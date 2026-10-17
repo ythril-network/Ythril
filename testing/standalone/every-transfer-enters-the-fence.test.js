@@ -39,8 +39,57 @@ import { readFileSync, existsSync } from 'node:fs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { parseSource, walkEveryNode, outermostFunctionOf, lineOf, routeBlocksOf, ts } from '../_shared/syntax-tree.mjs';
+import { askingFunctions, nearestFunctionOf, ASKING_WRAPPERS } from './_space-write-askers.mjs';
+
+/**
+ * The only reasons a function that asks the write gate may count nothing, each from design v5 §2.6b (its exemptions: the act bodies, and
+ * housekeeping that cannot create or refill a record — the stray-filemeta drain, the TTL sweep's deletes, the embed worker's write on an
+ * existing record) plus two structural cases below: a write the run's claim already fences, and a refusal ahead of writes that count themselves. A row is a claim about the function and the table fails when a row stops matching, so
+ * it is read, not trusted. **A writer that creates, replaces or removes space data on behalf of a caller is never a row here**: it is admitted
+ * and counted (`admitSpaceWrite`), because an uncounted write admitted just before an act registers lands after the act's first delete.
+ */
+const ONLY_REMOVES_OR_REFUSES = 'it only removes rows or bytes a deletion or wipe removes, or only refuses and passes a refused space over, and creates or refills nothing, so a unit counted for the drain would protect no write (design v5 section 2.6b housekeeping)';
+const UPDATES_EXISTING_ONLY = 'it only updates rows that already exist, by id and with no upsert, so a write landing after an act removed the row matches nothing and refills nothing: the embed worker\'s and housekeeping\'s write on an existing record (design v5 section 2.6b)';
+const FENCED_BY_THE_RUNS_CLAIM = 'it writes derived rows under a media run\'s claim: a wipe revokes the claims while the write is open and its removal waits for that transaction, and a run that lost its claim writes nothing, so the claim is this write\'s fence and a counted unit would hold the act\'s drain behind the jobs the act revokes (`a-derived-write-racing-a-delete-or-a-move-leaves-no-row-db`)';
+const REFUSAL_AHEAD_OF_ADMITTED_WRITES ='it asks the gate to refuse early, before long or expensive work, and writes nothing itself: every write it causes goes through a writer that admits and counts its own unit (named in `via`, and the function must still call it)';
+
+/**
+ * Functions that ask the gate and count nothing, by `<file>:<function>`: the reason, and for a refusal ahead of admitted writes the writers
+ * its writes go through (`via`).
+ */
+const EXEMPT_FUNCTIONS = new Map([
+  ['server/src/files/files.ts:ensureSpaceFilesDir', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/files/chunks.ts:(anonymous)', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/files/converters/pipeline.ts:removeWhatSidecarsLeft', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/files/derived-rows.ts:deleteRowsDerivedFrom', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/brain/entities.ts:unlabelFacesWhere', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/files/derived-fields.ts:stripFlaggedRowsOnce', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/files/derived-fields.ts:upsertDerivedFileRow', { why: FENCED_BY_THE_RUNS_CLAIM, via: ['writeUnderClaim'] }],
+  ['server/src/files/derived-fields.ts:replaceDerivedFileRows', { why: FENCED_BY_THE_RUNS_CLAIM, via: ['writeUnderClaim'] }],
+  ['server/src/files/derived-fields.ts:writeDerivedFields', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/files/derived-fields.ts:updateDerivedFileRow', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/files/derived-fields.ts:setFileProcessingState', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/files/derived-fields.ts:setDerivedDescriptionIfUnset', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/files/tombstones.ts:positionLegacyFileTombstones', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/files/tombstones.ts:forgetFileTombstonesOf', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/files/tombstones.ts:dropPendingById', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/files/tombstones.ts:settleStalePendingFileTombstones', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/files/tombstones.ts:pruneFileTombstonesUpTo', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/sync/file-sync.ts:recordSyncBase', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/sync/arrivals.ts:convergeFileStamps', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/sync/push-reads.ts:deleteSupersededTombstones', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/brain/chrono.ts:createChrono', { why: REFUSAL_AHEAD_OF_ADMITTED_WRITES, via: ['planAndCommitOne'] }],
+  ['server/src/brain/edges.ts:upsertEdge', { why: REFUSAL_AHEAD_OF_ADMITTED_WRITES, via: ['planAndCommitOne'] }],
+  ['server/src/brain/entities.ts:upsertEntity', { why: REFUSAL_AHEAD_OF_ADMITTED_WRITES, via: ['planAndCommitOne'] }],
+  ['server/src/brain/fact.ts:saveFact', { why: REFUSAL_AHEAD_OF_ADMITTED_WRITES, via: ['planAndCommitOne'] }],
+  ['server/src/files/media/audio-embedder.ts:embedAudio', { why: REFUSAL_AHEAD_OF_ADMITTED_WRITES, via: ['upsertDerivedFileRow'] }],
+  // Its only write is `updateDerivedFileRow`, which updates the segment rows that already exist.
+  ['server/src/files/media/video-embedder.ts:embedVideo', { why: UPDATES_EXISTING_ONLY }],
+]);
 
 const FENCE = 'server/src/sync/space-transfer-fence.ts';
+/** The one module that asks the write gate and counts the unit in one step. */
+const GATE_MODULE = 'server/src/spaces/space-write-gate.ts';
 const EXCHANGE = 'server/src/sync/space-exchange.ts';
 /** The modules the original four-file list named: the derivation below must still find each (its floor), and may only add to them. */
 const FLOOR_MODULES = ['pull-family.ts', 'push-family.ts', 'file-sync.ts', 'tombstone-transfer.ts'].map(f => `server/src/sync/${f}`);
@@ -300,5 +349,90 @@ describe('every inbound peer door enters the fence and leaves it on every path',
       .filter(f => /\b(?:transfersRunning|transferCounts?|inFlightTransfers)\b\s*(?:=|\.set\()/.test(text(f)));
     assert.deepEqual(offenders, [], 'a second counter of transfers is a second answer to "may the act begin"');
     assert.ok(existsSync(`${REPO_ROOT}/${FENCE}`), `${FENCE} does not exist: there is no counter at all`);
+  });
+});
+
+describe('a write unit is counted from the moment the write gate lets it through', () => {
+  const parsed = () => trackedSources(['server/src'], { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts')).map(file => ({ file, sf: parseSource(file, text(file)) }));
+  /** An await (or a `for await`) written directly in `fn`, not in a closure inside it: the point where another task can run. */
+  const awaitsIn = (fn) => {
+    const found = [];
+    walkEveryNode(fn, (n) => {
+      if ((ts.isAwaitExpression(n) || (ts.isForOfStatement(n) && n.awaitModifier)) && nearestFunctionOf(n) === fn) found.push(n);
+    });
+    return found;
+  };
+
+  it('a writer that asks the gate and enters a write unit awaits nothing between the two', () => {
+    // A writer that asked, awaited and only then entered was ADMITTED and yet not counted: an act that registered in that gap saw no unit in
+    // flight, drained at once, and deleted — and the write landed in the tree or the collection it had just emptied. The pair is derived
+    // from every entry in the server, never named, so a fourth writer written next year is held to it the day it enters.
+    const gaps = []; let pairs = 0;
+    for (const { file, sf } of parsed()) {
+      for (const enter of callsNamed(sf, 'enterSpaceWrite')) {
+        // The pair is written ONCE, in the gate module's `admitSpaceWriteUnit`: a writer that asks and enters by hand is the pair this rule
+        // exists to stop being written twice, whether or not it awaits between today.
+        if (file !== GATE_MODULE) { gaps.push(`${file}:${lineOf(sf, enter)} enters the fence by hand: go through admitSpaceWrite (or admitSpaceWriteUnit)`); continue; }
+        const fn = nearestFunctionOf(enter);
+        if (!fn) { gaps.push(`${file}:${lineOf(sf, enter)} enters at module scope`); continue; }
+        const asks = callsNamed(sf, 'assertSpaceTakesWrites').filter(a => nearestFunctionOf(a) === fn && a.getStart(sf) < enter.getStart(sf));
+        if (asks.length === 0) { gaps.push(`${file}:${lineOf(sf, enter)} enters a write unit in a function that never asked the gate before it`); continue; }
+        pairs++;
+        const ask = asks.reduce((a, b) => (b.getStart(sf) > a.getStart(sf) ? b : a));
+        const between = awaitsIn(fn).filter(a => a.getStart(sf) > ask.getEnd() && a.getStart(sf) < enter.getStart(sf));
+        for (const a of between) gaps.push(`${file}:${lineOf(sf, a)} awaits between the gate's check (line ${lineOf(sf, ask)}) and the fence entry (line ${lineOf(sf, enter)})`);
+      }
+    }
+    assert.ok(pairs >= 1, `only ${pairs} check-and-entry pair(s) found: the derivation is broken, and an empty set passes every check below`);
+    assert.deepEqual(gaps, [], `a write the gate admitted is not counted until after an await, so an act registered meanwhile cannot see it:\n  ${gaps.join('\n  ')}`);
+  });
+
+  it('every function that asks the gate counts its write unit — through the wrapper or an entry with no await after the check — or is a reasoned exemption', () => {
+    // The subject is every function that ASKS (`_space-write-askers.mjs`), not every function that already enters: a writer that asks and
+    // enters nothing has no pair for the rule above to see. Two did (a conflict's placing of its incoming copy and a chunked upload's staging),
+    // and so did two of the file door's four before the wrapper existed. An asker either counts its unit or is listed with the reason it needs
+    // no count; a row that matches no asker fails, so the table cannot go stale into a hole.
+    const askers = askingFunctions();
+    assert.ok(askers.length >= 40, `only ${askers.length} function(s) found that ask the write gate: the derivation is broken, and an empty set passes every check below`);
+    for (const key of ['server/src/files/files.ts:writeFile', 'server/src/files/files.ts:moveFile', 'server/src/brain/write-plan/commit.ts:commitPlans',
+      'server/src/sync/arrivals.ts:writeArrivals', 'server/src/api/conflicts.ts:placeIncomingCopy', 'server/src/files/chunks.ts:storeChunk', 'server/src/files/chunks.ts:assembleChunks',
+      'server/src/api/conflicts.ts:executeResolve', 'server/src/brain/fact.ts:saveFact', 'server/src/brain/fact.ts:updateFact', 'server/src/brain/fact.ts:deleteFact',
+      'server/src/brain/entities.ts:updateEntityById', 'server/src/brain/edges.ts:updateEdgeById', 'server/src/brain/chrono.ts:updateChrono',
+      'server/src/brain/edge-rekey.ts:rekeyEdges', 'server/src/brain/tombstones.ts:writeTombstones',
+      'server/src/files/file-meta.ts:upsertFileMeta', 'server/src/files/tombstones.ts:writePendingFileTombstones',
+      'server/src/sync/tombstone-apply.ts:applyPeerTombstones']) {
+      assert.ok(askers.some(a => a.key === key), `the derivation no longer finds ${key} among the askers`);
+    }
+    const counts = (a) => a.wraps.length > 0 || a.wrapsInside.length > 0 || a.enters.length > 0;
+    const uncounted = askers.filter(a => !counts(a) && !EXEMPT_FUNCTIONS.has(a.key)).map(a => `${a.key} (line ${a.line})`);
+    assert.deepEqual(uncounted, [], `these functions admit a write by asking the gate and never count it in the fence, so an act's drain cannot wait for them and a write they `
+      + `admitted just before the act registers lands after its first delete; go through admitSpaceWrite (or admitSpaceWriteUnit), or add a row to EXEMPT_FUNCTIONS `
+      + `with one of the design's reasons:\n  ${uncounted.join('\n  ')}`);
+    // An exempt row for a function that DOES count is a row nobody needs, and one that matches nothing is stale.
+    const unneeded = [...EXEMPT_FUNCTIONS.keys()].filter(k => !askers.some(a => a.key === k && !counts(a)));
+    assert.deepEqual(unneeded, [], `these exemption rows name no function that asks and fails to count (stale, or the function now counts): remove them\n  ${unneeded.join('\n  ')}`);
+    for (const [key, { why, via }] of EXEMPT_FUNCTIONS) {
+      assert.ok(why.split(/\s+/).length >= 8, `${key}: the reason is not a reason`);
+      if (!via) continue;
+      // A refusal ahead of admitted writes is true only while the function still reaches the writer that admits them.
+      const asker = askers.find(a => a.key === key);
+      const text = asker.fn.getText(asker.sf);
+      for (const writer of via) assert.match(text, new RegExp(`\\b${writer}\\(`), `${key} claims its writes go through ${writer} and no longer calls it`);
+    }
+  });
+
+  it('every asking wrapper ends in a function that asks the gate and enters the fence with nothing awaited between, so a writer that goes through it is counted from its check', () => {
+    const askers = askingFunctions();
+    const own = (name) => askers.find(a => a.name === name);
+    const terminal = [];
+    for (const name of ASKING_WRAPPERS) {
+      const w = own(name);
+      assert.ok(w, `the wrapper ${name} is gone: every writer that goes through it is uncounted`);
+      // A wrapper either asks and enters itself, or hands on to another wrapper that does.
+      const delegates = w.wraps.map(c => c.expression.text).filter(n => ASKING_WRAPPERS.includes(n) && n !== name);
+      if (w.asks.length > 0 && w.enters.length > 0) terminal.push(name);
+      else assert.ok(delegates.length > 0, `the wrapper ${name} neither asks and enters in its own body nor hands on to another wrapper`);
+    }
+    assert.ok(terminal.length >= 1, 'no wrapper asks the gate and enters the fence in its own body: the chain ends in nothing that counts');
   });
 });

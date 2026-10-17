@@ -21,8 +21,8 @@ import { duplicatesRouter } from './api/duplicates.js';
 import { contradictionsRouter } from './api/contradictions.js';
 import { syncRouter } from './api/sync/index.js';
 import { editorScopeFor } from './auth/editor-scope.js';
-import { wipeSpaceAsRequested } from './spaces/wipe-vote.js';
-import { spaceActFailureAnswer } from './spaces/space-act-failure.js';
+import { decidedBy, wipeSpaceAsRequested } from './spaces/wipe-vote.js';
+import { queuedActBody, spaceActFailureAnswer } from './spaces/space-act-failure.js';
 import { networksRouter } from './api/networks/index.js';
 import { notifyRouter } from './api/notify.js';
 import { inviteRouter } from './api/invite.js';
@@ -402,12 +402,9 @@ export function createApp() {
       const outcome = await wipeSpaceAsRequested(spaceId, types);
       const repeated = 'repeated' in outcome && outcome.repeated ? { repeated: true } : {};
       if (outcome.status === 'vote_pending') { res.status(202).json({ status: 'vote_pending', rounds: outcome.rounds, ...repeated }); return; }
-      if (outcome.status === 'passed') {
-        res.status(202).json({ status: 'passed', rounds: outcome.rounds, queued: true, ...(outcome.retryAt ? { retryAt: outcome.retryAt } : {}), ...repeated });
-        return;
-      }
+      if (outcome.status === 'passed') { res.status(202).json(queuedActBody(outcome, decidedBy(outcome))); return; }
       if (outcome.status === 'failed') {
-        const answer = spaceActFailureAnswer(outcome.cause, outcome.rounds, where);
+        const answer = spaceActFailureAnswer(outcome.cause, decidedBy(outcome), where);
         if (answer.store) sendStoreFailure(res, answer.store, answer.body); else res.status(answer.status).json(answer.body);
         return;
       }

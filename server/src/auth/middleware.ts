@@ -613,6 +613,21 @@ export async function acceptSchemaLibraryToken(
 }
 
 /**
+ * Is `spaceId` held for the PEER this token is bound to (a deletion or wipe applied on one side, design v5 section 3.3 v4 (5), W13)?
+ * Answers `423 space_held` itself and returns true when it is; otherwise admits the call as a transfer of the space, counted in the
+ * fence for as long as its response is open - destroyed the moment an act on the space registers (a file stream must not make the
+ * act wait for the sender) and by the server past `INBOUND_TRANSFER_MS`.
+ *
+ * The rights doors' half of the hold: the sync routes ask `refusePeerSpace`, these doors ask this, and both ask `spaceHold`. A token
+ * bound to no peer is the operator's own tooling, not the exchange, and is never held.
+ */
+export function refuseHeldPeer(res: Response, spaceId: string | undefined, record: unknown): boolean {
+  const peerId = peerBoundTo(record as { peerInstanceId?: unknown } | undefined);
+  if (!peerId || !spaceId) return false;
+  return admitPeerOnResponse(res, spaceId, peerId, undefined, 'rights', true);
+}
+
+/**
  * Middleware requiring a valid PAT **and** that the token reaches the space named by `req.params[paramName]`.
  *
  * ## Why the parameter name is an argument
@@ -629,21 +644,6 @@ export async function acceptSchemaLibraryToken(
  * So the binding is explicit and asserted: `space-routes-honour-token-scope.test.js` requires a route declaring `:id`
  * to use a guard bound to `'id'`, which a bare `requireSpaceAuth` cannot satisfy.
  */
-/**
- * Is `spaceId` held for the PEER this token is bound to (a deletion or wipe applied on one side, design v5 section 3.3 v4 (5), W13)?
- * Answers `423 space_held` itself and returns true when it is; otherwise admits the call as a transfer of the space, counted in the
- * fence for as long as its response is open - destroyed the moment an act on the space registers (a file stream must not make the
- * act wait for the sender) and by the server past `INBOUND_TRANSFER_MS`.
- *
- * The rights doors' half of the hold: the sync routes ask `refusePeerSpace`, these doors ask this, and both ask `spaceHold`. A token
- * bound to no peer is the operator's own tooling, not the exchange, and is never held.
- */
-export function refuseHeldPeer(res: Response, spaceId: string | undefined, record: unknown): boolean {
-  const peerId = peerBoundTo(record as { peerInstanceId?: unknown } | undefined);
-  if (!peerId || !spaceId) return false;
-  return admitPeerOnResponse(res, spaceId, peerId, undefined, 'rights', true);
-}
-
 export function requireSpaceAuthScoped(paramName: string) {
   return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
     const auth = await resolveAuthOrFail(req, res, { recordInvalidMetric: true });

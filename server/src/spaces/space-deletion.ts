@@ -17,7 +17,7 @@ import { removeSpaceFromNetwork } from '../networks/network-spaces.js';
 
 import { registerOwnSpaceAct, spaceActsOfSpace } from './space-act-runner.js';
 import { localAct, type DoorEnd, type DoorRound } from './door-acts.js';
-import { spaceActFailureAnswer } from './space-act-failure.js';
+import { queuedActBody, spaceActFailureAnswer } from './space-act-failure.js';
 import type { StoreFailureAnswer } from '../brain/store-failure.js';
 
 /**
@@ -51,13 +51,15 @@ export interface DeletionAnswer { status: number; body: Record<string, unknown> 
  * goes only when no network carries the space.
  */
 export function deletionAnswer(end: DoorEnd, spaceId: string, local: boolean, where: string): DeletionAnswer {
+  // An unnetworked deletion is not a vote: when it did not finish, its answer names the change and never a vote that passed (`space-act-failure.ts`).
+  const decidedBy = local ? 'local' as const : end.rounds;
   const rounds = local ? [] : end.rounds;
   const repeated = 'repeated' in end && end.repeated ? { repeated: true } : {};
   switch (end.kind) {
     case 'pending': return { status: 202, body: { status: 'vote_pending', rounds, ...repeated } };
-    case 'queued': return { status: 202, body: { status: 'passed', rounds, queued: true, ...(end.retryAt ? { retryAt: end.retryAt } : {}), ...repeated } };
+    case 'queued': return { status: 202, body: queuedActBody(end, decidedBy) };
     case 'failed': {
-      const answer = spaceActFailureAnswer(end.cause, rounds, where);
+      const answer = spaceActFailureAnswer(end.cause, decidedBy, where);
       return { status: answer.status, body: answer.body, ...(answer.store ? { store: answer.store } : {}) };
     }
     case 'done': {

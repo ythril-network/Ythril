@@ -83,6 +83,8 @@ export async function sendNotice(
       body: JSON.stringify({ networkId, instanceId: getConfig().instanceId, event, ...(data ? { data } : {}) }),
       signal: AbortSignal.timeout(timeoutMs),
     });
+    // Only the status is read. A body nobody reads holds its connection until the signal fires, so it is cancelled here for every caller.
+    await res.body?.cancel().catch(() => {});
     return res.status;
   } finally {
     pending--;

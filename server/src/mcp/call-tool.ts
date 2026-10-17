@@ -103,17 +103,16 @@ export interface ToolCallOutcome {
   retryAfterSeconds?: number;
 }
 
+/** Is a tool's error result the failed-act answer (`spaces/space-act-failure.ts`: our sentence and `space_act_failed`, whether or not a vote decided the act)? */
+function isSpaceActFailure(result: { structuredContent?: Record<string, unknown> } | undefined): boolean {
+  return result?.structuredContent?.['code'] === 'space_act_failed';
+}
+
 /**
  * A refusal, with the status the REST door should use. Prose is identical on both doors, by construction. `structuredContent` is the
  * body a refusal carries beside its prose — the judge's `{ error, issues, warnings }` — so a client that reads that half and not the
  * text sees the same refusal.
  */
-/** Is a tool's error result the failed-act answer (`spaces/space-act-failure.ts`: our sentence, `space_act_failed`, `status: 'passed'`)? */
-function isSpaceActFailure(result: { structuredContent?: Record<string, unknown> } | undefined): boolean {
-  const body = result?.structuredContent;
-  return body?.['code'] === 'space_act_failed' && body?.['status'] === 'passed';
-}
-
 function refuse(status: number, text: string, callSpace = '', structuredContent?: Record<string, unknown>): ToolCallOutcome {
   return {
     result: { content: [{ type: 'text' as const, text }], isError: true, ...(structuredContent ? { structuredContent } : {}) },

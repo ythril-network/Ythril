@@ -336,6 +336,9 @@ export async function writeDerivedFields(o: {
  * there would have created exactly the row it meant to refuse.
  */
 export async function upsertDerivedFileRow(spaceId: string, claim: JobClaim, doc: FileMetaDoc): Promise<DerivedWriteOutcome> {
+  // Refused before the row is built. NOT counted by the fence, on purpose: the run's CLAIM is this write's fence (see `writeUnderClaim`). A wipe
+  // revokes the space's claims while a run's write is open and its removal waits for that write's transaction, and a run that lost its claim writes
+  // nothing — so a row cannot land after the act's delete, and a counted unit would hold the act's drain behind the very jobs the act revokes.
   assertSpaceTakesWrites(spaceId, 'files');
   const parentFileId = doc.parentFileId;
   if (parentFileId === undefined) throw new Error('upsertDerivedFileRow: a derived row names the file it came from');
@@ -372,6 +375,7 @@ export async function replaceDerivedFileRows(
   docs: readonly FileMetaDoc[],
   opts: { batch: number },
 ): Promise<DerivedWriteOutcome> {
+  // Refused before the rows are written. NOT counted by the fence, for the reason `upsertDerivedFileRow` gives: the run's claim is the fence.
   assertSpaceTakesWrites(spaceId, 'files');
   return writeUnderClaim(spaceId, claim, async (session): Promise<DerivedWriteOutcome> => {
     if (docs.length === 0) return 'written';

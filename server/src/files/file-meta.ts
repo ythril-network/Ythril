@@ -53,7 +53,7 @@ import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
 import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 import { isLocalFileField, stripDerivedStages } from './derived-fields.js';
 
 
@@ -75,6 +75,7 @@ export async function upsertFileMeta(
   sizeBytes: number,
   opts: { description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; ttlDays?: number | null; sha256?: string } = {},
 ): Promise<void> {
+  // Refused before anything is read; the store write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'files');
   const normalised = toDocId(filePath);
   const now = new Date().toISOString();
@@ -108,16 +109,17 @@ export async function upsertFileMeta(
       const expireAt = expiryForCreate(spaceId, opts.ttlDays, { collection: 'file' });
       if (expireAt) $set['_expireAt'] = expireAt; else $unset['_expireAt'] = '';
     }
-    await withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+    // Each branch's store write is ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
+    await admitSpaceWrite(spaceId, 'files', () => withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
       asFilter<FileMetaDoc>({ _id: normalised }),
       asUpdate<FileMetaDoc>({ $set: { ...$set, seq }, $unset }),
-    ), 'file.upsert');
+    ), 'file.upsert'));
   } else {
     // A per-record ttlDays wins; otherwise the space's `file` retention bucket applies. Files have their OWN
     // bucket rather than sharing one with a knowledge collection: they are the largest and most obviously
     // disposable of the five, and they have no type, so the schema tier cannot reach them.
     const expireAt = expiryForCreate(spaceId, opts.ttlDays, { collection: 'file' });
-    await withSeq(spaceId, (seq) => {
+    await admitSpaceWrite(spaceId, 'files', () => withSeq(spaceId, (seq) => {
       const doc: FileMetaDoc = {
         _id: normalised,
         spaceId,
@@ -134,7 +136,7 @@ export async function upsertFileMeta(
         ...(expireAt ? { _expireAt: expireAt } : {}),
       };
       return col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(doc));
-    }, 'file.upsert');
+    }, 'file.upsert'));
   }
 
   // Both branches, unconditionally. A create enqueues for the reason every brain create does — the write
@@ -169,25 +171,28 @@ export async function recordArrivedFile(
   // A record NEW here takes this instance's file retention window, as an upload does; one already stored keeps its
   // expiry, because arriving bytes are not an authored write and must not re-slide it.
   const expireAt = expiryForCreate(spaceId, undefined, { collection: 'file' });
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({ _id: normalised }),
-    asUpdate<FileMetaDoc>({
-      $set: { sizeBytes, sha256 },
-      // Bytes on disk mean the file is live: a path soft-deleted here and re-created upstream comes back, as the
-      // upload writer has always made it (`Q-239`).
-      $unset: { deletedAt: '' },
-      $setOnInsert: {
-        spaceId, path: normalised, tags: [], author: from, createdAt: now, updatedAt: now, seq: 0,
-        // On INSERT only, by whom these bytes arrived (`deliveredBy`, bundle-51): a record new here is delivered by the peer
-        // whose bytes created it. A known row keeps its stamp — an upstream pushing bytes to a path this instance wrote, or
-        // that another peer delivered, gains nothing over it.
-        // Never an absent key (`stampOfArrival`): a row stamped with nothing is a row nobody can say who delivered.
-        deliveredBy: stampOfArrival({ restore: false, doc: {}, deliveredBy: from.instanceId }),
-        ...(expireAt ? { _expireAt: expireAt } : {}),
-      },
-    } as never),
-    { upsert: true },
-  );
+  // An UPSERT: it creates the row when none is there, so it is ONE admitted and counted unit from its own check (`admitSpaceWrite`).
+  await admitSpaceWrite(spaceId, 'files', async () => {
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+      asFilter<FileMetaDoc>({ _id: normalised }),
+      asUpdate<FileMetaDoc>({
+        $set: { sizeBytes, sha256 },
+        // Bytes on disk mean the file is live: a path soft-deleted here and re-created upstream comes back, as the
+        // upload writer has always made it (`Q-239`).
+        $unset: { deletedAt: '' },
+        $setOnInsert: {
+          spaceId, path: normalised, tags: [], author: from, createdAt: now, updatedAt: now, seq: 0,
+          // On INSERT only, by whom these bytes arrived (`deliveredBy`, bundle-51): a record new here is delivered by the peer
+          // whose bytes created it. A known row keeps its stamp — an upstream pushing bytes to a path this instance wrote, or
+          // that another peer delivered, gains nothing over it.
+          // Never an absent key (`stampOfArrival`): a row stamped with nothing is a row nobody can say who delivered.
+          deliveredBy: stampOfArrival({ restore: false, doc: {}, deliveredBy: from.instanceId }),
+          ...(expireAt ? { _expireAt: expireAt } : {}),
+        },
+      } as never),
+      { upsert: true },
+    );
+  });
   // A peer's bytes, not a local write: queued in the background lane, and by the RECEIVER's rules — the same step
   // every arriving file's metadata takes, so a file this instance suppresses is not queued and holds no vector
   // (bundle-30 I6, D3: this called `enqueueEmbedJob` directly, past the suppression check).
@@ -250,6 +255,7 @@ export async function updateFileMeta(
   /** Dot-notation paths to remove, applied AFTER the merge — the only way to unset. See the block below. */
   deleteFieldsPaths?: string[],
 ): Promise<FileMetaDoc | null> {
+  // Refused before anything is read; the store write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'files');
   /*
    * REFERENCES ARE VALIDATED HERE, so a caller cannot reach the collection around the check.
@@ -373,8 +379,8 @@ export async function updateFileMeta(
     return Object.keys(update).length === 0 ? Promise.resolve() : col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
       .updateOne(asFilter<FileMetaDoc>({ _id: normalised }), asUpdate<FileMetaDoc>(update)).then(() => undefined);
   };
-  if (authored) await withSeq(spaceId, write, 'file.update');
-  else await write();
+  // ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
+  await admitSpaceWrite(spaceId, 'files', () => (authored ? withSeq(spaceId, write, 'file.update') : write()));
 
   // ONE enqueue, unconditionally, after the write. Not gated on which fields moved: any such condition
   // could only be computed from the read above, which is the stale value this change exists to stop using.
@@ -455,11 +461,12 @@ export async function deleteFileMeta(
   spaceId: string,
   filePath: string,
 ): Promise<void> {
-  assertSpaceTakesWrites(spaceId, 'files');
-  const normalised = toDocId(filePath);
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(
-    asFilter<FileMetaDoc>({ _id: normalised }),
-  );
+  await admitSpaceWrite(spaceId, 'files', async () => {
+    const normalised = toDocId(filePath);
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(
+      asFilter<FileMetaDoc>({ _id: normalised }),
+    );
+  });
 }
 
 /**
@@ -474,17 +481,19 @@ export async function deleteFileMetaByPrefix(
   dirPath: string,
   { onRetired }: RetireUnderOptions = {},
 ): Promise<void> {
-  assertSpaceTakesWrites(spaceId, 'files');
   const norm = toDocId(dirPath).replace(/\/?$/, '');
   if (!norm) return; // guard: empty path would match everything
   // Escape regex special characters in the prefix so a path like "my.dir/"
   // doesn't accidentally match "myXdir/" etc.
   const escaped = escapeRegex(norm + '/');
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  await coll.deleteMany(
-    asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, $or: [{ parentFileId: { $exists: true } }, { deletedAt: { $exists: true } }] }),
-  );
-  await retireLiveRowsInPages(spaceId, norm + '/', ids => coll.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: ids } })), onRetired);
+  // The removals are ONE admitted and counted unit, from their own check (`admitSpaceWrite`).
+  await admitSpaceWrite(spaceId, 'files', async () => {
+    await coll.deleteMany(
+      asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, $or: [{ parentFileId: { $exists: true } }, { deletedAt: { $exists: true } }] }),
+    );
+    await retireLiveRowsInPages(spaceId, norm + '/', ids => coll.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: ids } })), onRetired);
+  });
 }
 
 /** What a retire of the rows under a directory tells its caller. */
@@ -596,12 +605,13 @@ export async function markFileMetaDeleted(
   spaceId: string,
   filePath: string,
 ): Promise<void> {
-  assertSpaceTakesWrites(spaceId, 'files');
-  const normalised = toDocId(filePath);
-  await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-    asFilter<FileMetaDoc>({ _id: normalised, ...LIVE_FILE_ROW }),
-    flagAndStrip() as never,
-  );
+  await admitSpaceWrite(spaceId, 'files', async () => {
+    const normalised = toDocId(filePath);
+    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+      asFilter<FileMetaDoc>({ _id: normalised, ...LIVE_FILE_ROW }),
+      flagAndStrip() as never,
+    );
+  });
 }
 
 /**
@@ -664,18 +674,20 @@ export async function markFileMetaDeletedByPrefix(
   dirPath: string,
   { onRetired }: RetireUnderOptions = {},
 ): Promise<void> {
-  assertSpaceTakesWrites(spaceId, 'files');
   const norm = toDocId(dirPath).replace(/\/?$/, '');
   if (!norm) return; // guard: empty path would match everything
   const escaped = escapeRegex(norm + '/');
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  // Remove derived chunk records outright, first: the LIVE file rows are what tell a retry the delete is still owed, so they go last.
-  await coll.deleteMany(
-    asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: true } }),
-  );
-  // Flag the user-visible file records, and strip what their bytes made, in the SAME write — the identical rule as
-  // for one file, from the one place that states it. A directory delete reaches here and never through
-  // `markFileMetaDeleted`, so a guard written there alone would simply not apply to a folder (`Q-418`).
-  await retireLiveRowsInPages(spaceId, norm + '/',
-    ids => coll.updateMany(asFilter<FileMetaDoc>({ _id: { $in: ids }, ...LIVE_FILE_ROW }), flagAndStrip() as never), onRetired);
+  // The removals and the flagging are ONE admitted and counted unit, from their own check (`admitSpaceWrite`).
+  await admitSpaceWrite(spaceId, 'files', async () => {
+    // Remove derived chunk records outright, first: the LIVE file rows are what tell a retry the delete is still owed, so they go last.
+    await coll.deleteMany(
+      asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: true } }),
+    );
+    // Flag the user-visible file records, and strip what their bytes made, in the SAME write — the identical rule as
+    // for one file, from the one place that states it. A directory delete reaches here and never through
+    // `markFileMetaDeleted`, so a guard written there alone would simply not apply to a folder (`Q-418`).
+    await retireLiveRowsInPages(spaceId, norm + '/',
+      ids => coll.updateMany(asFilter<FileMetaDoc>({ _id: { $in: ids }, ...LIVE_FILE_ROW }), flagAndStrip() as never), onRetired);
+  });
 }

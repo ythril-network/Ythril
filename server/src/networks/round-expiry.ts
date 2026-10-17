@@ -36,7 +36,7 @@ import type { NetworkConfig, VoteRound } from '../config/types.js';
 import { auditRoundEffect, ROUND_EXPIRED_OPERATION } from './round-audit.js';
 import { roundExpiryFailuresTotal } from '../metrics/registry.js';
 import { pruneExpiredRounds } from '../sync/vote-round-retention.js';
-import { retryOwedSpaceActs } from '../spaces/space-act-runner.js';
+import { reportSlowSpaceActs, retryOwedSpaceActs } from '../spaces/space-act-runner.js';
 import { roundSpaceLocalId } from '../sync/space-map.js';
 import { eachNetwork } from '../util/housekeeping-walk.js';
 import { intervalJob } from '../util/interval-job.js';
@@ -132,6 +132,9 @@ export function runRoundExpiryTick(now: number = Date.now()): void {
   // The runner's retry clock: every owed act whose `retryAt` has passed at `now` is started (it joins a run already going). Never
   // awaited and never rejected — a run answers, and a failure leaves its entry owed with the next `retryAt`.
   void retryOwedSpaceActs(now);
+  // The same clock reports an act that has run past the slow bound: reported once per window, never cut. Nothing else asks, so an act
+  // stuck mid-body would otherwise run for hours with no line saying so.
+  reportSlowSpaceActs(now);
 }
 
 const job = intervalJob('Vote round expiry', 60_000, () => runRoundExpiryTick());

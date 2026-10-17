@@ -21,6 +21,9 @@
  * - R-X2f: a token without the write rung gets the rung's `403`, never the closure's `409`.
  * - R-X2g: a peer token's push is answered `423 space_held` and never `409`, on the door's first look and in the race
  *   where its first chunk was admitted before the registration.
+ * - R-X2h: each file-tree writer is COUNTED by the fence from the moment the gate admits it, before its first await: a wipe registered while
+ *   the write resolves its path waits for it (the drain does not end until the write does), and a write begun after the registration is refused
+ *   `409` and leaves no count. Red on the base, where the entry came after the path resolution and two of the four never entered.
  *
  * ## Controls that pass on the base, on purpose
  *
@@ -36,7 +39,8 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { ADMIN_TOKEN, peerToken, build } from './_push-door.mjs';
 import { parkWrites } from './_write-faults.mjs';
-import { seedActEntry, clearActEntries } from './_space-act-harness.mjs';
+import fsp from 'node:fs/promises';
+import { seedActEntry, clearActEntries, deferred } from './_space-act-harness.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -259,6 +263,55 @@ describe('a registered space act closes every writer of its space', { skip }, ()
     assert.ok(gate.isSpaceNotWritable(await refused(WRITES.fact.run(VICTIM))));
     assert.equal(fence.spaceTransfersRunning(VICTIM), 0, 'a refused write left a count behind (a leak would hold every later drain)');
   });
+
+  /**
+   * Park the NEXT path resolution (the first await of every file-tree writer: `assertNoSymlinkEscape` starts with `fs.realpath`) behind a latch,
+   * so a test can stand inside the window between the gate's admission and the write. One-shot; `restore` puts the real function back.
+   */
+  function parkNextPathResolution() {
+    const real = fsp.realpath;
+    const latch = deferred();
+    let armed = true;
+    fsp.realpath = async function parked(...args) {
+      if (armed) { armed = false; latch.arrive(); await latch.promise; }
+      return real.apply(this, args);
+    };
+    return { reached: latch.reached, release: latch.release, restore() { fsp.realpath = real; latch.release(); } };
+  }
+
+  const FILE_WRITES = {
+    writeFile: (s) => writers.files.writeFile(s, 'admitted/a.txt', 'x'),
+    writeFileBytes: (s) => writers.files.writeFileBytes(s, 'admitted/b.bin', Buffer.from('x')),
+    createDir: (s) => writers.files.createDir(s, 'admitted/dir'),
+    moveFile: (s) => writers.files.moveFile(s, 'admitted/src.txt', 'admitted/moved.txt', { begun: false }),
+  };
+
+  for (const [name, run] of Object.entries(FILE_WRITES)) {
+    it(`R-X2h: ${name} is counted from the moment the gate admits it, so a wipe registered meanwhile waits for it, and one begun after is refused 409 with no count left`, async () => {
+      const fence = await import('../../server/dist/sync/space-transfer-fence.js');
+      await writers.files.writeFile(OTHER, 'admitted/src.txt', 'to be moved');
+      const park = parkNextPathResolution();
+      try {
+        const writing = run(OTHER).then(() => null, (err) => err);
+        await park.reached;   // inside the writer's first await: past the gate, before anything was written
+        assert.equal(fence.spaceTransfersRunning(OTHER), 1, `${name} was admitted by the gate and is not counted by the fence: an act registered now would drain at once and delete under it`);
+        await seedActEntry(loader, { kind: 'wipe', localId: OTHER, state: 'registered' });
+        let drained = false;
+        const drain = fence.awaitSpaceTransfersDrained(OTHER, 60_000).then((r) => { drained = r === 'drained'; return r; });
+        for (let i = 0; i < 25; i++) await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(drained, false, `the act's drain ended while ${name} was still in flight`);
+        park.release();
+        assert.equal(await drain, 'drained', 'the drain never ended once the write did');
+        assert.equal(await writing, null, `the write admitted before the registration did not complete: it is the act's drain that waits for it, not a refusal: ${(await writing)?.message}`);
+        assert.equal(fence.spaceTransfersRunning(OTHER), 0, `${name} left its count behind`);
+        // The write begun after the registration is the gate's 409, and a refusal is never counted.
+        const late = await refused(run(OTHER));
+        assert.ok(late && gate.isSpaceNotWritable(late), `${name} began after the registration and was not refused: ${late?.message ?? 'it wrote'}`);
+        assert.equal(late.code, 'space_being_wiped');
+        assert.equal(fence.spaceTransfersRunning(OTHER), 0, `a refused ${name} left a count behind`);
+      } finally { park.restore(); clearActEntries(loader); }
+    });
+  }
 
   it('R-X2g: refusePeerWrite answers a peer token 423 space_held and an instance-admin token 409, from the writer\'s typed refusal', async () => {
     const shared = await import('../../server/dist/api/sync/_shared.js');

@@ -25,7 +25,7 @@ import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planChrono, chronoWant, type ChronoInput, type ChronoFields } from './write-plan/plan-chrono.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 // Re-exported so existing importers (and the C5 tests) keep reaching it here; it lives in its own leaf
 // module only to keep chrono.ts ↔ recall.ts from importing each other. See chrono-status.ts.
@@ -151,6 +151,7 @@ export async function updateChrono(
   /** See `createChrono`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<ChronoEntry | null> {
+  // Refused before anything is read; the write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'chrono');
   const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: id, spaceId }),
@@ -250,7 +251,9 @@ export async function updateChrono(
   // hands back the record as it was at WRITE time, so comparing its seq with the one read at the top of this
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
-  const beforeWrite = await withSeq(spaceId, (seq) => {
+  // The store write is ONE admitted and counted unit, from its own check (`admitSpaceWrite`): an act registered while this update was being
+  // prepared refuses it, and one registered after waits for it.
+  const beforeWrite = await admitSpaceWrite(spaceId, 'chrono', () => withSeq(spaceId, (seq) => {
     $set['seq'] = seq;
     const updateOp: Record<string, unknown> = { $set };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
@@ -259,7 +262,7 @@ export async function updateChrono(
       asUpdate<ChronoEntry>(updateOp),
       { returnDocument: 'before' },
     );
-  }, 'chrono.update') as ChronoEntry | null;
+  }, 'chrono.update')) as ChronoEntry | null;
   brainWriteSeqTotal.labels({
     collection: 'chrono',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),
@@ -584,10 +587,11 @@ export async function deleteChrono(
   assertSpaceTakesWrites(spaceId, 'chrono');
   const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: chronoId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const result = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).deleteOne({
+  // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and link cascade are admitted writers of their own.
+  const result = await admitSpaceWrite(spaceId, 'chrono', () => col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).deleteOne({
     _id: chronoId,
     spaceId,
-  });
+  }));
   if (result.deletedCount === 0) return false;
   // The record is gone, so its embed job has nothing left to embed. Eager rather than left to the worker: the
   // worker only claims `pending` jobs, so a job that had already gone terminal `failed` would never be claimed

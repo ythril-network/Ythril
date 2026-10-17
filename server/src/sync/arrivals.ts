@@ -108,8 +108,7 @@ import { shadowedArrivals, supersedeFileTombstones } from '../files/tombstones.j
 import { fileKeyOf } from '../files/sandbox.js';
 import { countFileArrival } from '../files/bytes-arrived.js';
 import { isComparableIso } from '../util/comparable-iso.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
-import { enterSpaceWrite } from './space-transfer-fence.js';
+import { admitSpaceWriteUnit, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -504,9 +503,10 @@ export async function writeArrivals(
     bytesOf: (d) => (fillOnly ? 0 : operationBytes({ filter: filterOf(d), update: updateFor(d) })),
   });
   for (const chunk of chunks) {
-    // Asked per CHUNK, after every rights door has passed: an import, a push or a pull admitted before a deletion or wipe of the
-    // space registered stops at its next chunk instead of refilling what the act deletes.
-    assertSpaceTakesWrites(spaceId, family);
+    // The chunk is one write unit, ADMITTED and counted in one step (`admitSpaceWriteUnit`): asked per CHUNK, after every rights door has passed,
+    // so an import, a push or a pull admitted before a deletion or wipe of the space registered stops at its next chunk instead of refilling
+    // what the act deletes, and an act's drain waits for the chunk in flight. Released in the `finally` below; only declarations stand between.
+    const leaveWriteUnit = admitSpaceWriteUnit(spaceId, family);
     const landed: Doc[] = [];
     const dupes: Doc[] = [];
     const inserted = new Set<string>();
@@ -546,8 +546,6 @@ export async function writeArrivals(
       if (r.upsertedCount > 0) inserted.add(d._id);
       return true;
     };
-    // The chunk is one write unit: counted for its length, so an act's drain waits for it.
-    const leaveWriteUnit = enterSpaceWrite(spaceId);
     try {
       if (fillOnly) {
         for (const d of chunk) {

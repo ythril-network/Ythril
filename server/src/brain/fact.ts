@@ -29,7 +29,7 @@ import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-p
 import { spaceCollection } from '../db/space-collection.js';
 import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /** Store a new fact with semantic embedding */
 export async function saveFact(
@@ -118,6 +118,7 @@ export async function updateFact(
   /** See `saveFact`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<FactDoc | null> {
+  // Refused before anything is read; the store write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'facts');
   const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }),
@@ -211,7 +212,8 @@ export async function updateFact(
   // succeeded, so the counter records and the write lands. With an `If-Match` the same operation ALSO
   // enforces it, because `seq` goes in this filter — see `write-precondition.ts` for why the check has to
   // live here rather than in a comparison made before the embed call above.
-  const before = await withSeq(spaceId, (seq) => {
+  // ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
+  const before = await admitSpaceWrite(spaceId, 'facts', () => withSeq(spaceId, (seq) => {
     $set['seq'] = seq;
     const updateOp: Record<string, unknown> = { $set };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
@@ -220,7 +222,7 @@ export async function updateFact(
       asUpdate<FactDoc>(updateOp),
       { returnDocument: 'before' },
     );
-  }, 'fact.update') as FactDoc | null;
+  }, 'fact.update')) as FactDoc | null;
   brainWriteSeqTotal
     .labels({
       collection: 'facts',
@@ -267,10 +269,11 @@ export async function deleteFact(
   assertSpaceTakesWrites(spaceId, 'facts');
   const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const result = await col<FactDoc>(spaceCollection(spaceId, 'facts')).deleteOne({
+  // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and link cascade are admitted writers of their own.
+  const result = await admitSpaceWrite(spaceId, 'facts', () => col<FactDoc>(spaceCollection(spaceId, 'facts')).deleteOne({
     _id: memoryId,
     spaceId,
-  });
+  }));
   if (result.deletedCount === 0) return false;
   // The record is gone, so its embed job has nothing left to embed. Eager rather than left to the worker: the
   // worker only claims `pending` jobs, so a job that had already gone terminal `failed` would never be claimed
