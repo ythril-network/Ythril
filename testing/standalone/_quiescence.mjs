@@ -87,10 +87,12 @@ export async function untilQuiescentOf(queues, { stable = 4, maxTurns = 4000 } =
   for (let i = 0; i < maxTurns; i++) {
     busy = busyQueues(queues);
     if (busy.length === 0) { if (++idleTurns >= stable) return; } else idleTurns = 0;
-    // waits-differently: every fiftieth turn is a zero timer — the queues drain through store and peer round trips, and four thousand
-    // `setImmediate` turns passed in milliseconds while one wipe batch was still on the wire; a timer turn costs a clock tick (about
-    // 15 ms on Windows), so only some turns are one, and a wait that never ends still throws in about a second.
-    await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 0) : setImmediate(resolve)));
+    // waits-differently: every fiftieth turn is a 15 ms timer — the queues drain through store and peer round trips, and four thousand
+    // `setImmediate` turns passed in milliseconds while one wipe batch was still on the wire. The delay is stated, not left to the
+    // platform: a zero timer is about 15 ms on Windows and about 1 ms on Linux, so the same bound was a second here and a tenth of one on
+    // CI (the runner's idle wait in `_space-act-harness.mjs` failed that way, Full run 39067730979). A wait that never ends throws in
+    // about a second on both.
+    await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 15) : setImmediate(resolve)));
   }
   throw new Error(`the instance never went quiescent: still busy after ${maxTurns} turns: ${busy.join(', ')}`);
 }

@@ -267,8 +267,8 @@ Content-Type: application/json
 >
 > **A pub/sub subscriber wipes its own copy only**: it opens no round, the answer is `200` with `refills: true`, and the copy refills from its publisher at the next sync.
 >
-> **A space in no network is unaffected**: it wipes immediately and answers `200` with counts, exactly as
-> before.
+> **A space in no network is not voted on**: it wipes immediately and answers `200` with `{ "status": "wiped", "deleted" }`
+> and no `rounds`.
 >
 > *Why it votes rather than propagating.* A wipe writes no tombstones and deletes the existing ones, and
 > tombstones are the only thing that tells a peer a record is gone — so a local wipe on a shared space was
