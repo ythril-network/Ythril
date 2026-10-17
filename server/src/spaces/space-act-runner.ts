@@ -45,11 +45,11 @@ import { randomUUID } from 'node:crypto';
 import { getConfig, mutateConfig, isConfigLoaded } from '../config/loader.js';
 import type { Config, SpaceActEntry, SpaceActKind, SpaceActRound, SpaceActState, SpaceConfig } from '../config/types.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
+import { canonicalRoundWipeTypes } from '../networks/round-shape.js';
 import { getDb } from '../db/mongo.js';
 import { withinHousekeepingBound, housekeepingOpMs } from '../db/write-bound.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
-import { storeIsNotAnswering } from '../db/store-condition.js';
-import { classifyReadFailure } from '../brain/store-failure.js';
+import { isStoreSide } from '../brain/store-failure.js';
 import { PEER_TRANSFER_TIMEOUT_MS } from '../sync/peer-fetch.js';
 import { abortTransfersOf, awaitSpaceTransfersDrained, resetSpaceTransfersForTest } from '../sync/space-transfer-fence.js';
 import { forgetReceiveMarks } from '../sync/member-space-mark.js';
@@ -237,15 +237,16 @@ export function spaceActClosedAnswer(err: unknown): { status: 503; body: { error
 
 /**
  * The collections a wipe covers, canonical: deduplicated, in `BRAIN_COLLECTIONS` order, `undefined` when they are all of them. THROWS
- * for a name outside them, so a key, an entry and a round can never disagree about what a wipe covers.
+ * for a name outside them, so a key, an entry and a round can never disagree about what a wipe covers. The dedupe-and-order filter is the
+ * round's own (`canonicalRoundWipeTypes`); what this adds is the refusal and the collapse of "all of them" to no list.
  */
 export function canonicalWipeTypes(types: readonly string[] | undefined): BrainCollection[] | undefined {
   if (!types || types.length === 0) return undefined;
   for (const t of types) {
     if (!(BRAIN_COLLECTIONS as readonly string[]).includes(t)) throw new Error(`'${t}' is not a collection a wipe covers`);
   }
-  const covered = BRAIN_COLLECTIONS.filter(t => types.includes(t));
-  return covered.length === BRAIN_COLLECTIONS.length ? undefined : [...covered];
+  const covered = canonicalRoundWipeTypes(types);
+  return covered.length === BRAIN_COLLECTIONS.length ? undefined : covered;
 }
 
 /** The key two requests are the same act by: a deletion's network is part of it (X4), a wipe's covered set is. */
@@ -314,6 +315,22 @@ export function spaceActsOfSpace(cfg: Pick<Config, 'pendingSpaceActs'>, localId:
 /** The entries that carry a round of network `networkId`, or its deletion's network half: what the network answer lists as owed. */
 export function spaceActsOfNetwork(cfg: Pick<Config, 'pendingSpaceActs'>, networkId: string): readonly SpaceActEntry[] {
   return (cfg.pendingSpaceActs ?? []).filter(e => e.rounds.some(r => r.networkId === networkId) || (e.kind === 'delete' && e.networkId === networkId));
+}
+
+/** What an operator reads of one act entry: what it is, since when, how often it has failed, when it is retried, and where it stands. */
+export interface ActEntryView { kind: string; since: string; attempts: number; nextRetryAt?: string; state: string }
+
+/**
+ * An act entry as the operator's surfaces show it — the space's `actPending` and the network's `owedSpaceActs` both start from this, and add
+ * what only they know (the network's list adds the entry id, the space and its rounds). The one place that renames the entry's own fields
+ * (`registeredAt` is `since`, `retryAt` is `nextRetryAt`, and an absent retry is an absent key), so the two answers cannot describe one
+ * debt in two vocabularies.
+ */
+export function actEntryView(e: SpaceActEntry): ActEntryView {
+  return {
+    kind: e.kind, since: e.registeredAt, attempts: e.attempts,
+    ...(e.retryAt ? { nextRetryAt: e.retryAt } : {}), state: e.state,
+  };
 }
 
 // ── register ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -583,8 +600,7 @@ function failed(id: string, entry: SpaceActEntry, err: unknown, via: string): Sp
   counters?.spaceActsTotal.inc({ kind: entry.kind, via, outcome: 'failed' });
   counters?.spaceActRetriesTotal.inc({ kind: entry.kind });
   // A failure on the store's side is said once, with its text, by the door or walk that answers it; this line names only the act then.
-  const storeSide = storeIsNotAnswering(err) || classifyReadFailure(err).status >= 500;
-  failureSaid(id, () => log.error(storeSide ? `${peerText(sentence)} The store failed it.` : `${peerText(sentence)} Cause: ${peerText(err)}`));
+  failureSaid(id, () => log.error(isStoreSide(err) ? `${peerText(sentence)} The store failed it.` : `${peerText(sentence)} Cause: ${peerText(err)}`));
   return result(entry, id, { ok: false, error: sentence, cause: err, retryAt });
 }
 
@@ -630,7 +646,13 @@ function contextFor(entry: SpaceActEntry): SpaceActBodyContext {
 
 // ── resume, retry, shutdown ─────────────────────────────────────────────────────────────────────────────────────
 
-const due = (e: SpaceActEntry, now: number): boolean => e.state !== 'owed' || e.retryAt === undefined || Date.parse(e.retryAt) <= now;
+/**
+ * Is an act entry due to start at `now`: anything but an owed one whose `retryAt` is still ahead. The one answer to "may this act
+ * start now" for the runner's resume and tick, the apply step, a door's repeat and a proposer's second click — written four times it
+ * let a door start an act the tick was holding back, or hold back one the tick would have run.
+ */
+export const spaceActDueAt = (e: Pick<SpaceActEntry, 'state' | 'retryAt'>, now: number): boolean =>
+  e.state !== 'owed' || e.retryAt === undefined || Date.parse(e.retryAt) <= now;
 
 /**
  * Run every entry on disk that is due, after listen, one walk over their spaces: each space isolated (a failure in one never stops the
@@ -638,7 +660,7 @@ const due = (e: SpaceActEntry, now: number): boolean => e.state !== 'owed' || e.
  * for its `retryAt` (the tick takes it then).
  */
 export async function resumeSpaceActs(now: number = Date.now()): Promise<void> {
-  const entries = standingEntries().filter(e => due(e, now));
+  const entries = standingEntries().filter(e => spaceActDueAt(e, now));
   if (entries.length === 0) return;
   const bySpace = new Map<string, string[]>();
   for (const e of entries) {
@@ -655,7 +677,7 @@ export async function resumeSpaceActs(now: number = Date.now()): Promise<void> {
 
 /** Start every owed entry whose `retryAt` has passed at `now` — the round-expiry tick's retry. Joins a run already going. */
 export function retryOwedSpaceActs(now: number): Promise<SpaceRoundSettled[]> {
-  const owed = standingEntries().filter(e => e.state === 'owed' && due(e, now));
+  const owed = standingEntries().filter(e => e.state === 'owed' && spaceActDueAt(e, now));
   return Promise.all(owed.map(e => runSpaceAct(e.id, { via: 'tick' })));
 }
 

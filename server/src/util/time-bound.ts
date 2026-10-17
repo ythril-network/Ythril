@@ -54,6 +54,37 @@ export async function withinTimeBound<T>(work: Promise<T>, ms: number, what: str
   }
 }
 
+/** What waiting for work at most `ms` came to: its value, or that the wait ended first (the work goes on). */
+export type SettledWithin<T> = { finished: true; value: T } | { finished: false };
+
+/**
+ * Wait for `work` at most `ms` and SAY whether it finished — the answering sibling of {@link withinTimeBound}, which REJECTS when the bound
+ * ends. For a caller whose late work is an answer ("still running", "queued", "still loading") and not an error. A rejection of `work` before
+ * the bound is still the caller's; one after it is nobody's and never surfaces as an unhandled rejection.
+ *
+ * What it prevents: a door's wait for its space acts, the model verifier's probe and the webhook drain each wrote this race by hand, and
+ * the half each copy had to get right is the one easy to drop — clearing the timer when the work wins (a copy that forgot kept the loop
+ * busy for the whole bound on every call that succeeded) and handling the work's own late failure.
+ *
+ * The timer holds the loop, like any wait a caller is awaiting: a bound that is not allowed to hold the process open (the metrics scrape's
+ * budget, `metrics/registry.ts`) is a different question and keeps its own.
+ */
+export async function settledWithin<T>(work: Promise<T>, ms: number): Promise<SettledWithin<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms); });
+  const outcome = work.then(value => ({ value }));
+  try {
+    const first = await Promise.race([outcome, late]);
+    if (first === null) {
+      outcome.catch(() => { /* the bound answered already */ });
+      return { finished: false };
+    }
+    return { finished: true, value: first.value };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const orphanSaid = warnOnce<string>({ every: 10 * 60_000 });
 
 /**

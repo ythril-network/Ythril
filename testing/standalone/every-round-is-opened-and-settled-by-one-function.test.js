@@ -132,7 +132,10 @@ describe('addSpacesToNetwork returns its answer and every caller reads it or say
     assert.ok(sites.length >= 3, `only ${sites.length} caller(s) of addSpacesToNetwork found: re-anchor`);
     const REASON = /an announcement: the exchange's other work must not be lost/;
     const unread = sites.filter(c => {
-      const around = raw.get(c.file).slice(Math.max(0, c.at - 400), c.at + c.args.length + 900);
+      // The function the call is written in, whole: its failure is read (or its reason given) where it can be acted on, not within a guessed distance.
+      const fn = outermostFunctionAt(c.file, raw.get(c.file), c.at);
+      assert.ok(fn, `${c.file}: the addSpacesToNetwork call at ${c.at} is in no function — re-anchor this gate`);
+      const around = raw.get(c.file).slice(fn.start, fn.end);
       return !/\.failed\b/.test(around) && !REASON.test(around);
     });
     assert.deepEqual(unread.map(c => `${c.file} (${c.fn})`), [], 'a swallowed failure answered as success (W16/X16)');

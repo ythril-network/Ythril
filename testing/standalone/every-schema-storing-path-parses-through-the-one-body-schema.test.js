@@ -59,7 +59,6 @@ const EXEMPT = new Map([
   ['server/src/config/loader.ts#migrateSpaceDescriptionToPurpose', 'a boot migration of a legacy text into meta.purpose, a string cut to 4 000 characters'],
   ['server/src/config/migrate-network-space-keys.ts#migrateNetworkSpaceKeys', 're-keys layers already stored under a renamed space id; every layer is what was stored'],
   ['server/src/spaces/rename.ts#applySpaceRenameToConfig', 'moves a stored layer to the renamed space id; the layer is what was stored'],
-  ['server/src/spaces/meta-update.ts#applySpaceMetaUpdate', 'stores plan.mergedMeta, which planSpaceMetaUpdate built from the parsed body and the stored meta (the brand carries that through the plan)'],
 ]);
 
 /** A schema body's `safeParse`/`parse` call, or one of the two mint functions the plan names. */

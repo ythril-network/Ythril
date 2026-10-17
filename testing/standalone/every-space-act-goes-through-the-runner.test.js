@@ -26,6 +26,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { RUNNER, requireSource, bodyOf, filesMatching } from './_space-act-sources.mjs';
+import { blockAfter } from './_structural-window.mjs';
 
 const LIFECYCLE = 'server/src/spaces/lifecycle.ts';
 const RENAME = 'server/src/spaces/rename.ts';
@@ -110,7 +111,8 @@ describe('every deletion, wipe and rename of a space goes through the one runner
     const flush = src.indexOf('await flushConfig()', src.indexOf('const shutdown'));
     const mongo = src.indexOf('await closeMongo()', src.indexOf('const shutdown'));
     assert.ok(src.indexOf('const shutdown') < close && close < flush && close < mongo, 'closeSpaceActs( is not inside the shutdown sequence before flushConfig and closeMongo');
-    assert.match(src.slice(close, close + 700), /\bleft\b/, 'what closeSpaceActs() returns as `left` is not logged');
+    // The block the call's `if (left.length > 0)` opens, not a count of characters after it: what it returns as `left` is READ and said there.
+    assert.match(blockAfter(src, close, 'shutdown'), /\blog\.\w+\([^;]*\bleft\b/, 'what closeSpaceActs() returns as `left` is not logged');
     assert.doesNotMatch(src, /\bdrainSpaceActs\b/, 'shutdown WAITS for acts (W8: nothing waits for an act)');
   });
 

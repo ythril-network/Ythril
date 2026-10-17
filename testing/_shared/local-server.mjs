@@ -16,8 +16,10 @@
  *   socket, or a fake that deliberately never answers (`hang()`), keeps it waiting, and the test hangs at teardown
  *   instead of failing. Every accepted socket is remembered from the moment the server accepts it - the listener is
  *   attached BEFORE `listen`, so none is missed - and `close()` destroys them, then closes.
- * - **A server on the wrong interface.** It binds `127.0.0.1` only, never `0.0.0.0`: a fake that answers a token is
- *   not for the network, and a CI runner is a shared host.
+ * - **A server on the wrong interface.** `listenOnLoopback` binds `127.0.0.1` only, never `0.0.0.0`: a fake that answers a
+ *   token is not for the network, and a CI runner is a shared host. The one named exception is `listenOnPrivateAddress`,
+ *   for a fake the code under test fetches through an SSRF guard, which blocks loopback: it needs the machine's private
+ *   address, and says so in its name.
  * - **A second `close()` throwing.** Teardown runs from a `finally` and from `after`; closing an already-closed server
  *   is a no-op here, not `ERR_SERVER_NOT_RUNNING`.
  *
@@ -32,7 +34,31 @@
  * @returns {Promise<{ port: number, url: string, close: () => Promise<void> }>} `url` is `http://127.0.0.1:<port>`
  *   (the origin of an http server; a plain TCP server uses `port`)
  */
-export async function listenOnLoopback(server) {
+export function listenOnLoopback(server) {
+  return listenTracked(server, '127.0.0.1', '127.0.0.1');
+}
+
+/**
+ * The same shell for a server the code under test must REACH THROUGH AN SSRF GUARD: those guards block loopback outright, so the fake
+ * answers on the machine's private address (`privateHostAddress()` in `testing/standalone/_private-address.mjs`, which the caller passes in
+ * and has already asked `privateAddressSkipReason()` about). It binds every interface, because the private address is not `127.0.0.1`; that
+ * is the one reason to bind wider than loopback, so the url it reports is the private one and never `0.0.0.0`. Everything else - the
+ * remembered sockets, the `close()` that ends while a client holds one, the second `close()` - is {@link listenOnLoopback}'s, from the
+ * one function that writes it.
+ *
+ * @param {import('node:net').Server} server built, not listening
+ * @param {string} host the machine's private address, which names the server in `url`
+ * @returns {Promise<{ port: number, url: string, close: () => Promise<void> }>}
+ */
+export function listenOnPrivateAddress(server, host) {
+  if (typeof host !== 'string' || host === '' || host === '0.0.0.0' || host === '127.0.0.1') {
+    throw new Error(`listenOnPrivateAddress needs the machine's private address as \`host\`, not ${JSON.stringify(host)}: a server that answers a loopback or wildcard url is not reachable through an SSRF guard`);
+  }
+  return listenTracked(server, '0.0.0.0', host);
+}
+
+/** Bind `server` on `bindHost`, remembering every socket it accepts from the moment it accepts one; `url` names `urlHost`. */
+async function listenTracked(server, bindHost, urlHost) {
   const sockets = new Set();
   server.on('connection', (socket) => {
     sockets.add(socket);
@@ -40,12 +66,12 @@ export async function listenOnLoopback(server) {
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); });
+    server.listen(0, bindHost, () => { server.off('error', reject); resolve(); });
   });
   const { port } = server.address();
   return {
     port,
-    url: `http://127.0.0.1:${port}`,
+    url: `http://${urlHost}:${port}`,
     async close() {
       for (const socket of sockets) socket.destroy();
       // The callback's error (the server was not running) is the answer to "already closed", not a failure.

@@ -18,8 +18,12 @@
  * own transfer on a non-2xx and only the turn can say "stop the rest of this space for this member, and it is not a
  * failure".
  */
-/** `held` and `declined` end the space's exchange with this member for the cycle and move no failure counter. */
-export type TransferVerdict = 'held' | 'declined' | 'failed';
+/**
+ * What a refused transfer means to its sender. `held` and `declined` end the space's exchange with this member for the cycle
+ * and move no failure counter. Named for the refusal, not as a "Verdict": the arrival planner's verdicts (`upsert-plan.ts`)
+ * are what a receiver did with a record, and the push-pull parity gate derives its rows from every `*Verdict` type.
+ */
+export type TransferRefusal = 'held' | 'declined' | 'failed';
 
 /**
  * One space's exchange with one member, as the transfer modules see it: the unit in flight takes `signal`, the loops ask
@@ -28,7 +32,7 @@ export type TransferVerdict = 'held' | 'declined' | 'failed';
 export interface ExchangeTurn {
   readonly signal: AbortSignal;
   mayContinue(): boolean;
-  refusedBy(verdict: TransferVerdict): void;
+  refusedBy(verdict: TransferRefusal): void;
 }
 
 /** The `423` body a peer gets for a space held while a deletion or wipe is applied on one side (design v5 section 3.3). */
@@ -37,21 +41,21 @@ export const SPACE_HELD_ANSWER = { error: 'This space is held for this member wh
 export const SPACE_DECLINED_ANSWER = { error: 'This member left the space', code: 'space_declined' } as const;
 
 /** The codes a peer answers `423` with, and what each means to the sender. */
-const VERDICT_OF_CODE: Readonly<Record<string, TransferVerdict>> = {
-  space_held: 'held',
-  space_declined: 'declined',
+const VERDICT_OF_CODE: Readonly<Record<string, TransferRefusal>> = {
+  [SPACE_HELD_ANSWER.code]: 'held',
+  [SPACE_DECLINED_ANSWER.code]: 'declined',
 };
 
 /**
  * `'held'` for a `423` whose body says `space_held`, `'declined'` for `space_declined`, otherwise `'failed'`. Never throws:
  * a body that cannot be read is a failed transfer, as any other non-2xx.
  */
-export function transferRefusal(resp: Pick<Response, 'status' | 'clone'>): Promise<TransferVerdict> {
+export function transferRefusal(resp: Pick<Response, 'status' | 'clone'>): Promise<TransferRefusal> {
   if (resp.status !== 423) return Promise.resolve('failed');
   return readVerdict(resp);
 }
 
-async function readVerdict(resp: Pick<Response, 'clone'>): Promise<TransferVerdict> {
+async function readVerdict(resp: Pick<Response, 'clone'>): Promise<TransferRefusal> {
   try {
     const text = await resp.clone().text();
     const body = JSON.parse(text.slice(0, 4096)) as { code?: unknown };

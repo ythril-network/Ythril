@@ -35,7 +35,10 @@
 import { getConfig } from '../config/loader.js';
 import { log, currentRequestId, peerText } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
-import { toolRightsRefusal, spaceAdminRefusal, toolReach, peerHoldRefusal, withoutHeldForPeer } from './tool-rights-guard.js';
+import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
+import { peerBoundTo } from '../auth/peer-bound.js';
+import { withoutHeldFor } from '../sync/space-exchange-set.js';
+import { admitPeerToolCall } from '../sync/peer-space-admission.js';
 import { toolIsVisible } from './tool-visibility.js';
 import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -131,9 +134,23 @@ export interface ToolCallRequest {
  * has to catch is a door that gets to decide what the failure meant.
  */
 export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
+  // A peer token's call is counted in the fence of every space it names for as long as it runs; the release is HERE, in a `finally`, so no
+  // return of the dispatch below (a refusal of a later space, a handler that threw) can leave a count behind.
+  const admitted: (() => void)[] = [];
+  try {
+    return await dispatchTool(req, admitted);
+  } finally {
+    for (const release of admitted) release();
+  }
+}
+
+/** The body of {@link callTool}: every release it owes is pushed onto `admitted`, which the caller releases however this ends. */
+async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Promise<ToolCallOutcome> {
   const { name, args: a, caller } = req;
   const { rights } = caller;
   const cfg = getConfig();
+  // The peer this call's token is bound to, or none: a peer token is a peer's credential, every other token the operator's own tooling.
+  const peerId = peerBoundTo(cfg.tokens?.find(t => t.id === caller.tokenId));
   const accessibleSpaceIds = reachableSpaceIds(rights, cfg.spaces.map(s => s.id));
   const accessibleSpaces = cfg.spaces.filter(s => accessibleSpaceIds.includes(s.id));
 
@@ -277,9 +294,13 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
     // administering *a* space, because it runs before a space is named; this is where one exists.
     const adminRefusal = spaceAdminRefusal(tool, rights, sid);
     if (adminRefusal) return refuseAudited(403, adminRefusal, sid);
-    // A peer token naming a space held while a wipe is applied on one side: the sync doors' 423, on this door too (W13).
-    const held = peerHoldRefusal(caller.tokenId, sid);
-    if (held) return refuseAudited(held.status, held.text, sid, '', { ...held.body });
+    // A peer token naming a space held while a wipe is applied on one side: the sync doors' 423, on this door too (W13) — and one
+    // naming a space that is not held is counted in its fence until the call ends, as on every door (`sync/peer-space-admission.ts`).
+    if (peerId) {
+      const admission = admitPeerToolCall(peerId, sid);
+      if ('held' in admission) return refuseAudited(admission.held.status, admission.held.text, sid, '', { ...admission.held.body });
+      admitted.push(admission.release);
+    }
   }
   const callSpace = rawSpace;
   // Taken before the handler runs, outside the `try`, so the catch's audit entry has its duration too.
@@ -466,7 +487,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
       return withUnknownFieldRows(refuseAudited(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace, callSpace), rows);
     }
     let snapshots: AuditSnapshots | undefined;
-    const handlerSpaceIds = withoutHeldForPeer(caller.tokenId, toolReach(name, rights, accessibleSpaceIds));
+    const handlerSpaceIds = withoutHeldFor(toolReach(name, rights, accessibleSpaceIds), peerId);
     const result = await tool.handle({
       args: a,
       callSpace,

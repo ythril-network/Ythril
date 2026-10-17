@@ -42,7 +42,7 @@ import { readMemberSpaceMark } from './member-space-mark.js';
 import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
 import { reverseSpaceMap, localToRemote } from './space-map.js';
 import { exchangeVerdicts, mayExchangeNow, enterSpaceTransfer, spaceHold } from './space-exchange-set.js';
-import type { ExchangeTurn, TransferVerdict } from './held-answer.js';
+import type { ExchangeTurn, TransferRefusal } from './held-answer.js';
 import type { SpaceTransfer } from './space-transfer-fence.js';
 
 const zero = (): SyncCounts => ({ facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 });
@@ -71,7 +71,7 @@ class SpaceTurn implements ExchangeTurn {
   constructor(private readonly transfer: SpaceTransfer) {}
   get signal(): AbortSignal { return this.transfer.signal; }
   mayContinue(): boolean { return this.refusal === null && this.transfer.mayContinue(); }
-  refusedBy(verdict: TransferVerdict): void { if (verdict !== 'failed' && this.refusal === null) this.refusal = verdict; }
+  refusedBy(verdict: TransferRefusal): void { if (verdict !== 'failed' && this.refusal === null) this.refusal = verdict; }
   /** Stopped by an act on the space (the signal) — as opposed to a peer's refusal. */
   get cut(): boolean { return !this.transfer.mayContinue(); }
 }
@@ -87,6 +87,19 @@ function recordDecline(networkId: string, memberId: string, networkSpaceId: stri
 }
 
 /**
+ * Which ways data moves with `member` on `net`: both on a network with no direction, and on a directional one (braintree, pub/sub, where the
+ * direction is stored from THIS instance's side) only the ways its direction names. The one reading of it for the held space's schema pull
+ * and for the turn, so a held space's meta travels exactly when its records would have.
+ */
+function exchangeDirections(net: NetworkConfig, member: NetworkMember): { shouldPull: boolean; shouldPush: boolean } {
+  const isDirectional = isDirectionalNetwork(net);
+  return {
+    shouldPull: !isDirectional || member.direction === 'both' || member.direction === 'pull',
+    shouldPush: !isDirectional || member.direction === 'both' || member.direction === 'push',
+  };
+}
+
+/**
  * Exchange every space of `net` the hold lets through with `member`. The governance pass has run; `net` is the network as read
  * at the start of the cycle, and the spaces are read from the LIVE config here.
  */
@@ -98,10 +111,8 @@ export async function exchangeSpacesWithMember(
   const { exchange, held: heldNow, declined: declinedNow } = exchangeVerdicts(liveNet, member);
   out.held.push(...heldNow);
   out.declined.push(...declinedNow);
-  const isDirectional = isDirectionalNetwork(liveNet);
-  const shouldPull = !isDirectional || member.direction === 'both' || member.direction === 'pull';
   // A held space's schema still travels: a wipe changes no schema, and a subscriber takes its types from its upstream (X17).
-  if (shouldPull) for (const h of heldNow) await pullSpaceMetaFromUpstream(liveNet, member, h.spaceId, localToRemote(liveNet, h.spaceId), fetchOpts);
+  if (exchangeDirections(liveNet, member).shouldPull) for (const h of heldNow) await pullSpaceMetaFromUpstream(liveNet, member, h.spaceId, localToRemote(liveNet, h.spaceId), fetchOpts);
   // FIRST match, as `localToRemote` answers (Q-133): a later key for the same space is an inbound alias a rename left behind.
   const toNetworkId = reverseSpaceMap(liveNet);
   for (const spaceId of exchange) {
@@ -141,9 +152,7 @@ async function exchangeSpaceWithMember(
   const turn = new SpaceTurn(transfer);
   // Push to this member if the direction allows it (push or both); pull if bidirectional, or for non-directional networks.
   // Braintree/pubsub with direction='push': parent/publisher pushes down, child/subscriber never pushes up.
-  const isDirectional = isDirectionalNetwork(net);
-  const shouldPull = !isDirectional || member.direction === 'both' || member.direction === 'pull';
-  const shouldPush = !isDirectional || member.direction === 'both' || member.direction === 'push';
+  const { shouldPull, shouldPush } = exchangeDirections(net, member);
   try {
     if (shouldPull) {
       await pullSpaceMetaFromUpstream(net, member, spaceId, remoteSpaceId, fetchOpts, turn); // F-39.1: only from upstream, never throws

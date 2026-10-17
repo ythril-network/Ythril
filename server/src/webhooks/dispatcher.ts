@@ -29,6 +29,7 @@ import { writeInOneCommands } from '../db/one-command.js';
 import { warnOnce } from '../util/warn-once.js';
 import { drainedQueue } from '../util/drained-queue.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
+import { settledWithin } from '../util/time-bound.js';
 
 /** Retry schedule in milliseconds: 10s, 30s, 1m, 5m, 30m, 1h */
 const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 300_000, 1_800_000, 3_600_000];
@@ -441,11 +442,8 @@ export async function drainFirstDeliveries({ withinMs }: { withinMs: number }): 
   for (const d of queued) persistForRetry(d, { overflow: false });
   // Events emitted but not yet resolved are resolved now, against the closed limiter: each lands in the rows below.
   const written = (async () => { await emitQueue.settled(); await pendingRetryRows.settled(); })();
-  let timer: NodeJS.Timeout | undefined;
-  const budget = new Promise<'late'>(resolve => { timer = setTimeout(() => resolve('late'), withinMs); timer.unref(); });
-  const outcome = await Promise.race([written.then(() => 'written' as const), budget]);
-  clearTimeout(timer);
-  if (outcome === 'late') {
+  const outcome = await settledWithin(written, withinMs);
+  if (!outcome.finished) {
     log.warn(`Shutdown: the webhook retry queue did not finish writing within ${withinMs}ms (${emitQueue.size} events unresolved, ${pendingRetryRows.size} rows unwritten); those deliveries are lost`);
   }
   if (firstDeliveryTally.lost > lostBefore) {

@@ -20,14 +20,13 @@
  * was refused for adoption) there is no evidence, and the hold is bounded by this instance's prune.
  */
 import type { NetworkConfig, VoteRound } from '../config/types.js';
-
-const ACT_ROUND_TYPES: ReadonlySet<string> = new Set(['space_wipe', 'space_deletion']);
+import { isSpaceActRound } from '../networks/round-state.js';
 
 /** Add `memberId` to the local twin's `peersConcluded` when `peerRound` says the member concluded and passed it. Returns whether the round changed. */
 export function recordPeerConcluded(net: NetworkConfig, peerRound: unknown, memberId: string): boolean {
   const served = peerRound as { roundId?: unknown; type?: unknown; concluded?: unknown; passed?: unknown } | null;
   if (!served || typeof served.roundId !== 'string' || typeof served.type !== 'string') return false;
-  if (!ACT_ROUND_TYPES.has(served.type) || served.concluded !== true || served.passed !== true) return false;
+  if (!isSpaceActRound(served.type) || served.concluded !== true || served.passed !== true) return false;
   const local = net.pendingRounds.find(r => r.roundId === served.roundId) as (VoteRound & { peersConcluded?: string[] }) | undefined;
   if (!local || local.type !== served.type) return false;
   const known = Array.isArray(local.peersConcluded) ? local.peersConcluded : [];

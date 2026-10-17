@@ -36,6 +36,7 @@ import type { Config, NetworkConfig, NetworkMember, VoteRound } from '../config/
 import { spaceActStands } from '../spaces/space-act-runner.js';
 import { openSpaceTransfer, type SpaceTransfer } from './space-transfer-fence.js';
 import { roundSpaceLocalId, localToRemote } from './space-map.js';
+import { spaceActApplied } from '../networks/round-state.js';
 import { warnOnce } from '../util/warn-once.js';
 import { log, peerText } from '../util/log.js';
 
@@ -65,7 +66,11 @@ export interface HoldIndex {
 
 const unreadableRound = warnOnce<string>({ max: 500 });
 
-/** The covered types of a round, read totally: anything but an array of strings covers every type (the safe side). */
+/**
+ * The covered types of a round, read totally: anything but an array of strings covers every type (the safe side).
+ * Kept apart from `coveredKey` (`networks/propose-round.ts`) on purpose: that one compares two wipes for EQUALITY and may read an unreadable list as
+ * itself, while the hold asks SUPERSET over what a peer served and must fail safe toward holding.
+ */
 function coveredOf(wipeTypes: unknown): Covered {
   if (!Array.isArray(wipeTypes) || wipeTypes.length === 0 || !wipeTypes.every(t => typeof t === 'string')) return 'all';
   return new Set(wipeTypes as string[]);
@@ -111,7 +116,7 @@ function buildIndex(cfg: Config): HoldIndex {
         const space = spaceOf(bySpace, localId);
         const e = netEvidence(space, net.id);
         e.evidence.push({ types, peers });
-        if (raw.concluded === true && raw.passed === true && raw.appliedHere === true) space.applied.push(types);
+        if (spaceActApplied(raw)) space.applied.push(types);
         if (raw.concluded !== true) for (const p of peers) e.concludedFirst.add(p);
       } catch (err) {
         unreadableRound(`${net.id} ${String(raw.roundId)}`, () => log.warn(`Hold: a wipe round of network ${peerText(net.id)} could not be read (round ${peerText(String(raw.roundId))}): ${peerText(err)}; its space is held as evidence unknown`));
@@ -236,6 +241,20 @@ export function mayExchangeNow(networkId: string, peerId: string, localSpaceId: 
   const member = net.members.find(m => m.instanceId === peerId);
   if (member && declinedBy(net, member, localSpaceId)) return false;
   return spaceHold(cfg, localSpaceId, peerId, networkId) === null;
+}
+
+/**
+ * The spaces a search that NAMED none may fan out over for the caller: `spaces` less every one held for `peerId`. A caller bound to no
+ * peer (the operator's own tooling) is never held and gets `spaces` whole.
+ *
+ * What it prevents: a held space refused when a peer names it but searched, record by record, when the peer names nothing — the fan-out
+ * of the rights middleware and of the tool dispatch each spelled the filter, and a door that dropped it let the one refusal be walked
+ * around. A space the caller NAMED never reaches here held: its door refuses it first.
+ */
+export function withoutHeldFor(spaces: readonly string[], peerId: string | undefined): string[] {
+  if (!peerId) return [...spaces];
+  const cfg = getConfig();
+  return spaces.filter(s => !spaceHold(cfg, s, peerId));
 }
 
 /**

@@ -51,21 +51,8 @@
  * model can express.
  */
 import { isInstanceAdmin } from './instance-admin.js';
+import { peerBoundTo } from './peer-bound.js';
 import type { TokenRights } from '../config/rights-shape.js';
-
-/**
- * The peer identity on a token, or `undefined`.
- *
- * A LOCAL COPY OF ONE LINE, and the reason is an import cycle rather than a preference: the sync router's
- * `callerPeerId` lives in `api/sync/_shared.ts`, which imports from `auth/` — so reaching for it from here
- * closes the loop that `no-runtime-import-cycles` exists to refuse. The two are held identical by
- * `a-governance-relay-authorises-not-only-authenticates.test.js`, which asserts this file and that one
- * extract the field the same way, so a change to either is reported rather than silently divergent.
- */
-function peerIdOn(record: { peerInstanceId?: string }): string | undefined {
-  const v = record.peerInstanceId;
-  return typeof v === 'string' && v ? v : undefined;
-}
 
 /** What the token presenting itself at a governance relay may do. */
 export type PeerRelayCaller =
@@ -87,7 +74,7 @@ export function peerRelayCaller(
 ): PeerRelayCaller {
   if (!record) return { kind: 'refused' };
 
-  const peerInstanceId = peerIdOn(record);
+  const peerInstanceId = peerBoundTo(record);
   if (peerInstanceId) return { kind: 'peer', peerInstanceId };
 
   return isInstanceAdmin(record) ? { kind: 'admin' } : { kind: 'refused' };

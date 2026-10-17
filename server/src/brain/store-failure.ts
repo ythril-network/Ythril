@@ -261,6 +261,17 @@ export function classifyReadFailure(err: unknown): ReadFailure {
 }
 
 /**
+ * Is this failure on the store's side — one a door answers as a `5xx` (the store down, a bound that ended the call, a pool cleared, a write
+ * concern no retry can meet) rather than as a refusal of the caller's own request? The one question for a caller that has to CHOOSE
+ * between the store's failure and an operation's own: which failure of a sliced write to report, whether a failed act's log line names
+ * the store, and whether an act's own error is rethrown. It reads `classifyReadFailure`, so it can never disagree with the status a door
+ * answers; three hand-written `classifyReadFailure(err).status >= 500` were three chances to ask it of a different error.
+ */
+export function isStoreSide(err: unknown): boolean {
+  return classifyReadFailure(err).status >= 500;
+}
+
+/**
  * Rethrow a failure on the store's side; return for anything else.
  *
  * For the shared "act" functions that turn what an operation throws into a status and a sentence for both doors
@@ -271,7 +282,7 @@ export function classifyReadFailure(err: unknown): ReadFailure {
  * door answers it. Pure: it logs nothing, since the door that answers logs it once.
  */
 export function throwIfStoreSide(err: unknown): void {
-  if (classifyReadFailure(err).status >= 500) throw err;
+  if (isStoreSide(err)) throw err;
 }
 
 /**

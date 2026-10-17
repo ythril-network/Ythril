@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
-import { callerPeerId } from './_shared.js';
+import { peerBoundTo } from '../../auth/peer-bound.js';
 import { requireNetworkStanding } from '../../auth/network-standing.js';
 import { receiveChangeNotes } from '../../sync/change-notes.js';
 import { sendCaughtFailure } from '../send-failure.js';
@@ -20,7 +20,7 @@ syncChangeNotesRouter.post('/networks/:networkId/change-notes', syncRateLimit, r
   try {
     const r = await receiveChangeNotes(
       req.params['networkId'] as string,
-      callerPeerId(req.authToken as Record<string, unknown> | undefined),
+      peerBoundTo(req.authToken),
       req.body,
     );
     res.status(r.status).json(r.body);

@@ -35,6 +35,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { bodyOf } from './_structural-window.mjs';
 
 let runner;
 const strip = s => s
@@ -65,9 +66,8 @@ describe('both space operations claim the guard, and recovery reads it', () => {
   it('renameSpace and removeSpace run through the runner, which writes their marker inside its counted body', () => {
     for (const [file, name] of [['server/src/spaces/rename.ts', 'renameSpace'], ['server/src/spaces/lifecycle.ts', 'removeSpace']]) {
       const src = strip(readFileSync(file, 'utf8'));
-      const at = src.indexOf(`export async function ${name}(`);
-      assert.ok(at > -1, `${name} is gone — re-anchor this gate`);
-      assert.match(src.slice(at, at + 400), /return\s+runSpaceAct\(/, `${name} does not hand its act to the runner`);
+      // The function's own body, to the next top-level declaration — `bodyOf` throws when the declaration is gone.
+      assert.match(bodyOf(src, name, `${file} ${name}`), /return\s+runSpaceAct\(/, `${name} does not hand its act to the runner`);
     }
   });
 

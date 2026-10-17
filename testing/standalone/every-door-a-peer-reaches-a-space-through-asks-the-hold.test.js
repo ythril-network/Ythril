@@ -48,7 +48,10 @@ import { parseSource, walkEveryNode, lineOf, routeBlocksOf, ts } from '../_share
 const SYNC_DIR = 'server/src/api/sync';
 const SHARED = `${SYNC_DIR}/_shared.ts`;
 const MIDDLEWARE = 'server/src/auth/middleware.ts';
-const TOOL_GUARD = 'server/src/mcp/tool-rights-guard.ts';
+/** The tool door's dispatch: it asks the hold for a peer token's call through the one admission, as the response doors do. */
+const TOOL_GUARD = 'server/src/mcp/call-tool.ts';
+/** The one module a peer's request is admitted or refused in, for every door. */
+const ADMISSION_MODULE = 'server/src/sync/peer-space-admission.ts';
 const HOLD_MODULE = 'server/src/sync/space-exchange-set.ts';
 
 /** The sync route files that carry routes: `_shared.ts` is the helpers' home, `index.ts` mounts, `space-alias.ts` is the alias middleware. */
@@ -251,11 +254,14 @@ describe('the helpers ask the one hold question', () => {
     assert.ok(!calls(push, 'spaceAllowed'), 'pushAllowed still asks the hand-written spaceAllowed');
   });
 
-  it('refuseHeldPeer exists once and asks spaceHold', () => {
+  it('refuseHeldPeer exists once and asks the one admission, which is the hold', () => {
     const owners = trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))
       .filter(f => functionNamed(parsed(f), 'refuseHeldPeer'));
     assert.equal(owners.length, 1, `refuseHeldPeer is defined in ${owners.length} place(s) (${owners.join(', ')}): the rights doors need exactly one`);
-    assert.ok(calls(functionNamed(parsed(owners[0]), 'refuseHeldPeer').text, 'spaceHold'), `${owners[0]}: refuseHeldPeer does not call spaceHold(`);
+    assert.ok(calls(functionNamed(parsed(owners[0]), 'refuseHeldPeer').text, 'admitPeerOnResponse'), `${owners[0]}: refuseHeldPeer does not ask admitPeerOnResponse(`);
+    // The admission IS the hold: it admits through enterSpaceTransfer, which asks spaceHold, and nothing else decides.
+    assert.ok(calls(need(ADMISSION_MODULE, 'admitPeer'), 'enterSpaceTransfer'), `${ADMISSION_MODULE}: admitPeer does not admit through enterSpaceTransfer(`);
+    assert.ok(calls(need(HOLD_MODULE, 'enterSpaceTransfer'), 'spaceHold'), `${HOLD_MODULE}: enterSpaceTransfer does not ask spaceHold(`);
   });
 });
 
@@ -281,6 +287,7 @@ describe('every rights door a peer token passes asks refuseHeldPeer', () => {
   it('the tool guard asks the same question for a peer token\'s tool call', () => {
     assert.ok(existsSync(`${REPO_ROOT}/${TOOL_GUARD}`), `${TOOL_GUARD} does not exist`);
     const text = source(TOOL_GUARD);
-    assert.ok(calls(text, 'refuseHeldPeer') || calls(text, 'spaceHold'), `${TOOL_GUARD} never asks the hold: a peer token's MCP call reads a held space`);
+    assert.ok(calls(text, 'admitPeerToolCall'), `${TOOL_GUARD} never asks the hold: a peer token's MCP call reads a held space`);
+    assert.ok(calls(functionNamed(parsed(ADMISSION_MODULE), 'admitPeerToolCall').text, 'admitPeer'), `${ADMISSION_MODULE}: admitPeerToolCall does not ask the one admission`);
   });
 });

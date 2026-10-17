@@ -79,7 +79,7 @@ export function assertSpaceTakesWrites(spaceId: string, family?: BrainCollection
  * Is `err` the refusal of a write because an ACT stands for its space (not because the space is unconfigured)? Housekeeping asks it to
  * pass a space over quietly — a deletion or wipe owns that space's rows until it completes, and a sweep that met one is not a failure.
  */
-export function isActRefusal(err: unknown): boolean {
+export function isActRefusal(err: unknown): err is SpaceNotWritableError & { code: SpaceWriteClosedCode } {
   return isSpaceNotWritable(err) && err.code !== undefined;
 }
 
@@ -89,6 +89,6 @@ export function isActRefusal(err: unknown): boolean {
  * configured) is not this answer.
  */
 export function spaceWriteClosedAnswer(err: unknown): { status: 409; body: { error: string; code: SpaceWriteClosedCode } } | null {
-  if (!isSpaceNotWritable(err) || !err.code) return null;
+  if (!isActRefusal(err)) return null;
   return { status: 409, body: { error: err.message, code: err.code } };
 }

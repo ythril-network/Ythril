@@ -17,7 +17,7 @@
  *   accepted (counted and warned by the caller, never refused: a skewed clock is not an attack).
  */
 import { z } from 'zod';
-import { BRAIN_COLLECTIONS } from '../config/types-knowledge.js';
+import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
 
 const VOTE_ROUND_TYPES = ['join', 'remove', 'space_deletion', 'space_wipe', 'meta_change', 'space_addition'] as const;
 
@@ -58,7 +58,10 @@ export function hasRoundShape(round: unknown): boolean {
 /**
  * A wipe's covered types as adoption stores them: deduplicated, in collection order. Never `undefined` for a list — a list naming all of
  * them stays a list, because the signatures over the round cover the list as it was sent (sorted and deduplicated, `util/signing.ts`).
+ *
+ * The one filter every canonical form of a wipe's types is built on: `canonicalWipeTypes` (the runner's key and entry) is this, validated
+ * first and collapsed to `undefined` when it names all of them, because an entry's key reads "all" as no list at all.
  */
-export function canonicalRoundWipeTypes(types: readonly string[]): string[] {
+export function canonicalRoundWipeTypes(types: readonly string[]): BrainCollection[] {
   return BRAIN_COLLECTIONS.filter(t => types.includes(t));
 }

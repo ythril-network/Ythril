@@ -73,3 +73,24 @@ export function networkRole(net: NetworkConfig, selfId?: string): NetworkRole {
       return { role: 'member', members: net.members };
   }
 }
+
+/**
+ * Does this instance PUBLISH on `net` — the one pub/sub role whose space deletion or wipe is a network act: a deletion or wipe there is the
+ * publisher's, and every other instance's is its own local act (D-40). Asked from the local topology, never from a field a peer could set.
+ *
+ * What it prevents: the question was spelled at the round's opening (the publisher's notice), at adoption (a publisher holds no round it
+ * did not open) and at the pub/sub verdict, each as `type === 'pubsub'` and a role read, and a spelling that read the role without the
+ * type would call a club organiser a publisher. It lives here, beside the role it reads, because the round modules that ask it cannot import
+ * each other.
+ */
+export function publishesOn(net: NetworkConfig): boolean {
+  return net.type === 'pubsub' && networkRole(net).role === 'publisher';
+}
+
+/**
+ * Does this instance act on its own on `net` — a pub/sub subscriber, whose deletion or wipe of a space is a LOCAL act (D-40): it opens
+ * no round, tells the publisher nothing, and is answered as an unnetworked one. The one reading of "subscriber" the doors ask.
+ */
+export function actsLocallyOn(net: NetworkConfig): boolean {
+  return net.type === 'pubsub' && networkRole(net).role === 'subscriber';
+}

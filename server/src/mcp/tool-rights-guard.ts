@@ -3,36 +3,6 @@ import { effectiveRung } from '../auth/mint-cap.js';
 import { satisfies } from '../auth/required-rung.js';
 import { isSpaceAdminFor } from '../auth/editor-scope.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { getConfig } from '../config/loader.js';
-import { spaceHold } from '../sync/space-exchange-set.js';
-import { SPACE_HELD_ANSWER } from '../sync/held-answer.js';
-
-/** The peer the calling token is bound to, or undefined: a peer token is a peer's credential, every other token the operator's. */
-function peerOfToken(tokenId: string | undefined): string | undefined {
-  if (!tokenId) return undefined;
-  const peer = getConfig().tokens?.find(t => t.id === tokenId)?.peerInstanceId;
-  return typeof peer === 'string' && peer ? peer : undefined;
-}
-
-/**
- * Is `space` held for the PEER this tool call's token is bound to (design v5 section 3.3 v4 (5), W13)? The tool door's half of
- * the hold: a peer token whose matrix reaches a held space must not read it through `recall`, `similar` or any tool, as it may
- * not through the sync routes. Returns the refusal (status `423`, the sync doors' own body) or null. Asked after the rung checks,
- * so a token without the rung gets its 403 and never learns a space is held.
- */
-export function peerHoldRefusal(tokenId: string | undefined, space: string): { status: 423; text: string; body: typeof SPACE_HELD_ANSWER } | null {
-  const peer = peerOfToken(tokenId);
-  if (!peer || !space || !spaceHold(getConfig(), space, peer)) return null;
-  return { status: 423, text: `Error: ${SPACE_HELD_ANSWER.error} (space '${space}', ${SPACE_HELD_ANSWER.code})`, body: SPACE_HELD_ANSWER };
-}
-
-/** The spaces a peer token's call that named none searches: every space it reaches but the ones held for its peer. */
-export function withoutHeldForPeer(tokenId: string | undefined, spaces: readonly string[]): string[] {
-  const peer = peerOfToken(tokenId);
-  if (!peer) return [...spaces];
-  const cfg = getConfig();
-  return spaces.filter(s => !spaceHold(cfg, s, peer));
-}
 
 /**
  * The spaces a tool's HANDLER is given to work across: its reach, narrowed to where the token holds the tool's

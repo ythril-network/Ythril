@@ -32,9 +32,10 @@ import type { Config, NetworkConfig, VoteRound } from '../config/types.js';
 import type { WipeCollectionType } from './lifecycle.js';
 import { getConfig, saveConfig, configWriteGeneration } from '../config/loader.js';
 import { networkSpaceKey, roundSpaceLocalId } from '../sync/space-map.js';
-import { registerSpaceAct, runSpaceAct, spaceActOfRound, type SpaceActRequest, type SpaceRoundSettled } from './space-act-runner.js';
+import { registerSpaceAct, runSpaceAct, spaceActDueAt, spaceActOfRound, type SpaceActRequest, type SpaceRoundSettled } from './space-act-runner.js';
 import { applySpaceAdditionRound, forgetPendingOffer, type AdditionSettled } from '../networks/network-spaces.js';
 import { auditRoundEffect, ROUND_ADDITION_RETIRED_OPERATION } from '../networks/round-audit.js';
+import { roundPassedUnvetoed, spaceActOwed, spaceAdditionOwed } from '../networks/round-state.js';
 
 /** What a concluded space round does here, if anything. */
 export type SpaceRoundAction =
@@ -46,10 +47,8 @@ export function spaceRoundAction(
   net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>,
   round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'concluded' | 'passed' | 'votes' | 'wipeTypes'> & { appliedHere?: boolean },
 ): SpaceRoundAction | null {
-  if (round.type !== 'space_deletion' && round.type !== 'space_wipe') return null;
-  if (!round.concluded || !round.passed || round.appliedHere || !round.spaceId) return null;
-  // A single veto stops it.
-  if (round.votes.some(v => v.vote === 'veto')) return null;
+  // Passed, unvetoed (a single veto stops it) and not yet applied here: the round's one owed predicate.
+  if (!spaceActOwed(round) || !round.spaceId) return null;
   const localId = roundSpaceLocalId(net, round);
   if (!localId) return null;
   if (round.type === 'space_deletion') return { kind: 'delete', localId };
@@ -132,8 +131,7 @@ export interface SpaceRoundsApplied {
   failed: { round: VoteRound; cause: unknown }[];
 }
 
-const vetoed = (r: VoteRound): boolean => r.votes.some(v => v.vote === 'veto');
-const passedOf = (r: VoteRound, type: VoteRound['type']): boolean => r.type === type && r.concluded === true && r.passed === true && !vetoed(r);
+const passedOf = (r: VoteRound, type: VoteRound['type']): boolean => r.type === type && roundPassedUnvetoed(r);
 
 /** Was `deletion` opened at or after `addition`? By instant, not by string; an undatable side counts as yes — the safe side re-creates nothing. */
 function openedAtOrAfter(deletion: VoteRound, addition: VoteRound): boolean {
@@ -141,10 +139,6 @@ function openedAtOrAfter(deletion: VoteRound, addition: VoteRound): boolean {
   const a = Date.parse(addition.openedAt);
   return Number.isNaN(d) || Number.isNaN(a) || d >= a;
 }
-
-/** Is an act entry due to start at `now`: anything but an owed one waiting for its `retryAt`. */
-const dueAt = (e: { state: string; retryAt?: string }, now: number): boolean =>
-  e.state !== 'owed' || e.retryAt === undefined || Date.parse(e.retryAt) <= now;
 
 /**
  * Apply every space-scoped effect of `rounds` — deletion, wipe and addition — on `net`, part of `cfg`, which the caller saves.
@@ -174,7 +168,7 @@ export function applyConcludedSpaceRounds(
 
   // Phase 1 — retire superseded additions, before any act of this call forgets an alias (`networkSpaceKey` reads the alias table).
   const deletions = known.filter(r => passedOf(r, 'space_deletion'));
-  for (const addition of known.filter(r => passedOf(r, 'space_addition') && r.appliedHere !== true)) {
+  for (const addition of known.filter(spaceAdditionOwed)) {
     try {
       const key = networkSpaceKey(net, addition);
       const by = deletions.find(d => networkSpaceKey(net, d) === key && openedAtOrAfter(d, addition));
@@ -191,7 +185,7 @@ export function applyConcludedSpaceRounds(
   // Phase 2 — deletions and wipes.
   const start = new Set<string>();
   for (const round of set) {
-    if (!(passedOf(round, 'space_deletion') || passedOf(round, 'space_wipe')) || round.appliedHere === true) continue;
+    if (!spaceActOwed(round)) continue;
     try {
       if (round.type === 'space_deletion') {
         const key = networkSpaceKey(net, round);
@@ -200,7 +194,7 @@ export function applyConcludedSpaceRounds(
       // Already carried by an entry (a pass before this one registered it, or a rename moved its space): that entry is the act.
       const standing = spaceActOfRound(cfg, net.id, round.roundId);
       if (standing) {
-        if (dueAt(standing, now)) start.add(standing.id);
+        if (spaceActDueAt(standing, now)) start.add(standing.id);
         continue;
       }
       const target = spaceActTarget(net, round, cfg);
@@ -214,7 +208,7 @@ export function applyConcludedSpaceRounds(
       }
       const { entry } = registerSpaceAct(cfg, target.act, now);
       wrote = true;
-      if (dueAt(entry, now)) start.add(entry.id);
+      if (spaceActDueAt(entry, now)) start.add(entry.id);
     } catch (cause) {
       failed.push({ round, cause });
     }
@@ -223,8 +217,8 @@ export function applyConcludedSpaceRounds(
   // Phase 3 — the additions that remain.
   const additions: Promise<AdditionSettled>[] = [];
   for (const round of set) {
-    if (!passedOf(round, 'space_addition') || round.appliedHere === true) continue;
     try {
+      // `applySpaceAdditionRound` answers null for a round that is no addition or is not owed (`spaceAdditionOwed`).
       const applied = applySpaceAdditionRound(net, round, via);
       if (applied) additions.push(applied);
     } catch (cause) {

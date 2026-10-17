@@ -101,8 +101,12 @@ describe('what it is built from', () => {
     const src = code(FILE);
     assert.match(src, /\bsettleRounds\s*\(/);
     assert.doesNotMatch(src, /\bapplyRoundConclusion\s*\(/, 'the job applies a conclusion by hand beside the settle step');
-    assert.match(src, /\blogInternalAudit\s*\(/, 'a round the job ends leaves no audit entry');
-    assert.match(src, /['"`]network\.round\.expired['"`]/, 'the audit operation is not network.round.expired');
+    // Written like every effect a round has here: through the one writer, which owns the entry's shape and its never-throws.
+    assert.match(src, /\bauditRoundEffect\s*\(\s*ROUND_EXPIRED_OPERATION\b/, 'a round the job ends leaves no audit entry through auditRoundEffect');
+    assert.doesNotMatch(src, /\blogInternalAudit\s*\(/, 'the job writes its own audit entry beside the one writer of a round\'s effects');
+    const audit = code('server/src/networks/round-audit.ts');
+    assert.match(audit, /ROUND_EXPIRED_OPERATION\s*=\s*['"`]network\.round\.expired['"`]/, 'the audit operation is not network.round.expired');
+    assert.match(audit, /\blogInternalAudit\s*\(/, 'the one writer of a round\'s effects no longer writes the audit entry');
   });
 
   it('never decides a conclusion by setting its fields: it asks the settle step, which asks concludeRoundIfReady', () => {

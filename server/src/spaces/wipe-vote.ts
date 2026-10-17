@@ -26,11 +26,12 @@
 import { getConfig, saveConfig } from '../config/loader.js';
 import type { Config, NetworkConfig } from '../config/types.js';
 import { localToRemote } from '../sync/space-map.js';
-import { proposeRound, ownSpaceRoundInProgress, actsLocallyOn } from '../networks/propose-round.js';
+import { proposeRound, ownSpaceRoundInProgress } from '../networks/propose-round.js';
+import { actsLocallyOn } from '../networks/network-role.js';
 import type { RoundAnswer } from '../networks/vote-acts.js';
 import type { SettledSpaceRound } from '../networks/round-conclusion.js';
 import { canonicalWipeTypes, registerOwnSpaceAct, spaceActJoinedBy } from './space-act-runner.js';
-import { wipeTypesOf, type WipeCollectionType, type WipeResult } from './lifecycle.js';
+import { wipeResultOf, wipeTypesOf, type WipeCollectionType, type WipeResult } from './lifecycle.js';
 import { awaitDoorRounds, localAct, openedRound, repeatedRound, type DoorRound } from './door-acts.js';
 
 /**
@@ -114,7 +115,7 @@ function wipeLocally(spaceId: string, types: readonly WipeCollectionType[]): Doo
 
 /** The deleted counts summed over the acts that ran: two networks passing at once join one act; a second act on an emptied space adds zeroes. */
 function deletedBy(results: readonly SettledSpaceRound[]): WipeResult {
-  const deleted: WipeResult = { facts: 0, entities: 0, edges: 0, chrono: 0, files: 0, links: 0 };
+  const deleted = wipeResultOf();
   for (const r of results) {
     const counts = 'counts' in r ? r.counts : undefined;
     for (const k of Object.keys(deleted) as (keyof WipeResult)[]) deleted[k] += counts?.[k] ?? 0;

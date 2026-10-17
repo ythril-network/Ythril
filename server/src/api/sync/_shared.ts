@@ -8,6 +8,7 @@ import { getConfig } from '../../config/loader.js';
 import { reachesSpace } from '../../auth/space-reach.js';
 import { isInstanceAdmin } from '../../auth/instance-admin.js';
 import { peerRelayCaller } from '../../auth/peer-relay.js';
+import { peerBoundTo } from '../../auth/peer-bound.js';
 import { joinRoundOf } from '../../networks/round-state.js';
 import { deliveryOf, type Delivery, type DeliveryAuth } from '../../sync/deletion-authority.js';
 import { networksHolding } from '../../spaces/wipe-vote.js';
@@ -19,12 +20,10 @@ import { decodeSeqCursor, parseSeqText, type SeqPosition } from '../../util/seq-
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
 import { MACHINE_MADE_SOURCES } from '../../files/derived-fields.js';
-import { spaceHold, enterSpaceTransfer } from '../../sync/space-exchange-set.js';
-import { SPACE_HELD_ANSWER, SPACE_DECLINED_ANSWER } from '../../sync/held-answer.js';
-import { holdTransferWhileOpen } from '../../sync/space-transfer-fence.js';
-import { spaceActKnob } from '../../spaces/space-act-runner.js';
+import { spaceHold } from '../../sync/space-exchange-set.js';
+import { SPACE_DECLINED_ANSWER } from '../../sync/held-answer.js';
+import { admitPeerOnResponse, answerSpaceHeld } from '../../sync/peer-space-admission.js';
 import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
-import { spaceHeldRefusalsTotal } from '../../metrics/registry.js';
 
 /*
  * What a landed edge or link points at that is not here is `sync/linkage-check.ts`'s question (bundle-30 I8): checked
@@ -291,12 +290,6 @@ export function syncReadStart(sinceSeq: unknown, cursor: unknown): SeqPosition |
 
 // ── Space access guard ─────────────────────────────────────────────────────
 
-/** The peer identity bound to a production peer PAT (set by the invite handshake). */
-export function callerPeerId(authToken: Record<string, unknown> | undefined): string | undefined {
-  const v = authToken?.['peerInstanceId'];
-  return typeof v === 'string' && v ? v : undefined;
-}
-
 /**
  * Who a page of tombstones came from, as the push route knows it from the authenticated token: the peer the token is
  * bound to, a trusted instance administrator relaying on anyone's behalf, or nobody entitled to either.
@@ -327,7 +320,7 @@ export function deliveryOfRequest(spaceId: string, req: { authToken?: unknown })
  * The label is the member's as this instance lists it, or the id when no network lists the peer.
  */
 export function callerPeerAuthor(authToken: Record<string, unknown> | undefined): AuthorRef | undefined {
-  const instanceId = callerPeerId(authToken);
+  const instanceId = peerBoundTo(authToken);
   if (!instanceId) return undefined;
   const member = peerMemberNetworks(instanceId).flatMap(n => n.members).find(m => m.instanceId === instanceId);
   return { instanceId, instanceLabel: member?.label ?? instanceId };
@@ -385,7 +378,7 @@ export function spaceAllowed(
   // Enforce token-level space scope before any network check.
   if (!tokenReachesSpace(authToken, spaceId)) return false;
 
-  const peerId = callerPeerId(authToken);
+  const peerId = peerBoundTo(authToken);
   if (peerId) {
     const memberNets = peerMemberNetworks(peerId);
     if (memberNets.length > 0) {
@@ -429,7 +422,7 @@ export function spaceAllowed(
  */
 export function isNonPeerSyncWrite(authToken: Record<string, unknown> | undefined): boolean {
   if (authToken && isInstanceAdmin(authToken as { admin?: boolean; rights?: TokenRights | null })) return false;
-  return !callerPeerId(authToken);
+  return !peerBoundTo(authToken);
 }
 
 export const NON_PEER_WRITE_MESSAGE =
@@ -458,14 +451,10 @@ export function pushAllowed(
   if (refusePeerSpace(res, spaceId, networkId, token, 'push', false)) return null;
   if (isNonPeerSyncWrite(token)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return null; }
   if (isDirectionalWriteBlocked(spaceId, token)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return null; }
-  const peerId = callerPeerId(token);
+  const peerId = peerBoundTo(token);
   if (!peerId) return spaceId;
   // The push is a transfer of the space, counted in the fence until its response closes, so an act registered meanwhile waits for it.
-  const transfer = enterSpaceTransfer(spaceId, peerId, networkId);
-  if (!transfer) { spaceHeldRefusalsTotal.inc({ door: 'push' }); res.status(423).json(SPACE_HELD_ANSWER); return null; }
-  let kept = false;
-  try { kept = holdTransferWhileOpen(res, transfer, spaceActKnob('INBOUND_TRANSFER_MS'), false); } finally { if (!kept) transfer.release(); }
-  return spaceId;
+  return admitPeerOnResponse(res, spaceId, peerId, networkId, 'push', false) ? null : spaceId;
 }
 
 /**
@@ -508,27 +497,15 @@ export function refusePeerSpace(
   res: import('express').Response, spaceId: string, networkId: string | undefined, authToken: unknown, door = 'sync', admit = true,
 ): boolean {
   const token = authToken as Record<string, unknown>;
-  const peerId = callerPeerId(token);
+  const peerId = peerBoundTo(token);
   if (peerId && declinedByThisMember(spaceId, networkId, peerId)) { res.status(423).json(SPACE_DECLINED_ANSWER); return true; }
   if (refusePeerReach(res, spaceId, networkId, token)) return true;
   if (!peerId) return false;
   if (!admit) {
     // A push door admits the transfer itself, after its own refusals (`pushAllowed`); the hold is still asked here.
-    if (!spaceHold(getConfig(), spaceId, peerId, networkId)) return false;
-    spaceHeldRefusalsTotal.inc({ door });
-    res.status(423).json(SPACE_HELD_ANSWER);
-    return true;
+    return spaceHold(getConfig(), spaceId, peerId, networkId) ? answerSpaceHeld(res, door) : false;
   }
-  const transfer = spaceHold(getConfig(), spaceId, peerId, networkId) ? null : enterSpaceTransfer(spaceId, peerId, networkId);
-  if (!transfer) {
-    spaceHeldRefusalsTotal.inc({ door });
-    res.status(423).json(SPACE_HELD_ANSWER);
-    return true;
-  }
-  // Counted until the response closes, however it closes; a response that cannot say so is not counted at all.
-  let kept = false;
-  try { kept = holdTransferWhileOpen(res, transfer, spaceActKnob('INBOUND_TRANSFER_MS'), false); } finally { if (!kept) transfer.release(); }
-  return false;
+  return admitPeerOnResponse(res, spaceId, peerId, networkId, door, false);
 }
 
 /**
@@ -539,11 +516,9 @@ export function refusePeerSpace(
  */
 export function refusePeerWrite(res: import('express').Response, err: unknown, authToken: unknown): boolean {
   const token = authToken as Record<string, unknown> | undefined;
-  if (!isSpaceNotWritable(err) || !callerPeerId(token)) return false;
+  if (!isSpaceNotWritable(err) || !peerBoundTo(token)) return false;
   if (token && isInstanceAdmin(token as { admin?: boolean; rights?: TokenRights | null })) return false;
-  spaceHeldRefusalsTotal.inc({ door: 'write' });
-  res.status(423).json(SPACE_HELD_ANSWER);
-  return true;
+  return answerSpaceHeld(res, 'write');
 }
 
 /**
@@ -570,7 +545,7 @@ export function refusePeerWrite(res: import('express').Response, err: unknown, a
  * Returns true if the write should be REJECTED (403).
  */
 export function isDirectionalWriteBlocked(spaceId: string, authToken: Record<string, unknown> | undefined): boolean {
-  const peerInstanceId = callerPeerId(authToken);
+  const peerInstanceId = peerBoundTo(authToken);
   if (!peerInstanceId) return false;
   const nets = networksHolding(spaceId, { networks: peerMemberNetworks(peerInstanceId) });
   if (nets.length === 0) return false;

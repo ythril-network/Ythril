@@ -46,8 +46,13 @@ const FREE = 'searchfree';
 const HOUR = 3_600_000;
 const NOW = Date.now();
 const iso = (ms) => new Date(ms).toISOString();
-/** What this stack's search answers when a vector IS asked for: a seed that reached it was found. */
-const SEARCH_FAILED = /vectorSearch|Semantic recall is unavailable|unavailable/i;
+/**
+ * What `similar` answers once it has LOCATED its seed: the store cannot search ("unavailable"), or the seed exists and has no vector yet
+ * ("exists in space"). Both come after the seed lookup (brain/recall.ts findSimilar resolves the seed first), and a pushed seed carries
+ * no vector here (a receiver embeds by its own rules), so on this stack either is the sign a seed was reached; a seed that was not
+ * reached is a plain "not found".
+ */
+const SEARCH_FAILED = /vectorSearch|Semantic recall is unavailable|unavailable|exists in space/i;
 
 let door, loader, server, peerKey, adminKey;
 

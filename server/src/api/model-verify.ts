@@ -43,6 +43,7 @@ import { repairMarkdownExternal } from '../files/converters/vlm-client.js';
 import { log, refusalOfParse } from '../util/log.js';
 import { assistProbeTarget } from '../config/assist-backend.js';
 import { envInt } from '../config/env-num.js';
+import { settledWithin } from '../util/time-bound.js';
 
 export const modelVerifyRouter = Router();
 
@@ -107,17 +108,8 @@ export const VerifySchema = z.object({
 
 /** Race a real call against the budget, so a swapping backend reports `still-loading`, not `failed`. */
 async function withBudget<T>(work: Promise<T>): Promise<{ value?: T; timedOut: boolean }> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<'timeout'>(resolve => {
-    timer = setTimeout(() => resolve('timeout'), VERIFY_TIMEOUT_MS);
-  });
-  try {
-    const r = await Promise.race([work.then(value => ({ value })), timeout]);
-    if (r === 'timeout') return { timedOut: true };
-    return { value: (r as { value: T }).value, timedOut: false };
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+  const r = await settledWithin(work, VERIFY_TIMEOUT_MS);
+  return r.finished ? { value: r.value, timedOut: false } : { timedOut: true };
 }
 
 /**

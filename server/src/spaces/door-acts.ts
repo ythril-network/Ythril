@@ -13,7 +13,8 @@
  * already registered as a waiter and never starts it twice; and an owed act whose `retryAt` is ahead is answered, not started.
  */
 import type { Config, NetworkConfig, SpaceActEntry } from '../config/types.js';
-import { runSpaceAct, releaseSpaceActWaiter, spaceActAnswerMs, SpaceActsClosedError } from './space-act-runner.js';
+import { settledWithin } from '../util/time-bound.js';
+import { runSpaceAct, releaseSpaceActWaiter, spaceActAnswerMs, spaceActDueAt, SpaceActsClosedError } from './space-act-runner.js';
 import { settleRounds, type SettledSpaceRound } from '../networks/round-conclusion.js';
 import { roundAnswer, type RoundAnswer } from '../networks/vote-acts.js';
 import type { Proposed, RoundInProgress } from '../networks/propose-round.js';
@@ -39,7 +40,7 @@ export interface DoorRound {
  */
 export function localAct(standing: SpaceActEntry | undefined, register: () => string): DoorRound {
   if (standing) {
-    if (standing.state === 'owed' && standing.retryAt !== undefined && Date.parse(standing.retryAt) > Date.now()) {
+    if (!spaceActDueAt(standing, Date.now())) {
       return { acts: [], settled: [], retryAt: standing.retryAt, repeated: true };
     }
     return { acts: [standing.id], settled: [joinSpaceAct(standing.id)], repeated: true };
@@ -117,14 +118,10 @@ export type DoorWait<T> = { finished: true; results: T[] } | { finished: false }
  * never does).
  */
 export async function awaitDoorActs<T>(acts: readonly string[], settled: readonly Promise<T[]>[]): Promise<DoorWait<T>> {
-  let timer: NodeJS.Timeout | undefined;
-  const budget = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), spaceActAnswerMs()); });
   try {
-    const all = Promise.all(settled).then(lists => lists.flat());
-    const results = await Promise.race([all, budget]);
-    return results === null ? { finished: false } : { finished: true, results };
+    const wait = await settledWithin(Promise.all(settled).then(lists => lists.flat()), spaceActAnswerMs());
+    return wait.finished ? { finished: true, results: wait.value } : { finished: false };
   } finally {
-    if (timer) clearTimeout(timer);
     for (const id of new Set(acts)) releaseSpaceActWaiter(id);
   }
 }

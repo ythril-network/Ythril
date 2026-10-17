@@ -26,11 +26,9 @@ import type { TokenRights } from '../config/rights-shape.js';
 export { isInstanceAdmin } from './instance-admin.js';
 import { isInstanceAdmin } from './instance-admin.js';
 import { createSpacesRefusal } from './create-spaces.js';
-import { spaceHold, enterSpaceTransfer } from '../sync/space-exchange-set.js';
-import { holdTransferWhileOpen } from '../sync/space-transfer-fence.js';
-import { SPACE_HELD_ANSWER } from '../sync/held-answer.js';
-import { spaceActKnob } from '../spaces/space-act-runner.js';
-import { spaceHeldRefusalsTotal } from '../metrics/registry.js';
+import { withoutHeldFor } from '../sync/space-exchange-set.js';
+import { admitPeerOnResponse } from '../sync/peer-space-admission.js';
+import { peerBoundTo } from './peer-bound.js';
 
 // Augment Express Request type
 declare global {
@@ -641,18 +639,9 @@ export async function acceptSchemaLibraryToken(
  * bound to no peer is the operator's own tooling, not the exchange, and is never held.
  */
 export function refuseHeldPeer(res: Response, spaceId: string | undefined, record: unknown): boolean {
-  const peerId = (record as { peerInstanceId?: unknown } | undefined)?.peerInstanceId;
-  if (typeof peerId !== 'string' || !peerId || !spaceId) return false;
-  const transfer = spaceHold(getConfig(), spaceId, peerId) ? null : enterSpaceTransfer(spaceId, peerId);
-  if (!transfer) {
-    spaceHeldRefusalsTotal.inc({ door: 'rights' });
-    res.status(423).json(SPACE_HELD_ANSWER);
-    return true;
-  }
-  // Counted until the response closes, however it closes; a response that cannot say so is not counted at all.
-  let kept = false;
-  try { kept = holdTransferWhileOpen(res, transfer, spaceActKnob('INBOUND_TRANSFER_MS'), true); } finally { if (!kept) transfer.release(); }
-  return false;
+  const peerId = peerBoundTo(record as { peerInstanceId?: unknown } | undefined);
+  if (!peerId || !spaceId) return false;
+  return admitPeerOnResponse(res, spaceId, peerId, undefined, 'rights', true);
 }
 
 export function requireSpaceAuthScoped(paramName: string) {
@@ -739,8 +728,7 @@ export function requireBodyScopedSpace(area: SpaceArea, needs: Exclude<Rung, 'no
     // A peer token: a held space it NAMED is refused 423; one it did not name is left out of the set it searches.
     const namedIds = new Set(namedList.filter((s): s is string => typeof s === 'string').map(s => s.trim()));
     for (const sid of verdict.spaces) if (namedIds.has(sid) && refuseHeldPeer(res, sid, record)) return;
-    const peerId = (record as { peerInstanceId?: unknown }).peerInstanceId;
-    if (typeof peerId === 'string' && peerId) verdict.spaces = verdict.spaces.filter(sid => namedIds.has(sid) || !spaceHold(cfg, sid, peerId));
+    verdict.spaces = withoutHeldFor(verdict.spaces, peerBoundTo(record as { peerInstanceId?: unknown }));
 
     authAttemptsTotal.inc({ result: 'success' });
     req.authorisedSpaces = verdict.spaces;

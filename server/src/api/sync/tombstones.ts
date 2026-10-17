@@ -7,6 +7,7 @@ import { Router } from 'express';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../../config/types.js';
 import { z } from 'zod';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
+import { peerBoundTo } from '../../auth/peer-bound.js';
 import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { sendCaughtFailure } from '../send-failure.js';
@@ -17,7 +18,7 @@ import {
 } from '../../files/tombstones.js';
 import { applyPeerFileTombstones } from '../../files/peer-tombstone-apply.js';
 
-import { refusePeerSpace, refusePeerWrite, pushAllowed, callerPeerId, deliveryOfRequest, syncReadStart, BAD_SYNC_START } from './_shared.js';
+import { refusePeerSpace, refusePeerWrite, pushAllowed, deliveryOfRequest, syncReadStart, BAD_SYNC_START } from './_shared.js';
 import { parseLimit } from '../../util/pagination.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { completeThrough } from '../../sync/watermark.js';
@@ -69,7 +70,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
       const last = page[page.length - 1];
       const byType = Object.fromEntries(TOMBSTONE_TYPES.map(t => [TOMBSTONE_COLLECTION[t], page.filter(r => r.type === t)] as const));
       // Mid-run, the rest of the cursor's seq is not delivered yet, so only the seq before it counts as served.
-      recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, completeThrough(since.seq, true));
+      recordServedSeq(peerBoundTo(req.authToken), spaceId, completeThrough(since.seq, true));
       res.json({ ...byType, nextCursor: rows.length > pageSize && last ? encodeSeqCursor({ seq: last.seq, id: last._id }) : null });
       return;
     }
@@ -91,7 +92,7 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
     )));
 
     // After the read, so a bookkeeping failure can never cost the peer its tombstones.
-    recordServedSeq(callerPeerId(req.authToken as Record<string, unknown>), spaceId, since.seq);
+    recordServedSeq(peerBoundTo(req.authToken), spaceId, since.seq);
     res.json(grouped);
   } catch (err) {
     sendCaughtFailure(res, `sync GET tombstones`, err);

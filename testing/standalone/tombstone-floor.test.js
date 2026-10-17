@@ -302,7 +302,7 @@ describe('the pull handler is actually wired to record it', () => {
   const src = readFileSync(join(ROOT, 'server/src/api/sync/tombstones.ts'), 'utf8');
 
   it('the tombstone GET records the served position, keyed by the authenticated peer', () => {
-    assert.match(src, /recordServedSeq\(\s*callerPeerId\(/,
+    assert.match(src, /recordServedSeq\(\s*peerBoundTo\(/,
       'GET /api/sync/tombstones no longer records lastSeqServed, so the prune floor can never rise');
   });
 

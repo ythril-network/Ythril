@@ -87,12 +87,17 @@ const member = (instanceId, extra = {}) => ({
   instanceId, label: `member ${instanceId.slice(-2)}`, url: `https://${instanceId.slice(-2)}.example`, tokenHash: 'h', direction: 'both', ...extra,
 });
 
-/** The proposal an opener hands `proposeRound` for a round of this type: only what the round is ABOUT, never the fields the open path completes. */
+/**
+ * The proposal an opener hands `proposeRound` for a round of this type: only what the round is ABOUT, never the fields the open path
+ * completes. A space round names its space twice, by this instance's id and by the network's, as every real opener does and as
+ * `proposeRound` requires (older peers read `spaceId`); this network has no spaceMap, so the two are the same name.
+ */
 function proposalOf(roundType, netType, peerUrl) {
   const base = { type: roundType, subjectInstanceId: SELF, subjectLabel: 'Subject', subjectUrl: '' };
+  const named = (id) => ({ spaceId: id, networkSpaceId: id });
   const spaces = {
-    space_deletion: { spaceId: 'notes' }, space_wipe: { spaceId: 'notes' }, space_addition: { spaceId: 'fresh' },
-    meta_change: { spaceId: 'notes', pendingMeta: { purpose: 'a purpose the network chose' }, metaChangedFields: ['purpose'], baseMetaVersion: 0 },
+    space_deletion: named('notes'), space_wipe: named('notes'), space_addition: named('fresh'),
+    meta_change: { ...named('notes'), pendingMeta: { purpose: 'a purpose the network chose' }, metaChangedFields: ['purpose'], baseMetaVersion: 0 },
   };
   if (roundType === 'join') return { ...base, subjectInstanceId: JOINER, pendingMember: member(JOINER), ...(netType === 'braintree' ? { requiredVoters: [SELF] } : {}) };
   if (roundType === 'remove') return { ...base, subjectInstanceId: P2, subjectUrl: peerUrl, ...(netType === 'braintree' ? { requiredVoters: [SELF] } : {}) };

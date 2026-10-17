@@ -51,22 +51,72 @@ export function roundIsOpen(round: RoundDatable, now: number): boolean {
   return !round.concluded && !roundPastDeadline(round, now);
 }
 
+/** The round types that are a space ACT — a deletion or a wipe — which this instance runs through the space-act runner (bundle-106). */
+export const SPACE_ACT_ROUND_TYPES: ReadonlySet<string> = new Set(['space_deletion', 'space_wipe']);
+
+/**
+ * Is a round of this type a space act: a `space_deletion` or a `space_wipe`?
+ *
+ * What it prevents: the pair was spelled as `type === 'space_deletion' || type === 'space_wipe'` at eight sites and as a set at a ninth, so a
+ * third act type would have been picked up by some of them and not by others — a round settled here and held nowhere, or pruned while its act
+ * still stood. A type this does not know is not an act, whatever its spelling.
+ */
+export function isSpaceActRound(type: unknown): type is 'space_deletion' | 'space_wipe' {
+  return typeof type === 'string' && SPACE_ACT_ROUND_TYPES.has(type);
+}
+
+/** The part of a round the passed-and-still-to-apply questions read. */
+interface PassedRoundReadable {
+  type?: string;
+  concluded?: boolean;
+  passed?: boolean;
+  appliedHere?: boolean;
+  votes?: readonly { vote?: string }[];
+}
+
+/**
+ * Did this round conclude as passed with no veto cast on it? One reading for every caller that asks it — a single veto stops a space act,
+ * a vote that carries a veto never "passes" for the purposes of applying anything, and a spelling that left the veto out would let a round
+ * be applied by one reader and refused by the next (`passedOf` checked it, `spaceActOwed` and the addition's settle did not).
+ */
+export function roundPassedUnvetoed(r: PassedRoundReadable): boolean {
+  return r.concluded === true && r.passed === true && !(r.votes ?? []).some(v => v.vote === 'veto');
+}
+
 /**
  * A passed, unvetoed `space_deletion` or `space_wipe` this instance must act on and has not finished (bundle-106, design v5 §2.1).
  *
- * One predicate of the round, read by the settle, the served mask and the prune — never by a door that refuses, holds or admits: those
- * ask the one standing predicate (`spaceActStands`), which reads the act's entry. A round with nothing to do here never stays owed: it
- * is settled `not-carried` the moment a reader meets it (`spaces/apply-wipe-round.ts`).
+ * THE predicate of "a passed round still to apply here" for an act: read by the settle (`applyConcludedSpaceRounds`, `spaceRoundAction`), the
+ * served mask and the prune — never by a door that refuses, holds or admits: those ask the one standing predicate (`spaceActStands`), which
+ * reads the act's entry. A round with nothing to do here never stays owed: it is settled `not-carried` the moment a reader meets it
+ * (`spaces/apply-wipe-round.ts`).
  */
-export function spaceActOwed(r: { type?: string; concluded?: boolean; passed?: boolean; appliedHere?: boolean }): boolean {
-  return (r.type === 'space_deletion' || r.type === 'space_wipe') && r.concluded === true && r.passed === true && r.appliedHere !== true;
+export function spaceActOwed(r: PassedRoundReadable): boolean {
+  return isSpaceActRound(r.type) && roundPassedUnvetoed(r) && r.appliedHere !== true;
+}
+
+/**
+ * Did this instance APPLY a passed deletion or wipe: the act's own completion, as the hold reads it for its evidence (`sync/space-exchange-set.ts`).
+ * The complement of {@link spaceActOwed} over the rounds that passed, so "owed" and "applied" can never both hold for one round.
+ */
+export function spaceActApplied(r: PassedRoundReadable): boolean {
+  return isSpaceActRound(r.type) && r.concluded === true && r.passed === true && r.appliedHere === true;
+}
+
+/**
+ * A passed, unvetoed `space_addition` this instance has not applied. The addition's sibling of {@link spaceActOwed}, and a sibling rather than the
+ * same function because an addition is not a space act: it is a configuration write (`addSpacesToNetwork`) that no runner entry carries and no
+ * hold or write gate waits on, so a reader asking "is an act owed" must not see it. Both ask {@link roundPassedUnvetoed}, so the veto is one rule.
+ */
+export function spaceAdditionOwed(r: PassedRoundReadable): boolean {
+  return r.type === 'space_addition' && roundPassedUnvetoed(r) && r.appliedHere !== true;
 }
 
 /**
  * The round types a peer still needs after they end: a round whose effect every member applies is served after it passes, because its
  * proposer may have decided it at open (design v5 §3.1). `join` and `remove` stay out.
  */
-export const SERVED_ONCE_PASSED: ReadonlySet<string> = new Set(['space_addition', 'meta_change', 'space_deletion', 'space_wipe']);
+export const SERVED_ONCE_PASSED: ReadonlySet<string> = new Set(['space_addition', 'meta_change', ...SPACE_ACT_ROUND_TYPES]);
 
 /** The part of a join round {@link joinRoundOf} reads. */
 interface JoinRoundReadable extends RoundDatable {
