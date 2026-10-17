@@ -53,6 +53,7 @@ describe('a round that may pass at open is told to every member from one module'
     b = await startFakePeer((method, url) => (url === '/api/notify' ? { status: 500, body: { error: 'down' } } : undefined));
     const host = privateHostAddress();
     cServer = http.createServer((req, res) => { req.on('data', () => {}); req.on('end', () => req.socket.destroy()); });
+    // own-listener: binds the private LAN address, not loopback - the instance's peer fetch refuses a loopback peer (SSRF guard), as for startFakePeer
     await new Promise((resolve) => cServer.listen(0, host, resolve));
     cUrl = `http://${host}:${cServer.address().port}`;
     mongo = await openTestMongo('notify_members');
