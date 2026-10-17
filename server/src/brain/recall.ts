@@ -1268,14 +1268,10 @@ export async function findSimilar(
   minScore?: number,
   crossSpaceIds?: string[],
 ): Promise<FindSimilarResult> {
-  if (!isVectorSearchAvailable()) {
-    throw new Error(
-      'Vector search is unavailable: $vectorSearch is not supported by the connected MongoDB. ' +
-      'Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas.',
-    );
-  }
-
-  // Fetch the source entry's stored embedding
+  // The seed is resolved BEFORE the store is asked whether it can search. A seed that is not there - or not in a space the
+  // caller may search (a held space is dropped before this) - is a 404 whatever the store supports; asked the other way
+  // round, every seed answered the same "unavailable" on a store without vector search, so the answer said nothing about
+  // whether the seed was reachable, and a test of exactly that could not tell a held seed from a free one.
   const entry = await getEntryEmbedding(spaceId, entryId, entryType);
   if (entry === 'no-embedding') {
     throw new NotFoundError(
@@ -1286,6 +1282,12 @@ export async function findSimilar(
   }
   if (!entry) {
     throw new NotFoundError(`Entry '${entryId}' not found in space '${spaceId}' (type: ${entryType}).`);
+  }
+  if (!isVectorSearchAvailable()) {
+    throw new Error(
+      'Vector search is unavailable: $vectorSearch is not supported by the connected MongoDB. ' +
+      'Upgrade to MongoDB 8.2+, use Atlas Local, or connect to managed Atlas.',
+    );
   }
 
   const activeTypes: RecallKnowledgeType[] = (targetTypes && targetTypes.length > 0)

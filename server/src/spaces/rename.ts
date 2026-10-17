@@ -20,6 +20,7 @@ import {
 } from './space-act-runner.js';
 import { RenameSpaceBody } from './body-schemas.js';
 import { isProxy } from './proxy.js';
+import { builtInRefusal } from './built-in-space.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 import { refusalText } from '../brain/store-failure.js';
 import { isMissingPath } from '../files/stored-bytes.js';
@@ -357,7 +358,8 @@ export class RenameBlockedError extends Error {
 function renameRefusal(cfg: Config, oldId: string, newId: string, except?: string): Error | null {
   const space = cfg.spaces.find(s => s.id === oldId);
   if (!space) return new Error(`Space '${oldId}' not found`);
-  if (space.builtIn) return new Error(`Cannot rename built-in space '${oldId}'`);
+  const builtIn = builtInRefusal(space, 'rename');
+  if (builtIn) return builtIn;
   if (cfg.spaces.some(s => s.id === newId)) return new Error(`Space '${newId}' already exists`);
   // A network may still call ANOTHER space by `newId` — its name before a rename (Q-133). Taking it would make this
   // space indistinguishable from that one to every peer. Checked before anything moves.
@@ -390,7 +392,7 @@ async function renameSpaceUnqueued(ctx: SpaceActBodyContext): Promise<SpaceActBo
     const refusal = renameRefusal(getConfig(), oldId, newId, entry.id);
     if (refusal) return { refusal };
   }
-  return { renamed: await renameSpaceInner(oldId, newId, ctx.fileTree) };
+  return { renamed: await renameSpaceInner(oldId, newId, ctx.fileTree, entry.id) };
 }
 
 defineSpaceActBody('rename', renameSpaceUnqueued);
@@ -426,17 +428,13 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
 }
 
 async function renameSpaceInner(
-  oldId: string, newId: string, fileTree: <T>(fn: () => Promise<T>) => Promise<T>,
+  oldId: string, newId: string, fileTree: <T>(fn: () => Promise<T>) => Promise<T>, entryId: string,
 ): Promise<SpaceConfig> {
   const cfg = getConfig();
-  const space = cfg.spaces.find(s => s.id === oldId);
-  if (!space) throw new Error(`Space '${oldId}' not found`);
-  if (space.builtIn) throw new Error(`Cannot rename built-in space '${oldId}'`);
-  if (cfg.spaces.some(s => s.id === newId)) throw new Error(`Space '${newId}' already exists`);
-  // A network may still call ANOTHER space by `newId` — its name before a rename (Q-133). Taking it would make this
-  // space indistinguishable from that one to every peer. Checked before anything moves.
-  const inUse = spaceNameInUseRefusal(cfg.networks.filter(n => n.spaces.includes(oldId)), newId);
-  if (inUse) throw new SpaceNameInUseError(inUse);
+  // The same refusals the doors answer, from the one function; `entryId` is the rename's own entry, so a deletion or wipe registered
+  // after it (which waits behind it) does not block it.
+  const refusal = renameRefusal(cfg, oldId, newId, entryId);
+  if (refusal) throw refusal;
 
   const resuming = cfg.pendingSpaceOp?.type === 'rename'
     && cfg.pendingSpaceOp.spaceId === oldId

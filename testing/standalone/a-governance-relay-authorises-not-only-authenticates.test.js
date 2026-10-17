@@ -36,6 +36,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { trackedSources, REPO_ROOT } from './_sources.mjs';
 
 const { peerRelayCaller } = await import('../../server/dist/auth/peer-relay.js');
 
@@ -89,29 +90,33 @@ describe('the predicate answers which caller this is, not merely whether there i
   });
 });
 
-describe('the peer identity is read the same way the sync router reads it', () => {
+describe('the peer a token is bound to has one reader', () => {
   /*
-   * `peer-relay.ts` carries a one-line copy of `callerPeerId`, because importing the sync router's version
-   * from `auth/` closes an import cycle. A copy is only acceptable while something compares the two, so
-   * these do — and this is the codebase's most-produced defect, so the copy is the thing to watch rather
-   * than the rule.
+   * The relay used to carry a one-line copy of the sync router's reader, because importing it from `auth/` closed an import cycle, and a
+   * gate compared the two spellings. The reader now lives in `auth/peer-bound.ts` and imports nothing, so there is no copy to compare:
+   * the rule is that no other source reads the field off a request's token by hand.
    */
-  const RELAY = 'server/src/auth/peer-relay.ts';
-  const SYNC_SHARED = 'server/src/api/sync/_shared.ts';
+  const READER = 'server/src/auth/peer-bound.ts';
 
-  it('both treat an empty string as no peer, not as a peer named ""', () => {
+  it('an empty string is no peer, not a peer named ""', () => {
     // The half a re-implementation drops. `typeof v === 'string'` alone admits '', and an empty peer id
-    // would make `callerPeerId !== incoming.instanceId` true for every record — refusing a real peer.
+    // would make `peer !== incoming.instanceId` true for every record — refusing a real peer.
     const v = peerRelayCaller({ peerInstanceId: '', rights: { instanceAdmin: false } });
     assert.equal(v.kind, 'refused', 'an empty peer id must not read as a peer identity');
   });
 
-  it('and the two extractions are spelled the same, so a change to either is visible here', () => {
-    const shape = /typeof v === 'string' && v \? v : undefined/;
-    assert.match(code(RELAY), shape, `${RELAY} no longer extracts the peer id the shared way`);
-    assert.match(code(SYNC_SHARED), shape,
-      `${SYNC_SHARED} no longer extracts the peer id the shared way — the copy in ${RELAY} is now the `
-      + 'odd one out, which is how one rule becomes two');
+  it('no source but the reader takes `peerInstanceId` off a request\'s token itself', () => {
+    const sources = trackedSources('server/src', { floor: 300 }).filter(f => f !== READER);
+    // The shapes a hand read takes: a bracket read, a property read off the authenticated token, a read off a record cast to carry the field.
+    const byHand = [/\['peerInstanceId'\]/, /authToken\b[^;\n]*?\??\.peerInstanceId\b/, /\bas \{ (?:readonly )?peerInstanceId\?: [a-z]+ \}[^;\n]*?\??\.peerInstanceId\b/];
+    const offenders = sources.filter(f => { const text = stripComments(readFileSync(`${REPO_ROOT}/${f}`, 'utf8')); return byHand.some(re => re.test(text)); });
+    assert.deepEqual(offenders, [], `these read the peer a token is bound to by hand instead of through peerBoundTo: ${offenders.join(', ')}`);
+  });
+
+  it('the doors that ask which peer a token is bound to call the one reader', () => {
+    for (const f of ['server/src/auth/peer-relay.ts', 'server/src/auth/middleware.ts', 'server/src/api/sync/_shared.ts', 'server/src/mcp/call-tool.ts']) {
+      assert.match(code(f), /\bpeerBoundTo\(/, `${f} no longer asks the one reader which peer a token is bound to`);
+    }
   });
 });
 

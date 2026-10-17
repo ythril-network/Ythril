@@ -43,6 +43,7 @@ import { eachSpace, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { refusalText, storeFailureAnswer, throwIfStoreSide } from '../brain/store-failure.js';
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
+import { builtInRefusal } from './built-in-space.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
 
@@ -801,7 +802,8 @@ export async function removeSpace(spaceId: string): Promise<boolean> {
 
 /** This instance's own deletion of `spaceId`, refused before anything is registered when the space may never be deleted. */
 function soloRemoval(spaceId: string): SpaceActRequest {
-  if (getConfig().spaces.find(s => s.id === spaceId)?.builtIn) throw new Error(`Cannot delete built-in space '${spaceId}'`);
+  const refusal = builtInRefusal(getConfig().spaces.find(s => s.id === spaceId), 'delete');
+  if (refusal) throw refusal;
   return { kind: 'delete', localId: spaceId };
 }
 
@@ -843,7 +845,8 @@ async function removeOwnCopy(spaceId: string, ctx: SpaceActBodyContext): Promise
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) return false;
-  if (space.builtIn) throw new Error(`Cannot delete built-in space '${spaceId}'`);
+  const builtIn = builtInRefusal(space, 'delete');
+  if (builtIn) throw builtIn;
 
   // Proxy spaces have no DB collections or files — a pure config removal, atomic
   // via the single saveConfig, so no write-ahead marker is needed.
@@ -967,7 +970,7 @@ export interface WipeResult {
  *  The returned counts reflect the number of documents actually deleted.
  */
 export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): Promise<WipeResult> {
-  return runSpaceAct(registerOwnSpaceAct(soloWipe(spaceId, types)), { waiter: true }).then(settled => actAnswer(settled, () => wipeCounts(settled.counts)));
+  return runSpaceAct(registerOwnSpaceAct(soloWipe(spaceId, types)), { waiter: true }).then(settled => actAnswer(settled, () => wipeResultOf(settled.counts)));
 }
 
 /** This instance's own wipe of `spaceId`, refused before anything is registered when the space is not here or its id is unsafe. */
@@ -983,10 +986,17 @@ function byIds(ids: unknown[]): ReturnType<typeof asFilter<object>> {
   return asFilter<object>({ _id: { $in: ids } });
 }
 
-const wipeCounts = (counts: Record<string, number> | undefined): WipeResult => ({
-  facts: counts?.['facts'] ?? 0, entities: counts?.['entities'] ?? 0, edges: counts?.['edges'] ?? 0,
-  chrono: counts?.['chrono'] ?? 0, files: counts?.['files'] ?? 0, links: counts?.['links'] ?? 0,
-});
+/**
+ * A wipe's per-collection counts as a complete {@link WipeResult}: every collection a wipe covers present, a missing one zero, anything
+ * else in `counts` left out. The one place that writes the result's keys — they come from the collection list, so a collection added
+ * to a space is never a key some zero-literal forgot (a hand-listed zero made the door answer `undefined` for it, and a sum over such
+ * literals dropped its column silently).
+ */
+export function wipeResultOf(counts?: { readonly [K in WipeCollectionType]?: number }): WipeResult {
+  const result = {} as WipeResult;
+  for (const t of WIPE_COLLECTION_TYPES) result[t] = counts?.[t] ?? 0;
+  return result;
+}
 
 /**
  * The wipe body, run by the runner: every covered collection emptied in bounded batches, then what hangs off them. Its entry is its
@@ -1116,7 +1126,7 @@ async function wipeSpaceUnqueued(ctx: SpaceActBodyContext): Promise<SpaceActBody
   }
   invalidateUsageCache(); // a wipe frees disk + shrinks brain — honour it in the next quota check
 
-  const result = wipeCounts(counts);
+  const result = wipeResultOf(counts);
   const typesLabel = isFullWipe ? 'all' : Array.from(targets).join(', ');
   log.info(`Wiped space '${peerText(spaceId)}' [${peerText(typesLabel)}]: ${result.facts} facts, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files, ${result.links} links`);
   return { counts: { ...result } };

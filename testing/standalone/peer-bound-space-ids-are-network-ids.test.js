@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { enclosingBlockAround } from './_structural-window.mjs';
+import { enclosingBlockAround, argumentsOf } from './_structural-window.mjs';
 
 const sources = trackedSources('server/src').filter(f => f.endsWith('.ts'));
 const read = (f) => stripComments(readFileSync(f, 'utf8'));
@@ -50,24 +50,46 @@ describe('a network\'s local space list never reaches a peer without the network
 });
 
 describe('a space round names its space by the network id too', () => {
-  const ROUND = /type:\s*'(space_deletion|space_wipe)'/g;
-  const rounds = sources.flatMap(f => {
+  /*
+   * The rounds that reach a peer are the ones OPENED through `proposeRound`, so the subjects are the proposal each call hands it — derived
+   * from the calls, not from a `type: 'space_…'` text anywhere in the tree. That text also names a function's parameter type (a notice's
+   * wording) and the scratch round the forecast evaluates (`networks/round-forecast.ts`, which is never stored, served or signed): neither is
+   * a round a peer reads, and a gate that anchored on the text judged them as if it were.
+   */
+  const proposals = sources.flatMap(f => {
     const src = read(f);
-    return [...src.matchAll(new RegExp(ROUND))].map(m => ({ f, src, at: m.index, type: m[1] }));
+    // A call, not the declaration `function proposeRound(`.
+    return [...src.matchAll(/(?<!\bfunction\s)\bproposeRound\s*\(/g)]
+      .map(m => ({ f, proposal: argumentsOf(src, m.index, `${f} proposeRound`)[2] ?? '' }));
+  });
+  const kinds = (p) => [...p.proposal.matchAll(/\btype:\s*'(space_deletion|space_wipe)'/g)].map(m => m[1]);
+
+  it('the openers are found, both round kinds among them', () => {
+    assert.ok(proposals.length >= 3, `only ${proposals.length} call(s) of proposeRound found — the scan is wrong`);
+    assert.deepEqual([...new Set(proposals.flatMap(kinds))].sort(), ['space_deletion', 'space_wipe']);
   });
 
-  it('both round kinds are found', () => {
-    assert.deepEqual([...new Set(rounds.map(r => r.type))].sort(), ['space_deletion', 'space_wipe']);
-  });
-
-  for (const { f, src, at, type } of rounds) {
-    it(`${type} in ${f} carries networkSpaceId`, () => {
-      const object = enclosingBlockAround(src, at, `${f} ${type}`);
-      assert.match(object, /\bspaceId\b/, 'the spaceId older peers read is gone');
-      assert.match(object, /\bnetworkSpaceId:\s*localToRemote\(/,
-        `${type} names its space only by this instance's local id; a member that calls it something else cannot act on it`);
-    });
+  for (const p of proposals) {
+    for (const type of kinds(p)) {
+      it(`${type} opened in ${p.f} carries spaceId and networkSpaceId`, () => {
+        assert.match(p.proposal, /\bspaceId\b/, 'the spaceId older peers read is gone');
+        assert.match(p.proposal, /\bnetworkSpaceId:\s*localToRemote\(/,
+          `${type} names its space only by this instance's local id; a member that calls it something else cannot act on it`);
+      });
+    }
   }
+
+  it('proposeRound itself refuses a deletion or wipe that names its space only once', async () => {
+    // The guard is inside the opener, so an opener that forgot a field cannot open the round (the source gate above sees only the openers that exist today).
+    const { proposeRound } = await import('../../server/dist/networks/propose-round.js');
+    const net = { id: 'n', votingDeadlineHours: 24, members: [], spaces: [], pendingRounds: [] };
+    for (const type of ['space_deletion', 'space_wipe']) {
+      const base = { type, subjectInstanceId: 'a', subjectLabel: 'a', subjectUrl: '' };
+      assert.throws(() => proposeRound(net, {}, { ...base, spaceId: 'x' }), /networkSpaceId/, `${type} without networkSpaceId was opened`);
+      assert.throws(() => proposeRound(net, {}, { ...base, networkSpaceId: 'x' }), /spaceId/, `${type} without spaceId was opened`);
+    }
+    assert.equal(net.pendingRounds.length, 0, 'a refused proposal left a round behind');
+  });
 });
 
 describe('the member self-record has one builder', () => {

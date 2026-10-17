@@ -8,10 +8,9 @@
 
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
-import { roundPastDeadline } from '../networks/round-state.js';
+import { isSpaceActRound, roundPastDeadline } from '../networks/round-state.js';
 import { recordRoundOutcome } from '../networks/round-outcomes.js';
-import { spaceActStands } from '../spaces/space-act-runner.js';
-import { roundSpaceLocalId } from './space-map.js';
+import { spaceActOfRound } from '../spaces/space-act-runner.js';
 
 /** A round is prunable once it is concluded AND past its deadline. After the deadline
  *  every peer concludes the round independently (the deadline path in
@@ -39,14 +38,16 @@ export function roundCastsStillPropagate(round: { deadline?: string | null }, no
 /**
  * Is this deletion or wipe round's act still to finish here? Such a round is the debt a retry needs and the hold rides on, so
  * the prune keeps it past its deadline until the act completes. A round whose act completed (`appliedHere`) is done; for one that
- * has not, whether its act stands is asked through the one standing predicate (`spaceActStands`), which reads the entry - the
- * entry is the act, and no door decides from the round's own owed state.
+ * has not, whether its act stands is asked of the entry that carries THIS round (`spaceActOfRound`) - the entry is the act, and no
+ * door decides from the round's own owed state. It is the round's own act, not any act of the round's space: a prune is not a door
+ * that refuses or holds (those ask `spaceActStands`), and an unrelated act of the same space must not keep a settled round alive.
  */
 function actStandsForRound(net: NetworkConfig, round: VoteRound): boolean {
-  if ((round.type !== 'space_deletion' && round.type !== 'space_wipe') || round.appliedHere === true) return false;
+  if (!isSpaceActRound(round.type) || round.appliedHere === true) return false;
   try {
-    const localId = roundSpaceLocalId(net, round) ?? (typeof round.spaceId === 'string' ? round.spaceId : null);
-    return localId !== null && spaceActStands(getConfig(), localId) !== null;
+    // THIS round's own act, by the round it carries: an act of the same space for another round (a wipe of other families, a rename)
+    // is not this round's debt, and keeping a round past its deadline for it holds the round for as long as that act stands.
+    return spaceActOfRound(getConfig(), net.id, round.roundId) !== undefined;
   } catch {
     return false;
   }

@@ -33,8 +33,7 @@
  */
 import { getConfig, saveConfig } from '../config/loader.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
-import { logInternalAudit } from '../audit/audit.js';
-import { ROUND_EXPIRED_OPERATION } from '../audit/middleware.js';
+import { auditRoundEffect, ROUND_EXPIRED_OPERATION } from './round-audit.js';
 import { roundExpiryFailuresTotal } from '../metrics/registry.js';
 import { pruneExpiredRounds } from '../sync/vote-round-retention.js';
 import { retryOwedSpaceActs } from '../spaces/space-act-runner.js';
@@ -59,21 +58,11 @@ const saidOnce = warnOnce<string>({ max: 10, every: SKIP_WARNING_WINDOW_MS });
  */
 let unsaved = false;
 
-/** One audit entry for a round this job concluded. Never throws: the audit is a record, and a missing one must not undo the conclusion. */
+/** One audit entry for a round this job concluded, written like every effect a round has here (`auditRoundEffect`, which never throws). */
 function auditExpired(net: NetworkConfig, round: VoteRound): void {
-  try {
-    let space: string | null = null;
-    try { space = roundSpaceLocalId(net, round); } catch { /* a network whose spaces are unreadable names none */ }
-    logInternalAudit({
-      method: 'SYNC',
-      path: `internal:round-expiry:${String(net.id).slice(0, 80)}:${String(round.roundId).slice(0, 80)}`,
-      // `satisfies` ties the constant to the operation name the audit documentation lists, so renaming one without the other does not compile.
-      operation: ROUND_EXPIRED_OPERATION satisfies 'network.round.expired',
-      ...(space ? { spaceId: space } : {}),
-    });
-  } catch (err) {
-    saidOnce('audit', () => log.warn(`${LABEL}: the audit entry for an expired round was not written: ${peerText(err)}`));
-  }
+  let space: string | null = null;
+  try { space = roundSpaceLocalId(net, round); } catch { /* a network whose spaces are unreadable names none */ }
+  auditRoundEffect(ROUND_EXPIRED_OPERATION, net.id, round.roundId, space);
 }
 
 /**

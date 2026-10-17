@@ -43,7 +43,7 @@ import { proposeRound } from './propose-round.js';
 import { sendNotice } from './notify-members.js';
 import { ownYesCarries } from './round-forecast.js';
 import { isInstanceAdmin } from '../auth/instance-admin.js';
-import { spaceActsOfNetwork } from '../spaces/space-act-runner.js';
+import { actEntryView, spaceActsOfNetwork } from '../spaces/space-act-runner.js';
 import type { NetworkRefusalCode } from './refusal-codes.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 
@@ -129,10 +129,10 @@ export function networkAnswer(net: NetworkConfig, caller: Caller, cfg: Config = 
   if (!isInstanceAdmin(caller)) return view;
   view['owedSpaceActs'] = spaceActsOfNetwork(cfg, net.id)
     .map(e => ({
-      entryId: e.id, kind: e.kind, localSpaceId: e.localId,
+      entryId: e.id, localSpaceId: e.localId,
       ...(net.spaces.includes(e.localId) ? { networkSpaceId: localToRemote(net, e.localId) } : {}),
       rounds: e.rounds.filter(r => r.networkId === net.id).map(r => ({ roundId: r.roundId })),
-      attempts: e.attempts, ...(e.retryAt ? { nextRetryAt: e.retryAt } : {}), since: e.registeredAt, state: e.state,
+      ...actEntryView(e),
     }));
   return view;
 }

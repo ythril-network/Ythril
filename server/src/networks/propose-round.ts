@@ -24,13 +24,13 @@ import { getConfig } from '../config/loader.js';
 import { makeSignedOwnCast } from '../util/signing.js';
 import { localToRemote, networkSpaceKey, remoteToLocal } from '../sync/space-map.js';
 import { queueGeneratedNote } from '../sync/change-notes.js';
-import { canonicalWipeTypes, spaceActOfRound, type SpaceRoundSettled } from '../spaces/space-act-runner.js';
+import { canonicalWipeTypes, spaceActDueAt, spaceActOfRound, type SpaceRoundSettled } from '../spaces/space-act-runner.js';
 import type { SpaceActEntry } from '../config/types.js';
 import { openRoundHere } from './round-local-state.js';
-import { roundIsOpen, spaceActOwed } from './round-state.js';
+import { isSpaceActRound, roundIsOpen, spaceActOwed } from './round-state.js';
 import { settleRounds, type SettledSpaceRound } from './round-conclusion.js';
 import { notifyMembersToPull, type RoundNoticeSnapshot } from './notify-members.js';
-import { networkRole } from './network-role.js';
+import { publishesOn } from './network-role.js';
 import { roundAnswer, roundDecided, type RoundAnswer, type RoundDecided } from './vote-acts.js';
 
 /** What an opener hands over: only what the round is ABOUT. The open path completes the id, the dates and the votes. */
@@ -55,6 +55,12 @@ export interface Proposed {
  * anything acted, deferred past the caller's save.
  */
 export function proposeRound(net: NetworkConfig, cfg: Config, proposal: RoundProposal, opts: { now?: number } = {}): Proposed {
+  // A deletion or wipe names its space TWICE, and refuses here rather than opening a round half the members cannot read: `spaceId` is the
+  // field a 5.0/5.1 peer applies raw, `networkSpaceId` is the one a member that calls the space something else resolves (Q-133). An opener
+  // that drops either opens a round that some member applies to the wrong space or to none.
+  if (isSpaceActRound(proposal.type) && (!proposal.spaceId || !proposal.networkSpaceId)) {
+    throw new Error(`a ${proposal.type} round names its space by this instance's id (spaceId) and by the network's (networkSpaceId); one of them is missing`);
+  }
   const now = opts.now ?? Date.now();
   const round: VoteRound = {
     ...proposal,
@@ -77,8 +83,7 @@ export function proposeRound(net: NetworkConfig, cfg: Config, proposal: RoundPro
   };
   // 0b. The publisher's notice of a deletion or wipe, queued while the network still carries the space (X10, INT S4): its delivery
   // reads no carried list, so it still reaches the members after the space left.
-  if ((round.type === 'space_deletion' || round.type === 'space_wipe') && localSpace !== undefined && net.type === 'pubsub'
-    && networkRole(net, cfg.instanceId).role === 'publisher') {
+  if (isSpaceActRound(round.type) && localSpace !== undefined && publishesOn(net)) {
     void queueGeneratedNote(net.id, publisherNotice(cfg, net, round.type, snapshot.spaceLabel ?? localSpace), [localSpace]);
   }
   // 1-3. Store it, then sign this instance's yes over the round as stored.
@@ -97,14 +102,6 @@ function publisherNotice(cfg: Pick<Config, 'instanceLabel'>, net: NetworkConfig,
   return type === 'space_deletion'
     ? `${cfg.instanceLabel} deleted the space '${label}' from '${net.label}'. Your copy stays as a local space of yours; to stop receiving from this network you may leave it.`
     : `${cfg.instanceLabel} wiped the space '${label}' in '${net.label}'. Your copy was wiped too; you may leave the network.`;
-}
-
-/**
- * Does this instance act on its own on `net` — a pub/sub subscriber, whose deletion or wipe of a space is a LOCAL act (D-40): it opens
- * no round, tells the publisher nothing, and is answered as an unnetworked one. The one reading of "subscriber" the doors ask.
- */
-export function actsLocallyOn(net: NetworkConfig): boolean {
-  return net.type === 'pubsub' && networkRole(net).role === 'subscriber';
 }
 
 /** This instance's own round a door would repeat, and where its act stands. */
@@ -135,13 +132,16 @@ export function ownSpaceRoundInProgress(
     const entry = spaceActOfRound(cfg, net.id, round.roundId);
     if (!entry) return { round, state: 'due' };
     if (entry.state !== 'owed') return { round, state: 'running', entry };
-    const queued = entry.retryAt !== undefined && Date.parse(entry.retryAt) > now;
-    return { round, state: queued ? 'queued' : 'due', entry };
+    return { round, state: spaceActDueAt(entry, now) ? 'due' : 'queued', entry };
   }
   return null;
 }
 
-/** A wipe's covered set as one comparable string: canonical, all of them = `*`. A list no canonicalising accepts compares as itself. */
+/**
+ * A wipe's covered set as one comparable string: canonical, all of them = `*`. A list no canonicalising accepts compares as itself.
+ * Kept apart from `coveredOf` (`sync/space-exchange-set.ts`) on purpose: this asks EQUALITY of two covered sets (is it the same wipe), that one asks
+ * whether one set CONTAINS another and must read anything unreadable as "all" so the hold fails safe.
+ */
 function coveredKey(types: readonly string[] | undefined): string {
   try { return canonicalWipeTypes(types)?.join(',') ?? '*'; } catch { return [...(types ?? [])].sort().join(','); }
 }

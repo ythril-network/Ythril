@@ -15,12 +15,12 @@ import { commitOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-meta.j
 import { carriedLocalId } from './space-map.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { sendNotice } from '../networks/notify-members.js';
-import { networkRole } from '../networks/network-role.js';
+import { publishesOn } from '../networks/network-role.js';
 import { parseMetaRound, type MetaRoundParse, type MetaRoundProposal } from './meta-round-merge.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import type { ParsedSpaceMeta } from '../spaces/body-schemas.js';
 import { metaChangeNote, queueGeneratedNote } from './change-notes.js';
-import { roundPastDeadline } from '../networks/round-state.js';
+import { isSpaceActRound, roundPastDeadline } from '../networks/round-state.js';
 import { roundElectorate, votersOf } from '../networks/round-electorate.js';
 import { recordRoundOutcome } from '../networks/round-outcomes.js';
 
@@ -216,7 +216,7 @@ export function roundVerdict(
       // wipe is its own local act; one an older publisher adopted before the upgrade would otherwise pass at the next gossip or relay
       // and empty the publisher's space for every subscriber. Decided from the local role and a local field, never a wire field.
       passed = yesCount >= 1 && vetoCount === 0
-        && !((round.type === 'space_deletion' || round.type === 'space_wipe') && networkRole(net).role === 'publisher' && round.proposedHere !== true);
+        && !(isSpaceActRound(round.type) && publishesOn(net) && round.proposedHere !== true);
       break;
   }
   return passed ? 'passed' : null;

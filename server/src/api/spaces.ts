@@ -11,7 +11,8 @@ import {
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { editorScopeFor } from '../auth/editor-scope.js';
 import { getConfig, saveConfig, getDocumentProcessingConfig, getMediaEmbeddingConfig, getStorageConfig } from '../config/loader.js';
-import { proposeRound, ownSpaceRoundInProgress, actsLocallyOn } from '../networks/propose-round.js';
+import { proposeRound, ownSpaceRoundInProgress } from '../networks/propose-round.js';
+import { actsLocallyOn } from '../networks/network-role.js';
 import { networksHolding } from '../spaces/wipe-vote.js';
 import { awaitDoorRounds, openedRound, repeatedRound } from '../spaces/door-acts.js';
 import { deleteSpaceLocally, deletionAnswer } from '../spaces/space-deletion.js';

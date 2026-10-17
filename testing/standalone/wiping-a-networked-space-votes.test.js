@@ -162,8 +162,13 @@ describe('every conclusion site applies it, through one function', () => {
     }
   });
 
-  it('a single veto stops it, as for space_deletion', () => {
-    assert.match(src('server/src/spaces/apply-wipe-round.ts'), /votes\.some\(v => v\.vote === 'veto'\)/,
+  it('a single veto stops it, as for space_deletion', async () => {
+    // The veto is read once, by the round's owed predicate (`networks/round-state.ts`), which the action asks; asserted on the decision itself.
+    const { spaceRoundAction } = await import('../../server/dist/spaces/apply-wipe-round.js');
+    const net = { spaces: ['veto-space'], spaceMap: {} };
+    const round = (votes) => ({ type: 'space_wipe', spaceId: 'veto-space', networkSpaceId: 'veto-space', concluded: true, passed: true, votes });
+    assert.deepEqual(spaceRoundAction(net, round([{ vote: 'yes' }])), { kind: 'wipe', localId: 'veto-space' }, 'control: an unvetoed passed wipe is the action');
+    assert.equal(spaceRoundAction(net, round([{ vote: 'yes' }, { vote: 'veto' }])), null,
       'a member that does not want its copy emptied is not outvoted — the wipe is irreversible there too');
   });
 });

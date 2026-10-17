@@ -27,7 +27,7 @@
  * failed after the vote passed — and each door renders it. Neither decides. Who may call it is decided at the
  * door, by the tool's `spaceAdmin` flag (D-41): this module asks no rights question of its own.
  */
-import { WIPE_COLLECTION_TYPES, type WipeCollectionType, type WipeResult } from './lifecycle.js';
+import { WIPE_COLLECTION_TYPES, wipeResultOf, type WipeCollectionType } from './lifecycle.js';
 import { wipeSpaceAsRequested, wipeTypesOf, type WipeOutcome } from './wipe-vote.js';
 import { isProxySpace } from './proxy.js';
 import { getConfig } from '../config/loader.js';
@@ -95,10 +95,6 @@ export async function deleteSpaceData(args: DeleteSpaceDataArgs): Promise<Delete
 export const wipeTypesLabel = (types: WipeCollectionType[] | null | undefined): string =>
   types && types.length > 0 ? types.join(', ') : 'all';
 
-/** The flat per-collection counts, read where callers read them, beside `deleted`. */
-export const wipeCounts = (deleted: WipeResult | undefined): WipeResult =>
-  deleted ?? { facts: 0, entities: 0, edges: 0, chrono: 0, files: 0, links: 0 };
-
 /**
  * The tool's answer to a wipe outcome — text and `structuredContent` — for MCP and `POST /api/delete_space_data` alike (the REST tool door
  * answers the same `data`). A failed act is an error result carrying the failure body (`code: 'space_act_failed'`, `status: 'passed'`);
@@ -130,7 +126,7 @@ export function wipeToolResult(space: string, outcome: WipeOutcome, types: WipeC
       return { content: text(`Error: ${answer.body.error}`), isError: true, structuredContent: { ...answer.body } };
     }
     case 'wiped': {
-      const d = wipeCounts(outcome.deleted);
+      const d = wipeResultOf(outcome.deleted);
       const counts = `${d.facts} facts, ${d.entities} entities, ${d.edges} edges, ${d.chrono} chrono, ${d.files} files`;
       const open = where('vote_pending');
       const said = outcome.refills

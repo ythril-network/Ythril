@@ -136,9 +136,8 @@ const negatedReads = (code) => [...code.matchAll(NEGATED_CONCLUDED)].length;
  * hold such a read (a row outliving the code fails), and the reason is the reviewable half.
  */
 const NOT_THE_OPEN_QUESTION = {
-  'server/src/spaces/apply-wipe-round.ts': 'asks whether a space round has been decided and passed, to act on its outcome',
+  // The space rounds' "decided and passed, to act on its outcome" is no longer a read here: it is `spaceActOwed` / `spaceAdditionOwed` in `networks/round-state.ts`.
   'server/src/networks/member-introductions.ts': 'asks whether a join round concluded and passed, to admit or introduce its subject',
-  'server/src/networks/network-spaces.ts': 'asks whether a space_addition round concluded and passed, to apply it',
 };
 
 /** The readers the design names as meaning "open for votes". */

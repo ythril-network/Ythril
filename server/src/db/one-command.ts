@@ -32,7 +32,7 @@
  */
 
 import { BSON, MongoBulkWriteError } from 'mongodb';
-import { classifyReadFailure } from '../brain/store-failure.js';
+import { isStoreSide } from '../brain/store-failure.js';
 import { wrapsAThrownError } from './error-chain.js';
 import { isWriteTimeout } from './write-timeout.js';
 
@@ -240,7 +240,7 @@ export async function writeInOneCommands<T, R>(
  */
 function causeOfFailures(failures: ReadonlyArray<{ slice: number; error: unknown }>, stopped: boolean): unknown {
   const stopping = stopped ? failures[failures.length - 1]!.error : undefined;
-  if (stopped && (isWriteTimeout(stopping) || classifyReadFailure(stopping).status >= 500)) return stopping;
+  if (stopped && (isWriteTimeout(stopping) || isStoreSide(stopping))) return stopping;
   return failures[0]!.error;
 }
 

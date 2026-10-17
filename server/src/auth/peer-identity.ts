@@ -22,6 +22,7 @@
  */
 import type { Config } from '../config/types.js';
 import { findMatchingToken } from './tokens.js';
+import { peerBoundTo } from './peer-bound.js';
 
 /** Is `instanceId` a member of any network on this instance? */
 export function isKnownPeer(cfg: Pick<Config, 'networks'>, instanceId: string): boolean {
@@ -46,7 +47,7 @@ export async function claimedPeerIsProven(cfg: Pick<Config, 'networks'>, claimed
   const raw = bearer?.replace(/^Bearer\s+/i, '').trim();
   if (!raw) return false;
   const record = await findMatchingToken(raw);
-  return !!record && record.peerInstanceId === claimedId;
+  return !!record && peerBoundTo(record) === claimedId;
 }
 
 /**

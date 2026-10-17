@@ -41,6 +41,7 @@ import { logInternalAudit } from '../audit/audit.js';
 import { SPACE_ALIAS_HEAL_OPERATION } from '../audit/middleware.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { networkRole } from './network-role.js';
+import { spaceAdditionOwed } from './round-state.js';
 
 /** The shape a space id has everywhere else it is accepted — create, rename, the join's space map. */
 const SPACE_ID = /^[a-z0-9-]{1,40}$/;
@@ -455,7 +456,7 @@ export interface AdditionSettled { roundId: string; kind: 'add'; ok: boolean; er
  * says how it ended and never rejects, so a door that awaits the settle answers a creation that failed as a failure (X16).
  */
 export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, where: string): Promise<AdditionSettled> | null {
-  if (!round.concluded || !round.passed || round.type !== 'space_addition' || round.appliedHere) return null;
+  if (!spaceAdditionOwed(round)) return null;
   const cfg = getConfig();
   const target = spaceAdditionTarget(net, round, cfg.instanceId, cfg.spaces.map(s => s.id));
   if (!target) return null;

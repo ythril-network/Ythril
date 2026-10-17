@@ -24,6 +24,7 @@
  */
 import http from 'node:http';
 import { privateHostAddress } from './_private-address.mjs';
+import { listenOnPrivateAddress } from '../_shared/local-server.mjs';
 
 /** A request as the proxy saw it: `n` is its place in the arrival order since `reset`. */
 /** @typedef {{ n: number, method: string, path: string, query: Record<string, string> }} ProxiedRequest */
@@ -44,7 +45,6 @@ export async function startStallingPeerProxy(targetUrl) {
   /** @type {ProxiedRequest[]} */
   let requests = [];
   let rules = [];
-  const sockets = new Set();
 
   const server = http.createServer(async (req, res) => {
     const chunks = [];
@@ -72,13 +72,11 @@ export async function startStallingPeerProxy(targetUrl) {
     res.on('close', () => upstream.destroy());
     upstream.end(Buffer.concat(chunks));
   });
-  server.on('connection', (socket) => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
-  // own-listener: binds every interface because the peer fetch refuses a loopback address
-  await new Promise(resolve => { server.listen(0, '0.0.0.0', resolve); });
-  const url = `http://${privateHostAddress()}:${server.address().port}`;
+  // The peer fetch refuses a loopback address, so the proxy answers on the private one; the shell (sockets remembered, close() that ends while a request is parked) is the shared module's.
+  const local = await listenOnPrivateAddress(server, privateHostAddress());
 
   return {
-    url,
+    url: local.url,
     get requests() { return requests; },
     /**
      * Park the next request `when` admits (after `skip` earlier matches pass). `reached` resolves with the request once it is parked,
@@ -106,8 +104,7 @@ export async function startStallingPeerProxy(targetUrl) {
     async close() {
       for (const r of rules) r.release();
       rules = [];
-      for (const s of sockets) s.destroy();
-      await new Promise(resolve => server.close(() => resolve()));
+      await local.close();
     },
   };
 }

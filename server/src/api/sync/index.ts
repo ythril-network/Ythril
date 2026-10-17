@@ -12,7 +12,7 @@
  */
 import { Router } from 'express';
 import { getConfig } from '../../config/loader.js';
-import { callerPeerId } from './_shared.js';
+import { peerBoundTo } from '../../auth/peer-bound.js';
 import { peerFloorRefusal, MIN_PEER_VERSION } from '../../sync/peer-floor.js';
 import { syncDocsRouter } from './docs.js';
 import { syncTombstonesRouter } from './tombstones.js';
@@ -64,7 +64,7 @@ syncRouter.use((req, res, next) => {
  * tooling for being absent — the absent-is-old rule applied to something that is not a peer at all.
  */
 syncRouter.use((req, res, next) => {
-  const peerId = callerPeerId(req.authToken as Record<string, unknown> | undefined);
+  const peerId = peerBoundTo(req.authToken);
   if (!peerId) { next(); return; }
   // The announce is how a version arrives; see above.
   if (req.method === 'POST' && /\/networks\/[^/]+\/members$/.test(req.path)) { next(); return; }

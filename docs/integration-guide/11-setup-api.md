@@ -116,7 +116,7 @@ ythril_http_requests_total{method="GET",route="/health",status_code="200"} 42
 | `ythril_space_act_batches_retried_total` | counter | Wipe batches that the per-operation bound ended after the batch before them made progress, run again inside the same attempt. |
 | `ythril_round_settle_failures_total` | counter | Concluded vote rounds whose settlement here failed, by `via` (where they were settled). |
 | `ythril_space_exchange_held` | gauge | Per `network`: the member and space pairs whose exchange is held because a space act stands. Read from the live config at each scrape; a declined space is never counted. |
-| `ythril_space_held_refusals_total` | counter | Peer requests refused with `423 space_held`. |
+| `ythril_space_held_refusals_total` | counter | Peer requests refused with `423 space_held`, by `door`: the sync door that refused (such as `push` or `write`), `rights` for a space route, `tool` for a peer's tool call. |
 | `ythril_space_transfers_running` | gauge | Transfers of a space's data running now. |
 | `ythril_round_clock_ahead_total` | counter | Vote rounds whose opening time is ahead of this instance's clock; they are adopted and warned about. |
 | `ythril_round_expiry_failures_total` | counter | Failures of the `Vote round expiry` job: a vote round it could not conclude or prune, a network it could not walk, a configuration save that failed, or a settle step on this path that failed (also counted in `ythril_round_settle_failures_total`). Counted on every failure whether or not the log line was said, so a failure that repeats is a rate here; a network with no rounds is not a failure. Reports `0` from process start. A round past its deadline is never listed as open or voted on while the job fails; it is only recorded and pruned late |

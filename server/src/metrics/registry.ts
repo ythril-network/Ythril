@@ -289,6 +289,8 @@ export async function withCollectBudget(
       overBudget(collector, abandon);
       return;
     }
+    // Not `settledWithin` (`util/time-bound.ts`): a scrape's budget is unref'd on purpose, so a stuck collector never holds the process open,
+    // and that wait holds the loop like any wait its caller is awaiting.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const expiry = new Promise<typeof EXPIRED>(resolve => {
       timer = setTimeout(() => resolve(EXPIRED), remaining);

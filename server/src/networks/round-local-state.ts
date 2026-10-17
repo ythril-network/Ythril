@@ -24,8 +24,8 @@
  */
 import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
-import { roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
-import { networkRole } from './network-role.js';
+import { isSpaceActRound, roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
+import { publishesOn } from './network-role.js';
 import { hasRoundShape, canonicalRoundWipeTypes } from './round-shape.js';
 import { DEFAULT_STAMP_SKEW_WARN_MINUTES } from '../brain/stamp-skew.js';
 
@@ -82,8 +82,7 @@ export function adoptionRefusal(net: NetworkConfig, peerRound: VoteRound, now: n
   if ((net.roundOutcomes ?? []).some(e => e.roundId === peerRound.roundId)) return 'already recorded here';
   // D-40: on pub/sub a subscriber's deletion or wipe is its own local act. A publisher holds no round it did not open of those two
   // types — every other instance there is a subscriber — decided from this instance's role, never from a field a relayer could set.
-  if ((peerRound.type === 'space_deletion' || peerRound.type === 'space_wipe') && net.type === 'pubsub'
-    && networkRole(net).role === 'publisher') return 'proposed by a subscriber';
+  if (isSpaceActRound(peerRound.type) && publishesOn(net)) return 'proposed by a subscriber';
   return null;
 }
 
@@ -111,7 +110,7 @@ export function roundForPeer<T extends Partial<Record<LocalField, unknown>> & { 
   const copy = withoutLocalState(round) as Omit<T, LocalField> & { pendingMeta?: SpaceMeta; concluded?: boolean };
   // A deletion or wipe is served concluded only once its act has completed here (design v5 §3.1): a peer lifts its hold on the
   // word of a member that has APPLIED, never one that has only decided. Read from the local fields before they were stripped.
-  if (round.type === 'space_deletion' || round.type === 'space_wipe') {
+  if (isSpaceActRound(round.type)) {
     copy.concluded = round.concluded === true && round.appliedHere === true;
   }
   if (copy.pendingMeta) copy.pendingMeta = inlineResolvableRefs(copy.pendingMeta);

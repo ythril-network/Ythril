@@ -499,20 +499,15 @@ export const LEGACY_SPILL_SWEEP_OPERATION = 'file.legacy_spill.sweep';
 export const SPACE_ALIAS_HEAL_OPERATION = 'network.space_alias.heal';
 
 /**
- * A vote round the expiry job concluded because its deadline passed with nobody touching it (`networks/round-expiry.ts`): one
- * entry per round, its path naming the network and the round. No request asked for it, and the network's own outcome log is
- * bounded, so this is the record a flood of rounds cannot evict. Written directly, like the heal above.
- */
-export const ROUND_EXPIRED_OPERATION = 'network.round.expired';
-
-/**
  * What a concluded round did here with no request of this instance's operator behind it (bundle-106, VR7, X17): an addition a later
- * deletion retired, a deletion or wipe completed with nobody waiting for it, a member admitted by a relay, gossip or the tick. Declared
- * where they are written (`networks/round-audit.ts`, which the space-act runner imports and this module may not be) and re-exported
- * here, so the table gate reads them with the rest. The space-act runner's own completion of an act with no round is the fourth.
+ * deletion retired, a deletion or wipe completed with nobody waiting for it, a member admitted by a relay, gossip or the tick, and a
+ * vote round the expiry job concluded because its deadline passed with nobody touching it (the record a flood of rounds cannot evict from
+ * the network's bounded outcome log). Declared where they are written (`networks/round-audit.ts`, which the space-act runner imports and
+ * this module may not be) and re-exported here, so the table gate reads them with the rest. The space-act runner's own completion of an
+ * act with no round is the fifth.
  */
 export {
-  ROUND_ADDITION_RETIRED_OPERATION, ROUND_SPACE_ACT_OPERATION, ROUND_MEMBER_ADMITTED_OPERATION, SPACE_ACT_COMPLETED_OPERATION,
+  ROUND_ADDITION_RETIRED_OPERATION, ROUND_SPACE_ACT_OPERATION, ROUND_MEMBER_ADMITTED_OPERATION, ROUND_EXPIRED_OPERATION, SPACE_ACT_COMPLETED_OPERATION,
 } from '../networks/round-audit.js';
 
 /**

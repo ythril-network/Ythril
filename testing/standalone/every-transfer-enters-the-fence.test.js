@@ -37,6 +37,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
 import { parseSource, walkEveryNode, outermostFunctionOf, lineOf, routeBlocksOf, ts } from '../_shared/syntax-tree.mjs';
 
 const FENCE = 'server/src/sync/space-transfer-fence.ts';
@@ -93,6 +94,18 @@ const TURNLESS_CALLS = [
 /** The push doors alone, at a638e702: `pushAllowed` callers (docs.ts: five, tombstones.ts: two). */
 const FLOOR = 7;
 const DOOR_ASKS = ['refusePeerSpace', 'pushAllowed', 'refuseHeldPeer'];
+/** What enters the fence: the admission itself, and the peer admission (`sync/peer-space-admission.ts`) that wraps it for every door. */
+const ENTERING = ['enterSpaceTransfer', 'admitPeer'];
+/**
+ * Functions that enter and do NOT release themselves, because the transfer (or its release) is their RESULT. Each row names why, and the test
+ * holds every call of it to a function that releases in a finally, or to another row whose own callers do — so a hander whose caller drops the
+ * release is found at the call, not by a list of callers.
+ */
+const HANDS_ON = [
+  { fn: 'admitPeer', why: 'returns the transfer it admitted, because the medium decides what a close is: a response binds it to its close, a tool call to its own end' },
+  { fn: 'admitPeerToolCall', why: 'returns the release of a tool call\'s transfer, which the dispatcher keeps and calls from a finally however the call ends' },
+  { fn: 'dispatchTool', why: 'pushes the release of every transfer its call was admitted with onto a list the wrapping callTool releases in a finally' },
+];
 const text = (f) => readFileSync(`${REPO_ROOT}/${f}`, 'utf8');
 const callsNamed = (sf, name) => { const out = []; walkEveryNode(sf, (n) => { if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name) out.push(n); }); return out; };
 
@@ -170,7 +183,7 @@ describe('the outbound turn is cancellable', () => {
     const blind = loops.filter(l => !/\bmayContinue\(/.test(l.body)).map(l => `${l.file}:${l.line}`);
     assert.deepEqual(blind, [], `these loops move units from a peer and never ask transfer.mayContinue(): an act registered meanwhile waits for the whole turn:\n  ${blind.join('\n  ')}`);
     for (const file of TRANSFER_MODULES) {
-      assert.match(text(file).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''), /\bsignal\b/,
+      assert.match(stripComments(text(file)), /\bsignal\b/,
         `${file} never mentions the transfer's signal: the unit in flight cannot be cut when an act registers`);
     }
   });
@@ -195,7 +208,7 @@ describe('every inbound peer door enters the fence and leaves it on every path',
   /** Module-level helpers (by name) across the api and auth trees, with their text: what a door's one call level may enter through. */
   function helperBodies() {
     const map = new Map();
-    for (const file of [...apiFiles(), 'server/src/sync/space-exchange.ts'].filter(f => existsSync(`${REPO_ROOT}/${f}`))) {
+    for (const file of [...apiFiles(), 'server/src/sync/space-exchange.ts', 'server/src/sync/peer-space-admission.ts'].filter(f => existsSync(`${REPO_ROOT}/${f}`))) {
       const sf = parseSource(file, text(file));
       walkEveryNode(sf, (n) => { if (ts.isFunctionDeclaration(n) && n.name) map.set(n.name.text, `${map.get(n.name.text) ?? ''}\n${n.getText(sf)}`); });
     }
@@ -213,6 +226,9 @@ describe('every inbound peer door enters the fence and leaves it on every path',
 
   it('each door reaches enterSpaceTransfer, in its block or in the helper it asks', () => {
     const helpers = helperBodies();
+    /** Does `body` enter the fence itself, or call a helper that does, as far as the admission's own depth (a door, its helper, the admission, the entry)? */
+    const reachesFence = (body, depth = 4) => /\benterSpaceTransfer\(/.test(body)
+      || (depth > 0 && [...helpers].some(([name, helperText]) => new RegExp(`\\b${name}\\s*\\(`).test(body) && reachesFence(helperText, depth - 1)));
     const asked = new Set(DOOR_ASKS);
     const missing = [];
     for (const file of apiFiles()) {
@@ -221,7 +237,7 @@ describe('every inbound peer door enters the fence and leaves it on every path',
         const block = b.node.getText(sf);
         const asks = DOOR_ASKS.filter(a => new RegExp(`\\b${a}\\(`).test(block));
         if (asks.length === 0) continue;
-        const enters = /\benterSpaceTransfer\(/.test(block) || asks.some(a => /\benterSpaceTransfer\(/.test(helpers.get(a) ?? ''));
+        const enters = reachesFence(block) || asks.some(a => reachesFence(helpers.get(a) ?? ''));
         if (!enters) missing.push(`${file}:${b.line} ${b.route}`);
       }
     }
@@ -229,17 +245,24 @@ describe('every inbound peer door enters the fence and leaves it on every path',
     assert.deepEqual(missing, [], `these inbound peer doors never enter the fence, so a wipe's drain cannot see their transfer:\n  ${missing.join('\n  ')}`);
   });
 
-  it('every function that enters releases in a finally AND on the response close', () => {
+  it('every function that enters releases in a finally AND on the response close, or hands the transfer on to one that does', () => {
     const offenders = [];
     let enterers = 0;
-    for (const file of trackedSources(['server/src'], { untracked: true, floor: 100 }).filter(f => f !== FENCE)) {
-      const sf = parseSource(file, text(file));
-      for (const call of callsNamed(sf, 'enterSpaceTransfer')) {
+    const sources = trackedSources(['server/src'], { untracked: true, floor: 100 }).filter(f => f !== FENCE);
+    const parsedSources = sources.map(file => ({ file, sf: parseSource(file, text(file)) }));
+    const releasesInFinally = (fn, sf) => { let found = false; walkEveryNode(fn ?? sf, (n) => { if (ts.isTryStatement(n) && n.finallyBlock && /\brelease\(/.test(n.finallyBlock.getText(sf))) found = true; }); return found; };
+    /** The call sites of a function by name: the outermost function each is written in, and the file. */
+    const callSitesOf = (name) => parsedSources.flatMap(({ file, sf }) => callsNamed(sf, name).map(call => ({ file, sf, call, fn: outermostFunctionOf(call) })));
+    const handers = new Map(HANDS_ON.map(h => [h.fn, h]));
+
+    for (const { file, sf } of parsedSources) {
+      for (const call of ENTERING.flatMap(name => callsNamed(sf, name))) {
         enterers++;
         const fn = outermostFunctionOf(call);
         const body = fn ? fn.getText(sf) : '';
-        let inFinally = false;
-        walkEveryNode(fn ?? sf, (n) => { if (ts.isTryStatement(n) && n.finallyBlock && /\brelease\(/.test(n.finallyBlock.getText(sf))) inFinally = true; });
+        const name = fn && 'name' in fn && fn.name ? fn.name.text : '';
+        if (handers.has(name)) continue; // judged below, by who holds its release
+        const inFinally = releasesInFinally(fn, sf);
         // Inbound doors answer a response, so a client that drops mid-request must release too; the outbound turn has no response.
         const inbound = /\bres\b/.test(body) && /\breq\b/.test(body);
         const onClose = !inbound || /\.(?:once|on)\(\s*['"]close['"]/.test(body);
@@ -247,6 +270,26 @@ describe('every inbound peer door enters the fence and leaves it on every path',
       }
     }
     assert.ok(enterers >= 1, 'no module outside the fence calls enterSpaceTransfer(: nothing is counted');
+
+    // A function that hands the transfer (or its release) on is only as good as its callers: each call of it sits in a function that releases in a
+    // finally, or in another listed hander whose own callers do.
+    const holdsRelease = (name, seen = new Set()) => {
+      if (seen.has(name)) return [];
+      seen.add(name);
+      const bad = [];
+      const sites = callSitesOf(name);
+      if (sites.length === 0) bad.push(`${name} is handed a transfer and nothing calls it`);
+      for (const { file, sf, call, fn } of sites) {
+        const caller = fn && 'name' in fn && fn.name ? fn.name.text : '';
+        if (handers.has(caller)) bad.push(...holdsRelease(caller, seen));
+        else if (!releasesInFinally(fn, sf)) bad.push(`${file}:${lineOf(sf, call)} calls ${name} and releases in no finally`);
+      }
+      return bad;
+    };
+    for (const h of HANDS_ON) {
+      assert.ok(h.why.split(/\s+/).length >= 6, `${h.fn}: the reason is not a reason`);
+      offenders.push(...holdsRelease(h.fn));
+    }
     assert.deepEqual(offenders, [], `a transfer that does not release on every path leaks a count that blocks every later act's drain:\n  ${offenders.join('\n  ')}`);
   });
 

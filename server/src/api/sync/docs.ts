@@ -8,6 +8,7 @@
 import { Router, type Request, type Response } from 'express';
 import { col, asFilter } from '../../db/mongo.js';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
+import { peerBoundTo } from '../../auth/peer-bound.js';
 import { getAllowedChronoTypes } from '../../spaces/schema-validation.js';
 import { getConfig } from '../../config/loader.js';
 import { listTombstones } from '../../brain/tombstones.js';
@@ -19,7 +20,7 @@ import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../co
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { parseLimit } from '../../util/pagination.js';
-import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, BAD_SYNC_START, callerPeerId, refusePeerSpace, refusePeerWrite, pushAllowed, withSchemaViolations } from './_shared.js';
+import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, BAD_SYNC_START, refusePeerSpace, refusePeerWrite, pushAllowed, withSchemaViolations } from './_shared.js';
 import { boundedRows } from '../../brain/write-validation.js';
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
@@ -231,7 +232,7 @@ syncDocsRouter.get('/filemeta/:id', syncRateLimit, requireAuth, oneById<FileMeta
 type PushKey = PayloadKey;
 
 /** The peer identity the request's token proves, or undefined (an admin or local token). */
-const pusherOf = (req: Request): string | undefined => callerPeerId(req.authToken as Record<string, unknown>);
+const pusherOf = (req: Request): string | undefined => peerBoundTo(req.authToken);
 const peerOf = (req: Request): string => pusherOf(req) ?? 'unknown';
 const forkCapError = (id: string) => ({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${peerText(id)}'` });
 /**

@@ -25,9 +25,24 @@ export const ROUND_SPACE_ACT_OPERATION = 'network.round.space_act';
 export const ROUND_MEMBER_ADMITTED_OPERATION = 'network.round.member_admitted';
 /** A space act with no round (solo, a subscriber's own) that completed after its door answered, or with no door at all (X17). */
 export const SPACE_ACT_COMPLETED_OPERATION = 'space.act_completed';
+/** A vote round the expiry job concluded because its deadline passed with nobody touching it: one entry per round. */
+export const ROUND_EXPIRED_OPERATION = 'network.round.expired';
 
 export type RoundEffectOperation =
-  | typeof ROUND_ADDITION_RETIRED_OPERATION | typeof ROUND_SPACE_ACT_OPERATION | typeof ROUND_MEMBER_ADMITTED_OPERATION;
+  | typeof ROUND_ADDITION_RETIRED_OPERATION | typeof ROUND_SPACE_ACT_OPERATION | typeof ROUND_MEMBER_ADMITTED_OPERATION
+  | typeof ROUND_EXPIRED_OPERATION;
+
+/**
+ * The path prefix of each operation's entry, which names the network and the round after it. The expiry's is the one the integration guide
+ * documents (`internal:round-expiry:<network>:<round>`), so an integrator filtering the log by it keeps working; the others share
+ * `internal:round`. The operation decides it, so no caller picks a path.
+ */
+const PATH_PREFIX: Readonly<Record<RoundEffectOperation, string>> = {
+  [ROUND_ADDITION_RETIRED_OPERATION]: 'internal:round',
+  [ROUND_SPACE_ACT_OPERATION]: 'internal:round',
+  [ROUND_MEMBER_ADMITTED_OPERATION]: 'internal:round',
+  [ROUND_EXPIRED_OPERATION]: 'internal:round-expiry',
+};
 
 const saidOnce = warnOnce<string>({ max: 10, every: 10 * 60_000 });
 
@@ -41,7 +56,7 @@ export function auditRoundEffect(
   try {
     logInternalAudit({
       method: 'SYNC',
-      path: `internal:round:${String(networkId).slice(0, 80)}:${String(roundId).slice(0, 80)}`,
+      path: `${PATH_PREFIX[operation]}:${String(networkId).slice(0, 80)}:${String(roundId).slice(0, 80)}`,
       operation,
       ...(spaceId ? { spaceId } : {}),
     });

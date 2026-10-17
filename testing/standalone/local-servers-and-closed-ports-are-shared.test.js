@@ -30,6 +30,7 @@ import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { privateHostAddress, privateAddressSkipReason } from './_private-address.mjs';
 
 const SERVER_MODULE = 'testing/_shared/local-server.mjs';
 const PORT_MODULE = 'testing/_shared/closed-port.mjs';
@@ -84,6 +85,36 @@ describe('listenOnLoopback', () => {
       const got = await new Promise((r) => { const c = net.connect(local.port, '127.0.0.1'); let t = ''; c.on('data', (d) => { t += d; }); c.on('close', () => r(t)); });
       assert.equal(got, 'pong');
     } finally { await local.close(); }
+  });
+});
+
+describe('listenOnPrivateAddress', () => {
+  it('refuses a host that is not a private address: loopback and the wildcard are what the SSRF guards block or what is not an address to fetch', async () => {
+    const { listenOnPrivateAddress } = await load(SERVER_MODULE);
+    for (const host of ['127.0.0.1', '0.0.0.0', '', undefined]) {
+      assert.throws(() => listenOnPrivateAddress(http.createServer(), host), /private address/, `host ${JSON.stringify(host)} was accepted`);
+    }
+  });
+
+  it('answers on the private address, and close() ends while a client still holds a connection', { skip: privateAddressSkipReason() }, async () => {
+    const { listenOnPrivateAddress } = await load(SERVER_MODULE);
+    const host = privateHostAddress();
+    const local = await listenOnPrivateAddress(http.createServer((req, res) => res.end('hello')), host);
+    try {
+      assert.equal(local.url, `http://${host}:${local.port}`);
+      assert.equal(await (await fetch(local.url)).text(), 'hello');
+    } finally { await local.close(); }
+    const stuck = await listenOnPrivateAddress(http.createServer(() => { /* never answers */ }), host);
+    const held = net.connect(stuck.port, host);
+    held.on('error', () => {});
+    await new Promise((r) => held.once('connect', r));
+    held.write('GET / HTTP/1.1\r\nHost: x\r\n\r\n');
+    const closedByServer = new Promise((r) => held.once('close', r));
+    await Promise.race([
+      stuck.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('close() waited for a socket that was still open')), 3000).unref()),
+    ]);
+    await Promise.race([closedByServer, new Promise((_, reject) => setTimeout(() => reject(new Error('the held connection was left open')), 3000).unref())]);
   });
 });
 

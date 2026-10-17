@@ -24,7 +24,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOfEndingWith, statementFrom } from './_structural-window.mjs';
+import { bodyOf, bodyOfEndingWith, statementFrom } from './_structural-window.mjs';
 import { maskStrings } from './_brain-write-pairs.mjs';
 
 const JUDGE = 'answerUnknownWriteFields';
@@ -68,7 +68,12 @@ describe('the instrument: a bare return after the judge is found', () => {
 
 describe('callTool answers every outcome of a judged call through withUnknownFieldRows', () => {
   const src = stripComments(readFileSync('server/src/mcp/call-tool.ts', 'utf8'));
-  const fn = bodyOfEndingWith(src, 'callTool', 'status: 400, callSpace', 'the callTool function');
+  // `callTool` is the wrapper that releases a peer's admission in a `finally`; the judge and every exit after it are in the body it hands the call to.
+  const fn = bodyOfEndingWith(src, 'dispatchTool', 'status: 400, callSpace', 'the callTool dispatch');
+
+  it('callTool answers what the dispatch answers, unchanged, so the exits judged below are the exits of the call', () => {
+    assert.match(bodyOf(src, 'callTool', 'callTool'), /return\s+await\s+dispatchTool\(/, 'callTool no longer returns the dispatch\'s answer as it is');
+  });
 
   it('callTool calls the judge, and routes at least one exit through the wrapper (a floor: no judge means nothing to check)', () => {
     const r = bypasses(fn);
