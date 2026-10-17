@@ -6,7 +6,7 @@
 
 Base path: `/api/files`
 
-> **Proxy spaces:** Read operations (GET) search across all member spaces. Write operations (POST, DELETE, PATCH, mkdir) require `?targetSpace=<member>` in the query string.
+> **Proxy spaces:** Read operations (GET) search across all member spaces. Write operations (POST, DELETE, PATCH, mkdir) require `?targetSpace=<member>` in the query string, a member the token can write (see [Spaces API](06-spaces-api.md)).
 
 ### Upload a File (raw bytes)
 

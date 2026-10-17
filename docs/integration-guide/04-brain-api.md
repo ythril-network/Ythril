@@ -6,7 +6,7 @@
 
 Base path: `/api/brain`
 
-> **Proxy spaces:** Read operations aggregate across all member spaces. Write operations require `?targetSpace=<member>` in the query string.
+> **Proxy spaces:** Read operations aggregate across all member spaces. Write operations require `?targetSpace=<member>` in the query string, a member the token can write (see [Spaces API](06-spaces-api.md)).
 
 ### Route prefix
 

@@ -178,7 +178,7 @@ POST /api/spaces
   one is read as a real space — the key is removed on load and on reload, with a warning naming the space — so it
   is embedded, scanned, pruned and, when deleted, dropped like any other real space.
 - Creating the proxy is admin-gated (like any space creation); the create call validates only that each member exists and is not itself a proxy — it does **not** separately check the caller's space allowlist. (Per-space access is enforced at read/write time on the proxy's member spaces.)
-- The single-element wildcard `"proxyFor": ["*"]` creates an **all-spaces** proxy: it aggregates over every real space the caller can access (resolved dynamically), skipping per-member validation. The wildcard cannot be mixed with explicit member IDs.
+- The single-element wildcard `"proxyFor": ["*"]` creates an **all-spaces** proxy: it reads across every real space the token reaches and writes into one it can write (resolved per call), skipping per-member validation. The wildcard cannot be mixed with explicit member IDs.
 
 **Read operations** (GET facts, entities, edges, files, recall, query) aggregate results across all member spaces transparently.
 
@@ -192,9 +192,12 @@ POST /api/brain/spaces/all-research/facts?targetSpace=bio-research
 { "fact": "CRISPR efficiency improved by 40% with new guide RNA design." }
 ```
 
-The `targetSpace` must be one of the proxy's `proxyFor` members. Omitting it on a write returns `400`.
+The `targetSpace` must be a member of the proxy (any real space for `["*"]`) that the token reaches. A member the
+token does not reach answers exactly as a space that does not exist (`400`, `Target space '<id>' not found`); one it
+reaches without the write rung answers `403`. Omitting it answers `400` and lists only the members the token reaches.
+Deleting an edge or a link through a proxy finds it only in members the token reaches.
 
-**MCP**: When connected via MCP to a proxy space, read tools (`recall`, `query`, `read_file`, `list_dir`) aggregate automatically. Write tools (`save_fact`, `save_entity`, `write_file`, etc.) accept an optional `targetSpace` argument — required when the MCP endpoint is a proxy space.
+**MCP**: When connected via MCP to a proxy space, read tools (`recall`, `query`, `read_file`, `list_dir`) aggregate automatically. Write tools (`save_fact`, `save_entity`, `write_file`, etc.) accept an optional `targetSpace` argument — required when the MCP endpoint is a proxy space, with the same rule and answers as REST.
 
 ---
 

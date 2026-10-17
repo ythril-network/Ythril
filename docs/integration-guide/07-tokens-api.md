@@ -102,6 +102,9 @@ would understate what you hold.
 
 `none` reaches nothing, and no route is ever listed with `needs: "none"`.
 
+**Through a proxy space** a token reads the members it reaches and writes only into a member where it holds the
+rung the write needs; a member it does not reach is answered as one that does not exist.
+
 #### `implications` — a rung one area gives another
 
 One area's rung can entail a rung in another, **in the same space**. Today there is exactly one rule: a token
