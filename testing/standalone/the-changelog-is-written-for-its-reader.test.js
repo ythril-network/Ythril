@@ -63,7 +63,11 @@ const MAX_OPENING_CHARS = 300;
 const SECTION_MAX_LINES = 250;
 /** A `**Subject:**` lead names a product area; longer than this, it is a sentence in bold. */
 const SUBJECT_MAX_CHARS = 39;
-const FILE_MAX_BYTES = 134000;
+/**
+ * Raised once, from 134 000, by the owner on 2026-10-17 ("B": raise the cap), for the last 5.x lines; the next release
+ * is 6.0, whose cut archives every 5.x section (the-changelog-holds-one-major) and brings this ceiling back down.
+ */
+const FILE_MAX_BYTES = 140000;
 
 /** The table a release's breaking changes go in. */
 const TABLE_HEADER = '| Changes on upgrade | Action |';
@@ -91,6 +95,24 @@ const NARRATION = [
   [/\bfleet integrator\b/i, 'the fleet integrator'],
   [/\*Docs changed:?\*/i, 'a list of the docs files we touched'],
 ];
+
+/**
+ * Why a change was made. Owner, 2026-10-17: "concise and bloatless and has no explanations of why". The entry says what
+ * changed and what the reader does about it; the reason lives in the commit. Held over `[Unreleased]` and every release
+ * from 6.0 on: the released 5.x sections stay as shipped and are archived at the 6.0 cut.
+ */
+const WHY = [
+  [/\bbecause\b/i, 'because'],
+  [/\bso that\b/i, 'so that'],
+  [/\bin order to\b/i, 'in order to'],
+  [/\b(?:the|a) reason\b/i, 'the reason'],
+  [/\b(?:which|that|this) is why\b/i, 'which is why'],
+  [/\bsince (?:it|they|the|a|an|this|that|there)\b/i, 'since …'],
+  [/,\s+so\s+(?!far\b)/i, ', so …'],
+];
+
+/** A section the why-rule holds: the unreleased one, and every release of major 6 or later. */
+const holdsWhyRule = (name) => name === '[Unreleased]' || Number(/^\[(\d+)\./.exec(name)?.[1] ?? 0) >= 6;
 
 /** Strip inline code, so an id-shaped word that is a literal (a config key, a regex in a refusal) is not flagged. */
 const withoutCode = (s) => s.replace(/`[^`]*`/g, '``');
@@ -205,6 +227,24 @@ describe('the changelog is written for its reader', () => {
     }
     assertNone(offenders, 'lines narrate provenance instead of the change.',
       'The reader needs the behaviour and what to do about it, not the story of how it reached us.');
+  });
+
+  it('no entry explains why the change was made', () => {
+    const offenders = [];
+    let looked = 0;
+    for (const s of sections.filter(x => holdsWhyRule(x.name))) {
+      for (const e of entriesOf(s)) {
+        looked++;
+        const t = withoutCode(e.text);
+        for (const [re, label] of WHY) {
+          const m = re.exec(t);
+          if (m) offenders.push({ section: s.name, n: e.n, why: `${label}: ${e.text.slice(0, 70)}…` });
+        }
+      }
+    }
+    assert.ok(looked > 0, 'no entry found in [Unreleased]; the why-rule examined nothing');
+    assertNone(offenders, 'entries explain why.',
+      'Say what changed and what the reader does about it. The reason goes in the commit.');
   });
 
   it('every heading is one of the six kinds, once per section', () => {

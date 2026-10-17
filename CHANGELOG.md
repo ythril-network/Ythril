@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A path a regular file blocks (move, `mkdir`, upload, `write_file`; a directory into itself) is `409` `path_blocked`, was REST `500`, MCP `400` | Branch on `code` |
 | A move onto a file, folder or file record is `409` `destination_exists` and changes nothing, was a `200` replace (upload, restore and `keep-incoming` still replace) | Delete the destination first (deleted on every replica) |
 | `keep-both` (`rename`) and `save-to-space` onto a file, folder or record are `409` `destination_exists`, were a `200` replace; `save-to-space` needs `files: write` there | Choose another name or space |
-| A directory delete needs `confirm: true` (`422` `confirm_required`; space root `400`), on MCP too, so a `files: write` token can delete a tree | Send `confirm`; review `files: write` tokens |
+| A directory delete needs `confirm: true` (`422` `confirm_required`; space root `400`), on MCP too; a `files: write` token can delete a tree | Send `confirm`; review `files: write` tokens |
 | A directory delete fires one `file.deleted` per file it removed (it fired none) | Deduplicate on `X-Ythril-Delivery` |
 | A delete the storage refuses is `500` `file_system_fault` (an unreadable path was `404`); REST's other delete failure is `500` `Failed to delete`, was `… file` / `… directory` | Update body matchers |
 | A partly finished move is `503` `move_still_owed` with `Retry-After`; an act whose deletion cannot be recorded is `500` `act_not_recorded` | Retry (a `404` can mean it finished); repeat a move an older version stranded |
@@ -33,8 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A bulk fact or chrono item carrying the `id` of an existing record counts in `updated`, not `inserted` (new records only); `bulk.write` fires for a batch that only converged | Read `updated` as well as `inserted` |
 | A pushed fact over 50 000 characters is refused on the sync door, and `batch-upsert` allows a fact at most 10 forks | Older peers pushing these are refused; upgrade both ends |
 | A pulled page is validated and decided as a push is, and a sender pushes targets first (facts, entities, chrono, file metadata, edges, links) | Upgrade both ends: an older sender may trigger link violations an older receiver does not record |
-| A record arriving by push, pull or import without an expiry takes this space's retention window from its own creation time, so an older one is due at once and the sweep deletes it | Check the retention windows before syncing old data |
-| The Merkle root no longer hashes `spaceId`, instance-local files (conversion sidecars too) or soft-deleted file rows, so equal data matches | Mixed-version `merkle: true` networks log `MERKLE_DIVERGENCE` until all upgrade |
+| A record arriving by push, pull or import without an expiry takes this space's retention window from its own creation time; an older one is due at once and the sweep deletes it | Check the retention windows before syncing old data |
+| The Merkle root no longer hashes `spaceId`, instance-local files (conversion sidecars too) or soft-deleted file rows; equal data now matches | Mixed-version `merkle: true` networks log `MERKLE_DIVERGENCE` until all upgrade |
 | A file a peer pushes or this instance pulls fires no `file.created` webhook and no live-view event (a push did, with the peer's token) | List files instead of waiting for `file.created` |
 | Converted and extracted files (`_converted/`, `_extracted/`) no longer travel; each instance converts by its own settings, an offer answers `200 {"ignored":"instance-local"}` | Peers' sidecars are retired on upgrade |
 | A document or media file a peer pushes or this instance pulls is converted by this instance's pipeline, external assist included where consented | Expect conversion load and consented external-model traffic |
@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A file row whose `updatedAt` is not an ISO instant under 40 characters is refused on the sync doors (`400` on push) | Send ISO timestamps |
 | `ythril_reindex_in_progress` is the number of spaces with a run going, was 0 or 1; a second reindex of a space with a run going answers `409` | Change an alert `== 1` to `> 0` |
 | `POST /api/brain/similar` answers in the `similar` tool's shape: hits `{score, spaceId, type, record}`, `source` `{type, id, summary}`; `topK` above 100 is `400` | Read `hit.record.<field>` and `source.id` |
-| `recall` or `similar` without `space` (or `similar` with `crossSpace: true`) search only spaces where the token holds the tool's area, so a `files: read` token no longer ranks records | Grant the area on the spaces to search |
+| `recall` or `similar` without `space` (or `similar` with `crossSpace: true`) search only spaces where the token holds the tool's area; a `files: read` token no longer ranks records | Grant the area on the spaces to search |
 | `POST /api/brain/spaces/:spaceId/traverse` answers `400` for what it clamped (`maxDepth` outside 1-10, `limit` outside 1-1000, a bad `direction`, `edgeLabels` or blank `startId`); a bulk array over 500 items is `400` (was `207`) | Send values in range |
 | `400` past: `tags`, `deleteFields`, `edgeLabels`, `folders` 100; `linkEntities`/`linkFacts`/`linkChronos`, id lists (`spaces`, `proxyFor`, `ids`) 1 000; inline `edges` 500; bulk-resolve `ids` 2 000; notify `data` 8 KiB; `types`/`kinds`/`events` beyond their set | Stay within them (REST and MCP) |
 | An `ingest` conversation over 1 000 sessions or 20 000 turns, an upload whose JSON `tags` is not an array, `network_sync_history` `limit` outside 1-100 and an embed-queue `limit` over 200 answer `400` | Send values in range |
@@ -62,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | File tombstones carry `issuer` and `rowSeq`, apply only under the deletion rule and only to the version they name; `POST /api/sync/file-tombstones` takes pages and answers `{ applied, refused?, declined? }` | Send pages; read `declined` |
 | `GET /api/sync/file-tombstones` takes `cursor` and answers `nextCursor`; without `cursor` it answers as before, cut at its fixed ceiling | Page with `cursor` to read past the ceiling |
 | `POST /api/sync/tombstones` answers `declined`; a peer's upload of a file this instance deleted answers `200 { tombstoned: true }`; batch `filemeta` gains `tombstoned` | Read a missing counter as zero |
-| A rollback leaves `deliveredBy` on stored records: an older build hashes and serves it, so a `merkle: true` network logs divergences and an older peer refuses those file records | Expect the warnings until the upgrade is redone |
+| A rollback leaves `deliveredBy` on stored records: an older build hashes and serves it; a `merkle: true` network logs divergences and an older peer refuses those file records | Expect the warnings until the upgrade is redone |
 | A refused inline `edges` entry stores nothing (a bulk item with one: refused whole), answering `schema_violation`: REST `400` on create, `422` on update (was `500`); MCP a structured `422` (was `400`); `strictLinkage` refuses a missing far end of any kind | Branch on `schema_violation` |
 | `POST .../edges`, `save_edge` and a bulk top-level edge refuse a missing end as `schema_violation` (REST `400`, MCP structured `422`; was `{ "error" }` / plain `400`) | Match on `schema_violation` |
 | A write that stored its record and failed on its connections answers that cause's status with `retryable: false`, no `Retry-After` and `written: { kind, id, edges }` (was a retryable `503`); a bulk row carries `written` | Send the missing edges to `written.id` |
@@ -81,10 +81,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Under Refuse, an option a route does not read (`ttlDays` on a link) or a server-written key sent back gets `400` | Send only what you change |
 | A refused brain write names its unknown fields in `warnings`, without values; so does a stored record whose connections failed | Read `warnings` on a refusal |
 | A non-string `targetSpace` answers `400` `targetSpace must be a string` on every write door; a merge into a proxy space is refused before a malformed path id | Send one space id |
-| Chrono `PATCH {superseded: true}` is accepted (was `400`); an empty PATCH names the accepted fields; a link field a record cannot hold (`linkFiles` anywhere) is an unknown field, so Warn stores without it (a bulk item's was refused) | Read `warnings` |
+| Chrono `PATCH {superseded: true}` is accepted (was `400`); an empty PATCH names the accepted fields; a link field a record cannot hold (`linkFiles` anywhere) is an unknown field: Warn stores without it (a bulk item's was refused) | Read `warnings` |
 | `bulk.write` `errorCount` counts unknown-field warning rows | Do not alarm on `errorCount` alone |
 | Sync votes, members and change-notes answer `403` to a user token, an unlisted or other-network peer, or for a network not held (was `404`) | Read votes at `/api/networks/:id/votes` |
 | Add-space's `202` carries `round` as the vote list shows it (no `pendingMeta`); other opening doors gain `round` | Read proposals on the space |
+| `DELETE /api/spaces/:id` and the admin wipe answer `200` (was `202`) when this instance's own yes passes the round and the change ran | Branch on `status`, not `202` |
+| `202` `status: "passed"`, `queued: true` while the change runs; `500` `space_act_failed` (`503` for a store outage) if it failed in the call | Do not retry a passed `500` or `503` |
+| A networked `DELETE /api/spaces/:id`, and the admin wipe on any space, need `{ "confirm": true }`; without it the answer is `400` | Send `confirm` |
+| Writes into a space being deleted, wiped or renamed answer `409` (`space_being_deleted`, `space_being_wiped`, `space_being_renamed`) | Retry once the change completes |
+| After a networked wipe, a member re-reads that space from its members once | Expect one full re-read per member pair |
 
 ### Added
 
@@ -107,7 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database:** Boot logs one INFO line, `MongoDB client options: …`, a changed string takes a restart. An operation in flight when the database stops answering ends with the retryable `503` (`0` means no bound; `loadBalanced`: selection only).
 - **Database:** The first connection retries more kinds of "not up yet"; bad credentials fail at once.
 - **Database:** A search service (`mongot`) that starts after the app is picked up by a background retry (5 s backing off to 5 min); a waiting space stays `building` and `GET /api/spaces` adds `indexWaiting` and `indexWaitingSince`.
-- **Database:** `indexStatus: "failed"` now means only a build that failed or timed out, so an alert keyed on it for a late service stops firing; `INDEX_READY_TIMEOUT_MS` starts when indexes are confirmed. `GET /ready` shares one probe.
+- **Database:** `indexStatus: "failed"` now means only a build that failed or timed out; an alert keyed on it stops firing for a late service. `INDEX_READY_TIMEOUT_MS` starts when indexes are confirmed. `GET /ready` shares one probe.
 - **Database:** A collection's vector index exists only while it holds a record: dropped `SEARCH_INDEX_DROP_DELAY_MS` (default `60000`) after its last is deleted, and at boot for empty ones; it answers search empty (`empty: true` in `pipeline-status`).
 - **Server:** `space.reload_added` is written after initialisation with its real status. A refused manual reload moves `ythril_config_reload_failed_total` and holds `ythril_config_reload_pending`; a reload that succeeds clears the gauge.
 - **Server:** A `links:convert` failure prints `<id>: FAILED (<reason>) | not converted, not marked | file seqs NOT stamped`; the boot summary *"Link conversion FAILED for N space(s)…"* names hung, not-reached and skipped spaces.
@@ -119,14 +124,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Records:** A merge relinks a hub in one transaction of a few bulk writes. An entity delete with `cascadeToken` removes edges 500 at a time, one transaction per chunk with its tombstones, one `edge.deleted` webhook per edge after its chunk commits.
 - **Records:** A bulk write reads a batch once and writes one block per kind; items still see earlier items. An item depending on an unwritten one names that refusal, a `$ref` key used twice refuses the batch.
 - **Records:** A converge that loses a race is decided again against the record as it now is; losing twice is `409` on a create door and an item error in a batch. `save_bulk` declares the `id` of fact and chrono items.
-- **Sync:** A tombstone of a type the receiver does not know still answers `400`, so the sender re-sends after it upgrades.
-- **Sync:** A fork's id derives from the parent's id, seq and text, so a re-sent push upserts it; an older receiver accepts an eleventh. Documents past the 500-per-family cap and records the store refuses count in `rejected`.
-- **Sync:** A link under another id for linked endpoints is `skipped`. A space's Merkle root is not re-read when nothing changed, so `GET /api/sync/merkle` and `merkle: true` cycles are far cheaper; root date: `computedAt`.
+- **Sync:** A tombstone of a type the receiver does not know still answers `400`; the sender re-sends after it upgrades.
+- **Sync:** A fork's id derives from the parent's id, seq and text: a re-sent push upserts it; an older receiver accepts an eleventh. Documents past the 500-per-family cap and records the store refuses count in `rejected`.
+- **Sync:** A link under another id for linked endpoints is `skipped`. A space's Merkle root is not re-read when nothing changed: `GET /api/sync/merkle` and `merkle: true` cycles are far cheaper; root date: `computedAt`.
 - **Sync:** Each space gets a `(seq, _id)` index per record collection, built in the background on the first start; paging stays tie-safe meanwhile, only slower.
 - **Sync:** Each record stores which peer delivered it (`deliveredBy`: local, never sent, not shown by REST or MCP).
 - **Sync:** New `ythril_sync_tombstones_applied_total`, `ythril_sync_tombstones_declined_total` and gauge `ythril_sync_tombstone_rereads_owed`.
 - **Sync:** New `ythril_sync_file_arrivals_total{door,outcome}` counts arrivals, record failures, repairs, refused bodies, quota refusals and ignored offers.
-- **Embedding:** The bundled model runs in a supervised child process, so embedding no longer blocks the server (`/health` stays fast) and a native fault no longer takes it down; it exits after ten idle minutes (the next embed loads in 1-2 s).
+- **Sync:** A subscriber that left a pub/sub space gets `423` `space_declined` once; the publisher stops sending it, and the sync history lists it as `declined`, not held.
+- **Embedding:** The bundled model runs in a supervised child process: embedding no longer blocks the server (`/health` stays fast) and a native fault no longer takes it down; it exits after ten idle minutes (the next embed loads in 1-2 s).
 - **Embedding:** `mem_limit` or a pod memory limit counts both processes. The child gets no secrets. A lost process is replaced after a growing delay; a record that kills it three times is `failed`, the crash in its `lastError`.
 - **Embedding:** A model that cannot load stays failed until it or an offline flag changes, or a restart.
 - **Embedding:** New `ythril_embed_wait_seconds`, `ythril_embed_process_restarts_total{reason}`, `ythril_embed_process_state`; `GET /api/admin/pipeline-status` gains `inference` and `state: "down"` on a sticky load failure.
@@ -136,15 +142,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Media:** A raised `workerConcurrency` takes effect within one poll interval.
 - **Search:** Every answer the size budget cuts carries `budgetBoundBy` (`maxChars`, `maxTokens`, `maxBytes`, or two), on both doors, for every list, search, traversal and spill read; absent when not cut.
 - **Search:** `filter`'s `limit` stays uncapped: a single-space read stops at twice the answer budget and answers `truncated` with `nextSkip`. `recall` and `similar` with `traverse > 0` walk up to 16 result rows together.
-- **Search:** Text rank is per record type, so a fact no longer outranks an entity for being longer; fused results carry `vectorRank` and `lexicalRank` beside `fusedScore`.
+- **Search:** Text rank is per record type: a fact no longer outranks an entity for being longer; fused results carry `vectorRank` and `lexicalRank` beside `fusedScore`.
 - **MCP:** `list_embed_jobs` takes `skip`, reads and sums a proxy space's members, and on both doors returns `transientFailures`.
 - **MCP:** `recall`, `similar`, `filter` and `read_spill` take their size parameters from one schema: MCP accepts any `maxBytes` and raises a `maxChars` under 1000 to 1000, as REST did.
 - **MCP:** Tool calls cache one validator per token reach (64 kept), counted in `ythril_tool_validator_cache_total{result="hit|miss|evict"}`.
 - **MCP:** The delete tools and `move_file` say who a deletion reaches: peers holding a copy this instance wrote, and everything below it on a pub/sub network or a tree.
 - **Schemas:** A schema-library type reads as `{ "$ref": "library:<name>", ...definition }` on `GET /api/spaces/:id/meta` and `space_meta`; `resolve=false` returns the stored `{ $ref }` alone.
-- **Spaces:** `GET /api/spaces/:id/meta` and `space_meta` keep `stats` and `actualSchema` per space until the next write to its records, so an unchanged read is near-instant.
+- **Spaces:** `GET /api/spaces/:id/meta` and `space_meta` keep `stats` and `actualSchema` per space until the next write to its records; an unchanged read is near-instant.
 - **Networks:** A closed or democratic network connects every member to a newcomer; roster entries others propose wait for **Accept** (`POST /api/networks/:id/introductions/:instanceId/accept`, MCP `network_introduction_accept`); `GET /api/networks/:id`/`network_get` list `introductions`.
 - **Networks:** A club is a mesh: members pair directly via `POST /api/sync/networks/:id/pair` and `/pair/confirm`.
+- **Networks:** A deletion or wipe a vote passes is applied here as a completed act: retried if it fails, with the space closed to writes and its peer exchange held until it completes.
+- **Networks:** On a club or pub/sub network, and where this instance is the only member, its own yes passes a deletion or wipe at once, and the answer is `200`.
+- **Networks:** A deletion or wipe the proposer's own yes passes is applied at once, not left open until another member relays the vote.
 - **Files:** A file's extract returns its converted Markdown whole or in whole paragraphs that page to the end (**Show more**; it was cut at 256K characters), and its image list says when it is cut. `GET …/files/extract` takes `read_file`'s budget parameters.
 - **Files:** A chunked upload's `202` carries `maxBodyBytes`; a chunk may send `x-expected-sha256` (`422` on a mismatch). A push above a peer's single-body limit goes chunked (was `413`).
 - **Files:** A delete removes the links this instance wrote from the file and its derived ids, tombstoned; others' links stay.
@@ -170,14 +179,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** Pulled records and entities pushed via `POST /api/sync/entities` are queued for embedding (earlier pulls lack a vector: run `POST /api/spaces/:id/reembed` once per space); a counter left behind answers a push `500` and sets `counterBehind: true` on an import.
 - **Sync:** Every push door moves the seq counter past every seq it received before answering. A peer's edit no longer erases this instance's vector and retention stamps; a record pushed under a `spaceMap` alias is stored under the local space id.
 - **Sync:** A duplicate link in a push is `skipped` and a refused document gets one warning per page naming ids and reason. A database fault writing a pulled page no longer counts as `PEER UNREACHABLE`: it holds that family's position and refetches.
-- **Sync:** A driver argument error drops only its own document (`rejected`; a single route `400`). A merge-dropped duplicate edge's or re-keyed link's tombstone carries `originalSeq`, so a peer that never held it is not sent the deletion.
+- **Sync:** A driver argument error drops only its own document (`rejected`; a single route `400`). A merge-dropped duplicate edge's or re-keyed link's tombstone carries `originalSeq`; a peer that never held it is not sent the deletion.
 - **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good, and a refused element's seq no longer moves it (an older server still holds it); a tombstone `instanceId` over 256 characters is refused.
 - **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since (other bytes, or a newer version by its deleter) is kept.
 - **Sync:** An admin restore removes a file description, source, property, tag or mark its backup lacks (`keysRemoved`).
 - **Files:** A peer's file, pushed or pulled, is processed by this instance's rules (converted, chunked, media); a new version replaces old passages; a failed record write leaves no new file unless the database was down.
 - **Files:** A pushed file's later description and tag edits are no longer skipped; arriving bytes revive a soft-deleted path and get this instance's retention window; a metadata arrival no longer overwrites a newer copy.
 - **Files:** A file's processing status or a move of a peer's file no longer changes its `updatedAt` (a false Merkle divergence); changed media over a `complete` file is analysed again.
-- **Files:** A soft-deleted file's record keeps no description, vector, chunk or face, and is removed once the space's file retention window has passed since the deletion; a space with no file window keeps it.
+- **Files:** A soft-deleted file's record keeps no description, vector, chunk or face, and is removed once the space's file retention window, counted from the deletion, has passed; a space with no file window keeps it.
 - **Files:** Re-uploading a file with metadata takes one sequence number and a write that changes nothing takes none.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered, never over a row's own description or tags, waiting up to 30 days for a missing file; a wrong-typed key or any `parentFileId` is discarded and counted refused.
 - **Files:** Moving a file or folder leaves nothing at its old path, even mid-processing, and carries chunks, sidecars, queued jobs and links (`PATCH /api/files/:spaceId`, `move_file`); a retried move completes only a move it began.
@@ -194,7 +203,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Embedding:** A record or file this instance suppresses (flag, type or space) keeps no vector from a peer's update or file bytes, passages, captions and transcripts included; a record retired from search gets none when rewritten without the flag.
 - **Embedding:** Suppression turned on by a network (meta pull, space addition, leaving, precedence) or a saved type schema removes vectors already stored, files included, at once and at every start.
 - **Embedding:** An embed job no longer writes a vector over a record that changed while it embedded. A reindex embeds the same text as the original write; `reembed` no longer gives a passage, face crop or converted copy a vector of its path.
-- **Schemas:** `POST /api/notify` accepts `meta_change_pending`, so a schema-change round reaches peers (was `400`). `GET /api/schema-library` answers `usageCounts`; the dry-run reports checked-of-total per collection and pages.
+- **Schemas:** `POST /api/notify` accepts `meta_change_pending`: a schema-change round reaches peers (was `400`). `GET /api/schema-library` answers `usageCounts`; the dry-run reports checked-of-total per collection and pages.
 - **Schemas:** `PATCH` and `schema_update` store `meta.stampSkew` and `whenDuePasses` (one was refused, one dropped); a library `PATCH` no longer drops `suppressEmbeddings`, `endpoints` and `functional`.
 - **Spaces:** One space that cannot be initialised no longer stops start-up or a reload for the others: it is logged once (`space init failed for space '<id>': … — retried next reload`); index: `building`, then `ready`/`failed`.
 - **Spaces:** Deleting a space no longer loses a race with the media worker (`ENOTEMPTY`), and one unfinished delete no longer makes later renames and deletes answer `500 "… is still pending"`.
@@ -221,13 +230,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Errors:** Every door answers a store failure with one fixed `503` message, never the driver's text naming internal hosts, ports or the store's address (the two network `sync?wait=true` routes echoed the exception).
 - **Errors:** An unrecognised driver error answers `500` ("An internal database fault stopped this operation"), not `400` carrying its message; the database's own refusals stay `400`. Logged as `Store-side failure answered 503`.
-- **Server:** Log lines are single lines and each value in them is cut (4096 characters, 100 per list) and escaped, so a peer cannot forge a line or flood the log; redaction no longer takes quadratic time (5.6.x is affected too).
+- **Server:** Log lines are single lines and each value in them is cut (4096 characters, 100 per list) and escaped: a peer cannot forge a line or flood the log; redaction no longer takes quadratic time (5.6.x is affected too).
 - **Server:** Values quoted back in answers are bounded and escaped: a reference refusal names its first five (256 characters each, then `…(+N more)`), `Unknown field(s)` / `unrecognized_keys` the first 10 keys.
 - **Server:** Stored error text (an embed job's `lastError`, a reindex run's `error`, a media job's and a webhook delivery's `error`) and a chat model server's error text (cut at 200 characters) are bounded and escaped.
 - **Sync:** A peer's tombstone applies only to the space its sync admitted, not the one it names: before, a peer could delete its records in any space, and under a `spaceMap` an honest peer's deletions missed. Planted ones stay.
 - **Sync:** A tombstone is authorised before it is stored: one not delivered by its issuer, or for a record another instance wrote (unless from its upstream), is refused and blocks no author. Author-less records stay deletable by their peer.
 - **Sync:** One deletion rule decides every record and file tombstone: the issuer's own, or the direct upstream's on a pub/sub network or a tree, for what it delivered.
-- **Sync:** A peer's file tombstone needs the issuer's own authority or the upstream's (any admitted peer could delete the bytes), and a relayed one keeps its issuer. A held one refuses a later copy only as a record tombstone would, so a peer cannot block a path.
+- **Sync:** A peer's file tombstone needs the issuer's own authority or the upstream's (any admitted peer could delete the bytes), and a relayed one keeps its issuer. A held one refuses a later copy only as a record tombstone would; a peer cannot block a path.
 - **Sync:** A pull no longer fetches a file past the space quota, stores nothing from a body that is not as declared, and takes back bytes no row names.
 
 ## [5.6.9] — 2026-10-08
