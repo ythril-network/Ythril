@@ -111,6 +111,28 @@ describe('SpaceDangerTabComponent — irreversible ops are confirm-gated', () =>
     expect(ok.state.settingsSpace()).toBeNull(); // closeSettings()
   });
 
+  /*
+   * A networked delete or wipe may answer 202: a vote is open, or the vote passed and the change is still running (bundle-106). The space
+   * then still exists here, so treating the answer as done would drop a live space from the list and close its settings. PR A's minimum:
+   * a 202 is never "done" - the space stays, and the operator is told it is not done yet. The detailed outcomes are PR C's.
+   */
+  it('delete: an answer that is not done (202) keeps the space and says so', async () => {
+    const info = vi.fn();
+    const h = setup(true, { deleteSpace: vi.fn().mockReturnValue(of({ pending: true })) });
+    (TestBed.inject(ToastService) as unknown as { info: unknown }).info = info;
+    await h.c.confirmDangerDelete();
+    expect(h.state.settingsSpace()?.id).toBe('proj');
+    expect(info).toHaveBeenCalledWith('spaces.dangerZone.notDoneYet', 0);
+  });
+
+  it('wipe: an answer that is not done (202) says so instead of reading the stats as wiped', async () => {
+    const info = vi.fn();
+    const h = setup(true, { wipeSpace: vi.fn().mockReturnValue(of({ pending: true })) });
+    (TestBed.inject(ToastService) as unknown as { info: unknown }).info = info;
+    await h.c.confirmDangerWipe();
+    expect(info).toHaveBeenCalledWith('spaces.dangerZone.notDoneYet', 0);
+  });
+
   it('leave network: cancelled does not call the API; confirmed leaves', async () => {
     const cancelled = setup(false);
     await cancelled.c.leaveNetworkDanger('net1');

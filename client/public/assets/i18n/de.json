@@ -1245,6 +1245,7 @@
   "spaces.dangerZone.embeddingsBackfill": "Fehlende Embeddings nachtragen",
   "spaces.dangerZone.embeddingsBackfillBlocked": "Nachtragen ist bei aktiver Unterdrückung nicht möglich — jeder Datensatz würde übersprungen. Schalten Sie sie zuerst ab und speichern Sie.",
   "spaces.dangerZone.embeddingsBackfillDone": "{{enqueued}} Datensätze zum Einbetten eingeplant. Das läuft im Hintergrund weiter.",
+  "spaces.dangerZone.notDoneYet": "Noch nicht erledigt: Eine Abstimmung darüber läuft, oder sie ist angenommen und die Änderung läuft hier noch. Den Stand zeigt „Netzwerke“.",
   "spaces.dangerZone.embeddingsBackfillMore": "{{remaining}} weitere brauchen noch ein Embedding — erneut ausführen, um fortzufahren.",
   "spaces.dangerZone.embeddingsBackfillSkipped": "{{skipped}} Datensätze wurden übersprungen, weil ein Typ oder Datensatz sie weiterhin unterdrückt.",
   "spaces.dangerZone.renameTitle": "Space-ID bearbeiten",
