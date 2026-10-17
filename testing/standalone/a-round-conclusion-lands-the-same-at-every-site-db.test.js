@@ -180,13 +180,20 @@ describe('every via audits what it did, but the one that is the operator\'s requ
   const newPeer = { instanceId: 'aaaaaaaa-0000-4000-8000-0000000000e1', label: 'New peer', url: 'https://new-peer.example.com', token: 'peer-token', direction: 'both' };
 
   /**
-   * Audit writes are queued, not awaited, so a count read right after quiescence can precede the insert it counts. A sentinel entry written AFTER
-   * quiescence is waited for first; entries queued before it are in the collection by then, which makes a zero a zero.
+   * Audit writes are queued, not awaited, so a count read right after quiescence can precede the insert it counts. It waits until the writer
+   * has no insert on the wire (`auditWritesPending`), which makes a zero a zero. A sentinel entry written last and waited for did NOT: the
+   * inserts run concurrently on the pool, so an earlier entry can land after it — on CI a wipe's entry landed after the barrier, the row
+   * read 0, and the next row (after its own deleteMany) read 2 (Full run 39078417297).
    */
   async function auditCount(operation) {
-    const { logInternalAudit } = await import('../../server/dist/audit/audit.js');
-    logInternalAudit({ method: 'SWEEP', path: 'internal:settle-matrix-barrier', operation: 'test.barrier' });
-    for (let i = 0; i < 4000 && (await mongo.col('audit_log').countDocuments({ operation: 'test.barrier' })) === 0; i++) await new Promise(r => setImmediate(r));
+    const { auditWritesPending } = await import('../../server/dist/audit/audit.js');
+    assert.equal(typeof auditWritesPending, 'function', 'server/src/audit/audit.ts exports no auditWritesPending (or the build predates it)');
+    for (let i = 0; i < 4000 && auditWritesPending() > 0; i++) {
+      // waits-differently: bounded by turns like the runner's idle wait; every fiftieth turn is a stated 15 ms timer, because a store round
+      // trip outlasts thousands of setImmediate turns, so a wait for an insert that never answers still ends in about a second.
+      await new Promise(r => (i % 50 === 49 ? setTimeout(r, 15) : setImmediate(r)));
+    }
+    assert.equal(auditWritesPending(), 0, 'audit inserts were still on the wire after 4000 turns');
     return mongo.col('audit_log').countDocuments({ operation });
   }
 

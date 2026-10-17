@@ -109,6 +109,20 @@ export interface AuditEntryInput {
   changesRedacted?: boolean;
 }
 
+/** Inserts {@link logAuditEntry} has started and the store has not yet answered. */
+let pendingWrites = 0;
+
+/**
+ * How many audit inserts are still on the wire. The writer is fire-and-forget and its inserts run concurrently on the pool, so the
+ * store does NOT receive them in the order they were written: an entry written after another can land first. A reader that must
+ * know every entry written so far has landed (a test counting what a step audited) waits for this to reach zero — a "barrier"
+ * entry written last and waited for proves nothing about the ones before it (Full run 39078417297: a wipe's entry landed after
+ * the barrier and was counted in the next row instead).
+ */
+export function auditWritesPending(): number {
+  return pendingWrites;
+}
+
 /** Insert an audit log entry. Fire-and-forget — never throws. */
 export function logAuditEntry(input: AuditEntryInput): void {
   let retentionDays = DEFAULT_RETENTION_DAYS;
@@ -143,9 +157,11 @@ export function logAuditEntry(input: AuditEntryInput): void {
     ...(input.changes && input.changes.length > 0 ? { changes: input.changes } : {}),
   };
 
-  col().insertOne(entry as any).catch((err: unknown) => {
-    log.warn(`Audit log write failed: ${peerText(err)}`);
-  });
+  const write = col().insertOne(entry as any);
+  pendingWrites++;
+  write
+    .catch((err: unknown) => { log.warn(`Audit log write failed: ${peerText(err)}`); })
+    .finally(() => { pendingWrites--; });
 }
 
 /**
