@@ -2,6 +2,8 @@ import type { TokenRights } from './rights-shape.js';
 import type { ModelSlot, ModelSlotsConfig } from './model-slots.js';
 import type { AssistModelExtras } from './assist-backend.js';
 import type { MachineMadeSource } from '../files/derived-fields.js';
+import type { SpaceActEntry } from './types-space-acts.js';
+export type { SpaceActEntry, SpaceActKind, SpaceActState, SpaceActRound, SpaceActPostSteps } from './types-space-acts.js';
 export interface TokenRecord {
   id: string;
   name: string;
@@ -1394,6 +1396,8 @@ export interface Config {
    *  commits, so a crash mid-operation is detected on the next boot and completed
    *  idempotently (see reconcilePendingSpaceOp in spaces.ts). Not hand-edited. */
   pendingSpaceOp?: PendingSpaceOp;
+  /** Deletions, wipes and renames registered and not yet completed, one entry per act. Only the runner reads them. */
+  pendingSpaceActs?: SpaceActEntry[];
   // `removeSpaces` (S-10) is declared beside its only reader, in `reload-space-diff.ts`.
 }
 

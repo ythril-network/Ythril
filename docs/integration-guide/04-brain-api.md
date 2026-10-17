@@ -591,7 +591,7 @@ Content-Type: application/json
 { "space": "work", "confirm": true, "types": ["facts", "chrono"] }
 ```
 
-`types` is a subset of `facts`, `entities`, `edges`, `chrono`, `files`. **Omit it and all five go** — an
+`types` is a subset of `facts`, `entities`, `edges`, `chrono`, `files`, `links`. **Omit it and every type goes** — an
 omitted `types` is not a safe default. A partial wipe clears only the tombstones and review findings
 belonging to the types you named.
 
@@ -602,11 +602,11 @@ token **on both doors**, and rejected on a proxy space (`400`) — target member
 
 `confirm: true` is required. The act is irreversible: no undo, no trash.
 
-**On a space that belongs to a network nothing is deleted yet.** Emptying a shared space is a governed act:
+**On a space that belongs to a network, the wipe is a vote.** Emptying a shared space is a governed act:
 a round opens in every network holding the space, this instance votes yes, and the wipe happens on every
-member when a round passes — one veto stops it. The reply is still `200`, with
+member when a round passes — one veto stops it. On a club or pub/sub network, or where this instance is the only member, this instance's own yes passes the round and the wipe runs in the same request: the reply is `200` with `data.status: "wiped"`. Otherwise the reply is still `200`, with
 `data.status: "vote_pending"` and the open rounds (`data.rounds`, each `{ "networkId", "networkLabel", "roundId", "round" }` with `round` as the vote list shows it). **That is the success case** — do not retry it, and do
-not read the absence of counts as a failure. Branch on `data.status`, which is the same field MCP returns.
+not read the absence of counts as a failure. Branch on `data.status`, which is the same field MCP returns. A wipe that is running, or retried after a failure, is covered by [Auth and limits](03-auth-and-limits.md) (`409 space_being_wiped`), and a retry of this call while its vote is open answers that vote again. A typed wipe refuses writes of its own types only. If the vote passed and this instance's change failed during the call, the answer is `500` (`503` for a store outage) with `data.status: "passed"` and `data.rounds`: do not retry, the instance retries the change itself. See [Space Deletion and Wipe](06c-space-deletion-and-wipe-api.md).
 
 > **Changed in 5.0:** the per-collection bulk `DELETE` routes, which answered `{ deleted: <count> }`, are
 > gone — port to this route with `types[]`. It is the `delete_space_data` tool: same arguments, same answer.

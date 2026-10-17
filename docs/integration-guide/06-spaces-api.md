@@ -4,7 +4,7 @@
 
 ## Spaces API
 
-Base path: `/api/spaces`
+Base path: `/api/spaces`. Deleting a space, and emptying one, is described in [Space Deletion and Wipe](06c-space-deletion-and-wipe-api.md).
 
 ### List Spaces
 

@@ -7,6 +7,8 @@ import { andPredicates } from '../db/and-predicates.js';
 import { withAllocatedSeqs } from '../util/seq.js';
 import { readAfterSeq, type SeqPosition } from '../util/seq-keyset.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
+import { TOMBSTONE_COLLECTION } from '../config/types-knowledge.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /*
  * A tombstone a PEER delivered is applied by `applyPeerTombstones` (`sync/tombstone-apply.ts`), not here: this
@@ -98,6 +100,8 @@ export async function writeTombstones(
   spaceId: string, tombs: readonly IssuedTombstone[], session?: ClientSession, { firstSeq }: { firstSeq?: number } = {},
 ): Promise<void> {
   if (tombs.length === 0) return;
+  // A tombstone belongs to the family of the record it buries: a wipe of that family refuses it.
+  for (const family of new Set(tombs.map(t => TOMBSTONE_COLLECTION[t.type]))) assertSpaceTakesWrites(spaceId, family);
   const coll = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
   const deletedAt = new Date().toISOString();
   const write = async (first: number): Promise<void> => {
@@ -127,6 +131,7 @@ export async function removeWithTombstones(
   { session, filter, firstSeq }: { session?: ClientSession; filter?: Record<string, unknown>; firstSeq?: number } = {},
 ): Promise<void> {
   if (tombs.length === 0) return;
+  for (const family of new Set(tombs.map(t => TOMBSTONE_COLLECTION[t.type]))) assertSpaceTakesWrites(spaceId, family);
   const coll = col<{ _id: string }>(spaceCollection(spaceId, part));
   for (const chunk of inChunks(tombs, ROWS_PER_BULK_COMMAND)) {
     await coll.deleteMany(asFilter<{ _id: string }>(andPredicates({ _id: { $in: chunk.map(t => t._id) } }, filter) as never),

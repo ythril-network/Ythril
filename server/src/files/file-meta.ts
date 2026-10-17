@@ -53,6 +53,7 @@ import type { FileMetaDoc, AuthorRef } from '../config/types.js';
 import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
 import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 import { isLocalFileField, stripDerivedStages } from './derived-fields.js';
 
 
@@ -74,6 +75,7 @@ export async function upsertFileMeta(
   sizeBytes: number,
   opts: { description?: string; tags?: string[]; properties?: Record<string, string | number | boolean>; ttlDays?: number | null; sha256?: string } = {},
 ): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const normalised = toDocId(filePath);
   const now = new Date().toISOString();
 
@@ -161,6 +163,7 @@ export async function recordArrivedFile(
   sha256: string,
   from: AuthorRef,
 ): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const { key: normalised } = await peerFileKey(spaceId, filePath);
   const now = new Date().toISOString();
   // A record NEW here takes this instance's file retention window, as an upload does; one already stored keeps its
@@ -247,6 +250,7 @@ export async function updateFileMeta(
   /** Dot-notation paths to remove, applied AFTER the merge — the only way to unset. See the block below. */
   deleteFieldsPaths?: string[],
 ): Promise<FileMetaDoc | null> {
+  assertSpaceTakesWrites(spaceId, 'files');
   /*
    * REFERENCES ARE VALIDATED HERE, so a caller cannot reach the collection around the check.
    *
@@ -451,6 +455,7 @@ export async function deleteFileMeta(
   spaceId: string,
   filePath: string,
 ): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const normalised = toDocId(filePath);
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(
     asFilter<FileMetaDoc>({ _id: normalised }),
@@ -469,6 +474,7 @@ export async function deleteFileMetaByPrefix(
   dirPath: string,
   { onRetired }: RetireUnderOptions = {},
 ): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const norm = toDocId(dirPath).replace(/\/?$/, '');
   if (!norm) return; // guard: empty path would match everything
   // Escape regex special characters in the prefix so a path like "my.dir/"
@@ -590,6 +596,7 @@ export async function markFileMetaDeleted(
   spaceId: string,
   filePath: string,
 ): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const normalised = toDocId(filePath);
   await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
     asFilter<FileMetaDoc>({ _id: normalised, ...LIVE_FILE_ROW }),
@@ -657,6 +664,7 @@ export async function markFileMetaDeletedByPrefix(
   dirPath: string,
   { onRetired }: RetireUnderOptions = {},
 ): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const norm = toDocId(dirPath).replace(/\/?$/, '');
   if (!norm) return; // guard: empty path would match everything
   const escaped = escapeRegex(norm + '/');

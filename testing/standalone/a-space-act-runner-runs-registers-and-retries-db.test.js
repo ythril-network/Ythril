@@ -53,7 +53,7 @@ const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const T = { timeout: 45_000 };
-const SPACES = ['wipe-a', 'wipe-b', 'other-a', 'other-b', 'del-a', 'del-b', 'del-c', 'two-nets', 'files-a', 'stuck', 'ren-c', 'del-d', 'big-a', 'gone-a', 'boot-a', 'am3-del', 'am3-wipe', 'late-a', 'closing-a', 'gauge-a', 'ren-d'];
+const SPACES = ['wipe-a', 'wipe-b', 'other-a', 'other-b', 'del-a', 'del-b', 'del-c', 'two-nets', 'files-a', 'stuck', 'ren-c', 'del-d', 'big-a', 'gone-a', 'boot-a', 'am3-del', 'am3-wipe', 'late-a', 'closing-a', 'gauge-a', 'ren-d', 'del-e'];
 
 describe('the space-act runner registers, runs once, completes in one write, retries and stops without a failure', { skip }, () => {
   let door, loader, runner, lifecycle, renameMod, files, writers;
@@ -276,7 +276,9 @@ describe('the space-act runner registers, runs once, completes in one write, ret
     await hold.reached;
     const renamed = await renameMod.renameSpace('ren-c', 'ren-c2');
     assert.equal(renamed.id, 'ren-c2', 'a rename was refused behind a wipe of an unrelated space');
-    assert.equal(await lifecycle.removeSpace('stuck'), true, 'the stale delete of another space could not be finished by the next space op');
+    // The rename met the stale marker and, asking by key, found its op not running: it finished that delete before its own body.
+    assert.ok(!loader.getConfig().spaces.some(s => s.id === 'stuck'), 'the stale delete of another space was not finished by the next space op');
+    assert.equal(await lifecycle.removeSpace('del-e'), true, 'a delete of a third space was refused behind a wipe of an unrelated space');
     assert.equal(runner.spaceActRunning('big-a'), true, 'the wipe was no longer running when the rename and the delete finished: the row proved nothing');
     hold.release();
     await settledOk(wiping);
@@ -285,7 +287,8 @@ describe('the space-act runner registers, runs once, completes in one write, ret
 
   it('R-W2a: a wipe whose tree removal fails is OWED, keeps the space closed to record and file writes, leaves other spaces\' rename and delete alone, and the tick completes it', T, async () => {
     await seed('wipe-a'); await seed('other-b');
-    runner.setSpaceActHooksForTest({ atFileTree: () => { throw new Error('EACCES under the tree'); } });
+    // Scoped to the wiped space: the rename and the delete below run file-tree steps of their own, which must not fail with it.
+    runner.setSpaceActHooksForTest({ atFileTree: (localId) => { if (localId === 'wipe-a') throw new Error('EACCES under the tree'); } });
     const { entry } = register({ kind: 'wipe', localId: 'wipe-a' });
     const failed = await runner.runSpaceAct(entry.id);
     assert.equal(failed.ok, false);

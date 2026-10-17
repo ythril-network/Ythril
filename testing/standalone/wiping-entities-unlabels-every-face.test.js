@@ -41,9 +41,11 @@ describe('wiping entities unlabels every face', () => {
   });
 
   it('it calls the same cascade a single-entity delete calls', () => {
-    const at = SRC.indexOf('export async function wipeSpace(');
-    const body = blockAfter(SRC, at, 'the wipeSpace body');
-    assert.match(body, /unlabelAllFaces\(spaceId\)/,
+    // Re-anchored (bundle-106): `wipeSpace` hands the act to the runner, and the wipe's body is `wipeSpaceUnqueued`, which passes
+    // its own act entry to the cascade's write gate.
+    const at = SRC.indexOf('async function wipeSpaceUnqueued(');
+    const body = blockAfter(SRC, at, 'the wipe body');
+    assert.match(body, /unlabelAllFaces\(spaceId\b/,
       'wiping entities must unlabel the faces that pointed at them, or every labelled face in the space '
       + 'is left pointing at a person who no longer exists');
   });
@@ -54,8 +56,8 @@ describe('wiping entities unlabels every face', () => {
      * people are still there — a cascade that runs unconditionally is a data-loss bug wearing the clothes
      * of a fix, and it would pass the assertion above.
      */
-    const at = SRC.indexOf('export async function wipeSpace(');
-    const body = blockAfter(SRC, at, 'the wipeSpace body');
+    const at = SRC.indexOf('async function wipeSpaceUnqueued(');
+    const body = blockAfter(SRC, at, 'the wipe body');
     assert.match(body, /targets\.has\('entities'\)\s*\)?\s*(?:await )?unlabelAllFaces/,
       'the cascade must be guarded by entities being wiped — running it on any wipe would unlabel faces '
       + 'whose entities are untouched');

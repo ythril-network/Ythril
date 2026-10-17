@@ -43,6 +43,7 @@ import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
 import { SubjectEdges } from './functional-subject.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -841,6 +842,8 @@ async function relinkAndAbsorb(
   spaceId: string, survivor: EntityDoc, absorbed: EntityDoc,
   { now, session, set }: { now: string; session: ClientSession; set: Record<string, unknown> },
 ): Promise<MergeWrite> {
+  // A merge rewrites entities, edges, links and their tombstones: any act standing for the space refuses it.
+  assertSpaceTakesWrites(spaceId);
   const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
   // ── 1. Relink edges ──────────────────────────────────────────────────

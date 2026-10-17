@@ -88,6 +88,7 @@ const EXEMPT = {
   'server/src/api/brain/file-meta.ts:GET /api/brain/spaces/:spaceId/files/extract': 'its own reads select CHILD rows by `parentFileId`, which a flag is never set on; whether the FILE is still here is the parent read, `getFileMeta`, which carries the predicate',
   'server/src/brain/dupe-scanner.ts:recordMatchedText': 'reads `matchedText` alone, which the flag write strips, so a flagged row already answers the empty string a predicate would answer for it',
   // ── it handles the collection, not the files in it
+  'server/src/spaces/lifecycle.ts:wipeSpaceUnqueued': 'the wipe body hands the collection to the runner\'s batched delete, which reads each batch\'s ids to delete EVERY row, flagged ones included, on purpose',
   'server/src/spaces/lifecycle.ts:initSpace': 'creates the space\'s collections and indexes and samples a fact for the embedding model; reads no file for any caller',
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': 'walks the typed record collections (`KnowledgeType`: entity, fact, edge, chrono — a file is none of them) to stamp a retention window; names a suffix, never the files collection',
   'server/src/spaces/rename.ts:moveSpaceData': 'moves a whole space\'s collections to a new id: every row, flagged included, goes',

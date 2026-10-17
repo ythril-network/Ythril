@@ -22,94 +22,62 @@
  * Nothing is lost by standing aside: if the running op dies, its marker survives and the next boot recovers
  * it — the only situation the marker exists for.
  *
- * These tests pin the counter and the two call sites, since the failure mode of getting this wrong is a
- * recovery path that silently never runs.
+ * Since bundle-106 the guard is the space-act runner's (`spaces/space-act-runner.ts`): every rename and deletion is a runner act,
+ * the runner counts a body while it runs and releases it in a `finally`, and recovery asks by KEY — is the marker's OWN op running
+ * (`spaceActRunning(op.spaceId)`) — where it used to compare an instance-wide depth counter, which made a long wipe of an unrelated
+ * space look like the marker's op.
+ *
+ * These tests pin the counter and the call sites, since the failure mode of getting this wrong is a recovery path that silently
+ * never runs.
  *
  * Run: node --test testing/standalone/space-op-recovery-guard.test.js
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { enclosingBlockFrom } from './_structural-window.mjs';
 
-let beginSpaceOp, endSpaceOp, spaceOpInFlight;
+let runner;
 const strip = s => s
   .replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n\r]/g, ' '))
   .replace(/^(\s*)\/\/.*$/gm, (_m, indent) => indent);
 
 describe('the in-flight guard', () => {
   before(async () => {
-    ({ beginSpaceOp, endSpaceOp, spaceOpInFlight } = await import('../../server/dist/spaces/_shared.js'));
+    runner = await import('../../server/dist/spaces/space-act-runner.js');
   });
 
   it('is off by default, so recovery runs at boot as it always did', () => {
-    assert.equal(spaceOpInFlight(), false);
+    assert.equal(runner.spaceActsRunning(), 0);
+    assert.equal(runner.spaceActRunning('any-space'), false);
   });
 
-  it('reports in-flight between begin and end', () => {
-    beginSpaceOp();
-    assert.equal(spaceOpInFlight(), true);
-    endSpaceOp();
-    assert.equal(spaceOpInFlight(), false);
-  });
-
-  it('nests, so a delete inside a rename does not clear the outer guard', () => {
-    beginSpaceOp();
-    beginSpaceOp();
-    endSpaceOp();
-    assert.equal(spaceOpInFlight(), true, 'the outer operation is still running');
-    endSpaceOp();
-    assert.equal(spaceOpInFlight(), false);
-  });
-
-  it('CANNOT be driven negative by an unbalanced end', () => {
-    // The consequence of getting this wrong is the worst available: a permanently negative counter would
-    // read as "never in flight", and crash recovery would be disabled for the life of the process while
-    // looking fine.
-    endSpaceOp();
-    endSpaceOp();
-    assert.equal(spaceOpInFlight(), false);
-    beginSpaceOp();
-    assert.equal(spaceOpInFlight(), true, 'a later real operation must still register');
-    endSpaceOp();
+  it('counts a body only while it runs, released in a finally, and never below zero', () => {
+    const src = strip(readFileSync('server/src/spaces/space-act-runner.ts', 'utf8'));
+    const body = src.slice(src.indexOf('async function runBody'), src.indexOf('function complete('));
+    assert.match(body, /runningCount\+\+/, 'the runner does not count a body it runs');
+    // `finally`, not a trailing statement: a body that throws must not leave the space counted, or every later recovery of its marker
+    // in this process is skipped. Floored, so an unbalanced release cannot read as "never running" for good.
+    assert.match(body, /finally\s*\{[\s\S]*?runningCount\s*=\s*Math\.max\(0,/, 'the count is not released, floored, in a finally');
   });
 });
 
 describe('both space operations claim the guard, and recovery reads it', () => {
-  it('renameSpace wraps its work and releases in a finally', () => {
-    const src = strip(readFileSync('server/src/spaces/rename.ts', 'utf8'));
-    assert.match(src, /beginSpaceOp\(\);/);
-    // `finally`, not a trailing call: a rename that throws (the "incomplete" path does) must not leave the
-    // guard set, or every later recovery in this process is skipped.
-    assert.match(src, /finally\s*\{\s*endSpaceOp\(\);/);
+  it('renameSpace and removeSpace run through the runner, which writes their marker inside its counted body', () => {
+    for (const [file, name] of [['server/src/spaces/rename.ts', 'renameSpace'], ['server/src/spaces/lifecycle.ts', 'removeSpace']]) {
+      const src = strip(readFileSync(file, 'utf8'));
+      const at = src.indexOf(`export async function ${name}(`);
+      assert.ok(at > -1, `${name} is gone — re-anchor this gate`);
+      assert.match(src.slice(at, at + 400), /return\s+runSpaceAct\(/, `${name} does not hand its act to the runner`);
+    }
   });
 
-  it('removeSpace does too — it writes the same kind of marker', () => {
+  it('reconcilePendingSpaceOp checks it BEFORE doing any work, by the marker\'s own space', () => {
     const src = strip(readFileSync('server/src/spaces/lifecycle.ts', 'utf8'));
-    /*
-     * The rest of the FUNCTION the marker is opened in, bounded by the brace that closes it.
-     *
-     * `blockAfter` on the `try` was the obvious choice and is wrong: a `finally` is a SIBLING of the try block,
-     * not inside it, so bounding at the try's own brace excludes the very thing being looked for. The enclosing
-     * function is the smallest bound that contains both halves, and it still refuses an `endSpaceOp()` that
-     * belongs to some other function further down the file — which is what the 200-character cap could not.
-     */
-    const at = src.indexOf('beginSpaceOp();');
-    assert.ok(at > -1, 'beginSpaceOp is no longer called here — re-anchor this gate');
-    const rest = enclosingBlockFrom(src, at, 'the removeSpace body');
-    assert.match(rest, /finally\s*\{[\s\S]*?endSpaceOp\(\);/,
-      'the marker must be cleared in a finally of the function it was opened in');
-  });
-
-  it('reconcilePendingSpaceOp checks it BEFORE doing any work', () => {
-    const src = strip(readFileSync('server/src/spaces/lifecycle.ts', 'utf8'));
-    // The work lives in `resumePendingSpaceOp`, which both the boot/reload reconciler and the op that meets a
-    // pending marker call. The guard counts ops in flight since then (`spaceOpsInFlight`), because an op resuming
-    // another's marker counts itself once — so the check is on that count, before any data moves.
+    // The work lives in `resumePendingSpaceOp`, which both the boot/reload reconciler and the op that meets a pending marker call.
     const fn = src.slice(src.indexOf('async function resumePendingSpaceOp'));
-    const guardAt = fn.indexOf('spaceOpsInFlight()');
+    const guardAt = fn.indexOf('spaceActRunning(op.spaceId)');
     const workAt = fn.indexOf('moveSpaceData(');
-    assert.ok(guardAt > 0, 'the reconciler must consult the guard');
+    assert.ok(guardAt > 0, 'the reconciler must consult the guard, by the marker\'s own space');
     assert.ok(workAt > 0 && guardAt < workAt, 'and it must do so before moving any data');
   });
 });

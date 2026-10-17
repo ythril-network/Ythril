@@ -26,6 +26,7 @@ import { listReadMaxMs, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /** An item that references a given entity, and — for an edge — which of its ends does. */
 export interface BacklinkEntry {
@@ -67,11 +68,13 @@ export async function unlabelFacesForEntities(spaceId: string, entityIds: string
 }
 
 /** Clear every face label in a space — for the bulk wipe, where all entities are gone by definition. */
-export async function unlabelAllFaces(spaceId: string): Promise<number> {
-  return unlabelFacesWhere(spaceId, { faceEntityId: { $exists: true } });
+export async function unlabelAllFaces(spaceId: string, opts: { except?: string } = {}): Promise<number> {
+  return unlabelFacesWhere(spaceId, { faceEntityId: { $exists: true } }, opts);
 }
 
-async function unlabelFacesWhere(spaceId: string, match: Record<string, unknown>): Promise<number> {
+/** `except`: the wipe that is unlabelling its own space's faces passes its entry, so only ANOTHER act refuses it. */
+async function unlabelFacesWhere(spaceId: string, match: Record<string, unknown>, opts: { except?: string } = {}): Promise<number> {
+  assertSpaceTakesWrites(spaceId, 'files', opts);
   const res = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateMany(
     asFilter<FileMetaDoc>(match),
     asUpdate<FileMetaDoc>({ $unset: { faceEntityId: '', faceScore: '' } }),
@@ -129,6 +132,8 @@ export async function upsertEntity(
    * against a read set; the write is the commit's. A batch asks for the same plans in bulk (`Q-99` part 3).
    */
   const input: EntityInput = { name, type, tags, properties, description, id, opts, ttlDays, onValidation };
+  // Refused before the plan pays for an embedding; the commit asks again per stage, for a write admitted just before an act registers.
+  assertSpaceTakesWrites(spaceId, 'entities');
   const done = await planAndCommitOne(spaceId, entityWant(input), view => planEntity(spaceId, input, view));
   const entity = { ...done.plan.result, seq: done.seq } as unknown as EntityDoc;
   if (actor) {
@@ -194,6 +199,7 @@ export async function updateEntityById(
   /** See `upsertEntity`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<EntityDoc | null> {
+  assertSpaceTakesWrites(spaceId, 'entities');
   const collection = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
   const existing = await collection.findOne(asFilter<EntityDoc>({ _id: id, spaceId }),
     { projection: NEVER_RETURNED_PROJECTION }) as EntityDoc | null;
@@ -352,6 +358,7 @@ export async function deleteEntity(
   entityId: string,
   actor?: WebhookActor,
 ): Promise<boolean> {
+  assertSpaceTakesWrites(spaceId, 'entities');
   const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .findOne(asFilter<EntityDoc>({ _id: entityId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const result = await col<EntityDoc>(spaceCollection(spaceId, 'entities')).deleteOne({

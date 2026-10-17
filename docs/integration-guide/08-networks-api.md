@@ -67,7 +67,7 @@ Returns one network object (same shape as entries in `GET /api/networks`).
 
 **Response** `200` on success, `404` when the network does not exist or you may not see it.
 
-**A network body carries no vote round and no credential hash** — on `GET /api/networks`, `GET /api/networks/:id` and
+**A network body carries no vote round and no credential hash.** It carries `ownYesCarries`, true when this instance's own yes passes a round on this network without another member's vote. It carries `owedSpaceActs`, the space changes this instance has decided and not yet finished; it is shown to instance administrators only. — on `GET /api/networks`, `GET /api/networks/:id` and
 `network_get` alike. Open rounds are read on [`GET /api/networks/:id/votes`](#list-open-vote-rounds) and how rounds ended
 on [`GET /api/networks/:id/vote-outcomes`](#vote-outcomes); `pendingRounds` is no longer a field of the network, and nothing
 on it, or on a member, ends in `Hash`.
@@ -224,7 +224,7 @@ POST /api/networks/:id/spaces
 { "spaceId": "research" }
 ```
 
-Adds one of this instance's spaces to a network. Answers `200` with the network as `GET /api/networks/:id` shows it when the space is carried at once, or `202` with `{ "status": "vote_pending", "round", "rounds" }` when the network has to agree first. `round` is the round as [`GET /api/networks/:id/votes`](#list-open-vote-rounds) shows it, with its `summary` and no proposal body (`pendingMeta` and `metaBase` no longer ride on it; the space's schema is read on the space); `rounds` is the one-entry list every opening door answers, `[{ "networkId", "networkLabel", "roundId", "round" }]`. MCP: `network_add_space` with `{ "id", "spaceId" }`.
+Adds one of this instance's spaces to a network. Answers `200` with the network as `GET /api/networks/:id` shows it when the space is carried at once (a closed or democratic network where this instance is the only member concludes at open), or `202` with `{ "status": "vote_pending", "round", "rounds" }` when the network has to agree first. `round` is the round as [`GET /api/networks/:id/votes`](#list-open-vote-rounds) shows it, with its `summary` and no proposal body (`pendingMeta` and `metaBase` no longer ride on it; the space's schema is read on the space); `rounds` is the one-entry list every opening door answers, `[{ "networkId", "networkLabel", "roundId", "round" }]`. MCP: `network_add_space` with `{ "id", "spaceId" }`.
 
 **Who decides, per type:**
 
@@ -240,7 +240,7 @@ Adds one of this instance's spaces to a network. Answers `200` with the network 
 
 - The tokens this instance issued to the network's members reach the new space as soon as it is carried, so their sync of it is not refused.
 - On `pubsub` and `braintree` the member exchange names the space, and an instance considers it only from its **upstream** (a subscriber from its publisher, a tree node from its parent), never from anyone else. **The announcement is a proposal, not a grant**: the space is added only if the token that joined the network here could have joined it (see [Pending Spaces](#pending-spaces)); otherwise it waits for the operator.
-- On `club`, `closed` and `democratic` every member applies the passed round itself, re-deciding it from the casts under its own rule. The proposer keeps serving the passed round on `GET /api/sync/networks/:id/votes`, so a member that never saw it open still learns it.
+- On `club`, `closed` and `democratic` every member applies the passed round itself, re-deciding it from the casts under its own rule. The proposer keeps serving the passed round on `GET /api/sync/networks/:id/votes`, so a member that never saw it open still learns it. A passed deletion or wipe is served until it is pruned, and only once its act here is complete. A member that joins a network after a wipe or deletion round opened still applies it.
 - The receiving side only adds. A space it lacks is created with the network's id. **On the three voted types, a member that already has a local space of that name keeps it out of the network unless it voted yes**: those networks sync both ways, so joining it would send its records to every member. The skip is logged. On `pubsub` and `braintree` a same-named local space is never joined by an announcement: it waits as pending until the operator maps it or accepts it under another id.
 
 | status | when |
@@ -269,7 +269,7 @@ POST /api/networks/:id/members
 }
 ```
 
-In `closed`/`democratic` networks this opens a voting round: `202` `{ "status": "vote_pending", "roundId": "...", "round": { ... } }`, `round` being the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it (no candidate record, no invite-key hash).
+In `closed`/`democratic` networks this opens a voting round: `202` `{ "status": "vote_pending", "roundId": "...", "round": { ... } }`, `round` being the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it (no candidate record, no invite-key hash). Where this instance's own yes passes the round (the proposer's yes always counts, and a closed or democratic network where the two are its only members passes at open), the answer is `200` with the member added.
 In `club` networks the member is added immediately.
 In `braintree` networks all ancestors up to the root must approve.
 In `pubsub` networks the subscriber is added immediately with `direction` forced to `push` (publisher pushes to subscriber) regardless of the request body value.
@@ -354,7 +354,7 @@ re-apply it.
 
 **A passed `space_deletion` never deletes a member's space.** It takes the space out of the network on every member,
 which keeps its copy and data as a local space; only the proposer deletes its own copy, once no other network carries
-it. `DELETE /api/spaces/:id` on a networked space still answers `202` with the rounds it opened, each as `{ "networkId", "networkLabel", "roundId", "round" }` with `round` the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it.
+it. `DELETE /api/spaces/:id` on a networked space answers `200` when this instance's own yes passes the round, and otherwise `202` with the rounds it opened, each as `{ "networkId", "networkLabel", "roundId", "round" }` with `round` the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it.
 
 The instance that opens a round other than a join or a removal is one of its voters: its signed `yes` is in `votes`
 from the moment the round opens, and the round's `subjectInstanceId` is informational on those types. A peer cannot
@@ -403,6 +403,8 @@ A round carries the fields it travels with — `roundId`, `type`, the subject (`
 (since 5.6.0): what THIS instance calls the space, which after a rename is neither the network's id nor the proposer's name.
 It is absent for a space not carried here yet (a `space_addition` round), and on this route only — the peer-facing votes
 route serves rounds as they travel.
+
+An `outcome` this client does not know means the round did not pass: keep the round, and do not treat it as passed. The expiry job evaluates every undecided round, not only those past their deadline.
 
 **`summary`** (a `meta_change` round) is one plain sentence per change saying what the proposal would do to the space,
 named as this instance calls it and worded as a proposal rather than a done thing. It is English text and is text only: a
@@ -458,7 +460,7 @@ afterwards; this is where the answer to *"what happened to that vote?"* stays. `
 | `type` | the round's type (`join`, `remove`, `space_deletion`, `space_wipe`, `meta_change`, `space_addition`) |
 | `space` | the space as THIS instance calls it; absent for a round that is not about a space |
 | `subjectLabel` | the member or space the vote was about, as the round named it |
-| `outcome` | `passed`, `vetoed`, `expired` (the deadline came with no veto and not enough yes) or `ended` (a round that concluded before this log existed: the reason was not recorded, and there is no `concludedAt`) |
+| `outcome` | `passed`, `vetoed`, `expired` (the deadline came with no veto and not enough yes) `interrupted` (a passed deletion or wipe whose change a restart interrupted; it is finished on the next start, not failed), or `ended` (a round that concluded before this log existed: the reason was not recorded, and there is no `concludedAt`) |
 | `yes`, `veto`, `eligible` | the tally this instance counted, and how many members could vote |
 | `summary` | the proposed change of a `meta_change` round, as on [the open list](#list-open-vote-rounds) |
 
@@ -686,7 +688,7 @@ pushing peer is answered per document. MCP `network_sync_history` answers the sa
 **`status` says whether every member's transfers completed.** `success` means each member was reached and every
 transfer finished; `partial` means some members did not; `failed` means none did. A member counts as not
 completed when any of its transfers was refused or cut short (a `403`, a failed batch, no peer token), and
-`errors` then names the member, the space, the direction and the transfers that stopped. `errors` is present
+`errors` then names the member, the space, the direction and the transfers that stopped. A space listed as `held` (a wipe or deletion of it is being applied here) or `declined` (a pub/sub member left it) is reported as such and is not a failure. `errors` is present
 only when something failed.
 
 `limit` defaults to 20, max 100. Ordered most-recent-first. The last 100 records per network are retained; older entries are pruned automatically.

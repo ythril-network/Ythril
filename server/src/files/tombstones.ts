@@ -123,6 +123,7 @@ import {
   ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
   type MoveMarker, type PrunableRow, type StoredFileTombstone,
 } from './tombstone-store.js';
+import { assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
 import {
   abandonMove, createMoveMarkerPager, markerDocOf, moveMarker, MOVE_MARKER_KEEP_MS, movesStillOwed, removeUnlessOwed,
 } from './move-markers.js';
@@ -208,6 +209,8 @@ export const fileTombstonePosition = (t: { positionAt?: unknown; deletedAt?: unk
  * acknowledges only what it sent, so the gap is a delay and never a loss.
  */
 export async function positionLegacyFileTombstones(spaceId: string): Promise<number> {
+  // Housekeeping: a space an act owns is passed over (the act clears its tombstones or the space), never a failure.
+  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isActRefusal(err)) return 0; throw err; }
   // Its stamp is a position like any other, so it is held like any other: a page read between the stamp and the write's
   // commit would hand a peer a position above a row that has not landed.
   return withPositionHeld(spaceId, async (stamp) => {
@@ -347,7 +350,9 @@ export async function settledPositionCap(spaceId: string): Promise<string> {
  * It does not ask `moveIsOwed` (`move-markers.ts`), by design: the wipe removes the space's files and records with the tombstones, so no move
  * can be owed in a space that holds nothing for it to carry.
  */
-export async function forgetFileTombstonesOf(spaceId: string): Promise<void> {
+export async function forgetFileTombstonesOf(spaceId: string, opts: { except?: string } = {}): Promise<void> {
+  // The wipe that empties the space passes its own entry: the check still runs, so any OTHER act standing for the space refuses it.
+  assertSpaceTakesWrites(spaceId, 'files', opts);
   await publishLock.run(spaceId, () => withinWriteBound(async () => {
     bumpWipeGeneration(spaceId);
     await tombstonesOf(spaceId).deleteMany({});
@@ -449,6 +454,7 @@ function covers(p: StoredFileTombstone, c: ToPublish): boolean {
 async function publishSlice(
   spaceId: string, paths: readonly string[], byPath: ReadonlyMap<string, readonly ToPublish[]>,
 ): Promise<{ published: number; dropped: number }> {
+  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isActRefusal(err)) return { published: 0, dropped: 0 }; throw err; }
   const stored = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths, chunk => ({ path: { $in: chunk } }), STORED_FOR_PUBLISH);
   const alreadyPublished = new Set(stored.filter(t => !t.pending).map(t => t._id));
   const newestFirst = (a: ToPublish, b: ToPublish): number =>
@@ -534,6 +540,7 @@ async function publishSlice(
  * carrying an owed move's marker is kept (still pending, served to nobody) and goes once the move ends.
  */
 async function dropPendingById(spaceId: string, ids: readonly string[]): Promise<void> {
+  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isActRefusal(err)) return; throw err; }
   for (const chunk of inChunks([...ids], READ_CHUNK)) {
     await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: chunk }, pending: true, 'move.from': { $exists: false } }));
     const marked = await readTombstonesById<StoredFileTombstone>(spaceId, chunk, { move: 1 }, { pending: true, 'move.from': { $exists: true } });
@@ -588,6 +595,7 @@ const generationOfHandle = (pending: PendingFileTombstones): number => pending.g
 export async function writePendingFileTombstones(
   spaceId: string, paths: string[], move?: MoveMarker, named?: string,
 ): Promise<PendingFileTombstones> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const unique = [...new Set(paths.map(toDocId))].filter(Boolean);
   const generation = wipeGenerationOf(spaceId);
   // One stamp of the space's clock for the act: `writtenAt` is what the one-per-path rule orders by (against positions, which are
@@ -771,6 +779,7 @@ export async function settlePendingFileTombstones(pending: PendingFileTombstones
 export async function settleStalePendingFileTombstones(
   spaceId: string, now: Date = new Date(),
 ): Promise<{ dropped: number; confirmed: number; superseded: number }> {
+  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isActRefusal(err)) return { dropped: 0, confirmed: 0, superseded: 0 }; throw err; }
   // Before the first read: a wipe that lands while a batch is out must find a settle it can stop (`forgetFileTombstonesOf`).
   const generation = wipeGenerationOf(spaceId);
   const before = fileTombstoneStaleBefore(now);
@@ -994,6 +1003,7 @@ export async function heldFileTombstoneIds(spaceId: string, ids: readonly string
  * until it is a day old. A page that fails is thrown to the walk, which says it once and tries again next cycle.
  */
 export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Promise<number> {
+  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isActRefusal(err)) return 0; throw err; }
   const cap = await settledPositionCap(spaceId);
   let removed = 0;
   let after: IsoPosition = ISO_READ_START;
@@ -1214,6 +1224,7 @@ export interface RelayedFileTombstone {
  * marked `origin: 'relayed'`: it says a PEER deleted the path, and never covers a delete this instance made itself.
  */
 export async function storeRelayedFileTombstones(spaceId: string, docs: readonly RelayedFileTombstone[]): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   for (const slice of inChunks(docs, FILE_TOMBSTONE_PAGE)) {
     await withPositionHeld(spaceId, (receivedAt) => {
       const ops = slice.map(d => ({ updateOne: {

@@ -108,6 +108,9 @@ export async function openParkedMediaRuns({ suite, space, faces = false }) {
       : { enabled: false },
   };
   if (faces) cfg.allowPrivateModelEndpointsBySlot = { faceExternal: true };
+  // Saved, not only set: a config write re-reads the file first (`mutateConfig`), and a space act registers its entry that way
+  // (bundle-106), so a setting held only in memory would be lost by the first wipe a row runs.
+  loader.saveConfig(cfg);
 
   /** The log lines a run of `p` ends with: completed, abandoned, failed, or its source found gone. */
   const endOf = (p) => new RegExp(`Media worker: (completed \\w+ job|abandoning|job|source file) ${space}/${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);

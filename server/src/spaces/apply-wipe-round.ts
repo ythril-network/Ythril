@@ -54,6 +54,35 @@ export function spaceRoundAction(
 }
 
 /**
+ * How a concluded space round came to need nothing more from this instance:
+ * - `completed` — its act ran here (the runner's completion);
+ * - `absent` — the space it names is gone here, so there is nothing to act on;
+ * - `not-carried` — this instance does not carry the space the round names;
+ * - `superseded` — an addition retired by a later deletion of the same network space.
+ */
+export type SpaceActSettlement = 'completed' | 'absent' | 'not-carried' | 'superseded';
+
+/**
+ * Mark `round` of `net` as needing nothing more here — THE writer of `appliedHere` (design v5 §2.1, W23).
+ *
+ * `appliedHere` is what stops a round being acted on again: gossip hands every held round back on every changed pass. Written in
+ * more than one place, one copy marked a round applied BEFORE its act ran, and a crash between the two lost the act; another never
+ * marked it at all, and the act ran again on a space re-created under the same name. So every settlement goes through here, and the
+ * caller makes it part of the SAME config write as whatever completed the act (the runner removes its entry in that write).
+ *
+ * Mutates `round` in place — it must be the round held by the config the caller saves, found by network and round id inside that
+ * caller's `mutateConfig`, never one read before an await.
+ */
+export function settleSpaceAct(net: Pick<NetworkConfig, 'id'>, round: VoteRound, how: SpaceActSettlement): void {
+  const local = round as VoteRound & { appliedHere?: boolean };
+  if (local.appliedHere === true) return;
+  local.appliedHere = true;
+  if (how !== 'completed') {
+    log.info(`${round.type} round ${peerText(round.roundId)} of network ${peerText(net.id)} settled here: ${how}`);
+  }
+}
+
+/**
  * Apply every space-scoped side-effect for a list of rounds — deletion, wipe and addition.
  *
  * The gossip pass in `sync/engine.ts` concludes rounds nobody on this instance voted on, and had the

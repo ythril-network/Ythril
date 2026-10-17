@@ -25,6 +25,7 @@ import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planChrono, chronoWant, type ChronoInput, type ChronoFields } from './write-plan/plan-chrono.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 // Re-exported so existing importers (and the C5 tests) keep reaching it here; it lives in its own leaf
 // module only to keep chrono.ts ↔ recall.ts from importing each other. See chrono-status.ts.
@@ -124,6 +125,8 @@ export async function createChrono(
    * against a read set; the write is the commit's. A batch asks for the same plans in bulk (`Q-99` part 3).
    */
   const input: ChronoInput = { fields, ttlDays, opts };
+  // Refused before the plan pays for an embedding; the commit asks again per stage, for a write admitted just before an act registers.
+  assertSpaceTakesWrites(spaceId, 'chrono');
   const done = await planAndCommitOne(spaceId, chronoWant(input), view => planChrono(spaceId, input, view));
   const entry = { ...done.plan.result, seq: done.seq } as unknown as ChronoEntry;
   // `chrono.updated`, not `created`, on a converge — a subscriber must be able to tell a retry from a new entry.
@@ -148,6 +151,7 @@ export async function updateChrono(
   /** See `createChrono`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<ChronoEntry | null> {
+  assertSpaceTakesWrites(spaceId, 'chrono');
   const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: id, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as ChronoEntry | null;
@@ -577,6 +581,7 @@ export async function deleteChrono(
   chronoId: string,
   actor?: WebhookActor,
 ): Promise<boolean> {
+  assertSpaceTakesWrites(spaceId, 'chrono');
   const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: chronoId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const result = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).deleteOne({

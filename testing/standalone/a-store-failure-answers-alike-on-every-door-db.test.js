@@ -184,7 +184,7 @@ function argsFor(schema) {
   return out;
 }
 
-let door, base, adminKey, callTool, ADMIN, server, TOOLS, schemaOf, log, getConfig;
+let door, base, adminKey, callTool, ADMIN, server, TOOLS, schemaOf, log, getConfig, mutateConfig;
 
 /**
  * Operations the fault failed BEFORE the request was answered, per request id — so a door is judged only on what it
@@ -255,7 +255,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
   before(async () => {
     door = await openPushDoor({ suite: 'storedown', spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
     ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));
-    ({ getConfig } = await import('../../server/dist/config/loader.js'));
+    ({ getConfig, mutateConfig } = await import('../../server/dist/config/loader.js'));
     log = await import('../../server/dist/util/log.js');
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
@@ -319,6 +319,9 @@ describe('a store failure answers alike on every door', { skip }, () => {
    * over the first one's leftovers would be asked different questions and conclude about neither.
    */
   async function freshSpace() {
+    // A space act a door started and the failing store stopped is OWED, and an owed act closes its space to every writer until it is
+    // retried (bundle-106): what the last case left registered is not this case's subject.
+    mutateConfig(cfg => { delete cfg.pendingSpaceActs; delete cfg.pendingSpaceOp; });
     const files = path.join(process.env['DATA_ROOT'], 'files', S);
     fs.rmSync(files, { recursive: true, force: true });
     fs.mkdirSync(files, { recursive: true });
@@ -398,6 +401,8 @@ describe('a store failure answers alike on every door', { skip }, () => {
       const networks = getConfig().networks;
       failing = true;
       for (const d of all) {
+        // A door that started a space act the failing store stopped leaves it owed, closing the space to the doors after it.
+        if (getConfig().pendingSpaceActs || getConfig().pendingSpaceOp) mutateConfig(cfg => { delete cfg.pendingSpaceActs; delete cfg.pendingSpaceOp; });
         if (!d.variant) { results.push({ d, a: await ask(d) }); continue; }
         networks.push(structuredClone(NETWORK));
         try { results.push({ d, a: await ask(d) }); } finally {

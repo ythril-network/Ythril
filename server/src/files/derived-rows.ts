@@ -27,6 +27,7 @@ import { escapeRegex } from '../util/redos.js';
 import { derivedIdOwnerCandidate, idsUnder, isDerivedRowOf, movedRoot, type Sidecar } from './moved-paths.js';
 import { LIVE_FILE_ROW } from './live-file-row.js';
 import type { FileMetaDoc } from '../config/types.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /** `roots` and the ids of every file row derived from them, however deep (to `MAX_ANCESTRY`). */
 export async function rowsDerivedFrom(spaceId: string, roots: readonly string[]): Promise<Set<string>> {
@@ -86,6 +87,7 @@ export async function rowsOfFiles(spaceId: string, roots: readonly string[], own
  * extracted image go with it. It removes no bytes and not the roots' own rows, and a caller revokes the claims of the jobs first.
  */
 export async function deleteRowsDerivedFrom(spaceId: string, ids: ReadonlySet<string>): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   for (const part of inChunks([...ids], READ_CHUNK)) {
     await files.deleteMany(asFilter<FileMetaDoc>({ parentFileId: { $in: part } }));

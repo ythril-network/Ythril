@@ -45,6 +45,7 @@ import { spaceCollection } from '../../db/space-collection.js';
 import { replaceDerivedFileRows, type DerivedWriteOutcome } from '../derived-fields.js';
 import { mapLimit } from '../../util/map-limit.js';
 import { inChunks } from '../../util/chunks.js';
+import { assertSpaceTakesWrites } from '../../spaces/space-write-gate.js';
 
 export type InputFormat = 'pdf' | 'docx' | 'epub' | 'html' | 'md' | 'txt' | 'text' | 'auto';
 
@@ -649,6 +650,7 @@ export async function deleteConversionArtifacts(
  * the file's left the arrivals' rows, the directory's left those and the rows two levels down (bundle-71, Q-349).
  */
 async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[], owned: readonly Sidecar[]): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // The selection a move carries as well (`rowsOfFiles`): what the roots and the sidecars' rows leave, at every level.
   const { atSidecars, ids } = await rowsOfFiles(spaceId, roots, owned);

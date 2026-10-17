@@ -442,7 +442,7 @@ Content-Type: application/json
 { "confirm": true }
 ```
 
-**Response** `204`. If the space participates in a network, deletion requires a governance vote.
+**Response** `204` for a space in no network. A networked space is deleted by a governance vote and answers `200` or `202`, with `confirm: true` required.
 
 If cleanup partially fails (e.g. a collection drop or file deletion errors), the server returns `500` with error details. The space is **not** removed from config so the deletion can be retried. Check the response body for specifics:
 

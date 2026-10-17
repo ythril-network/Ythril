@@ -120,6 +120,10 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   // A vote round past its deadline ends without anyone's cast, relay or sync cycle touching it (`networks/round-expiry.ts`).
   const { startRoundExpiry } = await import('./networks/round-expiry.js');
   startRoundExpiry();
+  // Space acts on disk (a deletion, wipe or rename registered and not completed) are finished AFTER listen, each space isolated, never
+  // in phase 1: a body that throws there would skip the rest of the boot. Until then their spaces already take no writes.
+  const { resumeSpaceActs } = await import('./spaces/space-act-runner.js');
+  afterListening(() => void resumeSpaceActs().catch(err => log.warn('Resume of space acts stopped:', err)));
   const { startBackupScheduler } = await import('./db/backup-scheduler.js');
   startBackupScheduler();
   const { startDupeScanner } = await import('./brain/dupe-scanner.js');

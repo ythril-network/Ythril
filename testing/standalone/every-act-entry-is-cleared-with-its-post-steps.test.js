@@ -86,7 +86,8 @@ describe('an act entry is removed only inside the completion\'s one config write
   });
 
   it('the postSteps are carried on the entry (X1), and forgetReceiveMarks lives beside setMemberSpaceMark in sync/member-space-mark.ts', () => {
-    assert.match(requireSource('server/src/config/types.ts'), /postSteps\s*:\s*\{[^}]*forgetReceiveMarks/s, 'SpaceActEntry carries no postSteps.forgetReceiveMarks');
+    // `SpaceActEntry` is declared in its own module (`types.ts` is frozen by the size ratchet and re-exports it).
+    assert.match(requireSource('server/src/config/types-space-acts.ts'), /postSteps\s*:\s*\{[^}]*forgetReceiveMarks/s, 'SpaceActEntry carries no postSteps.forgetReceiveMarks');
     assert.match(requireSource('server/src/sync/member-space-mark.ts'), /export\s+function\s+forgetReceiveMarks\s*\(/, 'forgetReceiveMarks is not exported from sync/member-space-mark.ts');
   });
 });

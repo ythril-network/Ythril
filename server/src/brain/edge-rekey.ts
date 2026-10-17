@@ -50,6 +50,7 @@ import type { EdgeDoc } from '../config/types.js';
 import { removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { rekeyedRow, FUNCTIONAL_GUARD } from '../sync/local-only-fields.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /**
  * The result of a re-key. `null` where the identity did not change, so a caller can fall through to its
@@ -168,6 +169,7 @@ export async function rekeyEdges(
   session?: ClientSession,
   functionalGuard?: string,
 ): Promise<Array<EdgeRekey | null>> {
+  assertSpaceTakesWrites(spaceId, 'edges');
   const instanceId = getConfig().instanceId;
   const planned = moves.map(({ existing, next }) => {
     const from = next.from ?? existing.from;

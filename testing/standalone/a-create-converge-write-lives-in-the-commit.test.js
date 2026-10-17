@@ -101,7 +101,7 @@ const EXEMPT = {
   'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors': 'suppression: removes vectors from stored records',
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones': 'sync: a peer\'s tombstones delete their records',
   'server/src/brain/candidate-prune.ts:pruneCandidateCollection': 'prunes candidate rows; the collection name is computed',
-  'server/src/spaces/lifecycle.ts:wipeSpace': 'the space wipe',
+  'server/src/spaces/lifecycle.ts:wipeSpaceUnqueued': 'the space wipe (its body, run by the space-act runner)',
   'server/src/spaces/_shared.ts:repairStaleSpaceIds': 'repair: rewrites a stale spaceId field in every collection',
   // sync ingest and import: the receiver stores what a peer or a restore sent, through ONE writer (`Q-107` part 1;
   // CLAUDE.md, "What a receiver does after the write"). It replaced `ingestBrainDoc` (push, import) and the pull's

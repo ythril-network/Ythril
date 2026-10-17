@@ -71,6 +71,7 @@ import { retagToLocalSpace } from './upsert-plan.js';
 import { authorises, deleteBound, MAX_ISSUER, type Delivery, type DeletionGround, type DeletionTarget } from './deletion-authority.js';
 import { unlabelFacesForEntities } from '../brain/entities.js';
 import { syncTombstonesAppliedTotal } from '../metrics/registry.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /**
  * The most tombstones one push request may carry. An honest sender pages at 500 (`pushTombstones`) and retries a
@@ -152,6 +153,9 @@ type HeldTarget = DeletionTarget & { seq?: number };
 export async function applyPeerTombstones(
   localSpaceId: string, raw: readonly unknown[], delivery: Delivery, where: string, opts: TombstoneApplyOptions = {},
 ): Promise<TombstoneApplyOutcome> {
+  // A peer's tombstones delete records of every family a page carries, as an exchange moves every family: any act standing for the
+  // space refuses them, as the hold refuses the exchange.
+  assertSpaceTakesWrites(localSpaceId);
   const out: TombstoneApplyOutcome = {
     admitted: 0, refused: [], declined: [], unknownTypes: [], maxSeq: 0, deleted: { issuer: 0, upstream: 0 },
   };

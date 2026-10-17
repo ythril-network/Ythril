@@ -84,6 +84,9 @@ export const HELP_DOCS = [
       // an integrator reads while writing a `typeSchemas` block, and the library is a different feature that
       // happens to reuse the same shape.
       'integration-guide/06a-schema-api.md', 'integration-guide/06b-schema-library-api.md',
+      // Deleting and wiping a space came out of 06 when that page reached its ceiling: a networked delete or wipe is a vote
+      // with three possible answers, and the integrator reading it is deciding how to branch on them.
+      'integration-guide/06c-space-deletion-and-wipe-api.md',
       'integration-guide/07-tokens-api.md', 'integration-guide/08-networks-api.md', 'integration-guide/08a-invite-api.md',
       'integration-guide/09-sync-api.md', 'integration-guide/10-mfa-and-conflicts.md',
       'integration-guide/11-setup-api.md', 'integration-guide/12-admin-api.md',

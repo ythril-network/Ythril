@@ -74,6 +74,8 @@ import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import type { ClientSession } from 'mongodb';
 import type { FileMetaDoc } from '../config/types.js';
 import { writeUnderClaim, type JobClaim } from './media/lease.js';
+import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
+import { assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
 
 /**
  * The processing state of a top-level file row. Every field is local: derived from this instance's copy of the bytes.
@@ -188,6 +190,8 @@ export function stripDerivedStages(): object[] {
  * @returns how many rows it stripped
  */
 export async function stripFlaggedRowsOnce(spaceId: string, limit: number): Promise<number> {
+  // Housekeeping: a space an act is emptying has nothing worth stripping, and the sweep must not count it a failure.
+  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isSpaceNotWritable(err)) return 0; throw err; }
   const owed = {
     deletedAt: { $exists: true },
     $or: [
@@ -291,6 +295,7 @@ export async function writeDerivedFields(o: {
   session?: ClientSession;
 }): Promise<DerivedWriteOutcome> {
   const { spaceId, collectionSuffix, tier, filter, parentFileId, set, unset, session } = o;
+  assertSpaceTakesWrites(spaceId, (BRAIN_COLLECTIONS as readonly string[]).includes(collectionSuffix) ? collectionSuffix as BrainCollection : undefined);
   refuseHashed('writeDerivedFields', [...Object.keys(set ?? {}), ...Object.keys(unset ?? {})]);
   /*
    * A FILE THAT IS GONE DROPS WHAT A WRITE WOULD ADD AND KEEPS WHAT IT WOULD REMOVE.
@@ -331,6 +336,7 @@ export async function writeDerivedFields(o: {
  * there would have created exactly the row it meant to refuse.
  */
 export async function upsertDerivedFileRow(spaceId: string, claim: JobClaim, doc: FileMetaDoc): Promise<DerivedWriteOutcome> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const parentFileId = doc.parentFileId;
   if (parentFileId === undefined) throw new Error('upsertDerivedFileRow: a derived row names the file it came from');
   return writeUnderClaim(spaceId, claim, async (session): Promise<DerivedWriteOutcome> => {
@@ -366,6 +372,7 @@ export async function replaceDerivedFileRows(
   docs: readonly FileMetaDoc[],
   opts: { batch: number },
 ): Promise<DerivedWriteOutcome> {
+  assertSpaceTakesWrites(spaceId, 'files');
   return writeUnderClaim(spaceId, claim, async (session): Promise<DerivedWriteOutcome> => {
     if (docs.length === 0) return 'written';
     if (!await parentIsLive(spaceId, parentFileId, session)) return 'gone';
@@ -405,6 +412,7 @@ export async function setDerivedExcerpt(spaceId: string, claim: JobClaim, filePa
 export async function updateDerivedFileRow(
   spaceId: string, claim: JobClaim, rowId: string, parentFileId: string, set: Record<string, unknown>,
 ): Promise<DerivedWriteOutcome> {
+  assertSpaceTakesWrites(spaceId, 'files');
   return writeUnderClaim(spaceId, claim, async (session): Promise<DerivedWriteOutcome> => {
     if (!await parentIsLive(spaceId, parentFileId, session)) return 'gone';
     const r = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
@@ -437,6 +445,7 @@ export async function setFileProcessingState(
   state: FileProcessingState,
   opts: { session?: ClientSession } = {},
 ): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const $set: Record<string, unknown> = {};
   const $unset: Record<string, ''> = {};
   const given = Object.keys(state);
@@ -527,6 +536,7 @@ export async function setDerivedDescriptionIfUnset(
    */
   descriptionSource?: MachineMadeSource,
 ): Promise<boolean> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const _id = toDocId(filePath);
   const self = authorRef().instanceId ?? null;
   /**

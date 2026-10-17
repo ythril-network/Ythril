@@ -36,7 +36,7 @@ import { withInstanceAdminGrants } from '../auth/instance-admin-grants.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { createSpace, type SpaceCreator } from '../spaces/lifecycle.js';
 import { localToRemote, remoteToLocal, recordSpaceAlias, reverseSpaceMap, isSpaceId, forgetSpaceAliases } from '../sync/space-map.js';
-import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
+import { forgetReceiveMarks } from '../sync/member-space-mark.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { SPACE_ALIAS_HEAL_OPERATION } from '../audit/middleware.js';
 import { log, peerList, peerText } from '../util/log.js';
@@ -216,9 +216,7 @@ export function removeSpaceFromNetwork(networkId: string, localId: string, why: 
   if (net.schemaLayers) delete net.schemaLayers[localId];
   if (net.schemaLayerUnread) delete net.schemaLayerUnread[localId];
   if (net.spaceOrigins) delete net.spaceOrigins[localId];
-  for (const member of net.members) {
-    for (const key of PER_SPACE_WATERMARKS) delete (member[key] as Record<string, unknown> | undefined)?.[localId];
-  }
+  forgetReceiveMarks(net, localId);
   if (net.pendingSpaces?.some(p => p.localId === localId)) net.pendingSpaces = net.pendingSpaces.filter(p => p.localId !== localId);
   saveConfig(cfg);
   log.info(`Network ${networkId}: space '${localId}' left the network (${why}); this instance keeps it as a local space`);

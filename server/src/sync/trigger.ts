@@ -42,9 +42,7 @@
 import type { Response } from 'express';
 import { log, peerText } from '../util/log.js';
 import { sendCaughtFailure } from '../api/send-failure.js';
-
-/** Distinguishes "the race timed out" from "the cycle threw", which need different status codes. */
-const TIMEOUT = Symbol('sync-trigger-timeout');
+import { withinTimeBound, isTimeBoundEnded } from '../util/time-bound.js';
 
 /** The `?timeoutMs` bound: caller's value, clamped, defaulting to 30s. */
 export function syncTimeoutMs(raw: unknown): number {
@@ -72,15 +70,11 @@ export async function triggerNetworkSync(
     return;
   }
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(TIMEOUT), opts.timeoutMs);
-  });
   try {
-    const r = await Promise.race([runSyncForNetwork(networkId), timeout]);
+    const r = await withinTimeBound(runSyncForNetwork(networkId), opts.timeoutMs, `the sync cycle of network ${networkId}`);
     res.json({ ok: true, status: 'completed', networkId, synced: r.synced, errors: r.errors, ...note });
   } catch (err) {
-    if (err === TIMEOUT) {
+    if (isTimeBoundEnded(err)) {
       // 504 and NOT an error: the cycle is still running, and saying "failed" would send an operator
       // looking for a fault that does not exist.
       res.status(504).json({ ok: false, status: 'timeout', networkId, timeoutMs: opts.timeoutMs, ...note });
@@ -91,8 +85,6 @@ export async function triggerNetworkSync(
       sendCaughtFailure(res, `synchronous sync trigger for network ${peerText(networkId)}`, err,
         { ok: false, status: 'error', networkId, error: err instanceof Error ? err.message : String(err), ...note });
     }
-  } finally {
-    clearTimeout(timer);
   }
 }
 

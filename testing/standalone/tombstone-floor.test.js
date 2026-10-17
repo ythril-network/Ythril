@@ -324,8 +324,10 @@ describe('the pull handler is actually wired to record it', () => {
      * The source loops `PER_SPACE_WATERMARKS` now, and the derivation of what belongs on that list — every
      * per-space map on the member interface — is shared, so this asks the same question the other two ask.
      */
+    // The rename carries the marks through `moveReceiveMarks` (bundle-106), which loops the list beside the wipe's forget.
     const rename = readFileSync(join(ROOT, 'server/src/spaces/rename.ts'), 'utf8');
-    assert.match(rename, /for \(const key of PER_SPACE_WATERMARKS\)/,
+    assert.match(rename, /\bmoveReceiveMarks\s*\(/, 'the rename no longer carries its watermarks through the one loop');
+    assert.match(readFileSync(join(ROOT, 'server/src/sync/member-space-mark.ts'), 'utf8'), /for \(const key of PER_SPACE_WATERMARKS\)/,
       'the rename carries its watermarks by name again, so the next one added is carried by nobody');
     assert.ok(memberWatermarks().includes('lastSeqServed'),
       'lastSeqServed is no longer a per-space map on NetworkMember — this floor has moved, re-anchor here');
