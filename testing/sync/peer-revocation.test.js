@@ -246,12 +246,11 @@ describe('Peer credential revocation (H7)', () => {
       await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
       await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
 
-      // A opens + concludes the remove vote for B
+      // A removes B. The subject does not vote on its own removal, so A is the only voter, and since D-36 (bundle-106) A's yes is
+      // cast when the round opens: the removal passes AT OPEN and concludes in the request, 204 (it was 202 and a second call
+      // casting yes). The conclusion's side effects — B told `member_removed`, credentials revoked — are what the tests below ask.
       const removeR = await del(INSTANCES.a, tokenA, `/api/networks/${nid}/members/${instanceIdB}`);
-      assert.equal(removeR.status, 202, JSON.stringify(removeR.body));
-      const voteR = await post(INSTANCES.a, tokenA, `/api/networks/${nid}/votes/${removeR.body.roundId}`, { vote: 'yes' });
-      assert.equal(voteR.status, 200, JSON.stringify(voteR.body));
-      assert.equal(voteR.body.concluded, true);
+      assert.equal(removeR.status, 204, `the removal passes at open on A's own yes (D-36): ${JSON.stringify(removeR.body)}`);
 
       // Wait until B has processed member_removed
       await waitFor(async () => readContainerConfig('ythril-b').ejectedFromNetworks?.includes(nid));

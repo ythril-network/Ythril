@@ -3,8 +3,9 @@
  *
  * ## What each case builds, and why none of them can end early
  *
- * A democratic network ALWAYS opens a round to add a member (`addMemberAct`: 202 for `closed` and `democratic`, never
- * the direct 201), so each case asserts the 202 rather than branching on it. These cases used to branch — "if it
+ * A democratic network ALWAYS opens a round to add a member, and the proposer's yes is in it from the start (D-36). Where
+ * that yes is the majority — A alone, the first case — the round passes at open and the add answers 201; everywhere else
+ * it answers 202. Each case asserts the one its setup makes rather than branching on it. These cases used to branch — "if it
  * auto-added, this is also valid; skip" — and to skip when the network held fewer than two members; both branches
  * were unreachable guesses about a setup the test never made, and each ended the case green having voted on nothing.
  *
@@ -53,8 +54,9 @@ describe('Democratic network (3-member voting)', () => {
     const bPeer = await post(INSTANCES.b, tokenB, '/api/tokens', { name: 'dem-peer-a' });
     assert.equal(bPeer.status, 201);
 
-    // Democratic networks require a vote — even for the first member. With no other member the electorate is A alone,
-    // so A's own yes is a majority and the round concludes on it.
+    // Democratic networks put every join to a vote — even the first member's. With no other member the electorate is A alone,
+    // and since D-36 (bundle-106) the proposer's yes is cast when the round opens, so it is the majority AT OPEN: the round
+    // concludes in the request and B is admitted, 201 (it was 202 and a second call casting the yes).
     const addB = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
       instanceId: 'instance-b-dem',
       label: 'Instance B',
@@ -62,13 +64,11 @@ describe('Democratic network (3-member voting)', () => {
       token: bPeer.body.plaintext,
       direction: 'both',
     });
-    assert.equal(addB.status, 202, `A democratic network puts every join to a vote: ${JSON.stringify(addB.body)}`);
-
-    const roundId = addB.body.roundId;
-    const vote = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
-    assert.equal(vote.status, 200);
-    assert(vote.body.concluded, `Round should conclude after majority vote`);
-    console.log(`  Vote concluded: ${vote.body.concluded}`);
+    assert.equal(addB.status, 201, `A's own yes is the majority of a sole-member democratic network, so the join passes at open (D-36): ${JSON.stringify(addB.body)}`);
+    const net = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}`);
+    assert.ok(net.body.members?.some(m => m.instanceId === 'instance-b-dem'), 'B was not admitted by the join that passed at open');
+    const rounds = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes`);
+    assert.deepEqual((rounds.body.rounds ?? []).filter(r => r.type === 'join' && !r.concluded), [], 'a join the proposer alone decides left an open round');
   });
 
   it('Veto blocks a join round immediately', async () => {

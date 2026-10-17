@@ -210,6 +210,17 @@ describe('Network voting — closed (unanimous)', () => {
     });
     assert.equal(r.status, 201);
     networkId = r.body.id;
+
+    // D-36 (bundle-106): the proposer counts as a yes on every join, so on a closed network whose only member is A the add passes AT
+    // OPEN (201, admitted). A seed member first makes the add below need a yes beside A's own, which is the round this suite asks about.
+    const seed = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
+      instanceId: `closed-vote-seed-${Date.now()}`,
+      label: 'Closed Vote Seed',
+      url: 'http://ythril-c:3200',
+      token: 'ythril_peer_test_token_seed_not_used_for_real_auth',
+      direction: 'both',
+    });
+    assert.equal(seed.status, 201, `Seed add on a sole-member closed network passes at open (D-36): ${JSON.stringify(seed.body)}`);
   });
 
   it('Add member to closed network opens a voting round', async () => {

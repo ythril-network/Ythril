@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, delWithBody, reqJson, triggerSync, waitFor } from './helpers.js';
+import { dockerExec, INSTANCES, post, get, del, delWithBody, reqJson, triggerSync, makeTriggerProbe, waitFor } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -285,17 +285,22 @@ describe('Vote propagation via gossip', () => {
     const bVote = await post(INSTANCES.b, tokenB, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
     assert.ok([200, 201].includes(bVote.status), `B votes yes: ${JSON.stringify(bVote.body)}`);
 
-    // A triggers sync — should pull B's yes vote from B's open round list
+    // B's yes reaches A by either half of the gossip. Since D-36 (bundle-106) A's own yes was cast when the round opened, so B's yes
+    // completes the closed network's unanimity and B concludes the round at once — and a passed JOIN is not served once concluded
+    // (only space and schema rounds are, `SERVED_ONCE_PASSED`), so A's pull no longer finds it on B's open list. B's cycle PUSHES its
+    // cast to A (`propagateVotesWithPeer`), so B syncs too, re-triggered on every poll; A's sync pulls whatever is still open.
+    const pushFromB = makeTriggerProbe(INSTANCES.b, tokenB, networkId, 'B');
     await triggerSync(INSTANCES.a, tokenA, networkId);
 
     await waitFor(async () => {
+      await pushFromB();
       const r = await get(INSTANCES.a, tokenA, `/api/sync/networks/${networkId}/votes`);
       if (r.status !== 200) return false;
       const rnd = r.body.rounds.find(rn => rn.roundId === roundId);
       // Round may already be concluded (all remote voters voted) — that also proves the vote arrived
       if (!rnd) return true;
       return rnd.votes?.some(v => v.instanceId === instanceIdB && v.vote === 'yes');
-    });
+    }, 30_000, 1_000, pushFromB.diagnose);
   });
 
   it('A veto relayed via gossip concludes the round on B', async () => {

@@ -3,11 +3,10 @@
  *
  * Covers:
  *  - GET /api/networks/:id/votes: list rounds, empty when none pending
- *  - POST /api/networks/:id/votes/:roundId: cast yes → member added / member removed
- *  - POST /api/networks/:id/votes/:roundId: cast veto → member blocked / member kept
+ *  - a join or removal the proposer's own yes decides (D-36) → 201 / 204 at open, no round left behind
+ *  - POST /api/networks/:id/votes/:roundId: cast veto → member blocked
  *  - Invalid vote value → 400
  *  - Vote on non-existent round → 404
- *  - Re-voting on an already-concluded round → 409 or 404
  *
  * Targets instance A (port 3200) only. No sync stack required.
  *
@@ -40,9 +39,9 @@ async function createClosedNetwork() {
   return r.body.id;
 }
 
-/** Open a join vote by adding a member to a closed network. Returns roundId. */
-async function openJoinRound(networkId, instanceId = undefined) {
-  const iid = instanceId ?? `vote-member-${run}-${Date.now()}`;
+/** Ask instance A to add a member to a network; the raw answer and the member's id. */
+async function addMember(networkId) {
+  const iid = `vote-member-${run}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const r = await post(INSTANCES.a, token, `/api/networks/${networkId}/members`, {
     instanceId: iid,
     label: `Vote Test Member ${iid}`,
@@ -50,8 +49,27 @@ async function openJoinRound(networkId, instanceId = undefined) {
     token: `ythril_vote_test_token_${iid}`,
     direction: 'both',
   });
+  return { r, instanceId: iid };
+}
+
+/**
+ * Admit a member to a closed network whose only member is A. D-36 (bundle-106): the proposer counts as a yes on every join, and with no
+ * other member that yes is the whole quorum, so the add passes AT OPEN: 201 with the member, no round (it was 202 and a second call).
+ */
+async function admitAtOnce(networkId) {
+  const { r, instanceId } = await addMember(networkId);
+  assert.equal(r.status, 201, `Admit at open (D-36): ${JSON.stringify(r.body)}`);
+  return instanceId;
+}
+
+/**
+ * Open a join vote that stays open: the network must already hold another member (see {@link admitAtOnce}), whose yes a closed
+ * network needs beside A's own. Returns the round id.
+ */
+async function openJoinRound(networkId) {
+  const { r, instanceId } = await addMember(networkId);
   assert.equal(r.status, 202, `Open join round: ${JSON.stringify(r.body)}`);
-  return { roundId: r.body.roundId, instanceId: iid };
+  return { roundId: r.body.roundId, instanceId };
 }
 
 async function isMember(networkId, instanceId) {
@@ -69,6 +87,8 @@ describe('Votes API — list rounds', () => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
     run = Date.now();
     networkId = await createClosedNetwork();
+    // A second member, so the join below needs a yes beside A's own and stays open (D-36).
+    await admitAtOnce(networkId);
   });
 
   after(async () => {
@@ -100,41 +120,42 @@ describe('Votes API — list rounds', () => {
 
 // ── Join vote — yes ────────────────────────────────────────────────────────────
 
-describe('Votes API — join round: yes vote adds member', () => {
+// The proposer's yes is a cast from the start (D-36, bundle-106), so the old "open, then cast yes, then concluded" sequence of a sole
+// member no longer exists: where that yes is the quorum the join passes AT OPEN. A round that stays open needs another voter, and A
+// cannot supply that voter's yes — so the yes path is the at-open one, and the cast paths below are the veto and the error paths.
+describe('Votes API — join round: the proposer\'s yes admits the member at once on a sole-member closed network (D-36)', () => {
   let networkId;
   let memberId;
-  let roundId;
 
   before(async () => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
     run = Date.now();
     networkId = await createClosedNetwork();
-    const res = await openJoinRound(networkId);
-    roundId = res.roundId;
-    memberId = res.instanceId;
   });
 
   after(async () => {
     if (networkId) await del(INSTANCES.a, token, `/api/networks/${networkId}`).catch(() => {});
   });
 
-  it('Member is NOT in the network while vote is pending', async () => {
-    assert.equal(await isMember(networkId, memberId), false, 'Member must not be present while vote is pending');
+  it('The add answers 201 with the member: the proposer\'s yes concluded the round at open', async () => {
+    memberId = await admitAtOnce(networkId);
   });
 
-  it('Casting yes concludes the round and returns concluded: true', async () => {
-    const r = await post(INSTANCES.a, token, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
+  it('Member IS in the network once the add answered', async () => {
+    assert.equal(await isMember(networkId, memberId), true, 'Member must be added when the proposer\'s yes passes the join');
+  });
+
+  it('No open join round is left behind', async () => {
+    const r = await get(INSTANCES.a, token, `/api/networks/${networkId}/votes`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.concluded, true, 'Round must be marked concluded after a unanimous-solo yes');
+    assert.deepEqual(r.body.rounds.filter(rnd => rnd.type === 'join' && !rnd.concluded), [], 'a join the proposer alone decides left an open round');
   });
 
-  it('Member IS in the network after yes vote passes', async () => {
-    assert.equal(await isMember(networkId, memberId), true, 'Member must be added after yes vote');
-  });
-
-  it('Voting again on a concluded round returns 409 or 404', async () => {
-    const r = await post(INSTANCES.a, token, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
-    assert.ok(r.status === 409 || r.status === 404, `Expected 409 or 404, got ${r.status}: ${JSON.stringify(r.body)}`);
+  it('Adding the same member again is refused 409', async () => {
+    const r = await post(INSTANCES.a, token, `/api/networks/${networkId}/members`, {
+      instanceId: memberId, label: 'again', url: 'http://vote-test.internal:3200', token: `ythril_vote_test_token_${memberId}`, direction: 'both',
+    });
+    assert.equal(r.status, 409, `Expected 409, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 });
 
@@ -149,6 +170,7 @@ describe('Votes API — join round: veto blocks member', () => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
     run = Date.now();
     networkId = await createClosedNetwork();
+    await admitAtOnce(networkId);   // another voter, so the join stays open past A's own yes (D-36)
     const res = await openJoinRound(networkId);
     roundId = res.roundId;
     memberId = res.instanceId;
@@ -159,6 +181,7 @@ describe('Votes API — join round: veto blocks member', () => {
   });
 
   it('Casting veto concludes the round immediately', async () => {
+    // A's veto replaces the yes it cast as proposer; on a closed network one veto fails the round.
     const r = await post(INSTANCES.a, token, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'veto' });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.concluded, true, 'Veto must conclude the round immediately');
@@ -178,21 +201,17 @@ describe('Votes API — join round: veto blocks member', () => {
 
 // ── Remove vote — yes ──────────────────────────────────────────────────────────
 
-describe('Votes API — remove round: yes vote removes member', () => {
+// The subject of a removal does not vote on it, so on a closed network of A and one member A's own yes — cast as proposer, D-36 — is the
+// whole quorum: the removal passes AT OPEN and answers 204 (guide 08, Remove Member). It was 202 and a second call casting yes.
+describe('Votes API — remove round: the proposer\'s yes removes the member at once when it is the quorum (D-36)', () => {
   let networkId;
   let memberId;
-  let removeRoundId;  // set in first test, used by subsequent tests
 
   before(async () => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
     run = Date.now();
     networkId = await createClosedNetwork();
-
-    // Add a member and approve the join vote so the member is actually present
-    const { roundId, instanceId } = await openJoinRound(networkId);
-    memberId = instanceId;
-    await post(INSTANCES.a, token, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
-
+    memberId = await admitAtOnce(networkId);
     assert.equal(await isMember(networkId, memberId), true, 'Member must be present before remove test');
   });
 
@@ -200,60 +219,25 @@ describe('Votes API — remove round: yes vote removes member', () => {
     if (networkId) await del(INSTANCES.a, token, `/api/networks/${networkId}`).catch(() => {});
   });
 
-  it('DELETE member on closed network opens a remove vote round (202)', async () => {
+  it('DELETE member answers 204: the removal passed at open', async () => {
     const resp = await del(INSTANCES.a, token, `/api/networks/${networkId}/members/${memberId}`);
-    assert.equal(resp.status, 202, `Expected 202 vote_pending, got ${resp.status}: ${JSON.stringify(resp.body)}`);
-    assert.ok(resp.body.roundId, 'roundId must be returned for remove round');
-    removeRoundId = resp.body.roundId;
+    assert.equal(resp.status, 204, `Expected 204 (D-36: removed at open), got ${resp.status}: ${JSON.stringify(resp.body)}`);
   });
 
-  it('Member is still present while remove vote is pending', async () => {
-    assert.equal(await isMember(networkId, memberId), true, 'Member must still be present while remove vote is pending');
-  });
-
-  it('Yes vote on remove round concludes and removes the member', async () => {
-    assert.ok(removeRoundId, 'removeRoundId must have been captured by the preceding test');
-    const r = await post(INSTANCES.a, token, `/api/networks/${networkId}/votes/${removeRoundId}`, { vote: 'yes' });
+  it('The member is gone and no open remove round is left behind', async () => {
+    assert.equal(await isMember(networkId, memberId), false, 'Member must be removed when the proposer\'s yes passes the removal');
+    const r = await get(INSTANCES.a, token, `/api/networks/${networkId}/votes`);
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.concluded, true, 'Round must be concluded after yes');
-    assert.equal(await isMember(networkId, memberId), false, 'Member must be removed after yes vote');
+    assert.deepEqual(r.body.rounds.filter(rnd => rnd.type === 'remove' && !rnd.concluded), [], 'a removal the proposer alone decides left an open round');
   });
 });
 
 // ── Remove vote — veto ─────────────────────────────────────────────────────────
 
-describe('Votes API — remove round: veto keeps member', () => {
-  let networkId;
-  let memberId;
-  let removeRoundId;
-
-  before(async () => {
-    token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
-    run = Date.now();
-    networkId = await createClosedNetwork();
-
-    const { roundId, instanceId } = await openJoinRound(networkId);
-    memberId = instanceId;
-    await post(INSTANCES.a, token, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
-
-    // Open a remove round
-    const delR = await del(INSTANCES.a, token, `/api/networks/${networkId}/members/${memberId}`);
-    assert.equal(delR.status, 202, `Expected 202 remove round, got ${delR.status}: ${JSON.stringify(delR.body)}`);
-    removeRoundId = delR.body.roundId;
-  });
-
-  after(async () => {
-    if (networkId) await del(INSTANCES.a, token, `/api/networks/${networkId}`).catch(() => {});
-  });
-
-  it('Veto on remove round concludes and keeps the member', async () => {
-    const r = await post(INSTANCES.a, token, `/api/networks/${networkId}/votes/${removeRoundId}`, { vote: 'veto' });
-    assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.equal(r.body.concluded, true, 'Veto must conclude the round');
-
-    assert.equal(await isMember(networkId, memberId), true, 'Member must be retained after remove veto');
-  });
-});
+// "Veto on a remove round keeps the member" is not reachable from one instance any more: a removal stays open only while a member
+// other than A and the subject must vote, and A cannot admit that member on its own yes (a closed join needs every member's yes, D-36).
+// The veto of an open round on this door is held by "join round: veto blocks member" above; a vetoed REMOVAL needs a third member that
+// votes, which is a multi-instance (sync stack) scenario, not this single-instance file.
 
 // ── Error paths ────────────────────────────────────────────────────────────────
 
@@ -265,6 +249,7 @@ describe('Votes API — error paths', () => {
     token = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
     run = Date.now();
     networkId = await createClosedNetwork();
+    await admitAtOnce(networkId);   // another voter, so the round below stays open (D-36)
     const res = await openJoinRound(networkId);
     roundId = res.roundId;
   });

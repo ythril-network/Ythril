@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody, reqJson, waitFor, readRecord, mirroredNetwork } from './helpers.js';
+import { INSTANCES, post, get, delWithBody, waitFor, readRecord, mirroredNetwork } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -56,8 +56,10 @@ describe('a passed space deletion round', () => {
     assert.equal(w.status, 201, JSON.stringify(w.body));
     factId = w.body._id;
 
-    const d = await reqJson(INSTANCES.a, tokenA, `/api/spaces/${SPACE}`, { method: 'DELETE' });
+    // A networked delete asks for `confirm` (bundle-106); on a closed network of A and B it opens the round (202 vote_pending).
+    const d = await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${SPACE}`, { confirm: true });
     assert.equal(d.status, 202, JSON.stringify(d.body));
+    assert.equal(d.body?.status, 'vote_pending', JSON.stringify(d.body));
     const roundId = d.body.rounds?.[0]?.roundId;
     assert.ok(roundId, 'a round is opened');
 

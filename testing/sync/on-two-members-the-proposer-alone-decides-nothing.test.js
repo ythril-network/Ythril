@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody, reqJson, mirroredNetwork } from './helpers.js';
+import { INSTANCES, post, get, delWithBody, mirroredNetwork } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -54,8 +54,10 @@ for (const type of ['closed', 'democratic']) {
     });
 
     it('A proposes a space deletion; after several cycles it is still open on B, and B keeps its space', async () => {
-      const d = await reqJson(INSTANCES.a, tokenA, `/api/spaces/${SPACE}`, { method: 'DELETE' });
+      // A networked delete asks for `confirm` (bundle-106); on two voting members it opens the round, 202 vote_pending.
+      const d = await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${SPACE}`, { confirm: true });
       assert.equal(d.status, 202, JSON.stringify(d.body));
+      assert.equal(d.body?.status, 'vote_pending', JSON.stringify(d.body));
       roundId = d.body.rounds?.[0]?.roundId;
       assert.ok(roundId);
       // Each cycle carries A's open round to B. Before the fix B adopted it and passed it within that same cycle, so
