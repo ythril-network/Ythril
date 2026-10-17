@@ -46,8 +46,7 @@ import type { AuthorRef, EdgeDoc, LinkDoc, TombstoneDoc } from '../../config/typ
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
 import { COMMIT_ORDER, PLAN_KINDS, type CommitOutcome, type PlanKind, type WritePlan } from './types.js';
-import { assertSpaceTakesWrites, isSpaceNotWritable } from '../../spaces/space-write-gate.js';
-import { enterSpaceWrite } from '../../sync/space-transfer-fence.js';
+import { admitSpaceWrite, admitSpaceWriteUnit, assertSpaceTakesWrites, isSpaceNotWritable } from '../../spaces/space-write-gate.js';
 
 /** Insert-time duplicate rules run at most this many at once — each is a vector search. */
 const DUPE_RULE_CONCURRENCY = 4;
@@ -77,14 +76,14 @@ export async function commitPlans(spaceId: string, plans: readonly WritePlan[]):
     // Asked per STAGE: a long write admitted before a deletion or wipe registered stops at its next stage. Before anything
     // landed the refusal is the request's answer (409); after, it is this stage's items' outcome, and the caller is told what
     // landed — a stored record reported failed would invite a duplicating resend.
+    let leaveWriteUnit: () => void;
     try {
-      assertSpaceTakesWrites(spaceId, PLAN_KINDS[kind].collection);
+      leaveWriteUnit = admitSpaceWriteUnit(spaceId, PLAN_KINDS[kind].collection);
     } catch (err) {
       if (landed.length === 0 || !isSpaceNotWritable(err)) throw err;
       for (const i of ready) outcomes[i] = { ok: false, reason: err.message };
       continue;
     }
-    const leaveWriteUnit = enterSpaceWrite(spaceId);
     let stageLanded: number[];
     try {
       stageLanded = await writeStage(spaceId, kind, plans, ready, outcomes, landed.length > 0);
@@ -194,12 +193,15 @@ export async function clearStaleWriteGuard(
 ): Promise<boolean> {
   // A space whose edges an act is removing has no stale marker worth clearing: not cleared, never a failure of the caller's
   // own work (an index build at boot meets one too).
-  try { assertSpaceTakesWrites(spaceId, 'edges'); } catch (err) { if (isSpaceNotWritable(err)) return false; throw err; }
-  const res = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).updateOne(
-    asFilter<EdgeDoc>({ _id: holder._id, [FUNCTIONAL_GUARD]: guard, from: holder.from, label: holder.label }),
-    asUpdate<EdgeDoc>({ $unset: UNSET_GUARD }),
-  );
-  return res.modifiedCount === 1;
+  try {
+    return await admitSpaceWrite(spaceId, 'edges', async () => {
+      const res = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).updateOne(
+        asFilter<EdgeDoc>({ _id: holder._id, [FUNCTIONAL_GUARD]: guard, from: holder.from, label: holder.label }),
+        asUpdate<EdgeDoc>({ $unset: UNSET_GUARD }),
+      );
+      return res.modifiedCount === 1;
+    });
+  } catch (err) { if (isSpaceNotWritable(err)) return false; throw err; }
 }
 
 /** The driver operation for one plan, stamped with its seq. */
@@ -286,6 +288,7 @@ export interface LinkReconcile {
 export async function reconcileLinkRows(
   spaceId: string, records: readonly LinkReconcile[], opts: { additive?: boolean } = {},
 ): Promise<Array<{ added: number; removed: number }>> {
+  // Refused before the rows are read; the removals and additions below are admitted and counted again, at the instant they are made.
   assertSpaceTakesWrites(spaceId, 'links');
   const wantedBy = records.map(r => {
     const wanted = new Map<string, { to: string; toKind: RefKind }>();
@@ -328,25 +331,28 @@ export async function reconcileLinkRows(
 
   const tombstones = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
   const now = new Date().toISOString();
-  if (removals.length > 0) {
-    // The rows go, then their tombstones — one seq block taken at their write, each carrying the row's seq.
-    await linksColl.deleteMany(asFilter<LinkDoc>({ _id: { $in: removals }, spaceId }));
-    await writeTombstones(spaceId, removals.map(_id => ({ _id, type: 'link', deletedAt: now, originalSeq: seqOfExisting.get(_id) })));
-  }
-  if (additions.length > 0) {
-    await withAllocatedSeqs(spaceId, additions.length, async (first) => {
-      await linksColl.bulkWrite(asBulk(additions.map(({ _id, r, to, toKind }, i) => ({
-        replaceOne: {
-          filter: { _id, spaceId },
-          replacement: {
-            _id, spaceId, from: r.from, fromKind: r.fromKind, to, toKind, author: r.author,
-            createdAt: now, updatedAt: now, seq: first + i,
-          } satisfies LinkDoc,
-          upsert: true,
-        },
-      }))), { ordered: false });
-      await tombstones.deleteMany(asFilter<TombstoneDoc>({ _id: { $in: additions.map(a => a._id) } }));
-    }, 'link.reconcile.add');
-  }
+  // The removals and the additions are ONE admitted and counted unit (`admitSpaceWrite`): the additions CREATE link rows.
+  await admitSpaceWrite(spaceId, 'links', async () => {
+    if (removals.length > 0) {
+      // The rows go, then their tombstones — one seq block taken at their write, each carrying the row's seq.
+      await linksColl.deleteMany(asFilter<LinkDoc>({ _id: { $in: removals }, spaceId }));
+      await writeTombstones(spaceId, removals.map(_id => ({ _id, type: 'link', deletedAt: now, originalSeq: seqOfExisting.get(_id) })));
+    }
+    if (additions.length > 0) {
+      await withAllocatedSeqs(spaceId, additions.length, async (first) => {
+        await linksColl.bulkWrite(asBulk(additions.map(({ _id, r, to, toKind }, i) => ({
+          replaceOne: {
+            filter: { _id, spaceId },
+            replacement: {
+              _id, spaceId, from: r.from, fromKind: r.fromKind, to, toKind, author: r.author,
+              createdAt: now, updatedAt: now, seq: first + i,
+            } satisfies LinkDoc,
+            upsert: true,
+          },
+        }))), { ordered: false });
+        await tombstones.deleteMany(asFilter<TombstoneDoc>({ _id: { $in: additions.map(a => a._id) } }));
+      }, 'link.reconcile.add');
+    }
+  });
   return counts;
 }

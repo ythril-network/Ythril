@@ -39,7 +39,7 @@ import { syntheticEdgeId } from './edge-id.js';
 export type { TraverseEdge } from './traverse-subgraph.js';
 import type { TraverseEdge } from './traverse-subgraph.js';
 import { atReadSeq } from '../db/at-read-seq.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 export interface TraverseNode {
   _id: string;
@@ -223,6 +223,7 @@ export async function updateEdgeById(
   /** See `upsertEdge`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<EdgeDoc | null> {
+  // Refused before anything is read; the writes below (the re-key, or the in-place update) are admitted and counted again, at the instant they are made.
   assertSpaceTakesWrites(spaceId, 'edges');
   const collection = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
   const existing = await collection.findOne(asFilter<EdgeDoc>({ _id: id, spaceId }),
@@ -425,7 +426,8 @@ export async function updateEdgeById(
     if (functionalGuard !== undefined) $set[FUNCTIONAL_GUARD] = functionalGuard; else Object.assign($unset, UNSET_GUARD);
   }
   let seq = 0;
-  const writeInPlace = () => withSeq(spaceId, (s) => {
+  // Admitted and counted from its own check (`admitSpaceWrite`), each time it is attempted; a relabel that moved the edge was counted by `rekeyEdges`.
+  const writeInPlace = () => admitSpaceWrite(spaceId, 'edges', () => withSeq(spaceId, (s) => {
     seq = s;
     const updateOp: Record<string, unknown> = { $set: { ...$set, seq } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
@@ -434,7 +436,7 @@ export async function updateEdgeById(
       asUpdate<EdgeDoc>(updateOp),
       { returnDocument: 'before' },
     );
-  }, 'edge.update') as Promise<EdgeDoc | null>;
+  }, 'edge.update')) as Promise<EdgeDoc | null>;
   const beforeWrite = relabelled ? await writeRelabel(spaceId, relabelTarget, functionalGuard, writeInPlace, classify) : await writeInPlace();
   brainWriteSeqTotal.labels({
     collection: 'edges',

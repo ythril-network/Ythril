@@ -28,6 +28,7 @@ import { getConfig, isConfigLoaded } from '../config/loader.js';
 import type { Config } from '../config/types.js';
 import type { BrainCollection } from '../config/types-knowledge.js';
 import { spaceActStands, type SpaceActStanding } from './space-act-runner.js';
+import { enterSpaceWrite } from '../sync/space-transfer-fence.js';
 
 /** Why a space takes no writes: the act standing for it. */
 export type SpaceWriteClosedCode = 'space_being_wiped' | 'space_being_deleted' | 'space_being_renamed';
@@ -67,12 +68,55 @@ export function spaceWriteRefusal(spaceId: string, family?: BrainCollection, opt
   return refusalFor(cfg, spaceId, spaceActStands(cfg, spaceId, { types: family ? [family] : undefined, except: opts.except }))?.why ?? null;
 }
 
-/** Throw {@link SpaceNotWritableError} unless `spaceId` may take a write of `family` now. `except`: the asking act's own entry. */
-export function assertSpaceTakesWrites(spaceId: string, family?: BrainCollection, opts: { except?: string } = {}): void {
+/** What a write touches: one family, several (a tombstone write names the families of the records it buries), or none for every family. */
+export type WriteFamilies = BrainCollection | readonly BrainCollection[] | undefined;
+
+/**
+ * Throw {@link SpaceNotWritableError} unless `spaceId` may take a write of `family` now. `except`: the asking act's own entry. A CHECK that
+ * writes nothing: a writer asks through {@link admitSpaceWrite} or {@link admitSpaceWriteUnit}, which count what they admit; this stands alone
+ * only where a function refuses before a write another function admits and counts (a door's early refusal ahead of the commit's own stages)
+ * or passes a refused space over (housekeeping).
+ */
+export function assertSpaceTakesWrites(spaceId: string, family?: WriteFamilies, opts: { except?: string } = {}): void {
   if (!isConfigLoaded()) return;
   const cfg = getConfig();
-  const r = refusalFor(cfg, spaceId, spaceActStands(cfg, spaceId, { types: family ? [family] : undefined, except: opts.except }));
+  const types = family === undefined ? undefined : typeof family === 'string' ? [family] : [...family];
+  const r = refusalFor(cfg, spaceId, spaceActStands(cfg, spaceId, { types, except: opts.except }));
   if (r) throw new SpaceNotWritableError(spaceId, r.why, r.code);
+}
+
+/**
+ * ADMIT one write unit of `spaceId` and count it: ask the gate and enter the fence in ONE synchronous step, and return the release. The
+ * pair nothing may split — a unit admitted by its check and counted only after an await is admitted and yet invisible to the drain of an
+ * act that registers in the gap (the act drains at once, deletes, and the write lands in what it emptied). Throws
+ * {@link SpaceNotWritableError} before anything is counted, so a refusal leaves no count. For a writer whose unit is not one closure (the
+ * commit's stage loop, the arrival writer's chunk loop); everything else calls {@link admitSpaceWrite}, which cannot forget the release.
+ *
+ * `family` names what the write touches (none: every family); `except` is the asking act's own entry (an act's body writes its own space).
+ */
+export function admitSpaceWriteUnit(spaceId: string, family?: WriteFamilies, opts: { except?: string } = {}): () => void {
+  assertSpaceTakesWrites(spaceId, family, opts);
+  return enterSpaceWrite(spaceId);
+}
+
+/**
+ * Run `body` as ONE admitted and counted write of `spaceId`: the gate is asked and the fence entered with nothing awaited between
+ * ({@link admitSpaceWriteUnit}), and the count is released in a `finally` around the whole body, however it ends — the guard and the release
+ * are inside, so no writer can drop either. The one function a writer of a space goes through; `every-transfer-enters-the-fence` holds
+ * every asker to it (or to the unit form) and lists the few that need no count with the design's reason.
+ *
+ * ## What it prevents
+ *
+ * A deletion or wipe registers, waits for the units ADMITTED before it, then deletes. A writer that asked, awaited (its path, its read set, its
+ * embedding) and only then wrote was admitted and not counted: its write landed after the act's first delete, resurrecting what the act removed.
+ * Here a write the gate lets through is counted from that moment, and one it refuses is never counted (the refusal throws first, so nothing leaks).
+ *
+ * The body is every step that reads for or touches the space's data, so the unit is the writer's whole length; the drain waits for it and
+ * `withinWriteBound` bounds each store operation inside. The refusal is thrown as the writer's own rejection, as `assertSpaceTakesWrites` was.
+ */
+export async function admitSpaceWrite<T>(spaceId: string, family: WriteFamilies, body: () => Promise<T>, opts: { except?: string } = {}): Promise<T> {
+  const leaveWriteUnit = admitSpaceWriteUnit(spaceId, family, opts);
+  try { return await body(); } finally { leaveWriteUnit(); }
 }
 
 /**

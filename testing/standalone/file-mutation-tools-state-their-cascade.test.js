@@ -390,7 +390,7 @@ describe('create_dir says when you do not need it', () => {
     assert.match(bodyOfFile('placeIfFree'), /mkdirPrivate\(path\.dirname\(/, 'placeIfFree no longer creates the destination\'s parents');
     // writeFile hands its parents to the door, whose every write creates them unless the caller opts out.
     const write = bodyOfFile('writeFile');
-    assert.match(write, /writeStored\(abs, content\)/, 'writeFile no longer writes through the file door');
+    assert.match(write, /writeStored\(.*,\s*content\)/, 'writeFile no longer writes through the file door');
     assert.doesNotMatch(write, /noMkdir/, 'writeFile opted out of creating its parents');
     const at = DOOR.indexOf('async function finishWrite');
     const finish = DOOR.slice(at, DOOR.indexOf('\n}', at));

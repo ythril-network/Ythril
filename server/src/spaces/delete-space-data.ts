@@ -28,10 +28,10 @@
  * door, by the tool's `spaceAdmin` flag (D-41): this module asks no rights question of its own.
  */
 import { WIPE_COLLECTION_TYPES, wipeResultOf, type WipeCollectionType } from './lifecycle.js';
-import { wipeSpaceAsRequested, wipeTypesOf, type WipeOutcome } from './wipe-vote.js';
+import { decidedBy, wipeSpaceAsRequested, wipeTypesOf, type WipeOutcome } from './wipe-vote.js';
 import { isProxySpace } from './proxy.js';
 import { getConfig } from '../config/loader.js';
-import { spaceActFailureAnswer } from './space-act-failure.js';
+import { queuedActBody, spaceActFailureAnswer } from './space-act-failure.js';
 import type { ToolResult } from '../mcp/tools/types.js';
 
 export interface DeleteSpaceDataArgs {
@@ -97,7 +97,7 @@ export const wipeTypesLabel = (types: WipeCollectionType[] | null | undefined): 
 
 /**
  * The tool's answer to a wipe outcome — text and `structuredContent` — for MCP and `POST /api/delete_space_data` alike (the REST tool door
- * answers the same `data`). A failed act is an error result carrying the failure body (`code: 'space_act_failed'`, `status: 'passed'`);
+ * answers the same `data`). A failed act is an error result carrying the failure body (`code: 'space_act_failed'`, and `status: 'passed'` only when a vote decided the wipe);
  * a store-side cause is rethrown as itself, so the dispatcher answers it as every store failure (503, `storeSideFailure`).
  */
 export function wipeToolResult(space: string, outcome: WipeOutcome, types: WipeCollectionType[] | null): ToolResult {
@@ -115,13 +115,18 @@ export function wipeToolResult(space: string, outcome: WipeOutcome, types: WipeC
       };
     case 'passed':
       return {
-        content: text(outcome.retryAt
-          ? `The vote passed; the change on this instance failed and is retried automatically at ${outcome.retryAt}. See GET /api/networks/:id (owedSpaceActs).`
-          : 'The vote passed; the change on this instance is still running and completes on its own. Check GET /api/networks/:id (owedSpaceActs) or the space\'s counts.'),
-        structuredContent: { status: 'passed', queued: true, rounds, types, ...(outcome.retryAt ? { retryAt: outcome.retryAt } : {}), ...(outcome.repeated ? { repeated: true } : {}) },
+        // A wipe no vote decided names the change and the space's `actPending`, never a vote that passed (`space-act-failure.ts`).
+        content: text(outcome.local
+          ? (outcome.retryAt
+            ? `The change on this instance did not complete and is retried automatically at ${outcome.retryAt}. See the space's actPending (list_spaces).`
+            : 'The change on this instance is still running and completes on its own. Check the space\'s actPending (list_spaces) or its counts.')
+          : (outcome.retryAt
+            ? `The vote passed; the change on this instance failed and is retried automatically at ${outcome.retryAt}. See GET /api/networks/:id (owedSpaceActs).`
+            : 'The vote passed; the change on this instance is still running and completes on its own. Check GET /api/networks/:id (owedSpaceActs) or the space\'s counts.')),
+        structuredContent: { ...queuedActBody(outcome, decidedBy(outcome)), types },
       };
     case 'failed': {
-      const answer = spaceActFailureAnswer(outcome.cause, rounds, `tool delete_space_data on '${space}'`);
+      const answer = spaceActFailureAnswer(outcome.cause, decidedBy(outcome), `tool delete_space_data on '${space}'`);
       if (answer.store) throw outcome.cause;
       return { content: text(`Error: ${answer.body.error}`), isError: true, structuredContent: { ...answer.body } };
     }

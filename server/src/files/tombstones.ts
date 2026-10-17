@@ -123,7 +123,7 @@ import {
   ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
   type MoveMarker, type PrunableRow, type StoredFileTombstone,
 } from './tombstone-store.js';
-import { assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
 import {
   abandonMove, createMoveMarkerPager, markerDocOf, moveMarker, MOVE_MARKER_KEEP_MS, movesStillOwed, removeUnlessOwed,
 } from './move-markers.js';
@@ -501,7 +501,9 @@ async function publishSlice(
     dropped += candidates.length - 1;
   }
   if (winners.length > 0) {
-    await withPositionHeld(spaceId, (stamp) => {
+    // Publishing UPSERTS a published row (a tombstone the stale settle dropped while its act ran is written again), so it is ONE admitted and
+    // counted unit from its own check (`admitSpaceWrite`); a space an act took meanwhile is passed over, never a failure.
+    try { await admitSpaceWrite(spaceId, 'files', () => withPositionHeld(spaceId, (stamp) => {
       const ops = winners.map(w => ({ updateOne: {
         filter: asFilter<StoredFileTombstone>({ _id: w._id }),
         // What the act knew of the version it erased travels with it, so an upsert (a tombstone the stale settle dropped
@@ -521,7 +523,7 @@ async function publishSlice(
       } }));
       return writeInOneCommands(ops, (slice, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
         { ordered: false, commandKindOf: bulkCommandOf });
-    }, 'file.tombstone.publish');
+    }, 'file.tombstone.publish')); } catch (err) { if (isActRefusal(err)) return { published: 0, dropped }; throw err; }
   }
   // An update and a delete per path: sliced by type, so each slice is one command (`bulkCommandOf`).
   await writeInOneCommands(afterOps, (slice, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
@@ -595,6 +597,7 @@ const generationOfHandle = (pending: PendingFileTombstones): number => pending.g
 export async function writePendingFileTombstones(
   spaceId: string, paths: string[], move?: MoveMarker, named?: string,
 ): Promise<PendingFileTombstones> {
+  // Refused before anything is read; the insert below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'files');
   const unique = [...new Set(paths.map(toDocId))].filter(Boolean);
   const generation = wipeGenerationOf(spaceId);
@@ -624,11 +627,14 @@ export async function writePendingFileTombstones(
   if (pending.docs.length === 0) return pending;
   try {
     const stored = tombstonesOf(spaceId);
-    await writeInOneCommands(pending.docs.map(d => asDoc<StoredFileTombstone>(d)), (slice, { ordered }) => stored.insertMany(slice, { ordered }), { ordered: true });
+    // The insert CREATES the act's pending tombstones: ONE admitted and counted unit from its own check (`admitSpaceWrite`).
+    await admitSpaceWrite(spaceId, 'files', () => writeInOneCommands(pending.docs.map(d => asDoc<StoredFileTombstone>(d)), (slice, { ordered }) => stored.insertMany(slice, { ordered }), { ordered: true }));
     return pending;
   } catch (err) {
     // A write reported failed is not known NOT to have landed: a paused store applies it when it comes back.
     dropPendingFileTombstones(pending);
+    // A space an act took since the check above is the closure's refusal (409), not a failure to record the act.
+    if (isActRefusal(err)) throw err;
     throwIfStoreSide(err);
     // The cause is said here, where it is known; the answer to the caller is path-free and says only that nothing was done.
     log.warn(`writePendingFileTombstones error for space ${peerText(spaceId)} (${unique.length} paths): ${peerText(err)}`);
@@ -1226,7 +1232,9 @@ export interface RelayedFileTombstone {
 export async function storeRelayedFileTombstones(spaceId: string, docs: readonly RelayedFileTombstone[]): Promise<void> {
   assertSpaceTakesWrites(spaceId, 'files');
   for (const slice of inChunks(docs, FILE_TOMBSTONE_PAGE)) {
-    await withPositionHeld(spaceId, (receivedAt) => {
+    // Each slice CREATES rows: ONE admitted and counted unit from its own check (`admitSpaceWrite`), so an act registered between slices refuses
+    // the next and one registered during a slice waits for it.
+    await admitSpaceWrite(spaceId, 'files', () => withPositionHeld(spaceId, (receivedAt) => {
       const ops = slice.map(d => ({ updateOne: {
         filter: asFilter<StoredFileTombstone>({ _id: d._id }),
         update: asUpdate<StoredFileTombstone>({ $setOnInsert: {
@@ -1240,6 +1248,6 @@ export async function storeRelayedFileTombstones(spaceId: string, docs: readonly
       } }));
       return writeInOneCommands(ops, (part, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(part), { ordered }),
         { ordered: false, commandKindOf: bulkCommandOf });
-    }, 'file.tombstone.relayed');
+    }, 'file.tombstone.relayed'));
   }
 }

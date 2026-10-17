@@ -50,7 +50,7 @@ import type { EdgeDoc } from '../config/types.js';
 import { removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { rekeyedRow, FUNCTIONAL_GUARD } from '../sync/local-only-fields.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /**
  * The result of a re-key. `null` where the identity did not change, so a caller can fall through to its
@@ -169,6 +169,7 @@ export async function rekeyEdges(
   session?: ClientSession,
   functionalGuard?: string,
 ): Promise<Array<EdgeRekey | null>> {
+  // Refused before the plan is read; the write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'edges');
   const instanceId = getConfig().instanceId;
   const planned = moves.map(({ existing, next }) => {
@@ -235,7 +236,8 @@ export async function rekeyEdges(
   const n = moving.length;
   // One block of 2n, taken in THIS ORDER — see the module docblock. Every tombstone gets a seq below every
   // insert; reversing them is the one ordering that loses an edge on a peer.
-  const written = await withAllocatedSeqs(spaceId, 2 * n, async (tombSeq) => {
+  // The re-key (the old rows' removal, their tombstones and the inserts) is ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
+  const written = await admitSpaceWrite(spaceId, 'edges', () => withAllocatedSeqs(spaceId, 2 * n, async (tombSeq) => {
     const insertSeq = tombSeq + n;
     const opts = session ? { session } : {};
 
@@ -264,7 +266,7 @@ export async function rekeyEdges(
       await coll.insertMany(chunk.map(d => asDoc<EdgeDoc>(d)), { ordered: true, ...opts });
     }
     return stored;
-  }, 'edge.rekey');
+  }, 'edge.rekey'));
 
   /*
    * INSERTED with its vector, RETURNED without one.

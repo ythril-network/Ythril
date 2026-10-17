@@ -71,7 +71,7 @@ import { retagToLocalSpace } from './upsert-plan.js';
 import { authorises, deleteBound, MAX_ISSUER, type Delivery, type DeletionGround, type DeletionTarget } from './deletion-authority.js';
 import { unlabelFacesForEntities } from '../brain/entities.js';
 import { syncTombstonesAppliedTotal } from '../metrics/registry.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /**
  * The most tombstones one push request may carry. An honest sender pages at 500 (`pushTombstones`) and retries a
@@ -154,7 +154,7 @@ export async function applyPeerTombstones(
   localSpaceId: string, raw: readonly unknown[], delivery: Delivery, where: string, opts: TombstoneApplyOptions = {},
 ): Promise<TombstoneApplyOutcome> {
   // A peer's tombstones delete records of every family a page carries, as an exchange moves every family: any act standing for the
-  // space refuses them, as the hold refuses the exchange.
+  // space refuses them, as the hold refuses the exchange (the write below asks and counts again, at the instant it is made).
   assertSpaceTakesWrites(localSpaceId);
   const out: TombstoneApplyOutcome = {
     admitted: 0, refused: [], declined: [], unknownTypes: [], maxSeq: 0, deleted: { issuer: 0, upstream: 0 },
@@ -229,40 +229,44 @@ export async function applyPeerTombstones(
       }
       for (const g of groups.values()) deletes.push({ type, ...g });
     }
-    if (store.length > 0) {
-      // A page is a peer's: counted (`MAX_TOMBSTONES_PER_REQUEST`), not measured, and an id is text it chose, carried twice
-      // by each operation. So the bulk is sliced to stay ONE wire command (`db/one-command.ts`): the driver would split a
-      // larger one, and a second command carries a deadline of its own after the bound has answered the sender.
-      const tombstones = col<TombstoneDoc>(spaceCollection(localSpaceId, 'tombstones'));
-      const ops = store.map(({ t, via }) => ({
-        updateOne: {
-          filter: { _id: t._id },
-          // `storedVia` is set whether or not the row existed: a deletion held before this delivery (an earlier one that
-          // stood on no ground, or the same one re-sent) must carry the upstream it is now relayed for.
-          update: via === undefined ? { $setOnInsert: t } : { $setOnInsert: t, $set: { storedVia: via } },
-          upsert: true,
-        },
-      }));
-      await writeInOneCommands(ops, (slice, { ordered }) => tombstones.bulkWrite(asBulk<TombstoneDoc>(slice), { ordered }), { ordered: false });
-    }
-    for (const d of deletes) {
-      const coll = col<{ _id: string }>(spaceCollection(localSpaceId, TOMBSTONE_COLLECTION[d.type]));
-      // The group's delete carries the BOUND of the ground that authorised it (`deleteBound`), so a record another author
-      // wrote, or whose stamp changed, between the read above and this write is not taken with it — the write re-checks
-      // the verdict. The re-read adds each row's own seq bound.
-      const bound = deleteBound(d.ground, { issuer: d.issuer, deliverer: delivery.peerInstanceId, selfId });
-      let deleted = 0;
-      for (const chunk of inChunks(d.rows, ROWS_PER_BULK_COMMAND)) {
-        // The bound names `deliveredBy` and `author.instanceId`, never `_id` or `$or`, so the spread cannot replace the ids.
-        const res = opts.repair
-          ? await coll.deleteMany(asFilter<{ _id: string }>({ ...bound, $or: chunk.map(t => ({ _id: t._id, seq: { $lte: t.seq } })) }))
-          : await coll.deleteMany(asFilter<{ _id: string }>({ _id: { $in: chunk.map(t => t._id) }, ...bound }));
-        deleted += res.deletedCount ?? 0;
+    // What the page decided is written as ONE admitted and counted unit, from its own check (`admitSpaceWrite`): an act registered while the page
+    // was being judged refuses it, and one registered after waits for it, so a stored tombstone or a deleted row never lands after the act's delete.
+    await admitSpaceWrite(localSpaceId, undefined, async () => {
+      if (store.length > 0) {
+        // A page is a peer's: counted (`MAX_TOMBSTONES_PER_REQUEST`), not measured, and an id is text it chose, carried twice
+        // by each operation. So the bulk is sliced to stay ONE wire command (`db/one-command.ts`): the driver would split a
+        // larger one, and a second command carries a deadline of its own after the bound has answered the sender.
+        const tombstones = col<TombstoneDoc>(spaceCollection(localSpaceId, 'tombstones'));
+        const ops = store.map(({ t, via }) => ({
+          updateOne: {
+            filter: { _id: t._id },
+            // `storedVia` is set whether or not the row existed: a deletion held before this delivery (an earlier one that
+            // stood on no ground, or the same one re-sent) must carry the upstream it is now relayed for.
+            update: via === undefined ? { $setOnInsert: t } : { $setOnInsert: t, $set: { storedVia: via } },
+            upsert: true,
+          },
+        }));
+        await writeInOneCommands(ops, (slice, { ordered }) => tombstones.bulkWrite(asBulk<TombstoneDoc>(slice), { ordered }), { ordered: false });
       }
-      out.deleted[d.ground] += deleted;
-      if (deleted > 0) syncTombstonesAppliedTotal.labels({ kind: d.type, ground: d.ground }).inc(deleted);
-      if (d.type === 'entity') await unlabelRemoved(localSpaceId, d.rows.map(t => t._id), deleted);
-    }
+      for (const d of deletes) {
+        const coll = col<{ _id: string }>(spaceCollection(localSpaceId, TOMBSTONE_COLLECTION[d.type]));
+        // The group's delete carries the BOUND of the ground that authorised it (`deleteBound`), so a record another author
+        // wrote, or whose stamp changed, between the read above and this write is not taken with it — the write re-checks
+        // the verdict. The re-read adds each row's own seq bound.
+        const bound = deleteBound(d.ground, { issuer: d.issuer, deliverer: delivery.peerInstanceId, selfId });
+        let deleted = 0;
+        for (const chunk of inChunks(d.rows, ROWS_PER_BULK_COMMAND)) {
+          // The bound names `deliveredBy` and `author.instanceId`, never `_id` or `$or`, so the spread cannot replace the ids.
+          const res = opts.repair
+            ? await coll.deleteMany(asFilter<{ _id: string }>({ ...bound, $or: chunk.map(t => ({ _id: t._id, seq: { $lte: t.seq } })) }))
+            : await coll.deleteMany(asFilter<{ _id: string }>({ _id: { $in: chunk.map(t => t._id) }, ...bound }));
+          deleted += res.deletedCount ?? 0;
+        }
+        out.deleted[d.ground] += deleted;
+        if (deleted > 0) syncTombstonesAppliedTotal.labels({ kind: d.type, ground: d.ground }).inc(deleted);
+        if (d.type === 'entity') await unlabelRemoved(localSpaceId, d.rows.map(t => t._id), deleted);
+      }
+    });
     // The re-read says what it deleted once, in its own completion line over every page (`sync/tombstone-reread.ts`): a line
     // per page here would state the same deletions a second time.
     if (!opts.repair) saidDeletions(where, 'record', localSpaceId, out.deleted);

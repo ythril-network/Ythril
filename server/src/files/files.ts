@@ -6,8 +6,7 @@ import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 import { StringDecoder } from 'node:string_decoder';
 import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterruptedLink, DestinationOccupied } from './stored-bytes.js';
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
-import { assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
-import { enterSpaceWrite } from '../sync/space-transfer-fence.js';
+import { admitSpaceWrite, assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
 import { fsRefusalOf } from './destination.js';
 import { DestinationExists, type DestinationAct } from './act-answers.js';
 import { fileMoveLinkFallbackTotal } from '../metrics/registry.js';
@@ -94,14 +93,10 @@ export async function readFileWindow(
 
 /** Write a text file, creating parent directories as needed */
 export async function writeFile(spaceId: string, filePath: string, content: string): Promise<{ sha256: string }> {
-  // Nothing new lands under a space that is being deleted, wiped or renamed away — see `spaces/space-write-gate.ts`.
-  assertSpaceTakesWrites(spaceId, 'files');
-  const abs = await resolveSafePathChecked(spaceId, filePath);
   // Through the one door for stored bytes (F-43): encrypted at rest when a master secret is set, written to a
-  // temp file outside the tree and renamed, and hardened to owner-only whatever the file's history. One write unit, counted for an
-  // act's drain.
-  const leaveWriteUnit = enterSpaceWrite(spaceId);
-  try { await writeStored(abs, content); } finally { leaveWriteUnit(); }
+  // temp file outside the tree and renamed, and hardened to owner-only whatever the file's history. One write unit, admitted by the gate and
+  // counted for an act's drain from its check (`admitSpaceWrite`), the path's own resolution included.
+  await admitSpaceWrite(spaceId, 'files', async () => writeStored(await resolveSafePathChecked(spaceId, filePath), content));
   const sha256 = sha256Hex(content);
   return { sha256 };
 }
@@ -112,10 +107,7 @@ export async function writeFileBytes(
   filePath: string,
   data: Buffer,
 ): Promise<{ sha256: string }> {
-  assertSpaceTakesWrites(spaceId, 'files');   // see `writeFile` above
-  const abs = await resolveSafePathChecked(spaceId, filePath);
-  const leaveWriteUnit = enterSpaceWrite(spaceId);
-  try { await writeStored(abs, data); } finally { leaveWriteUnit(); }   // see the note in `writeFile` above
+  await admitSpaceWrite(spaceId, 'files', async () => writeStored(await resolveSafePathChecked(spaceId, filePath), data));   // see `writeFile` above
   const sha256 = sha256Hex(data);
   return { sha256 };
 }
@@ -145,10 +137,11 @@ export async function listDir(spaceId: string, dirPath: string): Promise<FileEnt
 
 /** Create a directory (including parents) */
 export async function createDir(spaceId: string, dirPath: string): Promise<void> {
-  assertSpaceTakesWrites(spaceId, 'files');
-  const abs = await resolveSafePathChecked(spaceId, dirPath);
-  // The filesystem's refusal is the caller's path or the server's fault, said once (`fsRefusalOf`), never the raw errno text.
-  await mkdirPrivate(abs).catch((err: unknown) => { throw fsRefusalOf(err, [dirPath]); });
+  await admitSpaceWrite(spaceId, 'files', async () => {
+    const abs = await resolveSafePathChecked(spaceId, dirPath);
+    // The filesystem's refusal is the caller's path or the server's fault, said once (`fsRefusalOf`), never the raw errno text.
+    await mkdirPrivate(abs).catch((err: unknown) => { throw fsRefusalOf(err, [dirPath]); });
+  });
 }
 
 /**
@@ -220,10 +213,11 @@ export async function moveFile(
   dstPath: string,
   { begun }: { begun: boolean },
 ): Promise<void> {
-  assertSpaceTakesWrites(spaceId, 'files');
-  const srcAbs = await resolveSafePathChecked(spaceId, srcPath);
-  const dstAbs = await resolveSafePathChecked(spaceId, dstPath);
-  await placeIfFree(srcAbs, dstAbs, toDocId(dstPath), { begun });
+  await admitSpaceWrite(spaceId, 'files', async () => {
+    const srcAbs = await resolveSafePathChecked(spaceId, srcPath);
+    const dstAbs = await resolveSafePathChecked(spaceId, dstPath);
+    await placeIfFree(srcAbs, dstAbs, toDocId(dstPath), { begun });
+  });
 }
 
 /**

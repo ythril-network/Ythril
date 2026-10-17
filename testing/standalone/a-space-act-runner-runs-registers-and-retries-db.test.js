@@ -29,7 +29,7 @@
  * - **R-X6a / R-X6b:** a batch the bound ended after earlier batches made progress is retried, not failed; a file-tree step that never resolves fails the attempt at its bound and frees the slot.
  * - **R-X9a / R-X9c / R-X9d:** a body that throws at the resume after listen is left owed and the tick retries; a body failing after `closeSpaceActs()` is `interrupted`,
  *   never `failed`; a door retry of an owed act before `retryAt` is `202 queued` with `retryAt` and starts nothing.
- * - **R-W16 (the runner's gauges) and the completion's ONE write** (the driven half of `every-act-entry-is-cleared-with-its-post-steps`).
+ * - **R-W16 (the runner's gauges, and a slow act's report from the round-expiry tick) and the completion's ONE write** (the driven half of `every-act-entry-is-cleared-with-its-post-steps`).
  *
  * ## Controls that pass once the runner exists, on purpose
  *
@@ -332,8 +332,9 @@ describe('the space-act runner registers, runs once, completes in one write, ret
     runner.setSpaceActHooksForTest({ beforeBatch: async (collection) => { if (isOf(collection, 'wipe-a')) { hold.arrive(); await hold.promise; } } });
     const answered = await door.call('delete_space_data', { space: 'wipe-a', confirm: true });
     await hold.reached;
-    assert.equal(answered.structured?.status, 'passed', `the door answered ${JSON.stringify(answered.structured)} / ${answered.text}`);
-    assert.equal(answered.structured?.queued, true);
+    // An unnetworked wipe is not a vote: queued says `queued`, never `status: 'passed'` (an-unnetworked-act-is-not-a-vote-db holds the whole shape).
+    assert.equal(answered.structured?.queued, true, `the door answered ${JSON.stringify(answered.structured)} / ${answered.text}`);
+    assert.equal(answered.structured?.status, undefined, `an unnetworked wipe was answered as a vote that passed: ${JSON.stringify(answered.structured)}`);
     hold.release();
     await untilRunnerIdle(runner, loader);
     assert.equal(await factCount('wipe-a'), 0, 'the queued wipe did not complete');
@@ -459,11 +460,38 @@ describe('the space-act runner registers, runs once, completes in one write, ret
     const runsBefore = runner.spaceActBodyRuns().wipe;
     runner.setSpaceActHooksForTest(null);
     const retry = await door.call('delete_space_data', { space: 'wipe-b', confirm: true });
-    assert.equal(retry.structured?.status, 'passed', `the retry was answered ${JSON.stringify(retry.structured)} / ${retry.text}`);
-    assert.equal(retry.structured?.queued, true);
+    // Unnetworked, so no vote: `queued` with its `retryAt`, and no `status: 'passed'`.
+    assert.equal(retry.structured?.queued, true, `the retry was answered ${JSON.stringify(retry.structured)} / ${retry.text}`);
+    assert.equal(retry.structured?.status, undefined, `an unnetworked retry was answered as a vote that passed: ${JSON.stringify(retry.structured)}`);
     assert.equal(typeof retry.structured?.retryAt, 'string', 'the retry answer does not say when the instance will retry');
     assert.equal(runner.spaceActBodyRuns().wipe, runsBefore, 'a door retry started the act before its retryAt');
     assert.equal(entriesOf(loader)[0].attempts, 1, 'a door retry before retryAt counted an attempt');
+  });
+
+  it('R-W16 (a slow act): the round-expiry tick reports an act running past SLOW_SPACE_ACT_MS once per window and never cuts it', T, async () => {
+    // `reportSlowSpaceActs` was exported and never called, so an act stuck mid-body ran for hours and nothing said so. The tick is the one clock
+    // the runner has (it also starts the owed retries), so the report is asked from there.
+    await seed('wipe-a');
+    const hold = deferred();
+    runner.setSpaceActHooksForTest({ beforeBatch: async (collection) => { if (isOf(collection, 'wipe-a')) { hold.arrive(); await hold.promise; } } });
+    runner.setSpaceActKnobsForTest({ SLOW_SPACE_ACT_MS: 1000 });
+    assert.equal(runner.spaceActKnob('SLOW_SPACE_ACT_MS'), 1000, 'the slow bound is not read through the knob');
+    const { runRoundExpiryTick } = await import('../../server/dist/networks/round-expiry.js');
+    const { entry } = register({ kind: 'wipe', localId: 'wipe-a' });
+    const running = runner.runSpaceAct(entry.id);
+    await hold.reached;
+    const slowLine = (lines) => lines.filter(l => /wipe of 'wipe-a' has been running for \d+s/.test(l));
+    const early = await logLinesDuring(() => runRoundExpiryTick(Date.now()));
+    assert.deepEqual(slowLine(early.lines), [], 'a tick before the bound reported an act that had not run long');
+    const at = Date.now() + 60_000;
+    const first = await logLinesDuring(() => runRoundExpiryTick(at));
+    assert.equal(slowLine(first.lines).length, 1, `one tick past the bound did not report the act once: ${JSON.stringify(first.lines)}`);
+    const again = await logLinesDuring(() => runRoundExpiryTick(at + 1000));
+    assert.deepEqual(slowLine(again.lines), [], 'the next tick said it again inside its window');
+    assert.equal(runner.spaceActRunning('wipe-a'), true, 'reporting a slow act cut it');
+    hold.release();
+    await settledOk(running);
+    assert.equal(await factCount('wipe-a'), 0, 'the slow act did not finish its wipe once released');
   });
 
   it('R-W16 (the runner\'s gauges): the owed and oldest-owed gauges show a failing act and return to 0 when it completes', T, async () => {

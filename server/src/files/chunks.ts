@@ -18,7 +18,7 @@ import { writeStored, readStored, statStored, pipeToStored, isMissingPath } from
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { log } from '../util/log.js';
-import { assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
 
 /** Deterministic upload ID from (spaceId, path, total). */
 export function uploadId(spaceId: string, filePath: string, total: number): string {
@@ -92,27 +92,30 @@ export async function storeChunk(
   start: number,
   total: number,
 ): Promise<{ received: number; complete: boolean }> {
-  assertSpaceTakesWrites(spaceId, 'files');
-  const id = uploadId(spaceId, filePath, total);
-  const dir = uploadDir(spaceId, id);
-  // Staging holds the same bytes as the finished file, so it gets the same protection. A half-uploaded document
-  // is not less confidential than a complete one.
-  await mkdirPrivate(dir);
+  // One counted write unit from its check (`admitSpaceWrite`): the staged bytes are space data a deletion removes with the tree, so an act
+  // registered while a range is being staged waits for it instead of deleting under it.
+  return admitSpaceWrite(spaceId, 'files', async () => {
+    const id = uploadId(spaceId, filePath, total);
+    const dir = uploadDir(spaceId, id);
+    // Staging holds the same bytes as the finished file, so it gets the same protection. A half-uploaded document
+    // is not less confidential than a complete one.
+    await mkdirPrivate(dir);
 
-  // A re-sent chunk replaces the one at its offset. With the length in the name a resend of a DIFFERENT length would
-  // otherwise sit beside the first rather than over it, so any other chunk at this start goes first.
-  const name = `${start}-${data.length}.bin`;
-  for (const other of await fs.readdir(dir)) {
-    if (other !== name && (other === `${start}.bin` || other.startsWith(`${start}-`))) {
-      await fs.rm(path.join(dir, other), { force: true });
+    // A re-sent chunk replaces the one at its offset. With the length in the name a resend of a DIFFERENT length would
+    // otherwise sit beside the first rather than over it, so any other chunk at this start goes first.
+    const name = `${start}-${data.length}.bin`;
+    for (const other of await fs.readdir(dir)) {
+      if (other !== name && (other === `${start}.bin` || other.startsWith(`${start}-`))) {
+        await fs.rm(path.join(dir, other), { force: true });
+      }
     }
-  }
-  // Through the stored-bytes door, so a chunk is ciphertext at rest like the file it becomes (F-43).
-  await writeStored(path.join(dir, name), data);
+    // Through the stored-bytes door, so a chunk is ciphertext at rest like the file it becomes (F-43).
+    await writeStored(path.join(dir, name), data);
 
-  // PLAINTEXT sizes, read from the names, or resume would count tags.
-  const received = await stagedBytes(dir);
-  return { received, complete: received >= total };
+    // PLAINTEXT sizes, read from the names, or resume would count tags.
+    const received = await stagedBytes(dir);
+    return { received, complete: received >= total };
+  });
 }
 
 /**
@@ -138,18 +141,23 @@ export async function assembleChunks(
   targetPath: string,
   expectedSha256?: string,
 ): Promise<string> {
-  const dir = uploadDir(spaceId, uploadId(spaceId, filePath, total));
-  const sized = await tiledChunks(dir, filePath, total);
+  // The assembly writes the target INTO the space's tree, so it is a counted write unit from its own check like every other writer of it
+  // (`admitSpaceWrite`): the staging's check was made a request earlier, and a deletion or wipe registered since then must meet this write
+  // in its drain, not delete under it.
+  return admitSpaceWrite(spaceId, 'files', async () => {
+    const dir = uploadDir(spaceId, uploadId(spaceId, filePath, total));
+    const sized = await tiledChunks(dir, filePath, total);
 
-  // Assemble sequentially: read each chunk, then stream it into the target through the tap. One chunk is
-  // held in memory at a time (chunk size is bounded by the upload body limit), and the target streams through
-  // the stored-bytes door, so a file of any size is encrypted at rest without ever being held whole (F-43).
-  const { sha256 } = await pipeToStored(targetPath, verifiedChunks(dir, filePath, sized), { expect: { sha256: expectedSha256, size: total } });
+    // Assemble sequentially: read each chunk, then stream it into the target through the tap. One chunk is
+    // held in memory at a time (chunk size is bounded by the upload body limit), and the target streams through
+    // the stored-bytes door, so a file of any size is encrypted at rest without ever being held whole (F-43).
+    const { sha256 } = await pipeToStored(targetPath, verifiedChunks(dir, filePath, sized), { expect: { sha256: expectedSha256, size: total } });
 
-  // Clean up chunk directory
-  await removeTree(dir);
+    // Clean up chunk directory
+    await removeTree(dir);
 
-  return sha256;
+    return sha256;
+  });
 }
 
 /**

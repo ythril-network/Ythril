@@ -8,6 +8,7 @@ import { col, asFilter, asDoc } from '../db/mongo.js';
 import { fileKeyOf, resolveSafePathChecked } from '../files/sandbox.js';
 import { deleteStoredIfPresent, lstatIfPresent, moveStored } from '../files/stored-bytes.js';
 import { placeIfFree } from '../files/files.js';
+import { admitSpaceWrite } from '../spaces/space-write-gate.js';
 import { assertDestinationReachable, assertNothingStandsAt, fsRefusalOf } from '../files/destination.js';
 import { FileSystemFault, fileActAnswer } from '../files/act-answers.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
@@ -22,7 +23,6 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { MAX_CONFLICT_IDS, countError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 export const conflictsRouter = Router();
 
@@ -62,18 +62,21 @@ type Resolution = 'resolved' | 'nothing-to-place';
 async function placeIncomingCopy(
   srcAbs: string, spaceId: string, dstSpaceId: string, dstPath: string, { callerChose }: { callerChose: boolean },
 ): Promise<Resolution> {
-  assertSpaceTakesWrites(dstSpaceId, 'files');
-  const dstAbs = await resolveSafePathChecked(dstSpaceId, dstPath);
-  if (dstSpaceId === spaceId && dstAbs === srcAbs) return 'nothing-to-place';
-  if (callerChose && isInstanceLocalFile(fileKeyOf(dstSpaceId, dstPath).key)) {
-    throw new RangeError(`'${toDocId(dstPath)}' is a path this instance keeps for itself (a conversion's output, a conflict copy or a schema snapshot), and a resolution does not place a file there.`);
-  }
-  await assertDestinationReachable(dstSpaceId, dstPath);
-  if (await lstatIfPresent(srcAbs) === null) return 'nothing-to-place';
-  await assertNothingStandsAt(dstSpaceId, dstPath, { placing: srcAbs });
-  // `begun`: the conflict record being open IS the evidence that a hard link of the copy at the destination is this placing's own.
-  await placeIfFree(srcAbs, dstAbs, toDocId(dstPath), { begun: true, act: 'resolution' });
-  return 'resolved';
+  // One counted write unit from its check, in the DESTINATION's space (`admitSpaceWrite`): a deletion or wipe of that space registered while
+  // the questions below are asked waits for the placing instead of deleting under it.
+  return admitSpaceWrite(dstSpaceId, 'files', async () => {
+    const dstAbs = await resolveSafePathChecked(dstSpaceId, dstPath);
+    if (dstSpaceId === spaceId && dstAbs === srcAbs) return 'nothing-to-place';
+    if (callerChose && isInstanceLocalFile(fileKeyOf(dstSpaceId, dstPath).key)) {
+      throw new RangeError(`'${toDocId(dstPath)}' is a path this instance keeps for itself (a conversion's output, a conflict copy or a schema snapshot), and a resolution does not place a file there.`);
+    }
+    await assertDestinationReachable(dstSpaceId, dstPath);
+    if (await lstatIfPresent(srcAbs) === null) return 'nothing-to-place';
+    await assertNothingStandsAt(dstSpaceId, dstPath, { placing: srcAbs });
+    // `begun`: the conflict record being open IS the evidence that a hard link of the copy at the destination is this placing's own.
+    await placeIfFree(srcAbs, dstAbs, toDocId(dstPath), { begun: true, act: 'resolution' });
+    return 'resolved' as const;
+  });
 }
 
 /**
@@ -102,11 +105,15 @@ async function executeResolve(
     }
     case 'keep-incoming': {
       // Replace the original with the conflict copy, then delete the conflict copy
-      const dstAbs = await resolveSafePathChecked(spaceId, doc.originalPath);
-      if (dstAbs === srcAbs || await lstatIfPresent(srcAbs) === null) { outcome = 'nothing-to-place'; break; }
-      await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath]); });
-      // A move, under both paths' locks: the stored bytes (ciphertext or not) are valid wherever they land (F-43).
-      await moveStored(srcAbs, dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath]); });
+      // A write of the tree like the placings below, so it is one counted unit from its own check (`admitSpaceWrite`).
+      outcome = await admitSpaceWrite(spaceId, 'files', async () => {
+        const dstAbs = await resolveSafePathChecked(spaceId, doc.originalPath);
+        if (dstAbs === srcAbs || await lstatIfPresent(srcAbs) === null) return 'nothing-to-place' as const;
+        await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath]); });
+        // A move, under both paths' locks: the stored bytes (ciphertext or not) are valid wherever they land (F-43).
+        await moveStored(srcAbs, dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath]); });
+        return 'resolved' as const;
+      });
       break;
     }
     case 'keep-both': {

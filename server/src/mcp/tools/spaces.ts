@@ -771,8 +771,11 @@ export const delete_space_dataTool: ToolHandler = {
     + 'the wipe happens on every member when a round passes, and a single veto stops it there. A pub/sub SUBSCRIBER '
     + 'wipes only its own copy, opens no vote, and refills from the publisher (`refills: true`). `status: passed` with '
     + '`queued: true` means the vote passed and the change here is still running, or failed and is retried at '
-    + '`retryAt` — see `network_get` (`owedSpaceActs`). Every answer carries `rounds`, each with its `outcome`.\n\n'
-    + 'ON A SPACE IN NO NETWORK it wipes immediately and finally, exactly as it always has.\n\n'
+    + '`retryAt` — see `network_get` (`owedSpaceActs`). Every answer on a networked space carries `rounds`, each with its `outcome`.\n\n'
+    + 'ON A SPACE IN NO NETWORK it wipes immediately and finally, exactly as it always has. A wipe no vote decides '
+    + '(this case, or a subscriber\'s own copy) is not a vote: if it outlasts the answer budget the answer is '
+    + '`queued: true` with no `status` and no `rounds` (`retryAt` when it failed and is owed), and the space\'s '
+    + '`actPending` (`list_spaces`) shows it.\n\n'
     + 'WHY IT VOTES RATHER THAN PROPAGATING. A wipe writes NO tombstones and deletes the existing ones, and '
     + 'tombstones are the only thing that tells a peer a record is gone — so a local wipe on a shared space '
     + 'used to be undone by the next sync, which offered everything back to an instance with no record of any '
@@ -793,7 +796,8 @@ export const delete_space_dataTool: ToolHandler = {
     + 'RESPONSE: `status`, `types`, `rounds` when the space is networked, and when it was wiped here the '
     + 'per-collection counts, both flat and in `deleted`. Zeroes mean the space was already empty, not that '
     + 'anything refused. A failure after a passed vote is an error with `code: space_act_failed` and '
-    + '`status: passed`: do not retry it — the vote stands and this instance retries the change itself.',
+    + '`status: passed`: do not retry it — the vote stands and this instance retries the change itself. The same '
+    + 'failure of a wipe no vote decided carries no `status` and no `rounds`: do not retry that either.',
   mutating: true,
   /*
    * SPACE-admin, not instance-admin. Owner, 2026-09-16: *"Sync both doors!!! Space admin to wipe space"*.

@@ -38,6 +38,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleIndex, callSitesIn } from './_call-graph.mjs';
 import { spaceWriters } from './_space-writers.mjs';
+import { ASKING_WRAPPERS } from './_space-write-askers.mjs';
 
 const INDEX = moduleIndex('server/src');
 const WRITERS = spaceWriters(INDEX, { floors: { space: 150, alias: 65, files: 40 } });
@@ -69,7 +70,10 @@ const EXEMPT = new Map([
   ['server/src/db/drop-link-arrays.ts', 'the boot step that clears retired link arrays, run before listen: updates existing rows only'],
 ]);
 
-const ASKS = /\bassertSpaceTakesWrites\s*\(/;
+/** The call that IS the check. */
+const ASKS_DIRECTLY = /\bassertSpaceTakesWrites\s*\(/;
+/** `ASKING_WRAPPERS` (`_space-write-askers.mjs`, shared with the fence gate): each must itself ask directly, before it runs the caller's body (held below). */
+const ASKS = new RegExp(`${ASKS_DIRECTLY.source}|\\b(?:${ASKING_WRAPPERS.join('|')})\\s*\\(`);
 
 /** Is this write a write of a family a wipe covers, or of the file tree? A computed collection part counts (the commit names its own). */
 const isCovered = (s) => s.kind === 'files'
@@ -125,12 +129,21 @@ describe('every function that writes a space asks the write gate before its firs
 
   it('every covered writer asks the gate before its first write, or is called only from functions that do, or is a reasoned exemption', () => {
     const unguarded = [];
+    /**
+     * Is every road into `key` through a function that asks the gate — directly, or itself reached only through ones that do? The body of an
+     * admitted writer is a private function its asking caller hands to the gate, so the road into a helper that body calls has two links.
+     */
+    const reachedOnlyThroughAskers = (key, seen = new Set()) => {
+      if (seen.has(key)) return true;   // a cycle adds no road that did not already ask
+      seen.add(key);
+      const via = callers.get(key);
+      return !!via && via.size > 0 && [...via].every(k => ASKS.test(INDEX.bodies.get(k)?.body ?? '') || reachedOnlyThroughAskers(k, seen));
+    };
     for (const [key, sites] of writers) {
       const entry = INDEX.bodies.get(key);
       if (!entry || EXEMPT.has(entry.file)) continue;
       if (asksBeforeFirstWrite(entry.body, [...new Set(sites.map(s => s.op))])) continue;
-      const via = callers.get(key);
-      if (via && via.size > 0 && [...via].every(k => ASKS.test(INDEX.bodies.get(k)?.body ?? ''))) continue;
+      if (reachedOnlyThroughAskers(key)) continue;
       unguarded.push(key.replace('server/src/', ''));
     }
     assert.deepEqual(unguarded.sort(), [], `${unguarded.length} writer(s) of a space write without asking assertSpaceTakesWrites( first, or being reached only through one that does. `
@@ -147,6 +160,17 @@ describe('every function that writes a space asks the write gate before its firs
       const at = (ASKS.test(body) ? body : stage).search(ASKS);
       const before = (ASKS.test(body) ? body : stage).slice(0, at);
       assert.match(before, loop, `${key} asks the gate outside any loop: it would not stop at its next unit`);
+    }
+  });
+
+  it('every asking wrapper asks the gate (itself or through another wrapper) before it runs the body it was handed', () => {
+    for (const name of ASKING_WRAPPERS) {
+      const key = [...INDEX.bodies.keys()].find(k => k.endsWith(`:${name}`));
+      assert.ok(key, `the wrapper ${name} is gone: a writer that goes through it asks nothing`);
+      const body = INDEX.bodies.get(key).body;
+      const ask = body.search(ASKS);
+      assert.ok(ask >= 0, `${name} never asks the gate, directly or through another wrapper: every writer that goes through it is unguarded`);
+      assert.ok(body.slice(0, ask).search(/\bbody\s*\(/) < 0, `${name} runs the caller's body before it asks the gate`);
     }
   });
 

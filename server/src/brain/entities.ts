@@ -26,7 +26,7 @@ import { listReadMaxMs, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /** An item that references a given entity, and — for an edge — which of its ends does. */
 export interface BacklinkEntry {
@@ -199,6 +199,7 @@ export async function updateEntityById(
   /** See `upsertEntity`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<EntityDoc | null> {
+  // Refused before anything is read; the store write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'entities');
   const collection = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
   const existing = await collection.findOne(asFilter<EntityDoc>({ _id: id, spaceId }),
@@ -277,7 +278,8 @@ export async function updateEntityById(
   // function is exactly the test for another writer landing in the window. Observation only — no write that
   // previously succeeded is now rejected.
   let seq = 0;
-  const beforeWrite = await withSeq(spaceId, (s) => {
+  // ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
+  const beforeWrite = await admitSpaceWrite(spaceId, 'entities', () => withSeq(spaceId, (s) => {
     seq = s;
     const updateOp: Record<string, unknown> = { $set: { ...$set, seq } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
@@ -286,7 +288,7 @@ export async function updateEntityById(
       asUpdate<EntityDoc>(updateOp),
       { returnDocument: 'before' },
     );
-  }, 'entity.update') as EntityDoc | null;
+  }, 'entity.update')) as EntityDoc | null;
   brainWriteSeqTotal.labels({
     collection: 'entities',
     outcome: writeOutcome(!!beforeWrite, ifMatchSeq !== undefined, !!beforeWrite && beforeWrite.seq !== existing.seq),
@@ -361,10 +363,11 @@ export async function deleteEntity(
   assertSpaceTakesWrites(spaceId, 'entities');
   const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .findOne(asFilter<EntityDoc>({ _id: entityId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  const result = await col<EntityDoc>(spaceCollection(spaceId, 'entities')).deleteOne({
+  // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and cascades are admitted writers of their own.
+  const result = await admitSpaceWrite(spaceId, 'entities', () => col<EntityDoc>(spaceCollection(spaceId, 'entities')).deleteOne({
     _id: entityId,
     spaceId,
-  });
+  }));
   if (result.deletedCount === 0) return false;
   // The record is gone, so its embed job has nothing left to embed. Eager rather than left to the worker: the
   // worker only claims `pending` jobs, so a job that had already gone terminal `failed` would never be claimed

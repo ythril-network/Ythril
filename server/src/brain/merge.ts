@@ -43,7 +43,7 @@ import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
 import { SubjectEdges } from './functional-subject.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite } from '../spaces/space-write-gate.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -763,9 +763,9 @@ export async function executeMerge(
 
   const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
   const written = await inHeldTransaction(spaceId, 'entity.merge',
-    (session) => relinkAndAbsorb(spaceId, survivor, absorbed, {
+    (session) => admitSpaceWrite(spaceId, undefined, () => relinkAndAbsorb(spaceId, survivor, absorbed, {
       now, session, set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, ...embeddingFields },
-    }),
+    })),
     // A commit whose answer was lost may have landed: the survivor at the seq this transaction gave it IS the commit.
     { landed: async (w) => (await entityColl.countDocuments(asFilter<EntityDoc>(atReadSeq(survivor._id, w.seq)), { limit: 1 })) === 1 });
 
@@ -842,8 +842,8 @@ async function relinkAndAbsorb(
   spaceId: string, survivor: EntityDoc, absorbed: EntityDoc,
   { now, session, set }: { now: string; session: ClientSession; set: Record<string, unknown> },
 ): Promise<MergeWrite> {
-  // A merge rewrites entities, edges, links and their tombstones: any act standing for the space refuses it.
-  assertSpaceTakesWrites(spaceId);
+  // A merge rewrites entities, edges, links and their tombstones. Its one caller runs it inside `admitSpaceWrite`, which asks the gate and counts
+  // the whole merge, so an act standing for the space refuses it and an act registered mid-merge waits for it.
   const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
   // ── 1. Relink edges ──────────────────────────────────────────────────
