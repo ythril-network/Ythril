@@ -32,10 +32,18 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { privateHostAddress } from './_private-address.mjs';
 
-/** Make a temp directory and point `CONFIG_PATH` at its `config.json`. Call BEFORE the first import of the server's loader. */
+/**
+ * Make a temp directory and point `CONFIG_PATH` at its `config.json` and `DATA_ROOT` at its `data/`. Call BEFORE the first import
+ * of the server's loader.
+ *
+ * `DATA_ROOT` is set here, not by each caller, because its default is `/data`: a wipe or a delete a round passes clears the space's
+ * file tree, and a test that forgot the root wrote into the developer's own `/data` where that is writable and failed with EACCES
+ * on CI where it is not (Full run 39067730979) — a wipe's file step fails its attempt since W2, it is no longer swallowed.
+ */
 export function tempInstanceDir(prefix) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   process.env['CONFIG_PATH'] = path.join(dir, 'config.json');
+  process.env['DATA_ROOT'] = path.join(dir, 'data');
   return dir;
 }
 

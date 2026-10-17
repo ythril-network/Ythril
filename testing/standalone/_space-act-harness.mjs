@@ -88,10 +88,12 @@ export async function untilRunnerIdle(runner, loader, { maxTurns = 4000, now } =
   // bound this harness promises its callers, and it throws naming what stayed busy.
   for (let i = 0; i < maxTurns; i++) {
     if (runnerIsIdle(runner, loader, now ?? Date.now())) return;
-    // waits-differently: every fiftieth turn is a zero timer — an act's body is store work, and four thousand `setImmediate` turns passed
-    // in a few milliseconds while one wipe batch was still on the wire; a timer turn costs a clock tick (about 15 ms on Windows), so
-    // only some turns are one, and a wait for something that never happens still ends in about a second.
-    await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 0) : setImmediate(resolve)));
+    // waits-differently: every fiftieth turn is a 15 ms timer — an act's body is store work, and four thousand `setImmediate` turns passed
+    // in a few milliseconds while one wipe batch was still on the wire. The delay is stated, not left to the platform: a zero timer
+    // costs a clock tick on Windows (about 15 ms) and about 1 ms on Linux, so the same bound was about a second here and under
+    // a tenth of one on CI, where a wipe that completed a moment later was reported as a runner that never went idle (Full run
+    // 39067730979). Stated, a wait for something that never happens ends in about a second on both.
+    await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 15) : setImmediate(resolve)));
   }
   throw new Error(`the runner never went idle: running=${runner.spaceActsRunning()}, entries=${JSON.stringify(entriesOf(loader).map(e => [e.kind, e.localId, e.state]))}`);
 }
