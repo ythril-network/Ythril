@@ -51,6 +51,23 @@ export function roundIsOpen(round: RoundDatable, now: number): boolean {
   return !round.concluded && !roundPastDeadline(round, now);
 }
 
+/**
+ * A passed, unvetoed `space_deletion` or `space_wipe` this instance must act on and has not finished (bundle-106, design v5 §2.1).
+ *
+ * One predicate of the round, read by the settle, the served mask and the prune — never by a door that refuses, holds or admits: those
+ * ask the one standing predicate (`spaceActStands`), which reads the act's entry. A round with nothing to do here never stays owed: it
+ * is settled `not-carried` the moment a reader meets it (`spaces/apply-wipe-round.ts`).
+ */
+export function spaceActOwed(r: { type?: string; concluded?: boolean; passed?: boolean; appliedHere?: boolean }): boolean {
+  return (r.type === 'space_deletion' || r.type === 'space_wipe') && r.concluded === true && r.passed === true && r.appliedHere !== true;
+}
+
+/**
+ * The round types a peer still needs after they end: a round whose effect every member applies is served after it passes, because its
+ * proposer may have decided it at open (design v5 §3.1). `join` and `remove` stay out.
+ */
+export const SERVED_ONCE_PASSED: ReadonlySet<string> = new Set(['space_addition', 'meta_change', 'space_deletion', 'space_wipe']);
+
 /** The part of a join round {@link joinRoundOf} reads. */
 interface JoinRoundReadable extends RoundDatable {
   type?: string;

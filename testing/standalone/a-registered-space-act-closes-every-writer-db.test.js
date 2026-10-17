@@ -269,6 +269,9 @@ describe('a registered space act closes every writer of its space', { skip }, ()
     const peer = asked(peerToken('push-door-peer'));
     assert.equal(peer.res.code, 423); assert.equal(peer.res.body?.code, 'space_held');
     const admin = asked(ADMIN_TOKEN);
-    assert.equal(admin.res.code, 409, 'an instance-admin token is the operator\'s own tooling and gets the 409');
+    // The admin's 409 is the writer's own answer (`sendCaughtFailure`, after this returns false), as the twin row in
+    // a-peer-meets-a-held-space-on-every-sync-door-db holds: the peer path answering it too would send the response twice.
+    assert.equal(admin.handled, false, 'an instance-admin token is the operator\'s own tooling: the peer path must leave it to the writer\'s 409');
+    assert.equal(admin.res.code, 0, 'the peer path answered an instance-admin token');
   });
 });

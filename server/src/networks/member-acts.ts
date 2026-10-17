@@ -10,19 +10,17 @@
  * The answer never carries a credential: the peer token is stored as a bcrypt hash and the plaintext in secrets,
  * and the member returned has its hash and TLS override stripped.
  */
-import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcrypt';
 import { z } from 'zod';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
-import { concludeRoundIfReady, sendMemberRemovedNotify } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
-import { makeSignedOwnCast, forceSetMemberSigningKey } from '../util/signing.js';
+import { forceSetMemberSigningKey } from '../util/signing.js';
 import { log, peerText, refusalOfParse } from '../util/log.js';
-import type { NetworkMember, VoteRound } from '../config/types.js';
+import type { NetworkMember } from '../config/types.js';
 import { BCRYPT_ROUNDS, SSRF_SAFE_URL, safeMemberList } from '../api/networks/_shared.js';
 import type { NetworkActResult } from './network-acts.js';
-import { openRoundHere } from './round-local-state.js';
+import { proposeRound, type RoundProposal } from './propose-round.js';
 import { roundIsOpen } from './round-state.js';
 import { roundForOperator } from './vote-acts.js';
 import { joinOutcomesAbout, joinWasDenied } from './round-outcomes.js';
@@ -69,27 +67,14 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
   if (freshNet.members.some(m => m.instanceId === instanceId)) return { status: 409, error: 'Member already exists' };
 
   const member: NetworkMember = { instanceId, label, url, tokenHash, direction, parentInstanceId, skipTlsVerify };
-  const joinRound = (requiredVoters?: string[]): VoteRound => ({
-    roundId: uuidv4(),
+  const joinRound = (requiredVoters?: string[]): RoundProposal => ({
     type: 'join',
     subjectInstanceId: instanceId,
     subjectLabel: label,
     subjectUrl: url,
-    deadline: new Date(Date.now() + freshNet.votingDeadlineHours * 3_600_000).toISOString(),
-    openedAt: new Date().toISOString(),
-    votes: [],
     pendingMember: member,
     ...(requiredVoters ? { requiredVoters } : {}),
   });
-
-  if (freshNet.type === 'closed' || freshNet.type === 'democratic') {
-    const round = joinRound();
-    openRoundHere(freshNet, round);
-    storePeerToken(instanceId, token);
-    saveConfig(freshCfg);
-    log.info(`Opened join vote round ${peerText(round.roundId)} for ${peerText(label)} in network ${peerText(freshNet.id)}`);
-    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(freshNet, round) } };
-  }
 
   if (freshNet.type === 'club' || freshNet.type === 'pubsub') {
     // Pubsub never allows 'both' — publisher stores subscribers as 'push', subscriber stores publisher as 'pull'.
@@ -104,20 +89,18 @@ export async function addMemberAct(networkId: string, input: unknown): Promise<N
     return { status: 201, body: safe(member) };
   }
 
-  // Braintree: requiredVoters = ancestry path from self to root, and the proposer auto-votes yes. If the path is
-  // only [self] (root case), concludeRoundIfReady passes immediately and the member is added at once → 201.
-  const round = joinRound(buildBraintreeAncestors(freshNet, freshCfg.instanceId, freshCfg.instanceId));
-  openRoundHere(freshNet, round);
-  round.votes.push(makeSignedOwnCast(freshNet.id, round, freshCfg.instanceId, 'yes'));
+  // Closed, democratic, braintree: a vote. The proposer's yes is in it from the start (D-36), so where that yes is the quorum —
+  // the only member of a closed or democratic network, a braintree root — the member is admitted at once (`applyPassedJoin`,
+  // through the settle) → 201. A braintree's required voters are the ancestry path from self to the root.
+  const requiredVoters = freshNet.type === 'braintree' ? buildBraintreeAncestors(freshNet, freshCfg.instanceId, freshCfg.instanceId) : undefined;
   storePeerToken(instanceId, token);
-  if (concludeRoundIfReady(freshNet, round)) {
-    freshNet.members.push(member);
-    saveConfig(freshCfg);
-    log.info(`Braintree join immediate (root): added ${peerText(label)} (${peerText(instanceId)}) to network ${peerText(freshNet.id)}`);
+  const { round, decided } = proposeRound(freshNet, freshCfg, joinRound(requiredVoters));
+  saveConfig(freshCfg);
+  if (decided === 'passed') {
+    log.info(`Join of ${peerText(label)} (${peerText(instanceId)}) to network ${peerText(freshNet.id)} passed at open: admitted`);
     return { status: 201, body: safe(member) };
   }
-  saveConfig(freshCfg);
-  log.info(`Opened braintree join round ${peerText(round.roundId)} for ${peerText(label)} (${peerText(instanceId)}) in network ${peerText(freshNet.id)}`);
+  log.info(`Opened join vote round ${peerText(round.roundId)} for ${peerText(label)} (${peerText(instanceId)}) in network ${peerText(freshNet.id)}`);
   return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(freshNet, round) } };
 }
 
@@ -130,25 +113,6 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
   const memberIdx = net.members.findIndex(m => m.instanceId === instanceId);
   if (memberIdx < 0) return { status: 404, error: 'Member not found' };
   const subject = net.members[memberIdx]!;
-  const removeRound = (requiredVoters?: string[]): VoteRound => ({
-    roundId: uuidv4(),
-    type: 'remove',
-    subjectInstanceId: subject.instanceId,
-    subjectLabel: subject.label,
-    subjectUrl: subject.url,
-    deadline: new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString(),
-    openedAt: new Date().toISOString(),
-    votes: [],
-    ...(requiredVoters ? { requiredVoters } : {}),
-  });
-
-  if (net.type === 'closed' || net.type === 'democratic') {
-    const round = removeRound();
-    openRoundHere(net, round);
-    saveConfig(cfg);
-    log.info(`Opened remove vote round ${peerText(round.roundId)} for ${peerText(subject.label)} in network ${peerText(net.id)}`);
-    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(net, round) } };
-  }
 
   if (net.type === 'club' || net.type === 'pubsub') {
     // Club / Pubsub: publisher (owner) removes directly, no vote required
@@ -161,21 +125,20 @@ export function removeMemberAct(networkId: string, instanceId: string): NetworkA
     return { status: 204 };
   }
 
-  // Braintree: the subject's parent and every ancestor up to the root must approve. If the subject is a direct
-  // child of self, buildBraintreeAncestors(startId=self) includes self and self's own ancestors.
-  const requiredVoters = buildBraintreeAncestors(net, cfg.instanceId, subject.parentInstanceId ?? cfg.instanceId);
-  const round = removeRound(requiredVoters);
-  openRoundHere(net, round);
-  if (requiredVoters.includes(cfg.instanceId)) round.votes.push(makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes'));
-  if (concludeRoundIfReady(net, round)) {
-    // Ancestor path is only [self] → removed at once (concludeRoundIfReady spliced the member)
-    saveConfig(cfg);
-    sendMemberRemovedNotify(round.subjectUrl, round.subjectInstanceId, net.id);
-    log.info(`Braintree remove immediate: removed ${peerText(subject.label)} (${peerText(subject.instanceId)}) from network ${peerText(net.id)}`);
+  // Closed, democratic, braintree: a vote, with the proposer's yes in it from the start (D-36). On a braintree the subject's parent
+  // and every ancestor up to the root must approve (a yes from outside that set decides nothing: the pass rule counts the ancestors);
+  // where the proposer's yes is the quorum the member is removed at once and told (`member_removed`, through the settle) → 204.
+  const requiredVoters = net.type === 'braintree' ? buildBraintreeAncestors(net, cfg.instanceId, subject.parentInstanceId ?? cfg.instanceId) : undefined;
+  const { round, decided } = proposeRound(net, cfg, {
+    type: 'remove', subjectInstanceId: subject.instanceId, subjectLabel: subject.label, subjectUrl: subject.url,
+    ...(requiredVoters ? { requiredVoters } : {}),
+  });
+  saveConfig(cfg);
+  if (decided === 'passed') {
+    log.info(`Removal of ${peerText(subject.label)} (${peerText(subject.instanceId)}) from network ${peerText(net.id)} passed at open`);
     return { status: 204 };
   }
-  saveConfig(cfg);
-  log.info(`Opened braintree remove round ${peerText(round.roundId)} for ${peerText(subject.label)} (${peerText(subject.instanceId)}) in network ${peerText(net.id)}`);
+  log.info(`Opened remove vote round ${peerText(round.roundId)} for ${peerText(subject.label)} (${peerText(subject.instanceId)}) in network ${peerText(net.id)}`);
   return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(net, round) } };
 }
 
@@ -274,70 +237,32 @@ export async function admitByInviteKeyAct(networkId: string, input: unknown): Pr
   }
   const member: NetworkMember = { instanceId, label, url, tokenHash, direction, parentInstanceId, skipTlsVerify };
 
-  if (freshNet.type === 'closed' || freshNet.type === 'democratic') {
-    const round: VoteRound = {
-      roundId: uuidv4(),
-      type: 'join',
-      subjectInstanceId: instanceId,
-      subjectLabel: label,
-      subjectUrl: url,
-      deadline: new Date(Date.now() + freshNet.votingDeadlineHours * 3_600_000).toISOString(),
-      openedAt: new Date().toISOString(),
-      votes: [],
-      pendingMember: member,             // held here until the vote passes
-      inviteKeyHash: net.inviteKeyHash,  // preserve the original validated hash in the round record
-    };
-    openRoundHere(freshNet, round);
-    // Revoke invite key after use to prevent replay
-    freshNet.inviteKeyHash = undefined;
-    // Save the plaintext peer token so the sync engine can use it once the vote passes
-    const secrets = getSecrets();
-    secrets.peerTokens[instanceId] = token;
-    saveSecrets(secrets);
-    saveConfig(freshCfg);
-    log.info(`Join via invite key opened vote round ${peerText(round.roundId)} for ${peerText(label)}`);
-    return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(freshNet, round) } };
-  }
-
-  if (freshNet.type === 'braintree') {
-    // Braintree is vote-governed (S9): the joiner is admitted only after every
-    // ancestor on the path from this (inviting) node to the root votes yes —
-    // same round shape as the admin member-add path. The joiner always becomes
-    // a child of the inviting node; topology fields from the wire are ignored.
-    member.parentInstanceId = freshCfg.instanceId;
-    member.direction = 'push';   // we push to our children
-    const requiredVoters = buildBraintreeAncestors(freshNet, freshCfg.instanceId, freshCfg.instanceId);
-    const round: VoteRound = {
-      roundId: uuidv4(),
-      type: 'join',
-      subjectInstanceId: instanceId,
-      subjectLabel: label,
-      subjectUrl: url,
-      deadline: new Date(Date.now() + freshNet.votingDeadlineHours * 3_600_000).toISOString(),
-      openedAt: new Date().toISOString(),
-      votes: [],
-      pendingMember: member,
-      requiredVoters,
-      inviteKeyHash: net.inviteKeyHash,  // preserve the validated hash so the joiner can poll
-    };
-    openRoundHere(freshNet, round);
-    // The inviting node's approval is implicit — it generated the invite key.
-    round.votes.push(makeSignedOwnCast(freshNet.id, round, freshCfg.instanceId, 'yes'));
+  if (freshNet.type === 'closed' || freshNet.type === 'democratic' || freshNet.type === 'braintree') {
+    // A vote (S9 for braintree: every ancestor on the path from this inviting node to the root votes yes; the joiner always becomes a
+    // child of the inviting node, topology fields from the wire ignored). The inviting node's yes is in it from the start (D-36), so
+    // where it is the quorum — this instance alone in a closed or democratic network, a braintree root — the joiner is admitted at
+    // once and answered as a re-presentation after a pass is: the admitted shape.
+    const requiredVoters = freshNet.type === 'braintree' ? buildBraintreeAncestors(freshNet, freshCfg.instanceId, freshCfg.instanceId) : undefined;
+    if (freshNet.type === 'braintree') {
+      member.parentInstanceId = freshCfg.instanceId;
+      member.direction = 'push';   // we push to our children
+    }
     // Consume the key (single-use) and store the peer token for post-admission sync.
+    const inviteKeyHash = net.inviteKeyHash;   // preserved on the round so the joiner can poll it
     freshNet.inviteKeyHash = undefined;
     const secrets = getSecrets();
     secrets.peerTokens[instanceId] = token;
     saveSecrets(secrets);
-    const immediatePassed = concludeRoundIfReady(freshNet, round);
-    if (immediatePassed) {
-      // Root case: the ancestor path is only [self] → admit immediately
-      freshNet.members.push(member);
-      saveConfig(freshCfg);
-      log.info(`Braintree join via invite key immediate (root): added ${peerText(label)} (${peerText(instanceId)}) to network ${peerText(freshNet.id)}`);
+    const { round, decided } = proposeRound(freshNet, freshCfg, {
+      type: 'join', subjectInstanceId: instanceId, subjectLabel: label, subjectUrl: url,
+      pendingMember: member, inviteKeyHash, ...(requiredVoters ? { requiredVoters } : {}),
+    });
+    saveConfig(freshCfg);
+    if (decided === 'passed') {
+      log.info(`Join via invite key of ${peerText(label)} (${peerText(instanceId)}) to network ${peerText(freshNet.id)} passed at open: admitted`);
       return { status: 200, body: { status: 'joined', members: safeMemberList(freshNet, instanceId), networkId: freshNet.id } };
     }
-    saveConfig(freshCfg);
-    log.info(`Join via invite key opened braintree ancestor round ${peerText(round.roundId)} for ${peerText(label)} (${peerText(instanceId)}) in network ${peerText(freshNet.id)}`);
+    log.info(`Join via invite key opened vote round ${peerText(round.roundId)} for ${peerText(label)} (${peerText(instanceId)}) in network ${peerText(freshNet.id)}`);
     return { status: 202, body: { status: 'vote_pending', roundId: round.roundId, round: roundForOperator(freshNet, round) } };
   }
 

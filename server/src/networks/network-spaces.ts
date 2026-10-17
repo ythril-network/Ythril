@@ -34,7 +34,7 @@ import { reachesSpace } from '../auth/space-reach.js';
 import { networkJoinRefusal } from '../auth/network-rights.js';
 import { withInstanceAdminGrants } from '../auth/instance-admin-grants.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { createSpace, type SpaceCreator } from '../spaces/lifecycle.js';
+import type { SpaceCreator } from '../spaces/lifecycle.js';
 import { localToRemote, remoteToLocal, recordSpaceAlias, reverseSpaceMap, isSpaceId, forgetSpaceAliases } from '../sync/space-map.js';
 import { forgetReceiveMarks } from '../sync/member-space-mark.js';
 import { logInternalAudit } from '../audit/audit.js';
@@ -146,7 +146,11 @@ export function widenPeerTokensOf(cfg: Config, peerIds: readonly string[], local
  * create, whichever mechanism decided it — an upstream's announcement or a passed `space_addition` round — so the
  * token half cannot be left out of one of them.
  *
- * Never throws: both callers run inside a sync exchange or a vote, whose other work must not be lost to this.
+ * Never throws: two callers run inside a sync exchange or a vote, whose other work must not be lost to this. It ANSWERS instead
+ * (design v5 §1.4a, X16): `added` the local ids it added, and `failed` — our sentence, never the store's — when it could not. An empty
+ * `added` without `failed` is "nothing to do"; with it, "could not". A caller that answers an operator reads `failed`; the announcement
+ * ignores it, and says why where it does. Before, a failure and "nothing to do" were the same empty list, and the accept of a pending
+ * space answered success over a space it never created.
  */
 export async function addSpacesToNetwork(
   networkId: string,
@@ -154,8 +158,12 @@ export async function addSpacesToNetwork(
   why: string,
   /** Who a space created here is credited to (Q-134): the accepting token, or the network's joining token. */
   creator: SpaceCreator,
-): Promise<string[]> {
+): Promise<{ added: string[]; failed?: string }> {
   try {
+    // Loaded when a space is created, never at import: the settle of a space round (`spaces/apply-wipe-round.ts`) imports this module,
+    // the space-act runner imports the settle, and `lifecycle.ts` hands the runner its bodies when IT loads — a static import here
+    // closed that circle and ran `lifecycle.ts` before the runner had finished loading.
+    const { createSpace } = await import('../spaces/lifecycle.js');
     for (const { localId } of entries) {
       if (getConfig().spaces.some(s => s.id === localId)) continue;
       await createSpace({ id: localId, label: localId.charAt(0).toUpperCase() + localId.slice(1) }, creator);
@@ -163,9 +171,9 @@ export async function addSpacesToNetwork(
     // Re-read after the awaits: `createSpace` saved the config, and a stale copy would write that away.
     const cfg = getConfig();
     const net = cfg.networks.find(n => n.id === networkId);
-    if (!net) return [];
+    if (!net) return { added: [] };
     const added = entries.map(e => e.localId).filter((id, i, all) => !net.spaces.includes(id) && all.indexOf(id) === i);
-    if (!added.length) return [];
+    if (!added.length) return { added: [] };
     for (const e of entries) {
       if (e.localId === e.networkId || !added.includes(e.localId)) continue;
       const why = recordSpaceAlias(net, e.networkId, e.localId);
@@ -176,21 +184,37 @@ export async function addSpacesToNetwork(
     widenPeerTokens(cfg, net, added);
     saveConfig(cfg);
     log.info(`Network ${peerText(networkId)}: added space(s) ${peerList(added, ', ')} (${peerText(why)})`);
-    return added;
+    return { added };
   } catch (err) {
     log.warn(`Network ${peerText(networkId)}: could not add space(s) (${peerText(why)}): ${peerText(err)}`);
-    return [];
+    return {
+      added: [],
+      failed: `The space${entries.length === 1 ? '' : 's'} ${peerList(entries.map(e => `'${e.localId}'`), ', ')} could not be created on this instance; see its log.`,
+    };
   }
 }
 
 /**
  * A network space that is now carried is no longer a proposal: a pending entry left behind would offer to add it a
  * second time, and the network view would say the opposite of what syncs. One clean-up for both ways a space becomes
- * carried after create — adoption and the Q-133 heal — so neither leaves its offer standing.
+ * carried after create — adoption and the Q-133 heal — so neither leaves its offer standing; and for a space the
+ * network deleted ({@link forgetPendingOffer}). @returns whether an offer was forgotten.
  */
-function clearSettledProposals(net: NetworkConfig, networkIds: readonly string[]): void {
+function clearSettledProposals(net: NetworkConfig, networkIds: readonly string[]): boolean {
   const settled = new Set(networkIds);
-  if (net.pendingSpaces?.some(p => settled.has(p.networkId))) net.pendingSpaces = net.pendingSpaces.filter(p => !settled.has(p.networkId));
+  if (!net.pendingSpaces?.some(p => settled.has(p.networkId))) return false;
+  net.pendingSpaces = net.pendingSpaces.filter(p => !settled.has(p.networkId));
+  return true;
+}
+
+/**
+ * Forget the pending offer of one network space (design v5 §2.4, VR12) — the one spelling of "this network space is no longer on
+ * offer here", so a passed deletion and a space leaving the network cannot clean it up two ways. A member that held the space only as
+ * an offer kept it after the network deleted the space, and accepting it later re-added a space the network had voted away.
+ * @returns whether an offer was forgotten.
+ */
+export function forgetPendingOffer(net: NetworkConfig, networkSpaceId: string): boolean {
+  return clearSettledProposals(net, [networkSpaceId]);
 }
 
 /**
@@ -211,13 +235,15 @@ export function removeSpaceFromNetwork(networkId: string, localId: string, why: 
   const net = cfg.networks.find(n => n.id === networkId);
   if (!net || !net.spaces.includes(localId)) return false;
   net.spaces = net.spaces.filter(s => s !== localId);
+  // The network's id for it, read before its alias is forgotten: the offer of it is forgotten by that id.
+  const networkSpaceId = localToRemote(net, localId);
   forgetSpaceAliases(net, localId);
   const hadLayer = Boolean(net.schemaLayers?.[localId]);
   if (net.schemaLayers) delete net.schemaLayers[localId];
   if (net.schemaLayerUnread) delete net.schemaLayerUnread[localId];
   if (net.spaceOrigins) delete net.spaceOrigins[localId];
   forgetReceiveMarks(net, localId);
-  if (net.pendingSpaces?.some(p => p.localId === localId)) net.pendingSpaces = net.pendingSpaces.filter(p => p.localId !== localId);
+  forgetPendingOffer(net, networkSpaceId);
   saveConfig(cfg);
   log.info(`Network ${networkId}: space '${localId}' left the network (${why}); this instance keeps it as a local space`);
   if (hadLayer) {
@@ -303,7 +329,10 @@ export async function adoptAnnouncedSpaces(networkId: string, fromInstanceId: st
   const { adopt: allowed, pending } = adoptionDecision(net, cfg.tokens, cfg.spaces.map(s => s.id), proposed);
   holdAsPending(cfg, net, pending, fromInstanceId, `upstream ${fromInstanceId} announced`);
   // Credited to the token that joined the network here — the authority adoptionDecision just judged by (Q-134).
-  return allowed.length ? addSpacesToNetwork(networkId, allowed, `announced by upstream ${fromInstanceId}, joined by ${net.joinedBy}`, { tokenId: net.joinedBy ?? null }) : [];
+  if (!allowed.length) return [];
+  // `failed` is not read here — an announcement: the exchange's other work must not be lost, and the failure is already in the log.
+  const { added } = await addSpacesToNetwork(networkId, allowed, `announced by upstream ${fromInstanceId}, joined by ${net.joinedBy}`, { tokenId: net.joinedBy ?? null });
+  return added;
 }
 
 /*
@@ -417,43 +446,57 @@ export function spaceAdditionTarget(
   return { localId };
 }
 
-/** Apply a concluded `space_addition` round here, if it passed. Deferred a tick: the caller's config write runs first. */
-export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, where: string): boolean {
-  if (!round.concluded || !round.passed || round.type !== 'space_addition') return false;
+/** What applying a passed addition came to: added, held as an offer, or — `ok: false` — could not be created, in our words. */
+export interface AdditionSettled { roundId: string; kind: 'add'; ok: boolean; error?: string; added?: string[] }
+
+/**
+ * Apply a concluded `space_addition` round here, if it passed — or `null` when it does nothing here (not passed, already carried,
+ * skipped, or retired by a later deletion: `appliedHere`). Deferred a tick, so the caller's config write runs first; the promise
+ * says how it ended and never rejects, so a door that awaits the settle answers a creation that failed as a failure (X16).
+ */
+export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, where: string): Promise<AdditionSettled> | null {
+  if (!round.concluded || !round.passed || round.type !== 'space_addition' || round.appliedHere) return null;
   const cfg = getConfig();
   const target = spaceAdditionTarget(net, round, cfg.instanceId, cfg.spaces.map(s => s.id));
-  if (!target) return false;
+  if (!target) return null;
   if ('skip' in target) {
-    log.warn(`space_addition round ${round.roundId} on network ${net.id} passed (${where}) but was not applied: ${target.skip}`);
-    return false;
+    log.warn(`space_addition round ${peerText(round.roundId)} on network ${peerText(net.id)} passed (${peerText(where)}) but was not applied: ${peerText(target.skip)}`);
+    return null;
   }
   const entry = { networkId: round.spaceId!, localId: target.localId };
+  const done = (more: Omit<AdditionSettled, 'roundId' | 'kind'>): AdditionSettled => ({ roundId: round.roundId, kind: 'add', ...more });
   // S-9 on the round path: a round this instance did not propose, for a space it does not have, would CREATE one on
   // the network's word. The same rule as an announcement decides — the joining token — and what it could not have
   // joined waits for the operator. A same-id local space got here only by this instance voting yes, which is consent.
   // Decided inside the deferred tick, on the config as it is then, so the caller's own write cannot overwrite it.
-  setImmediate(() => {
-    if (!round.proposedHere) {
-      const now = getConfig();
-      const liveNet = now.networks.find(n => n.id === net.id);
-      if (!liveNet) return;
-      const localIds = now.spaces.map(s => s.id);
-      if (!localIds.includes(entry.localId)) {
-        const { adopt, pending } = adoptionDecision(liveNet, now.tokens, localIds, [entry]);
-        if (!adopt.length) {
-          // Q-60: the schema the round carries waits with it, so an accept later adopts the space WITH its schema.
-          const withMeta = round.pendingMeta ? pending.map(p => ({ ...p, meta: round.pendingMeta })) : pending;
-          holdAsPending(now, liveNet, withMeta, round.subjectInstanceId ?? 'a passed round', `space_addition round ${round.roundId} passed (${where}) for`);
-          return;
+  return new Promise<AdditionSettled>(resolve => setImmediate(() => {
+    void (async (): Promise<AdditionSettled> => {
+      if (!round.proposedHere) {
+        const now = getConfig();
+        const liveNet = now.networks.find(n => n.id === net.id);
+        if (!liveNet) return done({ ok: true, added: [] });
+        const localIds = now.spaces.map(s => s.id);
+        if (!localIds.includes(entry.localId)) {
+          const { adopt, pending } = adoptionDecision(liveNet, now.tokens, localIds, [entry]);
+          if (!adopt.length) {
+            // Q-60: the schema the round carries waits with it, so an accept later adopts the space WITH its schema.
+            const withMeta = round.pendingMeta ? pending.map(p => ({ ...p, meta: round.pendingMeta })) : pending;
+            holdAsPending(now, liveNet, withMeta, round.subjectInstanceId ?? 'a passed round', `space_addition round ${round.roundId} passed (${where}) for`);
+            return done({ ok: true, added: [] });
+          }
         }
       }
-    }
-    void addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`, { tokenId: net.joinedBy ?? null }).then(async added => {
+      const result = await addSpacesToNetwork(net.id, [entry], `space_addition round ${round.roundId}, ${where}`, { tokenId: net.joinedBy ?? null });
+      if (result.failed) return done({ ok: false, error: result.failed });
       // Q-60: the round carries the space's schema, since a voted network has no meta pull — kept as the layer.
-      if (!added.includes(entry.localId) || !round.pendingMeta || round.proposedHere) return;
-      const { acceptNetworkLayer } = await import('../sync/space-meta-pull.js');
-      acceptNetworkLayer(net.id, entry.localId, round.pendingMeta, `space_addition round ${round.roundId}`);
+      if (result.added.includes(entry.localId) && round.pendingMeta && !round.proposedHere) {
+        const { acceptNetworkLayer } = await import('../sync/space-meta-pull.js');
+        acceptNetworkLayer(net.id, entry.localId, round.pendingMeta, `space_addition round ${round.roundId}`);
+      }
+      return done({ ok: true, added: result.added });
+    })().then(resolve, (err: unknown) => {
+      log.error(`space_addition side-effect (${peerText(where)}): ${peerText(err)}`);
+      resolve(done({ ok: false, error: `The space '${entry.localId}' could not be added on this instance; see its log.` }));
     });
-  });
-  return true;
+  }));
 }

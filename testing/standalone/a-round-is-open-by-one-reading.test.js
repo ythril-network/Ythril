@@ -139,7 +139,6 @@ const NOT_THE_OPEN_QUESTION = {
   'server/src/spaces/apply-wipe-round.ts': 'asks whether a space round has been decided and passed, to act on its outcome',
   'server/src/networks/member-introductions.ts': 'asks whether a join round concluded and passed, to admit or introduce its subject',
   'server/src/networks/network-spaces.ts': 'asks whether a space_addition round concluded and passed, to apply it',
-  'server/src/sync/engine.ts': 'the post-merge pass asks which rounds are still undecided, to conclude them; the merge itself uses roundIsOpen',
 };
 
 /** The readers the design names as meaning "open for votes". */
@@ -148,7 +147,8 @@ const OPEN_READERS = [
   'server/src/networks/network-acts.ts',
   'server/src/spaces/network-status.ts',
   'server/src/networks/member-acts.ts',
-  'server/src/sync/engine.ts',
+  // The gossip merge moved out of the engine with the intake of a served list (bundle-106, X11).
+  'server/src/sync/served-rounds.ts',
   'server/src/api/sync/votes.ts',
 ];
 
@@ -183,8 +183,8 @@ describe('every reader of "open for votes" asks roundIsOpen', () => {
   }
 
   it('the gossip merge skips a round that is not open, not only one that is concluded', () => {
-    const engine = all.find(s => s.file === 'server/src/sync/engine.ts');
-    const merge = bodyOf(engine.code, 'propagateVotesWithPeer', 'the gossip vote merge');
+    const engine = all.find(s => s.file === 'server/src/sync/served-rounds.ts');
+    const merge = bodyOf(engine.code, 'takeServedRounds', 'the gossip vote merge');
     assert.doesNotMatch(merge, /\blocal\s*\.\s*concluded\b/, 'the merge still tests `local.concluded`, so a past-deadline round keeps taking casts');
     assert.match(merge, /roundIsOpen\s*\(\s*local\b/);
   });

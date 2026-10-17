@@ -13,12 +13,13 @@ Content-Type: application/json
 { "confirm": true }
 ```
 
-`confirm: true` is required when the space belongs to a network; without it the answer is `400` and nothing is opened. A space in no network is deleted at once, as before.
+`confirm: true` is required on every space, networked or not; without it the answer is `400` and nothing is deleted or opened. A built-in space answers `400` and is never deleted.
 
 A space in a network is deleted by a governance vote in each network that holds it, and only this instance's copy is deleted. Every other member keeps its copy as a local space and the space leaves the network there. On a pub/sub network a subscriber's deletion is its own: no vote is opened and the publisher is not told; a publisher's deletion acts at once.
 
 | Answer | Meaning |
 |---|---|
+| `204` (no body) | No network votes on the space (it is in none, or only in pub/sub networks this instance subscribes to). The local copy is deleted at once. |
 | `200` `{ "status": "deleted", "rounds", "removedHere": true }` | This instance's own yes passed the round (a club or pub/sub network, or the only member) and the local copy is gone. |
 | `202` `{ "status": "vote_pending", "rounds" }` | No round has passed yet. The space is deleted here when one does. |
 | `202` `{ "status": "passed", "rounds", "queued": true }` | The vote passed and this instance's change is still running, past the answer budget. It completes on its own; check `GET /api/networks/:id` (`owedSpaceActs`), or the space's `actPending`. |

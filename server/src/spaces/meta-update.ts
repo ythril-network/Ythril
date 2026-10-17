@@ -33,19 +33,15 @@ import { localToRemote } from '../sync/space-map.js';
 import { replicatedMetaOf } from '../sync/replicated-meta.js';
 import type { SpaceConfig, SpaceMeta, DocExtractionMode, NetworkConfig } from '../config/types.js';
 import { normalizeDocExtractionMode } from '../config/types.js';
-import { getConfig, saveConfig, getSecrets, getDocumentProcessingConfig } from '../config/loader.js';
+import { getConfig, saveConfig, getDocumentProcessingConfig } from '../config/loader.js';
 import { updateSpace, refuseRemovedDescription, unknownWriteFieldsMode } from './spaces.js';
 import { ensureTtlIndex } from '../brain/ttl.js';
-import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { proposedMetaFields } from '../sync/meta-round-merge.js';
 import { membersBehindNewKeys, type MemberSkew } from '../sync/meta-skew.js';
 import { visibleNetworks } from '../auth/network-rights.js';
-import { concludeRoundIfReady } from '../sync/governance.js';
-import { openRoundHere } from '../networks/round-local-state.js';
-import { roundAnswer, type RoundAnswer } from '../networks/vote-acts.js';
-import { makeSignedOwnCast } from '../util/signing.js';
+import { proposeRound } from '../networks/propose-round.js';
+import type { RoundAnswer } from '../networks/vote-acts.js';
 import { log, NAME_QUOTED, peerList, peerText, refusalOfParse } from '../util/log.js';
-import { v4 as uuidv4 } from 'uuid';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { checkMetaPrecondition, preconditionErrorBody } from './meta-precondition.js';
 import { normaliseRecordTtl } from './record-ttl.js';
@@ -518,22 +514,21 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     // F-39.5: a proposal to one network opens its round there alone; any other edit, on every network carrying it.
     const networkedIn = cfg.networks.filter(n => n.spaces.includes(id) && (plan.targetNetwork === undefined || n.id === plan.targetNetwork));
     if (networkedIn.length > 0) {
-      const now = new Date().toISOString();
       const rounds: RoundAnswer[] = [];
       const layers: LayerOutcome[] = [];
 
       for (const net of networkedIn) {
-        const roundId = uuidv4();
-        const deadline = new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString();
-        const opened = openRoundHere(net, {
-          roundId,
+        /*
+         * Opened, signed and EVALUATED through the one open path (`proposeRound`), because the proposer's yes may already be
+         * enough (`Q-49`): on club and pub/sub one yes passes a round, and a closed network with no other member needs only ours.
+         * The round stays in the list either way, concluded or not, so peers learn of it exactly as before — and the members are
+         * told `meta_change_pending` from the same module every opener tells them through.
+         */
+        const { decided, answer } = proposeRound(net, cfg, {
           type: 'meta_change',
           subjectInstanceId: cfg.instanceId,
           subjectLabel: cfg.instanceLabel,
           subjectUrl: '',
-          deadline,
-          openedAt: now,
-          votes: [],
           // The network's id for the space, so each member resolves it to its own local id (F-39.4).
           spaceId: localToRemote(net, id),
           // Only what this write CHANGED (R6-6): the fields it named and the types it changed, never the whole meta it was
@@ -552,19 +547,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           ...(plan.changedTypes.length ? { changedTypes: plan.changedTypes } : {}),
           ...(plan.droppedTypes.length ? { keptTypes: plan.droppedTypes } : {}),
         });
-        // The proposer is a voter like any member (S-7), so its yes is required — and cast for it here, SIGNED, because
-        // a bare cast is taken only from the voter itself and a relayed copy of it would be dropped.
-        opened.votes.push(makeSignedOwnCast(net.id, opened, cfg.instanceId, 'yes'));
-        /*
-         * Evaluated now, because the proposer's yes above may already be enough (`Q-49`).
-         *
-         * On club and pub/sub one yes passes a round, and a closed network with no other member needs only ours —
-         * but nothing looked at the round until another vote arrived, so the change answered 202 and sat unapplied
-         * until somebody cast the identical yes again or the deadline expired it. The round stays in the list
-         * either way, concluded or not, so peers learn of it exactly as before.
-         */
-        const concluded = concludeRoundIfReady(net, opened);
-        if (!concluded) rounds.push(roundAnswer(net, opened));
+        const concluded = decided === 'passed';
+        if (!concluded) rounds.push(answer);
         layers.push({ networkId: net.id, networkLabel: net.label, outcome: concluded ? 'applied' : 'vote_pending' });
       }
       const kept = plan.droppedTypes.length ? { keptTypes: plan.droppedTypes } : {};
@@ -590,26 +574,6 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       }
       if (Object.keys(nonMetaUpdates).length > 0) updateSpace(id, nonMetaUpdates);
       else saveConfig(cfg);
-
-      // Notify peers (best-effort).
-      const secrets = getSecrets();
-      for (const net of networkedIn) {
-        for (const member of net.members) {
-          const peerToken = secrets.peerTokens[member.instanceId];
-          if (!peerToken) continue;
-          peerSafeFetch(`${member.url}/api/notify`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${peerToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              networkId: net.id,
-              instanceId: cfg.instanceId,
-              event: 'meta_change_pending',
-              data: { spaceId: id, spaceLabel: space.label },
-            }),
-            signal: AbortSignal.timeout(5_000),
-          }).catch(err => log.warn(`notify ${peerText(member.label)} of meta_change_pending: ${peerText(err)}`));
-        }
-      }
 
       if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept, ...reached };
 

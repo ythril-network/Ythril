@@ -19,6 +19,12 @@ import { decodeSeqCursor, parseSeqText, type SeqPosition } from '../../util/seq-
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
 import { MACHINE_MADE_SOURCES } from '../../files/derived-fields.js';
+import { spaceHold, enterSpaceTransfer } from '../../sync/space-exchange-set.js';
+import { SPACE_HELD_ANSWER, SPACE_DECLINED_ANSWER } from '../../sync/held-answer.js';
+import { holdTransferWhileOpen } from '../../sync/space-transfer-fence.js';
+import { spaceActKnob } from '../../spaces/space-act-runner.js';
+import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
+import { spaceHeldRefusalsTotal } from '../../metrics/registry.js';
 
 /*
  * What a landed edge or link points at that is not here is `sync/linkage-check.ts`'s question (bundle-30 I8): checked
@@ -448,10 +454,96 @@ export function pushAllowed(
 ): string | null {
   const token = authToken as Record<string, unknown>;
   if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return null; }
-  if (!spaceAllowed(spaceId, networkId, token)) { res.status(403).json({ error: 'Forbidden' }); return null; }
+  // Reach, the decline and the hold: a push is a data door like any other. Admitted LAST, once every refusal below has passed.
+  if (refusePeerSpace(res, spaceId, networkId, token, 'push', false)) return null;
   if (isNonPeerSyncWrite(token)) { res.status(403).json({ error: NON_PEER_WRITE_MESSAGE }); return null; }
   if (isDirectionalWriteBlocked(spaceId, token)) { res.status(403).json({ error: 'Directional network: write not permitted from this peer' }); return null; }
+  const peerId = callerPeerId(token);
+  if (!peerId) return spaceId;
+  // The push is a transfer of the space, counted in the fence until its response closes, so an act registered meanwhile waits for it.
+  const transfer = enterSpaceTransfer(spaceId, peerId, networkId);
+  if (!transfer) { spaceHeldRefusalsTotal.inc({ door: 'push' }); res.status(423).json(SPACE_HELD_ANSWER); return null; }
+  let kept = false;
+  try { kept = holdTransferWhileOpen(res, transfer, spaceActKnob('INBOUND_TRANSFER_MS'), false); } finally { if (!kept) transfer.release(); }
   return spaceId;
+}
+
+/**
+ * May the caller REACH `spaceId` at all? Answers `403` itself and returns true when not. The one place the sync routes ask
+ * `spaceAllowed`: a route that asked it by hand and wrote its own 403 was a door the hold could not reach. The schema door
+ * (`GET /meta`) asks this only - schema propagation is not data, and a wipe changes no schema (X17).
+ */
+export function refusePeerReach(
+  res: import('express').Response, spaceId: string, networkId: string | undefined, authToken: unknown,
+): boolean {
+  if (spaceAllowed(spaceId, networkId, authToken as Record<string, unknown>)) return false;
+  res.status(403).json({ error: 'Forbidden' });
+  return true;
+}
+
+/**
+ * Did the PEER `peerId` dismiss network space `spaceId` (it is a network space id this instance left, pub/sub): asked in the
+ * network the request names, or in every network that lists the peer. A space never carried and never dismissed is not declined.
+ */
+function declinedByThisMember(spaceId: string, networkId: string | undefined, peerId: string): boolean {
+  return getConfig().networks.some(n => (!networkId || n.id === networkId)
+    && n.members.some(m => m.instanceId === peerId)
+    && !n.spaces.includes(spaceId)
+    && (n.dismissedSpaces ?? []).includes(spaceId));
+}
+
+/**
+ * The question every sync DATA door asks before it serves or stores a space for a caller, answering the refusal itself
+ * (returns true) or admitting the request (false):
+ *
+ * - a peer asking for a network space this instance LEFT (pub/sub) is answered `423 space_declined`, which a new sender records
+ *   and stops asking for (a `403` would read as a failed transfer every cycle);
+ * - a caller that may not reach the space is answered `403` (`refusePeerReach`);
+ * - a PEER token is answered `423 space_held` while the space is held with that peer (`spaceHold`, the one answer); an admin or
+ *   local token is the operator's own tooling, not the exchange, and is never held;
+ * - an admitted peer request is a transfer of the space, counted in the fence for as long as its response is open, so an act
+ *   registered meanwhile waits for it (and the server ends it past `INBOUND_TRANSFER_MS`).
+ */
+export function refusePeerSpace(
+  res: import('express').Response, spaceId: string, networkId: string | undefined, authToken: unknown, door = 'sync', admit = true,
+): boolean {
+  const token = authToken as Record<string, unknown>;
+  const peerId = callerPeerId(token);
+  if (peerId && declinedByThisMember(spaceId, networkId, peerId)) { res.status(423).json(SPACE_DECLINED_ANSWER); return true; }
+  if (refusePeerReach(res, spaceId, networkId, token)) return true;
+  if (!peerId) return false;
+  if (!admit) {
+    // A push door admits the transfer itself, after its own refusals (`pushAllowed`); the hold is still asked here.
+    if (!spaceHold(getConfig(), spaceId, peerId, networkId)) return false;
+    spaceHeldRefusalsTotal.inc({ door });
+    res.status(423).json(SPACE_HELD_ANSWER);
+    return true;
+  }
+  const transfer = spaceHold(getConfig(), spaceId, peerId, networkId) ? null : enterSpaceTransfer(spaceId, peerId, networkId);
+  if (!transfer) {
+    spaceHeldRefusalsTotal.inc({ door });
+    res.status(423).json(SPACE_HELD_ANSWER);
+    return true;
+  }
+  // Counted until the response closes, however it closes; a response that cannot say so is not counted at all.
+  let kept = false;
+  try { kept = holdTransferWhileOpen(res, transfer, spaceActKnob('INBOUND_TRANSFER_MS'), false); } finally { if (!kept) transfer.release(); }
+  return false;
+}
+
+/**
+ * A sync write door's catch, asked before the ordinary failure answer: a PEER whose request was admitted before an act
+ * registered, and whose next unit met the writer's refusal, is answered `423 space_held` - what its sender classifies as a hold -
+ * and never the `409` an operator's own token gets, which a sender reads as a failed transfer of the whole member (X2, CH4).
+ * Returns true when it answered.
+ */
+export function refusePeerWrite(res: import('express').Response, err: unknown, authToken: unknown): boolean {
+  const token = authToken as Record<string, unknown> | undefined;
+  if (!isSpaceNotWritable(err) || !callerPeerId(token)) return false;
+  if (token && isInstanceAdmin(token as { admin?: boolean; rights?: TokenRights | null })) return false;
+  spaceHeldRefusalsTotal.inc({ door: 'write' });
+  res.status(423).json(SPACE_HELD_ANSWER);
+  return true;
 }
 
 /**

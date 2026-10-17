@@ -15,7 +15,7 @@ import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../../sync/trigger.js';
 import { attachSyncNote, changeNotesAct } from '../../sync/change-notes.js';
 import {
-  networkView, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, 
+  networkAnswer, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, 
   CreateNetworkBody, UpdateNetworkBody, AddNetworkSpaceBody, ResolvePendingSpaceBody, resolvePendingSpaceAct,
 } from '../../networks/network-acts.js';
 import { sendCaughtFailure } from '../send-failure.js';
@@ -28,8 +28,10 @@ export const crudRouter = Router();
 // `network_peers`, so the two doors list the same networks.
 crudRouter.get('/', globalRateLimit, requireAuth, (req, res) => {
   const visible = visibleNetworks(req.authToken as Parameters<typeof visibleNetworks>[0], getConfig().networks);
-  // `version`, `belowFloor` and `minPeerVersion` per MEMBER, spelled as MCP spells them — see `networkView`.
-  res.json({ networks: visible.map(networkView) });
+  // `version`, `belowFloor` and `minPeerVersion` per MEMBER, spelled as MCP spells them — see `networkView`; the owed acts for an
+  // instance administrator only — see `networkAnswer`, which `GET /:id` and MCP `network_get` answer through too.
+  const cfg = getConfig();
+  res.json({ networks: visible.map(net => networkAnswer(net, req.authToken as Parameters<typeof networkAnswer>[1], cfg)) });
 });
 
 
@@ -158,11 +160,16 @@ crudRouter.post('/:id/pending-spaces', globalRateLimit, requireAuth, denyReadOnl
 // ── POST /api/networks/:id/spaces — add a space to a network this instance governs (F-38.3) ──
 
 // The publisher of a pub/sub network or the root of a braintree; the rights are the act's (`networkAddSpaceRefusal`).
-crudRouter.post('/:id/spaces', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
+crudRouter.post('/:id/spaces', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   const parsed = AddNetworkSpaceBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
-  const r = addNetworkSpaceAct(req.authToken as Parameters<typeof addNetworkSpaceAct>[0], req.params['id'] as string, parsed.data);
-  if (r.audit) req.auditSnapshots = r.audit;
-  sendAct(res, r);
+  try {
+    // Awaited: an addition the proposer's yes passes at open lands before this answers (design v5 §1.4).
+    const r = await addNetworkSpaceAct(req.authToken as Parameters<typeof addNetworkSpaceAct>[0], req.params['id'] as string, parsed.data);
+    if (r.audit) req.auditSnapshots = r.audit;
+    sendAct(res, r);
+  } catch (err) {
+    sendCaughtFailure(res, 'POST /api/networks/:id/spaces', err);
+  }
 });
 

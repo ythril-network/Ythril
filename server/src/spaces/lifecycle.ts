@@ -20,7 +20,7 @@ import { armSearchIndexPresence, reconcileSpaceSearchIndexes, forgetSpaceSearchI
 import { afterSearchUp, forgetSearchWaiter } from './search-readiness.js';
 import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage, pendingOpStillFailingMessage, setReindexNeeded } from './_shared.js';
 import {
-  runSpaceAct, registerOwnSpaceAct, releaseSpaceActWaiter, defineSpaceActBody, spaceActRunning, SpaceActsClosedError,
+  runSpaceAct, registerOwnSpaceAct, releaseSpaceActWaiter, defineSpaceActBody, spaceActRunning, SpaceActsClosedError, canonicalWipeTypes,
   type SpaceActRequest, type SpaceRoundSettled, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from './space-act-runner.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
@@ -894,6 +894,25 @@ async function removeOwnCopy(spaceId: string, ctx: SpaceActBodyContext): Promise
 export type WipeCollectionType = BrainCollection;
 
 export const WIPE_COLLECTION_TYPES: readonly WipeCollectionType[] = BRAIN_COLLECTIONS;
+
+/**
+ * Which types a wipe covers, read ONE way (design v5 §2.2 (4), W23): deduplicated, in `WIPE_COLLECTION_TYPES` order, all of them for
+ * an absent or empty list — or `'refused'` for a value outside them or a list longer than they are.
+ *
+ * What it prevents: the admin route took `types` uncapped and undeduplicated while the tool's schema capped them, so the same wipe was
+ * stored, signed and keyed in two spellings, and a repeat of it was not recognised as one. Every reader asks it — both REST doors and
+ * the tool before any round opens, so the round's `wipeTypes` (and the signature over them), the act's key and the hold all read one
+ * canonical list. The canonicalising itself is the runner's (`canonicalWipeTypes`), which the runner's key reads too.
+ */
+export function wipeTypesOf(types?: unknown): WipeCollectionType[] | 'refused' {
+  if (types === undefined || types === null) return [...WIPE_COLLECTION_TYPES];
+  if (!Array.isArray(types) || types.length > WIPE_COLLECTION_TYPES.length || types.some(t => typeof t !== 'string')) return 'refused';
+  try {
+    return canonicalWipeTypes(types as string[]) ?? [...WIPE_COLLECTION_TYPES];
+  } catch {
+    return 'refused';
+  }
+}
 
 /**
  * Which review-finding `type` values a partial wipe should clear.

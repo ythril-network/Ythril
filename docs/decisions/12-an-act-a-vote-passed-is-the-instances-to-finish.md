@@ -12,7 +12,7 @@ A vote that passes a deletion or a wipe is a decision the whole network has made
 
 ## Decision
 
-1. **A proposer's own yes that carries the round acts at once.** On a club or pub/sub network, and on a closed or democratic network where this instance is the only member, the round is decided by the proposer's yes, and the door answers after the change has run. The `confirm` flag is required on a networked delete or wipe, because the act is then immediate.
+1. **A proposer's own yes that carries the round acts at once.** On a club or pub/sub network, and on a closed or democratic network where this instance is the only member, the round is decided by the proposer's yes, and the door answers after the change has run. The `confirm` flag is required on every delete and wipe, networked or not, since a networked one may act at once.
 2. **A passed space act is owed until it completes.** It is registered when the round concludes, retried with a backoff, and never stranded: a restart resumes it, and the expiry job retries it. While it stands, writes to the space are refused with `409` from every writer, and the space's exchange with every member is held.
 3. **The owed act is not given up after a set number of attempts.** A move gives up after its attempts, because its bytes and its records stay reachable at one of two paths (decision 09). A voted deletion or wipe that gave up would release data the network voted away, so it is retried for as long as it is owed.
 4. **A held exchange is an answer, not a failure.** `423` with `code: "space_held"` says the space is being applied on the other side; `423` with `code: "space_declined"` says a pub/sub subscriber has left the space. A sender that meets either classifies it as held or declined and retries on its next cycle.
@@ -21,7 +21,7 @@ A vote that passes a deletion or a wipe is a decision the whole network has made
 ## Consequences
 
 - A wipe closes its space to writes until it completes, so a write during a wipe answers `409` and is retried by its caller. The space's `actPending` and the network's `owedSpaceActs` show what is owed.
-- A member that applies a networked wipe re-reads that space from its members once afterwards.
+- A member that applies a wipe which resets the space's seq counters re-reads its upstream's tombstones once afterwards (the one-time re-read in `sync/tombstone-reread.ts`; re-reading is idempotent).
 - An operator who rolls back before the owed acts are finished can lose them: see the rollback notes in the [upgrade guide](../integration-guide/02b-upgrading.md).
 
 ## The reversal to prevent

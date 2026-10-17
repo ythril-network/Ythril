@@ -285,7 +285,11 @@ export async function receiveChangeNotes(
     await coll.insertOne(asDoc<ChangeNote>(doc));
     stored += 1;
     const entry = { id: doc._id, networkId, networkLabel: net.label, from: fromInstanceId, author: doc.author, generated: doc.generated, note: doc.note, spaces };
-    for (const spaceId of spaces.length ? spaces : net.spaces) emitWebhookEvent({ event: 'change_note.received', spaceId, entry });
+    // A note about the whole network (it named no space) goes to every space the network carries here. A note that NAMED spaces,
+    // none of which this instance carries, is stored and listed and tells no space (X10): a subscriber that applied a deletion
+    // before its notice arrived would otherwise have told every unrelated space's webhook about a space it no longer has.
+    const told = n.spaces.length === 0 ? net.spaces : spaces;
+    for (const spaceId of told) emitWebhookEvent({ event: 'change_note.received', spaceId, entry });
   }
   if (stored) await prune(networkId, 'in');
   return { status: 200, body: { received: parsed.data.notes.length, stored } };

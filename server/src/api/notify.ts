@@ -39,6 +39,13 @@ export const NotifyBody = z.object({
   data: z.record(z.string(), z.unknown()).optional(),  // event-specific payload
 });
 
+/**
+ * The events on which this instance runs a sync cycle at once. The sender's table (`NOTICE_EVENTS`, `networks/notify-members.ts`) says
+ * which notices wake a receiver; `every-round-is-opened-and-settled-by-one-function` holds the two to the same set, so a notice cannot
+ * be sent as a wake-up that the receiver only records. `meta_change_pending` is recorded and wakes nothing (W19).
+ */
+export const SYNC_TRIGGER_EVENTS = ['sync_available', 'space_deletion_pending', 'space_wipe_pending'] as const;
+
 // In-memory event log (not persistent — restart clears it)
 // Production deployments would store this in MongoDB.
 interface NotifyEvent {
@@ -155,19 +162,10 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
 
   log.info(`Notify: [${event}] from ${instanceId} in network ${networkId}`);
 
-  // For sync_available events, we trigger an async sync run
-  if (event === 'sync_available') {
-    import('../sync/engine.js').then(({ runSyncForNetwork }) => {
-      runSyncForNetwork(networkId).catch(err =>
-        log.error(`Triggered sync for network ${networkId} failed: ${err}`),
-      );
-    }).catch(err => log.error(`Failed to import sync engine: ${err}`));
-  }
-
-  // For a pending space_deletion or space_wipe, trigger a sync so we pull the vote round immediately.
-  // Both are irreversible and space-scoped, so the round wants to be in front of an operator now rather
-  // than at the next scheduled cycle — a deadline that expires unseen is a vote nobody got to cast.
-  if (event === 'space_deletion_pending' || event === 'space_wipe_pending') {
+  // The events that wake a sync cycle here. `sync_available`: the sender has new data. A pending space_deletion or space_wipe: both
+  // are irreversible and space-scoped, so the round wants to be in front of an operator now rather than at the next scheduled cycle —
+  // a deadline that expires unseen is a vote nobody got to cast.
+  if ((SYNC_TRIGGER_EVENTS as readonly string[]).includes(event)) {
     import('../sync/engine.js').then(({ runSyncForNetwork }) => {
       runSyncForNetwork(networkId).catch(err =>
         log.error(`Triggered sync (${event}) for network ${networkId} failed: ${err}`),

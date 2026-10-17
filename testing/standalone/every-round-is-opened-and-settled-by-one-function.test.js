@@ -42,7 +42,8 @@ describe('the open path and the settle step are written once (design v5 section 
   it('(a) every concludeRoundIfReady call outside sync/governance.ts is inside settleRounds, but the forecast, which evaluates a scratch copy', () => {
     const sites = callsOf('concludeRoundIfReady').filter(c => c.file !== 'server/src/sync/governance.ts');
     assert.ok(sites.length >= 1, 'no concludeRoundIfReady call found outside governance.ts: re-anchor');
-    const EXEMPT = { 'server/src/networks/round-forecast.ts': 'evaluates a scratch copy, never applies (P-32)' };
+    // Empty since bundle-106 A2: the forecast asks the pure pass rule (`roundVerdict`) and concludes nothing, so it needs no row.
+    const EXEMPT = {};
     const stray = sites.filter(c => c.fn !== 'settleRounds' && !(c.file in EXEMPT)).map(c => `${c.file} (${c.fn ?? 'module scope'})`);
     assert.deepEqual(stray, [], 'these conclude a round outside the one settle step, so what they conclude is applied by hand or not at all');
     for (const f of Object.keys(EXEMPT)) assert.ok(sites.some(c => c.file === f), `the exemption for ${f} is stale: it no longer calls concludeRoundIfReady`);
@@ -120,7 +121,8 @@ describe('one writer of appliedHere, one reading of a network space, one reading
 describe('addSpacesToNetwork returns its answer and every caller reads it or says why (X16)', () => {
   it('the function answers { added, failed } and never throws', () => {
     const src = blanked.get('server/src/networks/network-spaces.ts');
-    const sig = /export\s+async\s+function\s+addSpacesToNetwork\s*\([\s\S]*?\)\s*:\s*Promise<([^{]*)>\s*\{/.exec(src)?.[1] ?? '';
+    // The result is a type literal (design v5 section 1.4a), so the capture takes one brace-delimited literal as well as a named type.
+    const sig = /export\s+async\s+function\s+addSpacesToNetwork\s*\([\s\S]*?\)\s*:\s*Promise<(\{[^}]*\}|[^{]*)>\s*\{/.exec(src)?.[1] ?? '';
     assert.match(sig, /added\s*:\s*string\[\]/, `its result type is ${sig.trim() || 'not found'}: design v5 section 1.4a — { added: string[]; failed?: string }`);
     assert.match(sig, /failed\s*\??\s*:\s*string/);
   });

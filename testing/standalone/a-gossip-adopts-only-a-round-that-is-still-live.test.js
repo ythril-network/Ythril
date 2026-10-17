@@ -95,8 +95,11 @@ describe('what gossip adopts from a peer', { skip: privateAddressSkipReason() },
     for (const id of [...ADOPTED, ...Object.keys(REFUSED)].filter(id => !['passed-and-past', 'passed-undatable', 'passed-blank-deadline'].includes(id))) {
       assert.ok(sent.includes(id), `the real route does not serve ${id}, so this case would test nothing: ${sent.join(', ')}`);
     }
-    for (const id of ['passed-and-past']) assert.ok(sent.includes(id), `the real route stopped serving a passed meta_change round to a late joiner (${id})`);
-    peer.serve(served.body.rounds);
+    // X15 (bundle-106 §3.1): this build no longer serves a passed round past its deadline. An OLDER peer still does, and the receiver must
+    // still refuse it, so the fake peer adds the three ended rounds to what the real route served, as such a peer would.
+    const ENDED = ['passed-and-past', 'passed-undatable', 'passed-blank-deadline'];
+    for (const id of ENDED) assert.ok(!sent.includes(id), `the real route served a passed round past (or without) its deadline again (${id}): X15`);
+    peer.serve([...served.body.rounds, ...SERVED.filter(r => ENDED.includes(r.roundId)).map(r => ({ ...r }))]);
 
     const { runSyncForPeer } = await import('../../server/dist/sync/engine.js');
     await runSyncForPeer(P1);

@@ -10,15 +10,15 @@ import {
 } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { editorScopeFor } from '../auth/editor-scope.js';
-import { getConfig, saveConfig, getSecrets, getDocumentProcessingConfig, getMediaEmbeddingConfig, getStorageConfig } from '../config/loader.js';
-import { removeSpace } from '../spaces/lifecycle.js';
-import { openRoundHere } from '../networks/round-local-state.js';
-import { roundAnswer, type RoundAnswer } from '../networks/vote-acts.js';
-import { makeSignedOwnCast } from '../util/signing.js';
+import { getConfig, saveConfig, getDocumentProcessingConfig, getMediaEmbeddingConfig, getStorageConfig } from '../config/loader.js';
+import { proposeRound, ownSpaceRoundInProgress, actsLocallyOn } from '../networks/propose-round.js';
+import { networksHolding } from '../spaces/wipe-vote.js';
+import { awaitDoorRounds, openedRound, repeatedRound } from '../spaces/door-acts.js';
+import { deleteSpaceLocally, deletionAnswer } from '../spaces/space-deletion.js';
 import { localToRemote } from '../sync/space-map.js';
 import { spaceForWire } from '../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../spaces/rename.js';
-import { reorderSpaces, unknownWriteFieldsToReport } from '../spaces/spaces.js';
+import { reorderSpaces, unknownWriteFieldsToReport, spaceActPendingField } from '../spaces/spaces.js';
 import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-precondition.js';
 import { gatherCompletenessFacts, scoreCompleteness } from '../spaces/completeness.js';
 import { measureUsage, usageIsComplete } from '../quota/quota.js';
@@ -30,11 +30,9 @@ import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../spaces/space-meta-answ
 import { isNetworkSyncing } from '../sync/engine.js';
 import { spaceNetworkInfo } from '../spaces/network-status.js';
 import { z } from 'zod';
-import { v4 as uuidv4 } from 'uuid';
 import { log, refusalOfParse } from '../util/log.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { searchReadinessSnapshot, isSearchDown } from '../spaces/search-readiness.js';
-import { peerSafeFetch } from '../sync/peer-fetch.js';
 import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { writeFile as writeSpaceFile } from '../files/files.js';
@@ -50,7 +48,7 @@ import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { sendCaughtFailure } from './send-failure.js';
+import { sendCaughtFailure, sendStoreFailure } from './send-failure.js';
 
 export const spacesRouter = Router();
 
@@ -196,8 +194,9 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     const { id, label, builtIn, folders, maxGiB, flex, proxyFor, meta, dupeRules, dupeMergeSurvivor, dupeRulesOnInsert, recordTtlDays, documentExtraction, imageAnalysis, audioAnalysis, videoAnalysis, textAnalysis, indexStatus } = space;
     // Q-320: THIS instance's answer to an unknown write field, read back like the neighbouring settings — `'refuse'`, absent when warn.
     const unknownWriteFields = unknownWriteFieldsToReport(space);
+    const actPending = spaceActPendingField(cfg, id, req.authToken as Parameters<typeof spaceActPendingField>[2]);
     return {
-    id, label, builtIn, folders, maxGiB, flex,
+    id, label, builtIn, folders, maxGiB, flex, ...(actPending ? { actPending } : {}),
     usageGiB: usageBySpaceId.get(id)?.usageGiB ?? 0,
     // Present only when the figure is a FLOOR. An absent field means the measurement was whole, which is the
     // same convention the storage metric uses — a caller that ignores this field is not silently misled about
@@ -702,12 +701,14 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
   res.json(outcome.mode === 'stored' ? { spaceId, meta: outcome.meta, ...answer } : outcome.answer);
 });
 
-// DELETE /api/spaces/:id
+// DELETE /api/spaces/:id — requires { "confirm": true } on every space, networked or not (R4).
 //
-// Solo space (not in any network): requires { "confirm": true } body to guard against accidents.
-// Networked space: opens a space_deletion vote round on every network that includes this space,
-// casts this instance's own yes vote immediately, notifies all peers, and returns 202.
-// The space is only deleted once the vote passes on each network.
+// Solo space (not in any network, or only in pub/sub networks this instance subscribes to, D-40): deleted here, 204.
+// Networked space: a space_deletion round opens on every network that votes on it (`proposeRound`, which casts this
+// instance's yes, settles it and tells the members). Where that yes decides — a club, a pub/sub this instance publishes,
+// a network where it is the only member — the space leaves the network in this request; the local copy goes once no
+// network carries it. 200 when that happened, 202 while a round is still open somewhere. A repeat while a round is open
+// or its act is under way answers that round (`repeated: true`); a 404 after a delete means it is done.
 spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async (req, res) => {
   const id = req.params['id'] as string;
   const cfg = getConfig();
@@ -723,75 +724,34 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
     return;
   }
 
-  const networkedIn = cfg.networks.filter(n => n.spaces.includes(id));
-
-  // ── Solo path ─────────────────────────────────────────────────────────────
-  if (networkedIn.length === 0) {
-    const body = DeleteSpaceBody.safeParse(req.body);
-    if (!body.success || !body.data.confirm) {
-      res.status(400).json({
-        error: 'This space is not in any network. Send { "confirm": true } to delete it permanently.',
-      });
-      return;
-    }
-    const ok = await removeSpace(id).catch((err: unknown) => {
-      sendCaughtFailure(res, `DELETE /api/spaces/${id}`, err, { error: err instanceof Error ? err.message : String(err) });
-      return null;
+  const holding = networksHolding(id, cfg);
+  const voting = holding.filter(n => !actsLocallyOn(n));
+  const body = DeleteSpaceBody.safeParse(req.body);
+  if (!body.success || !body.data.confirm) {
+    res.status(400).json({
+      error: voting.length === 0
+        ? 'This space is not in any network. Send { "confirm": true } to delete it permanently.'
+        : 'Send { "confirm": true } to delete this space. It is in a network: on a club or pub/sub network, or where this instance is the only member, the deletion acts at once.',
     });
-    if (ok === null) return; // error already sent
-    if (!ok) { res.status(404).json({ error: `Space '${id}' not found` }); return; }
-    res.status(204).end();
     return;
   }
-
-  // ── Networked path ────────────────────────────────────────────────────────
-  // Open a space_deletion vote round on every network that contains this space.
-  // This instance votes yes immediately; deletion happens once each round passes.
-  const rounds: RoundAnswer[] = [];
-  const now = new Date().toISOString();
-
-  for (const net of networkedIn) {
-    const roundId = uuidv4();
-    const deadline = new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString();
-    const opened = openRoundHere(net, {
-      roundId,
-      type: 'space_deletion',
-      subjectInstanceId: cfg.instanceId,
-      subjectLabel: cfg.instanceLabel,
-      subjectUrl: '',       // not meaningful for space deletion
-      deadline,
-      openedAt: now,
-      votes: [],
-      spaceId: id,
-      // The network's id for it (Q-133): a member that calls the space something else resolves this one.
-      networkSpaceId: localToRemote(net, id),
+  const where = `DELETE /api/spaces/${id}`;
+  try {
+    const now = Date.now();
+    const opened = voting.length === 0 ? [deleteSpaceLocally(id, holding)] : voting.map((net) => {
+      const prior = ownSpaceRoundInProgress(net, { roundType: 'space_deletion', localSpaceId: id }, now, cfg);
+      return prior ? repeatedRound(net, cfg, prior, now) : openedRound(proposeRound(net, cfg, {
+        type: 'space_deletion', subjectInstanceId: cfg.instanceId, subjectLabel: cfg.instanceLabel, subjectUrl: '', spaceId: id,
+        // The network's id for it (Q-133): a member that calls the space something else resolves this one.
+        networkSpaceId: localToRemote(net, id),
+      }, { now }));
     });
-    // The proposer is a voter like any member (S-7): its yes is required and cast here, SIGNED, so a relayed copy of
-    // it survives — a bare cast is taken only from the voter itself.
-    opened.votes.push(makeSignedOwnCast(net.id, opened, cfg.instanceId, 'yes'));
-    rounds.push(roundAnswer(net, opened));
+    if (voting.length > 0) saveConfig(cfg);
+    const answer = deletionAnswer(await awaitDoorRounds(opened), id, voting.length === 0, where);
+    if (answer.store) sendStoreFailure(res, answer.store, answer.body ?? undefined);
+    else if (answer.body === null) res.status(204).end();
+    else res.status(answer.status).json(answer.body);
+  } catch (err) {
+    sendCaughtFailure(res, where, err, { error: 'The deletion did not complete; see the log.' });
   }
-  saveConfig(cfg);
-
-  // Notify all peers (best-effort — failures are logged but don't abort the response)
-  const secrets = getSecrets();
-  for (const net of networkedIn) {
-    for (const member of net.members) {
-      const peerToken = secrets.peerTokens[member.instanceId];
-      if (!peerToken) continue;
-      peerSafeFetch(`${member.url}/api/notify`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${peerToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          networkId: net.id,
-          instanceId: cfg.instanceId,
-          event: 'space_deletion_pending',
-          data: { spaceId: id, spaceLabel: space.label },
-        }),
-        signal: AbortSignal.timeout(5_000),
-      }).catch(err => log.warn(`notify ${member.label} of space_deletion_pending: ${err}`));
-    }
-  }
-
-  res.status(202).json({ status: 'vote_pending', rounds });
 });

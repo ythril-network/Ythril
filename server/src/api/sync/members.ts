@@ -5,7 +5,7 @@
  */
 import { Router } from 'express';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
-import { getConfig, loadConfig, saveConfig } from '../../config/loader.js';
+import { getConfig, saveConfig } from '../../config/loader.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { peerRelayCaller, PEER_RELAY_REFUSAL } from '../../auth/peer-relay.js';
 import { log, peerText } from '../../util/log.js';
@@ -17,6 +17,7 @@ import { adoptAnnouncedSpaces, healAnnouncedAliases } from '../../networks/netwo
 import { selfRecordFor } from '../../networks/self-record.js';
 import { rosterIsAuthority } from '../../networks/member-introductions.js';
 import { sendCaughtFailure } from '../send-failure.js';
+import { liftDeclinesFromAnnounce } from '../../sync/space-exchange-set.js';
 import { requireNetworkStanding } from '../../auth/network-standing.js';
 
 export const syncMembersRouter = Router();
@@ -49,7 +50,8 @@ syncMembersRouter.get('/networks/:networkId/members', syncRateLimit, requireAuth
     if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
     const safeMembers = net.members.map(m => {
-      const { tokenHash: _th, skipTlsVerify: _sv, ...safe } = m;
+      // `declinedSpaces` is the publisher's own record of a subscriber's decline (X10): local, never served.
+      const { tokenHash: _th, skipTlsVerify: _sv, declinedSpaces: _ds, ...safe } = m;
       return safe;
     });
     // Q-135: a club's removals travel beside its roster, so every member applies a removal made anywhere.
@@ -113,7 +115,7 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
     // Only the declared instance may update its own record's URL/label/children/direction
     // We trust the caller if they can authenticate (which syncAuth already verified).
     // For simplicity in Phase 3 we apply without full cryptographic proof.
-    const fresh = loadConfig();
+    const fresh = getConfig();
     const freshNet = fresh.networks.find(n => n.id === req.params['networkId']);
     if (freshNet) {
       const idx = freshNet.members.findIndex(m => m.instanceId === incoming.instanceId);
@@ -160,6 +162,8 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
         const incomingRotation = (incoming as { signingKeyRotation?: SigningKeyRotation }).signingKeyRotation;
         pinMemberSigningKey(updated, incoming.signingPublicKey, incomingRotation);
         freshNet.members[idx] = updated;
+        // A space this member declined and announces again is asked for again (AM2): in this same write.
+        liftDeclinesFromAnnounce(freshNet, incoming.instanceId, (incoming as { spaces?: unknown }).spaces);
         saveConfig(fresh);
       }
     }

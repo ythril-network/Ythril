@@ -506,6 +506,16 @@ export const SPACE_ALIAS_HEAL_OPERATION = 'network.space_alias.heal';
 export const ROUND_EXPIRED_OPERATION = 'network.round.expired';
 
 /**
+ * What a concluded round did here with no request of this instance's operator behind it (bundle-106, VR7, X17): an addition a later
+ * deletion retired, a deletion or wipe completed with nobody waiting for it, a member admitted by a relay, gossip or the tick. Declared
+ * where they are written (`networks/round-audit.ts`, which the space-act runner imports and this module may not be) and re-exported
+ * here, so the table gate reads them with the rest. The space-act runner's own completion of an act with no round is the fourth.
+ */
+export {
+  ROUND_ADDITION_RETIRED_OPERATION, ROUND_SPACE_ACT_OPERATION, ROUND_MEMBER_ADMITTED_OPERATION, SPACE_ACT_COMPLETED_OPERATION,
+} from '../networks/round-audit.js';
+
+/**
  * A token given admin of the space it just created (`Q-134`, `auth/creator-grant.ts`). It widens a token's rights with
  * no request to the token routes, so it is audited separately from the create that caused it: the entry names the
  * token and the space. Written directly by `createSpace`.

@@ -22,7 +22,7 @@ export const DOORS = Object.freeze([
   { door: 'server/src/networks/network-acts.ts::addNetworkSpaceAct', driver: 'add-space' },
   { door: 'server/src/spaces/meta-update.ts::applySpaceMetaUpdate', driver: 'meta-update' },
   { door: 'server/src/api/spaces.ts::DELETE /:id', driver: 'delete-space' },
-  { door: 'server/src/spaces/wipe-vote.ts::planSpaceWipe', driver: 'wipe' },
+  { door: 'server/src/spaces/wipe-vote.ts::openSpaceWipeRounds', driver: 'wipe' },
   { door: 'server/src/networks/member-acts.ts::addMemberAct', driver: 'member-add' },
   { door: 'server/src/networks/member-acts.ts::removeMemberAct', driver: 'member-remove' },
   { door: 'server/src/networks/member-acts.ts::admitByInviteKeyAct', driver: 'invite-key-join' },

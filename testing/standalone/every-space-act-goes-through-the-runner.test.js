@@ -70,10 +70,18 @@ describe('every deletion, wipe and rename of a space goes through the one runner
     }
   });
 
-  it('the callers of removeSpace( and wipeSpace( are derived, and include the doors the design names', () => {
-    const floor = ['server/src/api/spaces.ts', 'server/src/app.ts', 'server/src/spaces/delete-space-data.ts', APPLY];
-    const found = new Set([...callers('removeSpace'), ...callers('wipeSpace')].filter(f => f !== LIFECYCLE));
-    for (const f of floor) assert.ok(found.has(f), `${f} no longer calls removeSpace( or wipeSpace( — the derivation found: ${[...found].join(', ')}`);
+  // Corrected (bundle-106 A2): the doors reach the runner through the wipe planner and the deletion module, which register their acts
+  // themselves (design v5 section 2.2 (2): a door waits under its own budget and releases its waiter when it answers, which lifecycle's
+  // removeSpace/wipeSpace cannot), and the settle registers instead of calling removeSpace/wipeSpace (section 2.1). The rule is
+  // unchanged: each door, and the settle, reaches a body only through the runner's registrars or the lifecycle wrappers over them.
+  it('the callers of removeSpace(, wipeSpace( and the runner\'s registrars are derived, and include the doors the design names', () => {
+    const floor = ['server/src/spaces/space-deletion.ts', 'server/src/spaces/wipe-vote.ts', APPLY];
+    const found = new Set([...callers('removeSpace'), ...callers('wipeSpace'), ...callers('registerOwnSpaceAct'), ...callers('registerSpaceAct')]
+      .filter(f => f !== LIFECYCLE && f !== RUNNER));
+    for (const f of floor) assert.ok(found.has(f), `${f} no longer reaches the runner through removeSpace(, wipeSpace( or a registrar — the derivation found: ${[...found].join(', ')}`);
+    for (const [door, through] of [['server/src/api/spaces.ts', 'spaces/space-deletion.js'], ['server/src/app.ts', 'spaces/wipe-vote.js'], ['server/src/spaces/delete-space-data.ts', './wipe-vote.js']]) {
+      assert.ok(requireSource(door).includes(through), `${door} does not reach the runner through ${through}`);
+    }
   });
 
   it('every act is REGISTERED by a registrar the design names: the settle (apply-wipe-round.ts) and rename.ts register; nothing else writes an entry', () => {

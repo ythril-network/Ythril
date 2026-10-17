@@ -6,9 +6,12 @@
  * rounds, not about transfers, and it has its own tests (`vote-round-prune.test.js`).
  */
 
-import type { NetworkConfig } from '../config/types.js';
+import type { NetworkConfig, VoteRound } from '../config/types.js';
+import { getConfig } from '../config/loader.js';
 import { roundPastDeadline } from '../networks/round-state.js';
 import { recordRoundOutcome } from '../networks/round-outcomes.js';
+import { spaceActStands } from '../spaces/space-act-runner.js';
+import { roundSpaceLocalId } from './space-map.js';
 
 /** A round is prunable once it is concluded AND past its deadline. After the deadline
  *  every peer concludes the round independently (the deadline path in
@@ -24,6 +27,31 @@ export function isRoundPrunable(
   return Boolean(round.concluded) && roundPastDeadline(round, now);
 }
 
+/**
+ * Are this round's casts still pushed to a peer (W19)? Open rounds and rounds concluded within their deadline: a concluding cast
+ * must still reach a peer that has not concluded. A round KEPT past its deadline because its act is owed here is kept for the
+ * retry and the hold, not to be re-pushed every cycle - kept and re-propagated are two questions, so two functions.
+ */
+export function roundCastsStillPropagate(round: { deadline?: string | null }, now: number = Date.now()): boolean {
+  return !roundPastDeadline(round, now);
+}
+
+/**
+ * Is this deletion or wipe round's act still to finish here? Such a round is the debt a retry needs and the hold rides on, so
+ * the prune keeps it past its deadline until the act completes. A round whose act completed (`appliedHere`) is done; for one that
+ * has not, whether its act stands is asked through the one standing predicate (`spaceActStands`), which reads the entry - the
+ * entry is the act, and no door decides from the round's own owed state.
+ */
+function actStandsForRound(net: NetworkConfig, round: VoteRound): boolean {
+  if ((round.type !== 'space_deletion' && round.type !== 'space_wipe') || round.appliedHere === true) return false;
+  try {
+    const localId = roundSpaceLocalId(net, round) ?? (typeof round.spaceId === 'string' ? round.spaceId : null);
+    return localId !== null && spaceActStands(getConfig(), localId) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** Drop concluded-and-expired rounds from a network's `pendingRounds` in place.
  *  `concludeRoundIfReady` marks a round `concluded` but never removes it, so without
  *  this `pendingRounds` grows for the life of the network — bloating `config.json`, the
@@ -34,7 +62,7 @@ export function isRoundPrunable(
 export function pruneExpiredRounds(net: NetworkConfig, now: number = Date.now()): number {
   const rounds = net.pendingRounds;
   if (!rounds || rounds.length === 0) return 0;
-  const kept = rounds.filter(r => !isRoundPrunable(r, now));
+  const kept = rounds.filter(r => !isRoundPrunable(r, now) || actStandsForRound(net, r));
   const removed = rounds.length - kept.length;
   if (removed > 0) {
     for (const r of rounds) if (!kept.includes(r)) recordRoundOutcome(net, r, now);

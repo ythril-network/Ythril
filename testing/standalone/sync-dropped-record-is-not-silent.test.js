@@ -40,7 +40,8 @@ import { enclosingBlockFrom, balancedFrom, blockAfter } from './_structural-wind
 const receiver = ['server/src/api/sync/docs.ts', 'server/src/sync/accept-page.ts']
   .map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
 const planner = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
-const sender = stripComments(readFileSync('server/src/sync/engine.ts', 'utf8'));
+// The sender is the engine plus the per-space turn it hands each space to (`sync/space-exchange.ts`, bundle-106 §3.4).
+const sender = ['server/src/sync/engine.ts', 'server/src/sync/space-exchange.ts'].map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
 /*
  * The reporting lives BESIDE the engine, not in it. `no-new-god-files.test.js` freezes `sync/engine.ts` at its
  * size and refused this change inside it — *"put the new behaviour beside it rather than inside it"* — so the

@@ -5,15 +5,14 @@
  */
 import { Router } from 'express';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
-import { getConfig, loadConfig, saveConfig } from '../../config/loader.js';
+import { getConfig, saveConfig } from '../../config/loader.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { peerRelayCaller } from '../../auth/peer-relay.js';
 import { roundForPeer } from '../../networks/round-local-state.js';
 import { acceptVoteCast, castFromBody } from '../../util/signing.js';
-import { concludeRoundIfReady } from '../../sync/governance.js';
-import { roundIsOpen } from '../../networks/round-state.js';
+import { roundIsOpen, roundPastDeadline, SERVED_ONCE_PASSED } from '../../networks/round-state.js';
 import { roundToVoteOn } from '../../networks/vote-acts.js';
-import { applyRoundConclusion } from '../../networks/round-conclusion.js';
+import { settleRounds } from '../../networks/round-conclusion.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { requireNetworkStanding } from '../../auth/network-standing.js';
 
@@ -31,13 +30,16 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, re
     const net = cfg.networks.find(n => n.id === req.params['networkId']);
     if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
-    // Open rounds, and PASSED space_addition and meta_change rounds (F-38.4, F-39.4): on a club the organiser's own
-    // yes concludes one the moment it opens, so a member would never see it otherwise. The receiver re-decides it from the casts under its own rule
-    // — it adopts the round as open and never takes "passed" on a peer's word. A round past its deadline is not open
-    // whether or not anything has concluded it yet: serving it would hand a peer a round nobody can vote on.
+    // Open rounds, and the PASSED rounds whose effect every member applies (`SERVED_ONCE_PASSED`, design v5 section 3.1): a round
+    // its proposer may have decided at open is served after it passes, or a member would never learn of it. The receiver
+    // re-decides it from the casts under its own rule - it adopts the round as open and never takes "passed" on a peer's word - and
+    // a deletion or wipe is served concluded only once its act completed here (`roundForPeer`). Nothing past its deadline is
+    // served (X15): kept for a retry is not served, a receiver refuses such a round at adoption anyway, and its copy carries no
+    // evidence - so an owed round is not re-served by every member to every peer every cycle until it is pruned.
     const now = Date.now();
     const open = net.pendingRounds
-      .filter(r => roundIsOpen(r, now) || (r.passed && (r.type === 'space_addition' || r.type === 'meta_change')))
+      .filter(r => roundIsOpen(r, now)
+        || (r.concluded === true && r.passed === true && SERVED_ONCE_PASSED.has(r.type) && !roundPastDeadline(r, now)))
       .map(r => {
         // Strip sensitive key material before sending to a peer instance
         // This instance's own state never leaves (S-7, S-9).
@@ -76,7 +78,7 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
       return;
     }
 
-    const cfg = loadConfig();
+    const cfg = getConfig();
     const net = cfg.networks.find(n => n.id === req.params['networkId']);
     if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
@@ -119,8 +121,8 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
 
     // Check if the round should auto-conclude, and apply what its conclusion does here. A peer's yes can be the one that
     // carries the round, so this path must apply it too — through the one function every conclusion site calls.
-    concludeRoundIfReady(net, round, now);
-    applyRoundConclusion(net, cfg, [round], 'peer vote');
+    const settled = settleRounds(net, cfg, [round], 'peer vote', now);
+    void settled.settled;   // the relay answers the cast; the act it may have started runs on the runner
 
     saveConfig(cfg);
     res.status(200).json({ status: 'ok' });

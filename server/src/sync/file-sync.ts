@@ -45,6 +45,7 @@ import { MAX_TRANSFER_PAGES, stopAtPageBound, type TransferOutcome } from './wat
 import { noteToldTombstoned, wasToldTombstoned, noteRefusedUpload, wasRefusedUpload } from './told-tombstoned.js';
 import { pushStoredFile, type SendUpload } from './file-push.js';
 import { assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
+import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 
 /**
  * The most files whose held bytes are looked at for a repair, per space per sync cycle: a row that names another hash than the
@@ -158,6 +159,11 @@ export async function syncFiles(
   opts: () => RequestInit,
   doPull = true,
   doPush = true,
+  /**
+   * The space's turn with this member: every loop below asks it between files and pages, each fetch takes its signal (so the
+   * file in flight is cut when an act on the space registers), and a refusal the peer answers is handed to it.
+   */
+  turn?: ExchangeTurn,
 ): Promise<{ pulledFiles: number; pushedFiles: number; pulledPaths: string[] }> {
   let pulledFiles = 0, pushedFiles = 0;
   const pulledPaths: string[] = [];
@@ -166,7 +172,7 @@ export async function syncFiles(
     // Fetch tombstones before the manifest so that files deleted on the peer
     // are removed locally before the manifest comparison runs.
     if (doPull) try {
-      await pullFileTombstones(member, spaceId, remoteSpaceId, networkId, opts);
+      await pullFileTombstones(member, spaceId, remoteSpaceId, networkId, opts, turn);
     } catch (err) {
       // Tombstone fetch is best-effort; continue with manifest sync.
       log.warn(`File tombstone fetch from ${peerText(member.label)}: ${peerText(err)}`);
@@ -184,12 +190,15 @@ export async function syncFiles(
       let refused = 0;
       let declined = 0;
       for (let pages = 1; ; pages++) {
+        if (turn && !turn.mayContinue()) break;
         // Published ones only: a tombstone whose act has not happened is pushed to no peer (bundle-30 I15). The page names the
         // row past it (`peek`), to know whether it ends inside a run of rows at one position, and whether there is a next one.
         const { rows: sent, next, peek } = await publishedFileTombstonePage(spaceId, after);
         if (sent.length === 0) break;
+        const ackInit = opts();
         const ackResp = await peerSafeFetch(endpoint, {
-          ...opts(),
+          ...ackInit,
+          signal: turnSignal(ackInit.signal, turn),
           method: 'POST',
           body: JSON.stringify({ spaceId: remoteSpaceId, tombstones: sent.map(fileTombstoneOnTheWire) }),
         });
@@ -215,6 +224,7 @@ export async function syncFiles(
           refused += refusedCountOf(body);
           declined += declinedCountOf(body);
         } else {
+          turn?.refusedBy(await transferRefusal(ackResp));
           log.debug(`${sentTo}: ${ackResp.status} — position not advanced`);
           break;
         }
@@ -233,8 +243,16 @@ export async function syncFiles(
     // Only fetch the peer manifest if we need to pull or push (manifest comparison
     // drives both directions). When neither direction needs manifest, skip entirely.
     if (!doPull && !doPush) return { pulledFiles, pushedFiles, pulledPaths };
-    const resp = await peerSafeFetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`, opts());
-    if (!resp.ok) { log.warn(`File manifest from ${peerText(member.label)}: ${resp.status}`); return { pulledFiles, pushedFiles, pulledPaths }; }
+    if (turn && !turn.mayContinue()) return { pulledFiles, pushedFiles, pulledPaths };
+    const manifestInit = opts();
+    const resp = await peerSafeFetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`,
+      { ...manifestInit, signal: turnSignal(manifestInit.signal, turn) });
+    if (!resp.ok) {
+      const verdict = await transferRefusal(resp);
+      turn?.refusedBy(verdict);
+      if (verdict === 'failed') log.warn(`File manifest from ${peerText(member.label)}: ${resp.status}`);
+      return { pulledFiles, pushedFiles, pulledPaths };
+    }
     const { manifest, spaceId: peerSpaceId } = await boundedJson<{ manifest: { path: string; sha256: string; size: number; modifiedAt: string }[]; spaceId?: string }>(resp, 'sync peer');
     const fileSpaceId = peerFileSpaceId(peerSpaceId, remoteSpaceId); // Q-68: the plain file routes know only the peer's local id
 
@@ -292,6 +310,8 @@ export async function syncFiles(
     const notRepairedNow = new Set([...repairVerdicts.shadowed, ...repairVerdicts.undecided]);
 
     for (const { remote, key } of arriving) {
+      // Between files: an act registered on the space stops the turn here, and the file in flight was cut by its signal.
+      if (turn && !turn.mayContinue()) break;
       if (isInstanceLocalFile(key)) continue; // a peer's conflict copy or schema snapshot is the peer's own
       const local = oursMap.get(key);
       // See ./file-conflict.ts — a file has no `seq`, so a differing hash cannot be resolved by last-writer-wins the way
@@ -361,10 +381,12 @@ export async function syncFiles(
          */
         const dl = await peerSafeFetch(
           `${member.url}/api/files/${encodeURIComponent(fileSpaceId)}?path=${encodeURIComponent(remote.path)}`,
-          transferInit(opts()),
+          // The transfer budget, and the turn's signal beside it: whichever ends first ends the body.
+          { ...transferInit(opts()), signal: turnSignal(AbortSignal.timeout(PEER_TRANSFER_TIMEOUT_MS), turn) },
           { timeoutMs: PEER_TRANSFER_TIMEOUT_MS, streamBody: true },
         );
         if (!dl.ok) {
+          turn?.refusedBy(await transferRefusal(dl));
           await dl.body?.cancel().catch(() => undefined);   // a body nobody reads holds the connection until the signal fires
           log.warn(`DL file ${peerText(remote.path)} from ${peerText(member.label)}: ${dl.status}`);
           continue;
@@ -473,6 +495,7 @@ export async function syncFiles(
     if (doPush) {
     const peerManifestMap = new Map(manifest.map(e => [e.path, e]));
     for (const [localPath, localEntry] of oursMap) {
+      if (turn && !turn.mayContinue()) break;
       // Taken from this peer a moment ago: `localEntry` predates that write, so pushing it would undo it (Q-66).
       if (pulledPaths.includes(localPath) || isInstanceLocalFile(localPath)) continue;
       // Push only over a copy the peer has not changed since we last agreed; see decideFilePush.
@@ -495,9 +518,10 @@ export async function syncFiles(
               headers: { Authorization: headers['Authorization'], 'Content-Type': 'application/octet-stream', ...extra },
               body: body as unknown as BodyInit,
               duplex: 'half',
-              signal: AbortSignal.timeout(PEER_TRANSFER_TIMEOUT_MS),
+              signal: turnSignal(AbortSignal.timeout(PEER_TRANSFER_TIMEOUT_MS), turn),
             } as RequestInit,
           );
+          if (!pushResp.ok) turn?.refusedBy(await transferRefusal(pushResp));
           const json = await boundedJson<Record<string, unknown>>(pushResp, 'sync peer').catch(() => ({}) as Record<string, unknown>);
           return { status: pushResp.status, json: json !== null && typeof json === 'object' ? json : {} };
         };
@@ -555,7 +579,7 @@ export function syncBasePath(peerId: string): string {
  * `sync/file-tombstone-ack.ts`). A stop at the page bound of one cycle is said, and the rest is read next cycle.
  */
 async function pullFileTombstones(
-  member: NetworkMember, spaceId: string, remoteSpaceId: string, networkId: string, opts: () => RequestInit,
+  member: NetworkMember, spaceId: string, remoteSpaceId: string, networkId: string, opts: () => RequestInit, turn?: ExchangeTurn,
 ): Promise<void> {
   const peer = peerText(member.label);
   const delivery = deliveryOfMember(spaceId, member);
@@ -563,11 +587,14 @@ async function pullFileTombstones(
   const outcome: TransferOutcome = { deliveredThrough: 0, truncated: false };
   let cursor: string = ISO_START_CURSOR;
   for (let pages = 1; ; pages++) {
+    if (turn && !turn.mayContinue()) return;
+    const init = opts();
     const tsResp = await peerSafeFetch(
       `${member.url}/api/sync/file-tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}&cursor=${cursor}`,
-      opts(),
+      { ...init, signal: turnSignal(init.signal, turn) },
     );
     if (!tsResp.ok) {
+      turn?.refusedBy(await transferRefusal(tsResp));
       await tsResp.body?.cancel().catch(() => {});
       log.warn(`File tombstones from ${peer}: ${tsResp.status}`);
       return;

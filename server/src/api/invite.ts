@@ -53,14 +53,12 @@ import { createToken, adoptPeerToken } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { claimedPeerIsProven } from '../auth/peer-identity.js';
 import { announcedSpaces, isDirectionalNetwork, widenPeerTokensOf } from '../networks/network-spaces.js';
-import { concludeRoundIfReady } from '../sync/governance.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
-import { makeSignedOwnCast } from '../util/signing.js';
 import { log, peerText, refusalOfParse } from '../util/log.js';
 import { SSRF_SAFE_URL, safeMemberList } from './networks/_shared.js';
 import { stampAdmission, isMeshNetwork } from '../networks/member-introductions.js';
-import type { NetworkMember, VoteRound } from '../config/types.js';
-import { openRoundHere } from '../networks/round-local-state.js';
+import type { NetworkMember } from '../config/types.js';
+import { proposeRound } from '../networks/propose-round.js';
 import { networkRole } from '../networks/network-role.js';
 import { openSession, findSession, updateSession, dropSession, redeemedOpen } from './invite-sessions.js';
 
@@ -555,25 +553,19 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
       // the root to vote yes, closed requires all members, democratic a
       // majority. `concludeRoundIfReady` recomputes the braintree ancestor set
       // from local topology, so the requirement cannot be shrunk from the wire.
-      const round: VoteRound = {
-        roundId: uuidv4(),
+      // Opened, signed and settled through the one open path; a sole-voter case (braintree root, no other member) passes and
+      // admits through the settle (`applyPassedJoin`).
+      const { round, decided } = proposeRound(net, cfg, {
         type: 'join',
         subjectInstanceId: instanceId,
         subjectLabel: instanceLabel,
         subjectUrl: instanceUrl,
-        deadline: new Date(Date.now() + net.votingDeadlineHours * 3_600_000).toISOString(),
-        openedAt: new Date().toISOString(),
-        votes: [],
         pendingMember: newMember,
         ...(net.type === 'braintree'
           ? { requiredVoters: buildBraintreeAncestors(net, cfg.instanceId, cfg.instanceId) }
           : {}),
-      };
-      openRoundHere(net, round);
-      round.votes.push(makeSignedOwnCast(net.id, round, cfg.instanceId, 'yes'));
-      if (concludeRoundIfReady(net, round)) {
-        // Sole-voter case (braintree root / no other members): admit immediately.
-        net.members.push(newMember);
+      });
+      if (decided === 'passed') {
         log.info(`Invite handshake complete: ${peerText(instanceLabel)} (${peerText(instanceId)}) joined network ${peerText(session.networkId)}`);
         responseStatus = 'joined';
       } else {

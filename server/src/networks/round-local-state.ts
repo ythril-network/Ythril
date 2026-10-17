@@ -25,9 +25,12 @@
 import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
 import { roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
+import { networkRole } from './network-role.js';
+import { hasRoundShape, canonicalRoundWipeTypes } from './round-shape.js';
+import { DEFAULT_STAMP_SKEW_WARN_MINUTES } from '../brain/stamp-skew.js';
 
 /** The fields that describe this instance, never the network. A peer never sends them and never receives them. */
-export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere', 'outcome', 'concludedAt', 'refusedHere'] as const;
+export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere', 'outcome', 'concludedAt', 'refusedHere', 'actLocalId', 'peersConcluded'] as const;
 type LocalField = typeof LOCAL_ROUND_FIELDS[number];
 
 /** `round` with every local field removed. */
@@ -49,7 +52,18 @@ export function openRoundHere(net: NetworkConfig, round: VoteRound): VoteRound {
 }
 
 /** Why a round a peer served is not adopted — a short phrase, counted per pass and said once as a debug line. */
-export type AdoptionRefusal = 'past its deadline or undatable' | 'deadline beyond what a network allows' | 'already recorded here';
+export type AdoptionRefusal = 'past its deadline or undatable' | 'deadline beyond what a network allows' | 'already recorded here'
+  | 'proposed by a subscriber' | 'malformed';
+
+/**
+ * Does the round's `openedAt` lie ahead of this instance's clock by more than the one clock tolerance the server names (X11)? Such a
+ * round is ADOPTED — a proposer whose clock runs ahead is not an attacker — and the caller counts it and says so once per network and
+ * peer. Undatable reads as not ahead: the deadline checks already refuse a round that cannot be dated.
+ */
+export function roundOpenedAhead(round: { openedAt?: string | null }, now: number): boolean {
+  const opened = typeof round.openedAt === 'string' ? Date.parse(round.openedAt) : Number.NaN;
+  return Number.isFinite(opened) && opened > now + DEFAULT_STAMP_SKEW_WARN_MINUTES * 60_000;
+}
 
 /**
  * Should this instance adopt `peerRound`? `null` when it should; otherwise why not.
@@ -61,9 +75,15 @@ export type AdoptionRefusal = 'past its deadline or undatable' | 'deadline beyon
  * further than `openedAt` + the longest a network allows, or a `roundId` this instance has an outcome for.
  */
 export function adoptionRefusal(net: NetworkConfig, peerRound: VoteRound, now: number): AdoptionRefusal | null {
+  // Its declared keys first (X11): a string `wipeTypes` or an object `spaceId` would reach every later reader as what it is not.
+  if (!hasRoundShape(peerRound)) return 'malformed';
   if (roundPastDeadline(peerRound, now)) return 'past its deadline or undatable';
   if (roundDeadlineBeyondCap(peerRound)) return 'deadline beyond what a network allows';
   if ((net.roundOutcomes ?? []).some(e => e.roundId === peerRound.roundId)) return 'already recorded here';
+  // D-40: on pub/sub a subscriber's deletion or wipe is its own local act. A publisher holds no round it did not open of those two
+  // types — every other instance there is a subscriber — decided from this instance's role, never from a field a relayer could set.
+  if ((peerRound.type === 'space_deletion' || peerRound.type === 'space_wipe') && net.type === 'pubsub'
+    && networkRole(net).role === 'publisher') return 'proposed by a subscriber';
   return null;
 }
 
@@ -73,6 +93,9 @@ export function adoptionRefusal(net: NetworkConfig, peerRound: VoteRound, now: n
  */
 export function adoptPeerRound(net: NetworkConfig, peerRound: VoteRound): VoteRound {
   const stored: VoteRound = { ...withoutLocalState(peerRound), votes: [], concluded: false };
+  // Stored canonical (X11): every reader — the act's key, the hold, a door's repeat — reads one spelling of what a wipe covers, and the
+  // signatures over the round bind the same message for the list as sent and as stored (`util/signing.ts`).
+  if (Array.isArray(stored.wipeTypes)) stored.wipeTypes = canonicalRoundWipeTypes(stored.wipeTypes);
   net.pendingRounds.push(stored);
   return stored;
 }
@@ -82,8 +105,15 @@ export function adoptPeerRound(net: NetworkConfig, peerRound: VoteRound): VoteRo
  * library references this instance can resolve (`Q-60`) — a peer's library is its own, and a `$ref` it lacks
  * would land in its layer pointing at nothing. The one door a round leaves by, so no sender can skip either half.
  */
-export function roundForPeer<T extends Partial<Record<LocalField, unknown>> & { pendingMeta?: SpaceMeta }>(round: T): Omit<T, LocalField> {
-  const copy = withoutLocalState(round) as Omit<T, LocalField> & { pendingMeta?: SpaceMeta };
+export function roundForPeer<T extends Partial<Record<LocalField, unknown>> & { pendingMeta?: SpaceMeta; type?: string; concluded?: boolean }>(
+  round: T,
+): Omit<T, LocalField> {
+  const copy = withoutLocalState(round) as Omit<T, LocalField> & { pendingMeta?: SpaceMeta; concluded?: boolean };
+  // A deletion or wipe is served concluded only once its act has completed here (design v5 §3.1): a peer lifts its hold on the
+  // word of a member that has APPLIED, never one that has only decided. Read from the local fields before they were stripped.
+  if (round.type === 'space_deletion' || round.type === 'space_wipe') {
+    copy.concluded = round.concluded === true && round.appliedHere === true;
+  }
   if (copy.pendingMeta) copy.pendingMeta = inlineResolvableRefs(copy.pendingMeta);
   return copy;
 }

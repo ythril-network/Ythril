@@ -115,7 +115,8 @@ describe('the watermark stops at what the slowest stopped transfer can vouch for
 });
 
 describe('every transfer under a shared watermark is passed to the rule', () => {
-  const src = stripComments(readFileSync('server/src/sync/engine.ts', 'utf8'));
+  // The cycle is the engine plus the per-space turn it hands each space to (`sync/space-exchange.ts`, bundle-106 §3.4).
+  const src = ['server/src/sync/engine.ts', 'server/src/sync/space-exchange.ts'].map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
 
   it('both watermarks go through safeWatermark rather than a bare Math.max', () => {
     /*

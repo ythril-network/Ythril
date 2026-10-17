@@ -80,6 +80,11 @@ const SUBJECT_EXEMPTIONS = [
   },
   {
     key: 'server/src/sync/engine.ts:runSyncForMember', head: /net\.spaces/,
+    why: 'The presync warm-up of one member\'s cycle: one bounded `findOne` per family per carried space, each with its own catch, so a '
+      + 'failing space is skipped and never ends the warm-up. The per-space exchange moved to `sync/space-exchange.ts` (bundle-106 §3.4), the row below.',
+  },
+  {
+    key: 'server/src/sync/space-exchange.ts:exchangeSpacesWithMember', head: /\bexchange\b/,
     why: 'The sync cycle of one member over the network\'s spaces: its own question (a failed space makes the member\'s cycle incomplete and is '
       + 'reported in the cycle\'s result, push and pull are bounded by the fetch options), not a housekeeping walk. The plan names the sync '
       + 'engine\'s per-member per-space loop as outside Q-274.',

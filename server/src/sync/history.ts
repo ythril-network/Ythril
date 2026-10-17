@@ -40,7 +40,20 @@ export interface SyncHistoryRecord {
    * cycle that recorded nothing writes the row it always wrote. A push is not in it: a pushing peer is answered per document.
    */
   schemaViolations?: SyncSchemaRecording[];
+  /**
+   * Spaces this cycle did not exchange because a deletion or wipe is being applied on one side (design v5 section 3.3, W9), with the
+   * members it was held with and why. A held space is not a failure: a cycle whose only shortfall is held spaces is `success`. Absent
+   * when nothing was held.
+   */
+  held?: SyncHeldSpace[];
+  /** Spaces a pub/sub member left and answered `space_declined` for (X10): recorded, never requested again, never a hold. Absent when none. */
+  declined?: SyncDeclinedSpace[];
 }
+
+/** One held space of a cycle: the members it was held with, and why. */
+export interface SyncHeldSpace { spaceId: string; members: string[]; reason: string }
+/** One declined space of a cycle, and the members that declined it. */
+export interface SyncDeclinedSpace { spaceId: string; members: string[] }
 
 const COLLECTION = '_sync_history';
 const MAX_PER_NETWORK = 100;

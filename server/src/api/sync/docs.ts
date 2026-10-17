@@ -19,7 +19,7 @@ import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../co
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { parseLimit } from '../../util/pagination.js';
-import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, BAD_SYNC_START, callerPeerId, spaceAllowed, pushAllowed, withSchemaViolations } from './_shared.js';
+import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, BAD_SYNC_START, callerPeerId, refusePeerSpace, refusePeerWrite, pushAllowed, withSchemaViolations } from './_shared.js';
 import { boundedRows } from '../../brain/write-validation.js';
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
@@ -88,7 +88,7 @@ function pageBySeq<T extends { _id: string; seq: number }>(key: PayloadKey, tomb
     try {
       const { spaceId, networkId, sinceSeq, limit, cursor, full: fullParam } = req.query as Record<string, unknown>;
       if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-      if (!spaceAllowed(spaceId, networkId as string | undefined, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
+      if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
 
       const sinceVal = syncReadStart(sinceSeq, cursor);
       if (sinceVal === undefined) { res.status(400).json({ error: BAD_SYNC_START }); return; }
@@ -157,7 +157,7 @@ function oneById<T extends { _id: string }>(key: PayloadKey) {
     try {
       const { spaceId, networkId } = req.query as Record<string, string>;
       if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
-      if (!spaceAllowed(spaceId, networkId, req.authToken as Record<string, unknown>)) { res.status(403).json({ error: 'Forbidden' }); return; }
+      if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
 
       /*
        * The page's own filter and projection, so a read by id serves exactly what a page would (`Q-388`): it
@@ -287,6 +287,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (verdict === 'rejected') { res.status(400).json(refusedError(facts)); return; }
     res.status(200).json({ status: 'skipped' });
   } catch (err) {
+    if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST facts', err);
   }
 });
@@ -308,6 +309,7 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     if (verdict === 'rejected') { res.status(400).json(refusedError(entities)); return; }
     res.status(200).json(withSchemaViolations({ status: 'ok' }, recordedRows(entities)));
   } catch (err) {
+    if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST entities', err);
   }
 });
@@ -330,6 +332,7 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (verdict === 'rejected') { res.status(400).json(refusedError(edges)); return; }
     res.status(200).json(withSchemaViolations({ status: verdict === 'duplicate' ? 'duplicate' : 'ok' }, recordedRows(edges)));
   } catch (err) {
+    if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST edges', err);
   }
 });
@@ -361,6 +364,7 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     if (verdict === 'rejected') { res.status(400).json(refusedError(chrono)); return; }
     res.status(200).json(withSchemaViolations({ status: 'ok' }, recordedRows(chrono)));
   } catch (err) {
+    if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST chrono', err);
   }
 });
@@ -468,6 +472,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       filemeta: { ...fileMetaStats, rejected: rejected('filemeta') },
     });
   } catch (err) {
+    if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST batch-upsert', err);
   }
 });

@@ -68,6 +68,12 @@ export interface NetworkMember {
    *  arms it afresh), and never shown by `GET /api/networks`. */
   fileMetaRereadAt?: Record<string, string>;
   consecutiveFailures?: number;  // incremented on each failed sync; reset to 0 on success
+  /**
+   * LOCAL to a publisher: the network space ids this subscriber answered `423 space_declined` for — it left the space (design v5 §2.9,
+   * X10). The publisher stops requesting a declined space from it until the subscriber announces the space again. Never announced,
+   * never served.
+   */
+  declinedSpaces?: string[];
   parentInstanceId?: string; // braintree only
   /** Set during a temporary reparent; stores the original parent so it can be restored. */
   originalParentInstanceId?: string;
@@ -257,6 +263,14 @@ export interface VoteRound {
    * from or served to a peer.
    */
   refusedHere?: string;
+  /**
+   * LOCAL: the space this instance's own deletion removes here, by its local id, recorded when the act is registered (design v5
+   * §2.1, X7). After the network half ran the round resolves to no network space; this is what still finds the own copy. A rename's
+   * commit rewrites it. Never taken from or served to a peer.
+   */
+  actLocalId?: string;
+  /** LOCAL: the members this instance has seen serve the round concluded and complete (design v5 §3.3). Never taken from or served to a peer. */
+  peersConcluded?: string[];
   requiredVoters?: string[];     // braintree only: instanceIds that must ALL vote yes
 }
 

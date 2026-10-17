@@ -713,8 +713,9 @@ On the **receiving** end of a `member_departed` event:
 A `remove` vote round passes when the network's conclusion rule is satisfied. Once concluded, the observing instance sends a `member_removed` notify event to the ejected instance:
 
 - `sendMemberRemovedNotify(subjectUrl, subjectInstanceId, networkId)` lives in `sync/governance.ts`
-  alongside `concludeRoundIfReady`, and is sent from one place, `notifyMembersToPull`, after `concludeRoundIfReady`
-  returns true for a `remove` round: every settle of a `remove` round reaches it through that one place.
+  alongside `concludeRoundIfReady`, and is sent from one place, `applyRoundConclusion` (`networks/round-conclusion.ts`), for
+  each `remove` round that concluded passed. Every settle of a round goes through `settleRounds`, which calls it, so every
+  settle of a `remove` round reaches it through that one place.
 - The ejected instance receives `POST /api/notify { networkId, instanceId, event: "member_removed" }`.
 
 On the **receiving** end of a `member_removed` event:

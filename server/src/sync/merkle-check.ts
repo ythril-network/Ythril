@@ -16,6 +16,7 @@
 import { boundedJson } from '../util/bounded-read.js';
 import { log, peerText } from '../util/log.js';
 import { peerSafeFetch } from './peer-fetch.js';
+import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 
 /** What one check concluded: the roots are equal, they differ, or the check could not tell. */
@@ -27,6 +28,7 @@ export async function checkMerkleWithPeer(
   spaceId: string,
   remoteSpaceId: string,
   opts: () => RequestInit,
+  turn?: ExchangeTurn,
 ): Promise<MerkleComparison> {
   try {
     const { computeMerkleRoot } = await import('../brain/merkle.js');
@@ -34,11 +36,14 @@ export async function checkMerkleWithPeer(
       computeMerkleRoot(spaceId),
       peerSafeFetch(
         `${member.url}/api/sync/merkle?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(net.id)}`,
-        opts(),
+        { ...opts(), signal: turnSignal(opts().signal, turn) },
       ),
     ]);
 
     if (!peerResp.ok) {
+      const verdict = await transferRefusal(peerResp);
+      turn?.refusedBy(verdict);
+      if (verdict !== 'failed') return 'unknown';
       log.warn(`Merkle check for space '${peerText(spaceId)}' with peer '${peerText(member.label)}': peer returned HTTP ${peerResp.status} — skipping`);
       return 'unknown';
     }

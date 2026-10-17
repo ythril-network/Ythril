@@ -44,6 +44,7 @@ describe('D-39 = C: an undecided round runs to its deadline', { skip }, () => {
     it(`${type}: within its deadline the tick leaves it open, applies nothing and saves nothing; past its deadline it expires and acts on nothing`, async () => {
       const configWriteGeneration = await requireExport('../../server/dist/config/loader.js', 'configWriteGeneration', 'design v5 section 6.1: a read-only export of the write generation — a save is counted through it');
       const loader = await boot(dir, { spaces: ['notes'], networks: [networkOf('club', [M1], { spaces: ['general', 'notes'], extra: { pendingRounds: [olderRelease(type)] } })] });
+      await mongo.col('notes_facts').deleteMany({});   // the row before this one leaves its records in `notes`: count this row's own
       await seedFacts(mongo, 'notes', 3, type);
       const { runRoundExpiryTick } = await import('../../server/dist/networks/round-expiry.js');
       const before = configWriteGeneration();

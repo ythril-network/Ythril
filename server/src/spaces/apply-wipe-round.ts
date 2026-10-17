@@ -1,34 +1,40 @@
 /**
- * The side-effect of a concluded `space_wipe` round: empty the space, here, now.
+ * What a concluded SPACE round does here — a deletion, a wipe or an addition — decided once, for every place a round concludes.
  *
- * ## One function, three callers, on purpose
+ * ## One function, every settle site, on purpose
  *
- * A round concludes in three places — an operator's own vote (`api/networks/votes.ts`), a peer's vote
- * arriving over sync (`api/sync/votes.ts`), and the gossip pass in the sync engine. `space_deletion` has its
- * side-effect written out at all three, and that is the shape this repo keeps paying for: three copies of
- * one rule, where a change to two of them leaves the third quietly doing the old thing.
+ * A round concludes through an operator's own cast, a peer's relayed cast, the gossip pass, the expiry tick, the retry and — since
+ * bundle-106 — the open path, where the proposer's own yes may decide it (`networks/round-conclusion.ts`, `settleRounds`). Written out at
+ * each, a change to some of them left the others doing the old thing; so every one hands its rounds here.
  *
- * So the wipe lands as ONE function the three call. It is not more indirection than the alternative — it is
- * the same code, named once.
+ * ## Decided is not applied (design v5 §2.1)
+ *
+ * A passed deletion or wipe is DECIDED in the settle's synchronous call and APPLIED by the space-act runner: the act is REGISTERED on the
+ * config the caller saves (its entry closes the space to writes and holds it from exchanges from that write on), and it runs after the
+ * caller's save. `appliedHere` is the second moment — this instance has nothing left to do — and is written by {@link settleSpaceAct}
+ * alone: by the runner's completion, or here for a round with nothing to do here. Marking a round applied BEFORE its act ran was how a
+ * crash between the two lost the act; never marking a round with nothing to do here was how a wipe of a space held only as an offer
+ * emptied the space the day it was accepted (Q-520).
  *
  * ## Veto counting matches `space_deletion` exactly
  *
- * A single veto stops it. That is deliberately stricter than a majority: a member that does not want its
- * copy of a space emptied is not outvoted, because the wipe is irreversible on their instance too.
+ * A single veto stops it. That is deliberately stricter than a majority: a member that does not want its copy of a space emptied is not
+ * outvoted, because the wipe is irreversible on their instance too.
  *
- * ## Which space, and when — `spaceRoundAction` (`S-9`)
+ * ## Which space, and when — `spaceRoundAction` (`S-9`), asked only through `spaceActTarget`
  *
- * A deletion or wipe acts only on a round that PASSED — `concluded` alone includes a round that expired without
- * enough yes — on the space the round names mapped to this instance's id AND carried by the network the round
- * belongs to, and once. Each was missing: the id was used as the round carried it, so any member of any network
- * could name any space here, including one no network shares; an expired proposal deleted like a passed one; and
- * gossip hands this every round the network ever held, so an old deletion re-applied to a space re-created under
- * the same name. `appliedHere` is local state — adopting or serving a round strips it.
+ * A deletion or wipe acts only on a round that PASSED — `concluded` alone includes a round that expired without enough yes — on the space
+ * the round names mapped to this instance's id AND carried by the network the round belongs to, and once. `appliedHere` is local state —
+ * adopting or serving a round strips it.
  */
 import { log, peerText } from '../util/log.js';
-import type { NetworkConfig, VoteRound } from '../config/types.js';
+import type { Config, NetworkConfig, VoteRound } from '../config/types.js';
 import type { WipeCollectionType } from './lifecycle.js';
-import { roundSpaceLocalId } from '../sync/space-map.js';
+import { getConfig, saveConfig, configWriteGeneration } from '../config/loader.js';
+import { networkSpaceKey, roundSpaceLocalId } from '../sync/space-map.js';
+import { registerSpaceAct, runSpaceAct, spaceActOfRound, type SpaceActRequest, type SpaceRoundSettled } from './space-act-runner.js';
+import { applySpaceAdditionRound, forgetPendingOffer, type AdditionSettled } from '../networks/network-spaces.js';
+import { auditRoundEffect, ROUND_ADDITION_RETIRED_OPERATION } from '../networks/round-audit.js';
 
 /** What a concluded space round does here, if anything. */
 export type SpaceRoundAction =
@@ -51,6 +57,27 @@ export function spaceRoundAction(
   // by emptying the knowledge graph, which is what resolving this at conclusion time would risk.
   const types = round.wipeTypes as WipeCollectionType[] | undefined;
   return { kind: 'wipe', localId, ...(types ? { types } : {}) };
+}
+
+/**
+ * What a concluded, passed, unvetoed deletion or wipe does HERE (design v5 §2.1, X7): the act to register, or `'not-carried'` — this
+ * instance has nothing to do for it, and it is settled at once so it can never act on a space added here later (Q-520).
+ *
+ * The only reader of the three ways a round finds its space, in this order: (1) a deletion this instance proposed and recorded its own
+ * space for (`actLocalId`) while that space is still here — after its network half ran the round resolves to no network space, and the
+ * own copy must still go (REL F5); (2) the network space the round names, carried here (`spaceRoundAction`); (3) neither.
+ */
+export function spaceActTarget(
+  net: NetworkConfig, round: VoteRound, cfg: Pick<Config, 'spaces'> = getConfig(),
+): { act: SpaceActRequest } | 'not-carried' {
+  const viaRound = { networkId: net.id, roundId: round.roundId };
+  if (round.type === 'space_deletion' && round.proposedHere && round.actLocalId && cfg.spaces.some(s => s.id === round.actLocalId)) {
+    return { act: { kind: 'delete', localId: round.actLocalId, networkId: net.id, round: viaRound } };
+  }
+  const action = spaceRoundAction(net, round);
+  if (!action) return 'not-carried';
+  if (action.kind === 'delete') return { act: { kind: 'delete', localId: action.localId, networkId: net.id, round: viaRound } };
+  return { act: { kind: 'wipe', localId: action.localId, ...(action.types ? { types: action.types } : {}), round: viaRound } };
 }
 
 /**
@@ -83,56 +110,143 @@ export function settleSpaceAct(net: Pick<NetworkConfig, 'id'>, round: VoteRound,
 }
 
 /**
- * Apply every space-scoped side-effect for a list of rounds — deletion, wipe and addition.
- *
- * The gossip pass in `sync/engine.ts` concludes rounds nobody on this instance voted on, and had the
- * `space_deletion` side-effect written out inline there: a third copy of the same eight lines that already
- * existed in the two vote handlers. Adding `space_wipe` beside it would have made six.
- *
- * So the loop moved here. `no-new-god-files.test.js` is what forced it, and it was right — engine.ts is one
- * of the largest files in the tree, and the reason it is large is that every change lands where the code
- * already is. A round acted on is marked `appliedHere` at once; the caller saves the config it came from.
+ * Save `cfg` — the live config a settle changed — when nothing has been saved since generation `generation`: the caller of a settle
+ * saves synchronously after it, and this is the net under a caller that did not (a test reading state, a pass that only marked). A
+ * marking left only in memory is lost by the next reload from disk (`mutateConfig`), which any background writer makes. A config
+ * object that is not the live one is the caller's alone, and is left to it. Never throws.
  */
-export function applyConcludedSpaceRounds(net: NetworkConfig, rounds: readonly VoteRound[], where: string): void {
-  for (const round of rounds) {
-    // F-38.4: a passed space_addition adds the space here. The two vote routes call this too, so a round carried by
-    // a local vote, a peer's vote or gossip lands the same way.
-    if (round.concluded && round.passed && round.type === 'space_addition') {
-      void import('../networks/network-spaces.js')
-        .then(({ applySpaceAdditionRound }) => applySpaceAdditionRound(net, round, where))
-        .catch((err: unknown) => log.error(`space_addition side-effect (${peerText(where)}): ${peerText(err)}`));
-    }
-    const action = spaceRoundAction(net, round);
-    if (!action) continue;
-    (round as VoteRound & { appliedHere?: boolean }).appliedHere = true;
-    if (action.kind === 'delete') {
-      // A network never deletes a member's space (Q-70): the space leaves the network here, every member keeps its
-      // copy, and only the instance whose operator asked for the delete removes its own — once no other network
-      // still carries it, since the operator's delete opened a round on each of them.
-      void import('../networks/network-spaces.js').then(({ removeSpaceFromNetwork }) => {
-        removeSpaceFromNetwork(net.id, action.localId, `space_deletion round ${round.roundId} passed, ${where}`);
-        if (!round.proposedHere) return;
-        setImmediate(() => {
-          void import('../config/loader.js').then(async ({ getConfig }) => {
-            if (getConfig().networks.some(n => n.spaces.includes(action.localId))) {
-              log.info(`space_deletion round ${peerText(round.roundId)} passed (${peerText(where)}): '${peerText(action.localId)}' is still in another network, kept until that round passes`);
-              return;
-            }
-            const { removeSpace } = await import('./lifecycle.js');
-            await removeSpace(action.localId);
-            log.info(`space_deletion round ${peerText(round.roundId)} passed (${peerText(where)}): removed this instance's own '${peerText(action.localId)}'`);
-          }).catch((err: unknown) => log.error(`space_deletion side-effect (${peerText(where)}): ${peerText(err)}`));
-        });
-      }).catch((err: unknown) => log.error(`space_deletion side-effect (${peerText(where)}): ${peerText(err)}`));
-    } else {
-      void import('./lifecycle.js').then(({ wipeSpace }) =>
-        wipeSpace(action.localId, action.types)
-          .then(r => log.info(
-            `space_wipe round ${peerText(round.roundId)} passed (${peerText(where)}): emptied '${peerText(action.localId)}' — `
-            + `${r.facts} facts, ${r.entities} entities, ${r.edges} edges, ${r.chrono} chrono, ${r.files} files`,
-          ))
-          .catch((err: unknown) => log.error(`space_wipe side-effect (${peerText(where)}): ${peerText(err)}`)),
-      ).catch((err: unknown) => log.error(`space_wipe import (${peerText(where)}): ${peerText(err)}`));
+export function saveIfUnsaved(cfg: Config, generation: number, what: string): void {
+  if (configWriteGeneration() !== generation || cfg !== getConfig()) return;
+  try { saveConfig(cfg); } catch (err) { log.error(`${peerText(what)} could not be saved: ${peerText(err)}`); }
+}
+
+/** What one settle of space rounds came to. */
+export interface SpaceRoundsApplied {
+  /** Every act it started and every addition it applied; never rejects. */
+  settled: Promise<(SpaceRoundSettled | AdditionSettled)[]>;
+  /** It changed the config object it was handed (a registration, a settlement, a forgotten offer): the caller saves. */
+  wrote: boolean;
+  /** The act entries it starts once the caller has saved — a door that waits for them releases each when it has answered. */
+  acts: string[];
+  /** Rounds whose settlement threw; the others are unaffected. */
+  failed: { round: VoteRound; cause: unknown }[];
+}
+
+const vetoed = (r: VoteRound): boolean => r.votes.some(v => v.vote === 'veto');
+const passedOf = (r: VoteRound, type: VoteRound['type']): boolean => r.type === type && r.concluded === true && r.passed === true && !vetoed(r);
+
+/** Was `deletion` opened at or after `addition`? By instant, not by string; an undatable side counts as yes — the safe side re-creates nothing. */
+function openedAtOrAfter(deletion: VoteRound, addition: VoteRound): boolean {
+  const d = Date.parse(deletion.openedAt);
+  const a = Date.parse(addition.openedAt);
+  return Number.isNaN(d) || Number.isNaN(a) || d >= a;
+}
+
+/** Is an act entry due to start at `now`: anything but an owed one waiting for its `retryAt`. */
+const dueAt = (e: { state: string; retryAt?: string }, now: number): boolean =>
+  e.state !== 'owed' || e.retryAt === undefined || Date.parse(e.retryAt) <= now;
+
+/**
+ * Apply every space-scoped effect of `rounds` — deletion, wipe and addition — on `net`, part of `cfg`, which the caller saves.
+ *
+ * Three phases over the call's rounds, so the outcome never depends on the order a peer served them in or on a deferral (§2.3):
+ * 1. **retire** every passed addition (of this call or held on the network) that a passed, unvetoed deletion of the same network space
+ *    (`networkSpaceKey`) opened at or after it supersedes — marked through {@link settleSpaceAct}, logged and audited. A space added and
+ *    deleted within one voting window came back on the proposer at the next changed gossip pass; a late adopter served both in one page
+ *    let the addition land after the deletion.
+ * 2. **deletions and wipes**: a deletion forgets the pending offer of its network space on every instance (VR12); each asks
+ *    {@link spaceActTarget} — `'not-carried'` settles in this call, an act is REGISTERED (or joins the entry that already carries its
+ *    round) and is started after the caller's save, unless it is owed and its `retryAt` is still ahead.
+ * 3. **additions** that remain are applied (deferred a tick, inside `applySpaceAdditionRound`).
+ *
+ * `opts.waiter`: the caller is a door that awaits the acts (the proposer); their completion is then its to tell, not the audit log's.
+ * Never throws: a round whose settlement throws is reported in `failed` and the others go on.
+ */
+export function applyConcludedSpaceRounds(
+  net: NetworkConfig, cfg: Config, rounds: readonly VoteRound[], via: string, opts: { now?: number; waiter?: boolean } = {},
+): SpaceRoundsApplied {
+  const now = opts.now ?? Date.now();
+  const generation = configWriteGeneration();
+  const failed: SpaceRoundsApplied['failed'] = [];
+  const set = [...new Set(rounds)];
+  const known = [...new Set([...set, ...net.pendingRounds])];
+  let wrote = false;
+
+  // Phase 1 — retire superseded additions, before any act of this call forgets an alias (`networkSpaceKey` reads the alias table).
+  const deletions = known.filter(r => passedOf(r, 'space_deletion'));
+  for (const addition of known.filter(r => passedOf(r, 'space_addition') && r.appliedHere !== true)) {
+    try {
+      const key = networkSpaceKey(net, addition);
+      const by = deletions.find(d => networkSpaceKey(net, d) === key && openedAtOrAfter(d, addition));
+      if (!key || !by) continue;
+      settleSpaceAct(net, addition, 'superseded');
+      wrote = true;
+      log.info(`space_addition round ${peerText(addition.roundId)} of network ${peerText(net.id)} retired by space_deletion round ${peerText(by.roundId)} (${peerText(via)}): '${peerText(key)}' is not added back`);
+      auditRoundEffect(ROUND_ADDITION_RETIRED_OPERATION, net.id, addition.roundId, roundSpaceLocalId(net, addition));
+    } catch (cause) {
+      failed.push({ round: addition, cause });
     }
   }
+
+  // Phase 2 — deletions and wipes.
+  const start = new Set<string>();
+  for (const round of set) {
+    if (!(passedOf(round, 'space_deletion') || passedOf(round, 'space_wipe')) || round.appliedHere === true) continue;
+    try {
+      if (round.type === 'space_deletion') {
+        const key = networkSpaceKey(net, round);
+        if (key && forgetPendingOffer(net, key)) wrote = true;
+      }
+      // Already carried by an entry (a pass before this one registered it, or a rename moved its space): that entry is the act.
+      const standing = spaceActOfRound(cfg, net.id, round.roundId);
+      if (standing) {
+        if (dueAt(standing, now)) start.add(standing.id);
+        continue;
+      }
+      const target = spaceActTarget(net, round, cfg);
+      if (target === 'not-carried') {
+        settleSpaceAct(net, round, 'not-carried');
+        wrote = true;
+        continue;
+      }
+      if (round.type === 'space_deletion' && round.proposedHere && round.actLocalId !== target.act.localId) {
+        round.actLocalId = target.act.localId;
+      }
+      const { entry } = registerSpaceAct(cfg, target.act, now);
+      wrote = true;
+      if (dueAt(entry, now)) start.add(entry.id);
+    } catch (cause) {
+      failed.push({ round, cause });
+    }
+  }
+
+  // Phase 3 — the additions that remain.
+  const additions: Promise<AdditionSettled>[] = [];
+  for (const round of set) {
+    if (!passedOf(round, 'space_addition') || round.appliedHere === true) continue;
+    try {
+      const applied = applySpaceAdditionRound(net, round, via);
+      if (applied) additions.push(applied);
+    } catch (cause) {
+      failed.push({ round, cause });
+    }
+  }
+
+  for (const { round, cause } of failed) {
+    log.error(`${round.type} round ${peerText(round.roundId)} of network ${peerText(net.id)} could not be settled (${peerText(via)}): ${peerText(cause)}`);
+  }
+
+  const acts = [...start];
+  const started: Promise<SpaceRoundSettled[]> = !wrote && acts.length === 0 ? Promise.resolve([]) : new Promise(resolve => setImmediate(() => {
+    // The acts run on what is on disk (the runner re-reads its entry through `mutateConfig`), so they start after the caller's save —
+    // and a caller that saved nothing has its registration saved here, or the runner's first write would read the entry away.
+    // What this call wrote is saved here too when its caller saved nothing: any other writer's reload would read it away.
+    saveIfUnsaved(cfg, generation, `the space rounds of network ${peerText(net.id)}`);
+    resolve(Promise.all(acts.map(id => runSpaceAct(id, { waiter: opts.waiter === true, via }))));
+  }));
+
+  return {
+    settled: Promise.all([started, Promise.all(additions)]).then(([a, b]) => [...a, ...b]),
+    wrote, acts, failed,
+  };
 }

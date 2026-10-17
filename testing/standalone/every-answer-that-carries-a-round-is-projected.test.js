@@ -66,14 +66,17 @@ const notForAnOperator = (() => {
 
 const member = (instanceId) => ({ instanceId, label: `m${instanceId.slice(-2)}`, url: `https://${instanceId.slice(-2)}.example.com`, tokenHash: 'h', direction: 'both' });
 
-/** A closed network carrying `notes` with one other member, so no round passes at open: every opening door answers 202. */
+/**
+ * A closed network carrying `notes` with two other members, so no round passes at open: every opening door answers 202. Two, not one
+ * (D-36): with the proposer and the subject the only members, a removal of that subject passes at open on the proposer's own yes.
+ */
 async function fresh(loader) {
   const bcrypt = (await import('bcrypt')).default;
   const cfg = loader.getConfig();
   cfg.spaces = [{ id: 'general', label: 'General', builtIn: true, folders: [] }, { id: 'notes', label: 'Notes', folders: [] }, { id: 'extra', label: 'Extra', folders: [], meta: { purpose: 'a space with a schema layer of its own' } }];
   cfg.networks = [{
     id: NET, label: 'Net A', type: 'closed', origin: 'created', syncSchedule: '', spaces: ['general', 'notes'], votingDeadlineHours: 24,
-    createdAt: '2026-01-01T00:00:00.000Z', members: [member(PEER)], pendingRounds: [],
+    createdAt: '2026-01-01T00:00:00.000Z', members: [member(PEER), member('aaaaaaaa-0000-4000-8000-0000000000a2')], pendingRounds: [],
     inviteKeyHash: await bcrypt.hash(INVITE_KEY, 4),
   }];
 }

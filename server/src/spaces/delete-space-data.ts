@@ -8,7 +8,7 @@
  * "the same thing called" is structural rather than something a reviewer has to verify.
  *
  * **This capability is why that instruction exists.** There were five `DELETE .../<collection>` routes
- * calling `bulkDelete<Collection>` directly, and one tool calling `planSpaceWipe` first. So on a space
+ * calling `bulkDelete<Collection>` directly, and one tool calling the wipe planner first. So on a space
  * that belongs to a network, the tool opened a VOTE and the routes wiped immediately — same act, same
  * instance, and whether other members got a say depended on which door the caller came through. Nothing
  * reported it, because each door did exactly what its own code said.
@@ -23,15 +23,16 @@
  * act is irreversible, and aligning on the safer side of a difference is the only direction that cannot
  * cost somebody their data.
  *
- * The result says which of two things happened — a vote opened, or data was deleted — and each door
- * renders it. Neither decides.
+ * The result says what happened — a vote opened, the data was wiped, the change is still running here, or it
+ * failed after the vote passed — and each door renders it. Neither decides. Who may call it is decided at the
+ * door, by the tool's `spaceAdmin` flag (D-41): this module asks no rights question of its own.
  */
-import { WIPE_COLLECTION_TYPES, type WipeCollectionType, wipeSpace } from './lifecycle.js';
-import { planSpaceWipe, notifyPeersOfWipe } from './wipe-vote.js';
-
-import type { RoundAnswer } from '../networks/vote-acts.js';
+import { WIPE_COLLECTION_TYPES, type WipeCollectionType, type WipeResult } from './lifecycle.js';
+import { wipeSpaceAsRequested, wipeTypesOf, type WipeOutcome } from './wipe-vote.js';
 import { isProxySpace } from './proxy.js';
 import { getConfig } from '../config/loader.js';
+import { spaceActFailureAnswer } from './space-act-failure.js';
+import type { ToolResult } from '../mcp/tools/types.js';
 
 export interface DeleteSpaceDataArgs {
   space: string;
@@ -42,17 +43,15 @@ export interface DeleteSpaceDataArgs {
 export type DeleteSpaceDataResult =
   /** The caller got it wrong. `status` is the HTTP code the REST door answers; MCP renders the message. */
   | { ok: false; status: 400 | 404; error: string }
-  /** The space is governed: nothing was deleted and a round is open in each network. */
-  | { ok: true; outcome: 'vote_pending'; rounds: RoundAnswer[]; types: WipeCollectionType[] | null }
-  /** Deleted, with a per-collection count. Zeroes mean the space was already empty. */
-  | { ok: true; outcome: 'wiped'; deleted: Awaited<ReturnType<typeof wipeSpace>>; types: WipeCollectionType[] | null };
+  /** What the wipe came to (`wipeSpaceAsRequested`), and the canonical types it covered (`null` = all). */
+  | { ok: true; outcome: WipeOutcome; types: WipeCollectionType[] | null };
 
 /**
- * Validate, consult the network, then wipe — or open the vote.
+ * Validate, then wipe as the network decides.
  *
- * The space is already AUTHORISED by the caller's door (`requireBodyScopedSpace` on REST, the dispatcher's
- * `spaceAdmin` check on MCP). This function does not re-check rights: a second authorisation inside the
- * shared module would be a rule with two implementations again, one layer further in.
+ * The space is already AUTHORISED by the caller's door (the dispatcher's `spaceAdmin` check, for `POST /api/delete_space_data`
+ * and MCP alike). This function does not re-check rights: a second authorisation inside the shared module would be a rule with
+ * two implementations again, one layer further in.
  */
 export async function deleteSpaceData(args: DeleteSpaceDataArgs): Promise<DeleteSpaceDataResult> {
   const { space } = args;
@@ -70,37 +69,83 @@ export async function deleteSpaceData(args: DeleteSpaceDataArgs): Promise<Delete
     return { ok: false, status: 400, error: '`confirm: true` required' };
   }
 
-  let types: WipeCollectionType[] | undefined;
-  if (args.types !== undefined) {
-    const raw = args.types;
-    // An unknown type is a typo, and "wipe everything except the thing you misspelled" is the worst
-    // available reading of one. Refused rather than filtered.
-    if (!Array.isArray(raw)
-      || raw.some(t => typeof t !== 'string' || !WIPE_COLLECTION_TYPES.includes(t as WipeCollectionType))) {
-      return {
-        ok: false, status: 400,
-        error: `\`types\` must be an array of: ${WIPE_COLLECTION_TYPES.join(', ')}. Omit it to wipe all.`,
-      };
-    }
-    types = raw as WipeCollectionType[];
+  // An unknown type is a typo, and "wipe everything except the thing you misspelled" is the worst available reading of one.
+  // Refused rather than filtered — and deduplicated and ordered once, so the round, its signature and the act read one list.
+  const covered = wipeTypesOf(args.types);
+  if (covered === 'refused') {
+    return {
+      ok: false, status: 400,
+      error: `\`types\` must be an array of at most ${WIPE_COLLECTION_TYPES.length} of: ${WIPE_COLLECTION_TYPES.join(', ')}. Omit it to wipe all.`,
+    };
   }
 
   /*
    * THE GOVERNANCE STEP, and it is the reason this module exists rather than two handlers.
    *
-   * A space that belongs to a network cannot be emptied by one member deciding to. The planner opens a
-   * round in each network and this instance votes yes; the data goes when a round passes, and one veto
-   * stops it. Skipping this is not a slower path — it is a member deleting shared data unilaterally.
+   * The planner opens a round in each network that holds the space and this instance votes yes. On a club, a pub/sub
+   * network this instance publishes, or a network where it is the only member, that yes passes the round and the data
+   * goes in this request — which is why `confirm` is required. Elsewhere the data goes when the round passes, and one veto
+   * stops it. A pub/sub subscriber's wipe is its own copy only (D-40): it opens no round and refills from the publisher.
    */
-  const plan = planSpaceWipe(space, types);
-  if (plan.governed) {
-    notifyPeersOfWipe(space, types);
-    return { ok: true, outcome: 'vote_pending', rounds: plan.rounds, types: types ?? null };
-  }
-
-  return { ok: true, outcome: 'wiped', deleted: await wipeSpace(space, types), types: types ?? null };
+  const outcome = await wipeSpaceAsRequested(space, covered);
+  return { ok: true, outcome, types: covered.length === WIPE_COLLECTION_TYPES.length ? null : covered };
 }
 
 /** The types label both doors print — `all` when none were named, because that is what happens. */
 export const wipeTypesLabel = (types: WipeCollectionType[] | null | undefined): string =>
   types && types.length > 0 ? types.join(', ') : 'all';
+
+/** The flat per-collection counts, read where callers read them, beside `deleted`. */
+export const wipeCounts = (deleted: WipeResult | undefined): WipeResult =>
+  deleted ?? { facts: 0, entities: 0, edges: 0, chrono: 0, files: 0, links: 0 };
+
+/**
+ * The tool's answer to a wipe outcome — text and `structuredContent` — for MCP and `POST /api/delete_space_data` alike (the REST tool door
+ * answers the same `data`). A failed act is an error result carrying the failure body (`code: 'space_act_failed'`, `status: 'passed'`);
+ * a store-side cause is rethrown as itself, so the dispatcher answers it as every store failure (503, `storeSideFailure`).
+ */
+export function wipeToolResult(space: string, outcome: WipeOutcome, types: WipeCollectionType[] | null): ToolResult {
+  const label = wipeTypesLabel(types);
+  const text = (t: string) => [{ type: 'text' as const, text: t }];
+  const rounds = ('rounds' in outcome ? outcome.rounds : undefined) ?? [];
+  const where = (want: 'passed' | 'vote_pending') => rounds.filter(r => r.outcome === want).map(r => r.networkLabel).join(', ');
+  switch (outcome.status) {
+    case 'vote_pending':
+      return {
+        content: text(`Nothing has been wiped yet. '${space}' belongs to ${rounds.length} network${rounds.length === 1 ? '' : 's'} (${where('vote_pending') || rounds.map(r => r.networkLabel).join(', ')}), `
+          + `so emptying it is a governed act: a vote is ${outcome.repeated ? 'already ' : 'now '}open in each, and this instance has voted yes. [${label}] is wiped on every member `
+          + 'when a round passes, and a single veto stops it there. Watch the rounds rather than expecting counts from this call.'),
+        structuredContent: { status: 'vote_pending', rounds, types, ...(outcome.repeated ? { repeated: true } : {}) },
+      };
+    case 'passed':
+      return {
+        content: text(outcome.retryAt
+          ? `The vote passed; the change on this instance failed and is retried automatically at ${outcome.retryAt}. See GET /api/networks/:id (owedSpaceActs).`
+          : 'The vote passed; the change on this instance is still running and completes on its own. Check GET /api/networks/:id (owedSpaceActs) or the space\'s counts.'),
+        structuredContent: { status: 'passed', queued: true, rounds, types, ...(outcome.retryAt ? { retryAt: outcome.retryAt } : {}), ...(outcome.repeated ? { repeated: true } : {}) },
+      };
+    case 'failed': {
+      const answer = spaceActFailureAnswer(outcome.cause, rounds, `tool delete_space_data on '${space}'`);
+      if (answer.store) throw outcome.cause;
+      return { content: text(`Error: ${answer.body.error}`), isError: true, structuredContent: { ...answer.body } };
+    }
+    case 'wiped': {
+      const d = wipeCounts(outcome.deleted);
+      const counts = `${d.facts} facts, ${d.entities} entities, ${d.edges} edges, ${d.chrono} chrono, ${d.files} files`;
+      const open = where('vote_pending');
+      const said = outcome.refills
+        ? `Wiped your copy of '${space}' [${label}]: ${counts}. It refills from the publisher at the next sync.`
+        : rounds.length > 0
+          ? `Wiped [${label}] in '${space}' on this instance (passed in ${where('passed')})${outcome.deleted ? `: ${counts}` : ''}.`
+            + (open ? ` A vote is still open in ${open} — members there are not yet wiped.` : '')
+          : `Wiped [${label}] in space '${space}': ${counts}.`;
+      return {
+        content: text(said),
+        structuredContent: {
+          ...d, status: 'wiped', types, deleted: d,
+          ...(rounds.length > 0 ? { rounds } : {}), ...(outcome.repeated ? { repeated: true } : {}), ...(outcome.refills ? { refills: true } : {}),
+        },
+      };
+    }
+  }
+}

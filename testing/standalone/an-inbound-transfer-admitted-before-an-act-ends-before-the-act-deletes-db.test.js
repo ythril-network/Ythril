@@ -13,7 +13,7 @@
  *
  * - **R-W4d (records)** a push admitted before the act, whose write is in flight (parked behind a latch): the act does not delete while that write is in
  *   flight, a SECOND push of the space is refused `423 space_held` (never `409`) while the act stands, and after the latch is released nothing the push
- *   carried survives - the first delete follows the push's last write.
+ *   carried survives - the first delete follows the push's last write (the act's own writes, learnt from the act run alone, do not count).
  * - **R-W4d (upload)** a file upload admitted before the act, stalled in its body: the act's registration DESTROYS the stream at once (the door listens on
  *   the transfer's signal), so the act does not wait for the upload's bound, and the bytes the sender would have sent after the act are not on disk.
  * - **R-X5b** an upload held open past `INBOUND_TRANSFER_MS` (the knob lowered) is destroyed by the SERVER, with no act at all, and the transfer is no
@@ -64,6 +64,20 @@ let door, loader, lifecycle, server, peerKey, parks, cmd, dataParts, logModule;
 
 const wipe = (space) => lifecycle.wipeSpace(space);
 const quiet = () => settleActs(door, loader);
+
+/**
+ * The operations the act body issues on `space`'s data collections, learnt from the same act run ALONE (nothing writing the space): its own
+ * writes (the wipe's face unlabel on the files rows) are the act, not a write it raced, so the order rule leaves them out by WHAT they are -
+ * never by when they ran. Every other write still counts.
+ */
+async function actOperationsOf(space) {
+  cmd.reset();
+  await wipe(space);
+  await quiet();
+  const ops = cmd.writeShapes(space, dataParts);
+  cmd.reset();
+  return ops;
+}
 
 /** A peer's push of one fact, through the whole chain. */
 async function pushFact(space, id, seq) {
@@ -146,6 +160,7 @@ describe('an inbound transfer admitted before an act ends before the act deletes
   });
 
   it('R-W4d (records): a push admitted before the act is waited for, a second push is refused 423 while the act stands, and nothing the push carried survives', T, async () => {
+    const actOperations = await actOperationsOf(S);
     const park = parks.arm(`${S}_facts`, { when: (method) => !/^delete/.test(method) });
     const first = pushFact(S, 'in-1', 7);
     first.catch(() => {});
@@ -169,7 +184,8 @@ describe('an inbound transfer admitted before an act ends before the act deletes
     rules.that(firstAnswer.settled, 'the first push never answered once its write was released');
     rules.that(done.settled, 'the act did not complete once the write it waited for was released');
     rules.that(await door.coll(S, 'facts').countDocuments({}) === 0, 'a record the peer pushed survived the wipe: its write landed after the act deleted');
-    rules.that(cmd.writesEndedAfterFirstDelete(S, dataParts).length === 0, `a write to the space ended after the act's first delete started: ${cmd.describe(S, dataParts)}`);
+    rules.that(cmd.firstDeleteStart(S, dataParts) >= 0, 'the act issued no delete on the space\'s data collections, so the order of the writes against it was not tested');
+    rules.that(cmd.writesEndedAfterFirstDelete(S, dataParts, { actOperations }).length === 0, `an exchange write to the space ended after the act's first delete started: ${cmd.describe(S, dataParts)}`);
     rules.done();
   });
 

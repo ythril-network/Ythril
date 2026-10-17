@@ -87,7 +87,10 @@ export async function untilQuiescentOf(queues, { stable = 4, maxTurns = 4000 } =
   for (let i = 0; i < maxTurns; i++) {
     busy = busyQueues(queues);
     if (busy.length === 0) { if (++idleTurns >= stable) return; } else idleTurns = 0;
-    await new Promise(resolve => setImmediate(resolve));
+    // waits-differently: every fiftieth turn is a zero timer — the queues drain through store and peer round trips, and four thousand
+    // `setImmediate` turns passed in milliseconds while one wipe batch was still on the wire; a timer turn costs a clock tick (about
+    // 15 ms on Windows), so only some turns are one, and a wait that never ends still throws in about a second.
+    await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 0) : setImmediate(resolve)));
   }
   throw new Error(`the instance never went quiescent: still busy after ${maxTurns} turns: ${busy.join(', ')}`);
 }

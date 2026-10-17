@@ -35,6 +35,7 @@ import { webhookToken, parseTtlDaysQuery, requireWritePath, enforceSizeLimit } f
 import { callerPeerAuthor } from './sync/_shared.js';
 import { tagsError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { refusePeerWrite } from './sync/_shared.js';
 
 /**
  * The actor an upload is made by: the calling token for a person, and NOTHING for a peer. A peer's byte push is a synced write,
@@ -241,6 +242,8 @@ export function registerUploadRoute(router: Router): void {
             res.status(422).json({ error: `The assembled upload is not the file promised in ${EXPECTED_HASH_HEADER}; nothing was stored (${err.code})` });
             return;
           }
+          // A peer admitted before an act registered on the space meets the hold's 423, never the closure's 409 (X2).
+          if (refusePeerWrite(res, err, req.authToken)) return;
           sendCaughtFailure(res, `Chunked upload error for space ${targetSpace}, path ${filePath}`, err, { error: 'Chunked upload failed' });
         }
         return;
@@ -339,6 +342,7 @@ export function registerUploadRoute(router: Router): void {
           res.status(400).json({ error: err.message });
           return;
         }
+        if (refusePeerWrite(res, err, req.authToken)) return;
         sendCaughtFailure(res, `writeFile error for space ${targetSpace}, path ${filePath}`, err, { error: 'Failed to write file' });
       }
     },

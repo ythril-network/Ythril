@@ -45,6 +45,7 @@ import { readAfterSeq } from '../util/seq-keyset.js';
 import { andPredicates } from '../db/and-predicates.js';
 import { fileMetaForWire, fileMetaForOlderPeer, withAuthoredKeys } from '../api/sync/_shared.js';
 import { log, peerText } from '../util/log.js';
+import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import type { ReplicatedFamily } from './replicated-families.js';
 import type { NetworkMember, FileMetaDoc } from '../config/types.js';
 
@@ -75,6 +76,8 @@ export async function pushFamily(o: {
   instanceId: string;
   /** The request init for a batch-sized body (`BATCH_FETCH_TIMEOUT_MS`). */
   requestInit: () => RequestInit;
+  /** The space's turn with this member: its signal cuts the batch in flight, and a refusal the peer answers is handed to it. */
+  turn?: ExchangeTurn;
 }): Promise<{ pushed: number; maxSeq: number; refused: number } & TransferOutcome> {
   const { family, member, spaceId, remoteSpaceId, networkId } = o;
   const key = family.payloadKey;
@@ -97,15 +100,16 @@ export async function pushFamily(o: {
       // A file's metadata goes on the wire this peer takes (`Q-256`); every other family is sent as stored.
       const newer = key === 'filemeta' && peerTakesWireSince(member, FILE_META_REMOVAL_SINCE);
       if (key === 'filemeta' && !newer) warnOlderWire(member, FILE_META_REMOVAL_SINCE, 'file metadata');
+      const init = o.requestInit();
       const offer = (onNewerWire: boolean) => peerSafeFetch(endpoint, {
-        ...o.requestInit(), method: 'POST',
+        ...init, signal: turnSignal(init.signal, o.turn), method: 'POST',
         body: JSON.stringify({ [key]: key === 'filemeta' ? batch.map(d => {
           const wire = fileMetaForWire(d as unknown as FileMetaDoc);
           return onNewerWire ? withAuthoredKeys(wire) : fileMetaForOlderPeer(wire);
         }) : batch }),
       });
       const resp = await offer(newer);
-      if (!resp.ok) { await resp.body?.cancel().catch(() => {}); return `the peer answered ${resp.status}`; }
+      if (!resp.ok) { o.turn?.refusedBy(await transferRefusal(resp)); await resp.body?.cancel().catch(() => {}); return `the peer answered ${resp.status}`; }
       let r: number;
       if (!newer) r = await reportPushRefusals(resp, key, peerLabel, spaceId, batch.length);
       else {
@@ -116,7 +120,7 @@ export async function pushFamily(o: {
           // the wire every version takes (receivers keep the newer copy they hold, so a document that landed is a no-op).
           // Refusals that stand on the older wire are the documents' own, and are reported as any push's.
           const again = await offer(false);
-          if (!again.ok) { await again.body?.cancel().catch(() => {}); return `the peer answered ${again.status}`; }
+          if (!again.ok) { o.turn?.refusedBy(await transferRefusal(again)); await again.body?.cancel().catch(() => {}); return `the peer answered ${again.status}`; }
           const stood = await reportPushRefusals(again, key, peerLabel, spaceId, batch.length);
           if (stood < r) { rememberRefusedTheNewerWire(member); warnOlderWire(member, FILE_META_REMOVAL_SINCE, 'file metadata'); }
           r = stood;

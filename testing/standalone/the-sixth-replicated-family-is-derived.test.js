@@ -206,8 +206,10 @@ describe('a wipe vote is signed like every other own cast', () => {
      * `makeSignedOwnCast`. On a network with `requireSignedVotes` the peers refuse it, so a proposed wipe or
      * space deletion carried locally and nowhere else.
      */
-    assert.match(code(WIPE), /makeSignedOwnCast/,
-      'the wipe round casts its own yes unsigned, which a strict network refuses');
+    // Since bundle-106 the wipe opens its round through the one open path, which signs the proposer's yes for every opener.
+    assert.match(code(WIPE), /proposeRound\(/, 'the wipe round is not opened through the open path that signs the own yes');
+    assert.match(code('server/src/networks/propose-round.ts'), /makeSignedOwnCast\(/,
+      'the open path casts the proposer\'s yes unsigned, which a strict network refuses');
   });
 
   it('and its comment counts the collections a wipe actually empties', () => {

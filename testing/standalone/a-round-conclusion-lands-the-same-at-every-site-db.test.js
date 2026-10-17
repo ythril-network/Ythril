@@ -107,7 +107,7 @@ describe('a round that concludes as passed lands the same by every via, and acts
   after(async () => {
     await peer?.close();
     await closeTestMongo();
-    removeInstanceDir(dir);
+    // The instance directory is NOT removed here: the audit table below boots in the same one (it is removed after that).
   });
   afterEach(async () => {
     const runner = await import('../../server/dist/spaces/space-act-runner.js').catch(() => null);
@@ -137,7 +137,9 @@ describe('a round that concludes as passed lands the same by every via, and acts
             `${via} left this instance differently on a ${roundType} round: the round, the roster, the spaces, the offers, the layers, the notice, the space-act bodies that ran, and the act entries that still stand`,
           );
           assert.deepEqual(got.introductions, [], 'a conclusion introduced a member nobody asked for');
-          const took = roundType === 'space_wipe' || roundType === 'space_deletion';
+          // A network never deletes a member's space (Q-70, design v5 section 2.1): a passed deletion takes the space out of the network
+          // on every member, and only the instance that PROPOSED it removes its own copy — here, the proposer via.
+          const took = roundType === 'space_wipe' || (roundType === 'space_deletion' && via === 'proposer');
           assert.equal(await factCount(mongo, 'notes'), took ? 0 : 3, took ? `the ${roundType} round passed and the space still has its data` : `a ${roundType} round touched the space's data`);
           cells++;
         });
@@ -162,6 +164,7 @@ describe('every via audits what it did, but the one that is the operator\'s requ
   after(async () => {
     await peer?.close();
     await closeTestMongo();
+    removeInstanceDir(dir);
   });
   afterEach(async () => {
     const runner = await import('../../server/dist/spaces/space-act-runner.js').catch(() => null);
@@ -196,6 +199,7 @@ describe('every via audits what it did, but the one that is the operator\'s requ
     for (const { roundType, operation } of EFFECTS) {
       it(`${via}: a passing ${roundType} writes ${requestVias.includes(via) ? 'no' : 'exactly one'} ${operation} entry`, async () => {
         await mongo.col('audit_log').deleteMany({});
+        await mongo.col('notes_facts').deleteMany({});   // a join's row leaves the seed in place: each row seeds its own
         if (requestVias.includes(via)) {
           const loader = await boot(dir, { networks: [networkOf('closed', [])] });
           await seedFacts(mongo, 'notes', 2);

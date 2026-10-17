@@ -48,8 +48,9 @@ describe('the sync order puts targets before references', () => {
   });
 
   it('the engine pushes in that order, and both push doors take what is still to come from it', () => {
-    const engine = src('server/src/sync/engine.ts');
-    assert.match(engine, /for \(const family of REPLICATED_FAMILIES\) \{\s*pushed\[family\.payloadKey\] = await pushFamily\(/,
+    // The push moved with the per-space turn into `sync/space-exchange.ts` (bundle-106 §3.4); the turn's stop between families is allowed.
+    const engine = src('server/src/sync/space-exchange.ts');
+    assert.match(engine, /for \(const family of REPLICATED_FAMILIES\) \{\s*(?:if \(!turn\.mayContinue\(\)\) break;\s*)?pushed\[family\.payloadKey\] = await pushFamily\(/,
       'the push cycle no longer iterates REPLICATED_FAMILIES — the order above is not the order sent');
     const docs = src('server/src/api/sync/docs.ts');
     // `run` awaits the check, `start` starts it and answers (bundle-30 I13); either must say what is still to come.

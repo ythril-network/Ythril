@@ -204,7 +204,7 @@ After the row is gone, the file TOMBSTONE is what stops a stale copy of the dele
 - **Branch on `status`, not on `202`.** `DELETE /api/spaces/:id` and `POST /api/admin/spaces/:spaceId/wipe` answer `200` (was `202 vote_pending`) when this instance's own yes passes the round and the change ran; `202` with `status: "passed"` and `queued: true` while the change is still running; `202 vote_pending` only when no round passed. The tool door keeps its `200` envelope, with `data.status`.
 - **A networked delete or wipe needs `{ "confirm": true }` (breaking).** Without it the answer is `400` and nothing is opened. The admin wipe needs it on an unnetworked space too.
 - **Writes into a space being wiped, deleted or renamed answer `409`** (`space_being_wiped`, `space_being_deleted`, `space_being_renamed`); retry once it completes.
-- **After each networked wipe, expect one full re-read of that space per member pair**, because a member re-reads a wiped space from its members once afterwards.
+- **After a networked wipe that resets the space's sequence counters, expect one re-read of the upstream's tombstones for that space per member**, once afterwards; re-reading is idempotent.
 - **A space-scoped user token or an unlisted peer reading a network's votes or members is refused `403`**, and a network this instance does not hold answers `403` (was `404`). Read them through `/api/networks/:id/votes` as an operator.
 - **Pub/sub:** a publisher stops sending a space to a subscriber that left it, until the subscriber announces it again. Such a space is listed as `declined` in the sync history, not as held.
 - **An older member's cycle for a held space is refused with `423`** and reads as failed for up to `votingDeadlineHours`. Upgrade the members before a networked wipe.
@@ -304,7 +304,7 @@ recall on it answers empty until it is ready. Nothing is lost; the records are u
 - does not mask a round it owes an act on, so a newer peer may lift its hold early;
 - serves a skipped or owed round as it stored it.
 
-**Before rolling back:** no space deleted or wiped by a vote within `votingDeadlineHours` (`GET /api/networks/:id/vote-outcomes`, and the audit operations `network.round.space_act` and `network.round.addition_retired`); no round with an act owed (`GET /api/networks/:id/votes`, `actAttempts`); and no `pendingSpaceActs` in `config.json` and no `owedSpaceActs` (`GET /api/networks`, as an instance administrator). A restore of a `config.json` copied with entries finishes those acts after the first listen: before starting from a restored `config.json`, remove `pendingSpaceActs` unless you want those deletions, wipes and renames finished.
+**Before rolling back:** no space deleted or wiped by a vote within `votingDeadlineHours` (`GET /api/networks/:id/vote-outcomes`, and the audit operations `network.round.space_act` and `network.round.addition_retired`); no act owed (`owedSpaceActs` on `GET /api/networks/:id`, as an instance administrator); and no `pendingSpaceActs` in `config.json` and no `owedSpaceActs` (`GET /api/networks`, as an instance administrator). A restore of a `config.json` copied with entries finishes those acts after the first listen: before starting from a restored `config.json`, remove `pendingSpaceActs` unless you want those deletions, wipes and renames finished.
 
 **The first boot on a new version rewrites `config.json`, and some of those rewrites drop a field an older
 build reads.** So a rollback is not simply "run the previous image": that path exists, but it needs the copy of

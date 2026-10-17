@@ -95,16 +95,20 @@ describe('what it is built from', () => {
     assert.doesNotMatch(code(FILE), /for\s*\(\s*(?:const|let)\s+\w+\s+of\s+[\w$.()?]*\bnetworks\b/, 'a hand-written `for … of networks` is the shape every copy of the space walk had');
   });
 
+  // bundle-106: the job concludes AND applies through the one settle step (`settleRounds`), which concludes through
+  // concludeRoundIfReady and applies through applyRoundConclusion — so neither is spelled here, and a second copy of either would be.
   it('applies what it concluded, and audits each round it ended', () => {
     const src = code(FILE);
-    assert.match(src, /\bapplyRoundConclusion\s*\(/);
+    assert.match(src, /\bsettleRounds\s*\(/);
+    assert.doesNotMatch(src, /\bapplyRoundConclusion\s*\(/, 'the job applies a conclusion by hand beside the settle step');
     assert.match(src, /\blogInternalAudit\s*\(/, 'a round the job ends leaves no audit entry');
     assert.match(src, /['"`]network\.round\.expired['"`]/, 'the audit operation is not network.round.expired');
   });
 
-  it('never decides a conclusion by setting its fields: it asks concludeRoundIfReady', () => {
+  it('never decides a conclusion by setting its fields: it asks the settle step, which asks concludeRoundIfReady', () => {
     const src = code(FILE);
-    assert.match(src, /\bconcludeRoundIfReady\s*\(/);
+    assert.match(src, /\bsettleRounds\s*\(/);
+    assert.match(code('server/src/networks/round-conclusion.ts'), /\bconcludeRoundIfReady\s*\(/);
     assert.doesNotMatch(src, /\.\s*concluded\s*=[^=]/, 'the job concludes a round by writing `concluded` itself, so what concluding does (revoking a failed join) would be a second copy here');
   });
 });

@@ -296,7 +296,7 @@ Migration is a one-way operation. Keep your old database available until you hav
 
 ## Settings — Audit Log
 
-**Settings → Logs** (admin only) shows a searchable log of every API operation on this instance. A deletion or wipe a passed vote applied here is recorded as `network.round.space_act`, a passed space addition that was not applied as `network.round.addition_retired`, and a deletion, wipe or rename a request queued and then finished as `space.act_completed`; a concluded vote round is `network.round.expired`. The page has two sub-tabs, toggled at the top: **Audit Log** (the operation table below) and **Server Log** (the live server log described at the end).
+**Settings → Logs** (admin only) shows a searchable log of every API operation on this instance. A deletion or wipe a passed vote applied here is recorded as `network.round.space_act`, a passed space addition that a later deletion of the same space retired, so it was never applied, as `network.round.addition_retired`, and a deletion, wipe or rename a request queued and then finished as `space.act_completed`; a concluded vote round is `network.round.expired`. The page has two sub-tabs, toggled at the top: **Audit Log** (the operation table below) and **Server Log** (the live server log described at the end).
 
 **Filtering:** Filter by date range, operation type, space, HTTP status, or client IP.
 

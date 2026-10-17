@@ -8,13 +8,14 @@
  * Round state is config (`network.pendingRounds`), persisted via saveConfig — not in-memory — which
  * is why both the HTTP surfaces and the sync engine can safely drive conclusion.
  */
-import { getConfig, getSecrets } from '../config/loader.js';
+import { getConfig } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { commitOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-meta.js';
 import { carriedLocalId } from './space-map.js';
-import { peerSafeFetch } from './peer-fetch.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
+import { sendNotice } from '../networks/notify-members.js';
+import { networkRole } from '../networks/network-role.js';
 import { parseMetaRound, type MetaRoundParse, type MetaRoundProposal } from './meta-round-merge.js';
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import type { ParsedSpaceMeta } from '../spaces/body-schemas.js';
@@ -65,17 +66,11 @@ export function concludeRoundIfReady(
   round: import('../config/types.js').VoteRound,
   now: number = Date.now(),
 ): boolean {
-  // Who votes is `votersOf`'s (the subject is left out only where it is the member voted ON — a join or a removal; on every
-  // other round it is the PROPOSER, a voter like any member, whose yes is cast for it when the round opens, S-7; owner,
-  // 2026-09-25: "of course a proposer votes yes ... require the yes but set it automatically". Dropping it there let a peer
-  // name any member as proposer and so drop that member's vote from the quorum).
-  const { voters, localInstanceId, localIsVotedOn } = votersOf(net, round);
-  const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
-
-  if (vetoCount > 0 || roundPastDeadline(round, now)) {
+  const verdict = roundVerdict(net, round, now);
+  if (verdict === 'vetoed' || verdict === 'expired') {
     round.concluded = true;
     round.passed = false;
-    round.outcome = vetoCount > 0 ? 'vetoed' : 'expired';
+    round.outcome = verdict;
     round.concludedAt = new Date(now).toISOString();
     recordRoundOutcome(net, round, now);
     // A failed JOIN leaves the candidate's provisioned credentials (peer PAT
@@ -91,6 +86,61 @@ export function concludeRoundIfReady(
     }
     return false;
   }
+  if (verdict === 'passed') {
+    round.concluded = true;
+    round.passed = true;
+    round.outcome = 'passed';
+    round.concludedAt = new Date(now).toISOString();
+    // Before the passed round acts: a removal takes its subject off the roster, and the count belongs to the electorate that decided.
+    recordRoundOutcome(net, round, now);
+    // On join round pass: the candidate will call join again and get a 200 with member list
+    // On remove round pass: remove the member
+    if (round.type === 'remove') {
+      const idx = net.members.findIndex(m => m.instanceId === round.subjectInstanceId);
+      if (idx >= 0) net.members.splice(idx, 1);
+      // Revoke the ejected peer's credentials once it holds no membership anywhere.
+      // Deferred a tick so the caller's saveConfig (and the member_removed notify,
+      // which still needs our outbound token) run first.
+      const ejectedId = round.subjectInstanceId;
+      if (ejectedId) {
+        setImmediate(() => {
+          revokePeerCredentialsIfOrphaned(ejectedId)
+            .catch(err => log.error(`peer credential revocation for ${peerText(ejectedId)}: ${peerText(err)}`));
+        });
+      }
+    }
+    // On meta_change round pass: apply the fields this round proposed to the space's CURRENT meta.
+    //
+    // Not `{ meta: round.pendingMeta }`. That snapshot was computed when the round opened, and rounds stay
+    // open for `votingDeadlineHours` — so writing it wholesale reverts every field another round changed
+    // in the meantime, with no error and a correctly-recorded carried vote to hide it.
+    // The round names the space by the NETWORK's id; this instance may carry it under another (F-39.4) — and acts
+    // only on a space this network carries here (S-7). What is written, and that it is parsed first, is `passedMetaChange`'s.
+    if (round.type === 'meta_change') passedMetaChange.apply(net, round);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * How `round` stands at `now` by this network's rule, PURE — it writes nothing, not even to the round (bundle-106, W22): `vetoed`,
+ * `expired`, `passed`, or `null` while it is still undecided. {@link concludeRoundIfReady} concludes on it; the "acts now or opens a
+ * vote" forecast (`networks/round-forecast.ts`) reads it on a scratch round, so the forecast is the real pass rule and applies nothing.
+ * A veto beats expiry.
+ */
+export function roundVerdict(
+  net: import('../config/types.js').NetworkConfig,
+  round: import('../config/types.js').VoteRound,
+  now: number = Date.now(),
+): 'vetoed' | 'expired' | 'passed' | null {
+  // Who votes is `votersOf`'s (the subject is left out only where it is the member voted ON — a join or a removal; on every
+  // other round it is the PROPOSER, a voter like any member, whose yes is cast for it when the round opens, S-7; owner,
+  // 2026-09-25: "of course a proposer votes yes ... require the yes but set it automatically". Dropping it there let a peer
+  // name any member as proposer and so drop that member's vote from the quorum).
+  const { voters, localInstanceId, localIsVotedOn } = votersOf(net, round);
+  const vetoCount = round.votes.filter(v => v.vote === 'veto').length;
+  if (vetoCount > 0) return 'vetoed';
+  if (roundPastDeadline(round, now)) return 'expired';
 
   // For unanimous-requirement types (closed, braintree): every remote voter must have voted yes
   // individually. A self/proposer yes vote counts as evidence of intent but does NOT short-circuit
@@ -157,45 +207,19 @@ export function concludeRoundIfReady(
       break;
     }
     case 'club':
-    case 'pubsub':
-      // For Club/Pubsub: only the inviter/publisher (first yes voter) decides
+      // For Club: only the inviter (first yes voter) decides
       passed = yesCount >= 1 && vetoCount === 0;
       break;
+    case 'pubsub':
+      // For Pubsub: the publisher (first yes voter) decides — except that a deletion or wipe on a network where THIS instance is the
+      // publisher passes only when it opened the round (D-40, X10). Every other such round there is a subscriber's, whose deletion or
+      // wipe is its own local act; one an older publisher adopted before the upgrade would otherwise pass at the next gossip or relay
+      // and empty the publisher's space for every subscriber. Decided from the local role and a local field, never a wire field.
+      passed = yesCount >= 1 && vetoCount === 0
+        && !((round.type === 'space_deletion' || round.type === 'space_wipe') && networkRole(net).role === 'publisher' && round.proposedHere !== true);
+      break;
   }
-  if (passed) {
-    round.concluded = true;
-    round.passed = true;
-    round.outcome = 'passed';
-    round.concludedAt = new Date(now).toISOString();
-    // Before the passed round acts: a removal takes its subject off the roster, and the count belongs to the electorate that decided.
-    recordRoundOutcome(net, round, now);
-    // On join round pass: the candidate will call join again and get a 200 with member list
-    // On remove round pass: remove the member
-    if (round.type === 'remove') {
-      const idx = net.members.findIndex(m => m.instanceId === round.subjectInstanceId);
-      if (idx >= 0) net.members.splice(idx, 1);
-      // Revoke the ejected peer's credentials once it holds no membership anywhere.
-      // Deferred a tick so the caller's saveConfig (and the member_removed notify,
-      // which still needs our outbound token) run first.
-      const ejectedId = round.subjectInstanceId;
-      if (ejectedId) {
-        setImmediate(() => {
-          revokePeerCredentialsIfOrphaned(ejectedId)
-            .catch(err => log.error(`peer credential revocation for ${peerText(ejectedId)}: ${peerText(err)}`));
-        });
-      }
-    }
-    // On meta_change round pass: apply the fields this round proposed to the space's CURRENT meta.
-    //
-    // Not `{ meta: round.pendingMeta }`. That snapshot was computed when the round opened, and rounds stay
-    // open for `votingDeadlineHours` — so writing it wholesale reverts every field another round changed
-    // in the meantime, with no error and a correctly-recorded carried vote to hide it.
-    // The round names the space by the NETWORK's id; this instance may carry it under another (F-39.4) — and acts
-    // only on a space this network carries here (S-7). What is written, and that it is parsed first, is `passedMetaChange`'s.
-    if (round.type === 'meta_change') passedMetaChange.apply(net, round);
-    return true;
-  }
-  return false;
+  return passed ? 'passed' : null;
 }
 
 /**
@@ -283,26 +307,20 @@ export const passedMetaChange = {
 };
 
 // ── Notify ejected member after a remove vote passes ──────────────────────
-// Fire-and-forget: non-fatal if the peer is unreachable.
+// Fire-and-forget: non-fatal if the peer is unreachable. Sent through the one notice sender (`networks/notify-members.ts`), which
+// reads the token at send time.
 export function sendMemberRemovedNotify(
   subjectUrl: string,
   subjectInstanceId: string,
   networkId: string,
 ): void {
-  const cfg = getConfig();
-  const secrets = getSecrets();
-  const peerToken = secrets.peerTokens[subjectInstanceId];
-  if (!peerToken) {
-    log.warn(`member_removed: no outbound token for ${peerText(subjectInstanceId)} — cannot notify`);
-    return;
-  }
-  peerSafeFetch(`${subjectUrl}/api/notify`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${peerToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ networkId, instanceId: cfg.instanceId, event: 'member_removed' }),
-    signal: AbortSignal.timeout(10_000),
-  }).catch(err => log.warn(`member_removed notify to ${peerText(subjectInstanceId)}: ${peerText(err)}`));
+  sendNotice(networkId, { instanceId: subjectInstanceId, url: subjectUrl }, 'member_removed', undefined, MEMBER_REMOVED_TIMEOUT_MS)
+    .then(status => {
+      if (status === null) log.warn(`member_removed: no outbound token for ${peerText(subjectInstanceId)} — cannot notify`);
+      else if (status < 200 || status >= 300) log.warn(`member_removed notify to ${peerText(subjectInstanceId)}: HTTP ${status}`);
+    })
+    .catch(err => log.warn(`member_removed notify to ${peerText(subjectInstanceId)}: ${peerText(err)}`));
 }
+
+/** How long the ejected member is given to take the notice: it is told once and never again, so longer than a wake-up. */
+const MEMBER_REMOVED_TIMEOUT_MS = 10_000;

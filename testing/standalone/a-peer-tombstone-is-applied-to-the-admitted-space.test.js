@@ -116,7 +116,8 @@ function trace(key, name, depth = 0, path = []) {
   const e = INDEX.bodies.get(key);
   const b = bindingOf(e.body, name);
   if (b?.kind === 'forOf') {
-    return /\.spaces$/.test(b.from) ? [] : fail(`iterates \`${b.from}\`, not the spaces a network carries`);
+    // The spaces a network carries, read directly or through the set the hold produced from them (`exchangeVerdicts`, bundle-106 §3.4).
+    return /\.spaces$/.test(b.from) || /^exchangeVerdicts\(/.test(bindingOf(e.body, b.from)?.from ?? '') ? [] : fail(`iterates \`${b.from}\`, not the spaces a network carries`);
   }
   if (b?.kind === 'destructure') {
     if (/^req\.query$/.test(b.from)) {
@@ -175,7 +176,7 @@ describe('the derivation works', () => {
     // would fail it for the wrong reason. Both terminals, and one refusal, on code that does not change in the fix.
     const routeKey = PUSH_ROOTS[0];
     assert.deepEqual(trace(routeKey, 'spaceId'), [], 'the push route\'s admitted spaceId does not trace to req.query');
-    const pull = `${ENGINE}:pullFromPeer`;
+    const pull = 'server/src/sync/space-exchange.ts:pullFromPeer'; // moved out of the engine with the per-space turn (bundle-106 §3.4)
     assert.ok(INDEX.bodies.has(pull), `${pull} is gone — re-anchor this fixture`);
     assert.deepEqual(trace(pull, 'spaceId'), [], 'the engine\'s local spaceId does not trace to its loop over network spaces');
     assert.notDeepEqual(trace(pull, 'remoteSpaceId'), [], 'the network\'s id for the space traced as an admission');

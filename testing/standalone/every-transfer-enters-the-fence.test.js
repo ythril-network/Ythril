@@ -8,7 +8,10 @@
  *
  * 1. **The outbound turn is cancellable.** Every loop in the transfer modules that fetches from a peer asks `mayContinue(` inside its body
  *    (between pages, between files), and the fetch is handed the transfer's `signal` so the unit in flight is cut at once. A loop that
- *    never asks runs a whole turn (minutes to hours on a first sync) past a registered act.
+ *    never asks runs a whole turn (minutes to hours on a first sync) past a registered act. The transfer modules are DERIVED (every module
+ *    under `sync/` with a `peerSafeFetch(` to a space-scoped route), every such fetch combines the turn's signal (`turnSignal(`) in a
+ *    function that takes a `turn`, and every call of a function that takes a `turn` hands it on - so a wrapper that drops it (the tombstone
+ *    pull's, the re-reads) is found at its call, not by a list.
  * 2. **Every inbound peer door enters and leaves.** The doors are derived: every route block under `server/src/api` that calls
  *    `refusePeerSpace(`, `pushAllowed(`, `refuseHeldPeer(` or — before those exist — `spaceAllowed(`, `requireSpaceAuthScoped`. Each must
  *    reach `enterSpaceTransfer(` in its own block or in the one helper it calls (one level: the helper is the module-level function of that
@@ -38,8 +41,55 @@ import { parseSource, walkEveryNode, outermostFunctionOf, lineOf, routeBlocksOf,
 
 const FENCE = 'server/src/sync/space-transfer-fence.ts';
 const EXCHANGE = 'server/src/sync/space-exchange.ts';
-/** The outbound modules whose loops move pages and files. */
-const TRANSFER_MODULES = ['pull-family.ts', 'push-family.ts', 'file-sync.ts', 'tombstone-transfer.ts'].map(f => `server/src/sync/${f}`);
+/** The modules the original four-file list named: the derivation below must still find each (its floor), and may only add to them. */
+const FLOOR_MODULES = ['pull-family.ts', 'push-family.ts', 'file-sync.ts', 'tombstone-transfer.ts'].map(f => `server/src/sync/${f}`);
+/** A space-scoped peer route: the sync data routes and the peer file door; the governance routes that name a network are not a space transfer. */
+const SPACE_SCOPED = /\/api\/(?:sync\/(?!networks\/|warm\b|notify\b)|files\/)/;
+
+/** The text a fetch's URL resolves to: the argument, or the initializer of the identifier it names inside the same function. */
+function urlTextOf(call, fn, sf) {
+  const arg = call.arguments[0];
+  if (!arg) return '';
+  if (!ts.isIdentifier(arg) || !fn) return arg.getText(sf);
+  let found = '';
+  walkEveryNode(fn, (n) => { if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === arg.text && n.initializer) found = n.initializer.getText(sf); });
+  return found || arg.getText(sf);
+}
+
+/**
+ * Every `peerSafeFetch(` under `server/src/sync/` to a space-scoped route, with the outermost function it is written in: DERIVED, so a module
+ * that starts fetching a space is a subject the day it does (the list this replaced named four files and missed the schema pull and merkle).
+ */
+function spaceFetches() {
+  const out = [];
+  for (const file of trackedSources(['server/src/sync'], { untracked: true, floor: 20 })) {
+    const sf = parseSource(file, text(file));
+    walkEveryNode(sf, (n) => {
+      if (!ts.isCallExpression(n) || !ts.isIdentifier(n.expression) || n.expression.text !== 'peerSafeFetch') return;
+      const fn = outermostFunctionOf(n);
+      if (SPACE_SCOPED.test(urlTextOf(n, fn, sf))) out.push({ file, line: lineOf(sf, n), fn, sf });
+    });
+  }
+  return out;
+}
+/** The outbound modules that move a space's pages and files: every module with a space fetch. */
+const transferModules = () => [...new Set(spaceFetches().map(s => s.file))];
+
+/** A function's parameter list names `turn` (a parameter, or a field of its options object). */
+const takesTurn = (fn, sf) => !!fn && ts.isFunctionLike(fn) && fn.parameters.some(p => /\bturn\b/.test(p.getText(sf)));
+/** The name of a function node: a declaration's own, or the const it is bound to. */
+function nameOf(fn) {
+  if (fn?.name && ts.isIdentifier(fn.name)) return fn.name.text;
+  if (fn?.parent && ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name)) return fn.parent.name.text;
+  return null;
+}
+/**
+ * Calls that may leave the turn out, each with its reason. A row that no longer matches a call fails, so it cannot go stale into a hole.
+ */
+const TURNLESS_CALLS = [
+  { caller: 'exchangeSpacesWithMember', callee: 'pullSpaceMetaFromUpstream',
+    why: 'the schema pull of a HELD space runs outside the fence on purpose (design v5 X17): a wipe changes no schema, and that space has no turn to hand' },
+];
 /** The push doors alone, at a638e702: `pushAllowed` callers (docs.ts: five, tombstones.ts: two). */
 const FLOOR = 7;
 const DOOR_ASKS = ['refusePeerSpace', 'pushAllowed', 'refuseHeldPeer'];
@@ -56,8 +106,52 @@ describe('the outbound turn is cancellable', () => {
     assert.match(text(EXCHANGE), /\benterSpaceTransfer\(/, 'the turn never enters the fence');
   });
 
+  it('the transfer modules are derived from the space fetches, at or above the four the first list named', () => {
+    const found = transferModules();
+    const missing = FLOOR_MODULES.filter(f => !found.includes(f));
+    assert.deepEqual(missing, [], `the derivation no longer finds ${missing.join(', ')}: it is broken, and every check below would pass over less`);
+  });
+
+  it('every space fetch takes the turn\'s signal, in a function that can be handed the turn', () => {
+    const fetches = spaceFetches();
+    assert.ok(fetches.length >= 11, `only ${fetches.length} space fetch(es) under sync/ were found: the derivation is broken`);
+    const blind = fetches.filter(s => !/\bturnSignal\(/.test(s.fn ? s.fn.getText(s.sf) : '')).map(s => `${s.file}:${s.line}`);
+    assert.deepEqual(blind, [], `these fetches cannot be cut when an act registers - their function never combines the turn's signal:\n  ${blind.join('\n  ')}`);
+    const turnless = fetches.filter(s => !takesTurn(s.fn, s.sf)).map(s => `${s.file}:${s.line} in ${nameOf(s.fn) ?? 'an anonymous function'}`);
+    assert.deepEqual(turnless, [], `these fetches sit in a function that takes no turn, so no caller can hand it one:\n  ${turnless.join('\n  ')}`);
+  });
+
+  it('every call of a function that takes the turn hands it on (or is a listed exception with its reason)', () => {
+    // The functions that take a turn, derived from their parameters: a wrapper of a transfer (the tombstone pull's, the re-reads) is one
+    // the day it is given a `turn`, and a wrapper that is NOT given one is found here, at its call of the transfer it wraps.
+    const takers = new Set();
+    for (const file of trackedSources(['server/src/sync'], { untracked: true, floor: 20 })) {
+      const sf = parseSource(file, text(file));
+      walkEveryNode(sf, (n) => { if ((ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n)) && takesTurn(n, sf) && nameOf(n)) takers.add(nameOf(n)); });
+    }
+    assert.ok(takers.size >= 8, `only ${takers.size} function(s) take a turn: the derivation is broken`);
+    const dropped = []; const used = new Set();
+    for (const file of trackedSources(['server/src'], { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))) {
+      const sf = parseSource(file, text(file));
+      walkEveryNode(sf, (n) => {
+        if (!ts.isCallExpression(n) || !ts.isIdentifier(n.expression) || !takers.has(n.expression.text)) return;
+        if (n.arguments.some(a => /\bturn\b/.test(a.getText(sf)))) return;
+        const caller = nameOf(outermostFunctionOf(n));
+        const row = TURNLESS_CALLS.find(r => r.caller === caller && r.callee === n.expression.text);
+        if (row) { used.add(row); return; }
+        dropped.push(`${file}:${lineOf(sf, n)} ${caller ?? '(module)'} -> ${n.expression.text}`);
+      });
+    }
+    assert.deepEqual(dropped, [], `these calls drop the turn, so the fetches below them cannot be cut when an act registers:\n  ${dropped.join('\n  ')}`);
+    for (const row of TURNLESS_CALLS) {
+      assert.ok(used.has(row), `the exception ${row.caller} -> ${row.callee} no longer matches a call: remove or re-reason it`);
+      assert.ok(row.why.split(/\s+/).length >= 8, `${row.caller} -> ${row.callee}: the reason is not a reason`);
+    }
+  });
+
   it('every loop that fetches from a peer asks mayContinue between units, and its fetch carries the transfer signal', () => {
     const loops = [];
+    const TRANSFER_MODULES = transferModules();
     for (const file of TRANSFER_MODULES) {
       const sf = parseSource(file, text(file));
       walkEveryNode(sf, (n) => {

@@ -44,7 +44,9 @@ import { requireExport } from './_round-open-fixtures.mjs';
 
 const DEFINITION = 'server/src/sync/governance.ts';
 /** The one file allowed to call `concludeRoundIfReady` outside the settle step, and why. It goes stale when the file stops calling it. */
-const EXEMPT = { 'server/src/networks/round-forecast.ts': 'evaluates a scratch copy and never applies it (the `ownYesCarries` forecast)' };
+// Empty since bundle-106 A2: the `ownYesCarries` forecast asks the PURE half of the pass rule (`roundVerdict`) and concludes nothing,
+// so it is no exemption — and a read door (`GET /api/networks`) no longer reaches the conclusion's writes through it.
+const EXEMPT = {};
 
 describe('every conclusion of a round and every application of one is inside settleRounds', () => {
   const concludes = callSitesOf('concludeRoundIfReady').filter(c => c.file !== DEFINITION);
