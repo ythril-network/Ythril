@@ -152,8 +152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Networks:** A closed or democratic network connects every member to a newcomer; roster entries others propose wait for **Accept** (`POST /api/networks/:id/introductions/:instanceId/accept`, MCP `network_introduction_accept`); `GET /api/networks/:id`/`network_get` list `introductions`.
 - **Networks:** A club is a mesh: members pair directly via `POST /api/sync/networks/:id/pair` and `/pair/confirm`.
 - **Networks:** A deletion or wipe a vote passes is applied here as a completed act: retried if it fails, with the space closed to writes and its peer exchange held until it completes.
-- **Networks:** On a club or pub/sub network, and where this instance is the only member, its own yes passes a deletion or wipe at once, and the answer is `200`.
-- **Networks:** A deletion or wipe the proposer's own yes passes is applied at once, not left open until another member relays the vote.
+- **Networks:** A deletion or wipe the proposer's own yes passes (a club or pub/sub network, or a sole member) is applied at once; the answer is `200`.
 - **Files:** A file's extract returns its converted Markdown whole or in whole paragraphs that page to the end (**Show more**; it was cut at 256K characters), and its image list says when it is cut. `GET …/files/extract` takes `read_file`'s budget parameters.
 - **Files:** A chunked upload's `202` carries `maxBodyBytes`; a chunk may send `x-expected-sha256` (`422` on a mismatch). A push above a peer's single-body limit goes chunked (was `413`).
 - **Files:** A delete removes the links this instance wrote from the file and its derived ids, tombstoned; others' links stay.
