@@ -224,7 +224,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Server:** Log lines are single lines and each value in them is cut (4096 characters, 100 per list) and escaped, so a peer cannot forge a line or flood the log; redaction no longer takes quadratic time (5.6.x is affected too).
 - **Server:** Values quoted back in answers are bounded and escaped: a reference refusal names its first five (256 characters each, then `…(+N more)`), `Unknown field(s)` / `unrecognized_keys` the first 10 keys.
 - **Server:** Stored error text (an embed job's `lastError`, a reindex run's `error`, a media job's and a webhook delivery's `error`) and a chat model server's error text (cut at 200 characters) are bounded and escaped.
-- **Sync:** The votes, members and change-notes routes refuse a caller without standing in the network (`403`), unknown networks too.
 - **Sync:** A peer's tombstone applies only to the space its sync admitted, not the one it names: before, a peer could delete its records in any space, and under a `spaceMap` an honest peer's deletions missed. Planted ones stay.
 - **Sync:** A tombstone is authorised before it is stored: one not delivered by its issuer, or for a record another instance wrote (unless from its upstream), is refused and blocks no author. Author-less records stay deletable by their peer.
 - **Sync:** One deletion rule decides every record and file tombstone: the issuer's own, or the direct upstream's on a pub/sub network or a tree, for what it delivered.
@@ -317,12 +316,12 @@ errors no longer exposing the database, and bounded one-line log values.**
 
 | Changes on upgrade | Action |
 |---|---|
-| Every start, once listening, sweeps the vectors of everything a space suppresses (records, files, chunks), a space at a time | Nothing; expect one scan per record kind per space, and `Suppression sweep: removed N <kind> vector(s) in <space>` where any went |
-| Every log line is one line: a stack's breaks are written as `\n`, an `Error` renders as message and frames without the `Error:` prefix, a string extra argument is not JSON-quoted | Match a stack on one line |
+| Every start, once the server listens, sweeps the stored vectors of everything a space suppresses (records, files, chunks), one space at a time | Nothing; expect one scan per record kind per space at start, and `Suppression sweep: removed N <kind> vector(s) in <space>` where it removed any |
+| Every log line is one line: a stack's breaks are written as `\n`, an `Error` renders as message and frames without the `Error:` prefix, a string extra argument is no longer JSON-quoted | Match a stack on its single line |
 | A log value is cut at 4096 characters and a list at 100 items, and the line says how much (`…(+N chars)`, `…(+N more)`) | Nothing; a value that fits is written as before |
 | A store failure's `error` text is a fixed sentence of ours at the status it already had; the driver's message is in the server log under the failed operation | Read `retryable`, not the prose; grep the log for the operation named in the failure line |
 | An error of ours that only names the store (a path such as `notes/mongot-setup.md`) answers `400`, not a retryable `503`; a driver failure under a space rename or create answers `500`, not `404` or `409` | Nothing; a pooled connection cleared under a command keeps `400` |
-| A refusal listing references or unknown keys cuts each at 256 characters and ends `…(+N more)`, where it read `(+N more)` | Match the new tail |
+| A refusal listing references or unknown keys cuts each at 256 characters and ends `…(+N more)`, where it read `(+N more)` | A client matching the old tail text must match the new one |
 | A search right after a space's first write answers `200` and empty, not `503` | Retry logic that waited on that `503` can stop |
 | A duplicate merge needs `knowledge` write and `dataQuality` write in the space where the pair lives; a pair elsewhere answers `404` | Grant both rights to the token that merges |
 | A fork written from now on keeps the divergent copy's `createdAt` and `updatedAt`; a stored fork keeps its stamps | Nothing; on a mixed-version network the same fork differs in its timestamps until every member runs 5.6.4 |
