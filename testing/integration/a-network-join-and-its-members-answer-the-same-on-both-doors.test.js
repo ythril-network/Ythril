@@ -131,7 +131,7 @@ describe('a network\'s members through MCP and through REST', () => {
     assert.equal((await tool(mcpA, 'network_member_add', { id: club, ...member('mcp') })).text, `Error (409): ${dup.body.error}`);
   });
 
-  it('on a closed network with no other member both doors admit at once (D-36: the proposer's yes is the quorum); with a member both open a vote', async () => {
+  it("on a closed network with no other member both doors admit at once (D-36: the proposer's yes is the quorum); with a member both open a vote", async () => {
     // Two solo networks, so each door meets a network whose only voter is this instance.
     const [forRest, forMcp] = [await network('closed'), await network('closed')];
     const rest = await post(INSTANCES.a, adminA, `/api/networks/${forRest}/members`, member('vrest'));
