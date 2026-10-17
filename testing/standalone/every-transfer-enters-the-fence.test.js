@@ -34,7 +34,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
-import { parseSource, walkEveryNode, outermostFunctionOf, lineOf, ts } from '../_shared/syntax-tree.mjs';
+import { parseSource, walkEveryNode, outermostFunctionOf, lineOf, routeBlocksOf, ts } from '../_shared/syntax-tree.mjs';
 
 const FENCE = 'server/src/sync/space-transfer-fence.ts';
 const EXCHANGE = 'server/src/sync/space-exchange.ts';
@@ -47,18 +47,7 @@ const text = (f) => readFileSync(`${REPO_ROOT}/${f}`, 'utf8');
 const callsNamed = (sf, name) => { const out = []; walkEveryNode(sf, (n) => { if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name) out.push(n); }); return out; };
 
 /** Route registrations (`xRouter.get(...)`, `app.post(...)`) in a parsed file, each with its argument list text. */
-function routeBlocks(sf) {
-  const out = [];
-  walkEveryNode(sf, (n) => {
-    if (!ts.isCallExpression(n) || !ts.isPropertyAccessExpression(n.expression)) return;
-    if (!/^(get|post|put|patch|delete)$/.test(n.expression.name.text)) return;
-    const target = n.expression.expression.getText(sf);
-    if (!/(?:^|\.)(?:\w*[rR]outer|app)$/.test(target)) return;
-    if (!ts.isStringLiteralLike(n.arguments[0] ?? n)) return;
-    out.push({ node: n, route: `${n.expression.name.text.toUpperCase()} ${n.arguments[0].text}`, line: lineOf(sf, n) });
-  });
-  return out;
-}
+const routeBlocks = routeBlocksOf;
 
 describe('the outbound turn is cancellable', () => {
   it('the fence and the turn module exist', () => {

@@ -73,9 +73,31 @@ export const factCount = (mongo, space) => mongo.col(`${space}_facts`).countDocu
 
 /** `module[name]` or a failure naming the design's own word for it: a rule whose machinery is absent is red for THAT reason. */
 export async function requireExport(specifier, name, why) {
-  const mod = await import(specifier);
-  assert.equal(typeof mod[name], 'function', `${specifier.replace('../../server/dist/', 'server/src/').replace(/\.js$/, '.ts')} does not export ${name} — ${why}`);
+  const mod = await requireModule(specifier, why);
+  assert.equal(typeof mod[name], 'function', `${sourceOf(specifier)} does not export ${name} — ${why}`);
   return mod[name];
+}
+
+const sourceOf = (specifier) => specifier.replace('../../server/dist/', 'server/src/').replace(/\.js$/, '.ts');
+
+/**
+ * A built server module, or `null` when THAT module is absent from the build. Only `ERR_MODULE_NOT_FOUND` naming the module itself is an
+ * absence: one raised for a module IT imports means it is built and broken, and is rethrown, as is every other load failure - a swallowed
+ * one would quietly run a row's base-build half against a build that has the module.
+ */
+export async function loadModuleIfBuilt(specifier) {
+  try { return await import(specifier); } catch (err) {
+    if (err?.code === 'ERR_MODULE_NOT_FOUND' && String(err.message).includes(specifier.split('/').at(-1))) return null;
+    throw err;
+  }
+}
+
+/**
+ * A built server module, or a failure NAMING the design's file. Exists because the guard was written four times: a module the design adds
+ * is absent on the base commit, and a raw ERR_MODULE_NOT_FOUND reads as a broken harness rather than as the row's red.
+ */
+export async function requireModule(specifier, why) {
+  return (await loadModuleIfBuilt(specifier)) ?? assert.fail(`${sourceOf(specifier)} does not exist — ${why}`);
 }
 
 /** The rounds of `network` of one type, read live from the config. */
@@ -170,12 +192,8 @@ export async function warmSpaceCreation() {
 }
 
 /** The runner module, or a failure naming the design's file: a row that needs a seam is red for ITS absence, never for a module-not-found trace. */
-export async function requireRunner() {
-  try { return await import('../../server/dist/spaces/space-act-runner.js'); } catch (err) {
-    if (err?.code !== 'ERR_MODULE_NOT_FOUND') throw err;
-    return assert.fail('server/src/spaces/space-act-runner.ts does not exist — design v5 section 2.5: the one space-act runner');
-  }
-}
+export const requireRunner = (why = 'the one space-act runner') => requireModule('../../server/dist/spaces/space-act-runner.js', `design v5 section 2.5: ${why}`);
+export const requireFence = (why = 'the one fence that counts a space\'s transfers') => requireModule('../../server/dist/sync/space-transfer-fence.js', `design v5 section 3.3a: ${why}`);
 
 /** `a` with `condition()` polled through round trips to Mongo, at most `bound` of them: for a defect WAITED FOR where the base commit's deferred work cannot be awaited. */
 export async function untilOrBound(mongo, condition, bound = 800) {

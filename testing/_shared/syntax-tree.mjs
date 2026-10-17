@@ -50,6 +50,23 @@ export function parseSource(file, text) {
 export const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
 
 /**
+ * Every Express route registration in `sf` - `<router|app>.<verb>('<path>', …)` - as `{ node, route: 'VERB /path', line, text }`. Written once
+ * because two gates (the fence's and the hold's) each derived the doors with their own copy; a door one copy misses is a door its gate never
+ * judges. A registration whose path is not a string literal (a factory's parameter) is not a door here: the caller reads the factory.
+ */
+export function routeBlocksOf(sf) {
+  const out = [];
+  walkEveryNode(sf, (n) => {
+    if (!ts.isCallExpression(n) || !ts.isPropertyAccessExpression(n.expression)) return;
+    if (!/^(get|post|put|patch|delete)$/.test(n.expression.name.text)) return;
+    if (!/(?:^|\.)(?:\w*[rR]outer|app)$/.test(n.expression.expression.getText(sf))) return;
+    if (!ts.isStringLiteralLike(n.arguments[0] ?? n)) return;
+    out.push({ node: n, route: `${n.expression.name.text.toUpperCase()} ${n.arguments[0].text}`, line: lineOf(sf, n), text: n.getText(sf) });
+  });
+  return out;
+}
+
+/**
  * The expression under any parentheses, `!`, `as`, `satisfies` and `await`.
  *
  * The one list of wrappers that do not change what an expression IS: the delay-promise reader (`timer-sites.mjs`) and the

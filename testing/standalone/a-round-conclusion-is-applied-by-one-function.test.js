@@ -1,84 +1,81 @@
 /**
- * What a concluded round DOES here is written once — `applyRoundConclusion` — and every place that concludes a round calls it.
+ * A round is concluded and its conclusion applied in ONE step — `settleRounds` — and no other code concludes a round or applies a conclusion by hand
+ * (design v5 section 1.1 and 6.2, gates (a) and (b)).
  *
- * ## The defect this holds
+ * ## The defect this holds, and what changed from its first form
  *
- * A round concludes in three places — an operator's own cast (`networks/vote-acts.ts`), a peer's relayed cast
- * (`api/sync/votes.ts`) and the gossip pass (`sync/engine.ts`) — and each wrote out the same three steps: admit or introduce a
- * passed join, apply a passed space round, tell an ejected member. `apply-wipe-round.ts` said so in its own docblock ("one
- * function, three callers, on purpose") and still left two of the steps written three times. The expiry job is a FOURTH place a
- * round concludes, and a fourth copy is how a conclusion by the clock would have skipped a step a conclusion by a vote takes.
+ * A round concluded in three places, each of which wrote out the same steps (admit a passed join, apply a passed space round, tell an ejected member);
+ * the first form of this file held that each site called `applyRoundConclusion` "in the same function" and excused four OPENERS that concluded a round
+ * at the moment they opened it and applied it by hand. Those four are the defect, not an exemption (Q-453: two of them never evaluated the round, and
+ * each applied a conclusion its own way). The rule is now one sentence: **every conclusion of a round and every application of one is inside
+ * `settleRounds`**, the one step the settle sites (the cast, the relay, the gossip pass, the expiry tick, the retry, the opener's proposer yes) call
+ * with their `via`. The first form's `OPENERS` table is gone with the rule it contradicted.
  *
  * ## What it holds
  *
- * - every `concludeRoundIfReady(` call in `server/src`, DERIVED, is in a file that calls `applyRoundConclusion` in the SAME
- *   function — or is one of the named opening sites, which admit or apply their own round the instant they open it (each row
- *   is held: it must still contain a call);
- * - `applyRoundConclusion(net, cfg, rounds, via)` does what the three copies did, for the rounds it is handed and no others.
+ * - **Source (derived, with a floor).** Each `concludeRoundIfReady(` call outside `sync/governance.ts` is inside `settleRounds` by name resolution (its
+ *   outermost function), save the forecast, which evaluates a scratch copy and never applies (the exemption is stated and goes stale if the file stops
+ *   calling it); each `applyRoundConclusion(` call is inside `settleRounds`; and `settleRounds` does both. `every-round-is-opened-and-settled-by-one-
+ *   function.test.js` holds the same two gates beside the open path; this file keeps them next to the behaviour they are the consequence of.
+ * - **The three written-out copies stay gone:** no file but the settle module, the space-round module and the introductions module calls
+ *   `applyConcludedSpaceRounds` or `applyPassedJoin`.
+ * - **Behaviour, through `settleRounds` itself:** a round that concludes as passed is applied, read on the LIVE config after the instance is quiescent
+ *   (never on a local object); a passed removal tells the ejected member ONCE, and settling the same round again tells nobody (the twin of the first
+ *   send); a round that did not pass does nothing; and only the rounds it is handed are looked at. A passed space deletion is applied by the runner, which
+ *   needs the database: its cells, read live, are the settle matrix's (`a-round-conclusion-lands-the-same-at-every-site-db.test.js`).
  *
- * Run: node --test testing/standalone/a-round-conclusion-is-applied-by-one-function.test.js  (requires a prior server build)
+ * ## Written before the code (red on the base commit, 84f0b3cc)
+ *
+ * `settleRounds` does not exist: the source gates find `concludeRoundIfReady` in `networks/vote-acts.ts`, `api/sync/votes.ts`, `sync/engine.ts` and
+ * `networks/round-expiry.ts`, and `applyRoundConclusion` in the same four, outside any `settleRounds`; the behaviour rows fail on the missing export.
+ *
+ * Run: node --test testing/standalone/a-round-conclusion-is-applied-by-one-function.test.js  (the behaviour rows need a prior server build)
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { enclosingBlockMatching } from './_structural-window.mjs';
-import { tempInstanceDir, removeInstanceDir, bootInstance, settled, startFakePeer, allowEngineToDialPrivatePeers } from './_vote-round-instance.mjs';
+import { callSitesOf } from './_call-sites.mjs';
+import { tempInstanceDir, removeInstanceDir, bootInstance, startFakePeer, allowEngineToDialPrivatePeers } from './_vote-round-instance.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
+import { quiescent } from './_quiescence.mjs';
+import { requireExport } from './_round-open-fixtures.mjs';
 
 const DEFINITION = 'server/src/sync/governance.ts';
+/** The one file allowed to call `concludeRoundIfReady` outside the settle step, and why. It goes stale when the file stops calling it. */
+const EXEMPT = { 'server/src/networks/round-forecast.ts': 'evaluates a scratch copy and never applies it (the `ownYesCarries` forecast)' };
 
-/** Sites that conclude a round at the moment they OPEN it: each admits, removes or applies it itself, in the same request. */
-const OPENERS = {
-  'server/src/spaces/meta-update.ts': 'opens a meta_change round and, when its own yes carries it, applies the change in the same request',
-  'server/src/networks/network-acts.ts': 'opens a space_addition round and adds the space itself when the proposer\'s yes carries it',
-  'server/src/networks/member-acts.ts': 'opens a join or remove round and admits or removes the member itself when the proposer\'s yes carries it',
-  'server/src/api/invite.ts': 'opens the join round of an invite and admits the joiner itself when the inviter\'s yes carries it',
-};
+describe('every conclusion of a round and every application of one is inside settleRounds', () => {
+  const concludes = callSitesOf('concludeRoundIfReady').filter(c => c.file !== DEFINITION);
+  const applies = callSitesOf('applyRoundConclusion');
 
-/** `async (req, res) => {`, `function name(…) {`, and the `): Promise<…> {` that closes a multi-line signature — not `if (…) {`. */
-const FUNCTION_LIKE = /=>\s*\{$|\bfunction\b[^\n]*\{$|^\s*\)\s*(?::[^{]*)?\{$/;
+  it('finds the sites (the floor): the settle step concludes and applies, and the call sites are not zero', () => {
+    assert.ok(concludes.length >= 1, 'no concludeRoundIfReady call found outside sync/governance.ts: re-anchor this gate');
+    assert.ok(applies.length >= 1, 'no applyRoundConclusion call found: re-anchor this gate');
+    assert.ok(concludes.some(c => c.fn === 'settleRounds'), 'settleRounds does not conclude a round — design v5 section 1.1: the one settle step');
+    assert.ok(applies.some(c => c.fn === 'settleRounds'), 'settleRounds does not apply what it concluded');
+  });
 
-describe('every site that concludes a round applies its conclusion', () => {
-  const files = trackedSources('server/src', { untracked: true, floor: 100 });
-  const sites = [];
-  for (const file of files) {
-    if (file === DEFINITION) continue;
-    const src = stripComments(fs.readFileSync(file, 'utf8'));
-    for (const m of src.matchAll(/(?<![.\w$])concludeRoundIfReady\s*\(/g)) {
-      const fn = enclosingBlockMatching(src, m.index, FUNCTION_LIKE, `the function around the call in ${file}`);
-      sites.push({ file, at: m.index, fn, applies: fn !== null && /\bapplyRoundConclusion\s*\(/.test(fn.slice(fn.indexOf('concludeRoundIfReady'))) });
+  it('(a) each concludeRoundIfReady call is inside settleRounds, but the forecast\'s, which evaluates a scratch copy', () => {
+    const stray = concludes.filter(c => c.fn !== 'settleRounds' && !(c.file in EXEMPT)).map(c => `${c.file} (${c.fn ?? 'module scope'})`);
+    assert.deepEqual([...new Set(stray)], [],
+      'these conclude a round outside the one settle step, so what they conclude is applied by hand, differently, or not at all (Q-453)');
+  });
+
+  it('(b) each applyRoundConclusion call is inside settleRounds', () => {
+    const stray = applies.filter(c => c.fn !== 'settleRounds').map(c => `${c.file} (${c.fn ?? 'module scope'})`);
+    assert.deepEqual([...new Set(stray)], [], 'these apply a conclusion outside the settle step');
+  });
+
+  it('an exemption cannot outlive its code (the forecast still calls concludeRoundIfReady, or its row is stale)', () => {
+    for (const [file, why] of Object.entries(EXEMPT)) {
+      assert.ok(concludes.some(c => c.file === file), `${file} is excused for "${why}" and no longer calls concludeRoundIfReady: delete the row`);
     }
-  }
-
-  it('finds the sites (the floor): the operator cast, the relay, gossip and the openers', () => {
-    const where = new Set(sites.map(s => s.file));
-    for (const f of ['server/src/networks/vote-acts.ts', 'server/src/api/sync/votes.ts', 'server/src/sync/engine.ts']) {
-      assert.ok(where.has(f), `${f} no longer calls concludeRoundIfReady — re-point this gate (a conclusion moved somewhere it cannot see)`);
-    }
-    assert.ok(sites.length >= 8, `only ${sites.length} call site(s) found`);
   });
 
-  it('each one that is not an opener calls applyRoundConclusion after concluding, in the same function', () => {
-    const bare = sites.filter(s => !(s.file in OPENERS) && !s.applies).map(s => s.file);
-    assert.deepEqual([...new Set(bare)], [],
-      'these conclude a round and do not apply what it decided — a passed join never admits, a space round never lands. '
-      + 'Call applyRoundConclusion(net, cfg, rounds, via) after concludeRoundIfReady, or, if the site opens the round and applies it itself, name it in OPENERS with the reason.');
-  });
-
-  it('the expiry job is one of them (it is the fourth place a round concludes)', () => {
-    const job = sites.find(s => s.file === 'server/src/networks/round-expiry.ts');
-    assert.ok(job, 'networks/round-expiry.ts does not conclude a round through concludeRoundIfReady');
-    assert.ok(job.applies, 'the expiry job concludes rounds and does not apply what it concluded');
-  });
-
-  it('every opener row still contains a call (a row cannot outlive its code)', () => {
-    const stale = Object.keys(OPENERS).filter(f => !sites.some(s => s.file === f));
-    assert.deepEqual(stale, [], `these rows excuse a call that is gone: ${stale.join(', ')}`);
-  });
-
-  it('the three written-out copies are gone: no site but the function calls applyConcludedSpaceRounds or applyPassedJoin', () => {
+  it('the written-out copies stay gone: no file but the settle module, the space-round module and the introductions module applies a step by hand', () => {
+    const files = trackedSources('server/src', { untracked: true, floor: 100 });
     const offenders = [];
     for (const file of files) {
       if (['server/src/networks/round-conclusion.ts', 'server/src/spaces/apply-wipe-round.ts', 'server/src/networks/member-introductions.ts'].includes(file)) continue;
@@ -89,65 +86,75 @@ describe('every site that concludes a round applies its conclusion', () => {
   });
 });
 
-describe('applyRoundConclusion does what the three copies did', { skip: privateAddressSkipReason() }, () => {
+describe('what settleRounds does for the rounds it is handed', { skip: privateAddressSkipReason() }, () => {
   const SELF = 'aaaaaaaa-0000-4000-8000-000000005e1f';
   const P1 = 'aaaaaaaa-0000-4000-8000-0000000000a1';
   const JOINER = 'aaaaaaaa-0000-4000-8000-0000000000b1';
-  const dir = tempInstanceDir('ythril-apply-conclusion-');
+  const NOW = Date.parse('2026-10-09T10:30:00.000Z');
+  const dir = tempInstanceDir('ythril-settle-applies-');
   let peer;
   before(async () => { allowEngineToDialPrivatePeers(); peer = await startFakePeer((method, url) => (url === '/api/notify' ? { status: 204, body: undefined } : undefined)); });
   after(async () => { await peer?.close(); removeInstanceDir(dir); });
 
   const member = (instanceId, extra = {}) => ({ instanceId, label: instanceId.slice(-2), url: `https://${instanceId.slice(-2)}.example`, tokenHash: 'h', direction: 'both', ...extra });
-  const base = (over = {}) => ({
+  const yes = (instanceId) => ({ instanceId, vote: 'yes', castAt: '2026-10-09T10:01:00.000Z' });
+  /** A round one evaluation from concluded as passed: everyone who votes has voted yes, and nothing has concluded it yet. */
+  const open = (over = {}) => ({
     roundId: 'r', type: 'join', subjectInstanceId: JOINER, subjectLabel: 'Joiner', subjectUrl: '', openedAt: '2026-10-09T10:00:00.000Z',
-    deadline: '2026-10-10T10:00:00.000Z', votes: [{ instanceId: P1, vote: 'yes', castAt: '2026-10-09T10:01:00.000Z' }],
-    concluded: true, passed: true, ...over,
+    deadline: '2026-10-10T10:00:00.000Z', votes: [yes(P1), yes(SELF)], concluded: false, ...over,
   });
   const boot = (rounds, extra = {}) => bootInstance(dir, {
     instanceId: SELF, spaces: [{ id: 'general', label: 'General', builtIn: true, folders: [] }, { id: 'notes', label: 'Notes', folders: [] }],
     peerTokens: { [P1]: 'tok' },
     networks: [{ id: 'n', label: 'N', type: 'closed', origin: 'created', syncSchedule: '', spaces: ['general', 'notes'], members: [member(P1)], votingDeadlineHours: 24, createdAt: '2026-01-01T00:00:00.000Z', pendingRounds: rounds, ...extra }],
   });
-  const apply = async (loader, rounds, via = 'test') => {
-    const { applyRoundConclusion } = await import('../../server/dist/networks/round-conclusion.js');
+  /**
+   * Settle the rounds named by `ids` through the one step — the objects the LIVE config holds, never the fixture's own, which the loader has copied —
+   * then wait for quiescence and hand back the live network and what the step answered.
+   */
+  const settle = async (loader, ids, via = 'gossip') => {
+    const settleRounds = await requireExport('../../server/dist/networks/round-conclusion.js', 'settleRounds', 'design v5 section 1.1: the one settle step');
     const cfg = loader.getConfig();
-    applyRoundConclusion(cfg.networks[0], cfg, rounds, via);
-    return cfg.networks[0];
+    const out = settleRounds(cfg.networks[0], cfg, ids.map(id => liveRound(cfg.networks[0], id)), via, NOW);
+    await out.settled;
+    await quiescent(loader);
+    return { out, net: loader.getConfig().networks[0] };
   };
+  const liveRound = (net, id) => net.pendingRounds.find(r => r.roundId === id);
 
-  it('a passed join is admitted from its pending member', async () => {
-    const r = base({ pendingMember: member(JOINER) });
+  it('a round that concludes as passed is applied: a join admits its pending member, read from the live roster', async () => {
+    const r = open({ pendingMember: member(JOINER) });
     const loader = await boot([r]);
-    const net = await apply(loader, [r]);
+    const { out, net } = await settle(loader, ['r']);
+    assert.deepEqual(out.concluded.map(x => x.roundId), ['r'], 'the step did not report the round it concluded');
+    assert.equal(out.wrote, true, 'the step changed the config and did not say so (the caller would not save)');
+    assert.equal(liveRound(net, 'r').passed, true);
     assert.ok(net.members.some(m => m.instanceId === JOINER), 'the passed join was not admitted');
   });
 
-  it('a passed space_deletion is marked applied, once', async () => {
-    const r = base({ type: 'space_deletion', spaceId: 'notes', subjectInstanceId: P1 });
+  it('a passed removal tells the ejected member once, and settling the same round again tells nobody', async () => {
+    const r = open({ type: 'remove', subjectInstanceId: P1, subjectUrl: peer.url, votes: [yes(SELF)] });
     const loader = await boot([r]);
-    await apply(loader, [r]);
-    assert.equal(r.appliedHere, true);
-  });
-
-  it('a passed remove round tells the ejected member', async () => {
-    const r = base({ type: 'remove', subjectInstanceId: P1, subjectUrl: peer.url });
-    const loader = await boot([r], { members: [member(P1)] });
     loader.getSecrets().peerTokens[P1] = 'tok';
     peer.seen.length = 0;
-    await apply(loader, [r]);
-    await settled(() => peer.seen.length);
-    const notice = peer.seen.find(s => s.method === 'POST' && s.url === '/api/notify');
-    assert.ok(notice, 'the ejected member was not told');
-    assert.equal(JSON.parse(notice.body).event, 'member_removed');
+    const first = await settle(loader, ['r']);
+    const notices = () => peer.seen.filter(s => s.method === 'POST' && s.url === '/api/notify' && /member_removed/.test(s.body));
+    assert.equal(notices().length, 1, 'the ejected member was not told exactly once');
+    assert.deepEqual(first.out.concluded.map(x => x.roundId), ['r']);
+    const again = await settle(loader, ['r']);
+    assert.deepEqual(again.out.concluded.map(x => x.roundId), [], 'a round that had already concluded was reported as concluded again');
+    assert.equal(notices().length, 1, 'settling a concluded removal announced it again: every held removal would be re-sent on every pass');
   });
 
   it('a round that did not pass does nothing, and only the rounds it is handed are looked at', async () => {
-    const failed = base({ roundId: 'failed', passed: false, pendingMember: member(JOINER) });
-    const other = base({ roundId: 'other', subjectInstanceId: 'zzzz', pendingMember: member('zzzz') });
-    const loader = await boot([failed, other]);
-    const net = await apply(loader, [failed]);
+    const vetoed = open({ roundId: 'vetoed', pendingMember: member(JOINER), votes: [{ instanceId: P1, vote: 'veto', castAt: '2026-10-09T10:01:00.000Z' }, yes(SELF)] });
+    const other = open({ roundId: 'other', subjectInstanceId: 'zzzz', pendingMember: member('zzzz') });
+    const loader = await boot([vetoed, other]);
+    const { out, net } = await settle(loader, ['vetoed']);
+    assert.deepEqual(out.concluded.map(x => x.roundId), ['vetoed'], 'the vetoed round concludes (as failed) and nothing else does');
+    assert.equal(liveRound(net, 'vetoed').passed, false);
     assert.ok(!net.members.some(m => m.instanceId === JOINER), 'a join that failed was admitted');
-    assert.ok(!net.members.some(m => m.instanceId === 'zzzz'), 'a round it was not handed was applied');
+    assert.equal(liveRound(net, 'other').concluded, false, 'a round the step was not handed was concluded');
+    assert.ok(!net.members.some(m => m.instanceId === 'zzzz'), 'a round the step was not handed was applied');
   });
 });

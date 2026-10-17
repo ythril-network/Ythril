@@ -20,33 +20,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { trackedSources } from './_sources.mjs';
-import { blankComments, stripComments } from './_strip-comments.mjs';
+import { stripComments } from './_strip-comments.mjs';
 import { outermostFunctionAt } from './_source-helpers.mjs';
+import { callSitesOf as callsOf, serverSources } from './_call-sites.mjs';
 
-const files = trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'));
-const raw = new Map(files.map(f => [f, fs.readFileSync(f, 'utf8')]));
-const blanked = new Map([...raw].map(([f, t]) => [f, blankComments(t)]));
-
-/** Every call of `name(` in the server source, with the outermost function around it. A definition (`function name(`) is not a call. */
-function callsOf(name) {
-  const out = [];
-  for (const [file, text] of blanked) {
-    for (const m of text.matchAll(new RegExp(`(?<![.\\w$])${name}\\s*\\(`, 'g'))) {
-      if (/function\s+$/.test(text.slice(Math.max(0, m.index - 12), m.index))) continue;
-      out.push({ file, at: m.index, fn: outermostFunctionAt(file, raw.get(file), m.index)?.name ?? null, args: argumentText(text, m.index + m[0].length) });
-    }
-  }
-  return out;
-}
-
-/** The text between the parentheses a call opens at `from` (just after the `(`). */
-function argumentText(text, from) {
-  let depth = 1;
-  let i = from;
-  for (; i < text.length && depth > 0; i++) { if (text[i] === '(') depth++; else if (text[i] === ')') depth--; }
-  return text.slice(from, i - 1);
-}
+const { raw, blanked } = serverSources();
 
 const exported = (file, name) => new RegExp(`export\\s+(?:async\\s+)?(?:function|const)\\s+${name}\\b`).test(blanked.get(file) ?? '');
 const filesOf = (calls) => [...new Set(calls.map(c => c.file))].sort();
