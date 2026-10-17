@@ -49,7 +49,10 @@ describe('Space wipe — governed when the space is in a network', () => {
     const wipeR = await post(INSTANCES.a, token, `/api/admin/spaces/${spaceId}/wipe`, { confirm: true });
     assert.equal(wipeR.status, 200, `Expected an immediate wipe, got ${wipeR.status}: ${JSON.stringify(wipeR.body)}`);
     assert.ok(wipeR.body?.deleted, 'an ungoverned wipe answers with counts');
-    assert.equal(wipeR.body.status, undefined, 'and must NOT report a pending vote');
+    // bundle-106: both wipe doors name what happened in `status` (`spaces/wipe-vote.ts`), and an unnetworked wipe that ran says
+    // `wiped` with NO rounds — no vote decided it. What must never appear here is a pending or passed vote.
+    assert.equal(wipeR.body.status, 'wiped', 'an ungoverned wipe that ran says it was wiped');
+    assert.equal('rounds' in wipeR.body, false, 'and carries no rounds: no vote decided it');
 
     await delWithBody(INSTANCES.a, token, `/api/spaces/${spaceId}`, { confirm: true }).catch(() => {});
   });
