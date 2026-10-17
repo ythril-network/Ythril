@@ -154,7 +154,7 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
     return [...received];
   }
   async function rest(method, query, body = {}) {
-    const req = { method, params: { spaceId: S }, query, body, authToken: { name: 'test' }, get: () => undefined, headers: {} };
+    const req = { method, params: { spaceId: S }, query, body, authToken: { name: 'test', rights: ADMIN }, get: () => undefined, headers: {} };
     const res = { code: 200, body: undefined, headers: {}, headersSent: false,
       status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
       json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };

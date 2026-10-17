@@ -33,6 +33,8 @@ import { REF_KINDS, isRefKind } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { getConfig } from '../../config/loader.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
+import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
+import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
 import { applyJudgment } from './_judged-write.js';
 import { answerUnknownWriteFields } from '../../contract/write-accepts.js';
 import { webhookToken } from './_shared.js';
@@ -63,8 +65,8 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
+  if (answerWriteTarget(res, wt)) return;
   // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
   if (applyJudgment(res, answerUnknownWriteFields(req.body, 'link.create', wt.target, 'rest'))) return;
 
@@ -119,7 +121,8 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
 linksRouter.delete('/spaces/:spaceId/links/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const removed = await findFirstAcrossMembers(spaceId, mid => removeLink(mid, id, webhookToken(req)));
+  // The members THIS token reaches (`Q-440`), as the other record deletes walk; see `DELETE …/edges/:id`.
+  const removed = await findFirstAcrossMembers(memberSpacesForRequest(req, spaceId), mid => removeLink(mid, id, webhookToken(req)));
   if (removed) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Link not found' });
 });

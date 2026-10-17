@@ -9,6 +9,7 @@ import { type UpdateValidation } from '../../brain/write-validation.js';
 import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { getConfig } from '../../config/loader.js';
 import { isStrictLinkage, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
+import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { edgeEndpointKind, edgeEndpointKindSchema, isWellFormedRef } from '../../brain/entity-refs.js';
 import type { RefKind } from '../../config/types-knowledge.js';
@@ -95,8 +96,8 @@ export const save_edgeTool: ToolHandler = {
     const edgeProps = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
       ? (a['properties'] as Record<string, string | number | boolean>)
       : undefined;
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -258,8 +259,8 @@ export const update_edgeTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -457,8 +458,8 @@ export const delete_edgeTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
 
     const deleted = await findFirstAcrossMembers(wt.target, mid => deleteEdge(mid, id, ctx.actor));
     if (!deleted) throw new NotFoundError(`Edge '${id}' not found`);

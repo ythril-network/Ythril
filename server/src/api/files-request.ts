@@ -15,6 +15,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getConfig } from '../config/loader.js';
 import { resolveWriteTarget } from '../spaces/proxy.js';
+import { restWriteGrant, answerWriteTarget } from './write-target-answer.js';
 
 /** Extract token identification from the request for webhook payloads. */
 export function webhookToken(req: Request): { tokenId?: string; tokenLabel?: string } {
@@ -68,14 +69,15 @@ export interface WritePath extends WriteTarget { path: string }
 
 /**
  * The space a file WRITE route names and the space it writes to (`?targetSpace=`, which a proxy space narrows), or `null` after
- * answering: `404` for an unknown space, `400` for a target the space may not write to. `requireKnownSpace` then `resolveWriteTarget`,
- * asked together so no write route can ask the second without the first.
+ * answering: `404` for an unknown space, `400` for a target the caller does not reach or the space does not hold, `403` for one it
+ * reaches without the rung the route needs (`Q-440`). `requireKnownSpace` then `resolveWriteTarget`, asked together so no write route
+ * can ask the second without the first.
  */
 export function requireWriteTarget(req: Request, res: Response): WriteTarget | null {
   const spaceId = requireKnownSpace(req, res);
   if (spaceId === null) return null;
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return null; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined, restWriteGrant(req, 'files', 'write'));
+  if (answerWriteTarget(res, wt)) return null;
   return { spaceId, targetSpace: wt.target };
 }
 

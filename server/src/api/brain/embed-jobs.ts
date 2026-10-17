@@ -31,6 +31,7 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig } from '../../config/loader.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
+import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
 import {
   retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
 } from '../../brain/embed-queue.js';
@@ -96,11 +97,8 @@ embedJobsRouter.post('/spaces/:spaceId/embedding-queue/records/retry', globalRat
   // A proxy space stores nothing itself, so a retry has to name the member. Same helper the write routes use, so the
   // error text a caller gets is the one they already know from every other proxy write — including its refusal of a
   // `targetSpace` that is not a string, which this door used to read as absent and answer with a misleading "specify one".
-  const wt = resolveWriteTarget(spaceId, body.targetSpace);
-  if (!wt.ok) {
-    res.status(400).json({ error: wt.error });
-    return;
-  }
+  const wt = resolveWriteTarget(spaceId, body.targetSpace, restWriteGrant(req, 'knowledge', 'write'));
+  if (answerWriteTarget(res, wt)) return;
 
   const result = await retryEmbedJob(wt.target, body.recordType, recordId);
   if (result === 'not_found') {

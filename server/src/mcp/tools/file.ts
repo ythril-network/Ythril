@@ -10,6 +10,7 @@ import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.j
 import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
 import { deletePath } from '../../files/delete-cascade.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
+import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
 import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { readSpillByPath } from '../../brain/read-spill-act.js';
@@ -157,8 +158,8 @@ export const write_fileTool: ToolHandler = {
     const filePath = String(a['path'] ?? '');
     const content = String(a['content'] ?? '');
     if (!filePath.trim()) throw new Error('path must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
     /*
      * DECODED FIRST, and through the same module the REST upload uses.
      *
@@ -316,8 +317,8 @@ export const delete_fileTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const filePath = String(a['path'] ?? '');
     if (!filePath.trim()) throw new Error('path must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
     // What the path is, and which cascade it gets (a file's, a directory's, or a refusal), is `deletePath`'s one decision —
     // shared with the REST DELETE route, so the doors cannot differ; the TTL sweep deletes through the file cascade itself.
     const deleted = await deletePath(wt.target, filePath, { confirm: a['confirm'], actor: ctx.actor });
@@ -359,8 +360,8 @@ export const create_dirTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const dirPath = String(a['path'] ?? '');
     if (!dirPath.trim()) throw new Error('path must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
     await assertDestinationReachable(wt.target, dirPath);
     await createDir(wt.target, dirPath);
     return { content: [{ type: 'text' as const, text: `Directory '${dirPath}' created.` }],
@@ -440,8 +441,8 @@ export const move_fileTool: ToolHandler = {
     const dst = String(a['dst'] ?? '');
     if (!src.trim()) throw new Error('src must not be empty');
     if (!dst.trim()) throw new Error('dst must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
     // One cascade with the REST PATCH route: metadata, derived records, sidecars, jobs, tombstones, webhook.
     await moveFileCascade(wt.target, src, dst, ctx.actor);
     return { content: [{ type: 'text' as const, text: `Moved '${src}' → '${dst}'.` }],
@@ -490,8 +491,8 @@ export const retry_embed_fileTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const filePath = String(a['path'] ?? '');
     if (!filePath.trim()) throw new Error('path must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
 
     // Normalised the same way the REST route does it, so a path that works there works here. A raw path would
     // miss the job whose id is the normalised form, and report `not_found` for a file that exists.
@@ -618,8 +619,8 @@ export const update_file_metaTool: ToolHandler = {
     const filePath = String(a['path'] ?? '').trim();
     if (!filePath) throw new Error('path must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
 
     const { isStrictLinkage } = await import('../../spaces/proxy.js');
     const { updateFileMeta } = await import('../../files/file-meta.js');

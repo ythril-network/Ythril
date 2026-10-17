@@ -202,9 +202,10 @@ export async function locateForUpdate<T>(
   load: (memberId: string) => Promise<T | null | undefined>,
 ): Promise<{ memberId: string; record: T; meta: SpaceMeta | undefined } | undefined> {
   // `writeTarget`, not `spaceId`, and the rename is the point: every one of the four callers passes `wt.target`
-  // from `resolveWriteTarget`, which is ALWAYS a real space. A non-proxy resolves to itself, and a proxy demands an
-  // explicit `targetSpace` that must be one of its members — and members cannot be proxies, since nesting is not
-  // allowed. So this loop is provably single-element.
+  // from `resolveWriteTarget`, which is ALWAYS a real space the caller reaches and holds the rung in (`Q-440`: it resolves
+  // against the caller's grant). A non-proxy resolves to itself, and a proxy demands an explicit `targetSpace` that must be
+  // one of its members — and members cannot be proxies, since nesting is not allowed. So this loop is provably
+  // single-element, and it is already narrowed to the caller by the resolver that produced its argument.
   //
   // It was called `spaceId`, which is what made it read as a proxy fan-out during the Q-6 sweep and put it on the
   // list of sites to narrow. There is nothing here to narrow: the caller already chose one space. A misnamed

@@ -36,6 +36,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { adminRights } from './_cel-doors.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
@@ -59,7 +60,7 @@ const tombstoneRows = (space = S) => door.coll(space, 'file_tombstones').find({}
 
 /** The REST file router's own `DELETE` handler, past rate limit and auth. */
 async function restDelete(p, body = {}) {
-  const req = { method: 'DELETE', params: { spaceId: S }, query: { path: p }, body, authToken: { name: 'test' }, get: () => undefined, headers: {} };
+  const req = { method: 'DELETE', params: { spaceId: S }, query: { path: p }, body, authToken: { name: 'test', rights: await adminRights() }, get: () => undefined, headers: {} };
   const res = { code: 200, body: undefined, headersSent: false,
     status(c) { this.code = c; return this; }, setHeader() { return this; },
     json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };

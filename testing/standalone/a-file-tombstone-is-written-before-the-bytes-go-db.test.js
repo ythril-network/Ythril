@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { adminRights } from './_cel-doors.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { failWrites } from './_write-faults.mjs';
 
@@ -56,7 +57,7 @@ async function seed(p, extra = {}) {
 
 /** The REST `DELETE /api/files/:spaceId` handler, past rate limit and auth, as a caller reaches it. */
 async function restDelete(p, body = {}) {
-  const req = { method: 'DELETE', params: { spaceId: S }, query: { path: p }, body, authToken: { name: 'test' },
+  const req = { method: 'DELETE', params: { spaceId: S }, query: { path: p }, body, authToken: { name: 'test', rights: await adminRights() },
     get: () => undefined, headers: {} };
   const res = { code: 200, body: undefined, headersSent: false,
     status(c) { this.code = c; return this; }, setHeader() { return this; },

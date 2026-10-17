@@ -29,6 +29,7 @@ import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
 import { parseLimit, parseSkip } from '../../util/pagination.js';
 import { resolveWriteTarget, findFirstAcrossMembers, isStrictLinkage } from '../../spaces/proxy.js';
+import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
 import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { getMediaJobCounts, FAILED_SAMPLE_LIMIT, FAILED_REASON_LIMIT, type MediaJobCounts } from '../../files/media/job-queue.js';
@@ -341,8 +342,8 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   if (typeof path !== 'string' || !path.trim()) {
     res.status(400).json({ error: '`path` query parameter required' }); return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'files', 'write'));
+  if (answerWriteTarget(res, wt)) return;
   // The four brain record types honour `If-Match` against their `seq`, which advances on every write. A file
   // row's `seq` does NOT: `updateFileMeta` stamps one only for an AUTHORED write, and a write touching only
   // derived fields (the worker's excerpt, a processing state) leaves it where it was. So the number does not

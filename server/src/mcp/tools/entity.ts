@@ -12,6 +12,7 @@ import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from 
 import { type PropertyResolution, type EndpointRuleWarning, mergeEntities, MERGE_MAX_RELINKS } from '../../brain/merge.js';
 import { getConfig } from '../../config/loader.js';
 import { isProxySpace, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
+import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
@@ -82,8 +83,8 @@ export const save_entityTool: ToolHandler = {
     const description = typeof a['description'] === 'string' ? a['description'] : undefined;
     const rawId = typeof a['id'] === 'string' ? a['id'].trim() : undefined;
     if (rawId !== undefined && !UUID_V4_RE.test(rawId)) throw new Error('id must be a valid UUID v4');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -250,8 +251,8 @@ export const update_entityTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -394,8 +395,8 @@ export const graph_mergeTool: ToolHandler = {
     if (!absorbedId || !UUID_V4_RE.test(absorbedId)) throw new Error('absorbedId must be a valid UUID v4');
     if (survivorId === absorbedId) throw new Error('Cannot merge an entity with itself');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
 
     if (isProxySpace(callSpace)) throw new Error('Entity merge not supported on proxy spaces');
 
@@ -525,8 +526,8 @@ export const delete_entityTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
 
     for (const mid of resolveMemberSpaces(wt.target)) {
       const existing = await getEntityById(mid, id);

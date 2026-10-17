@@ -22,6 +22,8 @@ import {
   isStrictLinkage,
   findFirstAcrossMembers,
 } from '../../spaces/proxy.js';
+import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
+import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
 import { webhookToken, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
@@ -40,8 +42,8 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
+  if (answerWriteTarget(res, wt)) return;
   // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
   if (applyJudgment(res, answerUnknownWriteFields(req.body, 'edge.create', wt.target, 'rest'))) return;
   const { from, to, label, weight, type, description, properties, tags, fromKind, toKind } = req.body ?? {};
@@ -173,7 +175,10 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
 edgesRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const deleted = await findFirstAcrossMembers(spaceId, mid => deleteEdge(mid, id, webhookToken(req)));
+  // The members THIS token reaches, as every other record delete through a proxy walks (`Q-440`): a walk over the proxy's own id
+  // visited them all, and `204` against `404` said whether an edge exists in a member the token cannot see. The rung is the
+  // area guard's, held on every member it narrowed to.
+  const deleted = await findFirstAcrossMembers(memberSpacesForRequest(req, spaceId), mid => deleteEdge(mid, id, webhookToken(req)));
   if (deleted) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Edge not found' });
 });
@@ -189,8 +194,8 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
     res.status(404).json({ error: `Space '${spaceId}' not found` });
     return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace']);
-  if (!wt.ok) { res.status(400).json({ error: wt.error }); return; }
+  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
+  if (answerWriteTarget(res, wt)) return;
   // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
@@ -260,7 +265,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
    * end changed is a different relationship, and the way to make one is a delete and an upsert.
    */
   if (isStrictLinkage(wt.target) && (updates.fromKind !== undefined || updates.toKind !== undefined)) {
-    const stored = await findFirstAcrossMembers(spaceId, async mid => await getEdgeById(mid, id));
+    const stored = await findFirstAcrossMembers(wt.target, async mid => await getEdgeById(mid, id));
     if (stored) {
       try {
         if (updates.fromKind !== undefined) {

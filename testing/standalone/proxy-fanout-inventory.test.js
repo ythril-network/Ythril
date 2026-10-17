@@ -16,8 +16,13 @@
  * ## The two kinds
  *
  *  - **A write target** — the argument is an already-resolved single space (`wt.target` from `resolveWriteTarget`).
- *    A proxy write requires an explicit `targetSpace`, so by the time this is called there is exactly one real
- *    space and there is nothing to narrow. Classified automatically from the argument, not by being listed.
+ *    A proxy write requires an explicit `targetSpace` and `resolveWriteTarget` resolves it against the caller's grant
+ *    (the target must be one the token REACHES and holds the rung in, `Q-440`), so by the time this is called there is
+ *    exactly one real space, already narrowed to the caller by the resolver itself. Classified automatically from the
+ *    argument, not by being listed. **That is true only because the resolver takes the grant**: before `Q-440` it
+ *    checked membership and never reach, and this paragraph said "nothing to narrow" about a space the token could not
+ *    see. `every-proxy-write-door-resolves-its-target-with-the-callers-grant.test.js` holds the rule that makes it true
+ *    — every call passes its grant, and every `findFirstAcrossMembers` walks `wt.target` or a narrowed list.
  *  - **A read fan-out** — anything else. The argument is the request's space, which may be a proxy. These are the
  *    ones Q-6 must narrow, and they are listed below with their file.
  *
@@ -127,8 +132,11 @@ const RECLASSIFIED = 1;
  * Both used to hand `findFirstAcrossMembers` a closure and never name the member list, so neither was a
  * visible fan-out. `M-2` made a delete refusable — something can point at a memory or a chrono entry now, and
  * under strict linkage that blocks — so each route walks the members itself, checks the guard, and answers
- * `409` with the referring rows. The scope did not widen: `memberSpacesForRequest` is the same narrowing
- * `findFirstAcrossMembers` was applying, said out loud.
+ * `409` with the referring rows. **The scope NARROWED, and this sentence said the opposite** (`Q-440`): it read
+ * "`memberSpacesForRequest` is the same narrowing `findFirstAcrossMembers` was applying, said out loud", and
+ * `findFirstAcrossMembers(spaceId, …)` applied none — it walked the proxy's own id, every member. The edge and link
+ * deletes still did, and a token with write on one member deleted an edge in another; naming the narrowing is what
+ * moved those two routes onto it.
  *
  * The number moving up as narrowing becomes explicit is the healthy direction for this invariant, and is why
  * the note above says so.
@@ -170,8 +178,14 @@ const RECLASSIFIED = 1;
  *
  * 49 -> 50 (F-46): `schema_validate`, the MCP twin of `POST /api/spaces/:id/validate-schema`, reads a proxy space's members;
  * the tool narrows with `memberSpacesWithin` as the route does with `memberSpacesForRequest` — BORN narrowed.
+ *
+ * 50 -> 51 (`Q-440`): three sites moved and one is new. `DELETE …/edges/:id` and `DELETE …/links/:id` walked `findFirstAcrossMembers`
+ * over the proxy's own id — every member, reached or not — and now walk `memberSpacesForRequest(req, spaceId)` by name (two visible
+ * sites, +2). `retry_embed_media` and `space_reindex` swapped their `memberSpacesWithin` for `toolMemberReach` (-2) and that
+ * function, in `mcp/tool-rights-guard.ts`, is the one place that calls `memberSpacesWithin` for them (+1): the same narrowing,
+ * kept where the tool's rung is held, so the two tools state it once. Net +1.
  */
-const TOTAL = 50;
+const TOTAL = 51;
 
 /**
  * Fan-out sites that were REMOVED rather than converted, with the tool that owned them.
@@ -305,9 +319,11 @@ function callSites() {
 }
 
 /**
- * A write target needs no narrowing: a proxy write requires an explicit `targetSpace`, so the argument is already
- * one real space. Recognised from the ARGUMENT rather than from a list, so a new write path is classified without
- * anyone remembering to add it.
+ * A write target needs no narrowing HERE: a proxy write requires an explicit `targetSpace`, which `resolveWriteTarget` has
+ * already judged against the caller's grant (reached, not a proxy, rung held — `Q-440`), so the argument is one real space the
+ * caller may act in. Recognised from the ARGUMENT rather than from a list, so a new write path is classified without
+ * anyone remembering to add it — and the gate that makes the classification safe is the one named at the top of this file,
+ * which refuses a resolution without its grant.
  */
 const isWriteTarget = (arg) => /^(wt\.target|writeTarget)$/.test(arg);
 

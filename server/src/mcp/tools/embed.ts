@@ -14,6 +14,7 @@
  * drifts. What these handlers own is the MCP-shaped part: argument validation and text a model can act on.
  */
 import { resolveWriteTarget, isProxy } from '../../spaces/proxy.js';
+import { toolWriteGrant, assertWriteTarget, toolMemberReach } from '../tool-rights-guard.js';
 import { getConfig } from '../../config/loader.js';
 import { reembedSpace, REEMBED_KINDS, REEMBED_DEFAULT_LIMIT, REEMBED_MAX_LIMIT } from '../../brain/reembed.js';
 import type { BrainEmbedRecordType } from '../../config/types.js';
@@ -136,8 +137,8 @@ export const retry_embed_recordTool: ToolHandler = {
     const recordId = String(a['recordId'] ?? '').trim();
     if (!recordId) throw new Error('recordId must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined);
-    if (!wt.ok) throw new Error(wt.error);
+    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
+    assertWriteTarget(wt);
 
     const result = await retryEmbedJob(wt.target, a['recordType'], recordId);
     const text = result === 'ok'
@@ -197,8 +198,9 @@ export const retry_embed_mediaTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { callSpace, accessibleSpaceIds } = ctx;
     const { retryFailedJobs } = await import('../../files/media/job-queue.js');
-    // `memberSpacesWithin` is the MCP half of the narrowing the route states with `memberSpacesForRequest`.
-    const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
+    // The MCP half of the narrowing the route states with `memberSpacesForRequest` under its area guard: the members the connection
+    // reaches, kept where the token holds the files WRITE rung — the dispatcher checked it on the proxy id alone (`Q-440`).
+    const memberIds = toolMemberReach(ctx, callSpace, accessibleSpaceIds);
     let retried = 0;
     for (const mid of memberIds) retried += await retryFailedJobs(mid);
 
@@ -275,12 +277,13 @@ export const space_reindexTool: ToolHandler = {
     const { planReindex, startReindex } = await import('../../brain/reindex.js');
     const space = getConfig().spaces.find(s => s.id === callSpace);
 
-    // The member list comes from what this TOKEN may reach, not from the space's full membership. A proxy is refused
-    // below regardless, but a scoped admin reindexing a normal space must never walk a member it cannot see.
+    // The member list comes from what this TOKEN may reach AND administers (the tool's own rung), not from the space's full
+    // membership. A proxy is refused below regardless, but a scoped admin reindexing a normal space must never walk a member it
+    // cannot see or lacks the rung in (`Q-440`).
     const decision = await planReindex({
       spaceId: callSpace,
       space,
-      memberIds: memberSpacesWithin(callSpace, accessibleSpaceIds),
+      memberIds: toolMemberReach(ctx, callSpace, accessibleSpaceIds),
     });
     if (!decision.ok) {
       // The status is reported alongside the message: 409 means "this space's run is still going" and 400 means

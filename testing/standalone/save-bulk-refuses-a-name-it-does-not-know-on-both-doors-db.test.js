@@ -73,7 +73,7 @@ async function viaRest(body) {
     json(b) { this.body = b; return this; },
     setHeader() { return this; }, set() { return this; },
   };
-  await restHandler({ params: { spaceId: SPACE }, query: {}, body, headers: {}, ip: '127.0.0.1' }, res);
+  await restHandler({ params: { spaceId: SPACE }, query: {}, body, headers: {}, ip: '127.0.0.1', authToken: { name: 'test', rights: ADMIN } }, res);
   return { refused: res.statusCode >= 400, status: res.statusCode, text: JSON.stringify(res.body ?? '') };
 }
 

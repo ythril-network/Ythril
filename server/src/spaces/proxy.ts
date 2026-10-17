@@ -1,6 +1,9 @@
 import { getConfig, isConfigLoaded } from '../config/loader.js';
 import type { SpaceConfig } from '../config/types.js';
+import type { Rung, SpaceArea, TokenRights } from '../config/rights-shape.js';
 import { NAME_QUOTED, peerText } from '../util/log.js';
+import { reachesSpace, reachableSpaceIds } from '../auth/space-reach.js';
+import { holdsRung, rungRefusal } from '../auth/reachable-spaces.js';
 
 /**
  * Whether a space RECORD is a proxy: it names at least one member. A proxy holds no records of its own.
@@ -86,65 +89,118 @@ export function resolveMemberSpaces(spaceId: string): string[] {
   return [spaceId];
 }
 
-/** What resolving a write target answers: the one space the write lands in, or the sentence both doors refuse with. */
-export type ResolvedWriteTarget = { ok: true; target: string } | { ok: false; error: string };
+/**
+ * What resolving a write target answers: the one space the write lands in, or the status and the sentence both doors refuse with.
+ *
+ * **The status travels WITH the refusal** (`Q-440`). Each door used to answer `wt.error` with a status of its own, always 400, so a
+ * refusal the resolver could say as a 403 had nowhere to go; now one helper per door says it (`answerWriteTarget` on REST, a
+ * `ToolRefusal` on MCP) and a site that answers the sentence itself is refused by a gate.
+ */
+export type ResolvedWriteTarget = { ok: true; target: string } | { ok: false; status: 400 | 403 | 404; error: string };
 
 /**
- * Validate and resolve a targetSpace parameter for a write operation on a proxy space.
- * Returns the resolved target space ID, or an error string.
+ * What the CALLER may do, handed to every resolution of a write target: the rights matrix it holds, and the area and rung the act
+ * needs in the space it lands in. `needs` is `read` for a READ that goes through the resolver (an ingest run's status) and `write`
+ * for every write, because the resolver judges the rung on the member the act lands in, not on the proxy it was addressed through.
+ *
+ * `rights` is optional because the call sites hold it optionally (a tool context, a request's token). **An absent matrix is
+ * refused inside the resolver** (no matrix reaches nothing), so no site writes `!` to get past the type.
+ */
+export interface WriteGrant { rights: TokenRights | undefined; area: SpaceArea; needs: Rung }
+
+/**
+ * Validate and resolve a targetSpace parameter for a write operation on a proxy space, against what the caller may reach and do.
+ * Returns the resolved target space ID, or a refusal with its status.
+ *
+ * ## Why the grant is an argument and not a later check (`Q-440`)
+ *
+ * This answered MEMBERSHIP and never reach: a token holding write on `qa` only wrote into `secret` through a wildcard proxy
+ * (`?targetSpace=secret`, 201) on both doors, and the wildcard branch answered a space the token cannot see (201) differently from one
+ * that does not exist (400): an existence oracle. Every door checked the rung on the proxy id it was addressed through, which is
+ * where an operator grants a proxy, never on the member the write lands in.
+ *
+ * **The order is the rule:** the target exists -> the token reaches it -> it is not itself a proxy -> the token holds the rung there.
+ * A target the token does not reach is refused EXACTLY as one that does not exist (the same status and sentence, with the name the
+ * caller sent), so a refusal cannot be read as an inventory; every member list in a refusal is the members the token reaches. Reach
+ * and rung are `reachesSpace` and `holdsRung`, and the narrowed member list is `reachableSpaceIds` — never respelled here.
  *
  * **`targetSpace` is `unknown`, and a PRESENT value that is not a string is refused here, first, on every door** (`targetSpace must be
- * a string`): it is whatever a caller chose to send. Express 5 parses `?targetSpace=a&targetSpace=b` to an ARRAY, which the templates
+ * a string`), ahead of everything but the absent-matrix refusal: it is whatever a caller chose to send. Express 5 parses `?targetSpace=a&targetSpace=b` to an ARRAY, which the templates
  * below stringified into a misleading "not found" name, and an MCP caller's `{"toString":1}` threw a `TypeError` out of them. Absent is
  * `undefined` or `null` — what a body or query that names no target holds — and an empty string is still "name none" below.
  *
  * **Every name echoed back is rendered by `peerText`**: the space and the target are caller text, and one oversized or line-breaking
- * name neither floods the answer nor forges a line. The member lists are the instance's own configuration and are listed as they are.
+ * name neither floods the answer nor forges a line. The member lists are the members THE CALLER reaches (never the proxy's whole
+ * configuration), listed as they are.
  */
 export function resolveWriteTarget(
   spaceId: string,
   targetSpace: unknown,
+  grant: WriteGrant,
 ): ResolvedWriteTarget {
+  // No matrix reaches nothing, and holds no rung anywhere: refused before anything about the instance is said.
+  if (!grant.rights) return refuseTarget(403, rungRefusal(grant.needs, grant.area));
+  return resolveTarget(spaceId, targetSpace, { ...grant, rights: grant.rights });
+}
+
+/** What {@link resolveTarget} judges against: the caller's grant with its matrix present, or `null` for membership alone. */
+type TargetScope = (WriteGrant & { rights: TokenRights }) | null;
+
+function refuseTarget(status: 400 | 403 | 404, error: string): ResolvedWriteTarget {
+  return { ok: false, status, error };
+}
+
+/**
+ * The one resolution, against a scope. `scope === null` answers membership only — the dispatcher's pre-resolution
+ * ({@link resolveCallWriteTarget}) until it passes the caller's grant; every other caller reaches this through `resolveWriteTarget`.
+ */
+function resolveTarget(spaceId: string, targetSpace: unknown, scope: TargetScope): ResolvedWriteTarget {
   if (targetSpace !== undefined && targetSpace !== null && typeof targetSpace !== 'string') {
-    return { ok: false, error: 'targetSpace must be a string' };
+    return refuseTarget(400, 'targetSpace must be a string');
   }
   const space = findSpace(spaceId);
-  if (!space) return { ok: false, error: `Space '${peerText(spaceId, { max: NAME_QUOTED })}' not found` };
+  const shownSpace = peerText(spaceId, { max: NAME_QUOTED });
+  const noSuchSpace = (): ResolvedWriteTarget => refuseTarget(404, `Space '${shownSpace}' not found`);
+  if (!space) return noSuchSpace();
+  const reaches = (id: string): boolean => scope === null || reachesSpace(scope.rights, id);
+  /** The rung's refusal on a space the token reaches, or `null`. */
+  const lacksRung = (id: string): ResolvedWriteTarget | null =>
+    scope === null || holdsRung(scope.rights, id, scope.area, scope.needs)
+      ? null
+      : refuseTarget(403, rungRefusal(scope.needs, scope.area, id));
 
   // Regular space — ignore targetSpace, write directly
   if (!isProxy(space)) {
-    return { ok: true, target: spaceId };
+    if (!reaches(spaceId)) return noSuchSpace();
+    return lacksRung(spaceId) ?? { ok: true, target: spaceId };
   }
   const members = space.proxyFor!;
+  // The members THIS caller reaches: the only ones a refusal may name. `reachableSpaceIds` and not `memberSpacesForToken`: that one is
+  // called by `spaces/proxy-scoped.ts` alone (`proxy-reach.test.js`), which imports this module — a call from here would be a cycle.
+  const reached = scope === null ? resolveMemberSpaces(spaceId) : reachableSpaceIds(scope.rights, resolveMemberSpaces(spaceId));
 
   // Proxy space — targetSpace is required (an absent value and an empty string both name none)
   const named = typeof targetSpace === 'string' ? targetSpace : '';
   if (!named) {
-    return {
-      ok: false,
-      error: `This is a proxy space. Specify targetSpace (one of: ${resolveMemberSpaces(spaceId).join(', ')})`,
-    };
+    // A proxy none of whose members the caller reaches names nothing it may see: it is not a space to this caller.
+    if (reached.length === 0) return noSuchSpace();
+    return refuseTarget(400, `This is a proxy space. Specify targetSpace (one of: ${reached.join(', ')})`);
   }
   const shown = peerText(named, { max: NAME_QUOTED });
-
-  // Wildcard proxy — any non-proxy space is a valid target
-  if (isWildcardProxy(space)) {
-    const target = findSpace(named);
-    if (!target) return { ok: false, error: `Target space '${shown}' not found` };
-    if (isProxy(target)) {
-      return { ok: false, error: `'${shown}' is itself a proxy space and cannot be a write target` };
-    }
-    return { ok: true, target: named };
+  const target = findSpace(named);
+  // Wildcard proxy — any non-proxy space is a valid target; an explicit one — its members. Either way, a space that is absent, not a
+  // member, or not reached is the one answer.
+  const notATarget = isWildcardProxy(space)
+    ? refuseTarget(400, `Target space '${shown}' not found`)
+    : refuseTarget(400, `'${shown}' is not a member of proxy space '${shownSpace}' (members: ${reached.join(', ')})`);
+  if (!target || !reaches(named)) return notATarget;
+  if (!isWildcardProxy(space) && !members.includes(named)) return notATarget;
+  // Only the wildcard names a space nobody listed. An explicit proxy's member that is itself a proxy is a hand-edited config (the API
+  // refuses to create one, `space-create-contract`), and its answer is unchanged by `Q-440`: that nesting is the config's, not a caller's.
+  if (isWildcardProxy(space) && isProxy(target)) {
+    return refuseTarget(400, `'${shown}' is itself a proxy space and cannot be a write target`);
   }
-
-  if (!members.includes(named)) {
-    return {
-      ok: false,
-      error: `'${shown}' is not a member of proxy space '${peerText(spaceId, { max: NAME_QUOTED })}' (members: ${members.join(', ')})`,
-    };
-  }
-
-  return { ok: true, target: named };
+  return lacksRung(named) ?? { ok: true, target: named };
 }
 
 /**
@@ -152,13 +208,22 @@ export function resolveWriteTarget(
  *
  * It exists because the unknown-write-field judge answers by the setting of the space the write LANDS in, so the dispatcher must know the
  * target before any handler runs, and a second reading of `targetSpace` out of the arguments there would be a second implementation of
- * the proxy rules. The handlers keep their own `resolveWriteTarget` call, which on a call that got past this is a no-op re-check. A
- * reach check on the resolved target (Q-440) is added HERE, so a handler cannot skip it by not asking.
+ * the proxy rules. The handlers keep their own `resolveWriteTarget` call with the caller's grant, which is the check that decides
+ * reach and rung: a handler that skipped it would be caught by the gate that holds every call to pass its grant.
  *
- * `args` is the caller's own object, so `targetSpace` is read as `unknown` and `resolveWriteTarget` refuses a non-string.
+ * **WITHOUT a grant it answers MEMBERSHIP ONLY, and that is the interim state, not a design** (`Q-440`): the dispatcher is the one
+ * caller that does not pass the caller's grant yet, so its pre-resolution still names members the token does not reach (the "no
+ * target" refusal lists them all) and judges unknown fields by the setting of a space the token may not reach. The dispatcher passes
+ * `{ rights, area, needs }` from its tool's `TOOL_RIGHTS` row (`toolWriteGrant`), forwards the refusal's `status`, and then `grant`
+ * here becomes required and the membership path goes.
+ *
+ * `args` is the caller's own object, so `targetSpace` is read as `unknown` and the resolution refuses a non-string.
  */
-export function resolveCallWriteTarget(callSpace: string, args: Readonly<Record<string, unknown>>): ResolvedWriteTarget {
-  return resolveWriteTarget(callSpace, Object.hasOwn(args, 'targetSpace') ? args['targetSpace'] : undefined);
+export function resolveCallWriteTarget(
+  callSpace: string, args: Readonly<Record<string, unknown>>, grant?: WriteGrant,
+): ResolvedWriteTarget {
+  const targetSpace = Object.hasOwn(args, 'targetSpace') ? args['targetSpace'] : undefined;
+  return grant ? resolveWriteTarget(callSpace, targetSpace, grant) : resolveTarget(callSpace, targetSpace, null);
 }
 
 /**
@@ -189,13 +254,18 @@ export function isStrictLinkage(spaceId: string): boolean {
  * counts as a hit; it defaults to "non-null", which also treats a truthy boolean (e.g. a
  * `deleteX() → boolean`) as a hit. Members after the first hit are not visited. Returns the
  * accepted result, or `undefined` if no member produced one.
+ *
+ * **What it walks is the caller's to state, and never a raw proxy id** (`Q-440`): a resolved write target (`wt.target`, one real space)
+ * or the members the caller reaches (`memberSpacesForRequest` / `memberSpacesForToken` / `memberSpacesWithin`, an array). Handed a
+ * proxy's own id it visits EVERY member, including ones the caller cannot see, and `204` against `404` says whether a record exists
+ * there. `every-proxy-write-door-resolves-its-target-with-the-callers-grant.test.js` refuses any other first argument.
  */
 export async function findFirstAcrossMembers<T>(
-  spaceId: string,
+  walk: string | readonly string[],
   fn: (memberId: string) => Promise<T>,
   accept: (result: T) => boolean = (r): boolean => r != null && r !== false,
 ): Promise<T | undefined> {
-  for (const member of resolveMemberSpaces(spaceId)) {
+  for (const member of typeof walk === 'string' ? resolveMemberSpaces(walk) : walk) {
     const result = await fn(member);
     if (accept(result)) return result;
   }

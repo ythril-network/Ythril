@@ -39,6 +39,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { adminRights } from './_cel-doors.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
@@ -402,7 +403,7 @@ describe('delete_file deletes a directory with confirm, as the same act on every
       const layer = fileStoreRouter.stack.find(l => l.route?.path === '/:spaceId' && l.route.methods['delete']);
       const handle = layer.route.stack.at(-1).handle;
       const call = async (p, body) => {
-        const req = { method: 'DELETE', params: { spaceId: S }, query: { path: p }, body, authToken: { name: 'test' }, get: () => undefined, headers: {} };
+        const req = { method: 'DELETE', params: { spaceId: S }, query: { path: p }, body, authToken: { name: 'test', rights: await adminRights() }, get: () => undefined, headers: {} };
         const res = { code: 200, headersSent: false, status(c) { this.code = c; return this; }, setHeader() { return this; },
           json() { this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };
         await handle(req, res);
