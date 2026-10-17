@@ -65,7 +65,11 @@ describe('a network through MCP and through REST', () => {
     created.push(viaMcpId);
     const rest = await get(INSTANCES.a, shortToken, `/api/networks/${viaMcpId}`);
     assert.equal(rest.status, 200, JSON.stringify(rest.body));
-    same(r.body, rest.body);
+    // The READ answer (`networkAnswer`: GET /api/networks[/:id] and network_get alike) adds `ownYesCarries`, a forecast for the danger
+    // tab (bundle-106, design v5 §2.6); a create answers the network as it was made, on both doors alike (`createNetworkAct`).
+    assert.equal(typeof rest.body.ownYesCarries, 'boolean', 'the read answer lost its ownYesCarries forecast');
+    const { ownYesCarries: _forecast, ...readAsCreated } = rest.body;
+    same(r.body, readAsCreated);
   });
 
   it('network_get answers what GET /api/networks/:id answers, credentials stripped on both', async () => {

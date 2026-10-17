@@ -3,10 +3,10 @@
  *
  * Covers:
  *  Space deletion vote flow:
- *   - Networked DELETE opens a vote round (202) instead of deleting immediately
+ *   - Networked DELETE (with confirm) opens a vote round (202) where another member must vote
  *   - Space is still present while the vote is pending
  *   - Vote round is visible via GET /api/networks/:id/votes
- *   - Yes vote on a solo-member network concludes the round and deletes the space
+ *   - Where the proposer's own yes passes the round (a club, a braintree root) the space goes in the request (200)
  *   - Veto concludes the round but the space survives
  *
  *  N-7 auto-adopt on member departure:
@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, reqJson, waitFor, createTestSpace } from './helpers.js';
+import { INSTANCES, post, get, del, delWithBody, waitFor, createTestSpace } from './helpers.js';
 import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +31,18 @@ const CONFIGS = path.join(__dirname, 'configs');
 
 let tokenA;
 let SPACE, removeSpace;
+
+/**
+ * Admit one member that never votes to a network whose only member is A, so a round needs a yes beside A's own. D-36 (bundle-106): the
+ * proposer counts as a yes on every join, so on a sole-member closed or democratic network this add passes at open — 201.
+ */
+async function seedMember(networkId, tag) {
+  const r = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
+    instanceId: `gov-seed-${tag}-${Date.now()}`, label: `Gov seed ${tag}`, url: 'http://ythril-c:3200',
+    token: `ythril_gov_seed_token_${tag}_not_used`, direction: 'both',
+  });
+  assert.equal(r.status, 201, `seed member (admitted at open, D-36): ${JSON.stringify(r.body)}`);
+}
 
 // ── Governed space deletion ───────────────────────────────────────────────────
 
@@ -71,9 +83,11 @@ describe('Governed space deletion', () => {
     assert.equal(createNet.status, 201, JSON.stringify(createNet.body));
     const networkId = createNet.body.id;
     _createdNets.push(networkId);
+    // Another voter, so the deletion needs a yes beside A's own (with A alone its yes passes at open: the club test below).
+    await seedMember(networkId, 'votepending');
 
-    // DELETE should open a vote round, not delete immediately
-    const delR = await reqJson(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { method: 'DELETE' });
+    // DELETE (with the `confirm` a networked delete asks for, bundle-106) should open a vote round, not delete immediately
+    const delR = await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { confirm: true });
     assert.equal(delR.status, 202, `Expected 202, got ${delR.status}: ${JSON.stringify(delR.body)}`);
     assert.equal(delR.body?.status, 'vote_pending');
     assert.ok(Array.isArray(delR.body?.rounds) && delR.body.rounds.length >= 1, 'rounds array required');
@@ -92,16 +106,17 @@ describe('Governed space deletion', () => {
       'Vote round must be visible via GET /api/networks/:id/votes',
     );
 
-    // Conclude the round (yes vote → solo-member network → instant pass → async deletion)
-    await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
-    await waitFor(async () => {
-      const r = await get(INSTANCES.a, tokenA, '/api/spaces');
-      return !r.body?.spaces?.some(s => s.id === spaceId);
-    });
-    console.log(`  Gov-VotePending space deleted after yes vote ✓`);
+    // A's own yes is already in the round (D-36) and does not pass it: the seed's yes is outstanding, so a second yes from A
+    // concludes nothing and the space stays. (It used to be the solo yes that deleted it; that is the club case below now.)
+    const again = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
+    assert.equal(again.status, 200, JSON.stringify(again.body));
+    assert.equal(again.body?.concluded, false, 'a round still waiting for the seed\'s yes concluded on A\'s alone');
+    const stillR = await get(INSTANCES.a, tokenA, '/api/spaces');
+    assert.ok(stillR.body?.spaces?.some(s => s.id === spaceId), 'Space must still exist while the round waits for another yes');
+    // cleanup handled by after(): the network goes first, then the space as a local one
   });
 
-  it('Yes vote on space_deletion round concludes the round and deletes the space', async () => {
+  it('On a club the proposer\'s own yes passes the deletion at once — 200 deleted, the space gone in the request', async () => {
     const createSp = await post(INSTANCES.a, tokenA, '/api/spaces', { label: `Gov-VoteYes-${run}` });
     assert.equal(createSp.status, 201);
     const spaceId = createSp.body.space.id;
@@ -117,23 +132,25 @@ describe('Governed space deletion', () => {
     const networkId = createNet.body.id;
     _createdNets.push(networkId);
 
-    const delR = await reqJson(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { method: 'DELETE' });
-    assert.equal(delR.status, 202);
-    const roundId = delR.body.rounds[0]?.roundId;
-    assert.ok(roundId, 'roundId must be returned');
+    // bundle-106 (guide 06c): the proposer's yes is cast when the round opens and on a club it is the pass, so the deletion acts in
+    // this request — 200 { status: 'deleted', rounds, removedHere: true } (it was 202 and a second call casting yes). Past the door's
+    // answer budget the same pass answers 202 { status: 'passed', queued: true } and completes on its own.
+    const delR = await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { confirm: true });
+    assert.ok(delR.status === 200 || delR.status === 202, `Expected 200 (or 202 queued), got ${delR.status}: ${JSON.stringify(delR.body)}`);
+    if (delR.status === 200) {
+      assert.equal(delR.body?.status, 'deleted', JSON.stringify(delR.body));
+      assert.equal(delR.body?.removedHere, true, JSON.stringify(delR.body));
+    } else {
+      assert.equal(delR.body?.status, 'passed', `a 202 here is the queued pass, never vote_pending: ${JSON.stringify(delR.body)}`);
+      assert.equal(delR.body?.queued, true, JSON.stringify(delR.body));
+    }
+    assert.ok(delR.body.rounds?.[0]?.roundId, 'the answer names the round that passed');
 
-    // The proposer's yes was already cast when DELETE was called.
-    // Re-casting yes triggers concludeRoundIfReady on the vote endpoint.
-    const voteR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
-    assert.equal(voteR.status, 200, JSON.stringify(voteR.body));
-    assert.ok(voteR.body?.concluded === true, 'Round must be concluded after yes vote');
-
-    // Space is deleted asynchronously — poll until gone
     await waitFor(async () => {
       const r = await get(INSTANCES.a, tokenA, '/api/spaces');
       return !r.body?.spaces?.some(s => s.id === spaceId);
     });
-    console.log(`  Gov-VoteYes space deleted after yes vote ✓`);
+    console.log(`  Gov-Club space deleted on the proposer's own yes ✓`);
   });
 
   it('vote round stores the correct spaceId', async () => {
@@ -152,19 +169,17 @@ describe('Governed space deletion', () => {
     const networkId = createNet.body.id;
     _createdNets.push(networkId);
 
-    const delR = await reqJson(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { method: 'DELETE' });
-    assert.equal(delR.status, 202);
-    const roundId = delR.body.rounds[0]?.roundId;
-
-    // Inspect the round via the votes endpoint
-    const votesR = await get(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes`);
-    const round = votesR.body?.rounds?.find(r => r.roundId === roundId);
-    assert.ok(round, 'Round must be visible');
+    // A braintree root's own yes is its whole ancestry, so the deletion passes at open (bundle-106) and the space goes in this request;
+    // the round is read from the answer, which carries it as the vote list shows it (guide 06c), not from the list it has already left.
+    const delR = await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { confirm: true });
+    assert.ok(delR.status === 200 || delR.status === 202, `Expected 200 (or 202 queued), got ${delR.status}: ${JSON.stringify(delR.body)}`);
+    const entry = delR.body?.rounds?.find(r => r.networkId === networkId);
+    assert.ok(entry?.roundId, `the answer names the round: ${JSON.stringify(delR.body)}`);
+    const round = entry.round;
+    assert.ok(round, 'the answer carries the round');
     assert.equal(round.type, 'space_deletion', 'Round type must be space_deletion');
     assert.equal(round.spaceId, spaceId, 'Round must record the correct spaceId');
 
-    // cleanup
-    await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'yes' });
     await waitFor(async () => {
       const r = await get(INSTANCES.a, tokenA, '/api/spaces');
       return !r.body?.spaces?.some(s => s.id === spaceId);
@@ -186,12 +201,16 @@ describe('Governed space deletion', () => {
     assert.equal(createNet.status, 201);
     const networkId = createNet.body.id;
     _createdNets.push(networkId);
+    // Another voter: on a democratic network of A alone A's yes is the majority and the deletion would pass at open. With the seed
+    // it is 1 of 2, which is not a majority, so the round stays open for the veto.
+    await seedMember(networkId, 'veto');
 
-    const delR = await reqJson(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { method: 'DELETE' });
-    assert.equal(delR.status, 202);
+    const delR = await delWithBody(INSTANCES.a, tokenA, `/api/spaces/${spaceId}`, { confirm: true });
+    assert.equal(delR.status, 202, JSON.stringify(delR.body));
+    assert.equal(delR.body?.status, 'vote_pending', JSON.stringify(delR.body));
     const roundId = delR.body.rounds[0]?.roundId;
 
-    // Veto the round
+    // Veto the round (A's veto replaces the yes it cast as proposer)
     const voteR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/votes/${roundId}`, { vote: 'veto' });
     assert.equal(voteR.status, 200);
     assert.ok(voteR.body?.concluded === true, 'Veto must conclude the round immediately');

@@ -319,7 +319,7 @@ describe('Space export/import — round-trip (export → wipe → import)', () =
     assert.ok(exportPayload.chrono.length >= 1);
 
     // Wipe the space
-    const wipeR = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/wipe`, {});
+    const wipeR = await post(INSTANCES.a, tok, `/api/admin/spaces/${spaceId}/wipe`, { confirm: true });
     assert.equal(wipeR.status, 200, `Wipe: ${JSON.stringify(wipeR.body)}`);
 
     // Verify all data is gone

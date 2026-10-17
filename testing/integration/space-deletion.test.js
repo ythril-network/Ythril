@@ -196,9 +196,22 @@ describe('Space deletion — full cleanup', () => {
     assert.equal(netR.status, 201, `Network create: ${JSON.stringify(netR.body)}`);
     const networkId = netR.body.id;
 
-    // Attempt to delete the networked space — should return 202 (vote round opened)
-    const delR = await del(INSTANCES.a, token, `/api/spaces/${spaceId}`);
+    // A second member, so the deletion needs a yes beside A's own: with A alone its yes passes the round at open and the space goes
+    // in the request (bundle-106, 200). The seed is admitted at once for the same reason (D-36, 201).
+    const seedR = await post(INSTANCES.a, token, `/api/networks/${networkId}/members`, {
+      instanceId: `del-net-seed-${RUN_ID}`, label: 'Del Net Seed', url: 'http://ythril-c:3200',
+      token: 'ythril_peer_test_token_del_seed_not_used', direction: 'both',
+    });
+    assert.equal(seedR.status, 201, `seed member: ${JSON.stringify(seedR.body)}`);
+
+    // A networked deletion asks for `confirm` (bundle-106): without it nothing happens and the answer is 400.
+    const unconfirmed = await del(INSTANCES.a, token, `/api/spaces/${spaceId}`);
+    assert.equal(unconfirmed.status, 400, `a networked delete without confirm: ${JSON.stringify(unconfirmed.body)}`);
+
+    // Delete the networked space with confirm — 202, a vote round opened
+    const delR = await delWithBody(INSTANCES.a, token, `/api/spaces/${spaceId}`, { confirm: true });
     assert.equal(delR.status, 202, `Expected 202 (vote round), got ${delR.status}: ${JSON.stringify(delR.body)}`);
+    assert.equal(delR.body?.status, 'vote_pending', `the status names what happened: ${JSON.stringify(delR.body)}`);
     assert.ok(delR.body?.rounds?.length > 0, 'Should have opened at least one vote round');
     assert.equal(delR.body.rounds[0].networkId, networkId, 'Vote round should reference the correct network');
 

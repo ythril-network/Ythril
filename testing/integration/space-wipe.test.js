@@ -79,7 +79,7 @@ describe('Space wipe — full wipe', () => {
     assert.ok(preStats.body.files >= 1, 'Should have at least 1 file');
 
     // Execute full wipe
-    const wipeR = await post(INSTANCES.a, adminToken, `/api/admin/spaces/${spaceId}/wipe`, {});
+    const wipeR = await post(INSTANCES.a, adminToken, `/api/admin/spaces/${spaceId}/wipe`, { confirm: true });
     assert.equal(wipeR.status, 200, `Wipe: ${JSON.stringify(wipeR.body)}`);
     assert.ok(typeof wipeR.body.deleted === 'object', 'Response must have `deleted` object');
     assert.ok(wipeR.body.deleted.facts >= 1, 'deleted.facts should reflect removed docs');
@@ -108,7 +108,7 @@ describe('Space wipe — full wipe', () => {
     assert.equal(createR.status, 201);
     createdSpaceIds.push(spaceId);
 
-    const wipeR = await post(INSTANCES.a, adminToken, `/api/admin/spaces/${spaceId}/wipe`, {});
+    const wipeR = await post(INSTANCES.a, adminToken, `/api/admin/spaces/${spaceId}/wipe`, { confirm: true });
     assert.equal(wipeR.status, 200, `Wipe empty: ${JSON.stringify(wipeR.body)}`);
     /*
      * The WHOLE object, deliberately, and it earned that on 2026-09-03.
@@ -130,7 +130,7 @@ describe('Space wipe — full wipe', () => {
   });
 
   it('wipe with invalid types value returns 400', async () => {
-    const r = await post(INSTANCES.a, adminToken, '/api/admin/spaces/general/wipe', { types: ['invalid-type'] });
+    const r = await post(INSTANCES.a, adminToken, '/api/admin/spaces/general/wipe', { types: ['invalid-type'], confirm: true });
     assert.equal(r.status, 400, `Expected 400 for invalid type, got ${r.status}`);
     assert.ok(r.body?.error?.toLowerCase().includes('types'), `Error should mention 'types': ${r.body?.error}`);
   });
@@ -234,7 +234,7 @@ describe('Space wipe — partial wipe (by type)', () => {
     assert.ok(preMem.body.entities >= 1);
 
     // Wipe memories only
-    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['facts'] });
+    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['facts'], confirm: true });
     assert.equal(wipeR.status, 200, `Partial wipe: ${JSON.stringify(wipeR.body)}`);
     assert.ok(wipeR.body.deleted.facts >= 1, 'Should have deleted at least 1 memory');
     assert.equal(wipeR.body.deleted.entities, 0, 'Entities should not be affected');
@@ -259,7 +259,7 @@ describe('Space wipe — partial wipe (by type)', () => {
     await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/entities`, { name: 'EntToWipe', type: 'concept' });
 
     // Wipe entities only
-    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['entities'] });
+    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['entities'], confirm: true });
     assert.equal(wipeR.status, 200);
     assert.ok(wipeR.body.deleted.entities >= 1, 'Should have deleted at least 1 entity');
     assert.equal(wipeR.body.deleted.facts, 0, 'Memories should not be affected');
@@ -291,7 +291,7 @@ describe('Space wipe — partial wipe (by type)', () => {
     assert.ok(preStats.body.facts >= 1, 'Should have at least 1 memory');
 
     // Wipe files only
-    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['files'] });
+    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['files'], confirm: true });
     assert.equal(wipeR.status, 200, `File-only wipe: ${JSON.stringify(wipeR.body)}`);
     assert.ok(wipeR.body.deleted.files >= 1, 'Should have deleted at least 1 file record');
     assert.equal(wipeR.body.deleted.facts, 0, 'Memories should not be affected');
@@ -316,7 +316,7 @@ describe('Space wipe — partial wipe (by type)', () => {
     await post(INSTANCES.a, adminTok, `/api/brain/spaces/${spaceId}/chrono`, { title: 'Surviving chrono', type: 'event', startsAt: new Date().toISOString() });
 
     // Wipe memories + entities, leave chrono
-    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['facts', 'entities'] });
+    const wipeR = await post(INSTANCES.a, adminTok, `/api/admin/spaces/${spaceId}/wipe`, { types: ['facts', 'entities'], confirm: true });
     assert.equal(wipeR.status, 200, `Multi-type wipe: ${JSON.stringify(wipeR.body)}`);
     assert.ok(wipeR.body.deleted.facts >= 1, 'memories should be wiped');
     assert.ok(wipeR.body.deleted.entities >= 1, 'entities should be wiped');

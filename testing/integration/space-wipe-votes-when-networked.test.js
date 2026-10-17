@@ -42,7 +42,11 @@ describe('Space wipe — governed when the space is in a network', () => {
 
     await post(INSTANCES.a, token, `/api/brain/spaces/${spaceId}/facts`, { fact: 'solo wipe subject' });
 
-    const wipeR = await post(INSTANCES.a, token, `/api/admin/spaces/${spaceId}/wipe`, {});
+    // The admin wipe asks for `confirm` on every space (bundle-106): without it nothing is wiped and the answer is 400.
+    const unconfirmed = await post(INSTANCES.a, token, `/api/admin/spaces/${spaceId}/wipe`, {});
+    assert.equal(unconfirmed.status, 400, `a wipe without confirm: ${JSON.stringify(unconfirmed.body)}`);
+
+    const wipeR = await post(INSTANCES.a, token, `/api/admin/spaces/${spaceId}/wipe`, { confirm: true });
     assert.equal(wipeR.status, 200, `Expected an immediate wipe, got ${wipeR.status}: ${JSON.stringify(wipeR.body)}`);
     assert.ok(wipeR.body?.deleted, 'an ungoverned wipe answers with counts');
     assert.equal(wipeR.body.status, undefined, 'and must NOT report a pending vote');
@@ -67,7 +71,15 @@ describe('Space wipe — governed when the space is in a network', () => {
     assert.equal(netR.status, 201, `network create: ${JSON.stringify(netR.body)}`);
     const networkId = netR.body.id;
 
-    const wipeR = await post(INSTANCES.a, token, `/api/admin/spaces/${spaceId}/wipe`, {});
+    // A second member, so the wipe needs a yes beside A's own. With A alone its yes passes the round at open and the wipe acts in
+    // the request (bundle-106: 200, status passed); the seed is admitted at once for the same reason (D-36, 201).
+    const seedR = await post(INSTANCES.a, token, `/api/networks/${networkId}/members`, {
+      instanceId: `wipe-net-seed-${RUN_ID}`, label: 'Wipe Net Seed', url: 'http://ythril-c:3200',
+      token: 'ythril_peer_test_token_wipe_seed_not_used', direction: 'both',
+    });
+    assert.equal(seedR.status, 201, `seed member: ${JSON.stringify(seedR.body)}`);
+
+    const wipeR = await post(INSTANCES.a, token, `/api/admin/spaces/${spaceId}/wipe`, { confirm: true });
     assert.equal(wipeR.status, 202, `Expected 202 (vote opened), got ${wipeR.status}: ${JSON.stringify(wipeR.body)}`);
     assert.equal(wipeR.body?.status, 'vote_pending', 'the status names what happened');
     assert.ok(wipeR.body?.rounds?.length > 0, 'at least one round must be open');
