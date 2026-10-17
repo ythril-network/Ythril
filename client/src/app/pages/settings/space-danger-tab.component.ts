@@ -466,8 +466,10 @@ export class SpaceDangerTabComponent {
     this.state.dangerWiping.set(true);
     this.state.dangerWipeError.set('');
     this.spacesApi.wipeSpace(target.id).subscribe({
-      next: () => {
+      next: (answer) => {
         this.state.dangerWiping.set(false);
+        // A 202 is not done here: a vote is open, or it passed and the wipe still runs. Say so, sticky; the outcomes in detail are PR C's.
+        if (answer?.pending) { this.toast.info(this.transloco.translate('spaces.dangerZone.notDoneYet'), 0); this.store.refreshNetworks(); return; }
         this.state.dangerWipeStats.set(null);
         this.state.dangerWipeLoading.set(true);
         this.spacesApi.getSpaceStats(target.id).subscribe({
@@ -495,8 +497,10 @@ export class SpaceDangerTabComponent {
     this.state.dangerDeleting.set(true);
     this.state.dangerDeleteError.set('');
     this.spacesApi.deleteSpace(target.id).subscribe({
-      next: () => {
+      next: (answer) => {
         this.state.dangerDeleting.set(false);
+        // A 202 means the space still exists here (a vote is open, or the deletion still runs): keep it listed and say so.
+        if (answer?.pending) { this.toast.info(this.transloco.translate('spaces.dangerZone.notDoneYet'), 0); this.store.refreshNetworks(); return; }
         this.store.spaces.update(list => list.filter(s => s.id !== target.id));
         this.state.closeSettings();
       },

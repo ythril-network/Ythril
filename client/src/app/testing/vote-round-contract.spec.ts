@@ -35,6 +35,8 @@ const NOT_READ: Record<string, string> = {
   proposedHere: 'LOCAL: which instance opened the round',
   outcome: 'LOCAL; an open round has none — the decisions list carries it',
   concludedAt: 'LOCAL; an open round has none — the decisions list carries it',
+  actLocalId: 'LOCAL: the local space id a deletion or wipe acts on here (bundle-106); the owed act is shown from `owedSpaceActs`, not the vote row',
+  peersConcluded: 'LOCAL: which peers say they concluded the round, the evidence the exchange hold reads (bundle-106); machinery, not what a voter is asked about',
 };
 
 /**

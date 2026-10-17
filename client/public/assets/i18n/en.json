@@ -1245,6 +1245,7 @@
   "spaces.dangerZone.embeddingsBackfill": "Backfill missing embeddings",
   "spaces.dangerZone.embeddingsBackfillBlocked": "Backfill is unavailable while suppression is on — every record would be skipped. Turn it off and save first.",
   "spaces.dangerZone.embeddingsBackfillDone": "Queued {{enqueued}} record(s) for embedding. This continues in the background.",
+  "spaces.dangerZone.notDoneYet": "Not done yet: a vote on it is open, or it passed and the change is still running here. Check Networks for its state.",
   "spaces.dangerZone.embeddingsBackfillMore": "{{remaining}} more still need embedding — run it again to continue.",
   "spaces.dangerZone.embeddingsBackfillSkipped": "{{skipped}} record(s) were skipped because a type or record still suppresses them.",
   "spaces.dangerZone.renameTitle": "Edit Space ID",

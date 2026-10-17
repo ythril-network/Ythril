@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import type { ReembedResult, ReindexStatus } from './embed-ops.types';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import type {
   Space, SpaceMeta, SpacesResponse, SpaceMetaResponse, KnowledgeType, TypeSchema,
   DupeActionRule, SpaceStats, SpaceActivity, SpaceActivityResponse, WipeCollectionType, WipeResult, CompletenessReport,
@@ -57,6 +57,11 @@ export interface ValidateSchemaResult {
   staleGuards?: unknown[];
   /** Where the next page starts (sent back as `after`); absent when the check is complete. The server's `_id`-keyset spelling. */
   nextAfter?: string;
+}
+
+/** A delete or wipe answer as a caller may act on it: `pending` is a `202` - not done here yet (a vote is open, or the change still runs). */
+export interface SpaceActAnswer {
+  pending: boolean;
 }
 
 /** Spaces, their per-type schemas, stats, reindex, and destructive wipe. */
@@ -126,8 +131,13 @@ export class SpacesApi {
     return this.http.delete<void>(`/api/spaces/${spaceId}/meta/typeSchemas/${knowledgeType}/${typeName}`);
   }
 
-  deleteSpace(id: string): Observable<void> {
-    return this.http.delete<void>(`/api/spaces/${id}`, { body: { confirm: true } });
+  /**
+   * Delete a space. `pending` is true for a `202`: a networked delete opened a vote, or the vote passed and the change is still running, so
+   * the space still exists here. It is read from the status inside this method so no caller can treat a 202 as done by not looking.
+   */
+  deleteSpace(id: string): Observable<SpaceActAnswer> {
+    return this.http.delete(`/api/spaces/${id}`, { body: { confirm: true }, observe: 'response' })
+      .pipe(map(res => ({ pending: res.status === 202 })));
   }
 
   renameSpace(oldId: string, newId: string): Observable<{ space: Space }> {
@@ -161,9 +171,11 @@ export class SpacesApi {
     return this.http.post<ReembedResult>(`/api/spaces/${spaceId}/reembed`, body);
   }
 
-  wipeSpace(spaceId: string, types?: WipeCollectionType[]): Observable<{ deleted: WipeResult }> {
-    const body: { types?: WipeCollectionType[] } = types && types.length > 0 ? { types } : {};
-    return this.http.post<{ deleted: WipeResult }>(`/api/admin/spaces/${spaceId}/wipe`, body);
+  /** Wipe a space's records. The server refuses a wipe without `confirm`; `pending` is true for a `202`, as on {@link deleteSpace}. */
+  wipeSpace(spaceId: string, types?: WipeCollectionType[]): Observable<SpaceActAnswer & { deleted?: WipeResult }> {
+    const body: { confirm: true; types?: WipeCollectionType[] } = types && types.length > 0 ? { confirm: true, types } : { confirm: true };
+    return this.http.post<{ deleted?: WipeResult }>(`/api/admin/spaces/${spaceId}/wipe`, body, { observe: 'response' })
+      .pipe(map(res => ({ pending: res.status === 202, deleted: res.body?.deleted })));
   }
 
   getSpaceStats(spaceId: string): Observable<SpaceStats> {

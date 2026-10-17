@@ -1245,6 +1245,7 @@
   "spaces.dangerZone.embeddingsBackfill": "Uzupełnij brakujące embeddingi",
   "spaces.dangerZone.embeddingsBackfillBlocked": "Uzupełnianie jest niedostępne przy włączonym wstrzymaniu — każdy rekord zostałby pominięty. Najpierw wyłącz je i zapisz.",
   "spaces.dangerZone.embeddingsBackfillDone": "Zakolejkowano {{enqueued}} rekordów do osadzenia. Proces trwa w tle.",
+  "spaces.dangerZone.notDoneYet": "Jeszcze nie zakończono: trwa głosowanie w tej sprawie albo zostało przyjęte, a zmiana wciąż jest tu wykonywana. Stan pokazuje widok Sieci.",
   "spaces.dangerZone.embeddingsBackfillMore": "{{remaining}} kolejnych wciąż wymaga osadzenia — uruchom ponownie, aby kontynuować.",
   "spaces.dangerZone.embeddingsBackfillSkipped": "Pominięto {{skipped}} rekordów, ponieważ typ lub rekord nadal je wstrzymuje.",
   "spaces.dangerZone.renameTitle": "Edytuj identyfikator przestrzeni",
