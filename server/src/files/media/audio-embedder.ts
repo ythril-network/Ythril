@@ -24,6 +24,7 @@ import { log } from '../../util/log.js';
 import { AUDIO_STEPS, type MediaRunOpts } from './progress.js';
 import { isAbandonment, stopIfLeaseLost } from './lease.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
+import { assertSpaceTakesWrites } from '../../spaces/space-write-gate.js';
 
 
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
@@ -224,6 +225,7 @@ export async function embedAudio(
   overlapMs = 5000,
   opts: MediaRunOpts,
 ): Promise<AudioEmbedResult> {
+  assertSpaceTakesWrites(spaceId, 'files');
   // Asked ONCE for the job, at its entry — never per segment. A suppressed file keeps its transcript chunks as text and
   // holds no vector on any of them; the embedder is asked nothing, and that is not a failed chunk (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);

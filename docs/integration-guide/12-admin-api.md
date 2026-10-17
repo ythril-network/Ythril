@@ -254,13 +254,14 @@ Content-Type: application/json
 
 **Requires admin token** (and TOTP code when MFA is enabled).
 
-> **On a space that belongs to a network, this OPENS A VOTE and wipes nothing yet — new in 3.1.** Emptying a
+> **`confirm: true` is required on every wipe.** Without it the answer is `400` and nothing is wiped or opened.
+>
+> **On a space that belongs to a network, the wipe is a vote.** Emptying a
 > space the network shares is a governed act, like deleting one. A round opens in every network holding the
 > space, this instance votes yes, and the wipe happens on **every member** when a round passes. A single veto
 > stops it there.
 >
-> The answer is `202` with `{ "status": "vote_pending", "rounds": [...] }` instead of `200` with `deleted`
-> counts. **Treat that as success** — do not retry, and do not read the missing counts as a failure. Each entry
+> On a club or pub/sub network, or where this instance is the only member, its own yes passes the round and the wipe runs in the same request: the answer is `200` with `{ "status": "wiped", "rounds", "deleted" }`. Otherwise the answer is `202` with `{ "status": "vote_pending", "rounds": [...] }`, and the wipe happens on each member when its round passes. **Treat `vote_pending` as success** — do not retry, and do not read the missing counts as a failure. A vote that passed, whose change here is still running, answers `202` with `status: "passed"` and `queued: true`; it completes on its own. If the vote passed and this instance's change failed during the call, the answer is `500` with `code: "space_act_failed"` and `status: "passed"` (`503` for a store outage): do not retry, the instance retries the change itself. Each entry
 > of `rounds` is `{ "networkId", "networkLabel", "roundId", "round" }`, `round` being the round as
 > `GET /api/networks/:id/votes` shows it. Watch the rounds there.
 >
@@ -278,24 +279,25 @@ Content-Type: application/json
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `types` | `string[]` *(optional)* | Subset of collection types to wipe: `"facts"`, `"entities"`, `"edges"`, `"chrono"`, `"files"`, `"links"`. Omit (or send `{}`) to wipe **all** collections. |
+| `types` | `string[]` *(optional)* | Subset of collection types to wipe: `"facts"`, `"entities"`, `"edges"`, `"chrono"`, `"files"`, `"links"`. Omit to wipe **all** collections. |
+| `confirm` | `boolean` *(required)* | Must be `true`. Without it the answer is `400` and nothing is wiped or opened. |
 
 #### Full wipe (all collections)
 
 ```json
-{}
+{ "confirm": true }
 ```
 
 or explicitly:
 
 ```json
-{ "types": ["facts", "entities", "edges", "chrono", "files", "links"] }
+{ "confirm": true, "types": ["facts", "entities", "edges", "chrono", "files", "links"] }
 ```
 
 #### Partial wipe (specific types only)
 
 ```json
-{ "types": ["facts"] }
+{ "confirm": true, "types": ["facts"] }
 ```
 
 ```json

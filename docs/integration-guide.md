@@ -19,7 +19,7 @@ stands on its own.
 5. [Files API](integration-guide/05-files-api.md)
    [Conversion Pipeline](integration-guide/05a-conversion-pipeline.md) · [Media Embedding](integration-guide/05b-media-embedding.md) · [Face Recognition](integration-guide/05c-face-recognition.md)
 6. [Spaces API](integration-guide/06-spaces-api.md)
-   [Space Schemas & Validation](integration-guide/06a-schema-api.md) · [Schema Library](integration-guide/06b-schema-library-api.md)
+   [Space Schemas & Validation](integration-guide/06a-schema-api.md) · [Schema Library](integration-guide/06b-schema-library-api.md) · [Space Deletion and Wipe](integration-guide/06c-space-deletion-and-wipe-api.md)
 7. [Tokens API](integration-guide/07-tokens-api.md)
 8. [Networks API](integration-guide/08-networks-api.md)
    [Invite API](integration-guide/08a-invite-api.md)

@@ -15,6 +15,7 @@
 
 import { getMongo } from './db/mongo.js';
 import { log } from './util/log.js';
+import { withinTimeBound, isTimeBoundEnded } from './util/time-bound.js';
 import { noteSearchUp } from './spaces/search-readiness.js';
 
 const TIMEOUT_MS = 2_000;
@@ -54,6 +55,8 @@ export interface CheckResult {
 
 /** Map a driver error onto a {@link CheckReason}. Exported for the `/ready` handler's own catch branch. */
 export function classifyCheckError(err: unknown): CheckReason {
+  // The probe's own bound ended the wait: a server that took too long, never one that refused.
+  if (isTimeBoundEnded(err)) return 'timeout';
   const msg = err instanceof Error ? err.message : String(err);
   // Auth first: "Authentication failed." matches nothing else, and misreading it as `unreachable` would send an
   // operator to check a firewall that is fine.
@@ -108,17 +111,8 @@ let _cachedAt = 0;
 
 // ── Individual checks ─────────────────────────────────────────────────────────
 
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
+/** One probe call, waited for at most `ms` (`util/time-bound.ts`: the timer is cleared when the call wins). */
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => withinTimeBound(promise, ms, 'the readiness probe');
 
 async function checkMongoDB(): Promise<CheckResult> {
   const start = Date.now();

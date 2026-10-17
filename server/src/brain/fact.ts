@@ -29,6 +29,7 @@ import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-p
 import { spaceCollection } from '../db/space-collection.js';
 import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /** Store a new fact with semantic embedding */
 export async function saveFact(
@@ -91,6 +92,8 @@ export async function saveFact(
    * in bulk, so this and `bulkWrite` cannot come to mean different things (`Q-99` part 3).
    */
   const input: FactInput = { fact, linkEntities, tags, description, properties, type, opts, ttlDays, id };
+  // Refused before the plan pays for an embedding; the commit asks again per stage, for a write admitted just before an act registers.
+  assertSpaceTakesWrites(spaceId, 'facts');
   const done = await planAndCommitOne(spaceId, factWant(input), view => planFact(spaceId, input, view));
   const stored = { ...done.plan.result, seq: done.seq } as unknown as FactDoc;
   // `fact.updated`, not `created`, on a converge — a subscriber must be able to tell a retry from a new record.
@@ -115,6 +118,7 @@ export async function updateFact(
   /** See `saveFact`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<FactDoc | null> {
+  assertSpaceTakesWrites(spaceId, 'facts');
   const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as FactDoc | null;
@@ -260,6 +264,7 @@ export async function deleteFact(
   memoryId: string,
   actor?: WebhookActor,
 ): Promise<boolean> {
+  assertSpaceTakesWrites(spaceId, 'facts');
   const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
   const result = await col<FactDoc>(spaceCollection(spaceId, 'facts')).deleteOne({

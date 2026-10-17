@@ -44,6 +44,7 @@ import { serverCursorOf } from './seq-run-pager.js';
 import { MAX_TRANSFER_PAGES, stopAtPageBound, type TransferOutcome } from './watermark.js';
 import { noteToldTombstoned, wasToldTombstoned, noteRefusedUpload, wasRefusedUpload } from './told-tombstoned.js';
 import { pushStoredFile, type SendUpload } from './file-push.js';
+import { assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
 
 /**
  * The most files whose held bytes are looked at for a repair, per space per sync cycle: a row that names another hash than the
@@ -591,6 +592,7 @@ async function pullFileTombstones(
 
 /** Record that this instance and `peerId` now both hold `sha256` for the file at `filePath`. */
 async function recordSyncBase(spaceId: string, filePath: string, peerId: string, sha256: string): Promise<void> {
+  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isActRefusal(err)) return; throw err; }
   await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
     .updateOne(asFilter<SyncedFileMeta>({ _id: filePath }), asUpdate<SyncedFileMeta>({ $set: { [syncBasePath(peerId)]: sha256 } }))
     .catch(err => log.warn(`recordSyncBase ${peerText(filePath)}: ${peerText(err)}`));

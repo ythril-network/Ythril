@@ -8,7 +8,7 @@
 import fs from 'fs/promises';
 import { BRAIN_COLLECTIONS, TOMBSTONE_TYPE_OF, type BrainCollection, type TombstoneType } from '../config/types.js';
 import path from 'path';
-import { getDb, col } from '../db/mongo.js';
+import { getDb, col, asFilter } from '../db/mongo.js';
 import { getConfig, saveConfig, mutateConfig, getEmbeddingConfig, getDataRoot } from '../config/loader.js';
 import { ensureSpaceFilesDir } from '../files/files.js';
 import { invalidateUsageCache } from '../quota/quota.js';
@@ -18,7 +18,11 @@ import type { ParsedSpaceMeta } from './body-schemas.js';
 import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady } from './vector-index.js';
 import { armSearchIndexPresence, reconcileSpaceSearchIndexes, forgetSpaceSearchIndexWaiters } from './search-index-presence.js';
 import { afterSearchUp, forgetSearchWaiter } from './search-readiness.js';
-import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage, pendingOpStillFailingMessage, setReindexNeeded, beginSpaceOp, endSpaceOp, spaceOpsInFlight } from './_shared.js';
+import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage, pendingOpStillFailingMessage, setReindexNeeded } from './_shared.js';
+import {
+  runSpaceAct, registerOwnSpaceAct, releaseSpaceActWaiter, defineSpaceActBody, spaceActRunning, SpaceActsClosedError,
+  type SpaceActRequest, type SpaceRoundSettled, type SpaceActBodyContext, type SpaceActBodyOutcome,
+} from './space-act-runner.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
 import { concreteSpaceIds, isProxy } from './proxy.js';
 import { removeTree } from '../files/remove-tree.js';
@@ -684,7 +688,9 @@ export async function createSpace(opts: {
  *  directories. Idempotent — re-running after a partial run is safe (dropping a
  *  missing collection / removing an absent directory are both no-ops). Returns the
  *  list of hard errors encountered (empty on full success). */
-export async function dropSpaceData(spaceId: string): Promise<string[]> {
+export async function dropSpaceData(
+  spaceId: string, fileTree: <T>(fn: () => Promise<T>) => Promise<T> = (fn) => fn(),
+): Promise<string[]> {
   const db = getDb();
   const errors: string[] = [];
 
@@ -759,7 +765,8 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
   try {
     // Through `removeTree`: a writer that started before this space stopped taking writes may still be adding
     // entries, and a bare recursive rm loses that race with ENOTEMPTY (see the helper).
-    await removeTree(filesDir);
+    // Bounded when an act runs it (`fileTree`): a stuck mount fails the attempt instead of holding the lane.
+    await fileTree(() => removeTree(filesDir));
     log.debug(`Deleted files directory ${peerText(filesDir)}`);
   } catch (err) {
     const msg = `Could not delete files directory ${filesDir}: ${err}`;
@@ -770,7 +777,7 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
   // 4. Delete any stale chunked-upload directories for this space
   const chunksDir = path.resolve(getDataRoot(), '.chunks', spaceId);
   try {
-    await removeTree(chunksDir);
+    await fileTree(() => removeTree(chunksDir));
     log.debug(`Deleted chunk uploads directory ${peerText(chunksDir)}`);
   } catch (err) {
     const msg = `Could not delete chunk uploads directory ${chunksDir}: ${err}`;
@@ -789,17 +796,50 @@ export async function dropSpaceData(spaceId: string): Promise<string[]> {
  *  is already going away). If any drop fails, the marker is kept so the operator can
  *  retry (or the next boot resumes) rather than leaving a half-deleted space silently. */
 export async function removeSpace(spaceId: string): Promise<boolean> {
-  // Same reason as renameSpace: this writes a pendingSpaceOp marker before dropping anything, and the
-  // reconciler that acts on that marker also runs on the config-reload path. See beginSpaceOp.
-  beginSpaceOp();
-  try {
-    return await removeSpaceInner(spaceId);
-  } finally {
-    endSpaceOp();
-  }
+  return runSpaceAct(registerOwnSpaceAct(soloRemoval(spaceId)), { waiter: true }).then(settled => actAnswer(settled, () => settled.removedHere === true));
 }
 
-async function removeSpaceInner(spaceId: string): Promise<boolean> {
+/** This instance's own deletion of `spaceId`, refused before anything is registered when the space may never be deleted. */
+function soloRemoval(spaceId: string): SpaceActRequest {
+  if (getConfig().spaces.find(s => s.id === spaceId)?.builtIn) throw new Error(`Cannot delete built-in space '${spaceId}'`);
+  return { kind: 'delete', localId: spaceId };
+}
+
+/**
+ * What a caller of `removeSpace`/`wipeSpace` is answered from the act's run: its value when it completed, else the failure the body
+ * threw (a store failure stays the store's, so the door answers it as every door does). The door's wait ends either way.
+ */
+function actAnswer<T>(settled: SpaceRoundSettled, value: () => T): T {
+  releaseSpaceActWaiter(settled.entryId);
+  if (settled.ok) return value();
+  if (settled.interrupted) throw new SpaceActsClosedError();
+  throw settled.cause ?? new Error(settled.error ?? 'the space act did not complete');
+}
+
+/**
+ * The removal body, run by the runner: a deletion's network half (the space leaves the network its round belongs to), then this
+ * instance's own copy — for its own deletion, or for a round it proposed once no network carries the space any more.
+ */
+async function removeSpaceUnqueued(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutcome> {
+  const { entry } = ctx;
+  const spaceId = entry.localId;
+  if (entry.networkId) {
+    const { removeSpaceFromNetwork } = await import('../networks/network-spaces.js');
+    removeSpaceFromNetwork(entry.networkId, spaceId, `space_deletion round(s) ${entry.rounds.map(r => r.roundId).join(', ')} passed`);
+    const cfgNow = getConfig();
+    const proposedHere = entry.rounds.some(r => cfgNow.networks.find(n => n.id === r.networkId)?.pendingRounds
+      .find(x => x.roundId === r.roundId)?.proposedHere === true);
+    if (!proposedHere) return { removedHere: false };
+    if (cfgNow.networks.some(n => n.spaces.includes(spaceId))) {
+      log.info(`'${peerText(spaceId)}' left network ${peerText(entry.networkId)} and is still in another network: kept until that round passes`);
+      return { removedHere: false };
+    }
+  }
+  if (!getConfig().spaces.some(s => s.id === spaceId)) return { absent: !entry.networkId, removedHere: false };
+  return { removedHere: await removeOwnCopy(spaceId, ctx) };
+}
+
+async function removeOwnCopy(spaceId: string, ctx: SpaceActBodyContext): Promise<boolean> {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) return false;
@@ -826,7 +866,7 @@ async function removeSpaceInner(spaceId: string): Promise<boolean> {
     saveConfig(cfg);
   }
 
-  const errors = await dropSpaceData(spaceId);
+  const errors = await dropSpaceData(spaceId, ctx.fileTree);
   if (errors.length > 0) {
     // Keep the marker — the delete is incomplete and forward-only, so a retry or the
     // next boot resumes it. Do NOT remove the space from config yet.
@@ -908,20 +948,40 @@ export interface WipeResult {
  *  The returned counts reflect the number of documents actually deleted.
  */
 export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): Promise<WipeResult> {
-  const cfg = getConfig();
-  const space = cfg.spaces.find(s => s.id === spaceId);
-  if (!space) throw new Error(`Space '${spaceId}' not found`);
+  return runSpaceAct(registerOwnSpaceAct(soloWipe(spaceId, types)), { waiter: true }).then(settled => actAnswer(settled, () => wipeCounts(settled.counts)));
+}
 
-  // Guard: spaceId must match the safe pattern used during creation so it is
-  // safe to embed in a filesystem path (same constraint as removeSpace).
-  if (!/^[a-z0-9-]+$/.test(spaceId)) {
-    throw new Error(`Invalid spaceId '${spaceId}'`);
-  }
+/** This instance's own wipe of `spaceId`, refused before anything is registered when the space is not here or its id is unsafe. */
+function soloWipe(spaceId: string, types?: WipeCollectionType[]): SpaceActRequest {
+  if (!getConfig().spaces.some(s => s.id === spaceId)) throw new Error(`Space '${spaceId}' not found`);
+  // The id is embedded in a filesystem path, so it must match the pattern every id is created with (as for removeSpace).
+  if (!/^[a-z0-9-]+$/.test(spaceId)) throw new Error(`Invalid spaceId '${spaceId}'`);
+  return { kind: 'wipe', localId: spaceId, ...(types && types.length > 0 ? { types } : {}) };
+}
+
+/** The DELETE filter of one wipe batch: the ids the runner read for it. Not a read of stored copies. */
+function byIds(ids: unknown[]): ReturnType<typeof asFilter<object>> {
+  return asFilter<object>({ _id: { $in: ids } });
+}
+
+const wipeCounts = (counts: Record<string, number> | undefined): WipeResult => ({
+  facts: counts?.['facts'] ?? 0, entities: counts?.['entities'] ?? 0, edges: counts?.['edges'] ?? 0,
+  chrono: counts?.['chrono'] ?? 0, files: counts?.['files'] ?? 0, links: counts?.['links'] ?? 0,
+});
+
+/**
+ * The wipe body, run by the runner: every covered collection emptied in bounded batches, then what hangs off them. Its entry is its
+ * write-ahead (it exists before any delete), so it writes no marker; a space no longer here is `absent` (nothing to wipe).
+ */
+async function wipeSpaceUnqueued(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutcome> {
+  const { entry } = ctx;
+  const spaceId = entry.localId;
+  if (!getConfig().spaces.some(s => s.id === spaceId)) return { absent: true, counts: {} };
+  const own = { except: entry.id };
 
   // Resolve which types to wipe — default to all when not specified.
-  const targets: Set<WipeCollectionType> = new Set(
-    types && types.length > 0 ? types : WIPE_COLLECTION_TYPES,
-  );
+  const types = entry.types;
+  const targets: Set<WipeCollectionType> = new Set(types && types.length > 0 ? types : WIPE_COLLECTION_TYPES);
   const isFullWipe = WIPE_COLLECTION_TYPES.every(t => targets.has(t));
 
   /*
@@ -933,18 +993,17 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
    * what it wrote. Without it a run that read its parent live wrote a derived row after the wipe had removed the parent, under files
    * that no longer existed.
    */
-  if (targets.has('files')) await cancelEveryJobOfSpace(spaceId);
+  if (targets.has('files')) await ctx.claimWait(() => cancelEveryJobOfSpace(spaceId));
 
-  // Run all applicable deletes in parallel.
-  const zero = Promise.resolve({ deletedCount: 0 });
-  const [memRes, entRes, edgeRes, chronoRes, fileRes, linkRes] = await Promise.all([
-    targets.has('facts') ? col(spaceCollection(spaceId, 'facts')).deleteMany({}) : zero,
-    targets.has('entities') ? col(spaceCollection(spaceId, 'entities')).deleteMany({}) : zero,
-    targets.has('edges') ? col(spaceCollection(spaceId, 'edges')).deleteMany({}) : zero,
-    targets.has('chrono') ? col(spaceCollection(spaceId, 'chrono')).deleteMany({}) : zero,
-    targets.has('files') ? col(spaceCollection(spaceId, 'files')).deleteMany({}) : zero,
-    targets.has('links') ? col(spaceCollection(spaceId, 'links')).deleteMany({}) : zero,
-  ]);
+  // Each covered collection in bounded batches, one after another: a wipe of any size is a sequence of operations each far below
+  // the per-operation bound, and one that the bound ends after progress is run again rather than failing the attempt.
+  const counts: Record<string, number> = {};
+  for (const t of WIPE_COLLECTION_TYPES) {
+    // The file rows go with the rest of the file tree below, after the claims were revoked above.
+    if (t !== 'files' && targets.has(t)) {
+      counts[t] = await ctx.deleteInBatches(spaceCollection(spaceId, t), {}, ids => col(spaceCollection(spaceId, t)).deleteMany(byIds(ids)));
+    }
+  }
 
   /*
    * WIPING ENTITIES UNLABELS EVERY FACE, and this is the guard a hand-written wipe drops.
@@ -963,7 +1022,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
    * Unlabel, never delete: the face record belongs to the FILE, which the operator did not ask to remove.
    * A full wipe takes the files too, so this matters most for `types: ['entities']`.
    */
-  if (targets.has('entities')) await unlabelAllFaces(spaceId);
+  if (targets.has('entities')) await unlabelAllFaces(spaceId, own);
 
   // A read spill holding this space's records outlives a wipe of them otherwise (Q-92): the one-day lifetime
   // bounds it, but a wipe is an operator saying "gone now". Any wipe, since a spill mixes record kinds.
@@ -974,20 +1033,20 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   // reindex refusal and its recall flag for work that no longer exists, and a boot would resume it.
   if (isFullWipe) await col(spaceCollection(spaceId, 'reindexRun')).deleteMany({});
 
-  // Clear tombstones for the wiped types.
-  // Full wipe: drop everything (single deleteMany with no filter).
-  // Partial wipe: filter by the `type` field present on brain tombstones.
+  // Clear tombstones for the wiped types, in batches like the records.
+  // Full wipe: every tombstone. Partial wipe: filter by the `type` field present on brain tombstones.
   // DERIVED. This was a four-entry copy of the collection-to-type mapping, in the same function as a second
   // copy for the review findings — the seventh and eighth of that map in the codebase. `files` is absent from
   // the derived one for the reason it was absent from this one: a deleted file has `FileTombstoneDoc`.
   if (isFullWipe) {
-    await col(spaceCollection(spaceId, 'tombstones')).deleteMany({});
+    await ctx.deleteInBatches(spaceCollection(spaceId, 'tombstones'), {}, ids => col(spaceCollection(spaceId, 'tombstones')).deleteMany(byIds(ids)));
   } else {
     const tombstoneTypes = Array.from(targets)
       .map(t => TOMBSTONE_TYPE_OF[t])
       .filter((t): t is TombstoneType => t !== undefined);
     if (tombstoneTypes.length > 0) {
-      await col(spaceCollection(spaceId, 'tombstones')).deleteMany({ type: { $in: tombstoneTypes } });
+      await ctx.deleteInBatches(spaceCollection(spaceId, 'tombstones'), { type: { $in: tombstoneTypes } },
+        ids => col(spaceCollection(spaceId, 'tombstones')).deleteMany(byIds(ids)));
     }
   }
   // Clear review findings that reference the wiped types — BOTH candidate collections. See
@@ -1013,9 +1072,13 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
   if (targets.has('files')) {
     // Through the tombstones module, which marks the wipe: a publish in flight would otherwise write its tombstone again into
     // the emptied space (Q-406).
-    await forgetFileTombstonesOf(spaceId);
+    counts['files'] = await ctx.deleteInBatches(spaceCollection(spaceId, 'files'), {}, ids => col(spaceCollection(spaceId, 'files')).deleteMany(byIds(ids)));
+    await forgetFileTombstonesOf(spaceId, own);
+    // What hangs off the file rows: their conflict copies and the hashes kept for them.
+    await ctx.deleteInBatches(spaceCollection(spaceId, 'conflicts'), {}, ids => col(spaceCollection(spaceId, 'conflicts')).deleteMany(byIds(ids)));
+    await ctx.deleteInBatches(spaceCollection(spaceId, 'fileHashes'), {}, ids => col(spaceCollection(spaceId, 'fileHashes')).deleteMany(byIds(ids)));
 
-    // Delete the physical files directory, then recreate it empty.
+    // Delete the physical files directory, then recreate it empty; and the space's staged chunk uploads.
     // Validate the resolved path stays within the expected data root to guard
     // against any unexpected traversal (defence-in-depth alongside the regex above).
     const dataRoot = getDataRoot();
@@ -1024,27 +1087,24 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
     if (!filesDir.startsWith(boundary)) {
       throw new Error(`wipeSpace: resolved path '${filesDir}' escapes expected data root`);
     }
-    try {
+    // NOT swallowed (W2): a tree that could not be cleared fails the attempt, and the act stays owed with the space closed —
+    // a wipe that reported success over files still on disk is the defect this replaced.
+    await ctx.fileTree(async () => {
       await removeTree(filesDir);
       await fs.mkdir(filesDir, { recursive: true });
-    } catch (err) {
-      log.warn(`wipeSpace: could not clear files directory for '${peerText(spaceId)}': ${peerText(err)}`);
-    }
+      await removeTree(path.resolve(dataRoot, '.chunks', spaceId));
+    });
   }
   invalidateUsageCache(); // a wipe frees disk + shrinks brain — honour it in the next quota check
 
-  const result: WipeResult = {
-    facts: memRes.deletedCount ?? 0,
-    entities: entRes.deletedCount ?? 0,
-    edges: edgeRes.deletedCount ?? 0,
-    chrono: chronoRes.deletedCount ?? 0,
-    files: fileRes.deletedCount ?? 0,
-    links: linkRes.deletedCount ?? 0,
-  };
+  const result = wipeCounts(counts);
   const typesLabel = isFullWipe ? 'all' : Array.from(targets).join(', ');
   log.info(`Wiped space '${peerText(spaceId)}' [${peerText(typesLabel)}]: ${result.facts} facts, ${result.entities} entities, ${result.edges} edges, ${result.chrono} chrono, ${result.files} files, ${result.links} links`);
-  return result;
+  return { counts: { ...result } };
 }
+
+defineSpaceActBody('delete', removeSpaceUnqueued);
+defineSpaceActBody('wipe', wipeSpaceUnqueued);
 
 /** Complete a space rename/delete that was interrupted (e.g. by a crash or restart)
  *  after its `pendingSpaceOp` marker was written but before it committed. Called once
@@ -1053,12 +1113,12 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
  *  step still fails, the marker is kept and a loud error is logged for the operator;
  *  the next boot tries again. */
 export async function reconcilePendingSpaceOp(): Promise<void> {
-  await resumePendingSpaceOp({ callerHoldsOp: false });
+  await resumePendingSpaceOp();
 }
 
 /**
  * Before a rename or delete refuses because ANOTHER op's marker is pending, resume that op — and proceed if it
- * completes (the caller's own op is already counted in flight, which `callerHoldsOp` accounts for).
+ * completes.
  *
  * Why (Docker integration run of bundle-27, 13:30:47Z): one delete that failed on a racy file write kept its
  * marker, and since the marker was only resumed at BOOT, every space rename and delete on the instance was refused
@@ -1069,7 +1129,7 @@ export async function reconcilePendingSpaceOp(): Promise<void> {
 export async function settlePendingSpaceOpBefore(attempted: string): Promise<void> {
   const pending = getConfig().pendingSpaceOp;
   if (!pending) return;
-  const result = await resumePendingSpaceOp({ callerHoldsOp: true });
+  const result = await resumePendingSpaceOp();
   if (result.completed) return;
   // The store's own failure is not a reason to put in a sentence: the door answers it (503, Retry-After), as it answers every store failure.
   if (result.cause !== undefined) throwIfStoreSide(result.cause);
@@ -1095,7 +1155,7 @@ function resumeThrew(err: unknown): ResumeResult {
   return { completed: false, reason, cause: err };
 }
 
-async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<ResumeResult> {
+async function resumePendingSpaceOp(): Promise<ResumeResult> {
   const cfg = getConfig();
   const op = cfg.pendingSpaceOp;
   if (!op) return { completed: true };
@@ -1107,8 +1167,9 @@ async function resumePendingSpaceOp(opts: { callerHoldsOp: boolean }): Promise<R
   // aside: if the running op dies, its marker survives and the next boot recovers it, which is the only
   // situation this function exists for.
   //
-  // A caller that is itself a space op counts once; anything beyond that is the marker's own op, still running.
-  if (spaceOpsInFlight() > (opts.callerHoldsOp ? 1 : 0)) {
+  // Asked by KEY: is the marker's OWN op running now? A count would let a long wipe of an unrelated space make every rename and
+  // delete that meets a marker refuse.
+  if (spaceActRunning(op.spaceId)) {
     log.debug(`Pending space ${op.type} for '${peerText(op.spaceId)}' is being performed right now — recovery stands aside`);
     return { completed: false, reason: 'in-flight' };
   }

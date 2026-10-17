@@ -120,12 +120,6 @@ const UNBOUNDED_CALL_EXEMPTIONS = [
       + 'its own `timeoutMS` (3 s) and is never inside a scope; it writes nothing.',
   },
   {
-    methods: ['drop'], files: ['server/src/spaces/lifecycle.ts'],
-    why: 'Deleting a space a network voted to delete: reached from the vote-round expiry job only through applyRoundConclusion, which acts on '
-      + 'PASSED rounds alone, and the job hands it only rounds it concluded as expired (never passed). Dropping a collection is a one-off '
-      + 'metadata change that scales with nothing a per-operation figure could fit.',
-  },
-  {
     methods: ['command'], files: ['server/src/db/write-bound.ts'],
     why: 'The bound\'s own mechanism: after the backstop it finds the database\'s operation by its comment and kills it. It is how a bound ends, so '
       + 'it cannot be inside one.',

@@ -21,6 +21,7 @@ import { log } from '../../util/log.js';
 import { VIDEO_STEPS, type MediaRunOpts } from './progress.js';
 import { isAbandonment, stopIfLeaseLost } from './lease.js';
 import { updateDerivedFileRow } from '../derived-fields.js';
+import { assertSpaceTakesWrites } from '../../spaces/space-write-gate.js';
 
 const DEFAULT_KEYFRAME_INTERVAL_S = 30;
 
@@ -128,6 +129,7 @@ export async function embedVideo(
   keyframeIntervalS = DEFAULT_KEYFRAME_INTERVAL_S,
   opts: MediaRunOpts,
 ): Promise<{ audioFailed: number; audioTotal: number }> {
+  assertSpaceTakesWrites(spaceId, 'files');
   // Asked ONCE for the job, at its entry, for the keyframe re-embed below; the audio stage asks for its own chunks. A
   // suppressed file's chunks are stored with their text and no vector, and the embedder is asked nothing (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);

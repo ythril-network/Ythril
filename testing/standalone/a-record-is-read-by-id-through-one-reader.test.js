@@ -70,6 +70,9 @@ const ALLOWED = new Map([
   ['server/src/files/move-plan.ts:rowFacts',
     'an aggregation that projects each row\'s stored SIZE (`$bsonSize`) beside its parent and flag, never the stored copy: the sizes decide '
     + 'which rows of a move share a transaction, and reading the documents to measure them would move the very bytes the budget exists to bound.'],
+  ['server/src/spaces/lifecycle.ts:byIds',
+    'the DELETE filter of one wipe batch (bundle-106, X6): the space-act runner read the batch\'s ids and the wipe body deletes exactly '
+    + 'those; it never reads a stored copy.'],
   ['server/src/brain/entity-name-scope.ts:attachedToEntityNamed',
     'a filter BUILDER: it returns a predicate the filter tool ANDs into a caller\'s query, never reads by id itself.'],
 ]);

@@ -39,6 +39,7 @@ import { syntheticEdgeId } from './edge-id.js';
 export type { TraverseEdge } from './traverse-subgraph.js';
 import type { TraverseEdge } from './traverse-subgraph.js';
 import { atReadSeq } from '../db/at-read-seq.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 export interface TraverseNode {
   _id: string;
@@ -146,6 +147,7 @@ export async function upsertEdge(
    * `edgeRefusal` decides for this door, the edge routes, an inline edge and a batch alike.
    */
   const input: EdgeInput = { from, to, label, weight, type, description, properties, tags, ttlDays, opts };
+  assertSpaceTakesWrites(spaceId, 'edges');   // before the plan pays for an embedding; the commit asks again per stage
   const done = await planAndCommitOne(spaceId, edgeWant(spaceId, input), view => planEdge(spaceId, input, view));
   const edge = { ...done.plan.result, seq: done.seq } as unknown as EdgeDoc;
   // `edge.created` on both branches, as it has always been answered.
@@ -221,6 +223,7 @@ export async function updateEdgeById(
   /** See `upsertEdge`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
 ): Promise<EdgeDoc | null> {
+  assertSpaceTakesWrites(spaceId, 'edges');
   const collection = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
   const existing = await collection.findOne(asFilter<EdgeDoc>({ _id: id, spaceId }),
     { projection: NEVER_RETURNED_PROJECTION }) as EdgeDoc | null;

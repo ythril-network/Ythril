@@ -22,6 +22,8 @@ import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import type { TombstoneType } from '../config/types.js';
 import { forkCandidates, MAX_FORK_DEPTH, CONVERGE_BLANKED, type HeldTombstone, type ArrivalDoc, type PlannedFamily, type StoredCopy } from './upsert-plan.js';
+import { TOMBSTONE_COLLECTION } from '../config/types-knowledge.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /**
  * The tombstone held per record id — its seq, its issuer and the upstream it was stored for (`storedVia`) — per
@@ -126,6 +128,7 @@ export async function deleteSupersededTombstones(
   spaceId: string, type: TombstoneType, items: ReadonlyArray<{ id: string; below: number; via?: string }>,
 ): Promise<void> {
   if (items.length === 0) return;
+  assertSpaceTakesWrites(spaceId, TOMBSTONE_COLLECTION[type]);
   await col(spaceCollection(spaceId, 'tombstones')).deleteMany(asFilter({
     type, $or: items.map(i => (i.via !== undefined ? { _id: i.id, storedVia: i.via } : { _id: i.id, seq: { $lt: i.below } })),
   }));

@@ -54,6 +54,19 @@ const EXEMPT = new Map([
   ['server/src/files/plaintext-file.ts', 'a primitive beneath the file door'],
   ['server/src/sync/fill-file-meta.ts', 'fills existing file rows from local stray state and creates nothing (P-41)'],
   ['server/src/brain/ttl-sweep.ts', 'the TTL sweep\'s deletes remove records and create or refill none'],
+  // Housekeeping that only prunes, or updates rows that already exist (design v5 §2.6b, ruling R-P8): a row an act is removing
+  // matches nothing once it is gone, so none of these can refill a space an act empties.
+  ['server/src/brain/candidate-prune.ts', 'prunes review findings: deletes only'],
+  ['server/src/brain/tombstone-prune.ts', 'prunes tombstones past their retention: deletes only'],
+  ['server/src/brain/chrono-redaction.ts', 'redacts and stamps the expiry of chrono entries that exist: updates existing rows only'],
+  ['server/src/brain/suppression-sweep.ts', 'removes vectors from records that exist: updates existing rows only'],
+  ['server/src/sync/delivered-by-backfill.ts', 'stamps deliveredBy on records that exist, once: updates existing rows only'],
+  ['server/src/files/leaked-rows-repair.ts', 'removes derived rows and links a deleted file left behind: deletes only'],
+  ['server/src/files/legacy-spill-sweep.ts', 'removes legacy read spills: deletes only'],
+  ['server/src/files/move-markers.ts', 'updates and removes the move markers on file tombstones that exist: creates no row'],
+  // Boot conversions, run before listen: an act standing then is resumed only AFTER listen and acts on what they wrote.
+  ['server/src/brain/links-conversion.ts', 'the boot conversion of link arrays, run before listen; a standing act resumes after it'],
+  ['server/src/db/drop-link-arrays.ts', 'the boot step that clears retired link arrays, run before listen: updates existing rows only'],
 ]);
 
 const ASKS = /\bassertSpaceTakesWrites\s*\(/;

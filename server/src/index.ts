@@ -338,6 +338,14 @@ async function main(): Promise<void> {
     stopBrainEmbeddingWorker();
     const { stopRetryWorker, drainFirstDeliveries } = await import('./webhooks/dispatcher.js');
     stopRetryWorker();
+    // Space acts: refused from now on, and nothing waits for one. Each is on disk, so it resumes after the next start; a body that
+    // fails from here on (the store closes under it) records nothing.
+    const { closeSpaceActs } = await import('./spaces/space-act-runner.js');
+    const { left } = closeSpaceActs();
+    if (left.length > 0) {
+      log.info(`Shutdown: ${left.length} space act(s) not finished, resumed after the next start: `
+        + left.map(a => `${a.kind} of '${peerText(a.localId)}' (${a.state})`).join(', '));
+    }
     // First deliveries still waiting in the dispatcher's per-subscription queues were never attempted: written to the retry queue now,
     // while the database is open, so the next boot delivers them instead of losing them (Q-469). Events emitted from here on go there too.
     // Bounded by the shutdown's own drain budget (a database that stopped answering must cost the budget, not the orchestrator's kill), and

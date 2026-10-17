@@ -11,9 +11,13 @@ import { getDb, col, asDoc, asFilter } from '../db/mongo.js';
 import { getConfig, saveConfig, getDataRoot, mutateConfig } from '../config/loader.js';
 import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { Config, SpaceConfig } from '../config/types.js';
-import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
+import { moveReceiveMarks } from '../sync/member-space-mark.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
-import { repairStaleSpaceIds, beginSpaceOp, endSpaceOp } from './_shared.js';
+import { repairStaleSpaceIds } from './_shared.js';
+import {
+  runSpaceAct, registerSpaceAct, releaseSpaceActWaiter, defineSpaceActBody, spaceActStands, SpaceActsClosedError,
+  type SpaceActBodyContext, type SpaceActBodyOutcome,
+} from './space-act-runner.js';
 import { RenameSpaceBody } from './body-schemas.js';
 import { isProxy } from './proxy.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
@@ -56,7 +60,9 @@ class RenameIncompleteError extends Error {
  *  {oldId}_* / files/oldId to {newId}_* / files/newId. Idempotent — after a partial
  *  run, only the collections/dirs still under `oldId` remain to move, so re-running
  *  completes it. Returns hard errors (empty on full success). */
-export async function moveSpaceData(oldId: string, newId: string): Promise<string[]> {
+export async function moveSpaceData(
+  oldId: string, newId: string, fileTree: <T>(fn: () => Promise<T>) => Promise<T> = (fn) => fn(),
+): Promise<string[]> {
   const db = getDb();
   const errors: string[] = [];
 
@@ -170,8 +176,8 @@ export async function moveSpaceData(oldId: string, newId: string): Promise<strin
   const oldDir = path.resolve(dataRoot, 'files', oldId);
   const newDir = path.resolve(dataRoot, 'files', newId);
   try {
-    await fs.access(oldDir);
-    await fs.rename(oldDir, newDir);
+    // Bounded when an act runs it (`fileTree`): a stuck mount fails the attempt instead of holding the lane.
+    await fileTree(async () => { await fs.access(oldDir); await fs.rename(oldDir, newDir); });
     log.debug(`Moved files directory ${peerText(oldDir)} → ${peerText(newDir)}`);
   } catch (err) {
     // If old dir doesn't exist, that's fine — space had no files, or it was already moved.
@@ -254,13 +260,19 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
      * "unknown", which is SAFE and invisible. A fifth watermark would have been added to the type by
      * somebody who never opened this file.
      */
-    for (const member of net.members) {
-      for (const key of PER_SPACE_WATERMARKS) {
-        const marks = member[key] as Record<string, unknown> | undefined;
-        if (marks?.[oldId] === undefined) continue;
-        marks[newId] = marks[oldId];
-        delete marks[oldId];
-      }
+    moveReceiveMarks(net, oldId, newId);
+  }
+
+  // The acts standing for the space follow it (X3): an entry, and a round's recorded `actLocalId`, name the NEW id from this commit on,
+  // so a wipe waiting for the rename's slot reads its space from its entry and wipes what the rename moved.
+  for (const entry of cfg.pendingSpaceActs ?? []) {
+    if (entry.localId === oldId) entry.localId = newId;
+    for (const step of entry.postSteps.forgetReceiveMarks ?? []) if (step.localSpaceId === oldId) step.localSpaceId = newId;
+  }
+  for (const net of cfg.networks) {
+    for (const r of net.pendingRounds ?? []) {
+      const local = r as { actLocalId?: string };
+      if (local.actLocalId === oldId) local.actLocalId = newId;
     }
   }
 
@@ -322,18 +334,66 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
  *  retry (the retry resumes the same op rather than starting over).
  *  Returns the updated SpaceConfig on success. */
 export async function renameSpace(oldId: string, newId: string): Promise<SpaceConfig> {
-  // Crash recovery must not run against a rename that is still running HERE. The marker written below is
-  // what `reconcilePendingSpaceOp` acts on, and that reconciler also runs on the config-reload path — so
-  // without this, a config reload during the collection work starts a SECOND `moveSpaceData` over the same
-  // collections, and whichever loses reports `Source collection … does not exist` on a rename that
-  // succeeded. See `beginSpaceOp` in `_shared.ts`.
-  beginSpaceOp();
-  try {
-    return await renameSpaceInner(oldId, newId);
-  } finally {
-    endSpaceOp();
+  return runSpaceAct(registerRename(oldId, newId), { waiter: true }).then(settled => {
+    releaseSpaceActWaiter(settled.entryId);
+    if (settled.ok && settled.renamed) return settled.renamed;
+    if (settled.interrupted) throw new SpaceActsClosedError();
+    throw settled.cause ?? new Error(settled.error ?? `Space '${oldId}' rename did not complete`);
+  });
+}
+
+/**
+ * A rename meets a deletion or wipe of its space that is owed or running. Refused, never queued behind it: the act would delete what
+ * the rename moved, or the rename would move what the act half-deleted.
+ */
+export class RenameBlockedError extends Error {
+  override readonly name = 'RenameBlockedError';
+  constructor(oldId: string) {
+    super(`'${oldId}' cannot be renamed while a deletion or wipe of it is owed or running; see GET /api/networks/:id (owedSpaceActs).`);
   }
 }
+
+/** Why `oldId` may not be renamed to `newId` now, as the error the doors answer, or null. `except`: the rename's own entry. */
+function renameRefusal(cfg: Config, oldId: string, newId: string, except?: string): Error | null {
+  const space = cfg.spaces.find(s => s.id === oldId);
+  if (!space) return new Error(`Space '${oldId}' not found`);
+  if (space.builtIn) return new Error(`Cannot rename built-in space '${oldId}'`);
+  if (cfg.spaces.some(s => s.id === newId)) return new Error(`Space '${newId}' already exists`);
+  // A network may still call ANOTHER space by `newId` — its name before a rename (Q-133). Taking it would make this
+  // space indistinguishable from that one to every peer. Checked before anything moves.
+  const inUse = spaceNameInUseRefusal(cfg.networks.filter(n => n.spaces.includes(oldId)), newId);
+  if (inUse) return new SpaceNameInUseError(inUse);
+  const stands = spaceActStands(cfg, oldId, { except });
+  if (stands && (stands.kind === 'delete' || stands.kind === 'wipe')) return new RenameBlockedError(oldId);
+  return null;
+}
+
+/**
+ * Register the rename as an act in a config write of its own — refused before anything is registered when it could not go ahead now —
+ * and return its entry id. From that write the old id takes no writes, and a deletion or wipe of it queues behind the rename.
+ */
+function registerRename(oldId: string, newId: string): string {
+  const refusal = renameRefusal(getConfig(), oldId, newId);
+  if (refusal) throw refusal;
+  let id = '';
+  mutateConfig(cfg => { id = registerSpaceAct(cfg, { kind: 'rename', localId: oldId, newId }, Date.now()).entry.id; });
+  return id;
+}
+
+/** The rename body, run by the runner in the `space-op` lane. Asks again inside its job: a deletion or wipe may have stood up meanwhile. */
+async function renameSpaceUnqueued(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutcome> {
+  const { entry } = ctx;
+  const oldId = entry.localId;
+  const newId = entry.newId ?? '';
+  const resuming = getConfig().pendingSpaceOp?.type === 'rename' && getConfig().pendingSpaceOp?.spaceId === oldId;
+  if (!resuming) {
+    const refusal = renameRefusal(getConfig(), oldId, newId, entry.id);
+    if (refusal) return { refusal };
+  }
+  return { renamed: await renameSpaceInner(oldId, newId, ctx.fileTree) };
+}
+
+defineSpaceActBody('rename', renameSpaceUnqueued);
 
 /** A rename's answer as both doors give it: the renamed space, or the status and sentence of the refusal. */
 export type RenameSpaceResult =
@@ -353,6 +413,7 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
   } catch (err) {
     // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
     if (err instanceof SpaceNameInUseError) return { status: 409, error: err.message, code: err.code };
+    if (err instanceof RenameBlockedError) return { status: 409, error: err.message };
     if (err instanceof RenameIncompleteError) return { status: 500, error: err.message };
     // The store's failure is not a refusal: `refusalText` rethrows it, so each door answers it as every door does
     // (bundle-30 I12), and only then are the words read (bundle-53 G7, Q-335). A driver refusal comes back in our words.
@@ -364,7 +425,9 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
   }
 }
 
-async function renameSpaceInner(oldId: string, newId: string): Promise<SpaceConfig> {
+async function renameSpaceInner(
+  oldId: string, newId: string, fileTree: <T>(fn: () => Promise<T>) => Promise<T>,
+): Promise<SpaceConfig> {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === oldId);
   if (!space) throw new Error(`Space '${oldId}' not found`);
@@ -393,7 +456,7 @@ async function renameSpaceInner(oldId: string, newId: string): Promise<SpaceConf
     saveConfig(cfg);
   }
 
-  const errors = await moveSpaceData(oldId, newId);
+  const errors = await moveSpaceData(oldId, newId, fileTree);
   if (errors.length > 0) {
     // Keep the marker — the rename is incomplete but idempotent, so a retry or the
     // next boot resumes it. Config still points at the old id until it commits.

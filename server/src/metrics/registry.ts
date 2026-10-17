@@ -37,6 +37,8 @@ import { log, peerList, peerText } from '../util/log.js';
 import { SPACE_FAILURE_WINDOW_MS } from '../util/space-failure.js';
 import { warnOnce } from '../util/warn-once.js';
 import { ruleEngineStats, onRuleEvaluated } from '../spaces/schema-rules.js';
+import { spaceActsRunning, waitingSpaceActs, owedSpaceActCount, oldestOwedSpaceActSeconds } from '../spaces/space-act-runner.js';
+import { allSpaceTransfersRunning } from '../sync/space-transfer-fence.js';
 
 export const register = new Registry();
 
@@ -430,6 +432,95 @@ export const intervalTickSkippedTotal = new Counter({
 export const roundExpiryFailuresTotal = new Counter({
   name: 'ythril_round_expiry_failures_total',
   help: 'Vote rounds or networks the round expiry job failed to conclude or prune, and config saves it failed to make',
+  registers: [register],
+});
+
+/*
+ * Space acts — the deletions, wipes and renames the runner carries out (`spaces/space-act-runner.ts`), and the holds and transfers
+ * around them (bundle-106). Every metric of that change is declared here; the modules that act only write to them. The gauges read the
+ * live config through the runner's own readers at scrape time — only the runner reads the act entries.
+ */
+export const spaceActsTotal = new Counter({
+  name: 'ythril_space_acts_total',
+  help: 'Space acts that ended, by kind, by who started them and by outcome: completed, failed or interrupted',
+  labelNames: ['kind', 'via', 'outcome'] as const,
+  registers: [register],
+});
+
+export const spaceActRetriesTotal = new Counter({
+  name: 'ythril_space_act_retries_total',
+  help: 'Space acts that failed and were scheduled for a retry, by kind',
+  labelNames: ['kind'] as const,
+  registers: [register],
+});
+
+export const spaceActBatchesRetriedTotal = new Counter({
+  name: 'ythril_space_act_batches_retried_total',
+  help: 'Wipe batches the per-operation bound ended after the batch before them made progress, run again inside the same attempt',
+  registers: [register],
+});
+
+export const spaceActsRunningGauge = new Gauge({
+  name: 'ythril_space_acts_running',
+  help: 'Space act bodies running now',
+  registers: [register],
+  collect() { this.set(spaceActsRunning()); },
+});
+
+export const spaceActsWaitingGauge = new Gauge({
+  name: 'ythril_space_acts_waiting',
+  help: 'Space acts waiting for the transfers of their space to end, by kind (waiting is not failing)',
+  labelNames: ['kind'] as const,
+  registers: [register],
+  collect() { for (const [kind, n] of Object.entries(waitingSpaceActs())) this.set({ kind }, n); },
+});
+
+export const spaceActsOwedGauge = new Gauge({
+  name: 'ythril_space_acts_owed',
+  help: 'Space acts that failed and are owed a retry; their spaces take no writes and are held from exchanges until one completes',
+  registers: [register],
+  collect() { this.set(owedSpaceActCount()); },
+});
+
+export const spaceActOldestOwedSeconds = new Gauge({
+  name: 'ythril_space_act_oldest_owed_seconds',
+  help: 'Age in seconds of the oldest owed space act, counted from its registration (0 when none is owed)',
+  registers: [register],
+  collect() { this.set(oldestOwedSpaceActSeconds()); },
+});
+
+export const spaceTransfersRunningGauge = new Gauge({
+  name: 'ythril_space_transfers_running',
+  help: 'Units writing a space or moving its data to or from a peer, in flight now, across every space',
+  registers: [register],
+  collect() { this.set(allSpaceTransfersRunning()); },
+});
+
+export const roundSettleFailuresTotal = new Counter({
+  name: 'ythril_round_settle_failures_total',
+  help: 'Concluded vote rounds whose settlement here failed, by where they were settled',
+  labelNames: ['via'] as const,
+  registers: [register],
+});
+
+/** Held (member, space) pairs, by network — set by the hold, never counting a declined space. */
+export const spaceExchangeHeld = new Gauge({
+  name: 'ythril_space_exchange_held',
+  help: 'Member and space pairs whose exchange is held because a space act stands, by network',
+  labelNames: ['network'] as const,
+  registers: [register],
+});
+
+export const spaceHeldRefusalsTotal = new Counter({
+  name: 'ythril_space_held_refusals_total',
+  help: 'Peer requests refused 423 because their space is held, by door',
+  labelNames: ['door'] as const,
+  registers: [register],
+});
+
+export const roundClockAheadTotal = new Counter({
+  name: 'ythril_round_clock_ahead_total',
+  help: 'Adopted rounds whose openedAt lay ahead of this instance clock by more than the tolerated skew',
   registers: [register],
 });
 

@@ -529,6 +529,8 @@ export function getConfig(): Config {
 
 let _writeGeneration = 0;   // bumped on every in-memory config mutation via save*
 let _flushedGeneration = 0; // highest generation already durably on disk
+/** How many in-memory config writes have happened: read-only, so a test can count the saves one step makes. */
+export const configWriteGeneration = (): number => _writeGeneration;
 let _flushScheduled = false;
 /** The coalesced flushes, one at a time in the order they were asked: two never race on the temp file. One key, because there is one file. */
 const _flushLock = keyedLock();

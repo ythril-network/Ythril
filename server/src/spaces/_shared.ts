@@ -242,39 +242,8 @@ export async function dropSupersededEdgeIdentityIndex(coll: Collection): Promise
 /** Maximum number of previous meta versions kept for history. */
 export const META_VERSION_CAP = 20;
 
-// ── In-flight space operation ────────────────────────────────────────────────
-//
-// `pendingSpaceOp` is a CRASH marker: it exists so a rename or delete that died mid-way is rolled forward
-// on the next boot. But `reconcilePendingSpaceOp` also runs on the config-RELOAD path, and a rename writes
-// its marker to config.json BEFORE doing the collection work — so the marker a live rename just wrote is
-// exactly what the reconciler would act on, in the same process, while the original is still running.
-//
-// Both then call `moveSpaceData`, which renames every collection it found via `listCollections()`. Two
-// runners racing means one wins each collection and the loser gets
-// `MongoServerError: Source collection … does not exist` — which the caller reports as
-// "rename incomplete (3 errors)" on a rename that actually succeeded. Observed once in CI on
-// `space-rename`; the mtime guard on the watcher makes it rare rather than impossible, and the watcher's
-// own comment notes that bind-mount mtimes are unreliable.
-//
-// A live operation in THIS process does not need crash recovery — it needs to be left alone. If it dies,
-// its marker survives and the next boot recovers it, which is what the marker is for.
-
-let _spaceOpDepth = 0;
-
-/** Mark a space rename/delete as running in this process. Always pair with `endSpaceOp` in a `finally`. */
-export function beginSpaceOp(): void { _spaceOpDepth++; }
-
-/** Clear one level. Floored at zero so an unbalanced call cannot wedge recovery off permanently. */
-export function endSpaceOp(): void { _spaceOpDepth = Math.max(0, _spaceOpDepth - 1); }
-
-/** True while a rename/delete is running here, so crash recovery must stand aside. */
-export function spaceOpInFlight(): boolean { return _spaceOpDepth > 0; }
-
-/**
- * How many renames/deletes are running here. A space op that meets another op's marker counts itself, so it may
- * resume that marker only when it is the ONE running — more than one means the marker's own op is still going.
- */
-export function spaceOpsInFlight(): number { return _spaceOpDepth; }
+// Whether a rename or delete is running in THIS process — so the crash recovery of its `pendingSpaceOp` marker, which also runs
+// on the config-reload path, stands aside — is the space-act runner's to answer (`spaceActRunning`, by the marker's own space).
 
 /**
  * Maximum length of a space's directive (`meta.purpose`, and its deprecated `description` alias).

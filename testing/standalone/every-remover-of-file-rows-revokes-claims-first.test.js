@@ -130,7 +130,8 @@ describe('the removers of file rows are found, so the rule cannot pass by findin
   it('the derivation finds the removals, in more than one module, and the wipe among them', () => {
     assert.ok(REMOVALS.length >= 8, `only ${REMOVALS.length} removal(s) found`);
     assert.ok(new Set(REMOVALS.map(r => r.file)).size >= 3, 'the removals belong to fewer than three modules — the derivation is thin');
-    assert.ok(REMOVALS.some(r => /spaces\/lifecycle\.ts$/.test(r.file) && r.fn === 'wipeSpace'), 'wipeSpace is not found to remove file rows — the derivation is broken');
+    // The wipe's body is `wipeSpaceUnqueued` (bundle-106: `wipeSpace` hands the act to the space-act runner).
+    assert.ok(REMOVALS.some(r => /spaces\/lifecycle\.ts$/.test(r.file) && r.fn === 'wipeSpaceUnqueued'), 'the wipe body is not found to remove file rows — the derivation is broken');
     assert.ok(REMOVALS.some(r => /file-meta\.ts$/.test(r.file)), 'the retire primitives are not found to remove file rows');
   });
   it('the revokers exist where the rule says they do', () => {

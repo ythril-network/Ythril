@@ -18,6 +18,7 @@ import { writeStored, readStored, statStored, pipeToStored, isMissingPath } from
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { log } from '../util/log.js';
+import { assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
 
 /** Deterministic upload ID from (spaceId, path, total). */
 export function uploadId(spaceId: string, filePath: string, total: number): string {
@@ -91,6 +92,7 @@ export async function storeChunk(
   start: number,
   total: number,
 ): Promise<{ received: number; complete: boolean }> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const id = uploadId(spaceId, filePath, total);
   const dir = uploadDir(spaceId, id);
   // Staging holds the same bytes as the finished file, so it gets the same protection. A half-uploaded document
@@ -270,6 +272,9 @@ export async function cleanupStaleChunks(maxAgeMs = 24 * 60 * 60 * 1000): Promis
 
   const spaceDirs = await orMissing(fs.readdir(root), [] as string[]);
   await eachSpace(CLEANUP_STEP, spaceDirs, async (spaceDirName) => {
+    // A deletion or wipe standing for the space owns its staged uploads (it clears them itself); a space no longer configured is
+    // exactly what this sweep is for.
+    try { assertSpaceTakesWrites(spaceDirName, 'files'); } catch (err) { if (!isSpaceNotWritable(err)) throw err; if (err.code) return; }
     const spaceDir = path.join(root, spaceDirName);
     const stat = await orMissing(fs.stat(spaceDir), null);
     if (!stat?.isDirectory()) return;

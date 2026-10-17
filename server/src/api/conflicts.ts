@@ -22,6 +22,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { MAX_CONFLICT_IDS, countError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 export const conflictsRouter = Router();
 
@@ -61,6 +62,7 @@ type Resolution = 'resolved' | 'nothing-to-place';
 async function placeIncomingCopy(
   srcAbs: string, spaceId: string, dstSpaceId: string, dstPath: string, { callerChose }: { callerChose: boolean },
 ): Promise<Resolution> {
+  assertSpaceTakesWrites(dstSpaceId, 'files');
   const dstAbs = await resolveSafePathChecked(dstSpaceId, dstPath);
   if (dstSpaceId === spaceId && dstAbs === srcAbs) return 'nothing-to-place';
   if (callerChose && isInstanceLocalFile(fileKeyOf(dstSpaceId, dstPath).key)) {

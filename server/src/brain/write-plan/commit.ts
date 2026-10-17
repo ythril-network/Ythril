@@ -46,6 +46,8 @@ import type { AuthorRef, EdgeDoc, LinkDoc, TombstoneDoc } from '../../config/typ
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
 import { COMMIT_ORDER, PLAN_KINDS, type CommitOutcome, type PlanKind, type WritePlan } from './types.js';
+import { assertSpaceTakesWrites, isSpaceNotWritable } from '../../spaces/space-write-gate.js';
+import { enterSpaceWrite } from '../../sync/space-transfer-fence.js';
 
 /** Insert-time duplicate rules run at most this many at once — each is a vector search. */
 const DUPE_RULE_CONCURRENCY = 4;
@@ -72,7 +74,23 @@ export async function commitPlans(spaceId: string, plans: readonly WritePlan[]):
       }
     }
     if (ready.length === 0) continue;
-    const stageLanded = await writeStage(spaceId, kind, plans, ready, outcomes, landed.length > 0);
+    // Asked per STAGE: a long write admitted before a deletion or wipe registered stops at its next stage. Before anything
+    // landed the refusal is the request's answer (409); after, it is this stage's items' outcome, and the caller is told what
+    // landed — a stored record reported failed would invite a duplicating resend.
+    try {
+      assertSpaceTakesWrites(spaceId, PLAN_KINDS[kind].collection);
+    } catch (err) {
+      if (landed.length === 0 || !isSpaceNotWritable(err)) throw err;
+      for (const i of ready) outcomes[i] = { ok: false, reason: err.message };
+      continue;
+    }
+    const leaveWriteUnit = enterSpaceWrite(spaceId);
+    let stageLanded: number[];
+    try {
+      stageLanded = await writeStage(spaceId, kind, plans, ready, outcomes, landed.length > 0);
+    } finally {
+      leaveWriteUnit();
+    }
     landed.push(...stageLanded);
     await afterStage(spaceId, plans, stageLanded, outcomes);
   }
@@ -174,6 +192,9 @@ async function writeStage(
 export async function clearStaleWriteGuard(
   spaceId: string, holder: { _id: string; from: string; label: string }, guard: string,
 ): Promise<boolean> {
+  // A space whose edges an act is removing has no stale marker worth clearing: not cleared, never a failure of the caller's
+  // own work (an index build at boot meets one too).
+  try { assertSpaceTakesWrites(spaceId, 'edges'); } catch (err) { if (isSpaceNotWritable(err)) return false; throw err; }
   const res = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).updateOne(
     asFilter<EdgeDoc>({ _id: holder._id, [FUNCTIONAL_GUARD]: guard, from: holder.from, label: holder.label }),
     asUpdate<EdgeDoc>({ $unset: UNSET_GUARD }),
@@ -265,6 +286,7 @@ export interface LinkReconcile {
 export async function reconcileLinkRows(
   spaceId: string, records: readonly LinkReconcile[], opts: { additive?: boolean } = {},
 ): Promise<Array<{ added: number; removed: number }>> {
+  assertSpaceTakesWrites(spaceId, 'links');
   const wantedBy = records.map(r => {
     const wanted = new Map<string, { to: string; toKind: RefKind }>();
     for (const toKind of Object.keys(r.desired) as RefKind[]) {

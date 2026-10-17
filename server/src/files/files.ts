@@ -6,7 +6,8 @@ import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 import { StringDecoder } from 'node:string_decoder';
 import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterruptedLink, DestinationOccupied } from './stored-bytes.js';
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
+import { enterSpaceWrite } from '../sync/space-transfer-fence.js';
 import { fsRefusalOf } from './destination.js';
 import { DestinationExists, type DestinationAct } from './act-answers.js';
 import { fileMoveLinkFallbackTotal } from '../metrics/registry.js';
@@ -37,6 +38,9 @@ export interface FileEntry {
 
 /** Ensure the space files directory exists */
 export async function ensureSpaceFilesDir(spaceId: string): Promise<void> {
+  // A deletion, wipe or rename standing for the space owns its tree (a wipe recreates it empty): nothing to ensure. A space not yet
+  // configured is the one being created, whose tree this is.
+  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (!isSpaceNotWritable(err)) throw err; if (err.code) return; }
   // Owner-only. A space's files directory holds every document uploaded to that space; it has no business being
   // world-readable, and it was — see `util/fs-modes.ts`.
   await mkdirPrivate(spaceRoot(spaceId));
@@ -90,12 +94,14 @@ export async function readFileWindow(
 
 /** Write a text file, creating parent directories as needed */
 export async function writeFile(spaceId: string, filePath: string, content: string): Promise<{ sha256: string }> {
-  // Nothing new lands under a space that is being deleted or renamed away — see `spaces/space-write-gate.ts`.
-  assertSpaceTakesWrites(spaceId);
+  // Nothing new lands under a space that is being deleted, wiped or renamed away — see `spaces/space-write-gate.ts`.
+  assertSpaceTakesWrites(spaceId, 'files');
   const abs = await resolveSafePathChecked(spaceId, filePath);
   // Through the one door for stored bytes (F-43): encrypted at rest when a master secret is set, written to a
-  // temp file outside the tree and renamed, and hardened to owner-only whatever the file's history.
-  await writeStored(abs, content);
+  // temp file outside the tree and renamed, and hardened to owner-only whatever the file's history. One write unit, counted for an
+  // act's drain.
+  const leaveWriteUnit = enterSpaceWrite(spaceId);
+  try { await writeStored(abs, content); } finally { leaveWriteUnit(); }
   const sha256 = sha256Hex(content);
   return { sha256 };
 }
@@ -106,9 +112,10 @@ export async function writeFileBytes(
   filePath: string,
   data: Buffer,
 ): Promise<{ sha256: string }> {
-  assertSpaceTakesWrites(spaceId);   // see `writeFile` above
+  assertSpaceTakesWrites(spaceId, 'files');   // see `writeFile` above
   const abs = await resolveSafePathChecked(spaceId, filePath);
-  await writeStored(abs, data);   // see the note in `writeFile` above
+  const leaveWriteUnit = enterSpaceWrite(spaceId);
+  try { await writeStored(abs, data); } finally { leaveWriteUnit(); }   // see the note in `writeFile` above
   const sha256 = sha256Hex(data);
   return { sha256 };
 }
@@ -138,6 +145,7 @@ export async function listDir(spaceId: string, dirPath: string): Promise<FileEnt
 
 /** Create a directory (including parents) */
 export async function createDir(spaceId: string, dirPath: string): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const abs = await resolveSafePathChecked(spaceId, dirPath);
   // The filesystem's refusal is the caller's path or the server's fault, said once (`fsRefusalOf`), never the raw errno text.
   await mkdirPrivate(abs).catch((err: unknown) => { throw fsRefusalOf(err, [dirPath]); });
@@ -212,6 +220,7 @@ export async function moveFile(
   dstPath: string,
   { begun }: { begun: boolean },
 ): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
   const srcAbs = await resolveSafePathChecked(spaceId, srcPath);
   const dstAbs = await resolveSafePathChecked(spaceId, dstPath);
   await placeIfFree(srcAbs, dstAbs, toDocId(dstPath), { begun });

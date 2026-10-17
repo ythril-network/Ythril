@@ -582,6 +582,8 @@ Click **Disable MFA**. This **requires a current 6-digit code** — you cannot t
 
 Networks sync selected spaces between multiple Ythril instances over the internet.
 
+**Changes still owed.** A network's `owedSpaceActs` lists the deletions, wipes and renames this instance has decided on a vote and not yet finished. Only an instance administrator sees it, on `GET /api/networks/:id`; a space's `actPending` on `GET /api/spaces` shows the same per space. Writes into a space with a change owed answer `409` until it completes.
+
 **Who can manage them.** An instance administrator can do everything here. A token with the **Networks** right
 on a space (Settings → Tokens) can create a network with that space, see it, and leave a membership it created;
 at **admin** it can also change a network's settings and leave any membership. **Joining** a network from an
@@ -834,7 +836,7 @@ other network still carries it. Emptying a space is different: a passed wipe vot
 every member.
 
 **Proposing counts as your yes.** When you delete, empty, add or change a networked space, your instance opens the
-vote and its yes is already in the tally; the other members' votes decide it.
+vote and its yes is already in the tally. Where your yes alone carries the round (a club, a pub/sub network, or the only member of a closed network), it passes at once; otherwise the other members' votes decide it.
 
 **Signed votes:** a network can set `requireSignedVotes` so every vote cast must carry a valid Ed25519 signature from the voting member (verified against its pinned signing key). Enable it once all members have published a signing key; if a member rotates its signing key, the new key is accepted with a rotation proof that references the previous one.
 

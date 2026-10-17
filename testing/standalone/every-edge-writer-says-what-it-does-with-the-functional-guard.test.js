@@ -63,7 +63,7 @@ const WRITERS = {
   'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors': { marker: 'none-by-design', why: 'removes vectors only' },
   'server/src/files/rekey-rows.ts:rekeyRows': { marker: 'none-by-design', why: 'the rows of a file move and the jobs that follow it: the collection name is a parameter and is never edges (an edge re-key keeps its own writer and shares only the destination guard)' },
   'server/src/brain/tombstones.ts:removeWithTombstones': { marker: 'none-by-design', why: 'a delete frees the marker with the row' },
-  'server/src/spaces/lifecycle.ts:wipeSpace': { marker: 'none-by-design', why: 'the space wipe deletes every row, markers included' },
+  'server/src/spaces/lifecycle.ts:wipeSpaceUnqueued': { marker: 'none-by-design', why: 'the space wipe (its body, run by the space-act runner) deletes every row, markers included' },
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones': { marker: 'none-by-design', why: 'a peer\'s tombstone is a delete' },
   'server/src/sync/delivered-by-backfill.ts:stampCollection': { marker: 'none-by-design', why: 'stamps who delivered a row; from, label and the marker are untouched' },
   'server/src/brain/candidate-prune.ts:pruneCandidateCollection': { marker: 'none-by-design', why: 'prunes candidate rows; the collection name is computed and is not edges' },
