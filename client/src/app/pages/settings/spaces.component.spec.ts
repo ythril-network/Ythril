@@ -32,6 +32,7 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import type { Space, SpaceActivity } from '../../core/api.types';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { SpacesComponent } from './spaces.component';
+import { ACT_TEXT_KEYS, actPending } from '../../testing/space-act-bodies';
 
 function space(over: Partial<Space> = {}): Space {
   return { id: 'work', label: 'Work', ...over } as Space;
@@ -352,5 +353,27 @@ describe('SpacesComponent — the Usage column', () => {
     const { c } = createWith([], [space({ id: 'a' })]);
     expect(c.activityFor('a')).toBeUndefined();
     expect(c.sortedSpaces().map(s => s.id)).toEqual(['a']);
+  });
+});
+
+/*
+ * Q-535 (plan rev 2, design 9): a space with a standing delete, wipe or rename shows a small pending pill in the list, so an
+ * owed delete does not look like an ordinary space. `actPending` is served to admins only; its absence shows nothing.
+ */
+describe('SpacesComponent — a space with a standing act (Q-535)', () => {
+  const rowText = (f: ReturnType<typeof create>, id: string) =>
+    Array.from((f.nativeElement as HTMLElement).querySelectorAll('tbody tr')).map(r => r.textContent ?? '').find(t => t.includes(id)) ?? '';
+
+  it('an admin sees the pending pill on the row of a space whose act stands', () => {
+    const f = create([space({ id: 'proj', label: 'Project', actPending: actPending({ kind: 'delete', state: 'owed' }) } as Partial<Space>), space({ id: 'work' })]);
+    f.detectChanges();
+    expect(rowText(f, 'proj')).toContain(ACT_TEXT_KEYS.listPill);
+    expect(rowText(f, 'work')).not.toContain(ACT_TEXT_KEYS.listPill);
+  });
+
+  it('no actPending (a non-admin, or nothing stands): no pill', () => {
+    const f = create([space({ id: 'proj', label: 'Project' })]);
+    f.detectChanges();
+    expect(rowText(f, 'proj')).not.toContain(ACT_TEXT_KEYS.listPill);
   });
 });
