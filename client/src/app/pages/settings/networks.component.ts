@@ -26,6 +26,7 @@ import { NetworkVoteRowComponent } from './network-vote-row.component';
 import { RecentDecisionsComponent } from './network-decisions.component';
 import { castNotice, castRefusalNotice, roundName, type CastNotice, type Translate } from './network-vote-cast';
 import { DateFormatService } from '../../core/date-format.service';
+import { actKindKey, actStateKey, actStateVariant, actWhenText } from '../../core/space-act-view';
 import { voteTally } from '../../core/vote-round-view';
 import { NetworkCreateDialogComponent } from './network-create-dialog.component';
 import { NetworkJoinDialogComponent } from './network-join-dialog.component';
@@ -180,12 +181,37 @@ import { refusalText } from '../../core/refusal-text';
             @if (openVotes(net.id).length > 0) {
               <app-status-pill variant="warn" [dot]="true">{{ openVotes(net.id).length }} {{ 'networks.header.pendingVote' | transloco }}</app-status-pill>
             }
+            <!-- Deletions and wipes this instance still owes the network. Only an administrator is served the list, so a reader without it sees no pill. -->
+            @if (net.owedSpaceActs?.length) {
+              <app-status-pill variant="warn" [dot]="true">{{ 'networks.header.owedActs' | transloco: { count: net.owedSpaceActs!.length } }}</app-status-pill>
+            }
             <span style="flex:1;"></span>
             <span style="color:var(--text-muted); display:inline-flex;"><ph-icon [name]="expanded() === net.id ? 'caret-up' : 'caret-down'" [size]="14" /></span>
           </div>
 
           @if (expanded() === net.id) {
             <div class="network-body">
+
+              @if (net.ownYesCarries !== undefined) {
+                <p class="dz-hint" style="margin:0 0 12px;font-size:12px;color:var(--text-muted);">{{ (net.ownYesCarries ? 'networks.network.ownYesCarries.yes' : 'networks.network.ownYesCarries.no') | transloco }}</p>
+              }
+
+              @if (net.owedSpaceActs?.length) {
+                <div style="margin-bottom:16px;">
+                  <h4 class="section-title" style="margin:0 0 6px;">{{ 'networks.owedActs.title' | transloco }}</h4>
+                  <ul style="list-style:none;margin:0;padding:0;">
+                    @for (act of net.owedSpaceActs; track act.entryId) {
+                      <li style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+                        <span style="font-weight:500;">{{ act.localSpaceId }}</span>
+                        <span>{{ actKindKey(act.kind) | transloco }}</span>
+                        <app-status-pill [variant]="actStateVariant(act.state)" [dot]="true">{{ actStateKey(act.state) | transloco }}</app-status-pill>
+                        <span style="color:var(--text-muted);">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: act.attempts } }}</span>
+                        <span style="color:var(--text-muted);">{{ 'networks.owedActs.nextTry' | transloco: { when: whenText(act.nextRetryAt) } }}</span>
+                      </li>
+                    }
+                  </ul>
+                </div>
+              }
 
               <!-- Invite bundle — not for a pub/sub subscriber: only the publisher invites (F-38.1). -->
               @if (net.myRole?.role !== 'subscriber') {
@@ -412,6 +438,11 @@ export class NetworksComponent implements OnInit {
   readonly voteTally = voteTally;
   private readonly decisions = viewChildren(RecentDecisionsComponent);
   private readonly dates = inject(DateFormatService);
+  protected readonly actStateVariant = actStateVariant;
+  protected readonly actStateKey = actStateKey;
+  protected readonly actKindKey = actKindKey;
+  /** When an owed act's next try is, in words (see `actWhenText`); read against the clock at each render. */
+  whenText(retryAt: string | undefined): string { return actWhenText(this.transloco, this.dates, retryAt, Date.now()); }
   private readonly t: Translate = (key, params) => this.transloco.translate(key, params);
 
   ngOnInit(): void {

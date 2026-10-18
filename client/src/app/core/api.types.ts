@@ -8,6 +8,7 @@
 import type { RecallGraphReport } from './recall-graph-report';
 import type { ResultSpillLink, SpillReport } from './read-spill';
 import type { RecallHit } from './recall-hit';
+import type { ActEntryView, OwedSpaceAct } from './space-act-outcome';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -75,6 +76,11 @@ export interface Space {
   id: string;
   label: string;
   builtIn?: boolean;
+  /**
+   * The first delete, wipe or rename of this space that is owed or running here (Q-535). Served to instance administrators ONLY, so its
+   * absence means "not yours to see" and never "nothing stands": a view that shows nothing for absent is correct, one that says "none" is not.
+   */
+  actPending?: ActEntryView;
   folders?: string[];
   maxGiB?: number;
   usageGiB?: number;
@@ -837,6 +843,13 @@ export interface Network {
   pendingSpaces?: { networkId: string; localId: string; why: string; from: string; at: string }[];
   /** Club only: members a peer introduced that this instance is still connecting to (Q-135), with why if it failed. */
   introductions?: { instanceId: string; label: string; url: string; introducedBy: string; introducedAt: string; lastAttemptAt?: string; lastError?: string; needsApproval?: boolean }[];
+  /** Served to every reader: would THIS instance's own yes alone carry a deletion or wipe of a space here (true), or does it open a vote (false)? */
+  ownYesCarries?: boolean;
+  /**
+   * The deletions and wipes this instance still owes the network (Q-535). Served to instance administrators ONLY: absent is "not yours to
+   * see", never "none owed" (an empty array is "none owed").
+   */
+  owedSpaceActs?: OwedSpaceAct[];
 }
 
 export interface NetworkMember {

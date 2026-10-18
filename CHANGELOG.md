@@ -151,6 +151,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schemas:** A schema-library type reads as `{ "$ref": "library:<name>", ...definition }` on `GET /api/spaces/:id/meta` and `space_meta`; `resolve=false` returns the stored `{ $ref }` alone.
 - **Spaces:** `GET /api/spaces/:id/meta` and `space_meta` keep `stats` and `actualSchema` per space until the next write to its records; an unchanged read is near-instant.
 - **Spaces:** The admin wipe of a space in no network answers `status: "wiped"` beside `deleted`.
+- **Spaces:** Deleting or wiping a space shows its outcome and any owed retry in the Danger tab, an administrator sees owed changes on Networks and the Spaces list, and the confirmation says whether it acts at once or opens a vote.
 - **Networks:** A closed or democratic network connects every member to a newcomer; roster entries others propose wait for **Accept** (`POST /api/networks/:id/introductions/:instanceId/accept`, MCP `network_introduction_accept`); `GET /api/networks/:id`/`network_get` list `introductions`.
 - **Networks:** A club is a mesh: members pair directly via `POST /api/sync/networks/:id/pair` and `/pair/confirm`.
 - **Networks:** A deletion or wipe a vote passes is applied here as a completed act: retried if it fails, with the space closed to writes and its peer exchange held until it completes.

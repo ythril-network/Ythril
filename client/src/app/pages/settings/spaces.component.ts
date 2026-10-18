@@ -11,6 +11,8 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { TranslocoService } from '@jsverse/transloco';
 import { DragDropModule } from '@angular/cdk/drag-drop';
 import { PhIconComponent } from '../../shared/ph-icon.component';
+import { StatusPillComponent } from '../../shared/status-pill.component';
+import { actKindKey, actStateVariant } from '../../core/space-act-view';
 import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-strip.component';
 import { SpaceSettingsState } from './space-settings-state.service';
 import { SpacesStore } from './spaces-store.service';
@@ -22,7 +24,7 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 @Component({
   selector: 'app-spaces',
   standalone: true,
-  imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, TranslocoPipe, DragDropModule, PhIconComponent, SummaryStripComponent,
+  imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, TranslocoPipe, DragDropModule, PhIconComponent, StatusPillComponent, SummaryStripComponent,
     SpaceSettingsPopupComponent,
     SpaceCreateDialogComponent, HscrollTopDirective],
   // Provided here (not root) so each mount gets its own settings state, with a lifetime tied to
@@ -107,6 +109,10 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
                     } @else if (s.indexStatus === 'failed') {
                       <span class="badge badge-red" style="margin-left:6px;font-weight:normal" [attr.title]="'spaces.indexFailedTitle' | transloco">{{ 'spaces.indexFailed' | transloco }}</span>
                     }
+                    <!-- A delete, wipe or rename still owed or running here (admins are served it; absent means unknown, so no pill). -->
+                    @if (s.actPending; as act) {
+                      <app-status-pill style="margin-left:6px;" [variant]="actStateVariant(act.state)" [dot]="true" [attr.title]="actKindKey(act.kind) | transloco">{{ 'spaces.table.actPending' | transloco }}</app-status-pill>
+                    }
                   </td>
                   <td><span class="badge badge-gray mono">{{ s.id }}</span></td>
                   <td style="min-width:140px;">
@@ -173,6 +179,8 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
   `,
 })
 export class SpacesComponent implements OnInit {
+  protected readonly actStateVariant = actStateVariant;
+  protected readonly actKindKey = actKindKey;
   private spacesApi   = inject(SpacesApi);
   private transloco = inject(TranslocoService);
   /** Settings-dialog state, shared with the tabs. Public: the template binds to it. */
