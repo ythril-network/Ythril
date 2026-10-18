@@ -143,17 +143,14 @@ export function resolveWriteTarget(
   return resolveTarget(spaceId, targetSpace, { ...grant, rights: grant.rights });
 }
 
-/** What {@link resolveTarget} judges against: the caller's grant with its matrix present, or `null` for membership alone. */
-type TargetScope = (WriteGrant & { rights: TokenRights }) | null;
+/** What {@link resolveTarget} judges against: the caller's grant with its matrix present. */
+type TargetScope = WriteGrant & { rights: TokenRights };
 
 function refuseTarget(status: 400 | 403 | 404, error: string): ResolvedWriteTarget {
   return { ok: false, status, error };
 }
 
-/**
- * The one resolution, against a scope. `scope === null` answers membership only — the dispatcher's pre-resolution
- * ({@link resolveCallWriteTarget}) until it passes the caller's grant; every other caller reaches this through `resolveWriteTarget`.
- */
+/** The one resolution, against the caller's grant; every caller reaches it through `resolveWriteTarget`. */
 function resolveTarget(spaceId: string, targetSpace: unknown, scope: TargetScope): ResolvedWriteTarget {
   if (targetSpace !== undefined && targetSpace !== null && typeof targetSpace !== 'string') {
     return refuseTarget(400, 'targetSpace must be a string');
@@ -162,10 +159,10 @@ function resolveTarget(spaceId: string, targetSpace: unknown, scope: TargetScope
   const shownSpace = peerText(spaceId, { max: NAME_QUOTED });
   const noSuchSpace = (): ResolvedWriteTarget => refuseTarget(404, `Space '${shownSpace}' not found`);
   if (!space) return noSuchSpace();
-  const reaches = (id: string): boolean => scope === null || reachesSpace(scope.rights, id);
+  const reaches = (id: string): boolean => reachesSpace(scope.rights, id);
   /** The rung's refusal on a space the token reaches, or `null`. */
   const lacksRung = (id: string): ResolvedWriteTarget | null =>
-    scope === null || holdsRung(scope.rights, id, scope.area, scope.needs)
+    holdsRung(scope.rights, id, scope.area, scope.needs)
       ? null
       : refuseTarget(403, rungRefusal(scope.needs, scope.area, id));
 
@@ -177,7 +174,7 @@ function resolveTarget(spaceId: string, targetSpace: unknown, scope: TargetScope
   const members = space.proxyFor!;
   // The members THIS caller reaches: the only ones a refusal may name. `reachableSpaceIds` and not `memberSpacesForToken`: that one is
   // called by `spaces/proxy-scoped.ts` alone (`proxy-reach.test.js`), which imports this module — a call from here would be a cycle.
-  const reached = scope === null ? resolveMemberSpaces(spaceId) : reachableSpaceIds(scope.rights, resolveMemberSpaces(spaceId));
+  const reached = reachableSpaceIds(scope.rights, resolveMemberSpaces(spaceId));
 
   // Proxy space — targetSpace is required (an absent value and an empty string both name none)
   const named = typeof targetSpace === 'string' ? targetSpace : '';
@@ -211,19 +208,18 @@ function resolveTarget(spaceId: string, targetSpace: unknown, scope: TargetScope
  * the proxy rules. The handlers keep their own `resolveWriteTarget` call with the caller's grant, which is the check that decides
  * reach and rung: a handler that skipped it would be caught by the gate that holds every call to pass its grant.
  *
- * **WITHOUT a grant it answers MEMBERSHIP ONLY, and that is the interim state, not a design** (`Q-440`): the dispatcher is the one
- * caller that does not pass the caller's grant yet, so its pre-resolution still names members the token does not reach (the "no
- * target" refusal lists them all) and judges unknown fields by the setting of a space the token may not reach. The dispatcher passes
- * `{ rights, area, needs }` from its tool's `TOOL_RIGHTS` row (`toolWriteGrant`), forwards the refusal's `status`, and then `grant`
- * here becomes required and the membership path goes.
+ * **The grant is required** (`Q-440`): the dispatcher passes `{ rights, area, needs }` from its tool's `TOOL_RIGHTS` row
+ * (`toolWriteGrant`) and forwards the refusal's `status`, so its pre-resolution never names a member the token does not reach, and
+ * unknown fields are judged only by the setting of a space the token can write. A membership-only answer here was the interim state
+ * that named every member of a proxy in its refusal.
  *
  * `args` is the caller's own object, so `targetSpace` is read as `unknown` and the resolution refuses a non-string.
  */
 export function resolveCallWriteTarget(
-  callSpace: string, args: Readonly<Record<string, unknown>>, grant?: WriteGrant,
+  callSpace: string, args: Readonly<Record<string, unknown>>, grant: WriteGrant,
 ): ResolvedWriteTarget {
   const targetSpace = Object.hasOwn(args, 'targetSpace') ? args['targetSpace'] : undefined;
-  return grant ? resolveWriteTarget(callSpace, targetSpace, grant) : resolveTarget(callSpace, targetSpace, null);
+  return resolveWriteTarget(callSpace, targetSpace, grant);
 }
 
 /**
