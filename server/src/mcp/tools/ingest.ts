@@ -11,6 +11,7 @@ import { beginIngest, ingestStatus } from '../../extractor/ingest-door.js';
 import { INGEST_KINDS } from '../../extractor/ingest.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { MAX_INGEST_SESSIONS } from '../../util/request-bounds.js';
+import { TARGET_SPACE_DESCRIPTION } from './shared.js';
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text' as const, text: t }], isError });
 
@@ -40,7 +41,7 @@ export const ingestTool: ToolHandler = {
     type: 'object',
     properties: {
       space: s.requiredSpace,
-      targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
       kind: { type: 'string', enum: [...INGEST_KINDS], description: 'What the source is. `conversation` is the one kind there is.' },
       conversationId: {
         type: 'string',

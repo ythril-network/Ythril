@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge } from '../../brain/edges.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -72,7 +72,7 @@ export const save_edgeTool: ToolHandler = {
               description: 'Optional structured key-value metadata for this edge. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             waitForEmbedding: waitForEmbeddingSchema('edge', false),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
@@ -248,7 +248,7 @@ export const update_edgeTool: ToolHandler = {
             toKind: edgeEndpointKindSchema('to'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             deleteFields: { type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' }, description: 'Dot-notation paths to delete from the edge (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
           },
@@ -448,7 +448,7 @@ export const delete_edgeTool: ToolHandler = {
           + 'Deleting an edge NEVER touches the two entities it joined — it removes the relationship only. A '
           + 'tombstone is written, so re-creating it with the same id does not undo this.',
       },
-      targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'id'],
     additionalProperties: false,

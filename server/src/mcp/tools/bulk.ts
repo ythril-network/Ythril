@@ -8,7 +8,7 @@
  */
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { bulkWrite, bulkWriteTotal, bulkBodyRefusal, BULK_BODY_KEYS, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
@@ -284,7 +284,7 @@ export const save_bulkTool: ToolHandler = {
                 required: ['title', 'type', 'startsAt'],
               },
             },
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space'],
           additionalProperties: false,

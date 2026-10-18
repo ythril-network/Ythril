@@ -25,6 +25,7 @@ import {
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
 import { embedJobsPage, MAX_JOB_PAGE, DEFAULT_JOB_PAGE } from '../../brain/embed-jobs-page.js';
 import { LOST_MARKER, NOT_SENT_MARKER } from '../../brain/embed-errors.js';
+import { TARGET_SPACE_DESCRIPTION } from './shared.js';
 
 const RECORD_TYPES = [...EMBED_RECORD_TYPES];
 
@@ -126,7 +127,7 @@ export const retry_embed_recordTool: ToolHandler = {
           + 'finds nothing rather than finding the wrong thing.',
       },
       recordId: { type: 'string', minLength: 1, description: 'The record\'s _id, as list_embed_jobs reports it.' },
-      targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space holding the record.' },
+      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'recordType', 'recordId'],
     additionalProperties: false,
