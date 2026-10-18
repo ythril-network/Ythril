@@ -11,7 +11,7 @@ import { beginIngest, ingestStatus } from '../../extractor/ingest-door.js';
 import { INGEST_KINDS } from '../../extractor/ingest.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { MAX_INGEST_SESSIONS } from '../../util/request-bounds.js';
-import { TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text' as const, text: t }], isError });
 
@@ -30,8 +30,8 @@ export const ingestTool: ToolHandler = {
     + '`conversation` Schema Library group (add it with the group apply — ingest never changes a space\'s schema), '
     + 'or, for `sessions`, no decision model, no assist model, or no doc-nlp sidecar.\n\n'
     + 'Every record goes through the same validation as `save_bulk`. Transcripts are FILES, so they are written only '
-    + 'when the token also holds `files: write`; otherwise the run records that it skipped them. `targetSpace` is '
-    + 'required when `space` is a proxy.',
+    + 'when the token also holds `files: write`; otherwise the run records that it skipped them.\n\n'
+    + TARGET_SPACE_BULLET,
   mutating: true,
   spaceRequired: true,
   // Not `heavy`: the rail is inside `beginIngest`, which both doors call (S-8). Declared here as well, the dispatcher

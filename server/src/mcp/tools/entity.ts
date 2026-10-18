@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEntity, getEntityById, updateEntityById, upsertEntity } from '../../brain/entities.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -187,7 +187,7 @@ export const update_entityTool: ToolHandler = {
     + '`_graph`.\n'
     + '- `ttlDays` — this record\'s own expiry, and the MOST specific of three tiers: it beats the type\'s '
     + 'retention window, which beats the space-wide one.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the record. Without it the '
+    + TARGET_SPACE_BULLET + ' Without it the '
     + 'call is refused rather than guessing which member you meant.\n\n'
     + 'RESPONSE: one line naming the entity, its type, its id and its new `seq` — the sync sequence number, '
     + 'which increments on every write and is how a peer knows this version is newer. An id that does not exist '

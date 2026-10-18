@@ -1,5 +1,5 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs, DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { moveFileCascade } from '../../files/move-cascade.js';
@@ -295,7 +295,7 @@ export const delete_fileTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `path` — the file or directory path relative to the space root, as `list_dir` reports it.\n'
     + '- `confirm` — `true` to delete a directory; no effect on a file.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the file.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: one line naming the path that was deleted, with `{ path, deleted: true }` as structured content.',
   mutating: true,
   spaceRequired: true,
@@ -342,7 +342,7 @@ export const create_dirTool: ToolHandler = {
     + 'carries no metadata: there is nothing to tag or describe until it holds a file.\n\n'
     + 'PARAMETERS:\n'
     + '- `path` — the directory path relative to the space root. Missing parents are created.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space to create it in.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: one line confirming the path.',
   mutating: true,
   spaceRequired: true,
@@ -413,7 +413,7 @@ export const move_fileTool: ToolHandler = {
     + 'directory.\n'
     + '- `dst` — where it should end up, relative to the space root. Its parent directories are created if '
     + 'missing.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the file. This tool moves '
+    + TARGET_SPACE_BULLET + ' This tool moves '
     + 'WITHIN one space; it cannot move a file between spaces, and naming a different member does not do that '
     + '— read it and write it instead.\n\n'
     + 'RESPONSE: one line confirming the move.',
@@ -562,7 +562,7 @@ export const update_file_metaTool: ToolHandler = {
     + '- `linkEntities` / `linkFacts` / `linkChronos` — REPLACE those link lists. Sending one id drops the rest.\n'
     + '- `deleteFields` — dot-notation paths to remove, permanently and with no undo. Applied after the '
     + 'merge. The only way to unset anything.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the file.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: confirmation naming the path and which fields were changed. A path that does not exist is an '
     + 'error, so a successful reply means a record really was updated.\n\n'
     + UNKNOWN_ARGUMENT_RULE,

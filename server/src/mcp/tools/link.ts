@@ -11,7 +11,7 @@ import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
-import { DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 
 /** Every legal class, as the arrays spell them — used in the schema text and in the refusal. */
@@ -55,7 +55,7 @@ export const save_linkTool: ToolHandler = {
     + 'one is an ERROR: a link hanging off a record that does not exist is the dangling half this refuses '
     + 'to create.\n'
     + '- `to` / `toKind` — the record it concerns.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space to write to.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: the link record, including the derived `_id` you would pass to `delete_link`.\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
@@ -129,7 +129,7 @@ export const delete_linkTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the link\'s `_id`, as `save_link` and `filter` report it. An id that is not a link is an '
     + 'ERROR, not a silent success.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the link.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: one line confirming the id that was removed.',
   mutating: true,
   spaceRequired: true,

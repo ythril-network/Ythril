@@ -20,7 +20,7 @@ import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
 import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
@@ -228,7 +228,7 @@ export const update_factTool: ToolHandler = {
     + 'still reach it. Excluding a record does not hide it from the graph.\n'
     + '- `ttlDays` — this record\'s own expiry, the MOST specific of three tiers: it beats the type\'s '
     + 'retention window, which beats the space-wide one.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the record.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: one line with the fact\'s id and its new `seq` — the sync sequence number, which increments '
     + 'on every write and is how a peer knows this version is newer. An id that does not exist is an error, not '
     + 'a silent no-op.\n\n'
@@ -400,7 +400,7 @@ export const delete_factTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the fact\'s `_id`. Required. An id that does not exist is an ERROR, not a silent success, '
     + 'so a successful reply means a record really was deleted.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the fact. Without it '
+    + TARGET_SPACE_BULLET + ' Without it '
     + 'the call is refused rather than guessing which member you meant.\n\n'
     + 'RESPONSE: one line confirming the id that was deleted.',
   mutating: true,

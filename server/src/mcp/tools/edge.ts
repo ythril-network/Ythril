@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge } from '../../brain/edges.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -196,7 +196,7 @@ export const update_edgeTool: ToolHandler = {
     + 'ranking, never from traversal.\n'
     + '- `ttlDays` — this edge\'s own expiry, the MOST specific of three tiers: it beats the type\'s retention '
     + 'window, which beats the space-wide one.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the edge.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: one line with the edge\'s id and its new `seq` — the sync sequence number, which increments on '
     + 'every write and is how a peer knows this version is newer. An id that does not exist is an error, not a '
     + 'silent no-op.\n\n'
@@ -434,7 +434,7 @@ export const delete_edgeTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the edge\'s `_id`, as `graph_traverse`, `filter` and recall\'s `_graph` report it. Required. An id '
     + 'that does not exist is an ERROR, not a silent success.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the edge.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: one line confirming the id that was deleted.',
   mutating: true,
   spaceRequired: true,
