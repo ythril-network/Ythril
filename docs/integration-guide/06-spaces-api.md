@@ -192,10 +192,7 @@ POST /api/brain/spaces/all-research/facts?targetSpace=bio-research
 { "fact": "CRISPR efficiency improved by 40% with new guide RNA design." }
 ```
 
-The `targetSpace` must be a member of the proxy (any real space for `["*"]`) that the token reaches. A member the
-token does not reach answers exactly as a space that does not exist (`400`, `Target space '<id>' not found`); one it
-reaches without the write rung answers `403`. Omitting it answers `400` and lists only the members the token reaches.
-Deleting an edge or a link through a proxy finds it only in members the token reaches.
+The `targetSpace` must be a member of the proxy (any real space for `["*"]`) that the token reaches. A member the token does not reach answers exactly as a space that does not exist (`400`, `Target space '<id>' not found`); one it reaches without the write rung answers `403`. Omitting it answers `400` and lists only the members the token reaches. Deleting an edge or a link through a proxy finds it only in members the token reaches.
 
 **MCP**: When connected via MCP to a proxy space, read tools (`recall`, `query`, `read_file`, `list_dir`) aggregate automatically. Write tools (`save_fact`, `save_entity`, `write_file`, etc.) accept an optional `targetSpace` argument — required when the MCP endpoint is a proxy space, with the same rule and answers as REST.
 
