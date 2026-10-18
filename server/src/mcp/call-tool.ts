@@ -35,7 +35,7 @@
 import { getConfig } from '../config/loader.js';
 import { log, currentRequestId, peerText } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
-import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
+import { toolRightsRefusal, spaceAdminRefusal, toolReach, toolWriteGrant, assertWriteTarget } from './tool-rights-guard.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { admitPeerToolCall } from '../sync/peer-space-admission.js';
@@ -444,15 +444,18 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
      * through the one function that does it for the dispatcher, because what becomes of such an argument is the setting of the
      * space the write LANDS in; then `answerUnknownWriteFields` answers by that setting — a refusal before anything is stored, or
      * the rows every answer from here on carries. A failed resolution is refused for that, with nothing said about the arguments
-     * (resolution precedes the judge, as it does on REST). The handlers keep their own `resolveWriteTarget`, a no-op re-check now.
+     * (resolution precedes the judge, as it does on REST). It is judged against the caller's grant (`toolWriteGrant`, `Q-440`),
+     * and a refusal travels with its own status (`assertWriteTarget`): a member the token does not reach is never named, and a
+     * missing rung is a 403. The handlers keep their own `resolveWriteTarget`, a no-op re-check now.
      *
      * A batch (`save_bulk`) is not judged here: its top level is refused in every mode by the handler and its ITEMS are judged
      * one by one by the batch writer.
      */
     const judgedOperation = judgedOperationOfTool(name);
     if (judgedOperation !== null && !isBatchWriteOperation(judgedOperation)) {
-      const wt = resolveCallWriteTarget(callSpace, a);
-      if (!wt.ok) return refuseAudited(400, `Error: ${wt.error}`, callSpace, callSpace);
+      const wt = resolveCallWriteTarget(callSpace, a, toolWriteGrant({ name, rights }));
+      // Thrown as a `ToolRefusal` carrying the resolution's own status; the catch arm answers and records it as any refused write.
+      assertWriteTarget(wt);
       const judged = answerUnknownWriteFields(writeBodyOfToolCall(a, judgedOperation), judgedOperation, wt.target, writeDoor);
       rows = judged.rows;
       if (judged.refused) {
