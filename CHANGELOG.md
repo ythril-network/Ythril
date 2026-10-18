@@ -84,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Chrono `PATCH {superseded: true}` is accepted (was `400`); an empty PATCH names the accepted fields; a link field a record cannot hold (`linkFiles` anywhere) is an unknown field: Warn stores without it (a bulk item's was refused) | Read `warnings` |
 | `bulk.write` `errorCount` counts unknown-field warning rows | Do not alarm on `errorCount` alone |
 | Sync votes, members and change-notes answer `403` to a user token, an unlisted or other-network peer, or for a network not held (was `404`) | Read votes at `/api/networks/:id/votes` |
+| A write through a proxy into a space the token cannot reach or write is refused (`400` not found, `403` without the rung) | Grant the write rung on the member space |
 | Add-space's `202` carries `round` as the vote list shows it (no `pendingMeta`); other opening doors gain `round` | Read proposals on the space |
 | `DELETE /api/spaces/:id` and the admin wipe answer `200` (was `202`) when this instance's own yes passes the round and the change ran | Branch on `status`, not `202` |
 | `202` `status: "passed"`, `queued: true` while the change runs; `500` `space_act_failed` (`503` for a store outage) if it failed in the call | Do not retry a passed `500` or `503` |
@@ -233,6 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Server:** Log lines are single lines and each value in them is cut (4096 characters, 100 per list) and escaped: a peer cannot forge a line or flood the log; redaction no longer takes quadratic time (5.6.x is affected too).
 - **Server:** Values quoted back in answers are bounded and escaped: a reference refusal names its first five (256 characters each, then `…(+N more)`), `Unknown field(s)` / `unrecognized_keys` the first 10 keys.
 - **Server:** Stored error text (an embed job's `lastError`, a reindex run's `error`, a media job's and a webhook delivery's `error`) and a chat model server's error text (cut at 200 characters) are bounded and escaped.
+- **Spaces:** A write through a proxy space lands only in a member where the token holds the write rung; a member it does not reach answers as a missing space. Edge and link deletes and media retries through a proxy touch only reached members. 5.6.x is affected too.
 - **Sync:** A peer's tombstone applies only to the space its sync admitted, not the one it names: before, a peer could delete its records in any space, and under a `spaceMap` an honest peer's deletions missed. Planted ones stay.
 - **Sync:** A tombstone is authorised before it is stored: one not delivered by its issuer, or for a record another instance wrote (unless from its upstream), is refused and blocks no author. Author-less records stay deletable by their peer.
 - **Sync:** One deletion rule decides every record and file tombstone: the issuer's own, or the direct upstream's on a pub/sub network or a tree, for what it delivered.
