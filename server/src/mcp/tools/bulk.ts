@@ -8,7 +8,7 @@
  */
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { bulkWrite, bulkWriteTotal, bulkBodyRefusal, BULK_BODY_KEYS, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
@@ -63,7 +63,8 @@ export const save_bulkTool: ToolHandler = {
     + 'send its missing edges as an update to that id.\n\n'
     + 'PARAMETERS: each collection takes the same fields as its single-record tool — `facts` as `saveFact`, '
     + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
-    + '`ttlDays` per item. `targetSpace` is required when `space` is a proxy.\n\n'
+    + '`ttlDays` per item.\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'A KEY AN ITEM\'S COLLECTION DOES NOT TAKE is answered by how this instance is set for the space, item by item: by '
     + 'default the item is written and its `errors` row names the key; a space set to refuse rejects that item alone and '
     + 'the rest of the batch proceeds. The call\'s own top level takes only the collections, `space` and `targetSpace`, and '

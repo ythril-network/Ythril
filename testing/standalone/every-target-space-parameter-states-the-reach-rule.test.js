@@ -10,8 +10,9 @@
  *
  * ## The rule
  *
- * A tool that takes `targetSpace` takes its description from `TARGET_SPACE_DESCRIPTION` (mcp/tools/shared.ts), and no
- * tool source spells the old sentence again. The tools are DERIVED from the registry, never listed, and a FLOOR is asserted:
+ * A tool that takes `targetSpace` takes its description from `TARGET_SPACE_DESCRIPTION` (mcp/tools/shared.ts), a tool
+ * DESCRIPTION that mentions `targetSpace` carries that same text (the PARAMETERS bullet is `TARGET_SPACE_BULLET`, built from
+ * it), and no tool source spells the old sentence again. The tools are DERIVED from the registry, never listed, and a FLOOR is asserted:
  * an empty derivation passes every loop written over it.
  *
  * Run: npm run build -w server && node --test testing/standalone/every-target-space-parameter-states-the-reach-rule.test.js
@@ -53,6 +54,13 @@ describe('every MCP targetSpace parameter states the reach rule', () => {
       .filter(t => t.schema.properties.targetSpace.description !== TARGET_SPACE_DESCRIPTION)
       .map(t => `${t.door}: "${t.schema.properties.targetSpace.description}"`);
     assert.deepEqual(own, [], 'these tools describe targetSpace in their own words instead of TARGET_SPACE_DESCRIPTION');
+  });
+
+  it('every tool description that mentions targetSpace carries the shared text', () => {
+    const mentioning = writeTargets.filter(t => t.tool.description.includes('targetSpace'));
+    assert.ok(mentioning.length >= 10, `only ${mentioning.length} tool description(s) mention targetSpace - the derivation reads nothing`);
+    const own = mentioning.filter(t => !t.tool.description.includes(TARGET_SPACE_DESCRIPTION)).map(t => t.door);
+    assert.deepEqual(own, [], 'these tool descriptions say what targetSpace is in their own words instead of carrying TARGET_SPACE_DESCRIPTION');
   });
 
   it('no tool source spells the old per-tool sentence again', () => {

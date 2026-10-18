@@ -1,7 +1,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { createChrono, deleteChrono, getChronoById, updateChrono, parseRecurrence } from '../../brain/chrono.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
@@ -270,7 +270,7 @@ export const update_chronoTool: ToolHandler = {
     + 'never hides it from the graph or from a time-ordered listing.\n'
     + '- `ttlDays` — this entry\'s own expiry, the MOST specific of three tiers: it beats the type\'s retention '
     + 'window, which beats the space-wide one.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the entry.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: one line with the entry\'s id and its new `seq` — the sync sequence number, which increments '
     + 'on every write and is how a peer knows this version is newer. An id that does not exist is an error, not '
     + 'a silent no-op.\n\n'
@@ -484,7 +484,7 @@ export const delete_chronoTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the entry\'s `_id`, as `filter` reports it. Required. An id that does not '
     + 'exist is an ERROR, not a silent success.\n'
-    + '- `targetSpace` — required when `space` is a proxy: the member space holding the entry.\n\n'
+    + TARGET_SPACE_BULLET + '\n\n'
     + 'RESPONSE: one line confirming the id that was deleted.',
   mutating: true,
   spaceRequired: true,

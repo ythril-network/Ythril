@@ -90,6 +90,12 @@ export const TARGET_SPACE_DESCRIPTION =
   'Required when `space` is a proxy: the member space to write to. It must be a member this token can write; '
   + 'a member it cannot reach is answered as a space that does not exist.';
 
+/**
+ * The `targetSpace` bullet of a tool's PARAMETERS list: the same sentence as the parameter's own description, built from it,
+ * so the text a caller reads in the tool description and in the schema cannot say two things.
+ */
+export const TARGET_SPACE_BULLET = '- `targetSpace` — ' + TARGET_SPACE_DESCRIPTION;
+
 export const SUPPRESS_EMBEDDINGS_SCHEMA = {
   type: 'boolean',
   description:
