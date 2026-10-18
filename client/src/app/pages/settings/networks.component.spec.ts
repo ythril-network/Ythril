@@ -23,6 +23,7 @@ import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { NetworksComponent } from './networks.component';
+import { ACT_TEXT_KEYS, owedSpaceAct } from '../../testing/space-act-bodies';
 
 const net = (over: Partial<Network> = {}): Network =>
   ({ id: 'n1', label: 'Braintree', type: 'closed', members: [], ...over } as Network);
@@ -395,6 +396,64 @@ describe('NetworksComponent (characterization)', () => {
       const n = net({ spaces: ['team-flows'], spaceMap: { flows: 'team-flows' } } as Partial<Network>);
       expect(c.remoteOf(n, 'team-flows')).toBe('flows');
       expect(c.remoteOf(net({ spaces: ['x'] } as Partial<Network>), 'x')).toBeNull();
+    });
+  });
+
+  /*
+   * Q-535 (plan rev 2, design 8): the deletions and wipes this instance still owes a network. `owedSpaceActs` is served to an instance
+   * administrator only, so its ABSENCE is "not yours to see", never "none owed" — the page shows nothing then. `ownYesCarries` is served
+   * to every reader and stays a line in the card's body. Server shapes from `networkAnswer` (`testing/space-act-bodies.ts`).
+   */
+  describe('the acts this instance owes a network (Q-535)', () => {
+    const K = ACT_TEXT_KEYS;
+    function rendered(n: Network) {
+      make();
+      api.listNetworks.mockReturnValue(of({ networks: [n] }));
+      const fixture = TestBed.createComponent(NetworksComponent);
+      fixture.detectChanges();
+      const header = () => (fixture.nativeElement as HTMLElement).textContent ?? '';
+      const expand = () => { fixture.componentInstance.toggleNetwork(n.id); fixture.detectChanges(); };
+      return { fixture, header, expand, el: () => fixture.nativeElement as HTMLElement };
+    }
+    const owing = () => net({ id: 'n1', type: 'closed', spaces: ['proj', 'notes'], ownYesCarries: false,
+      owedSpaceActs: [owedSpaceAct(), owedSpaceAct({ entryId: 'e-2', localSpaceId: 'notes', networkSpaceId: 'notes', kind: 'wipe', state: 'running', attempts: 0, nextRetryAt: undefined })],
+    } as unknown as Partial<Network>);
+
+    it('an admin sees a header pill on the collapsed card when acts are owed', () => {
+      const r = rendered(owing());
+      expect(r.header()).toContain(K.owedPill);
+    });
+
+    it('inside, a real heading and a list with one item per owed act, naming its space', () => {
+      const r = rendered(owing());
+      r.expand();
+      const headings = Array.from(r.el().querySelectorAll('h2, h3, h4, h5, [role="heading"]')).map(h => h.textContent ?? '');
+      expect(headings.some(t => t.includes(K.owedTitle)), `headings: ${headings.join(' | ')}`).toBe(true);
+      const items = Array.from(r.el().querySelectorAll('ul li')).filter(li => /proj|notes/.test(li.textContent ?? ''));
+      expect(items).toHaveLength(2);
+      expect(items[0]!.textContent).toContain('proj');
+      expect(items[1]!.textContent).toContain('notes');
+    });
+
+    it('a reader who is not an admin (no owedSpaceActs) sees no pill and no list — absent is unknown, not "none"', () => {
+      const r = rendered(net({ id: 'n1', type: 'closed', spaces: ['proj'], ownYesCarries: true } as unknown as Partial<Network>));
+      expect(r.header()).not.toContain(K.owedPill);
+      r.expand();
+      expect(r.header()).not.toContain(K.owedTitle);
+    });
+
+    it('an admin with nothing owed (an empty list) sees no pill', () => {
+      const r = rendered(net({ id: 'n1', type: 'closed', spaces: ['proj'], ownYesCarries: true, owedSpaceActs: [] } as unknown as Partial<Network>));
+      expect(r.header()).not.toContain(K.owedPill);
+    });
+
+    it('the body says whether this instance\'s own yes carries a deletion or wipe here', () => {
+      const carries = rendered(net({ id: 'n1', type: 'club', spaces: ['proj'], ownYesCarries: true } as unknown as Partial<Network>));
+      carries.expand();
+      expect(carries.header()).toContain(K.ownYesCarriesYes);
+      const votes = rendered(net({ id: 'n1', type: 'closed', spaces: ['proj'], ownYesCarries: false } as unknown as Partial<Network>));
+      votes.expand();
+      expect(votes.header()).toContain(K.ownYesCarriesNo);
     });
   });
 });

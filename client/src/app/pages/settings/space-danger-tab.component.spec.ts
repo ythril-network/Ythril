@@ -7,10 +7,16 @@
  * the redesign can't weaken it: a cancelled confirm must never call the API, and a confirmed one calls the
  * right endpoint and updates state. (Wipe/Delete already use type-to-confirm; the rework adds it to Rename.)
  */
-import { TestBed } from '@angular/core/testing';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { of } from 'rxjs';
 import { signal } from '@angular/core';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting, type TestRequest } from '@angular/common/http/testing';
+import { LiveAnnouncement } from '../../core/live-announcement';
+import {
+  ACT_TEXT_KEYS, DELETE_ANSWERS as D, WIPE_ANSWERS as W, NOW, RETRY_AHEAD, SERVER_SENTENCES, actPending, type WireAnswer,
+} from '../../testing/space-act-bodies';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { SpaceDangerTabComponent } from './space-danger-tab.component';
 import { SpaceSettingsState } from './space-settings-state.service';
@@ -112,26 +118,9 @@ describe('SpaceDangerTabComponent — irreversible ops are confirm-gated', () =>
   });
 
   /*
-   * A networked delete or wipe may answer 202: a vote is open, or the vote passed and the change is still running (bundle-106). The space
-   * then still exists here, so treating the answer as done would drop a live space from the list and close its settings. PR A's minimum:
-   * a 202 is never "done" - the space stays, and the operator is told it is not done yet. The detailed outcomes are PR C's.
+   * The two 202 cases that stood here flushed `{ pending: true }`, a shape the server never sends, and pinned the sticky
+   * `notDoneYet` toast that Q-535 removes. They moved, as real server bodies, to "the act's outcome is shown in the tab" below.
    */
-  it('delete: an answer that is not done (202) keeps the space and says so', async () => {
-    const info = vi.fn();
-    const h = setup(true, { deleteSpace: vi.fn().mockReturnValue(of({ pending: true })) });
-    (TestBed.inject(ToastService) as unknown as { info: unknown }).info = info;
-    await h.c.confirmDangerDelete();
-    expect(h.state.settingsSpace()?.id).toBe('proj');
-    expect(info).toHaveBeenCalledWith('spaces.dangerZone.notDoneYet', 0);
-  });
-
-  it('wipe: an answer that is not done (202) says so instead of reading the stats as wiped', async () => {
-    const info = vi.fn();
-    const h = setup(true, { wipeSpace: vi.fn().mockReturnValue(of({ pending: true })) });
-    (TestBed.inject(ToastService) as unknown as { info: unknown }).info = info;
-    await h.c.confirmDangerWipe();
-    expect(info).toHaveBeenCalledWith('spaces.dangerZone.notDoneYet', 0);
-  });
 
   it('leave network: cancelled does not call the API; confirmed leaves', async () => {
     const cancelled = setup(false);
@@ -204,5 +193,326 @@ describe('the embedding suppression section', () => {
       TestBed.tick();
       expect(h.c.backfillResult()).toBe(null);
     });
+  });
+});
+
+/*
+ * Q-535 (plan rev 2, design 2-7): what a delete or wipe came to is shown IN the tab, in one `role="status"` region, from the REAL
+ * server answer — not a sticky toast built from `pending`. These run the real SpacesApi against HttpTestingController and flush the
+ * bodies the server sends (`testing/space-act-bodies.ts`), so they hold whatever shape the service and parser take.
+ */
+const K = ACT_TEXT_KEYS;
+
+interface Wired {
+  fixture: ComponentFixture<SpaceDangerTabComponent>;
+  c: SpaceDangerTabComponent;
+  state: SpaceSettingsState;
+  http: HttpTestingController;
+  confirm: ReturnType<typeof vi.fn>;
+}
+
+/** The tab with the real SpacesApi; `space` is merged into the open space (e.g. `{ actPending }`), `nets` is what networksForSpace gives. */
+function wired(opts: { space?: Record<string, unknown>; nets?: Record<string, unknown>[] } = {}): Wired {
+  const confirm = vi.fn((_data: unknown) => Promise.resolve(true));
+  TestBed.resetTestingModule();
+  TestBed.configureTestingModule({
+    imports: [SpaceDangerTabComponent, getTranslocoModule({ translation: { en: {
+      // A parametrised key echoes its own name AND its parameter, so a spec can see both the line and what filled it.
+      [K.queued]: `${K.queued} {{when}}`,
+    } } })],
+    providers: [
+      SpaceSettingsState,
+      SpacesApi,
+      provideHttpClient(),
+      provideHttpClientTesting(),
+      { provide: NetworksApi, useValue: { listNetworks: vi.fn().mockReturnValue(of({ networks: [] })), leaveNetwork: vi.fn().mockReturnValue(of({})) } },
+      { provide: SpacesStore, useValue: {
+        spaces: signal([{ id: 'proj', label: 'Project', ...opts.space }]), networks: signal([]), refreshNetworks: vi.fn(),
+        networksForSpace: () => opts.nets ?? [], load: vi.fn(),
+      } },
+      { provide: ToastService, useValue: { error: vi.fn(), success: vi.fn(), show: vi.fn(), info: vi.fn() } },
+      { provide: ConfirmDialogService, useValue: { confirm } },
+    ],
+  });
+  const state = TestBed.inject(SpaceSettingsState);
+  state.settingsSpace.set({ id: 'proj', label: 'Project', ...opts.space } as never);
+  const fixture = TestBed.createComponent(SpaceDangerTabComponent);
+  fixture.detectChanges();
+  return { fixture, c: fixture.componentInstance, state, http: TestBed.inject(HttpTestingController), confirm };
+}
+
+const flushWire = (req: TestRequest, a: WireAnswer) => req.flush(a.body, { status: a.status, statusText: String(a.status) });
+const textOf = (h: Wired, selector: string) =>
+  Array.from((h.fixture.nativeElement as HTMLElement).querySelectorAll(selector)).map(e => e.textContent ?? '').join(' | ');
+const statusText = (h: Wired) => textOf(h, '[role="status"]');
+const alertText = (h: Wired) => textOf(h, '[role="alert"]');
+const pageText = (h: Wired) => (h.fixture.nativeElement as HTMLElement).textContent ?? '';
+const spacesPolls = (h: Wired) => h.http.match(r => r.method === 'GET' && r.url === '/api/spaces');
+
+async function deleteAnswered(h: Wired, a: WireAnswer): Promise<void> {
+  await h.c.confirmDangerDelete();
+  flushWire(h.http.expectOne(r => r.method === 'DELETE' && r.url === '/api/spaces/proj'), a);
+  if (h.state.settingsSpace()) h.fixture.detectChanges();
+}
+
+async function wipeAnswered(h: Wired, a: WireAnswer): Promise<void> {
+  await h.c.confirmDangerWipe();
+  flushWire(h.http.expectOne(r => r.method === 'POST' && r.url === '/api/admin/spaces/proj/wipe'), a);
+  h.fixture.detectChanges();
+}
+
+describe('the act\'s outcome is shown in the tab (Q-535)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it('delete 202 vote_pending: the space stays and the status region says a vote is open', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.votePending);
+    expect(h.state.settingsSpace()?.id).toBe('proj');
+    expect(statusText(h)).toContain(K.votePending);
+  });
+
+  it('delete 202 queued with a retry ahead: the space stays and the line says when, never "ago"', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.localQueued);
+    expect(h.state.settingsSpace()?.id).toBe('proj');
+    expect(statusText(h)).toContain(K.queued);
+    expect(statusText(h)).not.toMatch(/\bago\b/);
+  });
+
+  it('delete 202 queued with a retry time already past: "retrying now", not a time in the past', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.localQueuedOverdue);
+    expect(statusText(h)).toContain(K.retryingNow);
+    expect(statusText(h)).not.toMatch(/\bago\b/);
+  });
+
+  it('delete 202 queued with no retry time (still running): "will run shortly"', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.votedQueuedRunning);
+    expect(statusText(h)).toContain(K.runsShortly);
+  });
+
+  it('delete 200 removedHere:false: the space is KEPT here and the line says another network holds it', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.votedDoneKeptHere);
+    expect(h.state.settingsSpace()?.id, 'the settings stay open on a space that still exists here').toBe('proj');
+    expect(statusText(h)).toContain(K.keptHere);
+  });
+
+  it('delete 200 removedHere:true: the space is removed and the settings close', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.votedDone);
+    expect(h.state.settingsSpace()).toBeNull();
+  });
+
+  it('delete 200 repeated: "already in progress" is said, and the space is gone', async () => {
+    const h = wired();
+    const say = vi.spyOn(LiveAnnouncement.prototype, 'say');
+    const toast = TestBed.inject(ToastService) as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    await deleteAnswered(h, D.repeatedDone);
+    const said = [...say.mock.calls, ...toast['info']!.mock.calls, ...toast['success']!.mock.calls, ...toast['show']!.mock.calls]
+      .map(c => String(c[0])).join(' | ');
+    expect(h.state.settingsSpace()).toBeNull();
+    expect(said).toContain(K.repeated);
+  });
+
+  it('delete 404: the space is already gone — done, no error line', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.alreadyGone);
+    expect(h.state.settingsSpace()).toBeNull();
+    expect(h.state.dangerDeleteError()).toBe('');
+  });
+
+  it('delete 500 space_act_failed after a vote: role=alert with the voted key, never the server\'s English', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.votedFailed);
+    expect(h.state.settingsSpace()?.id).toBe('proj');
+    expect(alertText(h)).toContain(K.failedVoted);
+    for (const s of SERVER_SENTENCES) expect(pageText(h)).not.toContain(s);
+  });
+
+  it('delete 500 space_act_failed on a local act: role=alert with the local key', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.localFailed);
+    expect(alertText(h)).toContain(K.failedLocal);
+    for (const s of SERVER_SENTENCES) expect(pageText(h)).not.toContain(s);
+  });
+
+  it('delete 503 from the store after a vote, and 503 shutting down: role=alert, voted and local keys', async () => {
+    const voted = wired();
+    await deleteAnswered(voted, D.votedStoreDown);
+    expect(alertText(voted)).toContain(K.failedVoted);
+    const closing = wired();
+    await deleteAnswered(closing, D.shuttingDown);
+    expect(alertText(closing)).toContain(K.failedLocal);
+  });
+
+  it('wipe 200: stats reload and the status region says it is wiped', async () => {
+    const h = wired();
+    await wipeAnswered(h, W.localDone);
+    h.http.expectOne('/api/brain/spaces/proj/stats');
+    expect(statusText(h)).toContain(K.wiped);
+  });
+
+  it('wipe 200 refills: the line says the copy refills from the publisher at the next sync', async () => {
+    const h = wired();
+    await wipeAnswered(h, W.subscriberRefills);
+    expect(statusText(h)).toContain(K.refills);
+  });
+
+  it('wipe 202 vote_pending and 202 queued: said in the status region, no stats reload as if wiped', async () => {
+    const pending = wired();
+    await wipeAnswered(pending, W.votePending);
+    expect(statusText(pending)).toContain(K.votePending);
+    expect(pending.http.match('/api/brain/spaces/proj/stats')).toHaveLength(0);
+    const queued = wired();
+    await wipeAnswered(queued, W.votedQueued);
+    expect(statusText(queued)).toContain(K.queued);
+  });
+
+  it('wipe 500 space_act_failed on a local act: role=alert with the local key', async () => {
+    const h = wired();
+    await wipeAnswered(h, W.localFailed);
+    expect(alertText(h)).toContain(K.failedLocal);
+    for (const s of SERVER_SENTENCES) expect(pageText(h)).not.toContain(s);
+  });
+});
+
+describe('the standing act (actPending, admins) and its poll (Q-535)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  const TEN_MINUTES = 600_000;
+
+  it('shows what stands: the notice, its state, attempts and the repeat hint, in the status region', () => {
+    const h = wired({ space: { actPending: actPending({ kind: 'delete', state: 'owed', attempts: 2, nextRetryAt: RETRY_AHEAD }) } });
+    const status = statusText(h);
+    expect(status).toContain(K.standing);
+    expect(status).toContain(K.attempts);
+    expect(pageText(h)).toContain(K.repeatHint);
+  });
+
+  it('a non-admin (no actPending: unknown, never "none") sees nothing about acts, and nothing is polled', () => {
+    const h = wired();
+    expect(pageText(h)).not.toContain('spaces.dangerZone.act.');
+    vi.advanceTimersByTime(TEN_MINUTES);
+    expect(spacesPolls(h)).toHaveLength(0);
+  });
+
+  it('the delete and wipe buttons stay enabled while an act stands (a repeat joins or retries it)', () => {
+    const h = wired({ space: { actPending: actPending({ kind: 'wipe', state: 'running' }) } });
+    const buttons = Array.from((h.fixture.nativeElement as HTMLElement).querySelectorAll('button'));
+    const wipe = buttons.find(b => b.textContent?.includes('spaces.dangerZone.wipeButton'));
+    const del = buttons.find(b => b.textContent?.includes('spaces.dangerZone.deleteButton'));
+    expect(wipe?.disabled).toBe(false);
+    expect(del?.disabled).toBe(false);
+    expect(pageText(h)).toContain(K.repeatHint);
+  });
+
+  it('a rename while a delete stands keeps its 409, in role=alert, with a hint line', async () => {
+    const h = wired({ space: { actPending: actPending({ kind: 'delete' }) } });
+    h.state.dangerRenameId = 'proj-2';
+    await h.c.submitDangerRename();
+    h.http.expectOne(r => r.method === 'PATCH' && r.url === '/api/spaces/proj/rename').flush(
+      { error: '\'proj\' cannot be renamed while a deletion or wipe of it is owed or running; see GET /api/networks/:id (owedSpaceActs).' },
+      { status: 409, statusText: 'Conflict' });
+    h.fixture.detectChanges();
+    expect(alertText(h)).toContain('cannot be renamed');
+    expect(pageText(h)).toContain(K.renameHint);
+  });
+
+  it('opening the tab on a standing act starts the poll; it goes on while the act stands', () => {
+    const h = wired({ space: { actPending: actPending() } });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    const first = spacesPolls(h);
+    expect(first.length, 'a GET /api/spaces while an act stands').toBeGreaterThan(0);
+    first[0]!.flush({ spaces: [{ id: 'proj', label: 'Project', actPending: actPending({ attempts: 3 }) }] });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    expect(spacesPolls(h).length, 'asked again: the act still stands').toBeGreaterThan(0);
+  });
+
+  it('a delete that ends while polled: the space is gone from the list, the tab closes and the end is announced', () => {
+    const say = vi.spyOn(LiveAnnouncement.prototype, 'say');
+    const h = wired({ space: { actPending: actPending({ kind: 'delete' }) } });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    const polls = spacesPolls(h);
+    expect(polls.length, 'the standing delete is polled').toBeGreaterThan(0);
+    polls[0]!.flush({ spaces: [] });
+    expect(h.state.settingsSpace()).toBeNull();
+    expect(say.mock.calls.map(c => String(c[0])).join(' | ')).toContain(K.ended);
+  });
+
+  it('a wipe that ends while polled: stats reload and the end is announced', () => {
+    const say = vi.spyOn(LiveAnnouncement.prototype, 'say');
+    const h = wired({ space: { actPending: actPending({ kind: 'wipe' }) } });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    const polls = spacesPolls(h);
+    expect(polls.length, 'the standing wipe is polled').toBeGreaterThan(0);
+    polls[0]!.flush({ spaces: [{ id: 'proj', label: 'Project' }] });
+    h.http.expectOne('/api/brain/spaces/proj/stats');
+    expect(say.mock.calls.map(c => String(c[0])).join(' | ')).toContain(K.ended);
+  });
+
+  it('a queued delete answer starts the poll', async () => {
+    const h = wired();
+    await deleteAnswered(h, D.votedQueued);
+    vi.advanceTimersByTime(TEN_MINUTES);
+    expect(spacesPolls(h).length).toBeGreaterThan(0);
+  });
+
+  it('the poll stops when the tab is destroyed', () => {
+    const h = wired({ space: { actPending: actPending() } });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    const first = spacesPolls(h);
+    expect(first.length, 'the poll ran before the destroy').toBeGreaterThan(0);
+    first[0]!.flush({ spaces: [{ id: 'proj', label: 'Project', actPending: actPending() }] });
+    h.fixture.destroy();
+    vi.advanceTimersByTime(TEN_MINUTES);
+    expect(spacesPolls(h)).toHaveLength(0);
+  });
+
+  it('the poll stops when the dialog switches to another space', () => {
+    const h = wired({ space: { actPending: actPending() } });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    const first = spacesPolls(h);
+    expect(first.length, 'the poll ran before the switch').toBeGreaterThan(0);
+    first[0]!.flush({ spaces: [{ id: 'proj', label: 'Project', actPending: actPending() }] });
+    h.state.settingsSpace.set({ id: 'other', label: 'Other' } as never);
+    h.fixture.detectChanges();
+    vi.advanceTimersByTime(TEN_MINUTES);
+    expect(spacesPolls(h)).toHaveLength(0);
+  });
+});
+
+describe('the confirm text forecasts what the act will do (Q-535 design 7)', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const asked = (h: Wired) => JSON.stringify(h.confirm.mock.calls[0]?.[0] ?? null);
+
+  it('no network holds the space: "local only", for a delete and for a wipe', async () => {
+    const del = wired({ nets: [] });
+    await del.c.confirmDangerDelete();
+    expect(asked(del)).toContain(K.forecastLocalOnly);
+    const wipe = wired({ nets: [] });
+    await wipe.c.confirmDangerWipe();
+    expect(asked(wipe)).toContain(K.forecastLocalOnly);
+  });
+
+  it('every network\'s ownYesCarries is true: "acts at once here and on the network"', async () => {
+    const h = wired({ nets: [{ id: 'n1', label: 'Team', ownYesCarries: true }] });
+    await h.c.confirmDangerDelete();
+    expect(asked(h)).toContain(K.forecastActsNow);
+  });
+
+  it('any network\'s ownYesCarries is false: "this opens a vote"', async () => {
+    const h = wired({ nets: [{ id: 'n1', label: 'Team', ownYesCarries: true }, { id: 'n2', label: 'Wide', ownYesCarries: false }] });
+    await h.c.confirmDangerWipe();
+    expect(asked(h)).toContain(K.forecastOpensVote);
   });
 });
