@@ -1,7 +1,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { createChrono, deleteChrono, getChronoById, updateChrono, parseRecurrence } from '../../brain/chrono.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
@@ -105,7 +105,7 @@ export const save_chronoTool: ToolHandler = {
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             recurrence: recurrenceSchema('Optional recurrence rule,'),
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             checkDuplicates: { type: 'boolean', default: true, description: 'Run a semantic near-duplicate check before storing (default true). When a highly similar entry already exists, the response flags it (id + summary + score) so you can update it instead of logging the same event twice. The entry is still stored regardless. Set false to skip.' },
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing entries that CONTRADICT this one — a near-neighbour claiming a different status, or setting the same single-valued property to a different value. Deterministic only (no model call). The entry is still stored regardless.' },
             waitForEmbedding: waitForEmbeddingSchema('chrono entry', true),
@@ -349,7 +349,7 @@ export const update_chronoTool: ToolHandler = {
                 + '`createdAt`, `updatedAt`) are REFUSED by name rather than ignored, so a path that cannot be '
                 + 'honoured tells you instead of silently doing nothing.',
             },
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             ttlDays: TTL_DAYS_SCHEMA,
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
             // a field on one verb and not the other is the gap this closes, and two hand-written copies
@@ -499,7 +499,7 @@ export const delete_chronoTool: ToolHandler = {
           + 'entry only drops them. A tombstone is written, so re-creating it with the same id does not '
           + 'undo this.',
       },
-      targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'id'],
     additionalProperties: false,

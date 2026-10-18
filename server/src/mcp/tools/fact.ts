@@ -20,7 +20,7 @@ import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
 import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
@@ -68,7 +68,7 @@ export const save_factTool: ToolHandler = {
               description: 'Optional structured key-value metadata (filterable via query). ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             checkDuplicates: { type: 'boolean', default: true, description: 'Run a semantic near-duplicate check before storing (default true). When a highly similar fact already exists, the response flags it (id + summary + score) so you can update it instead of creating a redundant one. The fact is still stored regardless. Set false to skip the check.' },
             waitForEmbedding: waitForEmbeddingSchema('fact', true),
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing facts that CONTRADICT this one — a near-neighbour that sets the same single-valued property to a different value (e.g. status="active" vs status="retired"). Different question from checkDuplicates: "is this redundant?" vs "does this conflict with what we already believe?". Deterministic only (no model call, no added latency). The fact is still stored regardless — if you are correcting an outdated fact, that is expected; consider updating or superseding the record named in the warning.' },
@@ -277,7 +277,7 @@ export const update_factTool: ToolHandler = {
             },
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             deleteFields: { type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' }, description: 'Dot-notation paths to delete from the fact (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
@@ -416,7 +416,7 @@ export const delete_factTool: ToolHandler = {
                 + 'deleted. A tombstone is written under this id, which is why re-creating the record with '
                 + 'it does not undo the delete.',
             },
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space', 'id'],
           additionalProperties: false,

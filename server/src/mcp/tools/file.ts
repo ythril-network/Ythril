@@ -1,5 +1,5 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs, DELETION_REACH } from './shared.js';
+import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs, DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { moveFileCascade } from '../../files/move-cascade.js';
@@ -141,7 +141,7 @@ export const write_fileTool: ToolHandler = {
               description: 'Optional structured key-value metadata for this file.',
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             ttlDays: TTL_DAYS_SCHEMA,
             inputFormat: {
               type: 'string',
@@ -308,7 +308,7 @@ export const delete_fileTool: ToolHandler = {
               + 'path deletes everything under it and needs `confirm: true`. A path '
               + 'that does not exist is an error, not a silent success.'),
             confirm: { type: 'boolean', description: 'Required `true` to delete a directory. Ignored for a file.' },
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space', 'path'],
           additionalProperties: false,
@@ -351,7 +351,7 @@ export const create_dirTool: ToolHandler = {
           properties: {
             space: s.requiredSpace,
             path: { type: 'string', minLength: 1, description: 'Directory path relative to the space root.' },
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space', 'path'],
           additionalProperties: false,
@@ -430,7 +430,7 @@ export const move_fileTool: ToolHandler = {
               + 'name where a file, a folder or a file\'s record already stands (`destination_exists`): a move never replaces '
               + 'anything, so delete the destination first. Missing parent directories are created. The file '
               + 'is not re-read, so a failed extraction stays failed.'),
-            targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space', 'src', 'dst'],
           additionalProperties: false,
@@ -482,7 +482,7 @@ export const retry_embed_fileTool: ToolHandler = {
       path: filePathSchema('The file must already exist and its indexing must have FAILED — retrying '
         + 'one that succeeded, or one still queued, does nothing useful. `list_embed_jobs` is where the '
         + 'failures and their reasons are.'),
-      targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'path'],
     additionalProperties: false,
@@ -609,7 +609,7 @@ export const update_file_metaTool: ToolHandler = {
       // The description above promises these; declaring them anywhere but here would mean the dispatcher
       // refusing what the text tells a caller to send.
       ...linkInputSchemasFor('file'),
-      targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space holding the file.' },
+      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'path'],
     additionalProperties: false,

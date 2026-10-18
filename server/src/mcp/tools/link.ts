@@ -11,7 +11,7 @@ import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
 import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
-import { DELETION_REACH } from './shared.js';
+import { DELETION_REACH, TARGET_SPACE_DESCRIPTION } from './shared.js';
 import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 
 /** Every legal class, as the arrays spell them — used in the schema text and in the refusal. */
@@ -79,7 +79,7 @@ export const save_linkTool: ToolHandler = {
           + 'traversal that comes back empty.',
       },
       toKind: kindSchema('to'),
-      targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'from', 'fromKind', 'to', 'toKind'],
     additionalProperties: false,
@@ -142,7 +142,7 @@ export const delete_linkTool: ToolHandler = {
         description: 'The link\'s `_id`. An id that is not a link is an ERROR, not a silent success. The two '
           + 'records at either end are never touched.',
       },
-      targetSpace: { type: 'string', description: 'Required for proxy spaces: the member space to write to.' },
+      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'id'],
     additionalProperties: false,
