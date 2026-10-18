@@ -1,10 +1,11 @@
 import { Injectable, inject } from '@angular/core';
 import type { ReembedResult, ReindexStatus } from './embed-ops.types';
-import { HttpClient } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Observable, catchError, map, of, throwError } from 'rxjs';
+import { spaceActOutcome, type SpaceActOutcome } from './space-act-outcome';
 import type {
   Space, SpaceMeta, SpacesResponse, SpaceMetaResponse, KnowledgeType, TypeSchema,
-  DupeActionRule, SpaceStats, SpaceActivity, SpaceActivityResponse, WipeCollectionType, WipeResult, CompletenessReport,
+  DupeActionRule, SpaceStats, SpaceActivity, SpaceActivityResponse, WipeCollectionType, CompletenessReport,
   RecordTtlWindows,
 } from './api.types';
 
@@ -57,11 +58,6 @@ export interface ValidateSchemaResult {
   staleGuards?: unknown[];
   /** Where the next page starts (sent back as `after`); absent when the check is complete. The server's `_id`-keyset spelling. */
   nextAfter?: string;
-}
-
-/** A delete or wipe answer as a caller may act on it: `pending` is a `202` - not done here yet (a vote is open, or the change still runs). */
-export interface SpaceActAnswer {
-  pending: boolean;
 }
 
 /** Spaces, their per-type schemas, stats, reindex, and destructive wipe. */
@@ -132,12 +128,14 @@ export class SpacesApi {
   }
 
   /**
-   * Delete a space. `pending` is true for a `202`: a networked delete opened a vote, or the vote passed and the change is still running, so
-   * the space still exists here. It is read from the status inside this method so no caller can treat a 202 as done by not looking.
+   * Delete a space, answered as what it came to ({@link SpaceActOutcome}): done, a vote open, queued, or failed. The status AND the body are
+   * read inside this method so no caller can treat a 202 as done, or a 500 the server retries as one nothing retries, by not looking.
+   *
+   * A 404 is "already gone" (done); a 500 or 503 is a `failed` outcome rather than an error, because its body says whether the server runs
+   * the act again. Every other refusal (400, 403, 409, 429, a network failure) is thrown for `refusalText`.
    */
-  deleteSpace(id: string): Observable<SpaceActAnswer> {
-    return this.http.delete(`/api/spaces/${id}`, { body: { confirm: true }, observe: 'response' })
-      .pipe(map(res => ({ pending: res.status === 202 })));
+  deleteSpace(id: string): Observable<SpaceActOutcome> {
+    return this.actAnswer(this.http.delete(`/api/spaces/${id}`, { body: { confirm: true }, observe: 'response' }), [404, 500, 503]);
   }
 
   renameSpace(oldId: string, newId: string): Observable<{ space: Space }> {
@@ -171,11 +169,20 @@ export class SpacesApi {
     return this.http.post<ReembedResult>(`/api/spaces/${spaceId}/reembed`, body);
   }
 
-  /** Wipe a space's records. The server refuses a wipe without `confirm`; `pending` is true for a `202`, as on {@link deleteSpace}. */
-  wipeSpace(spaceId: string, types?: WipeCollectionType[]): Observable<SpaceActAnswer & { deleted?: WipeResult }> {
+  /** Wipe a space's records. The server refuses a wipe without `confirm`. Answered as on {@link deleteSpace}, except that a 404 is thrown (the space is not there to wipe). */
+  wipeSpace(spaceId: string, types?: WipeCollectionType[]): Observable<SpaceActOutcome> {
     const body: { confirm: true; types?: WipeCollectionType[] } = types && types.length > 0 ? { confirm: true, types } : { confirm: true };
-    return this.http.post<{ deleted?: WipeResult }>(`/api/admin/spaces/${spaceId}/wipe`, body, { observe: 'response' })
-      .pipe(map(res => ({ pending: res.status === 202, deleted: res.body?.deleted })));
+    return this.actAnswer(this.http.post(`/api/admin/spaces/${spaceId}/wipe`, body, { observe: 'response' }), [500, 503]);
+  }
+
+  /** One request of a delete or wipe, as a {@link SpaceActOutcome}; a failure status in `readable` becomes an outcome, any other error is rethrown. */
+  private actAnswer(request: Observable<{ status: number; body: unknown }>, readable: number[]): Observable<SpaceActOutcome> {
+    return request.pipe(
+      map(res => spaceActOutcome(res.status, res.body as Record<string, unknown> | null)),
+      catchError((err: unknown) => err instanceof HttpErrorResponse && readable.includes(err.status)
+        ? of(spaceActOutcome(err.status, err.error as Record<string, unknown> | null))
+        : throwError(() => err)),
+    );
   }
 
   getSpaceStats(spaceId: string): Observable<SpaceStats> {

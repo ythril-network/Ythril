@@ -5,7 +5,7 @@
  * the server data and SpaceSettingsState owns the dialog form state, and both are services the
  * page provides — so this component just renders them and calls them.
  */
-import { Component, ChangeDetectionStrategy, inject, signal, computed, effect } from '@angular/core';
+import { Component, ChangeDetectionStrategy, DestroyRef, inject, signal, computed, effect, untracked } from '@angular/core';
 import type { ReembedResult } from '../../core/embed-ops.types';
 import { firstValueFrom } from 'rxjs';
 import { CommonModule } from '@angular/common';
@@ -21,11 +21,28 @@ import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { TranslocoService } from '@jsverse/transloco';
 import { refusalText, RefusalSource } from '../../core/refusal-text';
+import { DateFormatService } from '../../core/date-format.service';
+import { LiveAnnouncement } from '../../core/live-announcement';
+import { pollUntil, type PollHandle } from '../../core/poll-until';
+import type { ActEntryView, SpaceActOutcome } from '../../core/space-act-outcome';
+import { StatusPillComponent } from '../../shared/status-pill.component';
+import { actKindKey, actStateKey, actStateVariant, actWhenText } from '../../core/space-act-view';
+
+/** How often a standing delete or wipe is asked after, while this tab is open. */
+const ACT_POLL_MS = 5000;
+
+/** What the status region says about the last delete or wipe, besides a standing act (which it shows from the space itself). */
+type ActNotice =
+  | { kind: 'votePending' }
+  | { kind: 'queued'; retryAt?: string }
+  | { kind: 'keptHere' }
+  | { kind: 'wiped'; refills: boolean; repeated: boolean }
+  | { kind: 'ended' };
 
 @Component({
   selector: 'app-space-danger-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe],
+  imports: [CommonModule, FormsModule, TranslocoPipe, StatusPillComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SPACE_DIALOG_STYLES],
   template: `
@@ -142,7 +159,8 @@ import { refusalText, RefusalSource } from '../../core/refusal-text';
       @if (state.dangerRenaming()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.renameButton' | transloco }}
     </button>
   </form>
-  @if (state.dangerRenameError()) { <div class="alert alert-error" style="margin-top:8px;">{{ state.dangerRenameError() }}</div> }
+  @if (state.dangerRenameError()) { <div class="alert alert-error" role="alert" style="margin-top:8px;">{{ state.dangerRenameError() }}</div> }
+  @if (renameBlockedByAct()) { <p class="dz-hint" style="margin-top:6px;">{{ 'spaces.dangerZone.act.renameHint' | transloco }}</p> }
 </div>
 
 <div class="dz-section">
@@ -151,6 +169,36 @@ import { refusalText, RefusalSource } from '../../core/refusal-text';
   <button class="btn btn-secondary" type="button" [disabled]="rebuildingIndexes()" (click)="rebuildIndexes()">
     @if (rebuildingIndexes()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.rebuildIndexesButton' | transloco }}
   </button>
+</div>
+
+<!-- What a delete or wipe came to, and what still stands (Q-535). ONE polite live region, always in the DOM: a region that appears together
+     with its text is not announced. It is bound to the last outcome and to the space's actPending, which only an administrator is served;
+     an absent actPending is "unknown", so a reader who is not one sees an empty region and no word about acts. -->
+<div class="act-region" role="status" aria-live="polite">
+  @if (standing(); as s) {
+    <div class="alert alert-warning" style="margin-bottom:16px;font-size:13px;">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <app-status-pill [variant]="actStateVariant(s.state)" [dot]="true">{{ actStateKey(s.state) | transloco }}</app-status-pill>
+        <span>{{ 'spaces.dangerZone.act.standing' | transloco: { kind: (actKindKey(s.kind) | transloco), since: sinceText(s.since), when: whenText(s.nextRetryAt) } }}</span>
+      </div>
+      <div class="dz-hint" style="margin-top:6px;">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: s.attempts } }}</div>
+      @if (s.kind === 'delete' || s.kind === 'wipe') { <div class="dz-hint">{{ 'spaces.dangerZone.act.repeatHint' | transloco }}</div> }
+    </div>
+  } @else if (notice(); as n) {
+    <div class="alert" [class.alert-success]="n.kind === 'wiped' || n.kind === 'ended'" [class.alert-warning]="n.kind !== 'wiped' && n.kind !== 'ended'" style="margin-bottom:16px;font-size:13px;">
+      @switch (n.kind) {
+        @case ('votePending') { {{ 'spaces.dangerZone.act.votePending' | transloco }} }
+        @case ('queued') { {{ 'spaces.dangerZone.act.queued' | transloco: { when: whenText(n.retryAt) } }} }
+        @case ('keptHere') { {{ 'spaces.dangerZone.act.keptHere' | transloco }} }
+        @case ('wiped') {
+          {{ 'spaces.dangerZone.act.wiped' | transloco }}
+          @if (n.refills) { {{ 'spaces.dangerZone.act.refills' | transloco }} }
+          @if (n.repeated) { {{ 'spaces.dangerZone.act.repeated' | transloco }} }
+        }
+        @case ('ended') { {{ 'spaces.dangerZone.act.ended' | transloco }} }
+      }
+    </div>
+  }
 </div>
 
 <div class="dz-section dz-red">
@@ -170,7 +218,7 @@ import { refusalText, RefusalSource } from '../../core/refusal-text';
       }
     </div>
   }
-  @if (state.dangerWipeError()) { <div class="alert alert-error" style="margin-bottom:8px;">{{ state.dangerWipeError() }}</div> }
+  @if (state.dangerWipeError()) { <div class="alert alert-error" role="alert" style="margin-bottom:8px;">{{ state.dangerWipeError() }}</div> }
   <button class="btn btn-danger" type="button" (click)="confirmDangerWipe()" [disabled]="state.dangerWiping()">
     @if (state.dangerWiping()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.wipeButton' | transloco }}
   </button>
@@ -197,7 +245,7 @@ import { refusalText, RefusalSource } from '../../core/refusal-text';
   <div class="dz-section dz-red">
     <div class="dz-section-title">{{ 'spaces.dangerZone.deleteTitle' | transloco }}</div>
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">{{ 'spaces.dangerZone.deleteDescription' | transloco }}</p>
-    @if (state.dangerDeleteError()) { <div class="alert alert-error" style="margin-bottom:8px;">{{ state.dangerDeleteError() }}</div> }
+    @if (state.dangerDeleteError()) { <div class="alert alert-error" role="alert" style="margin-bottom:8px;">{{ state.dangerDeleteError() }}</div> }
     <button class="btn btn-danger" type="button" (click)="confirmDangerDelete()" [disabled]="state.dangerDeleting()">
       @if (state.dangerDeleting()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.deleteButton' | transloco }}
     </button>
@@ -213,8 +261,147 @@ export class SpaceDangerTabComponent {
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+  private dates = inject(DateFormatService);
+  private live = new LiveAnnouncement();
 
   rebuildingIndexes = signal(false);
+
+  // ── What a delete or wipe came to (Q-535) ──────────────────────────────────────────────────────────
+
+  /** The last outcome worth keeping on screen; cleared when the dialog moves to another space. */
+  readonly notice = signal<ActNotice | null>(null);
+  /** The space's standing act (admins only: absent is unknown). Seeded from the space, then from each poll. */
+  readonly standing = signal<ActEntryView | null>(null);
+  /** The clock the relative times are read against; set on every outcome and every poll tick, so "in 2 minutes" does not go stale. */
+  private readonly now = signal(Date.now());
+  private poll: PollHandle | null = null;
+  /** Which act the last request or the standing entry was, for what to do when the poll sees it end. */
+  private actKind: 'delete' | 'wipe' | 'rename' | null = null;
+
+  /** A delete or wipe stands, so a rename would be refused (409): the hint says why before it is tried. */
+  readonly renameBlockedByAct = computed(() => { const k = this.standing()?.kind; return k === 'delete' || k === 'wipe'; });
+
+  protected readonly actStateVariant = actStateVariant;
+  protected readonly actStateKey = actStateKey;
+  protected readonly actKindKey = actKindKey;
+  sinceText(since: string): string { return this.dates.format(since, 'datetime'); }
+  whenText(retryAt: string | undefined): string { return actWhenText(this.transloco, this.dates, retryAt, this.now()); }
+
+  /** Said in the live region, and also as a toast when the tab is about to close (a closed tab speaks no more). */
+  private announce(text: string, alsoToast: boolean): void {
+    this.live.say(text);
+    if (alsoToast) this.toast.info(text);
+  }
+
+  /** Ask after the standing act until it ends; stops with the tab or when the dialog moves to another space. */
+  private startPoll(spaceId: string): void {
+    if (this.poll?.active) return;
+    this.poll = pollUntil({
+      delayMs: () => ACT_POLL_MS,
+      request: () => this.spacesApi.listSpaces(),
+      onAnswer: ({ spaces }) => {
+        this.now.set(Date.now());
+        const row = spaces.find(s => s.id === spaceId);
+        if (row?.actPending) { this.standing.set(row.actPending); this.actKind = row.actPending.kind as 'delete' | 'wipe' | 'rename'; return true; }
+        this.standing.set(null);
+        this.endOfAct(spaceId, row !== undefined);
+        return false;
+      },
+    });
+  }
+
+  private stopPoll(): void { this.poll?.stop(); this.poll = null; }
+
+  /** The polled act is over: say so, and settle the tab as the act's own answer would have (a delete closes it, a wipe reloads the counts). */
+  private endOfAct(spaceId: string, spaceStillHere: boolean): void {
+    const kind = this.actKind;
+    this.actKind = null;
+    const ended = this.transloco.translate('spaces.dangerZone.act.ended');
+    this.store.load();
+    if (!spaceStillHere) {
+      this.announce(ended, true);
+      this.state.closeSettings();
+    } else if (kind === 'wipe') {
+      this.announce(ended, false);
+      this.notice.set({ kind: 'wiped', refills: false, repeated: false });
+      this.reloadWipeStats(spaceId);
+    } else if (kind === 'delete') {
+      this.announce(ended, false);
+      this.notice.set({ kind: 'keptHere' });
+    } else {
+      this.announce(ended, false);
+      this.notice.set({ kind: 'ended' });
+    }
+  }
+
+  private reloadWipeStats(spaceId: string): void {
+    this.state.dangerWipeStats.set(null);
+    this.state.dangerWipeLoading.set(true);
+    this.spacesApi.getSpaceStats(spaceId).subscribe({
+      next: (stats) => { this.state.dangerWipeStats.set(stats); this.state.dangerWipeLoading.set(false); },
+      error: () => this.state.dangerWipeLoading.set(false),
+    });
+  }
+
+  /**
+   * The ONE reading of a delete's or wipe's outcome (it was written twice, once per button, and each copy folded the 202s into one).
+   * `target` is the space the request was made for: the dialog may have moved on by the time the answer arrives.
+   */
+  private handleOutcome(act: 'delete' | 'wipe', target: { id: string }, o: SpaceActOutcome): void {
+    const t = (key: string) => this.transloco.translate(key);
+    const setError = act === 'delete' ? this.state.dangerDeleteError : this.state.dangerWipeError;
+    this.now.set(Date.now());
+    this.actKind = act;
+    switch (o.kind) {
+      // `default` is `done` on purpose: an answer this client has no kind for is the completed one, as it was before outcomes had kinds.
+      case 'done':
+      default:
+        if (act === 'delete') {
+          if (o.removedHere === false) {
+            // Gone from the network, kept here: another network holds the space. It still exists, so it stays listed.
+            this.notice.set({ kind: 'keptHere' });
+            this.toast.info(t('spaces.dangerZone.act.keptHere'));
+            this.store.refreshNetworks();
+            this.store.load();
+            return;
+          }
+          this.store.spaces.update(list => list.filter(s => s.id !== target.id));
+          if (o.repeated) this.announce(t('spaces.dangerZone.act.repeated'), true);
+          this.state.closeSettings();
+          return;
+        }
+        this.notice.set({ kind: 'wiped', refills: o.refills === true, repeated: o.repeated === true });
+        this.reloadWipeStats(target.id);
+        return;
+      case 'vote-pending':
+        // No act is registered until the vote passes, so there is nothing to poll: the vote's own state is on the Networks page.
+        this.notice.set({ kind: 'votePending' });
+        this.toast.info(t('spaces.dangerZone.act.votePending'));
+        this.store.refreshNetworks();
+        return;
+      case 'queued':
+        this.notice.set({ kind: 'queued', ...(o.retryAt ? { retryAt: o.retryAt } : {}) });
+        this.toast.info(this.transloco.translate('spaces.dangerZone.act.queued', { when: this.whenText(o.retryAt) }));
+        this.store.refreshNetworks();
+        this.startPoll(target.id);
+        return;
+      case 'failed':
+        if (o.retried) {
+          setError.set(t(o.voted ? 'spaces.error.space_act_failed.voted' : 'spaces.error.space_act_failed.local'));
+          this.startPoll(target.id);
+        } else {
+          setError.set(t(act === 'delete' ? 'spaces.error.deleteFailed' : 'spaces.error.wipeFailed'));
+        }
+        return;
+    }
+  }
+
+  /** What the confirmation dialog says the act will do, from each network's `ownYesCarries` (does this instance's own yes alone carry it?). */
+  private forecast(spaceId: string): string {
+    const nets = this.store.networksForSpace(spaceId);
+    const key = nets.length === 0 ? 'localOnly' : nets.every(n => n.ownYesCarries === true) ? 'actsNow' : 'opensVote';
+    return this.transloco.translate(`spaces.dangerZone.forecast.${key}`);
+  }
 
   // ── Retention ──────────────────────────────────────────────────────────────────────────────────────
   //
@@ -243,10 +430,19 @@ export class SpaceDangerTabComponent {
   private seeded = '';
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => this.stopPoll());
     effect(() => {
       const s = this.state.settingsSpace();
       if (!s || this.seeded === s.id) return;
       this.seeded = s.id;
+      // A different space: what the last one's act said, and the poll after it, are not this space's.
+      untracked(() => {
+        this.stopPoll();
+        this.notice.set(null);
+        this.standing.set(s.actPending ?? null);
+        this.actKind = s.actPending ? s.actPending.kind as 'delete' | 'wipe' | 'rename' : null;
+        if (s.actPending) this.startPoll(s.id);
+      });
       // `recordTtlWindows` widens a legacy scalar, so a space that set one number before the split shows it on
       // all five fields — which is what it has always meant — rather than appearing to have no policy.
       this.ttl = recordTtlWindows(s.recordTtlDays);
@@ -456,7 +652,7 @@ export class SpaceDangerTabComponent {
     // Irreversible: require the operator to type the space id (GitHub-style, C3).
     const ok = await this.confirmDialog.confirm({
       title: this.transloco.translate('spaces.dangerZone.confirmWipeTitle'),
-      message: this.transloco.translate('spaces.dangerZone.confirmWipe', { label: target.label }),
+      message: `${this.transloco.translate('spaces.dangerZone.confirmWipe', { label: target.label })} ${this.forecast(target.id)}`,
       confirmLabel: this.transloco.translate('spaces.dangerZone.wipeButton'),
       danger: true,
       requireText: target.id,
@@ -466,17 +662,7 @@ export class SpaceDangerTabComponent {
     this.state.dangerWiping.set(true);
     this.state.dangerWipeError.set('');
     this.spacesApi.wipeSpace(target.id).subscribe({
-      next: (answer) => {
-        this.state.dangerWiping.set(false);
-        // A 202 is not done here: a vote is open, or it passed and the wipe still runs. Say so, sticky; the outcomes in detail are PR C's.
-        if (answer?.pending) { this.toast.info(this.transloco.translate('spaces.dangerZone.notDoneYet'), 0); this.store.refreshNetworks(); return; }
-        this.state.dangerWipeStats.set(null);
-        this.state.dangerWipeLoading.set(true);
-        this.spacesApi.getSpaceStats(target.id).subscribe({
-          next: (stats) => { this.state.dangerWipeStats.set(stats); this.state.dangerWipeLoading.set(false); },
-          error: () => this.state.dangerWipeLoading.set(false),
-        });
-      },
+      next: (outcome) => { this.state.dangerWiping.set(false); this.handleOutcome('wipe', target, outcome); },
       error: (err) => { this.state.dangerWiping.set(false); this.state.dangerWipeError.set(refusalText(this.transloco, err, 'spaces.error.wipeFailed')); },
     });
   }
@@ -487,7 +673,7 @@ export class SpaceDangerTabComponent {
     // Irreversible: require the operator to type the space id (GitHub-style, C3).
     const ok = await this.confirmDialog.confirm({
       title: this.transloco.translate('spaces.dangerZone.confirmDeleteTitle'),
-      message: this.transloco.translate('spaces.dangerZone.confirmDelete', { label: target.label, id: target.id }),
+      message: `${this.transloco.translate('spaces.dangerZone.confirmDelete', { label: target.label, id: target.id })} ${this.forecast(target.id)}`,
       confirmLabel: this.transloco.translate('spaces.dangerZone.deleteButton'),
       danger: true,
       requireText: target.id,
@@ -497,13 +683,7 @@ export class SpaceDangerTabComponent {
     this.state.dangerDeleting.set(true);
     this.state.dangerDeleteError.set('');
     this.spacesApi.deleteSpace(target.id).subscribe({
-      next: (answer) => {
-        this.state.dangerDeleting.set(false);
-        // A 202 means the space still exists here (a vote is open, or the deletion still runs): keep it listed and say so.
-        if (answer?.pending) { this.toast.info(this.transloco.translate('spaces.dangerZone.notDoneYet'), 0); this.store.refreshNetworks(); return; }
-        this.store.spaces.update(list => list.filter(s => s.id !== target.id));
-        this.state.closeSettings();
-      },
+      next: (outcome) => { this.state.dangerDeleting.set(false); this.handleOutcome('delete', target, outcome); },
       error: (err) => { this.state.dangerDeleting.set(false); this.state.dangerDeleteError.set(refusalText(this.transloco, err, 'spaces.error.deleteFailed')); },
     });
   }

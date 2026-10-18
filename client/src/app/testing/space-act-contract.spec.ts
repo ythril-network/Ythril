@@ -140,7 +140,7 @@ const clientTypes = () => readClientSource('src/app/core/space-act-outcome.ts') 
 const clientKeys = (name: string) => interfaceKeys(clientTypes(), name);
 
 describe('the server\'s space-act shapes are derived (floors: an empty set passes every loop written over it)', () => {
-  it('the failure body, the queued body, the deletion answers and the wipe answers', () => {
+  it('the keys read from the server for the failure, queued, deletion and wipe answers are at least the known ones, never a word of a refusal\'s prose', () => {
     expect(failureBodyKeys, `failure body: ${failureBodyKeys.join(', ')}`).toEqual(expect.arrayContaining(['error', 'code', 'status', 'rounds']));
     expect(failureBodyKeys.length).toBeGreaterThanOrEqual(5);
     expect(queuedKeys, `queued body: ${queuedKeys.join(', ')}`).toEqual(expect.arrayContaining(['queued', 'retryAt', 'repeated']));
@@ -152,7 +152,7 @@ describe('the server\'s space-act shapes are derived (floors: an empty set passe
     expect(wipeKeys).not.toContain('of');
   });
 
-  it('the act entry, the owed entry and the network view keys', () => {
+  it('the keys read from the server for the act entry, the owed entry and the network view are at least the known ones, and the owed entry carries no roundId', () => {
     expect(entryKeys.length, `ActEntryView: ${entryKeys.join(', ')}`).toBeGreaterThanOrEqual(5);
     expect(entryKeys).toEqual(expect.arrayContaining(['kind', 'since', 'attempts', 'nextRetryAt', 'state']));
     expect(owedKeys, `owed entry: ${owedKeys.join(', ')}`).toEqual(expect.arrayContaining(['entryId', 'localSpaceId', 'networkSpaceId', 'rounds', 'kind', 'state']));
@@ -195,7 +195,7 @@ describe('the words for a space act exist in every language, and the retired one
   /** The keys the plan names; the attempts line may be one key or a plural family (`.one`/`.other`). */
   const keys = Object.values(ACT_TEXT_KEYS);
 
-  it('derives its key list (a floor)', () => {
+  it('the key list it checks holds at least 20 keys, so an empty list cannot pass every language', () => {
     expect(keys.length).toBeGreaterThanOrEqual(20);
   });
 

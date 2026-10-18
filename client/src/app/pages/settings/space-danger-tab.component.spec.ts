@@ -391,7 +391,7 @@ describe('the standing act (actPending, admins) and its poll (Q-535)', () => {
 
   const TEN_MINUTES = 600_000;
 
-  it('shows what stands: the notice, its state, attempts and the repeat hint, in the status region', () => {
+  it('when an act stands on the space, an admin sees its notice, state, attempts and the repeat hint in the status region', () => {
     const h = wired({ space: { actPending: actPending({ kind: 'delete', state: 'owed', attempts: 2, nextRetryAt: RETRY_AHEAD }) } });
     const status = statusText(h);
     expect(status).toContain(K.standing);

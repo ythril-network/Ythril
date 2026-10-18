@@ -229,11 +229,20 @@ A space in a network keeps syncing under the name the network knows it by, so me
 
 ### Deleting a space
 
-In the space's settings panel, open the **Danger** tab and click **Delete space**. You will be asked to type the space ID to confirm.
+In the space's settings panel, open the **Danger** tab and click **Delete space permanently**. You will be asked to type the space ID to confirm, and the dialog first says what will happen: it takes effect at once here and on the network when your own yes carries it, it opens a vote in the network when it does not, or it applies here only when no network holds the space.
+
+What the delete came to is shown in a status box on the tab, not in a pop-up that disappears:
+
+- **A vote is open.** Nothing has changed yet; the networks that vote decide, and **Settings → Networks** shows the state.
+- **Accepted but not finished here.** The box shows the change as still owed, its state, how many attempts it has had and when the next try is (as a time ahead, never as a time in the past). The server retries it by itself; the tab checks every few seconds and closes by itself when the delete ends.
+- **Deleted from the network, but kept here.** Another network the space belongs to still holds it, so it stays in your list.
+- **Failed.** The error line says whether the change is retried automatically.
+
+The buttons stay available while a change is owed: pressing **Delete** or **Wipe** again joins the change and runs it again now. A space cannot be renamed until its owed deletion or wipe has ended. Only an instance administrator sees what is owed; for anyone else the box stays empty, which means unknown, not "nothing owed".
 
 ### Wiping a space
 
-In the **Danger** tab, click **Wipe all data**. A confirmation dialog shows how many items are in each collection and asks you to type the space ID before you proceed. The space itself (its settings, label, schema) is kept — only the data inside it is removed.
+In the **Danger** tab, click **Wipe all data**. A confirmation dialog shows how many items are in each collection and asks you to type the space ID before you proceed. The space itself (its settings, label, schema) is kept — only the data inside it is removed. A wipe is reported in the same status box as a delete (vote open, owed and retried, finished). When the space is a subscriber's copy of a publisher's, the box adds that it **refills from the publisher at the next sync**: the wipe did not empty it for good.
 
 ### Keeping a record of deleted files
 
@@ -583,6 +592,8 @@ Click **Disable MFA**. This **requires a current 6-digit code** — you cannot t
 Networks sync selected spaces between multiple Ythril instances over the internet.
 
 **Changes still owed.** A network's `owedSpaceActs` lists the deletions, wipes and renames this instance has decided on a vote and not yet finished. Only an instance administrator sees it, on `GET /api/networks/:id`; a space's `actPending` on `GET /api/spaces` shows the same per space. Writes into a space with a change owed answer `409` until it completes.
+
+In the app, an administrator sees this as an **Owed: N** badge on the network's card and, inside the card, a list headed **Changes still owed here**: one row per change with the space, what it is (deletion, wipe or rename), its state, the attempts so far and the next try. On the **Spaces** page a space with a change owed carries a **Change pending** badge. A reader who is not an administrator sees neither (the list is not served to them, which does not mean nothing is owed). Every reader sees one line in the card saying whether this instance's own yes alone carries a deletion or wipe of a space in this network, or whether it opens a vote.
 
 **Who can manage them.** An instance administrator can do everything here. A token with the **Networks** right
 on a space (Settings → Tokens) can create a network with that space, see it, and leave a membership it created;

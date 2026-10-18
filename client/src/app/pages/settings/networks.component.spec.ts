@@ -424,7 +424,7 @@ describe('NetworksComponent (characterization)', () => {
       expect(r.header()).toContain(K.owedPill);
     });
 
-    it('inside, a real heading and a list with one item per owed act, naming its space', () => {
+    it('when acts are owed, the open card shows a real heading and one list item per owed act, naming its space', () => {
       const r = rendered(owing());
       r.expand();
       const headings = Array.from(r.el().querySelectorAll('h2, h3, h4, h5, [role="heading"]')).map(h => h.textContent ?? '');
@@ -447,7 +447,7 @@ describe('NetworksComponent (characterization)', () => {
       expect(r.header()).not.toContain(K.owedPill);
     });
 
-    it('the body says whether this instance\'s own yes carries a deletion or wipe here', () => {
+    it('when the network answers ownYesCarries, the open card says whether this instance\'s own yes carries a deletion or wipe here', () => {
       const carries = rendered(net({ id: 'n1', type: 'club', spaces: ['proj'], ownYesCarries: true } as unknown as Partial<Network>));
       carries.expand();
       expect(carries.header()).toContain(K.ownYesCarriesYes);
