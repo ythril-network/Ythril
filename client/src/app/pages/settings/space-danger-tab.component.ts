@@ -278,7 +278,7 @@ export class SpaceDangerTabComponent {
   private poll: PollHandle | null = null;
   private destroyed = false;
   /** Which act the last request or the standing entry was, for what to do when the poll sees it end. */
-  private actKind: 'delete' | 'wipe' | 'rename' | null = null;
+  private actKind: string | null = null;
 
   /** A delete or wipe stands, so a rename would be refused (409): the hint says why before it is tried. */
   readonly renameBlockedByAct = computed(() => { const k = this.standing()?.kind; return k === 'delete' || k === 'wipe'; });
@@ -305,7 +305,7 @@ export class SpaceDangerTabComponent {
       onAnswer: ({ spaces }) => {
         this.now.set(Date.now());
         const row = spaces.find(s => s.id === spaceId);
-        if (row?.actPending) { this.standing.set(row.actPending); this.actKind = row.actPending.kind as 'delete' | 'wipe' | 'rename'; return true; }
+        if (row?.actPending) { this.standing.set(row.actPending); this.actKind = row.actPending.kind; return true; }
         this.standing.set(null);
         this.endOfAct(spaceId, row !== undefined);
         return false;
@@ -447,7 +447,7 @@ export class SpaceDangerTabComponent {
         this.stopPoll();
         this.notice.set(null);
         this.standing.set(s.actPending ?? null);
-        this.actKind = s.actPending ? s.actPending.kind as 'delete' | 'wipe' | 'rename' : null;
+        this.actKind = s.actPending?.kind ?? null;
         if (s.actPending) this.startPoll(s.id);
       });
       // `recordTtlWindows` widens a legacy scalar, so a space that set one number before the split shows it on
