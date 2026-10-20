@@ -64,6 +64,24 @@ export async function openViewDoors({ suite, spaces }) {
     return { status: r.status, isError: rpc.result?.isError === true || !!rpc.error, text, structured: rpc.result?.structuredContent ?? null };
   }
 
+  /**
+   * Any JSON-RPC request on `POST /mcp` (`tools/list`, `initialize`, `tools/call`), answered as EVERY message the response carried,
+   * in order: a streamed answer may carry notifications before its result, and a test about a notification must see them.
+   * @returns `{ status, messages, result }` where `result` is the message answering this request's id.
+   */
+  async function rpc(key, method, params = {}) {
+    const r = await fetch(`${server.url}/mcp`, {
+      method: 'POST', signal: AbortSignal.timeout(60_000),
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 7, method, params }),
+    });
+    const raw = await r.text();
+    const chunks = /^(?:event|data):/m.test(raw) ? raw.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5)) : [raw];
+    const messages = [];
+    for (const c of chunks) { try { messages.push(JSON.parse(c)); } catch { /* not JSON */ } }
+    return { status: r.status, messages, result: messages.find(m => m.id === 7) ?? null };
+  }
+
   /** A token: `perSpace` maps a space to its rungs; `opts` passes through to createToken (expiresAt, peerInstanceId, admin). */
   async function mint(name, perSpace = {}, opts = {}) {
     const rights = opts.admin ? undefined : { instanceAdmin: false, createSpaces: false, floor: null, perSpace };
@@ -75,7 +93,7 @@ export async function openViewDoors({ suite, spaces }) {
   const setRights = (tokenId, apply) => loader.mutateConfig(cfg => { apply(cfg.tokens.find(t => t.id === tokenId).rights); });
 
   return {
-    door, loader, tokens, SPACE_AREAS, col, spaceCollection, server, rest, mcp, mint, setRights,
+    door, loader, tokens, SPACE_AREAS, col, spaceCollection, server, rest, mcp, rpc, mint, setRights,
     row: (over, rest_ = 'none') => rungsOf(SPACE_AREAS, over, rest_),
     async close() { await server?.close(); await door?.close(); },
   };
