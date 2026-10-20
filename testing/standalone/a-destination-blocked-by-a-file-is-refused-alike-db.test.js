@@ -37,6 +37,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
@@ -112,6 +113,58 @@ const stagedAt = async (p, total) => ({
   dir: fs.existsSync(path.join(process.env['DATA_ROOT'], '.chunks', S, chunks.uploadId(S, p, total))),
 });
 
+/** The marker an injected failure carries in its message AND its path: a door that echoes either says it. */
+const POISON = 'poison-q458-7f3a';
+const POISON_PATH = `/srv/${POISON}/data/files/${S}/x`;
+
+/**
+ * Replace `fsp[fn]` so a call whose argument at `argAt` lies under the space's files root throws an `EIO` carrying the poison;
+ * every other call goes through. The pre-check reads with `stat`/`lstat`, never with these, so a fired stub is the ACT's call.
+ */
+function injectFault(fn, argAt) {
+  const real = fsp[fn];
+  const state = { fired: 0 };
+  const root = path.resolve(acts.root());
+  fsp[fn] = async function injected(...args) {
+    const target = typeof args[argAt] === 'string' ? path.resolve(args[argAt]) : '';
+    if (target.startsWith(root + path.sep)) {
+      state.fired += 1;
+      throw Object.assign(new Error(`EIO: i/o error, ${fn} '${POISON_PATH}'`), { code: 'EIO', errno: -5, syscall: fn, path: POISON_PATH });
+    }
+    return real.apply(this, args);
+  };
+  return { state, restore: () => { fsp[fn] = real; } };
+}
+
+/** The doors whose ACT places bytes or a directory, each with the act's own file-system call(s) the fault goes into: `[fn, argAt]`. */
+const FAULT_DOORS = () => [
+  { name: 'REST upload', stub: [['rename', 1]], run: async () => normalised(await acts.post('upload', { query: { path: 'w/f.txt' },
+    body: { content: 'hello' }, headers: { 'content-type': 'application/json' } }), { via: 'rest' }) },
+  { name: 'POST /api/write_file', stub: [['rename', 1]], run: async () => normalised(await acts.tool('write_file', { path: 'w/f.txt', content: 'hello' }), { via: 'tool' }) },
+  { name: 'MCP write_file', stub: [['rename', 1]], run: async () => normalised(await acts.mcp('write_file', { path: 'w/f.txt', content: 'hello' }), { via: 'mcp' }) },
+  { name: 'POST /api/move_file', stub: [['link', 1], ['rename', 1]], run: async () => normalised(await acts.tool('move_file', { src: 's.txt', dst: 'm/s.txt' }), { via: 'tool' }) },
+  { name: 'MCP create_dir', stub: [['mkdir', 0]], run: async () => normalised(await acts.mcp('create_dir', { path: 'newdir' }), { via: 'mcp' }) },
+  { name: 'REST chunked upload, last range', stub: [['rename', 1]], run: async () => {
+    // The first range stages under `.chunks`, outside the space root, so the stub cannot fire there; it fires where the file lands.
+    const send = (range, bytes) => acts.post('upload', { query: { path: 'w/c.bin' }, body: Buffer.from(bytes),
+      headers: { 'content-type': 'application/octet-stream', 'content-range': range } });
+    const first = await send('bytes 0-3/8', 'abcd');
+    assert.equal(first.code, 202, `the first range, with nothing in the way: ${JSON.stringify(first.body)}`);
+    return normalised(await send('bytes 4-7/8', 'efgh'), { via: 'rest' });
+  } },
+];
+
+/** The server's fault, said alike: 500, `file_system_fault`, and neither the injected message, its path, nor the data root. */
+function assertFaultAlike(door, a) {
+  assert.equal(a.status, 500, `${door}: a file-system failure in the act answered ${a.status}, not 500 — ${a.wire}`);
+  assert.equal(a.code, 'file_system_fault', `${door}: the body carries code ${JSON.stringify(a.code)}, not 'file_system_fault' — ${a.wire}`);
+  assert.ok(!a.wire.includes(POISON), `${door}: the answer carries the failure's own message or path: ${a.wire}`);
+  const root = process.env['DATA_ROOT'];
+  for (const form of [root, root.replaceAll('\\', '\\\\'), root.replaceAll('\\', '/')]) {
+    assert.ok(!a.wire.includes(form), `${door}: the answer carries the server's data root: ${a.wire}`);
+  }
+}
+
 describe('a destination blocked by a file is refused, alike, before anything is written', { skip }, () => {
   before(async () => {
     acts = await openFileActDoors({ suite: 'destblocked', space: S });
@@ -175,5 +228,77 @@ describe('a destination blocked by a file is refused, alike, before anything is 
         assert.ok(await acts.door.coll(S, 'files').findOne({ _id: 'ab/f.txt' }), `${d.name}: the child's record did not follow`);
       });
     }
+  });
+
+  // ── A failure of the act itself (Q-458) ─────────────────────────────────────────────────────────────────────────────
+
+  describe('a file-system failure in the act itself is the server\'s fault, answered alike (Q-458)', () => {
+    beforeEach(async () => {
+      fs.rmSync(path.join(process.env['DATA_ROOT'], '.chunks', S), { recursive: true, force: true });
+    });
+
+    for (const d of FAULT_DOORS()) {
+      it(`${d.name}: 500 file_system_fault, the act's own call failed, no message, path or data root of it`, async () => {
+        const stubs = d.stub.map(([fn, argAt]) => injectFault(fn, argAt));
+        let a;
+        try { a = await d.run(); } finally { for (const s of stubs) s.restore(); }
+        const fired = stubs.reduce((n, s) => n + s.state.fired, 0);
+        assert.ok(fired >= 1, `${d.name}: the injected failure never fired (${d.stub.map(x => x[0])}), so the door was never asked to answer it — ${a.wire}`);
+        assertFaultAlike(d.name, a);
+      });
+    }
+
+    it('a temp step\'s ENAMETOOLONG on a name that fits (250 bytes; the temp name adds 17) is the server\'s fault, never a path_blocked about the caller\'s path', async () => {
+      const name = `${'n'.repeat(246)}.txt`;
+      assert.equal(Buffer.byteLength(name), 250, 'the name must fit a 255-byte component while its temp name does not');
+      const real = fsp.open;
+      let fired = 0;
+      // The temp file is opened under the stored-bytes temp directory, outside the space root: a component past 255 bytes there is the
+      // temp suffix's doing. Injected rather than real, because Windows and Linux disagree about which code a long component earns.
+      fsp.open = async function tooLong(p, ...rest) {
+        const base = typeof p === 'string' ? path.basename(p) : '';
+        if (base.startsWith(name) && Buffer.byteLength(base) > 255) {
+          fired += 1;
+          throw Object.assign(new Error(`ENAMETOOLONG: name too long, open '${POISON_PATH}'`), { code: 'ENAMETOOLONG', errno: -36, syscall: 'open', path: POISON_PATH });
+        }
+        return real.call(this, p, ...rest);
+      };
+      let answers;
+      try {
+        answers = [
+          ['MCP write_file', normalised(await acts.mcp('write_file', { path: name, content: 'hello' }), { via: 'mcp' })],
+          ['REST upload', normalised(await acts.post('upload', { query: { path: name }, body: { content: 'hello' },
+            headers: { 'content-type': 'application/json' } }), { via: 'rest' })],
+        ];
+      } finally { fsp.open = real; }
+      assert.ok(fired >= 2, `the temp step was reached ${fired} time(s), not once per door — the write opened no temp file named after the caller's`);
+      for (const [door, a] of answers) {
+        assert.notEqual(a.code, 'path_blocked', `${door}: a temp name's length was answered as the caller's path being blocked — ${a.wire}`);
+        assertFaultAlike(door, a);
+      }
+    });
+
+    it('wrapping the act changes no refusal made before it: a path outside the space stays 400, a closed space stays 409', async () => {
+      const { getConfig } = await import('../../server/dist/config/loader.js');
+      const write = (p) => [
+        ['MCP write_file', async () => normalised(await acts.mcp('write_file', { path: p, content: 'x' }), { via: 'mcp' })],
+        ['REST upload', async () => normalised(await acts.post('upload', { query: { path: p }, body: { content: 'x' },
+          headers: { 'content-type': 'application/json' } }), { via: 'rest' })],
+      ];
+      for (const [door, run] of write('../outside.txt')) {
+        const a = await run();
+        assert.equal(a.status, 400, `${door}: a path outside the space answered ${a.status}, not the caller's 400 — ${a.wire}`);
+      }
+      const cfg = getConfig();
+      const kept = cfg.pendingSpaceActs;
+      cfg.pendingSpaceActs = [...(kept ?? []), { id: 'q458-standing-wipe', localId: S, kind: 'wipe', state: 'running', requestedAt: T0 }];
+      try {
+        for (const [door, run] of write('closed.txt')) {
+          const a = await run();
+          assert.equal(a.status, 409, `${door}: a write to a space being wiped answered ${a.status}, not 409 — ${a.wire}`);
+          assert.equal(a.code, 'space_being_wiped', `${door}: the closed space's code is ${JSON.stringify(a.code)} — ${a.wire}`);
+        }
+      } finally { cfg.pendingSpaceActs = kept; }
+    });
   });
 });
