@@ -214,4 +214,76 @@ describe('a caught failure is answered by what it is, on every answerer (Q-458 t
       assert.ok(!wire.includes(POISON), `/recall carries the runtime's own text — ${wire}`);
     });
   }
+
+  /*
+   * `ythril_tool_failures_total` (Q-458): one increment per failure answered by the classifier, labelled by door, tool and class, the class
+   * always one of `CAUGHT_KINDS`. Read by delta against series that already moved (`pitfall-gauge-reset-reads-zero`: a counter cannot be
+   * poisoned below zero, so each series is first moved to a value no fresh process holds, and the case then asserts WHICH series changed
+   * and by how much — an identity, not "is zero"). The two tool doors reach it: `mcp` and `rest` (`POST /api/<tool>`).
+   */
+  const METRIC = 'ythril_tool_failures_total';
+  const KIND_OF_ROW = {
+    'StoredFileUnreadable': 'unreadable_file',
+    'a file-system error (EIO, syscall open)': 'file_system',
+    'a file-system error reached through `cause`': 'file_system',
+    'socket-shaped: ECONNREFUSED (syscall connect)': 'upstream',
+    'a MongoServerError the server answered (duplicate key)': 'driver_refusal',
+    'TypeError': 'internal',
+    'a non-Error (a thrown string)': 'internal',
+    'Error (our refusal convention)': 'refusal',
+  };
+
+  describe('every classified tool failure is counted once, by door, tool and class (Q-458)', () => {
+    let registry, kinds;
+    before(async () => {
+      registry = await import('../../server/dist/metrics/registry.js');
+      ({ CAUGHT_KINDS: kinds } = await import('../../server/dist/util/answer-for-caught.js'));
+    });
+    /** The series of the counter on the exposition text an operator reads: `{ 'door|tool|class': value }`. */
+    const scrape = async () => {
+      const out = {};
+      for (const line of (await registry.register.getSingleMetricAsString(METRIC)).split('\n')) {
+        if (!line.startsWith(`${METRIC}{`)) continue;
+        const m = /^[^{]+\{([^}]*)\}\s+(\S+)/.exec(line);
+        assert.ok(m, `unreadable series line: ${line}`);
+        const l = Object.fromEntries([...m[1].matchAll(/(\w+)="((?:[^"\\]|\\.)*)"/g)].map(x => [x[1], x[2]]));
+        out[`${l.door}|${l.tool}|${l.class}`] = Number(m[2]);
+      }
+      return out;
+    };
+    const delta = (a, b) => Object.fromEntries(Object.keys({ ...a, ...b }).map(k => [k, (b[k] ?? 0) - (a[k] ?? 0)]).filter(([, d]) => d !== 0));
+    const rowNamed = (name) => ROWS().find(r => r.name === name);
+    const failOn = (door, row) => whileToolThrows(TOOL, row.make(), () => (door === 'mcp' ? acts.mcp(TOOL, {}) : acts.tool(TOOL, {})));
+
+    it('the table covers every class the module names, so no class goes uncounted unseen', () => {
+      for (const name of Object.keys(KIND_OF_ROW)) assert.ok(rowNamed(name), `no truth-table row '${name}' — re-anchor this test`);
+      assert.deepEqual([...new Set(Object.values(KIND_OF_ROW))].sort(), [...kinds].sort(),
+        'every class in CAUGHT_KINDS needs a row here (and a class used here must be in CAUGHT_KINDS)');
+    });
+
+    for (const [name, kind] of Object.entries(KIND_OF_ROW)) {
+      for (const door of ['mcp', 'rest']) {
+        it(`${name}: one failure on the ${door} door moves ${door}|${TOOL}|${kind} by exactly one`, async () => {
+          for (let i = 0; i < 3; i += 1) await failOn(door, rowNamed(name)); // move the series off anything a fresh process holds
+          const before = await scrape();
+          assert.ok((before[`${door}|${TOOL}|${kind}`] ?? 0) >= 3, `the series did not move on its poisoning calls — ${JSON.stringify(before)}`);
+          const { fired } = await failOn(door, rowNamed(name));
+          assert.equal(fired, 1, 'the tool handler never ran, so the door was not asked');
+          assert.deepEqual(delta(before, await scrape()), { [`${door}|${TOOL}|${kind}`]: 1 },
+            'exactly the one series for this door, tool and class moved, once');
+        });
+      }
+    }
+
+    it('no series carries a class outside CAUGHT_KINDS, and a refused or typed answer is not counted as a failure', async () => {
+      const before = await scrape();
+      // A store failure is the door's first question (`storeFailureAnswer`), asked before the classifier: not this counter's.
+      await failOn('mcp', rowNamed('store down (a network error)'));
+      assert.deepEqual(delta(before, await scrape()), {}, 'a store-down answer moved the classifier counter');
+      for (const key of Object.keys(await scrape())) {
+        const cls = key.split('|')[2];
+        assert.ok(kinds.includes(cls), `series ${key} carries a class that is not in CAUGHT_KINDS`);
+      }
+    });
+  });
 });
