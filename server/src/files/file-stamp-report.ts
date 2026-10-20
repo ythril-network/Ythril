@@ -58,6 +58,7 @@ import { isRider, pageSeqRuns, serverCursorOf } from '../sync/seq-run-pager.js';
 import { syncBasePath } from '../sync/file-sync.js';
 import { peerIdsCarryingSpace, peersCarryingSpace, type PeerForSpace } from '../sync/peer-for-space.js';
 import { limitRefusal } from '../util/strict-limit.js';
+import { RequestRefusal } from '../util/errors.js';
 
 // ── constants ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -533,8 +534,8 @@ export async function fileStampReport(
 ): Promise<FileStampAnswer> {
   const { limit, after } = o;
   const limitError = limitRefusal(limit, FILE_STAMP_REPORT_MAX_LIMIT);
-  if (limitError) throw new RangeError(limitError);
-  if (after !== undefined && (typeof after !== 'string' || after.length > FILE_STAMP_REPORT_CURSOR_MAX)) throw new RangeError(`after must be a string of at most ${FILE_STAMP_REPORT_CURSOR_MAX} characters`);
+  if (limitError) throw new RequestRefusal(limitError);
+  if (after !== undefined && (typeof after !== 'string' || after.length > FILE_STAMP_REPORT_CURSOR_MAX)) throw new RequestRefusal(`after must be a string of at most ${FILE_STAMP_REPORT_CURSOR_MAX} characters`);
   const self = authorRef().instanceId;
   if (typeof self !== 'string' || self === '') throw new Error('file stamp report: this instance has no instance id, so no row can be called its own');
   const now = o.now ?? Date.now;

@@ -31,3 +31,19 @@ export class ValidationError extends Error {
     super(message);
   }
 }
+
+/**
+ * A refusal of what the CALLER sent, made by our own code: a path that leaves the space, a chunk range that does not tile the file, an
+ * encoding that is not one of the two. The REST doors answer it `400` in its own sentence.
+ *
+ * ## Why it is not a bare `RangeError`
+ *
+ * Our refusals used to be `RangeError`s, and a door chose its `400` by `instanceof RangeError`. The runtime throws `RangeError` too (an
+ * invalid `Buffer` length, an out-of-range offset, a stack overflow), so a fault of the server was answered `400` in the runtime's
+ * words, and a sync sender reads `400` as "refused about the bytes" and never offers them again. A door that means "our refusal" asks for
+ * this class, and any other `RangeError` is the fault it is. It extends `RangeError` so a caller that still asks the older question keeps
+ * its answer; the tool doors, which answer every `Error` as a refusal, are unchanged.
+ */
+export class RequestRefusal extends RangeError {
+  override name = 'RequestRefusal';
+}

@@ -15,6 +15,7 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireAdminMfaScoped } from '../auth/middleware.js';
 import { beginFileStampReport } from '../spaces/file-stamp-report-door.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { RequestRefusal } from '../util/errors.js';
 
 /** Mounted from `api/spaces.ts` so the route path stays `/api/spaces/:id/file-stamp-report`. */
 export function registerFileStampReportRoute(spacesRouter: Router): void {
@@ -25,7 +26,9 @@ export function registerFileStampReportRoute(spacesRouter: Router): void {
       if (r.status === 200) { res.json(r.answer); return; }
       res.status(r.status).json({ error: r.error });
     } catch (err) {
-      sendCaughtFailure(res, `POST /api/spaces/${spaceId}/file-stamp-report`, err, { error: err instanceof Error ? err.message : String(err) });
+      // Its own refusal of what was sent (a limit, a cursor) is the caller's `400`; anything else is a fault, in our words.
+      if (err instanceof RequestRefusal) { res.status(400).json({ error: err.message }); return; }
+      sendCaughtFailure(res, `POST /api/spaces/${spaceId}/file-stamp-report`, err);
     }
   });
 }

@@ -60,7 +60,7 @@ export function registerActivityResetRoute(spacesRouter: Router): void {
       req.auditSnapshots = { before: { activityBuckets: cleared }, after: { activityBuckets: 0 } };
       res.json({ ok: true, spaceId, cleared });
     } catch (err) {
-      sendCaughtFailure(res, `POST /api/spaces/${spaceId}/activity/reset`, err, { error: err instanceof Error ? err.message : String(err) });
+      sendCaughtFailure(res, `POST /api/spaces/${spaceId}/activity/reset`, err);
     }
   });
 }

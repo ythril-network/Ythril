@@ -479,7 +479,7 @@ export function createApp() {
     } catch (err) {
       const msg = peerText(err instanceof Error ? err.message : String(err));
       if (!res.headersSent) {
-        sendCaughtFailure(res, 'GET /api/admin/spaces/:spaceId/export', err, { error: msg });
+        sendCaughtFailure(res, 'GET /api/admin/spaces/:spaceId/export', err);
       } else {
         // We have already sent `200` and a partial body, so we cannot change the status.
         // Destroy the socket so the client sees a TRUNCATED/aborted response rather than a

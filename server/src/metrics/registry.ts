@@ -1287,6 +1287,19 @@ export const toolCallsTotal = new Counter({
 });
 
 /**
+ * Tool calls that threw and were answered by what the failure IS rather than by a typed branch (`answerForCaught`,
+ * `util/answer-for-caught.ts`), by `door` (`mcp` or `rest`), tool and `class`. The classes are the module's fixed vocabulary
+ * (`CAUGHT_KINDS`) and never a message, a space or a path: a series per spelling would be unbounded cardinality from any
+ * authenticated caller. A rising `internal` or `file_system` is the server failing; a rising `refusal` is callers being refused.
+ */
+export const toolFailuresTotal = new Counter({
+  name: 'ythril_tool_failures_total',
+  help: 'Tool calls answered by the caught-failure classifier, by door (mcp or rest), tool and class',
+  labelNames: ['door', 'tool', 'class'] as const,
+  registers: [register],
+});
+
+/**
  * Tool-argument validators found (`hit`), built (`miss`) or dropped to stay inside the bound (`evict`) — `Q-114`.
  * A validator is built once per reach a token can see; a rising `evict` rate means more distinct reaches are in
  * rotation than the cache holds, so calls are paying the build cost again.

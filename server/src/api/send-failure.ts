@@ -25,6 +25,7 @@ import type express from 'express';
 import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import type { ToolCallOutcome } from '../mcp/call-tool.js';
 import { reportServerFailure } from '../util/report-failure.js';
+import { answerForCaught } from '../util/answer-for-caught.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 import type { FileActAnswer } from '../files/act-answers.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
@@ -104,8 +105,13 @@ export function sendCaughtFailure(res: express.Response, where: string, err: unk
   if (closed) { res.status(closed.status).json(closed.body); return; }
   const store = storeFailureAnswer(err, where);
   if (store) { sendStoreFailure(res, store); return; }
-  reportServerFailure(where, err);
-  res.status(500).json(fallback);
+  // Whatever is left is a fault, whatever it is: this is a catch-all and every route answered its own refusals before it (`refusals: false`).
+  // A file-system error, a socket failure and an unreadable stored file are answered by what they are, in our words; the rest is the
+  // route's own sentence (`fallback`), and says `retryable: false` and its code itself, so a route that stamps `retryable` from the status
+  // cannot call it retryable. Reported inside `answerForCaught`, once per operation and class per window.
+  const caught = answerForCaught(err, where, { refusals: false });
+  const ownWords = caught.kind === 'internal' || caught.kind === 'refusal' || caught.kind === 'driver_refusal';
+  res.status(caught.status).json(ownWords ? { code: 'internal', retryable: false, ...fallback } : caught.body);
 }
 
 /**

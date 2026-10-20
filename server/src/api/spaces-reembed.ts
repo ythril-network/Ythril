@@ -61,7 +61,7 @@ export function registerReembedRoute(spacesRouter: Router): void {
       });
       res.json(out);
     } catch (err) {
-      sendCaughtFailure(res, `POST /api/spaces/${spaceId}/reembed`, err, { error: err instanceof Error ? err.message : String(err) });
+      sendCaughtFailure(res, `POST /api/spaces/${spaceId}/reembed`, err);
     }
   });
 }

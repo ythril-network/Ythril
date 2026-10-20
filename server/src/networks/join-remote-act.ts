@@ -146,7 +146,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     });
   } catch (err) {
     log.warn(`join-remote: could not reach ${peerText(inviteUrl)}: ${peerText(err)}`);
-    return { status: 502, error: `Could not reach inviting brain: ${err}` };
+    return { status: 502, error: 'Could not reach inviting brain; the reason is in the server log.' };
   }
 
   if (!applyRes.ok) {
@@ -237,7 +237,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
       } catch (err) {
         // The store's failure is answered by the door, in our words — `${err}` put the driver's text here (bundle-30 I12).
         throwIfStoreSide(err);
-        return { status: 500, error: `Failed to create space '${localId}': ${err}` };
+        log.warn(`join-remote: could not create space '${peerText(localId)}': ${peerText(err)}`);
+        return { status: 500, error: `Failed to create space '${localId}'; the reason is in the server log.` };
       }
     }
   }
@@ -271,7 +272,8 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
     });
   } catch (err) {
     await revokeToken(tokenForARecord.id);
-    return { status: 502, error: `Could not finalize with inviting brain: ${err}` };
+    log.warn(`join-remote: could not finalize with ${peerText(finalizeUrl)}: ${peerText(err)}`);
+    return { status: 502, error: 'Could not finalize with inviting brain; the reason is in the server log.' };
   }
 
   if (!finalizeRes.ok) {
@@ -420,7 +422,7 @@ export async function joinByInviteKeyAct(caller: Caller, input: unknown): Promis
     });
   } catch (err) {
     log.warn(`join-by-key: could not reach ${peerText(redeemUrl)}: ${peerText(err)}`);
-    return { status: 502, error: `Could not reach the publisher: ${err}` };
+    return { status: 502, error: 'Could not reach the publisher; the reason is in the server log.' };
   }
   if (!r.ok) return relay(r);
   const bundle = await boundedJson<{ handshakeId?: string; inviteUrl?: string; rsaPublicKeyPem?: string; networkId?: string }>(r, 'invite redeem')

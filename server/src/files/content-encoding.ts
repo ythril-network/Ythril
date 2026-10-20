@@ -31,6 +31,8 @@
  * anything — each of those belongs to the door, which has different answers for each of them.
  */
 
+import { RequestRefusal } from '../util/errors.js';
+
 /** The encodings a caller may name. Both doors offer the same two, and neither offers a third. */
 export const CONTENT_ENCODINGS = ['utf8', 'base64'] as const;
 
@@ -66,18 +68,18 @@ export function isContentEncoding(value: unknown): value is ContentEncoding {
  */
 export function decodeContent(content: string, encoding: unknown = 'utf8'): Buffer {
   const enc: unknown = encoding ?? 'utf8';
-  if (!isContentEncoding(enc)) throw new RangeError(encodingError(enc));
+  if (!isContentEncoding(enc)) throw new RequestRefusal(encodingError(enc));
   if (enc === 'utf8') return Buffer.from(content, 'utf8');
 
   if (!BASE64_CHARS.test(content)) {
-    throw new RangeError(
+    throw new RequestRefusal(
       'content is not base64. A character outside the base64 alphabet was found, which `Buffer.from` would '
       + 'have silently SKIPPED — storing a short, corrupt file under a success. The usual cause is a data '
       + 'URL: send only the part after `base64,`, never the `data:image/png;base64,` prefix.');
   }
   const stripped = content.replace(/\s+/g, '');
   if (stripped.replace(/=+$/, '').length % 4 === 1) {
-    throw new RangeError(
+    throw new RequestRefusal(
       'content is not base64: its length cannot be produced by base64 encoding, so it has been truncated '
       + 'or joined from pieces. Decoding it would store a file shorter than the one you sent.');
   }

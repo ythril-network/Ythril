@@ -35,6 +35,7 @@ import { webhookToken, parseTtlDaysQuery, requireWritePath, enforceSizeLimit } f
 import { callerPeerAuthor } from './sync/_shared.js';
 import { tagsError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { RequestRefusal } from '../util/errors.js';
 import { refusePeerWrite } from './sync/_shared.js';
 
 /**
@@ -112,7 +113,7 @@ export function registerUploadRoute(router: Router): void {
       if (arrivedFrom) {
         let key: string;
         try { key = fileKeyOf(targetSpace, filePath).key; } catch (err) {
-          if (err instanceof RangeError) { res.status(400).json({ error: err.message }); return; }
+          if (err instanceof RequestRefusal) { res.status(400).json({ error: err.message }); return; }
           throw err;
         }
         if (isInstanceLocalFile(key)) {
@@ -168,7 +169,7 @@ export function registerUploadRoute(router: Router): void {
             return;
           }
         } catch (err) {
-          if (err instanceof RangeError) { res.status(400).json({ error: (err as Error).message }); return; }
+          if (err instanceof RequestRefusal) { res.status(400).json({ error: err.message }); return; }
           throw err;
         }
         try {
@@ -233,8 +234,8 @@ export function registerUploadRoute(router: Router): void {
         } catch (err) {
           // The answer is `sendCaughtFailure`'s (409); what this door owes is that the ranges the refused upload staged do not stay.
           if (isPathBlocked(err)) await discardStagedChunks(targetSpace, filePath, range.total).catch(() => undefined);
-          if (err instanceof RangeError) {
-            res.status(400).json({ error: (err as Error).message });
+          if (err instanceof RequestRefusal) {
+            res.status(400).json({ error: err.message });
             return;
           }
           if (err instanceof StreamVerificationError) {
@@ -268,7 +269,9 @@ export function registerUploadRoute(router: Router): void {
           try {
             decoded = decodeContent(req.body.content as string, req.body.encoding);
           } catch (err) {
-            res.status(400).json({ error: (err as Error).message });
+            // `decodeContent` refuses with our `RequestRefusal`; anything else it threw is a fault, answered by the catch below.
+            if (!(err instanceof RequestRefusal)) throw err;
+            res.status(400).json({ error: err.message });
             return;
           }
         } else {
@@ -338,7 +341,7 @@ export function registerUploadRoute(router: Router): void {
         const statusCode = (embeddingStatusForResponse === 'pending' && isDocFormat) ? 202 : 201;
         res.status(statusCode).json(response);
       } catch (err) {
-        if (err instanceof RangeError) {
+        if (err instanceof RequestRefusal) {
           res.status(400).json({ error: err.message });
           return;
         }

@@ -24,7 +24,7 @@ import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { log } from '../util/log.js';
-import { openStoredRead, statStored, StoredFileUnreadable } from '../files/stored-bytes.js';
+import { openStoredRead, statStored } from '../files/stored-bytes.js';
 import {
   listDir,
   type FileEntry,
@@ -36,7 +36,7 @@ import {
 import { resolveSafePath, resolveSafePathChecked } from '../files/sandbox.js';
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
-import { NotFoundError } from '../util/errors.js';
+import { NotFoundError, RequestRefusal } from '../util/errors.js';
 import { moveFileCascade } from '../files/move-cascade.js';
 import { deletePath } from '../files/delete-cascade.js';
 import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
@@ -327,11 +327,8 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
     });
     body.pipe(res);
   } catch (err) {
-    if (err instanceof StoredFileUnreadable) {
-      log.warn(`readFileBytes error for space ${foundMid}, path ${normalised}: ${err}`);
-      res.status(500).json({ error: err.message });
-      return;
-    }
+    // A stored file that cannot be read is answered by what it is inside `sendCaughtFailure` (500, its base name and "cannot be read",
+    // reported there), the same words as the tool doors.
     sendCaughtFailure(res, `readFileBytes for space ${foundMid}, path ${normalised}`, err, { error: 'Failed to read file' });
   }
 });
@@ -381,7 +378,9 @@ fileStoreRouter.post(
       // Validate the path doesn't escape the space root
       resolveSafePath(targetSpace, filePath);
     } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      // The path's own refusal is the caller's `400` in its sentence; anything else that failed here is not (`sendCaughtFailure`).
+      if (!(err instanceof RequestRefusal)) { sendCaughtFailure(res, `retry embedding for space ${targetSpace}, path ${filePath}`, err); return; }
+      res.status(400).json({ error: err.message });
       return;
     }
 
@@ -425,7 +424,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
     if (deleted === 'directory') req.auditSnapshots = { before: {}, after: { kind: 'directory' } };
     res.status(204).end();
   } catch (err) {
-    if (err instanceof RangeError) {
+    if (err instanceof RequestRefusal) {
       res.status(400).json({ error: err.message });
       return;
     }
@@ -456,7 +455,7 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
     await moveFileCascade(targetSpace, srcPath, destination, webhookToken(req));
     res.json({ from: srcPath, to: destination });
   } catch (err) {
-    if (err instanceof RangeError) {
+    if (err instanceof RequestRefusal) {
       res.status(400).json({ error: err.message });
       return;
     }
