@@ -19,7 +19,7 @@
  * | socket-shaped (ECONN*, EPIPE, ETIMEDOUT, ENOTFOUND, EAI_*) | 502 | "an upstream service did not answer" |
  * | MongoServerError the server answered | its status today (the door's own) | our words, never the driver's (db, collection, key values) |
  * | TypeError, ReferenceError, SyntaxError, a non-Error | 500 | "Internal server error", `retryable: false`, `code: 'internal'` |
- * | Error, RangeError (our refusal convention) | 400 | its message |
+ * | Error, RangeError (our refusal convention) | 400 on the tool doors and `sendReadFailure`; 500 on `sendCaughtFailure` (a REST catch-all: its routes answer their own refusals first, so what reaches it is a fault; plan rev 3.1) | its message; on `sendCaughtFailure` "Internal server error" |
  *
  * Every row carries a poison marker wherever the runtime would put its own text (the message, a path, an address, a key value),
  * and no answer may carry it — except the last two rows, whose message IS the answer.
@@ -91,10 +91,13 @@ const ROWS = () => [
   { name: 'SyntaxError', make: () => new SyntaxError(`Unexpected token in JSON at ${POISON}`), expect: INTERNAL },
   { name: 'a non-Error (a thrown string)', make: () => `thrown string ${POISON}`, expect: INTERNAL },
   { name: 'a non-Error (a thrown object)', make: () => ({ reason: POISON }), expect: INTERNAL },
+  // `sendCaughtFailure` is a REST catch-all: every route answers its own refusals before it, so what reaches it is a fault (plan rev 3.1).
   { name: 'Error (our refusal convention)', make: () => new Error('the caller asked for something this refuses'),
-    expect: { status: 400, errorMatches: /the caller asked for something this refuses/ }, echoes: true },
+    expect: { status: 400, errorMatches: /the caller asked for something this refuses/ }, echoes: true,
+    expectOn: { sendCaughtFailure: { status: 500, error: 'Internal server error' } } },
   { name: 'RangeError (our refusal convention)', make: () => new RangeError('offset must be within the file'),
-    expect: { status: 400, errorMatches: /offset must be within the file/ }, echoes: true },
+    expect: { status: 400, errorMatches: /offset must be within the file/ }, echoes: true,
+    expectOn: { sendCaughtFailure: { status: 500, error: 'Internal server error' } } },
 ];
 
 let acts, tools, sendReadFailure, sendCaughtFailure, recallChain, ADMIN_RIGHTS;
