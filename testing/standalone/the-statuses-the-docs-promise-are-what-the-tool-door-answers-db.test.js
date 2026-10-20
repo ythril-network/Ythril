@@ -101,7 +101,7 @@ describe('the statuses the docs promise are what the tool door answers (Q-458)',
   for (const [label, make] of [
     ['a TypeError of ours', () => new TypeError('Cannot read properties of undefined (reading \'x\')')],
     ['a file-system error', () => Object.assign(new Error('EIO: i/o error, open \'/data/x\''), { code: 'EIO', syscall: 'open', path: '/data/x' })],
-    ['a socket error', () => Object.assign(new Error('connect ECONNREFUSED 10.0.0.9:443'), { code: 'ECONNREFUSED', syscall: 'connect' })],
+    ['a socket error', () => Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:443'), { code: 'ECONNREFUSED', syscall: 'connect' })],
   ]) {
     it(`POST /api/<tool>: ${label} answers a status ${MCP_GUIDE} lists, and not the one it calls malformed`, async () => {
       const list = toolDoorStatusList();

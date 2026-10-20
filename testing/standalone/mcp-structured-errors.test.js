@@ -102,8 +102,10 @@ describe('the refusal keeps its classification', () => {
       // answer carries `written`; it too is attached only by the branch that classified it. `identityTaken`: the fourth
       // (Q-439), a relabel onto a held identity, answered by `edgeIdentityTakenAnswer` as REST answers it. `fileAct`: a file
       // act's refusal (bundle-44), answered by `fileActAnswer` as every REST file door answers it. `spaceClosed`: a write a standing
-      // space act refused, or an act shutdown refused (bundle-106), answered as the REST sender answers it.
-      assert.match(r, /toStructured\(|storeSideFailure|connectionsNotWritten|identityTaken|fileAct|spaceClosed/,
+      // space act refused, or an act shutdown refused (bundle-106), answered as the REST sender answers it. `caught`: a failure no branch
+      // above claimed (Q-458), answered by what it is (`answerForCaught`) — a fault of ours carries `{ retryable: false, code: 'internal' }`,
+      // a file-system failure its `file_system_fault` — and a plain `Error` refusal (a `400`) none, which the spread's own condition keeps.
+      assert.match(r, /toStructured\(|storeSideFailure|connectionsNotWritten|identityTaken|fileAct|spaceClosed|caught\.status/,
         `a return carries structuredContent without a classification, so every unclassified error grows an `
         + `empty field: ${r.slice(0, 120)}`);
     }

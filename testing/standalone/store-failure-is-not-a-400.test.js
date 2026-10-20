@@ -244,9 +244,14 @@ describe('both doors, and all three routes', () => {
     };
     const store = sent(realErr('MongoNetworkError', { message: 'socket closed' }));
     const own = sent(new Error('unknown operator $nope'));
+    // A fault of ours (Q-458) is not the request's: `500`, in our words, and it says `retryable: false` ITSELF, so the decorator that stamps
+    // `true` on a `5xx` body that does not say cannot call it retryable.
+    const fault = sent(new TypeError('Cannot read properties of undefined (reading "x")'));
     assert.deepEqual([store.status, store.body?.retryable, store.headers['Retry-After'] !== undefined], [503, true, true]);
     assert.deepEqual([own.status, own.body?.retryable], [400, false],
       'the field must be sent unconditionally, not spread in behind a condition');
+    assert.deepEqual([fault.status, fault.body?.retryable, fault.body?.error], [500, false, 'Internal server error'],
+      'a TypeError of ours is a fault, not the request\'s 400, and its body states `retryable: false`');
   });
 
   it('`retryable` reaches the EARLY refusals too, not only the throws', () => {
