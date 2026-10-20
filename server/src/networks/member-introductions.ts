@@ -389,7 +389,8 @@ export async function answerPairing(networkId: string, b: { instanceId: string; 
     return { status: 200, body: { status: 'paired', instanceId: cfg.instanceId } };
   } catch (err) {
     noteAttempt(networkId, instanceId, { lastAttemptAt: nowIso(), lastError: String(err) });
-    return { status: 502, body: { error: `Could not reach the introduced address: ${err}` } };
+    log.warn(`member-introductions: could not reach the introduced address for ${peerText(instanceId)}: ${peerText(err)}`);
+    return { status: 502, body: { error: 'Could not reach the introduced address; the reason is in the server log.' } };
   } finally {
     inFlight.delete(key);
     if (tokenId) await revokeToken(tokenId).catch(() => {});

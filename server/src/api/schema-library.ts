@@ -47,7 +47,7 @@ import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { libraryUsages } from '../spaces/library-usages.js';
 import { mergeTypeDefinition } from '../spaces/meta-fields.js';
 import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.js';
-import { peerText, peerList, refusalOfParse } from '../util/log.js';
+import { log, peerText, peerList, refusalOfParse } from '../util/log.js';
 
 export const schemaLibraryRouter = Router();
 
@@ -855,8 +855,9 @@ async function proxyCatalogFetch(url: string, accessToken?: string): Promise<{ o
     return { ok: resp.ok, status: resp.status, body };
   } catch (err: unknown) {
     clearTimeout(timer);
-    const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, status: 502, body: { error: `Catalog fetch failed: ${message}` } };
+    // The cause (a socket's host and port, a resolver's text) is the operator's, in the log; the caller reads our sentence.
+    log.warn(`schema-library: catalog fetch of ${peerText(url)} failed: ${peerText(err)}`);
+    return { ok: false, status: 502, body: { error: 'Catalog fetch failed; the reason is in the server log.' } };
   }
 }
 
