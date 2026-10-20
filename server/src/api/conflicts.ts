@@ -109,9 +109,9 @@ async function executeResolve(
       outcome = await admitSpaceWrite(spaceId, 'files', async () => {
         const dstAbs = await resolveSafePathChecked(spaceId, doc.originalPath);
         if (dstAbs === srcAbs || await lstatIfPresent(srcAbs) === null) return 'nothing-to-place' as const;
-        await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath]); });
+        await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath], 'move'); });
         // A move, under both paths' locks: the stored bytes (ciphertext or not) are valid wherever they land (F-43).
-        await moveStored(srcAbs, dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath]); });
+        await moveStored(srcAbs, dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [doc.originalPath], 'move'); });
         return 'resolved' as const;
       });
       break;
