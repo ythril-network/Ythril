@@ -45,6 +45,7 @@ import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { isFileSystemError } from './fs-failure-words.js';
 import { log, peerText } from './log.js';
 import { warnOnce } from './warn-once.js';
+import { FAULT_REPORT_WINDOW } from './report-failure.js';
 
 /** The classes a caught failure is answered as: the metric's `class` label, so a fixed set and never a message. */
 export const CAUGHT_KINDS = ['unreadable_file', 'upstream', 'file_system', 'driver_refusal', 'internal', 'refusal'] as const;
@@ -64,7 +65,7 @@ const UPSTREAM_TEXT = 'an upstream service did not answer';
 /** Socket-shaped codes: the connection to something else failed, which is not a file act and not the caller's request. */
 const SOCKET_CODE = /^(ECONN[A-Z]*|EPIPE|ETIMEDOUT|ENOTFOUND|EAI_[A-Z_]+)$/;
 
-const saidFault = warnOnce<string>({ max: 256, every: 60_000 });
+const saidFault = warnOnce<string>(FAULT_REPORT_WINDOW);
 
 /** Report a fault's cause to the operator once per operation and class per window; the answer is given every time. */
 function reportCaught(where: string, kind: CaughtKind, err: unknown): void {

@@ -43,6 +43,7 @@
  * source at all.
  */
 import { log, peerText } from './log.js';
+import { warnOnce } from './warn-once.js';
 
 /**
  * Record the cause of a 5xx the route is about to send.
@@ -54,4 +55,18 @@ export function reportServerFailure(where: string, cause: unknown): void {
   // The cause goes as the meta argument: `fmt` keeps an Error's stack (this server's frames) and bounds its message,
   // which a driver may have built from a peer's `_id` (bundle-30 `B4`) — and bounds any other cause like any value.
   log.error(`${peerText(where)} failed with a 5xx:`, cause);
+}
+
+/** The window a repeated fault is said once in, and how many (operation, class) pairs are remembered: one number for every reporter of a fault. */
+export const FAULT_REPORT_WINDOW = { max: 256, every: 60_000 } as const;
+
+const saidOnce = warnOnce<string>(FAULT_REPORT_WINDOW);
+
+/**
+ * {@link reportServerFailure} for a failure a caller can repeat without bound: said once per operation and `kind` per window, so a bulk
+ * resolution of two thousand ids on a disk that answers `EIO` writes one line with a stack and not two thousand. The ANSWER is still given
+ * every time, and counted by whoever counts it: only the operator's line is thinned, and the first of a window carries the cause.
+ */
+export function reportServerFailureOncePerWindow(where: string, kind: string, cause: unknown): void {
+  saidOnce(`${where}|${kind}`, () => reportServerFailure(where, cause));
 }
