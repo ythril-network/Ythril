@@ -431,7 +431,7 @@ export async function storeConversionResults(
         imageJobs.push({ path: imgPath, mimeType: `image/${img.ext === 'jpg' ? 'jpeg' : img.ext}` });
       } catch (err) {
         // Non-fatal: log and continue; other images and chunks still processed
-        log.warn(`Failed to store extracted image ${imgId}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`Failed to store extracted image ${imgId}:`, err);   // as meta: a write's file-system fault says "see the log", and the log line is where its cause is
       }
     }
     log.info(`Stored ${extractedImages.length} extracted image(s) from ${spaceId}/${originalId}`);

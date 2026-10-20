@@ -675,7 +675,7 @@ async function processJob(
       mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
       return;
     }
-    log.warn(`Media worker: job ${spaceId}/${fileId} failed: ${message}`);
+    log.warn(`Media worker: job ${spaceId}/${fileId} failed:`, err);   // as meta, so a wrapper that says "see the log" (a file-system fault) has its cause in it
     // An oversized document will never shrink — fail permanently instead of
     // burning the retry budget re-reading a file the pipeline refuses to convert.
     // A stored file that cannot be decoded is the same: retrying reads the same bytes under the same key (F-43).

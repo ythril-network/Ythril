@@ -91,12 +91,31 @@ export async function readFileWindow(
   }
 }
 
+/**
+ * The one step that puts a caller's bytes at a caller's path, shared by {@link writeFile} and {@link writeFileBytes}: admitted by the gate,
+ * the path resolved inside the admission, and a failure of the FILE SYSTEM said once (`fsRefusalOf`) — a refusal about the caller's path
+ * (`PathBlocked`) or the server's fault (`FileSystemFault`), never the runtime's message, which names the data path.
+ *
+ * ## What it prevents
+ *
+ * A write's failed rename reached `POST /api/write_file` and MCP as `400 Error: <the runtime's message>` and REST upload as a bare `500`,
+ * three answers to one failure. The wrap is around the stored-bytes call ONLY: the admission and the path's resolution stay outside it, so
+ * a path outside the space (`RangeError`), a space a standing act closed and a refusal of the gate keep the status they always had.
+ * It is not in `writeStored` itself, which the chunk staging, the migration and ingest share and which must keep throwing what it threw.
+ */
+async function writeStoredAt(spaceId: string, filePath: string, data: Buffer | string): Promise<void> {
+  await admitSpaceWrite(spaceId, 'files', async () => {
+    const abs = await resolveSafePathChecked(spaceId, filePath);
+    await writeStored(abs, data).catch((err: unknown) => { throw fsRefusalOf(err, [filePath], 'write'); });
+  });
+}
+
 /** Write a text file, creating parent directories as needed */
 export async function writeFile(spaceId: string, filePath: string, content: string): Promise<{ sha256: string }> {
   // Through the one door for stored bytes (F-43): encrypted at rest when a master secret is set, written to a
   // temp file outside the tree and renamed, and hardened to owner-only whatever the file's history. One write unit, admitted by the gate and
   // counted for an act's drain from its check (`admitSpaceWrite`), the path's own resolution included.
-  await admitSpaceWrite(spaceId, 'files', async () => writeStored(await resolveSafePathChecked(spaceId, filePath), content));
+  await writeStoredAt(spaceId, filePath, content);
   const sha256 = sha256Hex(content);
   return { sha256 };
 }
@@ -107,7 +126,7 @@ export async function writeFileBytes(
   filePath: string,
   data: Buffer,
 ): Promise<{ sha256: string }> {
-  await admitSpaceWrite(spaceId, 'files', async () => writeStored(await resolveSafePathChecked(spaceId, filePath), data));   // see `writeFile` above
+  await writeStoredAt(spaceId, filePath, data);
   const sha256 = sha256Hex(data);
   return { sha256 };
 }
@@ -140,7 +159,7 @@ export async function createDir(spaceId: string, dirPath: string): Promise<void>
   await admitSpaceWrite(spaceId, 'files', async () => {
     const abs = await resolveSafePathChecked(spaceId, dirPath);
     // The filesystem's refusal is the caller's path or the server's fault, said once (`fsRefusalOf`), never the raw errno text.
-    await mkdirPrivate(abs).catch((err: unknown) => { throw fsRefusalOf(err, [dirPath]); });
+    await mkdirPrivate(abs).catch((err: unknown) => { throw fsRefusalOf(err, [dirPath], 'write'); });
   });
 }
 
@@ -189,12 +208,12 @@ export async function placeIfFree(
   dstDocId: string,
   { begun, act = 'move' }: { begun: boolean; act?: DestinationAct },
 ): Promise<void> {
-  await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [dstDocId]); });
+  await mkdirPrivate(path.dirname(dstAbs)).catch((err: unknown) => { throw fsRefusalOf(err, [dstDocId], 'move'); });
   // Under both paths' locks (F-43). The occupied destination is the placing's own refusal and is answered BEFORE `fsRefusalOf` sees it:
   // the kernel's ENOTEMPTY or EISDIR of a rename is a name that is taken, not a path that cannot be created.
   await moveStoredIfFree(srcAbs, dstAbs, { begun, onLinkFallback: linkFellBack }).catch((err: unknown) => {
     if (err instanceof DestinationOccupied) throw new DestinationExists(dstDocId, 'bytes', { act });
-    throw fsRefusalOf(err, [dstDocId]);
+    throw fsRefusalOf(err, [dstDocId], 'move');
   });
   await hardenPath(dstAbs);
 }

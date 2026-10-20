@@ -33,7 +33,7 @@ import path from 'node:path';
 import { DestinationExists, FileSystemFault, PathBlocked, fileActAnswerOf } from './act-answers.js';
 import { fileKeyOf, resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { CONVERTED_ROOT, isAtOrUnder, kindAt, movedSidecars, sidecarsOwnedBy } from './moved-paths.js';
-import { bytesPresentAt, destinationStateAt, isMissingPath, lstatIfPresent, type DestinationState } from './stored-bytes.js';
+import { bytesPresentAt, destinationStateAt, isMissingPath, isTmpStepFailure, lstatIfPresent, type DestinationState } from './stored-bytes.js';
 import { hasLiveFileRecordAt, hasLiveFileRecordExactlyAt } from './file-meta.js';
 import { toDocId } from '../util/paths.js';
 
@@ -64,7 +64,7 @@ export async function assertDestinationReachable(spaceId: string, relPath: strin
       found = await fs.stat(probe);
     } catch (err) {
       if (isMissingPath(err)) return;
-      throw fsRefusalOf(err, [toDocId(path.relative(root, abs))]);
+      throw fsRefusalOf(err, [toDocId(path.relative(root, abs))], 'write');
     }
     if (!found.isDirectory()) {
       const blocker = toDocId(path.relative(root, probe));
@@ -100,7 +100,7 @@ export function assertNotMovedIntoItself(spaceId: string, src: string, dst: stri
 export async function destinationStateOf(spaceId: string, src: string, dst: string, { begun }: { begun: boolean }): Promise<DestinationState> {
   const srcAbs = await resolveSafePathChecked(spaceId, src);
   const dstAbs = await resolveSafePathChecked(spaceId, dst);
-  return destinationStateAt(srcAbs, dstAbs, { begun }).catch((err: unknown) => { throw fsRefusalOf(err, [src, dst]); });
+  return destinationStateAt(srcAbs, dstAbs, { begun }).catch((err: unknown) => { throw fsRefusalOf(err, [src, dst], 'move'); });
 }
 
 /**
@@ -191,8 +191,8 @@ export async function assertNothingStandsAt(spaceId: string, dst: string, { plac
   const requested = toDocId(dst);
   const dstAbs = await resolveSafePathChecked(spaceId, dst);
   const state: DestinationState = placing === undefined
-    ? ((await lstatIfPresent(dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [requested]); })) === null ? 'free' : 'occupied')
-    : await destinationStateAt(placing, dstAbs, { begun: true }).catch((err: unknown) => { throw fsRefusalOf(err, [requested]); });
+    ? ((await lstatIfPresent(dstAbs).catch((err: unknown) => { throw fsRefusalOf(err, [requested], 'move'); })) === null ? 'free' : 'occupied')
+    : await destinationStateAt(placing, dstAbs, { begun: true }).catch((err: unknown) => { throw fsRefusalOf(err, [requested], 'move'); });
   // An alias is the placed file itself under another spelling of its name: its record, if any, is its own. A half-made link is not, so its
   // destination's record is asked like any other.
   await assertNeitherBytesNorRecord(state, requested, 'resolution', () => hasLiveFileRecordExactlyAt(spaceId, requested));
@@ -233,22 +233,36 @@ const REFUSED_BY_THE_TREE: Readonly<Record<string, string>> = Object.freeze({
   ENOTDIR: 'a file stands where a directory is needed',
   EISDIR: 'a directory stands where a file is needed',
   ENOTEMPTY: 'a directory that is not empty stands there',
-  EINVAL: 'a directory cannot be moved into itself',
   ENAMETOOLONG: 'the name is too long',
   ELOOP: 'the path loops through symbolic links',
 });
 
 /**
+ * What `EINVAL` means, by the act that met it: only a move can be asked to put a directory inside itself, so a write or a `mkdir` that
+ * meets it says what it knows (the file system did not accept the name) and not a move's sentence.
+ */
+const EINVAL_BY_ACT: Readonly<Record<FsAct, string>> = Object.freeze({
+  move: 'a directory cannot be moved into itself',
+  write: 'the file system does not accept this name',
+});
+
+/** The act a failed file-system call belongs to, which decides what a code means for the caller ({@link fsRefusalOf}). */
+export type FsAct = 'move' | 'write';
+
+/**
  * What a failed filesystem call (`mkdir`, `rename`, a write) means for the caller. `relPaths` are the space-relative paths the
  * act was given, the DESTINATION last.
  *
- * A code in the table is a {@link PathBlocked} naming the destination, built from `relPaths`. Every other failure,
- * whatever it is, becomes a {@link FileSystemFault} holding the original as its `cause` for the log: `err.message` of the
- * filesystem carries the server's absolute data path, and is never what a caller is told.
+ * A code in the table is a {@link PathBlocked} naming the destination, built from `relPaths`; `act` is the act that failed, which decides what
+ * `EINVAL` means. Every other failure, whatever it is, becomes a {@link FileSystemFault} holding the original as its `cause` for the log:
+ * `err.message` of the filesystem carries the server's absolute data path, and is never what a caller is told. So does a failure of the
+ * TEMPORARY file's step ({@link isTmpStepFailure}) whatever its code: the temp name is not the caller's path.
  */
-export function fsRefusalOf(err: unknown, relPaths: readonly string[]): PathBlocked | FileSystemFault {
+export function fsRefusalOf(err: unknown, relPaths: readonly string[], act: FsAct): PathBlocked | FileSystemFault {
   const code = (err as NodeJS.ErrnoException | null)?.code;
-  const meaning = typeof code === 'string' && Object.hasOwn(REFUSED_BY_THE_TREE, code) ? REFUSED_BY_THE_TREE[code] : undefined;
+  const meaning = typeof code !== 'string' || isTmpStepFailure(err) ? undefined
+    : code === 'EINVAL' ? EINVAL_BY_ACT[act]
+    : Object.hasOwn(REFUSED_BY_THE_TREE, code) ? REFUSED_BY_THE_TREE[code] : undefined;
   if (meaning === undefined) return new FileSystemFault(err);
   const destination = toDocId(relPaths.at(-1) ?? '');
   return new PathBlocked(destination, `'${destination}' cannot be created: ${meaning}.`);

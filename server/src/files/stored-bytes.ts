@@ -128,9 +128,36 @@ function withPathLocks<T>(aAbs: string, bAbs: string, fn: () => Promise<T>): Pro
   return withPathLock(first, () => first === second ? fn() : withPathLock(second, fn));
 }
 
+const tmpStepFailures = new WeakSet<object>();
+
+/**
+ * Did this failure happen in the TEMPORARY file's step, rather than at the caller's path? Asked by `fsRefusalOf` (`files/destination.ts`)
+ * before it reads a code as a refusal about the caller's path.
+ *
+ * ## What it prevents
+ *
+ * The temporary name is the caller's file name plus 17 bytes, in a directory the caller never named. A name that fits a component but whose
+ * temporary name does not fails `ENAMETOOLONG` at the temp step, and a table that read the code alone answered `409 path_blocked` about the
+ * caller's path; an `EEXIST` or `ENOTDIR` on the temp directory was the same. Those are the server's. The mark is on the error itself and
+ * the error is rethrown as it was, so a caller that classifies nothing (the chunk staging, the migration) sees what it always saw.
+ */
+export function isTmpStepFailure(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && tmpStepFailures.has(err);
+}
+
+/** Run a step that touches only the temporary file or its directory, marking whatever it throws ({@link isTmpStepFailure}). */
+async function inTmpStep<T>(step: () => Promise<T>): Promise<T> {
+  try {
+    return await step();
+  } catch (err) {
+    if (typeof err === 'object' && err !== null) tmpStepFailures.add(err);
+    throw err;
+  }
+}
+
 async function tmpPathFor(abs: string): Promise<string> {
   const dir = storedTmpDir();
-  await mkdirPrivate(dir);
+  await inTmpStep(() => mkdirPrivate(dir));
   return path.join(dir, `${path.basename(abs)}.${crypto.randomBytes(6).toString('hex')}.tmp`);
 }
 
@@ -169,8 +196,10 @@ async function writeUnlocked(abs: string, data: Buffer | string, opts: StoredWri
   const bytes = secret ? encryptChunked(plain, writerKey(secret)) : plain;
   const tmp = await tmpPathFor(abs);
   try {
-    const fh = await fsp.open(tmp, 'w', FILE_MODE);
-    try { await fh.writeFile(bytes); await fh.sync(); } finally { await fh.close(); }
+    await inTmpStep(async () => {
+      const fh = await fsp.open(tmp, 'w', FILE_MODE);
+      try { await fh.writeFile(bytes); await fh.sync(); } finally { await fh.close(); }
+    });
     await finishWrite(tmp, abs, opts);
   } catch (err) {
     await fsp.rm(tmp, { force: true }).catch(() => undefined);
