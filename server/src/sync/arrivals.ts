@@ -109,6 +109,7 @@ import { fileKeyOf } from '../files/sandbox.js';
 import { countFileArrival } from '../files/bytes-arrived.js';
 import { isComparableIso } from '../util/comparable-iso.js';
 import { admitSpaceWriteUnit, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { RequestRefusal } from '../util/errors.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -232,7 +233,8 @@ function fileKeyRefusal(spaceId: string, id: string): string | null {
   try {
     return fileKeyOf(spaceId, id).key === id ? null : '_id is not the canonical key of its path';
   } catch (err) {
-    if (err instanceof RangeError) return '_id is not a path inside the space';
+    // Our refusal class, not any `RangeError`: the runtime throws one too, and that is a fault of ours the page must fail on.
+    if (err instanceof RequestRefusal) return '_id is not a path inside the space';
     throw err;
   }
 }

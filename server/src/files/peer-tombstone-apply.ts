@@ -79,6 +79,7 @@ import { countFileArrival } from './bytes-arrived.js';
 import { recreatedSince } from './tombstone-shadow.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { heldFileTombstoneIds, storeRelayedFileTombstones, type RelayedFileTombstone } from './tombstones.js';
+import { RequestRefusal } from '../util/errors.js';
 
 /** The longest path a tombstone may name. A path is a peer's text, and it reaches the file system and the database. */
 const MAX_TOMBSTONE_PATH = 4096;
@@ -132,10 +133,10 @@ async function admit(raw: unknown, localSpaceId: string, now: string): Promise<{
   try {
     resolved = await peerFileKey(localSpaceId, t.path);
   } catch (err) {
-    // A path that leaves the space (a `RangeError`) is refused, and so is one that names the space itself. Any other failure to
+    // A path that leaves the space (a `RequestRefusal`, never a runtime `RangeError`) is refused, and so is one that names the space itself. Any other failure to
     // look at it is that element's too: one path the file system will not resolve must not stop the page, and nothing was touched.
     const reason = err instanceof PathNamesTheSpaceError ? 'its path names the space itself'
-      : err instanceof RangeError ? 'its path leaves the space' : 'its path cannot be resolved here';
+      : err instanceof RequestRefusal ? 'its path leaves the space' : 'its path cannot be resolved here';
     return { refused: { _id: t._id, reason } };
   }
   // A path this instance keeps for ITSELF (`isInstanceLocalFile`: a sidecar under a derived tree, a conflict copy, a schema
