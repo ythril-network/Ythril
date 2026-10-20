@@ -240,7 +240,7 @@ time, so the count is the cost.
 A `failed[]` element is `{ id, error, code?, status?, path? }`. `error` is a sentence of the server's, never the file system's own
 words (which name the server's data directory). A refusal of a file act carries its `code` (the same codes
 [Files](05-files-api.md) lists, such as `destination_exists`), its HTTP `status` and, when it names one, the `path`; a conflict that does not exist is `{ id, error, status: 404 }`;
-a path outside the space is `status: 400`. `code` is present only for a file act's answer. A copy that was already gone counts in `resolved`
+a path outside the space is `status: 400`. `code` is present for a file act's answer and for a fault: an error in the server's own code is `{ error: "Internal server error", code: "internal", status: 500 }` (it used to be reported as a file-system fault, which now means only a failure of the file system), and a failure to reach another host is `status: 502`. A copy that was already gone counts in `resolved`
 (it closed the record), not in `failed`.
 
 ---

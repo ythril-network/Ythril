@@ -21,7 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | `keep-both` (`rename`) and `save-to-space` onto a file, folder or record are `409` `destination_exists`, were a `200` replace; `save-to-space` needs `files: write` there | Choose another name or space |
 | A directory delete needs `confirm: true` (`422` `confirm_required`; space root `400`), on MCP too; a `files: write` token can delete a tree | Send `confirm`; review `files: write` tokens |
 | A directory delete fires one `file.deleted` per file it removed (it fired none) | Deduplicate on `X-Ythril-Delivery` |
+| A file act whose own file-system call fails is `500` `file_system_fault` with `retryable: false` on every door, `write_file`, upload and chunked upload included (was `400` with the data path on `write_file`, a bare `500` on upload) | Update body matchers |
+| A name that fits a path component but whose temporary name does not is `file_system_fault`, never `path_blocked` about your path | Shorten the name if it recurs |
 | A delete the storage refuses is `500` `file_system_fault` (an unreadable path was `404`); REST's other delete failure is `500` `Failed to delete`, was `… file` / `… directory` | Update body matchers |
+| An error in the server's code (`TypeError`, a thrown non-Error) is `500` `Internal server error`, `code: "internal"`, `retryable: false` on `POST /api/<tool>`, MCP and the read routes (was `400` with the runtime's sentence); a socket failure is `502` | Branch on status and `code` |
+| A `RangeError` the runtime raises on the upload, delete, move, `mkdir` and conflict-resolve routes is `500`, was `400`; our own path, encoding and chunk refusals stay `400` | A sync sender no longer drops a file for a server fault |
+| A stored file that cannot be read is `500` in our words on REST as on the tool doors; a synchronous sync trigger's and the join's failure bodies no longer carry the exception's text | Update body matchers |
+| A bulk conflict resolution's failed item for an error in our code is `code: "internal"`, was `file_system_fault` | Update body matchers |
+| `GET /api/admin/data/browse-dirs` answers `404` for a directory that is gone, `403` for one the server may not read, `500` otherwise, in our words (was `400` with the runtime's sentence) | Update body matchers |
+| New counter `ythril_tool_failures_total{door,tool,class}`: tool calls answered by the caught-failure classifier, `class` from a fixed set | Alert on a rising `internal` or `file_system` |
 | A partly finished move is `503` `move_still_owed` with `Retry-After`; an act whose deletion cannot be recorded is `500` `act_not_recorded` | Retry (a `404` can mean it finished); repeat a move an older version stranded |
 | A move another file's records hold back is `409` `destination_held_after_move` (`path`, `heldBy`) | Delete the file in `heldBy`, repeat the move |
 | A move whose sidecar destination was taken after its bytes moved finishes without that sidecar; it stayed `503` `move_still_owed` | Reprocess the file |
