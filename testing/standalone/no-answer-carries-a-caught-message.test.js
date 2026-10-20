@@ -187,6 +187,12 @@ function answersIn(body, answeredClasses) {
       if (type && ts.isStringLiteralLike(type.initializer) && type.initializer.text === 'text' && prop('text')) out.push([n, prop('text').initializer]);
       // An answer handed back for a door to send: `{ status, error }` (the join's acts return one).
       if (prop('status') && prop('error')) out.push([n, prop('error').initializer]);
+      // The other spelling of the same handed-back answer: `{ status, body: { error } }` (member introductions' confirm).
+      const body = prop('body');
+      if (prop('status') && body && ts.isObjectLiteralExpression(body.initializer)) {
+        const inner = body.initializer.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText() === 'error');
+        if (inner) out.push([n, inner.initializer]);
+      }
     }
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'sendCaughtFailure' && n.arguments[3]) out.push([n, n.arguments[3]]);
     if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && answeredClasses.has(n.expression.text)) for (const a of n.arguments ?? []) out.push([n, a]);
@@ -338,7 +344,8 @@ describe('no answer carries a caught message', () => {
         'res.status(400).json({ error: `failed: ${err}` })', 'const msg = err instanceof Error ? err.message : String(err); res.status(400).json({ error: msg })',
         "return { content: [{ type: 'text', text: `Error: ${(err as Error).message}` }] }",
         "sendCaughtFailure(res, 'w', err, { error: (err as Error).message })", 'throw new ToolRefusal(400, err.message)',
-        'return { status: 502, error: `Could not reach the peer: ${err}` }']) {
+        'return { status: 502, error: `Could not reach the peer: ${err}` }',
+        'return { status: 502, body: { error: `Could not reach the introduced address: ${err}` } }']) {
         const found = judge(`r.post('/x', requireAuth, async (req, res) => { try { work(); } catch (err) { ${body} } });`);
         assert.equal(found.length, 1, `not seen: ${body}`);
         assert.equal(found[0].allowed || found[0].admin, false, `seen and excused: ${body}`);
