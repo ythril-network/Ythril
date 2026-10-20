@@ -17,7 +17,9 @@ written, not a transport a client can still use.
 
 A tool that refuses the call is recorded with the status the refusal answers — **422** for a schema refusal of an
 edit, **400** for a refused merge or a call refused for its arguments, **403** for a token that may not, **404**, **409**,
-**429**, **503** as REST would answer. MCP answers 200 at the transport layer even when the tool errors, so a status
+**429**, **503** as REST would answer. A tool that FAILS rather than refuses is recorded with the status its failure answers: **500**
+for a fault of the server (a stored file that cannot be read, a file-system error, an unexpected exception) and **502** when an
+upstream service did not answer. Entries written before this change record these as **400**, which read as "the caller sent something wrong". MCP answers 200 at the transport layer even when the tool errors, so a status
 taken from the HTTP response would log every rejected write as a success.
 
 **Every refusal of a WRITE tool is a row**, whichever way it is refused, as the REST middleware records every response of
