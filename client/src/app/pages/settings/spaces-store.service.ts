@@ -48,6 +48,11 @@ export class SpacesStore {
 
   readonly spaces   = signal<Space[]>([]);
   readonly networks = signal<Network[]>([]);
+  /**
+   * Whether the networks list has arrived at least once. A failed request leaves `networks()` empty, and an empty list read as "no network
+   * holds this space" is a false claim: the danger tab's confirm forecast says nothing until this is true.
+   */
+  readonly networksLoaded = signal(false);
   /** Instance document-extraction ceiling — the highest mode a space may pick. Drives the per-space
    *  extraction dropdown so it never offers a level the runtime would cap. 'auto' = no policy limit. */
   readonly docExtractionCeiling = signal<'off' | 'ocr' | 'vlm' | 'repair' | 'auto'>('auto');
@@ -101,15 +106,12 @@ export class SpacesStore {
       },
       error: () => { this.error.set(true); this.loading.set(false); },
     });
-    this.networksApi.listNetworks().subscribe({
-      next: ({ networks }) => this.networks.set(networks),
-      error: () => {},
-    });
+    this.refreshNetworks();
   }
 
   refreshNetworks(): void {
     this.networksApi.listNetworks().subscribe({
-      next: ({ networks }) => this.networks.set(networks),
+      next: ({ networks }) => { this.networks.set(networks); this.networksLoaded.set(true); },
       error: () => {},
     });
   }

@@ -175,6 +175,7 @@ type ActNotice =
      with its text is not announced. It is bound to the last outcome and to the space's actPending, which only an administrator is served;
      an absent actPending is "unknown", so a reader who is not one sees an empty region and no word about acts. -->
 <div class="act-region" role="status" aria-live="polite">
+  <span class="sr-only">{{ live.text() }}</span>
   @if (standing(); as s) {
     <div class="alert alert-warning" style="margin-bottom:16px;font-size:13px;">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -262,7 +263,7 @@ export class SpaceDangerTabComponent {
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
   private dates = inject(DateFormatService);
-  private live = new LiveAnnouncement();
+  protected readonly live = new LiveAnnouncement();
 
   rebuildingIndexes = signal(false);
 
@@ -275,6 +276,7 @@ export class SpaceDangerTabComponent {
   /** The clock the relative times are read against; set on every outcome and every poll tick, so "in 2 minutes" does not go stale. */
   private readonly now = signal(Date.now());
   private poll: PollHandle | null = null;
+  private destroyed = false;
   /** Which act the last request or the standing entry was, for what to do when the poll sees it end. */
   private actKind: 'delete' | 'wipe' | 'rename' | null = null;
 
@@ -295,7 +297,8 @@ export class SpaceDangerTabComponent {
 
   /** Ask after the standing act until it ends; stops with the tab or when the dialog moves to another space. */
   private startPoll(spaceId: string): void {
-    if (this.poll?.active) return;
+    // An answer can land after the tab closed (closing the dialog destroys it); a poll started then would have nothing to stop it.
+    if (this.destroyed || this.poll?.active) return;
     this.poll = pollUntil({
       delayMs: () => ACT_POLL_MS,
       request: () => this.spacesApi.listSpaces(),
@@ -396,8 +399,12 @@ export class SpaceDangerTabComponent {
     }
   }
 
-  /** What the confirmation dialog says the act will do, from each network's `ownYesCarries` (does this instance's own yes alone carry it?). */
+  /**
+   * What the confirmation dialog says the act will do, from each network's `ownYesCarries` (does this instance's own yes alone carry it?).
+   * Nothing while the networks list has not arrived: an empty list then is not "no network holds it".
+   */
   private forecast(spaceId: string): string {
+    if (!this.store.networksLoaded()) return '';
     const nets = this.store.networksForSpace(spaceId);
     const key = nets.length === 0 ? 'localOnly' : nets.every(n => n.ownYesCarries === true) ? 'actsNow' : 'opensVote';
     return this.transloco.translate(`spaces.dangerZone.forecast.${key}`);
@@ -430,7 +437,7 @@ export class SpaceDangerTabComponent {
   private seeded = '';
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => this.stopPoll());
+    inject(DestroyRef).onDestroy(() => { this.destroyed = true; this.stopPoll(); });
     effect(() => {
       const s = this.state.settingsSpace();
       if (!s || this.seeded === s.id) return;
@@ -652,7 +659,7 @@ export class SpaceDangerTabComponent {
     // Irreversible: require the operator to type the space id (GitHub-style, C3).
     const ok = await this.confirmDialog.confirm({
       title: this.transloco.translate('spaces.dangerZone.confirmWipeTitle'),
-      message: `${this.transloco.translate('spaces.dangerZone.confirmWipe', { label: target.label })} ${this.forecast(target.id)}`,
+      message: `${this.transloco.translate('spaces.dangerZone.confirmWipe', { label: target.label })} ${this.forecast(target.id)}`.trimEnd(),
       confirmLabel: this.transloco.translate('spaces.dangerZone.wipeButton'),
       danger: true,
       requireText: target.id,
@@ -673,7 +680,7 @@ export class SpaceDangerTabComponent {
     // Irreversible: require the operator to type the space id (GitHub-style, C3).
     const ok = await this.confirmDialog.confirm({
       title: this.transloco.translate('spaces.dangerZone.confirmDeleteTitle'),
-      message: `${this.transloco.translate('spaces.dangerZone.confirmDelete', { label: target.label, id: target.id })} ${this.forecast(target.id)}`,
+      message: `${this.transloco.translate('spaces.dangerZone.confirmDelete', { label: target.label, id: target.id })} ${this.forecast(target.id)}`.trimEnd(),
       confirmLabel: this.transloco.translate('spaces.dangerZone.deleteButton'),
       danger: true,
       requireText: target.id,
