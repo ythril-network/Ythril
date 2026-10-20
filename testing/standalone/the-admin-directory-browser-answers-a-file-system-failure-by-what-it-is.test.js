@@ -77,6 +77,18 @@ describe('the admin directory browser answers a file-system failure by what it i
     assert.ok(fs.existsSync(TARGET) && fs.statSync(TARGET).isDirectory(), `${TARGET} must be a directory for the existence check to pass`);
   });
 
+  // Found by the b110 verify drive (2026-10-21): `existsSync` swallows EACCES/EPERM and answers false, so a directory that exists
+  // but cannot be read was answered 404 "not found" before the classifier ever saw the real error. Here existsSync says false, as
+  // it does for such a directory, while statSync throws the permission error the directory really has.
+  it('an existing directory the server may not read answers 403, never 404 from an existence pre-check', async () => {
+    const realExists = fs.existsSync;
+    fs.existsSync = (p) => (typeof p === 'string' && path.resolve(p) === TARGET ? false : realExists(p));
+    const stub = failFor('statSync', 'EACCES');
+    let out;
+    try { out = await browse(); } finally { stub.restore(); fs.existsSync = realExists; }
+    assert.equal(out.status, 403, `an unreadable existing directory answered ${out.status}, not 403 - ${JSON.stringify(out)}`);
+  });
+
   for (const fn of ['statSync', 'readdirSync']) {
     for (const { code, status } of ROWS) {
       it(`${code} from ${fn} answers ${status}, in our words`, async () => {
