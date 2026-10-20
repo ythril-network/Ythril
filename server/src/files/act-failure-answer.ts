@@ -1,5 +1,5 @@
 /**
- * Answer a caught failure that is a file act's refusal or failure — counted, and reported to the operator when it is the server's own.
+ * Answer a caught failure that is a file act's refusal or failure — counted, and reported to the operator when it is the server's own (once per operation and code per window: a caller can repeat a failure without bound).
  *
  * ## What it prevents
  *
@@ -16,10 +16,10 @@
  * What each door does with the answer (a status line and `Retry-After`, `structuredContent`, one item of a bulk answer) stays the door's.
  */
 import { fileActAnswer, type FileActAnswer } from './act-answers.js';
-import { reportServerFailure } from '../util/report-failure.js';
+import { reportServerFailureOncePerWindow } from '../util/report-failure.js';
 
 export function answerFileActFailure(err: unknown, where: string): FileActAnswer | undefined {
   const answer = fileActAnswer(err);
-  if (answer !== undefined && answer.status >= 500) reportServerFailure(where, err);
+  if (answer !== undefined && answer.status >= 500) reportServerFailureOncePerWindow(where, answer.body.code, err);
   return answer;
 }
