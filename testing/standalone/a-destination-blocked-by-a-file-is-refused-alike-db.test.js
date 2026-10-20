@@ -32,6 +32,21 @@
  *
  * Red against 664676ef: REST answers 500, MCP 400 with the raw message, the chunked first range answers 202.
  *
+ * ## A failure of the act itself, after every pre-check passed (Q-458)
+ *
+ * The rule above is held at the pre-check; its second half is the ACT. A file-system call that fails while the bytes or the
+ * directory are being placed (the rename that lands a write, the link that lands a move, the mkdir of a directory) is the
+ * server's fault, and every door says so alike: `500`, `code: 'file_system_fault'`, in our words, never the runtime's message,
+ * which names the server's data path. Each row injects the failure into the ACT's own call (never a stat or lstat, which is what
+ * the pre-check reads), counts that the stub fired, carries a poison marker in the error's message and path, and restores the
+ * stub in a `finally`. A temp step's `ENAMETOOLONG` (the temp name adds 17 bytes to a name that fits) is the server's fault too,
+ * never a `409 path_blocked` about the caller's path. And wrapping the act changes no refusal made before it: a path outside the
+ * space stays the caller's `400`, a write to a space a standing act closed stays its `409` (plan rev 3 of Q-458, section 1).
+ *
+ * Red against da4cafd8: a write's failed rename reaches MCP and `POST /api/write_file` as `400` with the raw message, REST upload
+ * and the chunked upload as a bare `500` with no code. The move and `create_dir` rows already hold (their act is wrapped); they
+ * stay as rows so all doors are held to one answer.
+ *
  * Run: node --test testing/standalone/a-destination-blocked-by-a-file-is-refused-alike-db.test.js
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
