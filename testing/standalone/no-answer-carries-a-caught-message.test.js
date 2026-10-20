@@ -14,8 +14,9 @@
  * Every answer body or tool text built inside a `catch` (or a `.catch(...)` callback) from the caught value — `.message`,
  * `String(x)`, `${x}`, `'...' + x`, or a local built from one of those — is allowed only where a preceding `instanceof` narrows
  * the caught value to one of OUR refusal classes. The set is DERIVED from `server/src`: every class extending `Error` or
- * `RangeError` (or one of ours) whose constructor does not build its message from another error's `.message` or `String(...)`,
- * plus `RangeError`, the refusal convention. `StoredFileUnreadable` is out by that derivation (its message repeats its cause's).
+ * `RangeError` (or one of ours) whose constructor does not build its message from another error's `.message` or `String(...)`.
+ * A bare `RangeError` is NOT one of ours (the runtime throws it too): only `RequestRefusal`, which stands on it, and what extends
+ * `Error` or one of ours. `StoredFileUnreadable` is out by that derivation (its message repeats its cause's).
  *
  * An answer is: the argument of `res.json(...)` / `res.send(...)`, the `text` of a `{ type: 'text', text }` tool content, the
  * fallback body handed to `sendCaughtFailure`, and the argument of `new X(...)` for every class `answerThrown` answers with its
@@ -60,8 +61,9 @@ const buildsFromAnotherMessage = (expr) => {
 /**
  * Our refusal classes: every class in `sources` extending `Error`, `RangeError` or another of ours whose constructor's `super(...)`
  * does not build its message from another error. A class with no constructor passes its caller's message through, and the caller is
- * our code. Plus `RangeError`, the refusal convention.
+ * our code. A class extending `RangeError` is ours only when it is `RequestRefusal`; `RangeError` itself never is.
  */
+const REFUSAL_ROOT = 'RequestRefusal';
 export function refusalClassesOf(sources) {
   const classes = new Map();
   for (const { file, text } of sources) {
@@ -80,12 +82,16 @@ export function refusalClassesOf(sources) {
       classes.set(n.name.text, { base: ext.text, wraps, file });
     });
   }
-  const ours = new Set(['RangeError']);
+  // `RangeError` itself is NOT seeded: the runtime throws it too (an invalid array length, a bad `toFixed` digit), so a catch that
+  // narrows to it answers a fault in the thrower's words. Our refusals are the typed classes below it (`RequestRefusal` and the rest).
+  const ours = new Set();
   for (let grew = true; grew;) {
     grew = false;
     for (const [name, c] of classes) {
       if (ours.has(name) || c.wraps) continue;
-      if (c.base === 'Error' || ours.has(c.base)) { ours.add(name); grew = true; }
+      // The one class allowed to stand on `RangeError` is the refusal root (`util/errors.ts`), so a class that extends the runtime's
+      // own `RangeError` any other way is not ours.
+      if (c.base === 'Error' || ours.has(c.base) || (c.base === 'RangeError' && name === REFUSAL_ROOT)) { ours.add(name); grew = true; }
     }
   }
   return ours;
@@ -290,9 +296,10 @@ describe('no answer carries a caught message', () => {
   it('the derivations found what they must, so the sweep is about something', () => {
     // Floors, and identities the derivation must get right in each direction.
     assert.ok(OURS.size >= 10, `only ${OURS.size} refusal classes derived — the class scan is broken: ${[...OURS]}`);
-    for (const c of ['RangeError', 'ToolRefusal', 'QuotaError', 'NotFoundError', 'PathBlocked']) {
+    for (const c of ['RequestRefusal', 'ToolRefusal', 'QuotaError', 'NotFoundError', 'PathBlocked']) {
       assert.ok(OURS.has(c), `${c} is one of our refusal classes and the derivation lost it: ${[...OURS].sort()}`);
     }
+    assert.ok(!OURS.has('RangeError'), 'a bare RangeError is also thrown by the runtime, so it is not one of our refusal classes');
     assert.ok(!OURS.has('StoredFileUnreadable'), 'StoredFileUnreadable builds its message from its cause\'s, so it is not a refusal class');
     assert.ok(ADMIN_GUARDS.has('requireAdmin') && ADMIN_GUARDS.has('requireAdminMfa') && !ADMIN_GUARDS.has('requireAdminMfaScoped'),
       `instance-admin guards derived as ${[...ADMIN_GUARDS]}`);
@@ -351,10 +358,11 @@ describe('no answer carries a caught message', () => {
         assert.equal(found[0].allowed || found[0].admin, false, `seen and excused: ${body}`);
       }
     });
-    it('narrowed to our refusal class it is allowed; narrowed to StoredFileUnreadable or TypeError it is not', () => {
+    it('narrowed to our refusal class it is allowed; narrowed to RangeError, StoredFileUnreadable or TypeError it is not', () => {
       const one = (cls) => judge(`r.get('/x', async (req, res) => { try { w(); } catch (err) { if (err instanceof ${cls}) { res.status(400).json({ error: err.message }); return; } } });`)[0];
       assert.equal(one('QuotaError').allowed, true);
-      assert.equal(one('RangeError').allowed, true);
+      assert.equal(one('RequestRefusal').allowed, true);
+      assert.equal(one('RangeError').allowed, false, 'the runtime throws RangeError too');
       assert.equal(one('StoredFileUnreadable').allowed, false);
       assert.equal(one('TypeError').allowed, false);
     });
