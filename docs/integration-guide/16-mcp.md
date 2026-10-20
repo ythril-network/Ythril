@@ -175,8 +175,8 @@ default measured 50 KB on the wire before and 25 KB now, with correspondingly fe
 `nextSkip`.
 
 `error` is word-for-word what MCP puts in `content` for the same refusal. The one thing this door adds is a
-status code, because HTTP has one and JSON-RPC does not: `400` malformed, `403` the token may not,
-`404` no such space or tool, `422` the tool refused a well-formed call, `429` throttled, `503` the store
+status code, because HTTP has one and JSON-RPC does not: `400` malformed, or a refusal the tool made in its own words (a plain `Error`, never a fault), `403` the token may not,
+`404` no such space or tool, `422` the tool refused a well-formed call, `429` throttled, `500` a fault of the server's (an error in our code, answered `Internal server error` with `code: "internal"`, or a file-system failure, `code: "file_system_fault"`; both say `retryable: false` and name no path or message of the runtime's), `502` an upstream service did not answer (the server could not reach another host), `503` the store
 could not answer (retry it). Over MCP the identical refusal arrives as `isError: true` on a `200`.
 
 > **When to use which.** MCP if your client speaks it — you get `tools/list`, the schemas and the
