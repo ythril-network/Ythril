@@ -270,7 +270,9 @@ describe('MCP audit coverage', () => {
     const src = readFileSync(ROUTER, 'utf8');
     const at = src.indexOf('const answer = answerThrown(err);');
     assert.ok(at > 0, 'the catch no longer answers through `answerThrown`');
-    const window = src.slice(at, src.indexOf('return answer;', at));
+    const end = src.indexOf('return withUnknownFieldRows(answer, rows);', at);
+    assert.ok(end > at, 'the catch arm no longer ends by returning its answer with the unknown-field rows — re-anchor this window');
+    const window = src.slice(at, end);
     assert.match(window, /mcpActOperation\(name\) !== null/, 'only an act is recorded on a throw: every other tool keeps its behaviour');
     assert.match(window, /!\(err instanceof ToolRefusal\)/, 'a refusal is raised before the run and is not a run');
     assert.match(window, /recordToolCall\(caller, name, callSpace, answer\.status,/, 'the status recorded is the status answered');
