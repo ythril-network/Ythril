@@ -26,7 +26,7 @@ import { NetworkVoteRowComponent } from './network-vote-row.component';
 import { RecentDecisionsComponent } from './network-decisions.component';
 import { castNotice, castRefusalNotice, roundName, type CastNotice, type Translate } from './network-vote-cast';
 import { DateFormatService } from '../../core/date-format.service';
-import { actKindKey, actStateKey, actStateVariant, actWhenText } from '../../core/space-act-view';
+import { NetworkOwedActsComponent } from './network-owed-acts.component';
 import { voteTally } from '../../core/vote-round-view';
 import { NetworkCreateDialogComponent } from './network-create-dialog.component';
 import { NetworkJoinDialogComponent } from './network-join-dialog.component';
@@ -35,7 +35,7 @@ import { refusalText } from '../../core/refusal-text';
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent, NetworkOwedActsComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -197,20 +197,7 @@ import { refusalText } from '../../core/refusal-text';
               }
 
               @if (net.owedSpaceActs?.length) {
-                <div style="margin-bottom:16px;">
-                  <h4 class="section-title" style="margin:0 0 6px;">{{ 'networks.owedActs.title' | transloco }}</h4>
-                  <ul style="list-style:none;margin:0;padding:0;">
-                    @for (act of net.owedSpaceActs; track act.entryId) {
-                      <li style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
-                        <span style="font-weight:500;">{{ act.localSpaceId }}</span>
-                        <span>{{ actKindKey(act.kind) | transloco }}</span>
-                        <app-status-pill [variant]="actStateVariant(act.state)" [dot]="true">{{ actStateKey(act.state) | transloco }}</app-status-pill>
-                        <span style="color:var(--text-muted);">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: act.attempts } }}</span>
-                        <span style="color:var(--text-muted);">{{ 'networks.owedActs.nextTry' | transloco: { when: whenText(act.nextRetryAt) } }}</span>
-                      </li>
-                    }
-                  </ul>
-                </div>
+                <app-network-owed-acts [acts]="net.owedSpaceActs!" />
               }
 
               <!-- Invite bundle — not for a pub/sub subscriber: only the publisher invites (F-38.1). -->
@@ -438,11 +425,6 @@ export class NetworksComponent implements OnInit {
   readonly voteTally = voteTally;
   private readonly decisions = viewChildren(RecentDecisionsComponent);
   private readonly dates = inject(DateFormatService);
-  protected readonly actStateVariant = actStateVariant;
-  protected readonly actStateKey = actStateKey;
-  protected readonly actKindKey = actKindKey;
-  /** When an owed act's next try is, in words (see `actWhenText`); read against the clock at each render. */
-  whenText(retryAt: string | undefined): string { return actWhenText(this.transloco, this.dates, retryAt, Date.now()); }
   private readonly t: Translate = (key, params) => this.transloco.translate(key, params);
 
   ngOnInit(): void {
