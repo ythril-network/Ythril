@@ -56,7 +56,7 @@ function setup<E extends Record<string, unknown>>(confirmResult: boolean, api: E
       // `networksForSpace` and `load` are needed because these tests run a real change-detection pass
       // (`TestBed.tick()`) to fire the seeding effect, which renders the template. The earlier tests called
       // methods directly and never rendered, so the mock could get away with less.
-      { provide: SpacesStore, useValue: { spaces: signal([]), networks: signal([]), refreshNetworks: () => {}, networksForSpace: () => [], load: () => {} } },
+      { provide: SpacesStore, useValue: { spaces: signal([]), networks: signal([]), networksLoaded: signal(true), refreshNetworks: () => {}, networksForSpace: () => [], load: () => {} } },
       { provide: ToastService, useValue: { error: () => {}, success: () => {}, show: () => {} } },
       { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(confirmResult) } },
     ],
@@ -211,8 +211,11 @@ interface Wired {
   confirm: ReturnType<typeof vi.fn>;
 }
 
-/** The tab with the real SpacesApi; `space` is merged into the open space (e.g. `{ actPending }`), `nets` is what networksForSpace gives. */
-function wired(opts: { space?: Record<string, unknown>; nets?: Record<string, unknown>[] } = {}): Wired {
+/**
+ * The tab with the real SpacesApi; `space` is merged into the open space (e.g. `{ actPending }`), `nets` is what networksForSpace gives,
+ * and `networksLoaded: false` is a networks list that never arrived (its request failed).
+ */
+function wired(opts: { space?: Record<string, unknown>; nets?: Record<string, unknown>[]; networksLoaded?: boolean } = {}): Wired {
   const confirm = vi.fn((_data: unknown) => Promise.resolve(true));
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
@@ -228,6 +231,7 @@ function wired(opts: { space?: Record<string, unknown>; nets?: Record<string, un
       { provide: NetworksApi, useValue: { listNetworks: vi.fn().mockReturnValue(of({ networks: [] })), leaveNetwork: vi.fn().mockReturnValue(of({})) } },
       { provide: SpacesStore, useValue: {
         spaces: signal([{ id: 'proj', label: 'Project', ...opts.space }]), networks: signal([]), refreshNetworks: vi.fn(),
+        networksLoaded: signal(opts.networksLoaded ?? true),
         networksForSpace: () => opts.nets ?? [], load: vi.fn(),
       } },
       { provide: ToastService, useValue: { error: vi.fn(), success: vi.fn(), show: vi.fn(), info: vi.fn() } },
@@ -478,6 +482,26 @@ describe('the standing act (actPending, admins) and its poll (Q-535)', () => {
     expect(spacesPolls(h)).toHaveLength(0);
   });
 
+  it('the end of a polled act is heard: the status region carries the announced sentence, not only a spy', () => {
+    const h = wired({ space: { actPending: actPending({ kind: 'wipe' }) } });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    spacesPolls(h)[0]!.flush({ spaces: [{ id: 'proj', label: 'Project' }] });
+    h.http.expectOne('/api/brain/spaces/proj/stats');
+    vi.advanceTimersByTime(1_000);
+    h.fixture.detectChanges();
+    expect(statusText(h)).toContain(K.ended);
+  });
+
+  it('a queued answer that arrives after the tab closed starts no poll', async () => {
+    const h = wired();
+    await h.c.confirmDangerDelete();
+    const req = h.http.expectOne(r => r.method === 'DELETE' && r.url === '/api/spaces/proj');
+    h.fixture.destroy();
+    flushWire(req, D.votedQueued);
+    vi.advanceTimersByTime(TEN_MINUTES);
+    expect(spacesPolls(h)).toHaveLength(0);
+  });
+
   it('the poll stops when the dialog switches to another space', () => {
     const h = wired({ space: { actPending: actPending() } });
     vi.advanceTimersByTime(TEN_MINUTES);
@@ -502,6 +526,12 @@ describe('the confirm text forecasts what the act will do (Q-535 design 7)', () 
     const wipe = wired({ nets: [] });
     await wipe.c.confirmDangerWipe();
     expect(asked(wipe)).toContain(K.forecastLocalOnly);
+  });
+
+  it('the networks list never arrived: no forecast at all, never "local only" for a space a network may hold', async () => {
+    const h = wired({ nets: [], networksLoaded: false });
+    await h.c.confirmDangerDelete();
+    for (const key of [K.forecastLocalOnly, K.forecastActsNow, K.forecastOpensVote]) expect(asked(h)).not.toContain(key);
   });
 
   it('every network\'s ownYesCarries is true: "acts at once here and on the network"', async () => {
