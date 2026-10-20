@@ -272,11 +272,8 @@ dataRouter.get('/browse-dirs', (req, res) => {
   }
 
   try {
-    if (!fs.existsSync(normalized)) {
-      res.status(404).json({ error: `Directory not found: ${normalized}` });
-      return;
-    }
-
+    // No existsSync pre-check: it answers false for a directory the server may not read (EACCES/EPERM), which turned a
+    // permission failure into "not found". statSync throws the real errno, and the catch below answers it by what it is.
     const stat = fs.statSync(normalized);
     if (!stat.isDirectory()) {
       res.status(400).json({ error: 'path is not a directory' });
