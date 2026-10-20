@@ -47,7 +47,7 @@
  * answer `204`, write a second tombstone, move the record's seq and fire a second `file.deleted`.
  */
 import { log, peerText } from '../util/log.js';
-import { NotFoundError } from '../util/errors.js';
+import { NotFoundError, RequestRefusal } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import fs from 'fs/promises';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
@@ -134,7 +134,7 @@ export type PathDeleted = 'file' | 'directory';
 /** `confirm` as a delete's caller gave it: absent, or a boolean — anything else is the caller's malformed request (`400`). */
 function confirmOf(confirm: unknown): boolean | undefined {
   if (confirm === undefined || typeof confirm === 'boolean') return confirm;
-  throw new RangeError("'confirm' must be a boolean");
+  throw new RequestRefusal("'confirm' must be a boolean");
 }
 
 /**

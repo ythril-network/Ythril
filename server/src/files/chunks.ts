@@ -19,6 +19,7 @@ import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { log } from '../util/log.js';
 import { admitSpaceWrite, assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
+import { RequestRefusal } from '../util/errors.js';
 
 /** Deterministic upload ID from (spaceId, path, total). */
 export function uploadId(spaceId: string, filePath: string, total: number): string {
@@ -179,7 +180,7 @@ async function tiledChunks(dir: string, filePath: string, total: number): Promis
   const sized: { name: string; size: number }[] = [];
   for (const cf of chunkFiles) {
     if (cf.start !== expected) {
-      throw new RangeError(
+      throw new RequestRefusal(
         `Chunk coverage error for '${filePath}': expected a chunk at offset ${expected}, ` +
         `found one at ${cf.start} (gap or overlap).`,
       );
@@ -188,7 +189,7 @@ async function tiledChunks(dir: string, filePath: string, total: number): Promis
     expected += cf.size;
   }
   if (expected !== total) {
-    throw new RangeError(
+    throw new RequestRefusal(
       `Chunk coverage error for '${filePath}': assembled size ${expected} does not match ` +
       `the declared total ${total}.`,
     );
@@ -203,7 +204,7 @@ async function* verifiedChunks(dir: string, filePath: string, sized: readonly { 
     // The name promised this many bytes; a chunk that decodes to a different length would tile wrongly and
     // assemble a corrupt file whose hash is nonetheless "correct".
     if (buf.length !== cf.size) {
-      throw new RangeError(`Chunk ${cf.name} of '${filePath}' holds ${buf.length} bytes, not the ${cf.size} its name records.`);
+      throw new RequestRefusal(`Chunk ${cf.name} of '${filePath}' holds ${buf.length} bytes, not the ${cf.size} its name records.`);
     }
     yield buf;
   }

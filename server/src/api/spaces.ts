@@ -80,7 +80,7 @@ spacesRouter.post('/:id/rebuild-indexes', globalRateLimit, requireSpaceAuthMfaSc
     await reconcileSpaceSearchIndexes(spaceId, { waitForReady: false, force: true });
     res.json({ ok: true, spaceId, status: 'rebuilding' });
   } catch (err) {
-    sendCaughtFailure(res, `POST /api/spaces/${spaceId}/rebuild-indexes`, err, { error: err instanceof Error ? err.message : String(err) });
+    sendCaughtFailure(res, `POST /api/spaces/${spaceId}/rebuild-indexes`, err);
   }
 });
 

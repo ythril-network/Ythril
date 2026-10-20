@@ -39,6 +39,7 @@ import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { log, refusalOfParse } from '../util/log.js';
 import { mapLimit } from '../util/map-limit.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { isMissingPath } from '../files/stored-bytes.js';
 
 export const dataRouter = Router();
 
@@ -303,8 +304,12 @@ dataRouter.get('/browse-dirs', (req, res) => {
     dirs.sort();
     res.json({ path: normalized, dirs });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(400).json({ error: msg });
+    // A directory the file system will not show is not a malformed request: gone is `404`, not permitted is `403`, anything else is the
+    // server's own fault (`500`, by what it is). All in our words — the runtime's message is not what the operator is told (Q-542).
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (isMissingPath(err)) { res.status(404).json({ error: 'That directory does not exist.' }); return; }
+    if (code === 'EACCES' || code === 'EPERM') { res.status(403).json({ error: 'The server is not permitted to read that directory.' }); return; }
+    sendCaughtFailure(res, 'GET /api/admin/data/browse-dirs', err);
   }
 });
 

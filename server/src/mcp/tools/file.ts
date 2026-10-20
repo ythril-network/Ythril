@@ -99,7 +99,8 @@ export const write_fileTool: ToolHandler = {
     + 'and mean the same thing by them.\n\n'
     + 'IT REPLACES THE WHOLE FILE. There is no append and no patch: whatever you send becomes the entire content, so read first if you meant to add to it. Writing a path that already exists overwrites it without asking. A path that runs THROUGH a file (`a.txt/x` where `a.txt` is a file) is REFUSED with `409`, and nothing is written.\n\n'
     + 'The file is CHUNKED and each chunk is embedded separately, which is why `recall` returns a passage rather than a document and why `includeFileContent: false` is worth using — one long chunk can crowd out several one-line records. Structure the text with headings: a chunk that begins under a heading carries it, and that is what makes a recall hit locatable.\n\n'
-    + 'Embedding is ASYNCHRONOUS, as with `saveFact`: the write returns once the bytes are stored and a queued job computes the vectors afterwards. `recall` always scans the newest records straight from the collection, so a chunk the vector index has not ingested yet is still found — but a chunk whose embedding job has not RUN yet has no vector to compare and stays invisible until it does; `list_embed_jobs` says whether the queue is behind. Rewriting a file resets its embedding: new content is new content, and a previous failure to embed it is not carried forward.',
+    + 'Embedding is ASYNCHRONOUS, as with `saveFact`: the write returns once the bytes are stored and a queued job computes the vectors afterwards. `recall` always scans the newest records straight from the collection, so a chunk the vector index has not ingested yet is still found — but a chunk whose embedding job has not RUN yet has no vector to compare and stays invisible until it does; `list_embed_jobs` says whether the queue is behind. Rewriting a file resets its embedding: new content is new content, and a previous failure to embed it is not carried forward.'
+    + '\n\nWHEN IT FAILS the result carries a `code` in `structuredContent`: `path_blocked` (`409`) when a file stands where a directory is needed or the name is not one the file system accepts, `file_system_fault` (`500`, `retryable: false`) when the server\'s own storage refused the write, and a plain refusal of your arguments (`400`) otherwise. A `500` names no path and no message of the runtime\'s.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -343,7 +344,8 @@ export const create_dirTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `path` — the directory path relative to the space root. Missing parents are created.\n'
     + TARGET_SPACE_BULLET + '\n\n'
-    + 'RESPONSE: one line confirming the path.',
+    + 'RESPONSE: one line confirming the path.'
+    + '\n\nWHEN IT FAILS the result carries a `code` in `structuredContent`: `path_blocked` (`409`) for a name a file holds, `file_system_fault` (`500`, `retryable: false`) when the server\'s own storage refused it.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -416,7 +418,8 @@ export const move_fileTool: ToolHandler = {
     + TARGET_SPACE_BULLET + ' This tool moves '
     + 'WITHIN one space; it cannot move a file between spaces, and naming a different member does not do that '
     + '— read it and write it instead.\n\n'
-    + 'RESPONSE: one line confirming the move.',
+    + 'RESPONSE: one line confirming the move.'
+    + '\n\nWHEN IT FAILS the result carries a `code` in `structuredContent`: `path_blocked` (`409`) for a destination the tree refuses, `destination_exists` (`409`), `move_still_owed` (`503`, retry) or `file_system_fault` (`500`, `retryable: false`) when the server\'s own storage refused the act.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({

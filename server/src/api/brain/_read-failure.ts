@@ -15,6 +15,7 @@
 import type express from 'express';
 import { storeFailureAnswer } from '../../brain/store-failure.js';
 import { sendStoreFailure } from '../send-failure.js';
+import { answerForCaught } from '../../util/answer-for-caught.js';
 import { decorateJsonAnswer } from '../decorate-json-answer.js';
 
 /**
@@ -30,8 +31,10 @@ export function sendReadFailure(res: express.Response, where: string, err: unkno
   // `where` names the operation in the store failure's log line, as `sendCaughtFailure` does (bundle-30 I15).
   const store = storeFailureAnswer(err, where);
   if (store) { sendStoreFailure(res, store); return; }
-  // Not the store's: the request's, which the caller is the one who can fix.
-  res.status(400).json({ error: err instanceof Error ? err.message : String(err), retryable: false });
+  // Not the store's. Our own refusal (a plain `Error`) is the request's, which the caller can fix, and answers `400` in its message; anything
+  // else is what it is (a fault of ours, a file-system or socket failure) in our words, and `retryable: false` is on every body.
+  const caught = answerForCaught(err, where, { refusals: true });
+  res.status(caught.status).json(caught.body);
 }
 
 /**

@@ -92,9 +92,9 @@ export async function readFileWindow(
 }
 
 /**
- * The one step that puts a caller's bytes at a caller's path, shared by {@link writeFile} and {@link writeFileBytes}: admitted by the gate,
- * the path resolved inside the admission, and a failure of the FILE SYSTEM said once (`fsRefusalOf`) — a refusal about the caller's path
- * (`PathBlocked`) or the server's fault (`FileSystemFault`), never the runtime's message, which names the data path.
+ * What a failed WRITE of a caller's bytes says, as the `.catch` of the stored-bytes call in {@link writeFile} and {@link writeFileBytes}: a
+ * failure of the FILE SYSTEM said once (`fsRefusalOf`) — a refusal about the caller's path (`PathBlocked`) or the server's fault
+ * (`FileSystemFault`), never the runtime's message, which names the data path.
  *
  * ## What it prevents
  *
@@ -103,11 +103,8 @@ export async function readFileWindow(
  * a path outside the space (`RangeError`), a space a standing act closed and a refusal of the gate keep the status they always had.
  * It is not in `writeStored` itself, which the chunk staging, the migration and ingest share and which must keep throwing what it threw.
  */
-async function writeStoredAt(spaceId: string, filePath: string, data: Buffer | string): Promise<void> {
-  await admitSpaceWrite(spaceId, 'files', async () => {
-    const abs = await resolveSafePathChecked(spaceId, filePath);
-    await writeStored(abs, data).catch((err: unknown) => { throw fsRefusalOf(err, [filePath], 'write'); });
-  });
+function saysFileSystemFault(filePath: string): (err: unknown) => never {
+  return (err: unknown): never => { throw fsRefusalOf(err, [filePath], 'write'); };
 }
 
 /** Write a text file, creating parent directories as needed */
@@ -115,7 +112,7 @@ export async function writeFile(spaceId: string, filePath: string, content: stri
   // Through the one door for stored bytes (F-43): encrypted at rest when a master secret is set, written to a
   // temp file outside the tree and renamed, and hardened to owner-only whatever the file's history. One write unit, admitted by the gate and
   // counted for an act's drain from its check (`admitSpaceWrite`), the path's own resolution included.
-  await writeStoredAt(spaceId, filePath, content);
+  await admitSpaceWrite(spaceId, 'files', async () => writeStored(await resolveSafePathChecked(spaceId, filePath), content).catch(saysFileSystemFault(filePath)));
   const sha256 = sha256Hex(content);
   return { sha256 };
 }
@@ -126,7 +123,7 @@ export async function writeFileBytes(
   filePath: string,
   data: Buffer,
 ): Promise<{ sha256: string }> {
-  await writeStoredAt(spaceId, filePath, data);
+  await admitSpaceWrite(spaceId, 'files', async () => writeStored(await resolveSafePathChecked(spaceId, filePath), data).catch(saysFileSystemFault(filePath)));   // see `writeFile` above
   const sha256 = sha256Hex(data);
   return { sha256 };
 }

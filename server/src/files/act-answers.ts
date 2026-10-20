@@ -175,7 +175,8 @@ export interface FileActAnswer {
     path?: string;
     /** The foreign file whose records hold an id a finished move needs: `destination_held_after_move` only. */
     heldBy?: string;
-    retryable?: true;
+    /** `true` on `move_still_owed` (the server finishes the move; retry); `false` on `file_system_fault`, which no retry is known to clear; absent elsewhere. */
+    retryable?: boolean;
   };
   /** Seconds a REST door puts in `Retry-After` (`sendRetryAfter`, the one writer of it); MCP has no place for it and says `retryable` in the body. */
   retryAfterSeconds?: number;
@@ -244,8 +245,9 @@ export function fileActAnswerOf(err: unknown): FileActAnswer | undefined {
     return { status: 500, body: { error: err.message, code: 'act_not_recorded', path: err.path } };
   }
   if (err instanceof FileSystemFault) {
-    // No `path` and no `Retry-After`: it is not about a path the caller gave, and nobody knows a retry will help.
-    return { status: 500, body: { error: err.message, code: 'file_system_fault' } };
+    // No `path` and no `Retry-After`: it is not about a path the caller gave, and nobody knows a retry will help, so it SAYS `retryable: false`
+    // (a route that stamps `retryable` from the status would otherwise call a `500` retryable).
+    return { status: 500, body: { error: err.message, code: 'file_system_fault', retryable: false } };
   }
   return undefined;
 }

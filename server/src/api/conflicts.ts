@@ -10,19 +10,19 @@ import { deleteStoredIfPresent, lstatIfPresent, moveStored } from '../files/stor
 import { placeIfFree } from '../files/files.js';
 import { admitSpaceWrite } from '../spaces/space-write-gate.js';
 import { assertDestinationReachable, assertNothingStandsAt, fsRefusalOf } from '../files/destination.js';
-import { FileSystemFault, fileActAnswer } from '../files/act-answers.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { mkdirPrivate } from '../util/fs-modes.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { isProxySpace } from '../spaces/proxy.js';
 import { storeFailureAnswer } from '../brain/store-failure.js';
-import { reportServerFailure } from '../util/report-failure.js';
 import { toDocId } from '../util/paths.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { MAX_CONFLICT_IDS, countError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { RequestRefusal } from '../util/errors.js';
+import { answerForCaught } from '../util/answer-for-caught.js';
 
 export const conflictsRouter = Router();
 
@@ -68,7 +68,7 @@ async function placeIncomingCopy(
     const dstAbs = await resolveSafePathChecked(dstSpaceId, dstPath);
     if (dstSpaceId === spaceId && dstAbs === srcAbs) return 'nothing-to-place';
     if (callerChose && isInstanceLocalFile(fileKeyOf(dstSpaceId, dstPath).key)) {
-      throw new RangeError(`'${toDocId(dstPath)}' is a path this instance keeps for itself (a conversion's output, a conflict copy or a schema snapshot), and a resolution does not place a file there.`);
+      throw new RequestRefusal(`'${toDocId(dstPath)}' is a path this instance keeps for itself (a conversion's output, a conflict copy or a schema snapshot), and a resolution does not place a file there.`);
     }
     await assertDestinationReachable(dstSpaceId, dstPath);
     if (await lstatIfPresent(srcAbs) === null) return 'nothing-to-place';
@@ -189,12 +189,13 @@ function failedResolution(id: string, err: unknown, where: string): FailedResolu
   if (act) {
     return { id, error: act.body.error, code: act.body.code, status: act.status, ...(act.body.path !== undefined ? { path: act.body.path } : {}) };
   }
-  if (err instanceof RangeError) return { id, error: err.message, status: 400 };
+  if (err instanceof RequestRefusal) return { id, error: err.message, status: 400 };
   const store = storeFailureAnswer(err, where);
   if (store) return { id, error: store.body.error, status: store.status };
-  reportServerFailure(where, err);
-  const fault = fileActAnswer(new FileSystemFault(err))!;
-  return { id, error: fault.body.error, code: fault.body.code, status: fault.status };
+  // Whatever is left is a fault, said by what it is (`answerForCaught`): a file-system failure is `file_system_fault`, a socket failure
+  // `502`, and a `TypeError` of ours is `internal` and no longer counted as a file-system fault.
+  const fault = answerForCaught(err, where, { refusals: false });
+  return { id, error: fault.body.error, ...(fault.body.code !== undefined ? { code: fault.body.code } : {}), status: fault.status };
 }
 
 // Bounds for the cross-space list endpoints below. Without these the fan-in was up to 500·N docs
@@ -451,7 +452,7 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
     res.status(200).json(resolvedBody(outcome));
   } catch (err) {
     // A path outside the space (or through a link out of it) is the request's: 400, as the file doors answer it.
-    if (err instanceof RangeError) { res.status(400).json({ error: err.message }); return; }
+    if (err instanceof RequestRefusal) { res.status(400).json({ error: err.message }); return; }
     sendCaughtFailure(res, `POST /api/conflicts/:id/resolve`, err);
   }
 });

@@ -17,6 +17,7 @@ import { createDir } from '../files/files.js';
 import { assertDestinationReachable } from '../files/destination.js';
 import { requireWritePath } from './files-request.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { RequestRefusal } from '../util/errors.js';
 
 /** Attach `POST /:spaceId/mkdir` to the file-store router. */
 export function registerMkdirRoute(mkdirRouter: Router): void {
@@ -35,7 +36,7 @@ export function registerMkdirRoute(mkdirRouter: Router): void {
         await createDir(targetSpace, dirPath);
         res.status(201).json({ created: dirPath });
       } catch (err) {
-        if (err instanceof RangeError) {
+        if (err instanceof RequestRefusal) {
           res.status(400).json({ error: err.message });
           return;
         }

@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { getDataRoot } from '../config/loader.js';
 import { toDocId } from '../util/paths.js';
+import { RequestRefusal } from '../util/errors.js';
 
 /**
  * Resolve a user-supplied path within a space's data directory (LEXICAL check).
@@ -35,7 +36,7 @@ export function resolveSafePath(spaceId: string, userPath: string): string {
 
   // 2. Reject null bytes
   if (normalized.includes('\x00')) {
-    throw new RangeError('Path contains null bytes');
+    throw new RequestRefusal('Path contains null bytes');
   }
 
   // 3. Strip any leading slashes so browser-supplied filenames like
@@ -51,7 +52,7 @@ export function resolveSafePath(spaceId: string, userPath: string): string {
 
   // 5. Prefix check — must start with spaceRoot + separator
   if (!isWithin(spaceRootDir, resolved)) {
-    throw new RangeError(`Path traversal attempt: '${userPath}'`);
+    throw new RequestRefusal(`Path traversal attempt: '${userPath}'`);
   }
 
   return resolved;
@@ -99,7 +100,7 @@ export async function assertNoSymlinkEscape(spaceId: string, absPath: string): P
       const realFull = suffix ? path.resolve(realProbe, suffix) : realProbe;
       if (!isWithin(realRoot, realFull)) {
         // Named relative to the space: the refusal reaches the caller, and the server's own directory layout is not theirs to learn.
-        throw new RangeError(`Path escapes the space root via a symlink: '${toDocId(path.relative(rootDir, absPath))}'`);
+        throw new RequestRefusal(`Path escapes the space root via a symlink: '${toDocId(path.relative(rootDir, absPath))}'`);
       }
       return;
     } catch (err) {
@@ -123,7 +124,7 @@ export async function resolveSafePathChecked(spaceId: string, userPath: string):
 }
 
 /** A peer's path that resolves to the space's own root: not a file, so not a key ({@link peerFileKey}). */
-export class PathNamesTheSpaceError extends RangeError {
+export class PathNamesTheSpaceError extends RequestRefusal {
   constructor(userPath: string) {
     super(`Path names the space itself: '${userPath}'`);
     this.name = 'PathNamesTheSpaceError';
@@ -151,7 +152,7 @@ export function fileKeyOf(spaceId: string, userPath: string): { abs: string; key
   const key = toDocId(path.relative(spaceRoot(spaceId), abs));
   if (key === '' || key === '.') throw new PathNamesTheSpaceError(userPath);
   // A name that only looks like a parent step to the key (a backslash is a name character on a POSIX filesystem) is no file here.
-  if (key === '..' || key.startsWith('../')) throw new RangeError(`Path traversal attempt: '${userPath}'`);
+  if (key === '..' || key.startsWith('../')) throw new RequestRefusal(`Path traversal attempt: '${userPath}'`);
   return { abs, key };
 }
 

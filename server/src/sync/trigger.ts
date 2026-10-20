@@ -44,6 +44,9 @@ import { log, peerText } from '../util/log.js';
 import { sendCaughtFailure } from '../api/send-failure.js';
 import { withinTimeBound, isTimeBoundEnded } from '../util/time-bound.js';
 
+/** What a synchronous trigger says when its cycle failed for a reason that is not the store's: the reason is in the server log, never in the body. */
+const SYNC_FAILED_TEXT = 'The sync cycle failed; the reason is in the server log.';
+
 /** The `?timeoutMs` bound: caller's value, clamped, defaulting to 30s. */
 export function syncTimeoutMs(raw: unknown): number {
   return Math.min(Math.max(parseInt(String(raw ?? ''), 10) || 30_000, 1_000), 120_000);
@@ -80,10 +83,10 @@ export async function triggerNetworkSync(
       res.status(504).json({ ok: false, status: 'timeout', networkId, timeoutMs: opts.timeoutMs, ...note });
     } else {
       // Through the one sender (bundle-30 I13): a store failure is its 503 in our words — this answered the
-      // exception's message, which for the store's names internal hosts and ports. Anything else keeps the admin
-      // route's body, whose operator acts on the message.
+      // exception's message, which for the store's names internal hosts and ports. Anything else is answered by what it is, in our
+      // words (`sendCaughtFailure`): the reason is in the server log, not in a body.
       sendCaughtFailure(res, `synchronous sync trigger for network ${peerText(networkId)}`, err,
-        { ok: false, status: 'error', networkId, error: err instanceof Error ? err.message : String(err), ...note });
+        { ok: false, status: 'error', networkId, error: SYNC_FAILED_TEXT, ...note });
     }
   }
 }
@@ -109,6 +112,6 @@ export async function triggerPeerSync(
     res.json({ ok: true, status: 'completed', peerId, networksSynced: r.networksSynced, errors: r.errors });
   } catch (err) {
     sendCaughtFailure(res, `synchronous sync trigger for peer ${peerText(peerId)}`, err,
-      { ok: false, status: 'error', peerId, error: err instanceof Error ? err.message : String(err) });
+      { ok: false, status: 'error', peerId, error: SYNC_FAILED_TEXT });
   }
 }

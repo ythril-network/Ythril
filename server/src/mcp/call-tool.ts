@@ -47,6 +47,7 @@ import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-fail
 import { SchemaViolationError, writeRefusalAnswer, schemaRefusalStatus, countSchemaRefusal } from '../brain/write-validation.js';
 import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
+import { answerForCaught } from '../util/answer-for-caught.js';
 import { spaceWriteClosedAnswer } from '../spaces/space-write-gate.js';
 import { spaceActClosedAnswer } from '../spaces/space-act-runner.js';
 import { NotFoundError, ToolRefusal } from '../util/errors.js';
@@ -67,7 +68,7 @@ import { auditChanges } from '../audit/audit-changes.js';
 /** What a tool hands the audit entry through `recordChanges` (Q-50) — the pair a REST route sets as `req.auditSnapshots`. */
 type AuditSnapshots = { before: Record<string, unknown>; after: Record<string, unknown> };
 import { mcpAuditOperation, mcpActOperation, isMcpReadOperation } from './audit-map.js';
-import { toolCallsTotal } from '../metrics/registry.js';
+import { toolCallsTotal, toolFailuresTotal } from '../metrics/registry.js';
 /** Who is calling, for the rung checks and the audit trail. Snapshotted by the door at its own edge. */
 export interface ToolCaller {
   rights?: TokenRights;
@@ -347,7 +348,12 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
      * the refusals below is a driver error, so classifying before them changes none of their answers.
      */
     const store = storeFailureAnswer(err, `tool ${name}`);
-    log.warn(`tool '${peerText(name)}' error in space '${peerText(callSpace || 'global')}': ${store ? `store-side failure, answered ${store.status}` : peerText(message)}`);
+    // Said once per failure: a refusal a typed branch below answers, or the plain `Error` refusal the end of this function answers, says it
+    // here; a FAULT is reported (cause and stack, once per tool and class per window) by `answerForCaught`, never also by this line.
+    const sayRefusal = (): void => {
+      log.warn(`tool '${peerText(name)}' error in space '${peerText(callSpace || 'global')}': ${store ? `store-side failure, answered ${store.status}` : peerText(message)}`);
+    };
+    const typed = (): ToolCallOutcome | null => {
     /*
      * Classified HERE, once, rather than in each tool — every write funnels through this catch, and the
      * alternative was editing a dozen throw sites, which is how the introduced/pre-existing split came to
@@ -426,7 +432,20 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
         status: store.status, callSpace, storeFailure: store,
       };
     }
-    return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 400, callSpace };
+      return null;
+    };
+    const claimed = typed();
+    if (claimed) { sayRefusal(); return claimed; }
+    // Nothing above claimed it: answered by what it IS, in our words (`answerForCaught`) — a fault of ours is a `500`, a file-system error
+    // `file_system_fault`, a socket failure `502`, and only a plain `Error`, our refusal convention, is the caller's `400` and its message.
+    const caught = answerForCaught(err, `tool ${name}`, { refusals: true });
+    toolFailuresTotal.inc({ door: caller.transport, tool: name, class: caught.kind });
+    if (caught.kind === 'refusal') sayRefusal();
+    return {
+      result: { content: [{ type: 'text' as const, text: `Error: ${caught.body.error}` }], isError: true,
+        ...(caught.status === 400 ? {} : { structuredContent: { ...caught.body } }) },
+      status: caught.status, callSpace,
+    };
   }
 
   /** The unknown-field rows of this call, once the judge has run; every answer from there on is given through `withUnknownFieldRows`. */
