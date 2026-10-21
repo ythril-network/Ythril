@@ -19,7 +19,7 @@
  *
  * What each scheduler has armed is `util/armed-schedule.ts`'s question; this one answers only "may anything arm now".
  */
-import { log } from './log.js';
+import { log, peerText } from './log.js';
 import { warnOnce } from './warn-once.js';
 
 let _armingClosed = false;
@@ -36,6 +36,6 @@ export function closeCronArming(): void {
  */
 export function cronArmingRefused(what: string): boolean {
   if (!_armingClosed) return false;
-  refusalSaid(what, () => log.info(`${what} not armed: the process is stopping its schedulers`));
+  refusalSaid(what, () => log.info(`${peerText(what)} not armed: the process is stopping its schedulers`));
   return true;
 }
