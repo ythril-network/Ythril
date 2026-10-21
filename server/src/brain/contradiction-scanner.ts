@@ -46,7 +46,7 @@ import { runExclusive } from '../util/single-flight.js';
 import { readAfterSeq } from '../util/seq-keyset.js';
 import { readScanStart, writeScanPosition, advanceScanPosition } from './scan-cursor.js';
 import { summariseRecall } from './recall-shape.js';
-import { armedSchedules } from '../util/armed-schedule.js';
+import { armedSchedules, cronArmingRefused } from '../util/armed-schedule.js';
 import { NotFoundError } from '../util/errors.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -442,10 +442,11 @@ const DEFAULT_SCHEDULE = '30 3 * * *';
 let _task: ScheduledTask | null = null;
 /** See `util/armed-schedule.ts`. Worse here than next door: this sweep calls an NLI model per pair,
  *  so a restarted task can turn a pass that was about to finish into one that starts again. */
-const _armed = armedSchedules();
+const _armed = armedSchedules('contradiction scanner');
 const ARMED = 'the one task';
 
 export function startContradictionScanner(): void {
+  if (cronArmingRefused('the contradiction scanner')) return;   // the process is ending (`util/armed-schedule.ts`)
   const cs = getConfig().contradictionScanner;
   const cron = cs?.enabled ? (cs.schedule ?? DEFAULT_SCHEDULE) : null;
   if (cron !== null && _task && _armed.isArmed(ARMED, cron)) return;   // already running on exactly this expression

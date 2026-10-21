@@ -31,6 +31,8 @@
  * The distinction is exactly "is the schedule captured at start, or read per run" — not "is it a scheduler".
  */
 import { log } from './util/log.js';
+import { closeCronArming } from './util/armed-schedule.js';
+import { configReloadsSettled, stopConfigWatcher } from './config/loader.js';
 
 /**
  * Re-arm every scheduler whose cron expression is captured at start time.
@@ -67,4 +69,30 @@ export async function rearmCronSchedulers(): Promise<void> {
         + `${err instanceof Error ? err.message : String(err)}`);
     }
   }
+}
+
+/**
+ * End every cron schedule for the rest of this process, so nothing can arm one again (`Q-474`, `Q-570`).
+ *
+ * The shutdown handler calls it before the drain, and so does a test's in-process app teardown
+ * (`testing/_shared/in-process-app.mjs`): the one list of what "stop scheduling" means. In order, because each step closes a
+ * door the next relies on: the config watcher stops (no new reload starts), a reload already running is waited for within
+ * `withinMs` (it re-arms the schedulers as its last step), arming closes (a reload that outlived the bound, a network's
+ * settings or the backup route can no longer arm), and then every cron scheduler stops. A cron task left armed holds the
+ * process open, which is how a CI job sat out its 30-minute limit.
+ */
+export async function closeScheduling({ withinMs }: { withinMs: number }): Promise<void> {
+  stopConfigWatcher();
+  if (!(await configReloadsSettled({ withinMs }))) {
+    log.warn(`Stopping schedulers: a config reload was still running after ${withinMs} ms; it can no longer arm anything`);
+  }
+  closeCronArming();
+  const { stopSyncScheduler } = await import('./sync/scheduler.js');
+  stopSyncScheduler();
+  const { stopBackupScheduler } = await import('./db/backup-scheduler.js');
+  stopBackupScheduler();
+  const { stopDupeScanner } = await import('./brain/dupe-scanner.js');
+  stopDupeScanner();
+  const { stopContradictionScanner } = await import('./brain/contradiction-scanner.js');
+  stopContradictionScanner();
 }

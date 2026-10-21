@@ -46,7 +46,8 @@ describe('each cron scheduler remembers what it armed', () => {
   for (const { module, start } of CRON_SCHEDULERS) {
     it(`${start} asks ${ARMED} before restarting`, () => {
       const src = read(module);
-      assert.ok(src.includes(`${ARMED} = armedSchedules()`),
+      // The memory names its scheduler (`armedSchedules('<owner>')`), so `armedCronKeys()` can say what this process has armed.
+      assert.match(src, new RegExp(`${ARMED} = armedSchedules\\('[^']+'\\)`),
         `${module} does not hold the shared memory, so it has its own bookkeeping to get wrong`);
       const body = bodyOf(src, start);
       /*
