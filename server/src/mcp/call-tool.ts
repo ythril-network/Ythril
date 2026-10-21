@@ -38,7 +38,7 @@ import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { TOOL_RIGHTS, toolTakesAView } from '../auth/space-rights.js';
 import { isViewId, resolveOwnView, viewOwnerOf, viewReadMembers, viewsOfOwner } from '../config/views.js';
-import { retiredIdNamedIn, retiredSpaceSentence, unknownSpaceAnswer } from '../spaces/unknown-space.js';
+import { retiredIdNamedIn, unknownSpaceAnswer } from '../spaces/unknown-space.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { admitPeerToolCall } from '../sync/peer-space-admission.js';
@@ -189,7 +189,8 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
   // A retired proxy id answers 410 to every caller, before anything about the caller or the tool is asked (visibility, reach, rung): the id
   // was public, it is not a view, and what happened to it is the answer however little the caller may do.
   const namedRetired = retiredIdNamedIn(a['space'], cfg);
-  if (namedRetired !== null) return refuse(410, retiredSpaceSentence(namedRetired), '', { error: retiredSpaceSentence(namedRetired), code: 'space_retired' });
+  const gone = namedRetired === null ? null : unknownSpaceAnswer(null, namedRetired, false, cfg);
+  if (gone) return refuse(gone.status, gone.body.error, '', { ...gone.body });
 
   /*
    * A refusal of a WRITE tool is a row in the trail, whichever way it is refused (R6-13): the REST middleware records every response
