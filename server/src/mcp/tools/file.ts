@@ -336,7 +336,8 @@ export const create_dirTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `path` — the directory path relative to the space root. Missing parents are created.\n'
     + '\n'
-    + 'RESPONSE: one line confirming the path.',
+    + 'RESPONSE: one line confirming the path.'
+    + '\n\nWHEN IT FAILS the result carries a `code` in `structuredContent`: `path_blocked` (`409`) for a name a file holds, `file_system_fault` (`500`, `retryable: false`) when the server\'s own storage refused it.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -404,7 +405,8 @@ export const move_fileTool: ToolHandler = {
     + '- `dst` — where it should end up, relative to the space root. Its parent directories are created if '
     + 'missing.\n'
     + 'This tool moves WITHIN one space; it cannot move a file between spaces — read it and write it instead.\n\n'
-    + 'RESPONSE: one line confirming the move.',
+    + 'RESPONSE: one line confirming the move.'
+    + '\n\nWHEN IT FAILS the result carries a `code` in `structuredContent`: `path_blocked` (`409`) for a destination the tree refuses, `destination_exists` (`409`), `move_still_owed` (`503`, retry) or `file_system_fault` (`500`, `retryable: false`) when the server\'s own storage refused the act.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({

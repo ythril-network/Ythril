@@ -508,7 +508,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
      * the rows every answer from here on carries. A failed resolution is refused for that, with nothing said about the arguments
      * (resolution precedes the judge, as it does on REST). It is judged against the caller's grant (`toolWriteGrant`, `Q-440`),
      * and a refusal travels with its own status (`assertWriteTarget`): a member the token does not reach is never named, and a
-     * missing rung is a 403. The handlers keep their own `resolveWriteTarget`, a no-op re-check now.
+     * missing rung is a 403.
      *
      * A batch (`save_bulk`) is not judged here: its top level is refused in every mode by the handler and its ITEMS are judged
      * one by one by the batch writer.

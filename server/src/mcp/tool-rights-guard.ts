@@ -14,9 +14,8 @@ import type { TokenRights } from '../config/rights-shape.js';
  * REST `/similar` route narrowed its own set, and moving it onto the tool is what showed the tool never did.
  *
  * Read rows only, and that is not the whole of a write's reach: a write tool's named space is checked at the rung it
- * needs by the dispatcher, but only on the id the call NAMED — for a proxy, the proxy's own id — so the member a write
- * lands in is judged by the one resolver of a write target (`resolveWriteTarget`, with `toolWriteGrant`), and a sweep over
- * a proxy's members by `toolMemberReach` (`Q-440`). This function stays out of it: it decides what a handler is GIVEN to
+ * needs by the dispatcher, on the id the call NAMED; a personal view is never a write target (Q-531), and a read through a
+ * view is narrowed to what its owner reads by `viewReadMembers`. This function stays out of it: it decides what a handler is GIVEN to
  * search, and giving a write tool fewer spaces would change every tool that lists them.
  */
 export function toolReach(toolName: string, rights: TokenRights | undefined, reachable: readonly string[]): string[] {
