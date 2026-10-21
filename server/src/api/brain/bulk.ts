@@ -7,7 +7,6 @@ import { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { bulkWrite, bulkWriteTotal, bulkSizeRefusal, bulkBodyRefusal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
-import { } from '../../config/loader.js';
 import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { webhookToken } from './_shared.js';

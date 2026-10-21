@@ -13,7 +13,6 @@
 import type { Router } from 'express';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireAdminMfaScoped } from '../auth/middleware.js';
-import { } from '../config/loader.js';
 import { flushSpaceActivity, purgeSpaceActivity } from '../metrics/space-activity-store.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { answeredUnknownSpace } from './write-target-answer.js';

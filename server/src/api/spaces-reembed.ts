@@ -17,7 +17,6 @@ import { z } from 'zod';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireSpaceAuthMfaScoped, denyReadOnly } from '../auth/middleware.js';
 
-import { } from '../config/loader.js';
 import { reembedSpace, REEMBED_MAX_LIMIT } from '../brain/reembed.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { answeredUnknownSpace } from './write-target-answer.js';

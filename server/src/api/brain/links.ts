@@ -31,10 +31,7 @@ import { addLink, removeLink, LINK_PAIRS, linkLabel } from '../../brain/links.js
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { REF_KINDS, isRefKind } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
-import { } from '../../config/loader.js';
 import { isStrictLinkage } from '../../spaces/space-lookup.js';
-import { findFirstAcrossMembers } from '../../spaces/across-members.js';
-import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import { applyJudgment } from './_judged-write.js';
 import { answerUnknownWriteFields } from '../../contract/write-accepts.js';
@@ -117,8 +114,10 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
 linksRouter.delete('/spaces/:spaceId/links/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  // The members THIS token reaches (`Q-440`), as the other record deletes walk; see `DELETE …/edges/:id`.
-  const removed = await findFirstAcrossMembers(readSpacesOfRequest(req, spaceId), mid => removeLink(mid, id, webhookToken(req)));
+  // ONE space, resolved as every write resolves its target; see `DELETE …/edges/:id`.
+  const target = writeSpaceOf(req, res, spaceId);
+  if (target === null) return;
+  const removed = await removeLink(target, id, webhookToken(req));
   if (removed) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Link not found' });
 });
