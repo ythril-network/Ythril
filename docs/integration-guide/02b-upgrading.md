@@ -303,10 +303,11 @@ See [Admin API](12-admin-api.md#post-apiadmindatarestore) for the whole contract
   supplies the URI, and with `409 target_not_empty` when the target holds anything. **An empty `MONGO_URI` now counts as unset**
   everywhere, so an instance started with `MONGO_URI=''` connects to the URI in `config.json` (it connected to the bundled
   default while `GET /api/admin/data/config` said `config`). The old database keeps every record after a migrate.
-- **While either stands, writes answer `409`** `space_being_restored` or `space_being_migrated`, a backup answers `409`
-  `backup_refused_during_restore`, and the instance is in maintenance until the last space's act ends. **An instance-admin token
-  now passes maintenance on every path**, where it was refused outside `/api/admin/*`; every other caller still gets the `503`,
-  reads included. `GET /api/admin/data/maintenance` answers `{ active, manual, heldBy }`.
+- **While a space's act stands, writes to it answer `409`** `space_being_restored` or `space_being_migrated`, until that space's
+  own act completes; a backup answers `409` `backup_refused_during_restore`, and the instance is in maintenance, until the last
+  space's act ends. **An instance-admin token now passes maintenance on every path**, where it was refused outside `/api/admin/*`;
+  every other caller still gets the `503` on `/api` and `/mcp`, reads included, and **the web client itself now loads for anyone**
+  during maintenance (a `GET` or `HEAD` outside `/api` and `/mcp`). `GET /api/admin/data/maintenance` answers `{ active, manual, heldBy }`.
 - **The audit operation `data.restore` is now `data.restore.requested`, and `data.migrate` is `data.migrate.requested`**; the
   outcome is a row of its own when the set ends ([Audit log](13-audit-log-api.md)). Change saved audit queries.
 

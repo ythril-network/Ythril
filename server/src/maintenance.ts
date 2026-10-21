@@ -1,8 +1,14 @@
 /**
  * Maintenance mode: the flag and the Express middleware.
  *
- * When active, every request but an instance administrator's receives a 503. Health checks (/health, /ready,
- * /metrics) and the /api/admin/* routes pass through so the operator can still monitor and control the instance.
+ * When active, every request to the API (`/api`) and to MCP (`/mcp`), and every write anywhere, receives a 503 unless
+ * it is an instance administrator's. Health checks (/health, /ready, /metrics) and the /api/admin/* routes pass through
+ * so the operator can still monitor and control the instance.
+ *
+ * The web client itself loads for ANY caller: a `GET` or `HEAD` outside `/api` and `/mcp` is its static bundle,
+ * `index.html` or the SPA fallback, which hold no data (Q-560). Without that, a browser's page load carries no bearer,
+ * reads as a non-admin's and is refused, so the administrator who could end a stuck restore cannot load the page that
+ * does it. What the page shows it reads through `/api`, which stays held for everyone else.
  *
  * ## Two halves, one answer (bundle-157, R4.1, R5.3)
  *
@@ -13,7 +19,7 @@
  * maintenance with them, and the toggle cannot end it early: {@link setMaintenanceActive} sets the manual half only.
  *
  * An instance administrator passes on ANY path while it holds, so the danger tab, the Networks owed list and MCP keep
- * working for the one caller who can act on a restore. Every other caller gets the 503 JSON.
+ * working for the one caller who can act on a restore. Every other caller gets the 503 JSON on the API and MCP.
  */
 import type { Request, Response, NextFunction } from 'express';
 import { instanceWideActStanding } from './spaces/space-act-runner.js';
@@ -48,6 +54,17 @@ function refuse(res: Response): void {
 }
 
 /**
+ * Is this request a load of the web client itself: a `GET` or `HEAD` outside `/api` and `/mcp`. Every data route the
+ * server mounts is under one of the two (the probes and `/metrics` are answered above), so what is left is the static
+ * bundle, `index.html` and the SPA fallback, none of which holds any data.
+ */
+function isWebClientLoad(method: string, p: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  const under = (root: string) => p === root || p.startsWith(`${root}/`);
+  return !under('/api') && !under('/mcp');
+}
+
+/**
  * Express middleware — mount this early in the chain, after /health and /ready
  * but before the API routers, so maintenance blocks all API traffic except admin.
  */
@@ -67,6 +84,12 @@ export function maintenanceMiddleware(req: Request, res: Response, next: NextFun
 
   // Always pass: admin routes so the operator can monitor and deactivate maintenance
   if (p.startsWith('/api/admin/')) {
+    next();
+    return;
+  }
+
+  // Always pass: the web client's own files, so an administrator can load the page that ends the maintenance (Q-560).
+  if (isWebClientLoad(req.method, p)) {
     next();
     return;
   }

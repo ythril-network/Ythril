@@ -50,8 +50,7 @@ import { SchemaViolationError, writeRefusalAnswer, schemaRefusalStatus, countSch
 import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { answerForCaught } from '../util/answer-for-caught.js';
-import { spaceWriteClosedAnswer } from '../spaces/space-write-gate.js';
-import { spaceActClosedAnswer } from '../spaces/space-act-runner.js';
+import { spaceActAnswer } from '../spaces/space-act-answer.js';
 import { NotFoundError, ToolRefusal } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
@@ -446,10 +445,10 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     }
     /*
      * A write the space's standing deletion, wipe or rename refused, or an act shutdown refused: the status and body the REST sender
-     * answers (`spaceWriteClosedAnswer`, `spaceActClosedAnswer`), carried as `structuredContent`. A SIBLING of the file-act answer and not
+     * answers (`spaceActAnswer`), carried as `structuredContent`. A SIBLING of the file-act answer and not
      * the rights guards' 403 text: the check runs in the writer, after every rights door passed.
      */
-    const spaceClosed = spaceWriteClosedAnswer(err) ?? spaceActClosedAnswer(err);
+    const spaceClosed = spaceActAnswer(err);
     if (spaceClosed) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${spaceClosed.body.error}` }], isError: true, structuredContent: { ...spaceClosed.body } }, status: spaceClosed.status, callSpace };
     }

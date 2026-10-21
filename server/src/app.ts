@@ -1,6 +1,7 @@
 import { writeRefusalAnswer } from './brain/write-validation.js';
 import { ConnectionsNotWritten } from './brain/connections-not-written.js';
 import { storeFailureAnswer } from './brain/store-failure.js';
+import { spaceActAnswer } from './spaces/space-act-answer.js';
 import { sendCaughtFailure, sendStoreFailure, sendConnectionsNotWritten } from './api/send-failure.js';
 import express from 'express';
 import compression from 'compression';
@@ -740,6 +741,17 @@ export function createApp() {
     if (err instanceof ConnectionsNotWritten) {
       // Audited as a write of the record too, which a create's path cannot name (`sendConnectionsNotWritten`).
       sendConnectionsNotWritten(res, err, `${req.method} ${req.baseUrl}${req.path}`);
+      return;
+    }
+    /*
+     * A write a space's standing act refused (`409` with the act's code: a restore, a deletion, a wipe, a rename, a migration), or an
+     * act refused because shutdown closed the runner (`503`). The writers raise it from the write gate, and a route that does not catch
+     * reaches here: without this branch sixteen REST record routes answered `500` for a documented `409` while the MCP door and the
+     * routes that catch answered it right (Q-560). The same function `sendCaughtFailure` and `callTool` ask.
+     */
+    const actAnswer = spaceActAnswer(err);
+    if (actAnswer) {
+      res.status(actAnswer.status).json(actAnswer.body);
       return;
     }
     // A refusal (a reference that names nothing, a schema refusal) or a conflict (another write kept moving the record:

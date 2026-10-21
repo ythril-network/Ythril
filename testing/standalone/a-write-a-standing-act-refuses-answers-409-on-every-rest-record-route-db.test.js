@@ -17,7 +17,8 @@
  * the reason it is not one, and a derived route in neither fails the test, so a route mounted next month is asked the day it is mounted.
  * A request is literal fixture, as fixtures may be. Every requested route, while a `restore` act stands for the space, answers `409`
  * with `code: 'space_being_restored'` (the code `SPACE_ACT_KINDS.restore.writeRefusalCode` names, read from the build), and the record
- * it would have written is not stored.
+ * it would have written is not stored. The MCP door is asked the same write (`save_fact`) and must answer the same status and code, so
+ * both doors are held to the rule in one test.
  *
  * The app is the real `createApp()` on loopback, the caller an instance admin (a standing restore holds maintenance, which an instance
  * admin passes), the act a `restore` entry stood up on the live config as the runner's registration leaves it (`_space-act-harness.mjs`);
@@ -67,7 +68,7 @@ const REQUESTS = {
   'POST /api/brain/spaces/:spaceId/chrono': { body: { title: 'Written during', type: 'event', startsAt: '2026-10-21T00:00:00.000Z' }, coll: 'chrono', match: { title: 'Written during' } },
   'PATCH /api/brain/spaces/:spaceId/chrono/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000c1' }, body: { title: 'Changed during' }, coll: 'chrono', match: { title: 'Changed during' } },
   'DELETE /api/brain/spaces/:spaceId/chrono/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000c2' }, gone: { coll: 'chrono', _id: 'aaaaaaaa-0000-4000-8000-0000000000c2' } },
-  'POST /api/brain/spaces/:spaceId/links': { body: { from: 'aaaaaaaa-0000-4000-8000-0000000000f1', fromKind: 'fact', to: 'aaaaaaaa-0000-4000-8000-0000000000e1', toKind: 'entity' }, coll: 'links', match: { from: 'aaaaaaaa-0000-4000-8000-0000000000f1', to: 'aaaaaaaa-0000-4000-8000-0000000000e1' } },
+  'POST /api/brain/spaces/:spaceId/links': { body: { from: 'aaaaaaaa-0000-4000-8000-0000000000f2', fromKind: 'fact', to: 'aaaaaaaa-0000-4000-8000-0000000000e1', toKind: 'entity' }, coll: 'links', match: { from: 'aaaaaaaa-0000-4000-8000-0000000000f2', to: 'aaaaaaaa-0000-4000-8000-0000000000e1' } },
   'DELETE /api/brain/spaces/:spaceId/links/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000b1' }, gone: { coll: 'links', _id: 'aaaaaaaa-0000-4000-8000-0000000000b1' } },
   'PATCH /api/brain/spaces/:spaceId/files': { query: { path: 'held.txt' }, body: { tags: ['changed-during'] }, coll: 'files', match: { tags: 'changed-during' } },
   'POST /api/brain/spaces/:spaceId/bulk': { body: { facts: [{ fact: 'bulk during the restore' }] }, coll: 'facts', match: { fact: 'bulk during the restore' } },
@@ -123,6 +124,19 @@ describe('a write a standing act refuses answers 409 with its code on every REST
     const stale = Object.keys(REQUESTS).filter(k => !subjects.includes(k));
     assert.deepEqual(stale, [], 'a request names a route the server does not mount');
     assert.equal(typeof wantCode, 'string', 'SPACE_ACT_KINDS.restore has no writeRefusalCode to compare against');
+  });
+
+  it('the MCP door answers the same write (save_fact) with the same 409 and code, so both doors are held to one rule', async () => {
+    const { callTool } = await import('../../server/dist/mcp/call-tool.js');
+    const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
+    const rights = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
+    const out = await callTool({ name: 'save_fact', args: { space: S, fact: 'written through MCP during the restore' },
+      caller: { rights, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId: 't', tokenLabel: 't' } });
+    const sc = out.result.structuredContent ?? {};
+    assert.equal(out.result.isError, true, `save_fact was taken while the restore stood: ${JSON.stringify(out.result).slice(0, 240)}`);
+    assert.equal(out.status, 409, `save_fact answered ${out.status} ${JSON.stringify(out.result).slice(0, 240)}`);
+    assert.equal(sc.code, wantCode, `save_fact answered code '${sc.code}', not the restore's '${wantCode}'`);
+    assert.equal(await door.coll(S, 'facts').findOne({ fact: 'written through MCP during the restore' }), null, 'save_fact stored its write while the restore stood');
   });
 
   for (const key of subjects) {

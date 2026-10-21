@@ -351,10 +351,12 @@ Maintenance has two halves, and `active` is either of them:
 | `heldBy` | `"restore"` or `"migrate"` while an act standing on every space holds the instance ([restore](#post-apiadmindatarestore), [migrate](#post-apiadmindatamigrate)); `null` otherwise. It is read from the standing acts, so a restart that resumes them resumes it, and it ends when the last act ends |
 | `active` | `manual` or `heldBy` |
 
-While `active`, every request answers `503` with `{ "error": "System is in maintenance mode. Please try again later.", "maintenance": true }`,
+While `active`, every request to `/api` and `/mcp`, and every write, answers `503` with `{ "error": "System is in maintenance mode. Please try again later.", "maintenance": true }`,
 reads included, except `/health`, `/ready`, `/metrics`, the `/api/admin/*` routes and **any request made with an instance-admin
 token**, which passes on every path: the danger tab, the Networks owed list and MCP keep working for the one caller who can act on
-a restore.
+a restore. **The web client itself still loads for anyone**: a `GET` or `HEAD` outside `/api` and `/mcp` (the page, its bundle,
+a client route) passes, because it holds no data and an administrator's browser asks for the page without a token. What the page
+then shows it reads through `/api`, which stays held for everyone but an instance admin.
 
 ---
 
@@ -520,13 +522,17 @@ every file it names is present, every line can be read (and decrypted, for an en
 }
 ```
 
-**From the `202` until the last space's act ends:**
+**From the `202`:**
 
-- every space takes no write: a local write answers `409` with `code: "space_being_restored"` on REST and MCP, and the
-  space's peer exchanges are held;
-- the instance is in [maintenance](#get-apiadmindatamaintenance) (`heldBy: "restore"`): every caller but an instance-admin
-  token is answered `503`;
-- a backup is refused (`409 backup_refused_during_restore`), and so is a second restore or a migrate;
+- each space takes no write **until its own act completes**: a local write answers `409` with `code: "space_being_restored"`
+  on REST and MCP, and the space's peer exchanges are held. A space whose act has completed has its hold lifted while the others are
+  still being restored;
+- until the **last** space's act ends, the instance is in [maintenance](#get-apiadmindatamaintenance) (`heldBy: "restore"`):
+  every caller but an instance-admin token is answered `503` on `/api` and `/mcp`, so meanwhile only an instance admin can
+  write to a space whose act has completed. The web client itself still loads, so the admin can open the page that reports
+  and abandons the restore;
+- until the last space's act ends, a backup is refused (`409 backup_refused_during_restore`), and so is a second restore or a
+  migrate;
 - a restart resumes the acts where they stand, and the holds with them.
 
 **What each space's act does.** It checks the backup again for its space (the files can change on disk), drops the space's
