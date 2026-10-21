@@ -25,6 +25,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { appRouter } from '../_shared/in-process-app.mjs';
 import { removeInstanceDir, callRoute } from './_vote-round-instance.mjs';
 import { deferred, seedActEntry, untilRunnerIdle, resetRunnerForTest, entriesOf } from './_space-act-harness.mjs';
 import {
@@ -230,15 +231,19 @@ describe('R-W7 and R-W20: a concluding relay answers before the act finishes, an
     // The driver's own class: the server's one store classifier reads the error's class, never a name any Error could carry.
     const { MongoNetworkError } = await import('mongodb');
     runner.setSpaceActHooksForTest({ beforeBatch: async () => { throw new MongoNetworkError('connection closed'); } });
-    const { createApp } = await import('../../server/dist/app.js');
-    const app = createApp();
-    const res = await (async () => {
-      const { fakeRes } = await import('./_vote-round-instance.mjs');
-      const r = fakeRes();
-      const layer = (app.router ?? app._router).stack.find(l => l.route?.path === '/api/admin/spaces/:spaceId/wipe' && l.route.methods.post);
-      await layer.route.stack.at(-1).handle({ method: 'POST', params: { spaceId: 'notes' }, body: { confirm: true }, authToken: ADMIN, headers: {}, get: () => undefined }, r);
-      return r;
-    })();
+    const { router: app, close: closeApp } = await appRouter();
+    let res;
+    try {
+      res = await (async () => {
+        const { fakeRes } = await import('./_vote-round-instance.mjs');
+        const r = fakeRes();
+        const layer = (app.router ?? app._router).stack.find(l => l.route?.path === '/api/admin/spaces/:spaceId/wipe' && l.route.methods.post);
+        await layer.route.stack.at(-1).handle({ method: 'POST', params: { spaceId: 'notes' }, body: { confirm: true }, authToken: ADMIN, headers: {}, get: () => undefined }, r);
+        return r;
+      })();
+    } finally {
+      await closeApp();
+    }
     assert.equal(res.code, 503, JSON.stringify(res.body)?.slice(0, 300));
     assert.ok(res.headers['retry-after'], 'a store outage names when to retry');
     assert.equal(res.body.status, 'passed', 'the 503 body lost status: passed and rounds, so a client\'s passed branch never fired');

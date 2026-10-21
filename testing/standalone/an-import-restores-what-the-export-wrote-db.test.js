@@ -42,9 +42,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -126,8 +125,7 @@ describe('the admin import restores what the export wrote', { skip }, () => {
     ({ LOCAL_ONLY_FIELDS: localOnly } = await import('../../server/dist/sync/local-only-fields.js'));
     const tokens = await import('../../server/dist/auth/tokens.js');
     adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
     base = server.url;
   });
 

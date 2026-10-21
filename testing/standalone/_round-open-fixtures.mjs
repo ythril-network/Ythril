@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { appRouter } from '../_shared/in-process-app.mjs';
 import { bootInstance, handlerFor, fakeRes } from './_vote-round-instance.mjs';
 
 export const SELF = 'aaaaaaaa-0000-4000-8000-000000005e1f';
@@ -115,11 +116,14 @@ export async function route(router, method, routePath, { params = {}, body = {},
   return { code: res.code, body: res.body };
 }
 
-/** The app's own router (the admin wipe route is registered inline on it), so the handler that runs is production's. */
-async function appRouter() {
-  const { createApp } = await import('../../server/dist/app.js');
-  const app = createApp();
-  return app.router ?? app._router;
+/**
+ * The admin wipe route's own handler, called through the app's own router (the route is registered inline on it), so the handler that
+ * runs is production's. The app is closed when the call ends: this fixture has no teardown of its own to close it in, and an app left open
+ * keeps its config watcher and cron schedulers running past the test.
+ */
+async function routeOnApp(method, routePath, request) {
+  const { router: app, close } = await appRouter();
+  try { return await route(app.router ?? app._router, method, routePath, request); } finally { await close(); }
 }
 
 /** The tool's own handler, as an instance administrator. */
@@ -145,7 +149,7 @@ export const doors = {
     return route(spacesRouter, 'delete', '/:id', { params: { id }, body, authToken });
   },
   async wipeSpace(spaceId, body = { confirm: true }, authToken = ADMIN) {
-    return route(await appRouter(), 'post', '/api/admin/spaces/:spaceId/wipe', { params: { spaceId }, body, authToken });
+    return routeOnApp('post', '/api/admin/spaces/:spaceId/wipe', { params: { spaceId }, body, authToken });
   },
   wipeTool: (args, rights) => callTool('spaces', 'delete_space_data', { confirm: true, ...args }, rights),
   addSpace: async (id, spaceId, authToken = ADMIN) => {

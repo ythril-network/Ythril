@@ -30,11 +30,10 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openPullDoor, PEER } from './_pull-door.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -97,8 +96,7 @@ describe('a peer\'s tool call meets a held space as every door does', { skip }, 
     const area = Object.fromEntries(SPACE_AREAS.map(a => [a, 'write']));
     peerKey = (await tokens.createToken({ name: 'peer', peerInstanceId: PEER, rights: { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [HELD]: area, [FREE]: area } } })).plaintext;
     adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
   });
   after(async () => { await server?.close(); await door?.close(); });
 

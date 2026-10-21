@@ -30,10 +30,9 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -108,8 +107,7 @@ describe('the unknownWriteFields setting is set, refused and governed alike on b
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
     const tokens = await import('../../server/dist/auth/tokens.js');
     adminKey = (await tokens.createToken({ name: 'b128-set-admin', admin: true })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
     base = server.url;
   });
   after(async () => {

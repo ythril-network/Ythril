@@ -53,8 +53,9 @@ describe('POST /api/admin/reload-config answers a space whose init failed', { sk
     configPath = process.env['CONFIG_PATH'];
     // The file watcher (`createApp` starts it) would reload on its own the moment this test edits the file; this test calls
     // the route itself, once per edit, so the watcher is taken off the file.
-    fs.unwatchFile(configPath);
-    await (await import('../../server/dist/config/loader.js')).flushConfig();
+    const loader = await import('../../server/dist/config/loader.js');
+    loader.stopConfigWatcher();
+    await loader.flushConfig();
   });
   after(async () => { await doors?.close(); });
 

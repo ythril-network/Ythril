@@ -54,6 +54,7 @@ import { createRequire } from 'node:module';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
@@ -310,8 +311,7 @@ describe('an unknown field on a brain write is answered alike on both doors (b12
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
     const tokens = await import('../../server/dist/auth/tokens.js');
     adminKey = (await tokens.createToken({ name: 'b128-parity', admin: true })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    app = await listenOnLoopback(http.createServer(createApp()));
+    app = await listenApp();
     base = app.url;
 
     // ── the subjects: every non-GET route of the brain write routers, paired to its tool ────────────────────────────

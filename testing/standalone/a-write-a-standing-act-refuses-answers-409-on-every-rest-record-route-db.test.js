@@ -36,12 +36,11 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { mountedRoutes } from './_routes.mjs';
 import { seedActEntry, clearActEntries } from './_space-act-harness.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -106,8 +105,7 @@ describe('a write a standing act refuses answers 409 with its code on every REST
     await door.coll(S, 'links').insertOne(build.link(S, 'aaaaaaaa-0000-4000-8000-0000000000b1', 1, { from: 'aaaaaaaa-0000-4000-8000-0000000000f1', to: 'aaaaaaaa-0000-4000-8000-0000000000e1' }));
     await door.coll(S, 'files').insertOne(build.filemeta(S, 'held.txt', 1));
 
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
     const loader = await import('../../server/dist/config/loader.js');
     await seedActEntry(loader, { kind: 'restore', localId: S, state: 'registered' });
   });
