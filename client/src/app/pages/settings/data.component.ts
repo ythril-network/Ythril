@@ -352,6 +352,8 @@ interface BackupConfig {
 export class DataComponent implements OnInit {
   private adminApi = inject(AdminApi);
   private transloco = inject(TranslocoService);
+  /** The active language as a signal: `getActiveLang()` is a plain read, so a computed() using it would not follow a switch. */
+  private readonly lang = toSignal(this.transloco.langChanges$, { initialValue: this.transloco.getActiveLang() });
   private confirmDialog = inject(ConfirmDialogService);
 
   uriSource = signal<UriSource | null>(null);
@@ -442,7 +444,7 @@ export class DataComponent implements OnInit {
     // Ask whether the active language has been LOADED, not whether it has content. An empty-but-loaded
     // dictionary is a legitimate state — the spec harness uses exactly that, and so would a minimal
     // locale — and treating it as "not ready" would blank the strip permanently.
-    return this.transloco.getTranslation().has(this.transloco.getActiveLang());
+    return this.transloco.getTranslation().has(this.lang());
   });
 
   /** Operator overview strip: DB source, maintenance state, backup count, and the saved schedule. */
