@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, delWithBody, waitFor, mirroredNetwork, patchContainerNetwork, readContainerConfig, getInstanceId, readRecord, restoreOrFail } from './helpers.js';
+import { INSTANCES, post, get, del, delWithBody, waitFor, mirroredNetwork, patchContainerNetwork, readContainerConfig, getInstanceId, readRecord, restoreOrFail } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -58,17 +58,16 @@ before(async () => {
 
 after(async () => {
   await net?.remove();
-  // What the migration wrote on A: the view(s) made from PX and its reservation. Instance-wide, so restored or the suite fails.
-  const leftOnA = (c) => (c.retiredSpaceIds ?? []).includes(PX) || [...(c.views ?? []), ...(c.unclaimedViews ?? [])].some(v => v.migratedFrom === PX);
+  // What the migration wrote on A: this token's view made from PX, and the reservation. Removed through the doors an operator has: a
+  // reload keeps a view its file no longer lists (views are their owners' data), so a file edit cannot take it away. A copy the migration
+  // gave another admin token leaves with that token.
+  const mine = async () => ((await get(INSTANCES.a, tokenA, '/api/views')).body?.views ?? []).filter(v => v.name === PX || v.name?.startsWith(`${PX}-`));
   await restoreOrFail(`ythril-a: the view and the reservation migrated from ${PX}`, async () => {
-    patchContainerNetwork('ythril-a', net?.networkId ?? '-', `
-      cfg.retiredSpaceIds = (cfg.retiredSpaceIds || []).filter(id => id !== ${JSON.stringify(PX)});
-      cfg.views = (cfg.views || []).filter(v => v.migratedFrom !== ${JSON.stringify(PX)});
-      cfg.unclaimedViews = (cfg.unclaimedViews || []).filter(v => v.migratedFrom !== ${JSON.stringify(PX)});
-      cfg.spaces = cfg.spaces.filter(s => s.id !== ${JSON.stringify(PX)});`);
-    const r = await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-    if (r.status !== 200) throw new Error(`reload on A: ${r.status} ${JSON.stringify(r.body)}`);
-  }, () => !leftOnA(readContainerConfig('ythril-a')));
+    for (const v of await mine()) await del(INSTANCES.a, tokenA, `/api/views/${encodeURIComponent(v.id)}`);
+    const r = await post(INSTANCES.a, tokenA, `/api/admin/views/retired/${encodeURIComponent(PX)}/purge`, {});
+    if (r.status !== 200) throw new Error(`purge on A: ${r.status} ${JSON.stringify(r.body)}`);
+  }, async () => (await mine()).length === 0
+    && !((await get(INSTANCES.a, tokenA, '/api/spaces')).body?.retiredSpaceIds ?? []).includes(PX));
   for (const [base, t] of [[INSTANCES.a, tokenA], [INSTANCES.b, tokenB]]) {
     for (const id of [SPACE, PX]) await delWithBody(base, t, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
   }
