@@ -1257,6 +1257,8 @@
   "spaces.dangerZone.act.ended": "Oczekująca zmiana tej przestrzeni zakończyła się.",
   "spaces.dangerZone.act.state.registered": "Oczekuje",
   "spaces.dangerZone.act.state.abandonOnly": "Wymaga porzucenia",
+  "spaces.dangerZone.act.state.stopped": "Zatrzymane",
+  "data.progress.state.stopped": "Zatrzymane",
   "spaces.dangerZone.act.state.draining": "Czeka na zakończenie transferów",
   "spaces.dangerZone.act.state.running": "W toku",
   "spaces.dangerZone.act.state.owed": "Ponowienie zaległe",

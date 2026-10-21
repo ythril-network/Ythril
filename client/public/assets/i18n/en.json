@@ -1257,6 +1257,8 @@
   "spaces.dangerZone.act.ended": "The pending change on this space has ended.",
   "spaces.dangerZone.act.state.registered": "Waiting",
   "spaces.dangerZone.act.state.abandonOnly": "Needs an abandon",
+  "spaces.dangerZone.act.state.stopped": "Stopped",
+  "data.progress.state.stopped": "Stopped",
   "spaces.dangerZone.act.state.draining": "Waiting for transfers",
   "spaces.dangerZone.act.state.running": "Running",
   "spaces.dangerZone.act.state.owed": "Retry owed",
