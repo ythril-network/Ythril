@@ -719,8 +719,10 @@ destination picker in the Settings UI.
 |-------------|----------|-------------|
 | `path` | — | Absolute path to list. Defaults to `/` |
 
-`400` if the path is not absolute, or if any segment is still `..` after normalisation. It returns directories only — never
-file contents — and it is admin-gated because it discloses the server's directory layout.
+`400` if the path is not absolute, or if any segment is still `..` after normalisation. A path the file system cannot list
+is answered by what went wrong, in our words and never with the runtime's message: `404` when the directory does not exist,
+`403` when it exists but the server may not read it (`EACCES`, `EPERM`), and `500` for any other file-system failure. It
+returns directories only — never file contents — and it is admin-gated because it discloses the server's directory layout.
 
 ---
 
