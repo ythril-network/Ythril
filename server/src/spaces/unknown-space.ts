@@ -24,6 +24,10 @@ import type { Config } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
 import { isViewId, resolveOwnView, viewOwnerOf, type ViewOwnerSource } from '../config/views.js';
 import { NAME_QUOTED, peerText } from '../util/log.js';
+import { isRetiredSpaceId, retiredSpaceSentence, type Reservations } from './retired-space-id.js';
+
+// The leaf half (`retired-space-id.ts`), re-exported: the rule's callers find it here.
+export { isRetiredSpaceId, retiredSpaceSentence, type Reservations };
 
 /** A space id a pre-6.0 proxy reserved, named for a creation: the id is not free until an instance admin purges what it still holds. */
 export class ReservedSpaceIdError extends Error {
@@ -58,16 +62,6 @@ export interface SpaceAnswer {
   body: { error: string; code?: string };
 }
 
-/** The half of a config the retired-id rule reads: the reservations and the live spaces (a pure caller may hand just these). */
-export interface Reservations {
-  spaces: readonly { id: string }[];
-  retiredSpaceIds?: readonly string[] | undefined;
-}
-
-/** Whether `id` is a retired proxy id: reserved, and not a live space (a live space wins over a reservation). */
-export function isRetiredSpaceId(id: string, config: Reservations = getConfig()): boolean {
-  return (config.retiredSpaceIds ?? []).includes(id) && !config.spaces.some(s => s.id === id);
-}
 
 /** The first retired proxy id a call's `space` argument names (one name or a list), or `null`: asked before anything else about the call. */
 export function retiredIdNamedIn(space: unknown, config: Config = getConfig()): string | null {
@@ -78,9 +72,6 @@ export function retiredIdNamedIn(space: unknown, config: Config = getConfig()): 
   return null;
 }
 
-/** The one sentence a retired id is answered with. */
-export const retiredSpaceSentence = (id: string): string =>
-  `'${peerText(id, { max: NAME_QUOTED })}' was a shared proxy and is now personal views; ask the instance admin`;
 
 /** `Space '<id>' not found`, the words every door uses, the id rendered as caller text. */
 export const unknownSpaceSentence = (id: string): string => `Space '${peerText(id, { max: NAME_QUOTED })}' not found`;

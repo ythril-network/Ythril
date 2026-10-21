@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { getDataRoot } from '../config/loader.js';
 import { toDocId } from '../util/paths.js';
-import { isRetiredSpaceId } from '../spaces/unknown-space.js';
+import { isRetiredSpaceId } from '../spaces/retired-space-id.js';
 import { SpaceRetired } from './act-answers.js';
 
 /**

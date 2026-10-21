@@ -42,7 +42,7 @@
  *   storage, said in words that name no path.
  */
 import { fileSystemRefusalMessage } from '../util/fs-failure-words.js';
-import { retiredSpaceSentence } from '../spaces/unknown-space.js';
+import { retiredSpaceSentence } from '../spaces/retired-space-id.js';
 /** The caller's path cannot be used: a regular file stands where a directory must be, it is the source itself or inside it, or the file system refuses it. Answered `path_blocked`. */
 export class PathBlocked extends Error {
   override readonly name = 'PathBlocked';
