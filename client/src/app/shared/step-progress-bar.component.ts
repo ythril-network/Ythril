@@ -74,6 +74,8 @@ import { buildBarModel, isStale, StepProgress } from './step-progress.model';
 })
 export class StepProgressBarComponent {
   progress = input<StepProgress | null | undefined>(null);
+  /** A key that names the stage in the caller's own words (a set that ended: Completed, Abandoned), in place of the pipeline stage's. */
+  stageLabelKey = input<string | null>(null);
   /** ISO8601 of the job's last report, for the stalled check. */
   progressAt = input<string | null | undefined>(null);
   /** Instance stall timeout. Default matches the server's own default. */
@@ -90,6 +92,8 @@ export class StepProgressBarComponent {
   /** i18n key for the running stage. Unknown stages fall back to a generic "working" rather than
    *  rendering a raw internal identifier at the user. */
   stepLabel = computed(() => {
+    const named = this.stageLabelKey();
+    if (named) return named;
     const step = this.progress()?.step;
     if (!step) return 'files.progress.working';
     return KNOWN_STEPS.has(step) ? `mediaProcessing.step.${step}` : 'files.progress.working';

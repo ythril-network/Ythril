@@ -17,6 +17,32 @@ export function actStateVariant(state: string): StatusVariant {
 }
 
 export const actStateKey = (state: string): string => `spaces.dangerZone.act.state.${state}`;
+
+/** What a row's words depend on: the server's state, the tries so far, and whether only an abandon ends it. */
+export interface ActRowFacts { state: string; attempts: number; needsAbandon?: boolean }
+
+/** How one row reads: its state word and colour, and whether its tries and its next try are said. */
+export interface ActRowView { stateKey: string; variant: StatusVariant; showsAttempts: boolean; showsNextTry: boolean }
+
+/**
+ * How ONE standing act's row reads, for the Data page's progress card and the Networks page's owed-acts list (Q-561).
+ *
+ * The server calls an act `owed` from the moment it is registered, so "Retry owed - Attempts so far: 0 - Next try: shortly" was said of
+ * acts that had not started, and of acts no retry will ever run (`needsAbandon`), where it contradicted the sentence beside it. Said
+ * once here, so no list keeps the old wording:
+ * - owed, only an abandon ends it: no retry, so no "retry owed" and no next try;
+ * - owed, no try yet: it has not started, so it is WAITING (the word the danger tab uses), with no tries and no next try to name;
+ * - owed, tried before: a real retry, with its tries and its next try.
+ * Any other state keeps its own word; an act that ended (`done`, `restore_abandoned`) names no tries and no next try.
+ */
+export function actRowView(row: ActRowFacts): ActRowView {
+  const owed = row.state === 'owed';
+  if (owed && row.needsAbandon) return { stateKey: actStateKey('abandonOnly'), variant: 'warn', showsAttempts: true, showsNextTry: false };
+  if (owed && row.attempts === 0) return { stateKey: actStateKey('registered'), variant: 'pending', showsAttempts: false, showsNextTry: false };
+  const ended = row.state === 'done' || row.state === 'restore_abandoned' || row.state === 'migrate_abandoned';
+  const retryable = owed || row.state === 'registered' || row.state === 'draining';
+  return { stateKey: actStateKey(row.state), variant: actStateVariant(row.state), showsAttempts: !ended, showsNextTry: retryable };
+}
 export const actKindKey = (kind: string): string => `spaces.dangerZone.act.kind.${kind}`;
 
 /**
