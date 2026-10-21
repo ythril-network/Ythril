@@ -56,7 +56,7 @@ describe('a library type is read and written back whole', { skip }, () => {
   };
   /** The MCP door. */
   const mcpMeta = async (args = {}) => {
-    const r = await spacesTools.space_metaTool.handle({ callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE], args: { space: SPACE, ...args }, rights: RIGHTS });
+    const r = await spacesTools.space_metaTool.handle({ callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE], viewReads: new Map(), args: { space: SPACE, ...args }, rights: RIGHTS });
     return r.structuredContent;
   };
   const stored = () => loader.getConfig().spaces.find(s => s.id === SPACE).meta.typeSchemas.entity.service;
@@ -110,7 +110,7 @@ describe('a library type is read and written back whole', { skip }, () => {
       const space = loader.getConfig().spaces.find(s => s.id === SPACE);
       const decision = metaUpdate.planSpaceMetaUpdate({ spaceId: SPACE, space, body: { meta: { typeSchemas } }, ifMatch: undefined });
       assert.ok(decision.ok, `the round trip was refused: ${JSON.stringify(decision.refusal)}`);
-      const r = await spacesTools.schema_updateTool.handle({ callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE], args: { space: SPACE, typeSchemas }, rights: RIGHTS });
+      const r = await spacesTools.schema_updateTool.handle({ callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE], viewReads: new Map(), args: { space: SPACE, typeSchemas }, rights: RIGHTS });
       assert.ok(!r.isError, JSON.stringify(r.content));
       assert.deepEqual(stored(), { $ref: REF }, `the stored type was cut loose from its library entry: ${JSON.stringify(stored())}`);
     });
@@ -145,7 +145,7 @@ describe('a library type is read and written back whole', { skip }, () => {
       assert.deepEqual(stored(), { $ref: REF });
     });
     it('through MCP schema_update', async () => {
-      const r = await spacesTools.schema_updateTool.handle({ callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE], args: { space: SPACE, typeSchemas: await edited() }, rights: RIGHTS });
+      const r = await spacesTools.schema_updateTool.handle({ callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE], viewReads: new Map(), args: { space: SPACE, typeSchemas: await edited() }, rights: RIGHTS });
       assert.equal(r.isError, true);
       assert.match(r.content[0].text, /Error \(400\)/);
       named(r.content[0].text);
