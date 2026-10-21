@@ -43,12 +43,12 @@ import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js'
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 import {
   defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, abandonSpaceActSet, instanceWideActStanding,
-  spaceActSetOf, entriesOfSet, SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
+  SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from '../spaces/space-act-runner.js';
 import type { SpaceActKind, SpaceActSet } from '../config/types.js';
 import { seqFloor, bumpSeq } from '../util/seq.js';
 import { logInternalAudit } from '../audit/audit.js';
-import { RESTORE_ABANDONED_OPERATION, RESTORE_COMPLETED_OPERATION } from '../audit/restore-operations.js';
+import { RESTORE_ABANDONED_OPERATION, RESTORE_COMPLETED_OPERATION } from '../audit/act-set-operations.js';
 import { log, peerText } from '../util/log.js';
 
 const KIND = 'restore' satisfies SpaceActKind;
@@ -102,52 +102,8 @@ export function startRestore(plan: Extract<RestorePlan, { ok: true }>): RestoreS
 }
 
 
-// ── the report ─────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** One space of the report: where its restore stands and what it reported. */
-export interface RestoreSpaceReport {
-  id: string;
-  state: 'owed' | 'running' | 'done' | 'restore_abandoned';
-  attempts: number;
-  lastError?: string;
-  retryAt?: string;
-  needsAbandon?: true;
-  completedAt?: string;
-  edgeIndexes?: unknown;
-  vectorIndexes?: unknown;
-}
-
-/** The restore standing, or the last one; `{ restore: null }` when none ever ran here. */
-export interface RestoreReport {
-  restoreId: string; backupId?: string; state: 'running' | 'completed' | 'abandoned';
-  startedAt: string; endedAt?: string; done: number; total: number;
-  spaces: RestoreSpaceReport[]; emptied: string[]; leftOut: string[];
-}
-
-/** The report of the restore standing or the last one: per space its state, attempts, our sentence for its last failure, its index results. */
-export function restoreReport(): RestoreReport | null {
-  const set = spaceActSetOf(KIND);
-  if (!set) return null;
-  const entries = new Map(entriesOfSet(set.id).map(e => [e.localId, e]));
-  const spaces = Object.entries(set.members).map(([id, m]): RestoreSpaceReport => {
-    if (m.state === 'done') return { id, state: 'done', attempts: 0, ...(m.completedAt ? { completedAt: m.completedAt } : {}), ...(m.report ?? {}) };
-    const e = entries.get(id);
-    if (m.state === 'abandoned') return { id, state: 'restore_abandoned', attempts: e?.attempts ?? 0 };
-    return {
-      id, state: e?.state === 'running' ? 'running' : 'owed', attempts: e?.attempts ?? 0,
-      ...(e?.lastError ? { lastError: e.lastError } : {}),
-      ...(e?.retryAt ? { retryAt: e.retryAt } : {}),
-      ...(e?.needsAbandon ? { needsAbandon: true as const } : {}),
-    };
-  });
-  return {
-    restoreId: set.id, ...(set.backupId ? { backupId: set.backupId } : {}),
-    state: set.endedAt ? (set.outcome ?? 'completed') : 'running',
-    startedAt: set.startedAt, ...(set.endedAt ? { endedAt: set.endedAt } : {}),
-    done: spaces.filter(s => s.state === 'done').length, total: spaces.length,
-    spaces, emptied: set.emptied ?? [], leftOut: set.leftOut ?? [],
-  };
-}
+// ── the abandon ────────────────────────────────────────────────────────────────────────────────────────────────
+// (The report of a restore is the act-set report, `spaces/act-set-report.ts`, which a migrate's shares.)
 
 /** What an abandon answered. */
 export type RestoreAbandon =

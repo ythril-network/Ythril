@@ -135,6 +135,19 @@ export function auditWritesPending(): number {
  * awaits it.
  */
 export function logAuditEntry(input: AuditEntryInput): Promise<void> {
+  const write = col().insertOne(auditEntryOf(input) as any);
+  pendingWrites++;
+  return write
+    .then(() => undefined, (err: unknown) => { log.warn(`Audit log write failed: ${peerText(err)}`); })
+    .finally(() => { pendingWrites--; });
+}
+
+/**
+ * The record {@link logAuditEntry} inserts, built and not written: for the one writer whose row belongs in ANOTHER database than this
+ * process's (a migrate's completion, written into the database the instance continues with). Every guard of the record - its expiry,
+ * its request id - is here, so that writer cannot leave one out.
+ */
+export function auditEntryOf(input: AuditEntryInput): AuditLogEntry {
   let retentionDays = DEFAULT_RETENTION_DAYS;
   try { retentionDays = getConfig().audit?.retentionDays ?? DEFAULT_RETENTION_DAYS; } catch { /* pre-setup */ }
 
@@ -168,12 +181,34 @@ export function logAuditEntry(input: AuditEntryInput): Promise<void> {
     // that reads as "we looked and nothing changed" when in fact we never looked.
     ...(input.changes && input.changes.length > 0 ? { changes: input.changes } : {}),
   };
+  return entry;
+}
 
-  const write = col().insertOne(entry as any);
-  pendingWrites++;
-  return write
-    .then(() => undefined, (err: unknown) => { log.warn(`Audit log write failed: ${peerText(err)}`); })
-    .finally(() => { pendingWrites--; });
+/** What {@link logInternalAudit} is told: the work, never a request. */
+export interface InternalAuditInput {
+  /** What kind of work it was, in the `method` column: `SWEEP`, `SYNC`, `CREATE`. */
+  method: string;
+  /** `internal:<what>`, so it never collides with a route path. */
+  path: string;
+  operation: string;
+  spaceId?: string;
+  startedAt?: number;
+  /** The token the work was done for, when there is one (a creator grant names the token it widened). */
+  tokenId?: string | null;
+}
+
+/** The entry input of work the server did on its own; {@link logInternalAudit} writes it, {@link auditEntryOf} builds its record. */
+export function internalAuditInput(input: InternalAuditInput): AuditEntryInput {
+  return {
+    ip: 'internal',
+    method: input.method,
+    path: input.path,
+    spaceId: input.spaceId,
+    operation: input.operation,
+    status: 200,
+    durationMs: input.startedAt === undefined ? 0 : Date.now() - input.startedAt,
+    tokenId: input.tokenId ?? null,
+  };
 }
 
 /**
@@ -185,27 +220,8 @@ export function logAuditEntry(input: AuditEntryInput): Promise<void> {
  *  - `ip` is `internal`, which no client address can be, so a reader filters them out (or in) by that alone;
  *  - `durationMs` is measured from `startedAt` when the caller has one.
  */
-export function logInternalAudit(input: {
-  /** What kind of work it was, in the `method` column: `SWEEP`, `SYNC`, `CREATE`. */
-  method: string;
-  /** `internal:<what>`, so it never collides with a route path. */
-  path: string;
-  operation: string;
-  spaceId?: string;
-  startedAt?: number;
-  /** The token the work was done for, when there is one (a creator grant names the token it widened). */
-  tokenId?: string | null;
-}): void {
-  logAuditEntry({
-    ip: 'internal',
-    method: input.method,
-    path: input.path,
-    spaceId: input.spaceId,
-    operation: input.operation,
-    status: 200,
-    durationMs: input.startedAt === undefined ? 0 : Date.now() - input.startedAt,
-    tokenId: input.tokenId ?? null,
-  });
+export function logInternalAudit(input: InternalAuditInput): void {
+  void logAuditEntry(internalAuditInput(input));
 }
 
 // ── Query ──────────────────────────────────────────────────────────────────

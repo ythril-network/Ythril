@@ -25,6 +25,7 @@ import { MongoClient } from 'mongodb';
 import { EJSON } from 'bson';
 import { log } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
+import { boundedClientOptions, perBatchTimeout } from './bounded-client-options.js';
 import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
 import { redactUri } from '../config/mongo-uri.js';
 
@@ -104,10 +105,9 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
   // This is a tightening only: the owning process is the sole reader, and `restoreDatabase` runs as the same user.
   mkdirPrivateSync(destDir);
 
-  const client = new MongoClient(uri, {
-    serverSelectionTimeoutMS: 15_000,
-    connectTimeoutMS: 15_000,
-  });
+  // Inside a bound scope (a migrate's act) every operation of this client carries the scope's per-operation figure, each batch of a read
+  // included; outside one (a scheduled backup) none, as before (`bounded-client-options.ts`).
+  const client = new MongoClient(uri, boundedClientOptions(uri, { serverSelectionTimeoutMS: 15_000, connectTimeoutMS: 15_000 }));
 
   try {
     await client.connect();
@@ -130,7 +130,7 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
       const stream = fs.createWriteStream(destFile, { encoding: 'utf8', mode: FILE_MODE });
 
       let count = 0;
-      const cursor = col.find({}).batchSize(CURSOR_BATCH_SIZE);
+      const cursor = col.find({}, perBatchTimeout(col)).batchSize(CURSOR_BATCH_SIZE);
 
       try {
         for await (const doc of cursor) {

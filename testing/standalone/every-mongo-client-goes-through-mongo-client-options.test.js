@@ -18,15 +18,18 @@
  * property called `MongoClient` (`new driver.MongoClient(`). The set is DERIVED, never listed, and floored: a scan that
  * reads the tree wrongly finds no client and so passes for every one.
  *
- * It asks one question of each: does the OPTIONS argument (the second) hold a call of `mongoClientOptions`? A spread
- * beside it (`{ ...mongoClientOptions(uri, d), socketTimeoutMS }`) counts; a literal object does not. A client with no
- * options argument at all fails the same way.
+ * It asks one question of each: does the OPTIONS argument (the second) hold a call of `mongoClientOptions`, or of a
+ * function built on it? A spread beside it (`{ ...mongoClientOptions(uri, d), socketTimeoutMS }`) counts; a literal object
+ * does not. A client with no options argument at all fails the same way. The functions built on it are DERIVED: every
+ * function declared in `server/src` whose body calls `mongoClientOptions` (today `boundedClientOptions`, which adds a bound
+ * scope's per-operation figure, bundle-157 I4a) - so a wrapper is accepted because it calls the module, never because it
+ * is named here.
  *
  * ## The exemptions
  *
- * `db/dump.ts` and `db/restore.ts` build a client for a long-running dump or restore of the whole database, which has its
- * own question (how long a bulk copy may take to find a server) and its own figures, 15 s, not the live client's. Each row
- * says so, and the gate holds the row to the site: an exemption for a file with no client in it fails, and so does one for a
+ * None today. `db/dump.ts` and `db/restore.ts` were exempt (a whole-database copy with its own 15 s figures) until their
+ * clients went through `boundedClientOptions` (bundle-157 I4a), which keeps those figures as caller defaults. A row says
+ * why, and the gate holds the row to the site: an exemption for a file with no client in it fails, and so does one for a
  * client that does go through the module (a row that is no longer needed is the stale half of the same defect).
  *
  * The detector is held on samples, so a mutation of the scan fails here and not only on the repository.
@@ -43,10 +46,7 @@ import { lineOf, parseSource, ts } from '../_shared/syntax-tree.mjs';
 const OPTIONS_BUILDER = 'mongoClientOptions';
 
 /** The files whose client is not the live one, and why. Keyed by repo-relative path. */
-const EXEMPT = new Map([
-  ['server/src/db/dump.ts', 'a whole-database dump is a long-running copy with its own 15 s figures; it is not the live connection, and an operator\'s liveness options for the live client are not the question it asks'],
-  ['server/src/db/restore.ts', 'a whole-database restore is a long-running copy with its own 15 s figures; it is not the live connection, and an operator\'s liveness options for the live client are not the question it asks'],
-]);
+const EXEMPT = new Map([]);
 
 /** The fewest clients that means the scan read the tree: the repository holds four today, and a scan that finds none passes everything. */
 const CLIENT_FLOOR = 3;
@@ -55,26 +55,38 @@ const isClientName = (expr) =>
   (ts.isIdentifier(expr) && expr.text === 'MongoClient')
   || (ts.isPropertyAccessExpression(expr) && expr.name.text === 'MongoClient');
 
-/** Does `node`, or anything it holds, call `mongoClientOptions(...)`? */
-function callsBuilder(node) {
+/** Does `node`, or anything it holds, call one of `builders` (`mongoClientOptions`, or a function built on it)? */
+function callsBuilder(node, builders = new Set([OPTIONS_BUILDER])) {
   let found = false;
   const visit = (n) => {
     if (found) return;
-    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === OPTIONS_BUILDER) { found = true; return; }
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && builders.has(n.expression.text)) { found = true; return; }
     ts.forEachChild(n, visit);
   };
   visit(node);
   return found;
 }
 
-/** Every `new MongoClient(` in `text`: `{ line, viaBuilder }` — `viaBuilder` says the options argument calls `mongoClientOptions`. */
-export function mongoClients(file, text) {
+/** The names of the functions declared in `text` whose body calls `mongoClientOptions`: builders on it, derived and never listed. */
+export function buildersIn(file, text) {
+  const sf = parseSource(file, text);
+  const names = [];
+  const visit = (node) => {
+    if (ts.isFunctionDeclaration(node) && node.name && node.body && node.name.text !== OPTIONS_BUILDER && callsBuilder(node.body)) names.push(node.name.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return names;
+}
+
+/** Every `new MongoClient(` in `text`: `{ line, viaBuilder }` — `viaBuilder` says the options argument calls one of `builders`. */
+export function mongoClients(file, text, builders = new Set([OPTIONS_BUILDER])) {
   const sf = parseSource(file, text);
   const clients = [];
   const visit = (node) => {
     if (ts.isNewExpression(node) && isClientName(node.expression)) {
       const options = node.arguments?.[1];
-      clients.push({ line: lineOf(sf, node), viaBuilder: options !== undefined && callsBuilder(options) });
+      clients.push({ line: lineOf(sf, node), viaBuilder: options !== undefined && callsBuilder(options, builders) });
     }
     ts.forEachChild(node, visit);
   };
@@ -103,11 +115,20 @@ describe('mongoClients (the detector, held on samples)', () => {
   it('does not take the builder named only in the FIRST argument for the options', () => {
     assert.deepEqual(mongoClients('x.ts', 'new MongoClient(mongoClientOptions(uri), {});'), [{ line: 1, viaBuilder: false }]);
   });
+  it('derives a function built on the builder, and accepts a client built through it', () => {
+    const text = 'export function wrapped(uri) { return { ...mongoClientOptions(uri), timeoutMS: 5 }; }\nfunction unrelated() { return {}; }';
+    assert.deepEqual(buildersIn('x.ts', text), ['wrapped']);
+    const builders = new Set([OPTIONS_BUILDER, 'wrapped']);
+    assert.deepEqual(mongoClients('y.ts', 'new MongoClient(uri, wrapped(uri));\nnew MongoClient(uri, unrelated());', builders),
+      [{ line: 1, viaBuilder: true }, { line: 2, viaBuilder: false }]);
+  });
 });
 
 describe('every MongoClient is built from mongoClientOptions', () => {
+  const builders = new Set([OPTIONS_BUILDER]);
+  for (const file of sources()) for (const name of buildersIn(file, read(file))) builders.add(name);
   const found = [];
-  for (const file of sources()) for (const c of mongoClients(file, read(file))) found.push({ file, ...c });
+  for (const file of sources()) for (const c of mongoClients(file, read(file), builders)) found.push({ file, ...c });
 
   it('the scan reads enough to mean something (a floor on the clients found)', () => {
     assert.ok(found.length >= CLIENT_FLOOR,
