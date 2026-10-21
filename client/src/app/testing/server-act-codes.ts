@@ -37,3 +37,20 @@ export function serverActCodes(): string[] {
   }
   return codes;
 }
+
+const SPACE_ACT_KINDS = resolve(__dirname, '../../../../server/src/config/types-space-acts.ts');
+
+/**
+ * The codes a write to a space is refused with while an act stands over it (`writeRefusalCode` of every kind in `SPACE_ACT_KINDS`).
+ * They are not in `act-answers.ts`: a file route gets them from the write gate in front of the act. So a spec asking "does the server
+ * still answer the code this sentence words" asks `serverActCodes()` AND this one, or it calls a live sentence one nobody can reach.
+ * It throws below the number of kinds the server has had, for the reason `serverActCodes` does.
+ */
+export function serverWriteClosedCodes(): string[] {
+  const codes = [...stripComments(readFileSync(SPACE_ACT_KINDS, 'utf8')).matchAll(/writeRefusalCode:\s*'([a-z_]+)'/g)].map(m => m[1]!);
+  if (codes.length < FLOOR) {
+    throw new Error(`found ${codes.length} write-refusal codes in ${SPACE_ACT_KINDS} — fewer than ${FLOOR}, so the record moved or its spelling changed, `
+      + 'and a check over each code would report clean about nothing.');
+  }
+  return codes;
+}
