@@ -37,7 +37,8 @@ const RUN = Date.now();
 
 const SPACE = `embedjobs-${RUN}`;
 const MEMBER = `embedjobs-member-${RUN}`;
-const PROXY = `embedjobs-proxy-${RUN}`;
+const VIEW_NAME = `embedjobs-view-${RUN}`;
+const VIEW = `@${VIEW_NAME}`;
 
 let token;
 let session;
@@ -58,7 +59,9 @@ before(async () => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   await makeSpace(SPACE);
   await makeSpace(MEMBER);
-  await makeSpace(PROXY, { proxyFor: [MEMBER] });
+  // A personal view over the member: a retry names a space, and a view is not one.
+  const view = await post(INSTANCES.a, token, '/api/views', { name: VIEW_NAME, members: [MEMBER] });
+  assert.equal(view.status, 201, JSON.stringify(view.body));
   const mem = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, { fact: `embed queue subject ${RUN}` });
   assert.equal(mem.status, 201, JSON.stringify(mem.body));
   session = await openMcpSession(token);
@@ -140,21 +143,21 @@ describe('REST: the retry refuses what it cannot act on', () => {
     const r = await retryRest({ recordType: 'fact', recordId: `no-such-${RUN}` });
     assert.equal(r.status, 404, JSON.stringify(r.body));
     assert.equal(r.body.result, 'not_found', 'the outcome is machine-readable, not only prose');
-    assert.match(r.body.error, new RegExp(SPACE), 'the space is named — a proxy retry can land in a member space');
+    assert.match(r.body.error, new RegExp(SPACE), 'the space is named');
   });
 
-  it('refuses a PROXY space without a target, and names the members', async () => {
-    // A proxy space stores nothing of its own, so "retry this record here" has no meaning until a member is named.
-    const r = await retryRest({ recordType: 'fact', recordId: 'anything' }, PROXY);
-    assert.equal(r.status, 400, JSON.stringify(r.body));
-    assert.match(r.body.error, new RegExp(MEMBER), 'the refusal must say which member to retry in');
-  });
-
-  it('accepts a proxy retry that names the member', async () => {
-    const r = await retryRest({ recordType: 'fact', recordId: `no-such-${RUN}`, targetSpace: MEMBER }, PROXY);
-    // 404 because that record has no job — the point is that it got PAST the proxy check and looked in the member.
+  it('answers a personal view id as an unknown space and names no member', async () => {
+    // A view holds no jobs: "retry this record here" has no meaning for it, and it answers as a space that does not exist.
+    const r = await retryRest({ recordType: 'fact', recordId: 'anything' }, VIEW);
     assert.equal(r.status, 404, JSON.stringify(r.body));
-    assert.match(r.body.error, new RegExp(MEMBER), 'it looked in the member space, not in the proxy');
+    assert.match(r.body.error, /not found/i);
+    assert.doesNotMatch(r.body.error, new RegExp(MEMBER), 'the refusal named a member of the view');
+  });
+
+  it('refuses the retired targetSpace by name, in the body', async () => {
+    const r = await retryRest({ recordType: 'fact', recordId: `no-such-${RUN}`, targetSpace: MEMBER }, SPACE);
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.match(r.body.error, /targetSpace/);
   });
 });
 
@@ -218,13 +221,14 @@ describe('MCP: the same two capabilities, through the other door', () => {
     assert.ok(r?.isError, `an unknown recordType was accepted: ${JSON.stringify(r)}`);
   });
 
-  it('refuses a proxy retry with no target, with the same message REST gives', async () => {
+  it('refuses a personal view id as an unknown space, with the same words REST gives', async () => {
     const mcp = await session.callTool('retry_embed_record', {
-      space: PROXY, recordType: 'fact', recordId: 'anything',
+      space: VIEW, recordType: 'fact', recordId: 'anything',
     });
     assert.ok(mcp?.isError, JSON.stringify(mcp));
     const text = JSON.stringify(mcp);
-    assert.ok(text.includes(MEMBER), 'both surfaces route through resolveWriteTarget, so both name the members');
+    assert.match(text, /not found/i);
+    assert.ok(!text.includes(MEMBER), 'both surfaces answer through the one existence rule, so neither names a member');
   });
 });
 

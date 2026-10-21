@@ -125,7 +125,7 @@ export function fixtureTypeSchemas() {
  * The spaces are registered by `openStalledWriteDoors` (so the app, the token and the indexes are the shared ones); their
  * meta is then rewritten in the config file and reloaded, which is how the sibling edge test sets a schema.
  */
-export async function openInlineEdgeDoors({ suite, spaces, proxies = [] }) {
+export async function openInlineEdgeDoors({ suite, spaces }) {
   const opened = await openStalledWriteDoors({ suite, spaces: spaces.map(s => s.id) });
   try {
     const path = process.env['CONFIG_PATH'];
@@ -134,8 +134,6 @@ export async function openInlineEdgeDoors({ suite, spaces, proxies = [] }) {
       const entry = cfg.spaces.find(x => x.id === s.id);
       entry.meta = { ...entry.meta, validationMode: s.validationMode, strictLinkage: s.strictLinkage, typeSchemas: fixtureTypeSchemas() };
     }
-    // A proxy owns no collections and no schema: it is configuration only, so it is added after the members are registered.
-    for (const p of proxies) cfg.spaces.push({ id: p.id, label: p.id, folders: [], proxyFor: p.proxyFor });
     fs.writeFileSync(path, JSON.stringify(cfg, null, 2), { mode: 0o600 });
     (await import('../../server/dist/config/loader.js')).loadConfig();
   } catch (err) {
@@ -276,8 +274,8 @@ function refusalOf(door, answer) {
 /**
  * Every door, for `env` (what `openInlineEdgeDoors` returned): `{ name, channel, verb, kind, bulk, send, found, edgesIn, stored }`.
  *
- * - `send(space, { fields, id, targetSpace, headers })` — `fields` is the record's own fields plus `edges`; `id` addresses the record an
- *   update door edits; `targetSpace` names the member when `space` is a proxy; `headers` (REST only — MCP has no `If-Match`) is e.g. a stale precondition.
+ * - `send(space, { fields, id, headers })` — `fields` is the record's own fields plus `edges`; `id` addresses the record an
+ *   update door edits; `headers` (REST only — MCP has no `If-Match`) is e.g. a stale precondition.
  *   Answers `{ status, body, text, refusal }`, `refusal` being `null` when the write was accepted.
  * - `found(space, marker)` — the ids of every record of this door's kind carrying the marker. A create door's record is
  *   unknown beforehand, so the case marks it and looks it up — an identity, not a count.
@@ -330,8 +328,8 @@ function restDoor(env, d) {
   const door = {
     name: `REST ${d.method} ${d.path}${d.bulk ? ` (${d.collection})` : ''}`, channel: 'rest', ...d,
   };
-  door.send = async (space, { fields, id, targetSpace, headers } = {}) => {
-    const path = d.path.replace(':spaceId', space).replace(':id', id ?? '') + (targetSpace ? `?targetSpace=${encodeURIComponent(targetSpace)}` : '');
+  door.send = async (space, { fields, id, headers } = {}) => {
+    const path = d.path.replace(':spaceId', space).replace(':id', id ?? '');
     const answer = await restCall(env, d.method, path, d.bulk ? bulkBody(door, fields) : fields, headers);
     return { ...answer, refusal: refusalOf(door, answer) };
   };
@@ -341,9 +339,8 @@ function restDoor(env, d) {
 function mcpDoor(env, d) {
   const door = { name: `MCP ${d.tool}${d.bulk ? ` (${d.collection})` : ''}`, channel: 'mcp', ...d };
   // MCP has no `If-Match`: a precondition header is a REST-only parameter, so `headers` is not read here.
-  door.send = async (space, { fields, id, targetSpace } = {}) => {
-    const target = targetSpace ? { targetSpace } : {};
-    const args = d.bulk ? { space, ...target, ...bulkBody(door, fields) } : { space, ...target, ...(id !== undefined ? { id } : {}), ...fields };
+  door.send = async (space, { fields, id } = {}) => {
+    const args = d.bulk ? { space, ...bulkBody(door, fields) } : { space, ...(id !== undefined ? { id } : {}), ...fields };
     const answer = await mcpCall(env, d.tool, args);
     return { ...answer, refusal: refusalOf(door, answer) };
   };

@@ -58,9 +58,6 @@ const skip = await mongoSkipReason();
 const STRICT = 'ie-strict';
 const LAX = 'ie-lax';
 const WARN = 'ie-warn';
-/** A proxy over a strict and a warn-only member (different edge rules), and a proxy whose only member is that proxy. */
-const PROXY = 'ie-proxy';
-const OUTER = 'ie-proxy-outer';
 
 /**
  * Opened at module level, not in `before`: the doors are derived from the built tool registry, and importing it
@@ -74,7 +71,6 @@ const doors = skip ? null : await openInlineEdgeDoors({
     { id: LAX, strictLinkage: false, validationMode: 'strict' },
     { id: WARN, strictLinkage: true, validationMode: 'warn' },
   ],
-  proxies: [{ id: PROXY, proxyFor: [STRICT, WARN] }, { id: OUTER, proxyFor: [PROXY] }],
 });
 const env = doors?.env ?? {};
 const DOORS = skip ? [] : await inlineEdgeDoors(env);
@@ -412,63 +408,6 @@ describe('an inline edge that is refused writes nothing, on every door', { skip 
         const answer = await d.send(STRICT, { fields: { description: EDITED_DESCRIPTION, edges: [edge(LABELS.undeclared, FAR_ENDS.entity.exists)] }, id, headers: STALE });
         assert.notEqual(answer.status, 412, `${d.name} answered the stale precondition and never looked at the refused edge`);
         assert.deepEqual(refusalDifferences(d, answer, oracle), [], `${d.name}: the refusal is not the record's own — ${answer.text.slice(0, 300)}`);
-        assert.deepEqual(await d.stored(STRICT, id), before);
-        assert.deepEqual(await d.edgesIn(STRICT), []);
-      });
-    }
-  });
-
-  describe('an update through a proxy is judged by the schema of the member that holds the record', () => {
-    // PROXY's members are a strict one and a warn-only one: the SAME edge (an undeclared label) is refused by one and written by the other.
-    const updates = DOORS.filter(d => d.verb === 'update');
-    const BAD = [edge(LABELS.undeclared, FAR_ENDS.entity.exists)];
-    for (const d of updates) {
-      it(`a member whose schema allows the edge takes it: ${d.name}`, async () => {
-        await fresh(STRICT);
-        await fresh(WARN);
-        const id = KINDS[d.kind].updId;
-        const answer = await d.send(PROXY, { fields: { description: EDITED_DESCRIPTION, edges: BAD }, id, targetSpace: WARN });
-        assert.equal(answer.refusal, null, `${d.name} refused through a proxy an edge the member's schema allows (${answer.status}: ${answer.text.slice(0, 300)})`);
-        assert.deepEqual(await d.edgesIn(WARN), [{ from: id, to: IDS.BOB, label: LABELS.undeclared }]);
-        assert.deepEqual(await d.edgesIn(STRICT), [], `${d.name}: the edge landed in the other member`);
-      });
-
-      it(`a member whose schema refuses the edge refuses it, and nothing is written: ${d.name}`, async () => {
-        await fresh(STRICT);
-        await oracleOf(d);
-        await fresh(STRICT);
-        await fresh(WARN);
-        const id = KINDS[d.kind].updId;
-        const before = await d.stored(STRICT, id);
-        const answer = await d.send(PROXY, { fields: { description: EDITED_DESCRIPTION, edges: BAD }, id, targetSpace: STRICT });
-        await assertRefusedAsTheRecordIs(d, answer, { edgeIndex: 0 });
-        assert.deepEqual(await d.stored(STRICT, id), before);
-        assert.deepEqual(await d.edgesIn(STRICT), []);
-        assert.deepEqual(await d.edgesIn(WARN), []);
-      });
-
-      it(`a proxy that is itself the declared target does not decide: the member holding the record does: ${d.name}`, async () => {
-        await fresh(STRICT);
-        await fresh(WARN);
-        const id = KINDS[d.kind].updId;
-        // The record lives ONLY in the warn-only member, so it is that member's schema — not the strict one the search
-        // passes first, and not the proxy's, which has none — that must judge the edge.
-        await env.door.coll(STRICT, KINDS[d.kind].coll).deleteOne({ _id: id });
-        const answer = await d.send(OUTER, { fields: { description: EDITED_DESCRIPTION, edges: BAD }, id, targetSpace: PROXY });
-        assert.equal(answer.refusal, null, `${d.name} refused an edge the holding member's schema allows (${answer.status}: ${answer.text.slice(0, 300)})`);
-        assert.deepEqual(await d.edgesIn(WARN), [{ from: id, to: IDS.BOB, label: LABELS.undeclared }]);
-      });
-
-      it(`a proxy that is itself the declared target does not decide: the member holding the record refuses what its schema refuses: ${d.name}`, async () => {
-        await fresh(STRICT);
-        await oracleOf(d);
-        await fresh(STRICT);
-        await fresh(WARN);
-        const id = KINDS[d.kind].updId;
-        await env.door.coll(WARN, KINDS[d.kind].coll).deleteOne({ _id: id });
-        const before = await d.stored(STRICT, id);
-        const answer = await d.send(OUTER, { fields: { description: EDITED_DESCRIPTION, edges: BAD }, id, targetSpace: PROXY });
-        await assertRefusedAsTheRecordIs(d, answer, { edgeIndex: 0 });
         assert.deepEqual(await d.stored(STRICT, id), before);
         assert.deepEqual(await d.edgesIn(STRICT), []);
       });

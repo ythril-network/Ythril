@@ -33,7 +33,6 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'stampargs';
-const PROXY = 'stampargs-proxy';
 const DOOR_NAMES = ['route', 'toolRest', 'mcp'];
 
 let stamp, door, drivers;
@@ -128,12 +127,10 @@ describe('refused: the same values, with the same status, naming the parameter',
     for (const name of DOOR_NAMES) assert.equal(answers[name].status, 404, `${name}: ${answers[name].status} ${answers[name].error ?? ''}`);
   });
 
-  it('a proxy space holds no rows and is a 400 on every door', async () => {
+  it('a personal view id is not a space and is a 404 on every door', async () => {
     await controlIsServed();
-    door.config().spaces.push({ id: PROXY, label: PROXY, folders: [], proxyFor: [S] });
-    try {
-      const answers = await askAll({}, PROXY);
-      for (const name of DOOR_NAMES) assert.equal(answers[name].status, 400, `${name}: ${answers[name].status} ${answers[name].error ?? 'served'}`);
-    } finally { door.config().spaces = door.config().spaces.filter(s => s.id !== PROXY); }
+    // A view holds no files and no rows; a stamp report names a space, so a view id (here one no token holds) answers as an unknown space.
+    const answers = await askAll({}, '@a-view-is-not-a-space');
+    for (const name of DOOR_NAMES) assert.equal(answers[name].status, 404, `${name}: ${answers[name].status} ${answers[name].error ?? 'served'}`);
   });
 });

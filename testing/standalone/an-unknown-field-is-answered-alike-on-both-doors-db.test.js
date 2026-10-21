@@ -84,7 +84,6 @@ const UNKNOWN_VALUE = 7;
 const S = 'pspace';
 const SCHEMA_SPACE = 'pschema';
 const EMBED_SPACE = 'pembed';
-const PROXY = 'pproxy';
 const IGNORED = 'unknown field — ignored';
 const NOT_ACCEPTED = 'unknown field — not accepted';
 const RECORD_COLLECTIONS = ['entities', 'facts', 'edges', 'chrono', 'links', 'files'];
@@ -103,10 +102,6 @@ const TAKES_NO_RECORD_BODY = new Map([
 /** Subjects the generic cases leave to a case of their own, each for a reason of its own. */
 const OWN_CASE = new Map([
   ['bulk.write', 'a batch judges its ITEMS and refuses its top level in every mode — case (n)'],
-]);
-/** Subjects case (g) cannot ask, each with the reason. */
-const NO_PROXY_CASE = new Map([
-  ['entity.merge', 'REST refuses a proxy space before any target is read and MCP takes targetSpace: the divergence is Q-499, outside this bundle'],
 ]);
 
 const requireFromServer = createRequire(path.resolve('server/package.json'));
@@ -243,7 +238,7 @@ function requestOf(fx, { space = S, extra = {}, payload = fx.payload, addr = {},
  */
 function acceptedOf(fx) {
   const schema = TOOLS_BY_NAME.get(fx.tool).inputSchema(toolSchemas);
-  const addressing = new Set(['space', 'targetSpace', ...Object.keys(fx.addr)]);
+  const addressing = new Set(['space', ...Object.keys(fx.addr)]);
   return Object.keys(schema.properties).filter(k => !addressing.has(k));
 }
 
@@ -300,8 +295,6 @@ describe('an unknown field on a brain write is answered alike on both doors (b12
       suite: 'b128-parity-doors',
       spaces: [
         { id: S, label: S, folders: [], meta: { suppressEmbeddings: true } },
-        // A view over the member: written by a proxy, a record lands in `pspace` (the target a write names).
-        { id: PROXY, label: PROXY, folders: [], proxyFor: [S], meta: {} },
         { id: SCHEMA_SPACE, label: SCHEMA_SPACE, folders: [], meta: { suppressEmbeddings: true, validationMode: 'warn', typeSchemas: { entity: { wide: { propertySchemas: Object.fromEntries(WIDE.map(k => [k, { type: 'number' }])) } } } } },
         { id: EMBED_SPACE, label: EMBED_SPACE, folders: [], meta: {} },
       ],
@@ -312,7 +305,7 @@ describe('an unknown field on a brain write is answered alike on both doors (b12
     ({ RETIRED_WRITE_FIELDS: RETIRED } = await import('../../server/dist/brain/retired-write-fields.js'));
     ({ NAME_QUOTED, REFUSAL_NAMES_MAX, peerText } = await import('../../server/dist/util/log.js'));
     const { toolSchemasFor } = await import('../../server/dist/mcp/tool-schema.js');
-    toolSchemas = toolSchemasFor([S, SCHEMA_SPACE, EMBED_SPACE, PROXY]);
+    toolSchemas = toolSchemasFor([S, SCHEMA_SPACE, EMBED_SPACE]);
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
     const tokens = await import('../../server/dist/auth/tokens.js');
@@ -607,54 +600,29 @@ describe('an unknown field on a brain write is answered alike on both doors (b12
     });
   }
 
-  // ── (g) the target is resolved BEFORE the judge ──────────────────────────────────────────────────────────────────
+  // ── (g) the retired `targetSpace` is refused BY NAME, whatever else the body carries ─────────────────────────────
 
   for (const mode of ['absent', 'refuse']) {
-    it(`(g) an unknown key beside a failed targetSpace: both doors answer the resolution error and no rows, in ${mode === 'absent' ? 'warn' : 'refuse'}`, async () => {
-      setMode(S, mode); setMode(PROXY, mode);
+    it(`(g) a targetSpace beside an unknown key is refused by name on every door, nothing stored, in ${mode === 'absent' ? 'warn' : 'refuse'}`, async () => {
+      setMode(S, mode);
       const failures = [];
       try {
-        for (const s of judged().filter(x => !NO_PROXY_CASE.has(x.op))) {
-          const fx = await FIXTURES[s.op]();
+        for (const s of judged()) {
           const extra = withKey([UNKNOWN, UNKNOWN_VALUE]);
-          // Control: the proxy fixture works — a VALID write that names its member is accepted on every door, so a refusal below is
-          // about the target and not about a proxy the fixture could not write through.
-          for (const which of DOORS) {
-            const good = await ask(which, requestOf(await FIXTURES[s.op](), { space: PROXY, targetRest: S, targetMcp: S }));
-            if (good.refused) failures.push(`${s.op} ${which}: a valid write through the proxy to ${S} was refused (${good.status}): ${good.error.slice(0, 160)}`);
+          // Control: the same write WITHOUT the retired field is accepted or judged on its merits, so the refusal below is about the field.
+          const rest = await ask('rest', requestOf(await FIXTURES[s.op](), { space: S, extra, targetRest: S }));
+          if (rest.status !== 400 || !rest.error.includes('targetSpace') || !/\bspace\b/.test(rest.error.replace(/targetSpace/g, ''))) {
+            failures.push(`${s.op} REST ?targetSpace=: answered ${rest.status} ${rest.error.slice(0, 200)}`);
           }
-          const cases = [
-            ['a target that is not a member', { targetRest: 'nope', targetMcp: 'nope' }, /'nope' is not a member of proxy space 'pproxy'/],
-            ['no target on a proxy space', {}, /This is a proxy space\. Specify targetSpace/],
-          ];
-          for (const [label, target, expected] of cases) {
-            const req = requestOf(fx, { space: PROXY, extra, ...target });
-            for (const which of DOORS) {
-              const a = await ask(which, req);
-              if (a.status !== 400 || !expected.test(a.error)) failures.push(`${s.op} ${which} (${label}): answered ${a.status} ${a.error.slice(0, 200)}`);
-              if (unknownRows(a.data).length > 0) failures.push(`${s.op} ${which} (${label}): resolution comes first, yet the answer carries unknown rows ${fmt(unknownRows(a.data))}`);
-            }
+          for (const which of ['mcp', 'tool']) {
+            const a = await ask(which, requestOf(await FIXTURES[s.op](), { space: S, extra, targetMcp: S }));
+            if (a.status !== 400 || !a.error.includes('targetSpace')) failures.push(`${s.op} ${which} targetSpace: answered ${a.status} ${a.error.slice(0, 200)}`);
           }
         }
-      } finally { setMode(S, 'absent'); setMode(PROXY, 'absent'); }
-      assert.deepEqual(failures, [], 'a call whose target cannot be resolved is refused for that, with nothing said about its body');
+      } finally { setMode(S, 'absent'); }
+      assert.deepEqual(failures, [], 'a retired addressing field is refused by name, with its replacement, on every door and in both REST spellings');
     });
   }
-
-  it('(g) a targetSpace that is not a string answers "targetSpace must be a string" on both doors — the array a REST query makes of a repeated name, and the object an MCP caller can send — and never a TypeError', async () => {
-    const failures = [];
-    for (const s of judged().filter(x => !NO_PROXY_CASE.has(x.op))) {
-      const fx = await FIXTURES[s.op]();
-      const rest = await ask('rest', requestOf(fx, { space: PROXY, targetRest: ['a', 'b'] }));
-      if (rest.status !== 400 || !rest.error.includes('targetSpace must be a string')) failures.push(`${s.op} REST ?targetSpace=a&targetSpace=b: answered ${rest.status} ${rest.error.slice(0, 160)}`);
-      for (const which of ['mcp', 'tool']) {
-        const a = await ask(which, requestOf(fx, { space: PROXY, targetMcp: { toString: 1 } }));
-        if (a.status !== 400 || !a.error.includes('targetSpace must be a string')) failures.push(`${s.op} ${which} {"toString":1}: answered ${a.status} ${a.error.slice(0, 160)}`);
-        if (/TypeError/.test(a.text)) failures.push(`${s.op} ${which}: the dispatcher threw a TypeError out of the template`);
-      }
-    }
-    assert.deepEqual(failures, [], 'the string guard lives in resolveWriteTarget, so both doors refuse a non-string target in the same words before any lookup');
-  });
 
   // ── (h) merge: the judge before the path ids ─────────────────────────────────────────────────────────────────────
 

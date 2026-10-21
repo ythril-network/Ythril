@@ -145,4 +145,6 @@ export const PROXY_TEST_CLASSIFICATION = Object.freeze([
     why: 'Q-531\'s own test: feeds proxyFor configs to the migration that retires them' },
   { file: 'testing/sync/a-migrated-proxy-leaves-its-network-space-as-its-peers-see-it.test.js', verdict: 'unaffected',
     why: 'Q-531\'s own test: hand-edits a 5.x proxyFor into a config so the migration takes it out of its network' },
+  { file: 'testing/standalone/rollback-is-documented.test.js', verdict: 'unaffected',
+    why: 'names proxyFor as the key the 6.0 migration reads when it explains the rollback; a historical note, not a use' },
 ]);

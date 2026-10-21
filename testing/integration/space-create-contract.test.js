@@ -5,7 +5,7 @@
  *
  * B-2's last two capabilities are `save_space` and `reindex`, and `save_space` is the 9-refusal one:
  * `createSpace()` exists in `spaces/lifecycle.ts`, but this route wraps it in checks that an MCP tool calling
- * `createSpace()` directly would skip — proxy member existence, proxy nesting, the schema-library `$ref`, and the
+ * `createSpace()` directly would skip — the retired-field refusal, the schema-library `$ref`, and the
  * strict-flag seeding. That is the *two surfaces, one rule, one weaker* defect the whole item is about, and it would
  * be reintroduced by the fix for it.
  *
@@ -21,7 +21,7 @@
  *
  * What is NOT covered anywhere, and is exactly what an extraction can drop:
  *
- *  - **the two proxy refusals**, which are the only checks that read OTHER spaces to validate this one;
+ *  - **the retired `proxyFor`**, refused by name with the view door as its replacement;
  *  - **`422` for a broken schema-library `$ref` at CREATE time.** `broken-library-ref-refused-everywhere.test.js`
  *    asserts the call site exists by reading source; nothing asserted the route actually answers 422. A source gate
  *    and a runtime test fail for different reasons, and this route is the one that had the defect;
@@ -73,38 +73,23 @@ after(async () => {
   }
 });
 
-describe('POST /api/spaces — the proxy refusals, which read other spaces to validate this one', () => {
-  it('400 when a proxy member does not exist, and no space is created', async () => {
-    const id = idFor('proxy-missing');
-    const r = await create({ id, label: 'Proxy missing member', proxyFor: [`no-such-space-${RUN}`] });
+describe('POST /api/spaces — the retired proxyFor', () => {
+  it('400 names proxyFor and POST /api/views, and no space is created', async () => {
+    const member = idFor('proxy-base');
+    assert.equal((await create({ id: member, label: 'Proxy base' })).status, 201);
+    const id = idFor('proxy-refused');
+    const r = await create({ id, label: 'Proxy refused', proxyFor: [member] });
     assert.equal(r.status, 400, JSON.stringify(r.body));
-    assert.match(r.body.error, /not found/i);
+    assert.match(r.body.error, /proxyFor/);
+    assert.match(r.body.error, /POST \/api\/views/, 'the refusal must say what to do instead');
     assert.equal(await exists(id), false, 'a refused create must not leave the space behind');
   });
 
-  it('400 when a proxy member is itself a proxy — nesting is refused, and nothing is created', async () => {
-    // Needs a real member and a real proxy over it, so this is the one case that cannot be checked without
-    // building two spaces first. That is also why it is the refusal most likely to be dropped by an extraction:
-    // it is the only one whose input is the rest of the config rather than the request body.
-    const member = idFor('proxy-base');
-    const firstProxy = idFor('proxy-level1');
-    const nested = idFor('proxy-level2');
-
-    assert.equal((await create({ id: member, label: 'Proxy base' })).status, 201);
-    assert.equal((await create({ id: firstProxy, label: 'Proxy level 1', proxyFor: [member] })).status, 201);
-
-    const r = await create({ id: nested, label: 'Proxy level 2', proxyFor: [firstProxy] });
-    assert.equal(r.status, 400, JSON.stringify(r.body));
-    assert.match(r.body.error, /nesting/i, 'the message must say WHY, not just that it failed');
-    assert.equal(await exists(nested), false);
-  });
-
-  it('the wildcard proxy is accepted — it is a sentinel, not a member list', async () => {
-    // `['*']` must skip per-member validation entirely. An extraction that validated it as a member id would
-    // refuse every wildcard proxy space, and the refusal would read as "space '*' not found".
+  it('the wildcard spelling is refused the same way: a personal view lists ["*"] as its members', async () => {
     const id = idFor('proxy-wildcard');
     const r = await create({ id, label: 'Proxy wildcard', proxyFor: ['*'] });
-    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.equal(await exists(id), false);
   });
 });
 
