@@ -21,7 +21,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { getConfig, mutateConfig } from '../config/loader.js';
 import {
   MAX_VIEWS_PER_OWNER, MAX_VIEW_MEMBERS, VIEW_NAME_MAX, VIEW_NAME_PATTERN, WILDCARD_MEMBER, ViewRefusal,
-  deleteView, freeViewName, isValidViewName, isViewId, memberAdmissible, resolveOwnView, viewOwnerKind, viewOwnerOf, viewReadMembers, viewsOfOwner,
+  deleteView, freeViewName, isValidViewName, isViewId, memberAdmissible, viewIdOf, resolveOwnView, viewOwnerKind, viewOwnerOf, viewReadMembers, viewsOfOwner,
   type ViewOwnerSource,
 } from '../config/views.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
@@ -127,7 +127,7 @@ export function createView(actor: ViewActor, input: { name: unknown; members: un
     const members = checkedMembers(input.members, ViewCreateInput.safeParse({ members: input.members }).success, admissibleFor(actor.rights, peerBoundTo(actor.record), cfg));
     if (mine.some(v => v.name === name)) throw new ViewRefusal('nameTaken', `You already have a view named '${name}'`);
     if (mine.length >= MAX_VIEWS_PER_OWNER) throw tooManyViews();
-    made = { id: `@${name}`, name, ownerId: owner, members, createdAt: new Date().toISOString() };
+    made = { id: viewIdOf(name), name, ownerId: owner, members, createdAt: new Date().toISOString() };
     cfg.views = [...(cfg.views ?? []), made];
   });
   return { view: viewAnswer(actor, made), ownerKey: owner, memberCount: made.members.length };
@@ -145,7 +145,7 @@ export function updateView(actor: ViewActor, id: string, input: { name?: unknown
       const name = checkedName(input.name);
       if (viewsOfOwner(owner, cfg).some(v => v.name === name)) throw new ViewRefusal('nameTaken', `You already have a view named '${name}'`);
       view.name = name;
-      view.id = `@${name}`;
+      view.id = viewIdOf(name);
     }
     if (input.members !== undefined) {
       view.members = checkedMembers(input.members, ViewUpdateInput.safeParse({ members: input.members }).success, admissibleFor(actor.rights, peerBoundTo(actor.record), cfg));
@@ -240,7 +240,7 @@ export function copyViewTo(actor: ViewActor, id: string, toTokenId: unknown, fro
     }
     if (mine.length >= MAX_VIEWS_PER_OWNER) throw tooManyViews();
     const name = freeViewName(from.name, new Set(mine.map(v => v.name)));
-    const copy: ViewRecord = { id: `@${name}`, name, ownerId: receiverOwner, members: kept, createdAt: new Date().toISOString(), copiedFrom: key };
+    const copy: ViewRecord = { id: viewIdOf(name), name, ownerId: receiverOwner, members: kept, createdAt: new Date().toISOString(), copiedFrom: key };
     cfg.views = [...(cfg.views ?? []), copy];
     result = { view: copy, created: true };
   });
@@ -290,7 +290,7 @@ export function claimUnclaimedView(actor: ViewActor, name: unknown): { view: Vie
     else {
       if (mine.length >= MAX_VIEWS_PER_OWNER) throw tooManyViews();
       const viewName = freeViewName(def.name, new Set(mine.map(v => v.name)));
-      made = { id: `@${viewName}`, name: viewName, ownerId: owner, members: [...def.members], createdAt: new Date().toISOString(), migratedFrom: def.migratedFrom };
+      made = { id: viewIdOf(viewName), name: viewName, ownerId: owner, members: [...def.members], createdAt: new Date().toISOString(), migratedFrom: def.migratedFrom };
       cfg.views = [...(cfg.views ?? []), made];
     }
     cfg.unclaimedViews = (cfg.unclaimedViews ?? []).filter(u => u !== def);

@@ -22,7 +22,7 @@
 import type { Config, TokenRecord, ViewRecord } from './types.js';
 import { isInstanceAdmin } from '../auth/instance-admin.js';
 import { takeSpaceOutOfNetwork } from '../networks/take-space-out-of-network.js';
-import { freeViewName, liveOwnerKeys } from './view-shape.js';
+import { freeViewName, liveOwnerKeys, viewIdOf } from './view-shape.js';
 
 /** What a run did, for the boot log and the durable report. */
 export interface ProxyMigrationResult {
@@ -82,7 +82,7 @@ function convertProxies(cfg: Config, now: number): ProxyMigrationResult {
         const mine = cfg.views.filter(v => v.ownerId === owner);
         if (mine.some(v => v.migratedFrom === proxy.id)) continue;
         const name = freeViewName(proxy.id, new Set(mine.map(v => v.name)));
-        const view: ViewRecord = { id: `@${name}`, name, ownerId: owner, members: [...members], createdAt, migratedFrom: proxy.id };
+        const view: ViewRecord = { id: viewIdOf(name), name, ownerId: owner, members: [...members], createdAt, migratedFrom: proxy.id };
         cfg.views.push(view);
         result.copies++;
       }

@@ -34,6 +34,9 @@ export type ViewOwnerKind = typeof VIEW_OWNER_KINDS[number];
 /** A view id begins with `@`, which no space id may. */
 export const isViewId = (id: string): boolean => id.startsWith('@');
 
+/** A view's id: `@` and its name - the one place the prefix {@link isViewId} reads is written, for every site that makes or renames a view. */
+export const viewIdOf = (name: string): string => `@${name}`;
+
 /** The kind of an owner key, or `null` for a string no issuer produces. */
 export function viewOwnerKind(ownerId: string): ViewOwnerKind | null {
   const kind = VIEW_OWNER_KINDS.find(k => ownerId.startsWith(`${k}:`) && ownerId.length > k.length + 1);
@@ -56,7 +59,7 @@ export function validateViews(views: unknown): void {
   for (const v of views as Partial<ViewRecord>[]) {
     const where = `view '${String(v?.id ?? v?.name ?? '?')}'`;
     if (!isValidViewName(v?.name)) problems.push(`${where}: name '${String(v?.name)}' must match ${VIEW_NAME_PATTERN.source} and be at most ${VIEW_NAME_MAX} characters`);
-    else if (v.id !== `@${v.name}`) problems.push(`${where}: id must be '@${v.name}'`);
+    else if (v.id !== viewIdOf(v.name)) problems.push(`${where}: id must be '${viewIdOf(v.name)}'`);
     if (typeof v?.ownerId !== 'string' || !viewOwnerKind(v.ownerId)) {
       problems.push(`${where}: owner '${String(v?.ownerId)}' is not a token:, oauth: or oidc: key`);
     } else if (typeof v.name === 'string') {
