@@ -12,6 +12,7 @@ import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { log } from '../util/log.js';
 import { encryptSecret, decryptSecret, isEncrypted } from '../util/crypto.js';
 import type { WebhookSubscription, WebhookDelivery, WebhookEventType } from './types.js';
+import { subscriptionAfterRetiredIds } from '../config/migrate-proxies-to-views.js';
 
 const COLLECTION = '_webhooks';
 const DELIVERIES_COLLECTION = '_webhook_deliveries';
@@ -30,6 +31,31 @@ export async function initWebhookDeliveryIndexes(): Promise<void> {
   const dc = col<WebhookDelivery>(DELIVERIES_COLLECTION);
   await ensureExpiryIndex(DELIVERIES_COLLECTION, '_expireAt', 0, 'ttl_delivery_expireAt');
   await dc.createIndex({ webhookId: 1, timestamp: -1 });
+}
+
+/**
+ * The DB phase of the 6.0 proxy-to-view upgrade, for webhooks (Q-531): a subscription that named ONLY retired proxy ids is DISABLED and
+ * keeps its list (emptying it would subscribe it to every space: an empty list means all); one that named others loses only the retired ids.
+ * Subscriptions live in the database, not in `config.json`, so the config migration cannot reach them. Idempotent: a repeat finds nothing to do.
+ * @returns how many subscriptions it changed.
+ */
+export async function retireWebhookSpaceIds(retiredIds: readonly string[]): Promise<number> {
+  if (retiredIds.length === 0) return 0;
+  let changed = 0;
+  for (const sub of await col<WebhookSubscription>(COLLECTION).find({}).toArray()) {
+    const after = subscriptionAfterRetiredIds(sub as WebhookSubscription, retiredIds);
+    if (after === sub || (after.enabled === sub.enabled && after.spaces.length === sub.spaces.length)) continue;
+    await col<WebhookSubscription>(COLLECTION).updateOne(
+      { id: sub.id } as Filter<WebhookSubscription>,
+      { $set: { spaces: after.spaces, enabled: after.enabled, status: after.enabled ? sub.status : 'disabled', updatedAt: new Date().toISOString() } } as UpdateFilter<WebhookSubscription>,
+    );
+    changed++;
+  }
+  if (changed > 0) {
+    invalidateCache();
+    log.warn(`${changed} webhook subscription(s) named a retired proxy id: ones that named only retired ids are disabled, the rest lost the id`);
+  }
+  return changed;
 }
 
 // ── In-memory cache ─────────────────────────────────────────────────────────

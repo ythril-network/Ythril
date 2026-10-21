@@ -975,7 +975,7 @@ export const SERVER_OWNED_SPACE_FIELDS = ['builtIn', 'usageGiB', 'indexStatus', 
  * of both lists is what makes that refusal reachable — a field on the strip list is dropped before any
  * handler sees it, so the caller would get a 200 for a change that did not happen.
  */
-export const CREATE_ONLY_SPACE_FIELDS = ['id', 'folders', 'proxyFor'] as const;
+export const CREATE_ONLY_SPACE_FIELDS = ['id', 'folders'] as const;
 
 /**
  * Drop the server-owned top-level fields from an incoming space body, leaving everything else to Zod.
@@ -992,13 +992,6 @@ export function stripServerOwnedSpace(body: unknown, opts: { forUpdate?: boolean
   return copy;
 }
 
-// proxyFor accepts either the wildcard sentinel ['*'] or a list of specific space IDs
-export const ProxyForZ = z.union([
-  // `['*']` exactly — an array of one literal rather than a tuple, so its bound is a count a validator can read.
-  z.array(z.literal('*')).length(1),
-  z.array(z.string().min(1).max(40)).min(1).max(MAX_SPACE_IDS),
-]);
-
 export const CreateSpaceBody = z.object({
   id: z.string().min(1).max(40).regex(/^[a-z0-9-]+$/).optional(),
   label: z.string().min(1).max(200),
@@ -1013,7 +1006,6 @@ export const CreateSpaceBody = z.object({
   // an empty one, which is the case an operator asked about on 2026-08-20 and neither the schema nor the guide
   // covered. See `spaces/face-width-change.ts`.
   faceDescriptorDims: z.number().int().min(64).max(4096).optional(),
-  proxyFor: ProxyForZ.optional(),
   meta: SpaceMetaBody.optional(),
 }).strict();
 

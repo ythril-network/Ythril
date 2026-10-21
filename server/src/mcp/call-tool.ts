@@ -35,14 +35,16 @@
 import { getConfig } from '../config/loader.js';
 import { log, currentRequestId, peerText } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
-import { toolRightsRefusal, spaceAdminRefusal, toolReach, toolWriteGrant, assertWriteTarget } from './tool-rights-guard.js';
+import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
+import { TOOL_RIGHTS, toolTakesAView } from '../auth/space-rights.js';
+import { isViewId, resolveOwnView, viewOwnerOf, viewReadMembers, viewsOfOwner } from '../config/views.js';
+import { retiredIdNamedIn, retiredSpaceSentence, unknownSpaceAnswer } from '../spaces/unknown-space.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { admitPeerToolCall } from '../sync/peer-space-admission.js';
 import { toolIsVisible } from './tool-visibility.js';
 import { createSpacesRefusal } from '../auth/create-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { memberSpacesWithin } from '../spaces/proxy-scoped.js';
 import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import { SchemaViolationError, writeRefusalAnswer, schemaRefusalStatus, countSchemaRefusal } from '../brain/write-validation.js';
 import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
@@ -55,9 +57,9 @@ import { WriteConflict } from '../brain/write-plan/types.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 import { mergeRefusal } from '../brain/merge.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
+import type { ToolCallerRecord } from './tools/types.js';
 import { validatorFor } from './validate-args.js';
 import { withUnknownFieldRows } from './schema-warnings.js';
-import { resolveCallWriteTarget } from '../spaces/proxy.js';
 import { answerUnknownWriteFields, writeBodyOfToolCall, writeDoorOfTransport } from '../contract/write-accepts.js';
 import { judgedOperationOfTool, isBatchWriteOperation } from '../contract/judged-write-operations.js';
 import type { UnknownFieldRow } from '../contract/unknown-field-rows.js';
@@ -72,6 +74,8 @@ import { toolCallsTotal, toolFailuresTotal } from '../metrics/registry.js';
 /** Who is calling, for the rung checks and the audit trail. Snapshotted by the door at its own edge. */
 export interface ToolCaller {
   rights?: TokenRights;
+  /** The caller's token record (what a personal view's owner key is made of, and what its copy and peer rules read). Snapshotted by the door. */
+  record?: ToolCallerRecord;
   tokenId?: string;
   tokenLabel?: string;
   ip: string;
@@ -153,6 +157,9 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
   const peerId = peerBoundTo(cfg.tokens?.find(t => t.id === caller.tokenId));
   const accessibleSpaceIds = reachableSpaceIds(rights, cfg.spaces.map(s => s.id));
   const accessibleSpaces = cfg.spaces.filter(s => accessibleSpaceIds.includes(s.id));
+  // The caller's own personal views, offered to the tools that take one (and to no other), and resolved per call below.
+  const ownerKey = caller.record ? viewOwnerOf(caller.record) : null;
+  const ownViewIds = viewsOfOwner(ownerKey, cfg).map(v => v.id);
 
   /*
    * The arguments must be an OBJECT, and this is refused before anything reads a field off them.
@@ -168,6 +175,11 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
 
   // Unknown tools carry no flags and fall through the gates to be reported below, as they always did.
   const tool = TOOLS_BY_NAME.get(name);
+
+  // A retired proxy id answers 410 to every caller, before anything about the caller or the tool is asked (visibility, reach, rung): the id
+  // was public, it is not a view, and what happened to it is the answer however little the caller may do.
+  const namedRetired = retiredIdNamedIn(a['space'], cfg);
+  if (namedRetired !== null) return refuse(410, retiredSpaceSentence(namedRetired), '', { error: retiredSpaceSentence(namedRetired), code: 'space_retired' });
 
   /*
    * A refusal of a WRITE tool is a row in the trail, whichever way it is refused (R6-13): the REST middleware records every response
@@ -277,17 +289,28 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
    * SHORTER answer, and a caller cannot tell a filtered result from a small one. The refusal names only the
    * space that failed: listing the reachable ones hands an unauthorised caller an inventory of what exists.
    */
+  /** The caller's own views this call NAMED, each with the spaces it reads for this tool: handed to the handler, never recomputed there. */
+  const viewReads = new Map<string, readonly string[]>();
+  const viewRow = tool && toolTakesAView(name) ? TOOL_RIGHTS.find(r => r.tool === name) : undefined;
   for (const sid of rawSpaces) {
-    if (!cfg.spaces.some(s => s.id === sid)) {
-      return refuse(404, `Error: Space '${sid}' not found`);
+    // The caller's OWN view, on a tool that reads data: the members it reads for this caller in this tool's area, now. Every other id
+    // (a space, another token's view, an unknown id, a retired proxy id, or a view on a tool that does not take one) is answered by the one
+    // existence rule: another token's view and an id that never existed answer in the same words.
+    const own = viewRow && rights && isViewId(sid) ? resolveOwnView(ownerKey, sid, cfg) : null;
+    if (own && viewRow && rights) {
+      viewReads.set(sid, viewReadMembers({ rights, view: own, area: viewRow.area, needs: viewRow.needs, peerId }));
+      continue;
     }
-    // A proxy is usable when the connection reaches AT LEAST ONE member; the tools then read only the
-    // members it reaches. For a non-proxy space this returns the space itself, so it is one predicate.
-    if (memberSpacesWithin(sid, accessibleSpaceIds).length === 0) {
-      return refuseAudited(403, `Error: token does not have access to '${sid}' or any of its member spaces`, sid);
+    const unknown = unknownSpaceAnswer(ownerKey, sid, false, cfg);
+    if (unknown) {
+      // A retired id is answered with its sentence alone and its code, to every caller; the rest carry the tool door's "Error: " prefix.
+      return unknown.status === 410
+        ? refuse(410, unknown.body.error, '', { ...unknown.body })
+        : refuse(unknown.status, `Error: ${unknown.body.error}`);
     }
-    // The space is the one the CALLER named. For a proxy that is the proxy's own id, which is where an
-    // operator grants access; checking a member here would let a proxy grant be bypassed by naming it.
+    if (!accessibleSpaceIds.includes(sid)) {
+      return refuseAudited(403, `Error: token does not have access to '${sid}'`, sid);
+    }
     const rightsRefusal = toolRightsRefusal(name, rights, sid);
     if (rightsRefusal) return refuseAudited(403, rightsRefusal, sid);
     // And the space-admin question, for the tools that configure ONE space. `toolIsVisible` admitted anyone
@@ -448,6 +471,9 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     };
   }
 
+  /** The members every view this call named reads, deduplicated (undefined when it named none): what is recorded and announced. */
+  const viewSpacesRead = viewReads.size > 0 ? [...new Set([...viewReads.values()].flat())] : undefined;
+
   /** The unknown-field rows of this call, once the judge has run; every answer from there on is given through `withUnknownFieldRows`. */
   let rows: readonly UnknownFieldRow[] = [];
 
@@ -457,7 +483,8 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     if (!tool) {
       return refuse(404, `Unknown tool: ${name}`, callSpace);
     }
-    toolCallsTotal.inc({ tool: name, space: callSpace || 'global', door: caller.transport });
+    // A view's id is the caller's own text and unbounded as a label: it is one label, as a space's id is one per configured space.
+    toolCallsTotal.inc({ tool: name, space: viewReads.size > 0 ? '@view' : (callSpace || 'global'), door: caller.transport });
     /*
      * A brain RECORD write is judged for an argument it does not take (Q-320, bundle-128): the target space is resolved here,
      * through the one function that does it for the dispatcher, because what becomes of such an argument is the setting of the
@@ -472,10 +499,9 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
      */
     const judgedOperation = judgedOperationOfTool(name);
     if (judgedOperation !== null && !isBatchWriteOperation(judgedOperation)) {
-      const wt = resolveCallWriteTarget(callSpace, a, toolWriteGrant({ name, rights }));
-      // Thrown as a `ToolRefusal` carrying the resolution's own status; the catch arm answers and records it as any refused write.
-      assertWriteTarget(wt);
-      const judged = answerUnknownWriteFields(writeBodyOfToolCall(a, judgedOperation), judgedOperation, wt.target, writeDoor);
+      // The space the write LANDS in is the one the call named: reach and rung were judged on it above, and a view is never a write target
+      // (a write tool is never offered one, and an own view named to it was refused as an unknown space).
+      const judged = answerUnknownWriteFields(writeBodyOfToolCall(a, judgedOperation), judgedOperation, callSpace, writeDoor);
       rows = judged.rows;
       if (judged.refused) {
         return withUnknownFieldRows(refuseAudited(400, `Error: ${judged.refusal!.error}`, callSpace, callSpace, { ...judged.refusal }), rows);
@@ -485,7 +511,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     // (save_bulk), which report per-item errors in the result rather than rejecting the whole call. A judged tool's TOP level is
     // tolerated (its unknown arguments were answered above); everything nested is still held to the closed schema.
     if (!tool.skipSchemaValidation) {
-      const argErr = validatorFor(accessibleSpaceIds).validate(tool, a, { tolerateTopLevel: judgedOperation !== null });
+      const argErr = validatorFor(accessibleSpaceIds, ownViewIds).validate(tool, a, { tolerateTopLevel: judgedOperation !== null });
       if (argErr) return withUnknownFieldRows(refuseAudited(400, `Error: ${argErr}`, callSpace, callSpace), rows);
     }
     /*
@@ -527,6 +553,8 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
       // Populated, not merely declared. `toolIsVisible(t, undefined)` hides every mutating and admin tool,
       // so an unpopulated `rights` here would empty `help`'s listing while `tools/list` stayed correct.
       rights,
+      ...(caller.record ? { callerRecord: caller.record } : {}),
+      viewReads,
       actor: { tokenId: caller.tokenId, tokenLabel: caller.tokenLabel },
       recordChanges: (before, after) => { snapshots = { before, after }; },
     });
@@ -535,8 +563,9 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     // A failed act after a passed vote is a FAILURE the act's tool answers with `spaceActFailureAnswer`'s body (design v5 section 2.2
     // v4 (3)): 500, as the REST route answers it - not the 422 of a call that was refused.
     const status = result?.isError ? (isSpaceActFailure(result) ? 500 : 422) : 200;
-    recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a, snapshots);
-    return withUnknownFieldRows({ result, status, callSpace }, rows);
+    recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a, snapshots, undefined, viewSpacesRead);
+    // A read through a view says which members it read (the answer is narrowed to what the caller reads now, never silently).
+    return withUnknownFieldRows({ result: result && !result.isError ? announceViewMembers(result, viewSpacesRead) : result, status, callSpace }, rows);
   } catch (err) {
     const answer = answerThrown(err);
     /*
@@ -555,10 +584,19 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
      */
     const isAct = mcpActOperation(name) !== null;
     if (!(err instanceof ConnectionsNotWritten) && (isAct ? !(err instanceof ToolRefusal) : tool?.mutating)) {
-      recordToolCall(caller, name, callSpace, answer.status, Date.now() - startedAt, a);
+      recordToolCall(caller, name, callSpace, answer.status, Date.now() - startedAt, a, undefined, undefined, viewSpacesRead);
     }
     return withUnknownFieldRows(answer, rows);
   }
+}
+
+/**
+ * A result of a read through a personal view, carrying the members it read in `structuredContent`, where both doors read it (every
+ * successful tool answer carries one: `a-tool-answer-reaches-both-halves`).
+ */
+function announceViewMembers(result: ToolResult, spaces: readonly string[] | undefined): ToolResult {
+  if (!spaces) return result;
+  return { ...result, structuredContent: { ...(result.structuredContent ?? {}), viewMembers: [...spaces] } };
 }
 
 /**
@@ -573,7 +611,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
  * that was forgotten is an unaudited mutation.
  */
 function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, status: number,
-  durationMs: number, args: unknown, snapshots?: AuditSnapshots, writtenId?: string): void {
+  durationMs: number, args: unknown, snapshots?: AuditSnapshots, writtenId?: string, viewSpaces?: readonly string[]): void {
   // The ARGUMENTS, because a capability with two subjects is audited under the subject of the call:
   // `network_sync` with a `peerId` records what the per-peer route records (`Q-37`).
   const act = mcpActOperation(toolName);
@@ -589,7 +627,9 @@ function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, s
     ip: caller.ip,
     method: caller.transport === 'mcp' ? 'MCP' : 'POST',
     path: caller.transport === 'mcp' ? `http:${toolName}` : `/api/${toolName}`,
-    spaceId: spaceId || null,
+    // A read through a personal view is ONE row with no space and the members read: nothing in it names the view.
+    spaceId: viewSpaces ? null : (spaceId || null),
+    ...(viewSpaces ? { spaces: [...viewSpaces] } : {}),
     // Q-50: the record the call acted on, as the REST entry names it from the path. A tool's `id` argument is always
     // its subject's id, so an operator filtering the log by record finds the MCP edit beside the REST one.
     // `writtenId`: a create whose record landed and whose connections failed names the record it stored (`Q-170`) —

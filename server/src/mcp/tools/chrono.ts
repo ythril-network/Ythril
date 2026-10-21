@@ -1,7 +1,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
 import { createChrono, deleteChrono, getChronoById, updateChrono, parseRecurrence } from '../../brain/chrono.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
@@ -29,8 +29,7 @@ const WHAT_A_PASSED_DATE_MEANS =
   + 'always see the stored value, whatever the setting.';
 import { getConfig } from '../../config/loader.js';
 import { checkQuota } from '../../quota/quota.js';
-import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
+import { findFirstAcrossMembers } from '../../spaces/across-members.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { getAllowedChronoTypes, getSpaceMeta, resolveMetaRefs } from '../../spaces/schema-validation.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
@@ -105,7 +104,6 @@ export const save_chronoTool: ToolHandler = {
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             recurrence: recurrenceSchema('Optional recurrence rule,'),
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             checkDuplicates: { type: 'boolean', default: true, description: 'Run a semantic near-duplicate check before storing (default true). When a highly similar entry already exists, the response flags it (id + summary + score) so you can update it instead of logging the same event twice. The entry is still stored regardless. Set false to skip.' },
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing entries that CONTRADICT this one — a near-neighbour claiming a different status, or setting the same single-valued property to a different value. Deterministic only (no model call). The entry is still stored regardless.' },
             waitForEmbedding: waitForEmbeddingSchema('chrono entry', true),
@@ -129,8 +127,6 @@ export const save_chronoTool: ToolHandler = {
       ? (a['properties'] as Record<string, string | number | boolean>)
       : undefined;
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -139,7 +135,7 @@ export const save_chronoTool: ToolHandler = {
 
     // Schema validation (single pass)
     // Validate type against the space-specific allowlist (custom or default built-ins).
-    const { meta: chronoMeta, allowed: allowedChronoTypes } = chronoTypeGate(wt.target);
+    const { meta: chronoMeta, allowed: allowedChronoTypes } = chronoTypeGate(callSpace);
     if (!allowedChronoTypes.has(chronoType)) {
       throw new Error(`type must be one of: ${[...allowedChronoTypes].join(', ')}`);
     }
@@ -160,7 +156,7 @@ export const save_chronoTool: ToolHandler = {
     // Refused BEFORE the record is written: the connections' shape, a class this kind cannot hold, under strict
     // linkage an id that names nothing, and every inline edge the space's schema refuses. `applyConnections` runs after
     // the write, so a refusal there would leave the record stored without the connections the same call asked for.
-    await assertConnections(wt.target, 'chrono', await connectionSubject(wt.target, 'chrono', a, { id: chronoSuppliedId }), a);
+    await assertConnections(callSpace, 'chrono', await connectionSubject(callSpace, 'chrono', a, { id: chronoSuppliedId }), a);
 
     const chronoSuppress = parseRecordSuppression(a);
     if (!chronoSuppress.ok) throw new Error(chronoSuppress.error);
@@ -168,7 +164,7 @@ export const save_chronoTool: ToolHandler = {
     if (!susCreate.ok) throw new Error(susCreate.error);
     // A schema refusal is NOT caught here (`Q-315`): it reaches `callTool`, which answers every tool's refusal the one way. This catch
     // answered `Error: schema_violation` and DROPPED the message, so the same refusal read three ways over one door.
-    const entry = await createChrono(wt.target, {
+    const entry = await createChrono(callSpace, {
       id: chronoSuppliedId,
       title,
       type: chronoType,
@@ -194,7 +190,7 @@ export const save_chronoTool: ToolHandler = {
     });
     // Links REPLACE per class, edges UPSERT. Both semantics live in `applyConnections`, after the record
     // exists — a relationship needs both ends, and the `from` is what was just minted.
-    const connected = await applyConnections(wt.target, entry._id, 'chrono', a, entry.author, ctx.actor);
+    const connected = await applyConnections(callSpace, entry._id, 'chrono', a, entry.author, ctx.actor);
 
     let text = `Chrono entry '${entry.title}' (${entry.type}) created (ID ${entry._id}, seq ${entry.seq}).`
       + (remQuota.softBreached ? `\n⚠️ Storage warning: ${remQuota.warning}` : '');
@@ -270,7 +266,7 @@ export const update_chronoTool: ToolHandler = {
     + 'never hides it from the graph or from a time-ordered listing.\n'
     + '- `ttlDays` — this entry\'s own expiry, the MOST specific of three tiers: it beats the type\'s retention '
     + 'window, which beats the space-wide one.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'RESPONSE: one line with the entry\'s id and its new `seq` — the sync sequence number, which increments '
     + 'on every write and is how a peer knows this version is newer. An id that does not exist is an error, not '
     + 'a silent no-op.\n\n'
@@ -349,7 +345,6 @@ export const update_chronoTool: ToolHandler = {
                 + '`createdAt`, `updatedAt`) are REFUSED by name rather than ignored, so a path that cannot be '
                 + 'honoured tells you instead of silently doing nothing.',
             },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             ttlDays: TTL_DAYS_SCHEMA,
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
             // a field on one verb and not the other is the gap this closes, and two hand-written copies
@@ -363,8 +358,6 @@ export const update_chronoTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -384,7 +377,7 @@ export const update_chronoTool: ToolHandler = {
       // Without it this was the ONE surface of four that let a record be moved to a type the space
       // does not allow — and an asymmetry between two write paths is worse than either rule alone,
       // because the constraint looks enforced right up until someone uses the other door.
-      const { allowed } = chronoTypeGate(wt.target);
+      const { allowed } = chronoTypeGate(callSpace);
       if (!allowed.has(a['type'] as string)) {
         throw new Error(`type must be one of: ${[...allowed].join(', ')}`);
       }
@@ -435,7 +428,7 @@ export const update_chronoTool: ToolHandler = {
 
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
     // It is also where the entry is LOCATED: which member space holds it, and so whose schema judges this edit.
-    const audit = await readEditAudit(wt.target, mid => getChronoById(mid, id), id, a, 'chrono');
+    const audit = await readEditAudit(callSpace, mid => getChronoById(mid, id), id, a, 'chrono');
     // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
     // changed — once the entry is found (a missing one is the not-found below, as REST's `404`), by the schema of the
     // member that holds it.
@@ -445,12 +438,12 @@ export const update_chronoTool: ToolHandler = {
     // Through the members, as REST's PATCH and every other update tool do: a write target may itself be a proxy, and the
     // entry lives in the member the audit read just found — updating the target as though it held it answered "not found".
     let updCheck: UpdateValidation | undefined;
-    const entry = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a), undefined, c => { updCheck = c; }));
+    const entry = await findFirstAcrossMembers([callSpace], mid => updateChrono(mid, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a), undefined, c => { updCheck = c; }));
     if (!entry) throw new NotFoundError(`Chrono entry '${id}' not found`);
     { const s = audit.snapshots(entry); ctx.recordChanges?.(s.before, s.after); }
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
-    // `entry.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
+    // `entry.spaceId` rather than `callSpace`: a proxy write lands where the record actually is.
     const connected = await applyConnections(entry.spaceId, entry._id, 'chrono', a, entry.author, ctx.actor);
     const schemaWarnings = schemaWarningAnswer(getSpaceMeta(entry.spaceId), updCheck, connected.warnings);
     return { content: [{ type: 'text' as const, text: [`Chrono entry '${entry.title}' updated (seq ${entry.seq}).`, ...schemaWarnings.lines].join('\n') }],
@@ -484,7 +477,7 @@ export const delete_chronoTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the entry\'s `_id`, as `filter` reports it. Required. An id that does not '
     + 'exist is an ERROR, not a silent success.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'RESPONSE: one line confirming the id that was deleted.',
   mutating: true,
   spaceRequired: true,
@@ -499,7 +492,6 @@ export const delete_chronoTool: ToolHandler = {
           + 'entry only drops them. A tombstone is written, so re-creating it with the same id does not '
           + 'undo this.',
       },
-      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'id'],
     additionalProperties: false,
@@ -509,8 +501,6 @@ export const delete_chronoTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
 
     /*
      * `M-2`: what points at this record can be SEEN now, so under strict linkage it can also block.
@@ -519,9 +509,9 @@ export const delete_chronoTool: ToolHandler = {
      * their own refusal for entities and said different things. The sentence and the rows come from
      * `entityDeleteBlockers`; a door decides only how to report them.
      */
-    const block = await findFirstAcrossMembers(wt.target, mid => entityDeleteBlockers(mid, id, 'chrono'));
+    const block = await findFirstAcrossMembers([callSpace], mid => entityDeleteBlockers(mid, id, 'chrono'));
     if (block) throw new Error(block.message);
-    const deleted = await findFirstAcrossMembers(wt.target, mid => deleteChrono(mid, id, ctx.actor));
+    const deleted = await findFirstAcrossMembers([callSpace], mid => deleteChrono(mid, id, ctx.actor));
     if (!deleted) throw new NotFoundError(`Chrono entry '${id}' not found`);
     return { content: [{ type: 'text' as const, text: `Chrono entry deleted (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true } };

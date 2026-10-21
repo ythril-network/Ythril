@@ -9,7 +9,7 @@ import { isMfaEnabled, verifyMfaCode } from '../auth/totp.js';
 import { z } from 'zod';
 import { SPACE_AREAS, RUNGS, RUNG_IMPLICATIONS, DERIVED_RUNGS } from '../config/rights-shape.js';
 import { ROUTE_RIGHTS, NOT_AREA_SCOPED } from '../auth/space-rights.js';
-import { refusalsOutsideEditorScope, editorScopeFor } from '../auth/editor-scope.js';
+import { refusalsOutsideEditorScope, refusalsToManageToken, editorScopeFor } from '../auth/editor-scope.js';
 import { capRights, describeExcess } from '../auth/mint-cap.js';
 import { reportServerFailure } from '../util/report-failure.js';
 import { refuseSelfFloorRaise } from '../auth/floor-guard.js';
@@ -587,11 +587,7 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
   //
   // Same rule the MINT route applies to a space-restricted creator, expressed once in `refusalsOutsideEditorScope` so
   // the two cannot drift into disagreeing about what "outside your scope" means.
-  const scopeRefusals = refusalsOutsideEditorScope({
-    editorSpaces: editorScopeFor(req.authToken),
-    target: previous,
-    rights: rights as never,
-  });
+  const scopeRefusals = refusalsToManageToken(req.authToken, previous, rights as never);
   if (scopeRefusals.length > 0) {
     res.status(403).json({
       error: `A space-restricted administrator cannot make this edit — ${scopeRefusals.join('; ')}.`,
@@ -737,11 +733,7 @@ tokensRouter.post('/:id/regenerate', authRateLimit, requireAdminOrSpaceAdminMfa,
 
   // The shared rule, same call as PATCH and DELETE. `rights: undefined` because a rotation changes no rights,
   // so only the guard's TARGET half applies.
-  const scopeRefusals = refusalsOutsideEditorScope({
-    editorSpaces: editorScopeFor(req.authToken),
-    target,
-    rights: undefined,
-  });
+  const scopeRefusals = refusalsToManageToken(req.authToken, target);
   if (scopeRefusals.length > 0) {
     res.status(403).json({
       error: `A space-restricted administrator cannot rotate this token — ${scopeRefusals.join('; ')}.`,
@@ -801,11 +793,7 @@ tokensRouter.delete('/:id', requireAdminOrSpaceAdminMfa, async (req, res) => {
   }
 
   // The same guard PATCH and the mint route use, on the verb that needed it most. See the note above.
-  const scopeRefusals = refusalsOutsideEditorScope({
-    editorSpaces: editorScopeFor(req.authToken),
-    target,
-    rights: undefined,
-  });
+  const scopeRefusals = refusalsToManageToken(req.authToken, target);
   if (scopeRefusals.length > 0) {
     res.status(403).json({
       error: `A space-restricted administrator cannot revoke this token — ${scopeRefusals.join('; ')}.`,

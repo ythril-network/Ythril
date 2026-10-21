@@ -14,13 +14,12 @@ import { readEditAudit } from '../../brain/edit-audit.js';
 // the allowlist `save_chrono` enforced, and two copies of a validation rule is how that happens.
 import { getConfig } from '../../config/loader.js';
 import { checkQuota } from '../../quota/quota.js';
-import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
+import { findFirstAcrossMembers } from '../../spaces/across-members.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
 import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
@@ -68,7 +67,6 @@ export const save_factTool: ToolHandler = {
               description: 'Optional structured key-value metadata (filterable via query). ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             checkDuplicates: { type: 'boolean', default: true, description: 'Run a semantic near-duplicate check before storing (default true). When a highly similar fact already exists, the response flags it (id + summary + score) so you can update it instead of creating a redundant one. The fact is still stored regardless. Set false to skip the check.' },
             waitForEmbedding: waitForEmbeddingSchema('fact', true),
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing facts that CONTRADICT this one — a near-neighbour that sets the same single-valued property to a different value (e.g. status="active" vs status="retired"). Different question from checkDuplicates: "is this redundant?" vs "does this conflict with what we already believe?". Deterministic only (no model call, no added latency). The fact is still stored regardless — if you are correcting an outdated fact, that is expected; consider updating or superseding the record named in the warning.' },
@@ -96,14 +94,12 @@ export const save_factTool: ToolHandler = {
     // MCP, the surface agents actually use. REST has always accepted `type`.
     const memType = typeof a['type'] === 'string' && a['type'].trim() ? a['type'] : undefined;
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
     const shapeErr = shapeError('fact', a);
     if (shapeErr) throw new Error(shapeErr);
-    const ts = wt.target;
+    const ts = callSpace;
 
     // Schema validation (single pass — reuse for both strict gate and warn output)
     const remMetaRaw = getConfig().spaces.find(s => s.id === ts)?.meta;
@@ -228,7 +224,7 @@ export const update_factTool: ToolHandler = {
     + 'still reach it. Excluding a record does not hide it from the graph.\n'
     + '- `ttlDays` — this record\'s own expiry, the MOST specific of three tiers: it beats the type\'s '
     + 'retention window, which beats the space-wide one.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'RESPONSE: one line with the fact\'s id and its new `seq` — the sync sequence number, which increments '
     + 'on every write and is how a peer knows this version is newer. An id that does not exist is an error, not '
     + 'a silent no-op.\n\n'
@@ -277,7 +273,6 @@ export const update_factTool: ToolHandler = {
             },
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             deleteFields: { type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' }, description: 'Dot-notation paths to delete from the fact (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
@@ -293,8 +288,6 @@ export const update_factTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -354,7 +347,7 @@ export const update_factTool: ToolHandler = {
     // Search member spaces sequentially — consistent with REST endpoint behaviour.
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
     // It is also where the record is LOCATED: which member space holds it, and so whose schema judges this edit.
-    const audit = await readEditAudit(wt.target, mid => listFacts(mid, { _id: id }, 1, 0).then(r => r[0] ?? null), id, a, 'fact');
+    const audit = await readEditAudit(callSpace, mid => listFacts(mid, { _id: id }, 1, 0).then(r => r[0] ?? null), id, a, 'fact');
     // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
     // changed — once the record is found (a missing one is the not-found below, as REST's `404`), by the schema of the
     // member that holds it.
@@ -362,12 +355,12 @@ export const update_factTool: ToolHandler = {
       await assertConnections(audit.home!, 'fact', await connectionSubject(audit.home!, 'fact', a, { stored: audit.prior as { _id: string; type?: string } }), a);
     }
     let updCheck: UpdateValidation | undefined;
-    const updated = await findFirstAcrossMembers(wt.target, mid => updateFact(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
+    const updated = await findFirstAcrossMembers([callSpace], mid => updateFact(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updated) { const s = audit.snapshots(updated); ctx.recordChanges?.(s.before, s.after); }
     if (!updated) throw new NotFoundError(`Fact '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
-    // `updated.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
+    // `updated.spaceId` rather than `callSpace`: a proxy write lands where the record actually is.
     const connected = await applyConnections(updated.spaceId, updated._id, 'fact', a, updated.author, ctx.actor);
     const schemaWarnings = schemaWarningAnswer(getSpaceMeta(updated.spaceId), updCheck, connected.warnings);
     return {
@@ -400,8 +393,7 @@ export const delete_factTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the fact\'s `_id`. Required. An id that does not exist is an ERROR, not a silent success, '
     + 'so a successful reply means a record really was deleted.\n'
-    + TARGET_SPACE_BULLET + ' Without it '
-    + 'the call is refused rather than guessing which member you meant.\n\n'
+    + '\n'
     + 'RESPONSE: one line confirming the id that was deleted.',
   mutating: true,
   spaceRequired: true,
@@ -416,7 +408,6 @@ export const delete_factTool: ToolHandler = {
                 + 'deleted. A tombstone is written under this id, which is why re-creating the record with '
                 + 'it does not undo the delete.',
             },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space', 'id'],
           additionalProperties: false,
@@ -426,8 +417,6 @@ export const delete_factTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
 
     /*
      * `M-2`: what points at this record can be SEEN now, so under strict linkage it can also block.
@@ -436,9 +425,9 @@ export const delete_factTool: ToolHandler = {
      * their own refusal for entities and said different things. The sentence and the rows come from
      * `entityDeleteBlockers`; a door decides only how to report them.
      */
-    const block = await findFirstAcrossMembers(wt.target, mid => entityDeleteBlockers(mid, id, 'fact'));
+    const block = await findFirstAcrossMembers([callSpace], mid => entityDeleteBlockers(mid, id, 'fact'));
     if (block) throw new Error(block.message);
-    const deleted = await findFirstAcrossMembers(wt.target, mid => deleteFact(mid, id, ctx.actor));
+    const deleted = await findFirstAcrossMembers([callSpace], mid => deleteFact(mid, id, ctx.actor));
     if (!deleted) throw new NotFoundError(`Fact '${id}' not found`);
     return {
       content: [{ type: 'text' as const, text: `Fact deleted (ID ${id}).` }],

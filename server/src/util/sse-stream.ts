@@ -30,6 +30,8 @@ export interface EventStream {
   send(chunk: string): void;
   /** Register what to undo when the stream ends (an unsubscribe). Runs once, whichever side closes. */
   onClose(fn: () => void): void;
+  /** End the stream from this side (the client reconnects and recomputes what it was told): frees its slot and runs every `onClose`. */
+  end(): void;
 }
 
 export interface EventStreamOptions {
@@ -101,5 +103,7 @@ export function openEventStream(req: Request, res: Response, opts: EventStreamOp
   heartbeat.unref?.();
   req.on('close', close);
 
-  return { send, onClose: fn => { if (closed) fn(); else cleanups.push(fn); } };
+  const end = (): void => { close(); if (!res.writableEnded) res.end(); };
+
+  return { send, onClose: fn => { if (closed) fn(); else cleanups.push(fn); }, end };
 }

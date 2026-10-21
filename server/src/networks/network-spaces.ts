@@ -35,8 +35,11 @@ import { networkJoinRefusal } from '../auth/network-rights.js';
 import { withInstanceAdminGrants } from '../auth/instance-admin-grants.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import type { SpaceCreator } from '../spaces/lifecycle.js';
-import { localToRemote, remoteToLocal, recordSpaceAlias, reverseSpaceMap, isSpaceId, forgetSpaceAliases } from '../sync/space-map.js';
-import { forgetReceiveMarks } from '../sync/member-space-mark.js';
+import { localToRemote, remoteToLocal, recordSpaceAlias, reverseSpaceMap, isSpaceId } from '../sync/space-map.js';
+import { clearSettledProposals, takeSpaceOutOfNetwork } from './take-space-out-of-network.js';
+
+// The pure cleanup lives in a leaf (the config loader's proxy migration shares it and must not import this module); re-exported for the callers that always imported it here.
+export { forgetPendingOffer, takeSpaceOutOfNetwork } from './take-space-out-of-network.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { SPACE_ALIAS_HEAL_OPERATION } from '../audit/middleware.js';
 import { log, peerList, peerText } from '../util/log.js';
@@ -196,29 +199,6 @@ export async function addSpacesToNetwork(
 }
 
 /**
- * A network space that is now carried is no longer a proposal: a pending entry left behind would offer to add it a
- * second time, and the network view would say the opposite of what syncs. One clean-up for both ways a space becomes
- * carried after create — adoption and the Q-133 heal — so neither leaves its offer standing; and for a space the
- * network deleted ({@link forgetPendingOffer}). @returns whether an offer was forgotten.
- */
-function clearSettledProposals(net: NetworkConfig, networkIds: readonly string[]): boolean {
-  const settled = new Set(networkIds);
-  if (!net.pendingSpaces?.some(p => settled.has(p.networkId))) return false;
-  net.pendingSpaces = net.pendingSpaces.filter(p => !settled.has(p.networkId));
-  return true;
-}
-
-/**
- * Forget the pending offer of one network space (design v5 §2.4, VR12) — the one spelling of "this network space is no longer on
- * offer here", so a passed deletion and a space leaving the network cannot clean it up two ways. A member that held the space only as
- * an offer kept it after the network deleted the space, and accepting it later re-added a space the network had voted away.
- * @returns whether an offer was forgotten.
- */
-export function forgetPendingOffer(net: NetworkConfig, networkSpaceId: string): boolean {
-  return clearSettledProposals(net, [networkSpaceId]);
-}
-
-/**
  * Take a space OUT of a network here, and keep it as a local space (`Q-70`).
  *
  * Owner, 2026-09-26: a network never deletes a member's space — *"remove space from network and delete for self so
@@ -234,17 +214,9 @@ export function forgetPendingOffer(net: NetworkConfig, networkSpaceId: string): 
 export function removeSpaceFromNetwork(networkId: string, localId: string, why: string): boolean {
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
-  if (!net || !net.spaces.includes(localId)) return false;
-  net.spaces = net.spaces.filter(s => s !== localId);
-  // The network's id for it, read before its alias is forgotten: the offer of it is forgotten by that id.
-  const networkSpaceId = localToRemote(net, localId);
-  forgetSpaceAliases(net, localId);
-  const hadLayer = Boolean(net.schemaLayers?.[localId]);
-  if (net.schemaLayers) delete net.schemaLayers[localId];
-  if (net.schemaLayerUnread) delete net.schemaLayerUnread[localId];
-  if (net.spaceOrigins) delete net.spaceOrigins[localId];
-  forgetReceiveMarks(net, localId);
-  forgetPendingOffer(net, networkSpaceId);
+  if (!net) return false;
+  const { carried, hadLayer } = takeSpaceOutOfNetwork(net, localId);
+  if (!carried) return false;
   saveConfig(cfg);
   log.info(`Network ${networkId}: space '${localId}' left the network (${why}); this instance keeps it as a local space`);
   if (hadLayer) {
@@ -271,11 +243,17 @@ export function adoptionDecision(
   localSpaceIds: readonly string[],
   entries: readonly { networkId: string; localId: string }[],
   now = Date.now(),
+  /** The ids a pre-6.0 proxy reserved (`config.retiredSpaceIds`): an announced space under one waits, as one under a local space's id does. */
+  retiredIds: readonly string[] = [],
 ): { adopt: { networkId: string; localId: string }[]; pending: { networkId: string; localId: string; why: string }[] } {
   const joiner = net.joinedBy ? tokens.find(t => t.id === net.joinedBy) : undefined;
   const adopt: { networkId: string; localId: string }[] = [];
   const pending: { networkId: string; localId: string; why: string }[] = [];
   for (const e of entries) {
+    if (retiredIds.includes(e.localId) && !localSpaceIds.includes(e.localId)) {
+      pending.push({ ...e, why: `'${e.localId}' is reserved: it was a shared proxy and is now personal views; an instance admin must purge what it still holds before the id is used again` });
+      continue;
+    }
     if (localSpaceIds.includes(e.localId)) {
       pending.push({ ...e, why: `a local space '${e.localId}' already exists; it joins the network only by an explicit mapping` });
       continue;
@@ -327,7 +305,7 @@ export async function adoptAnnouncedSpaces(networkId: string, fromInstanceId: st
   if (!net) return [];
   const proposed = spacesToAdopt(net, fromInstanceId, announced);
   if (!proposed.length) return [];
-  const { adopt: allowed, pending } = adoptionDecision(net, cfg.tokens, cfg.spaces.map(s => s.id), proposed);
+  const { adopt: allowed, pending } = adoptionDecision(net, cfg.tokens, cfg.spaces.map(s => s.id), proposed, Date.now(), cfg.retiredSpaceIds ?? []);
   holdAsPending(cfg, net, pending, fromInstanceId, `upstream ${fromInstanceId} announced`);
   // Credited to the token that joined the network here — the authority adoptionDecision just judged by (Q-134).
   if (!allowed.length) return [];
@@ -478,7 +456,7 @@ export function applySpaceAdditionRound(net: NetworkConfig, round: VoteRound, wh
         if (!liveNet) return done({ ok: true, added: [] });
         const localIds = now.spaces.map(s => s.id);
         if (!localIds.includes(entry.localId)) {
-          const { adopt, pending } = adoptionDecision(liveNet, now.tokens, localIds, [entry]);
+          const { adopt, pending } = adoptionDecision(liveNet, now.tokens, localIds, [entry], Date.now(), now.retiredSpaceIds ?? []);
           if (!adopt.length) {
             // Q-60: the schema the round carries waits with it, so an accept later adopts the space WITH its schema.
             const withMeta = round.pendingMeta ? pending.map(p => ({ ...p, meta: round.pendingMeta })) : pending;

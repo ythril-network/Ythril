@@ -52,7 +52,7 @@
  * function reads the space list and returns.
  */
 import { getConfig } from '../config/loader.js';
-import { convertAndMarkSpaces, linkConversionConcerns } from './links-conversion.js';
+import { convertAndMarkSpaces } from './links-conversion.js';
 import { log, peerList, peerText } from '../util/log.js';
 
 /**
@@ -81,7 +81,7 @@ export async function convertLinksOnBoot(): Promise<void> {
 
 async function convertPendingSpaces(): Promise<void> {
   // A proxy is never a subject: it holds no records, and its members convert in their own right.
-  const pending = getConfig().spaces.filter(s => linkConversionConcerns(s) && s.completeLinkage !== true);
+  const pending = getConfig().spaces.filter(s => s.completeLinkage !== true);
 
   if (pending.length === 0) return;
 

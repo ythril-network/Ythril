@@ -54,7 +54,7 @@ import { changeSpaceEntries } from '../config/change-space-entries.js';
 import { authorRef } from '../config/author.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { LEAKED_ROWS_REPAIR_OPERATION } from '../audit/middleware.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { removeFileLinksThisInstanceWrote } from '../brain/links.js';
 import { fileLinkSourcesAfter } from '../brain/link-adjacency.js';
 import { leakedRowsKeptTotal, leakedRowsRemovedTotal, leakedRowsRepairPendingSpaces } from '../metrics/registry.js';
@@ -139,7 +139,7 @@ export function restartLeakedRowScans(spaceIds: readonly string[]): void {
 
 /** Write the gauge: how many concrete spaces still owe a scan at `now`. Every pass writes it, so a pass that did not is visible. */
 export function publishLeakedRowScansOwed(now: Date): void {
-  leakedRowsRepairPendingSpaces.set(concreteSpaces().filter(s => scanIsOwed(s.leakedRowScan, now)).length);
+  leakedRowsRepairPendingSpaces.set(configuredSpaces().filter(s => scanIsOwed(s.leakedRowScan, now)).length);
 }
 
 /** What the scan stamp is compared with: a row written after it is a re-upload writing now. Mirrors {@link notAfter}, the delete's filter. */

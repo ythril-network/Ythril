@@ -11,6 +11,8 @@ import { resolveMasterSecret, isEnvelope, encryptEnvelope, decryptEnvelope } fro
 import { envIntOpt } from './env-num.js';
 import { migrateTokenRightsOnBoot } from '../auth/backfill-token-rights.js';
 import { keyedLock } from '../util/keyed-lock.js';
+import { migrateProxiesToViews, holdsLegacyProxies } from './migrate-proxies-to-views.js';
+import { validateViews } from './view-shape.js';
 
 const CONFIG_PATH = process.env['CONFIG_PATH'] ?? '/config/config.json';
 const SECRETS_PATH = path.join(path.dirname(CONFIG_PATH), 'secrets.json');
@@ -340,6 +342,29 @@ function normaliseLoadedConfig(parsed: Config): void {
   }
 }
 
+/**
+ * The boot half of the proxy-to-view migration, before it runs: take a copy of the file beside it before the first conversion (the way
+ * back to 5.x is that copy). A failure is a NAMED boot error and leaves `config.json` exactly as it was.
+ */
+function backUpBeforeProxyMigration(config: Config): void {
+  if (holdsLegacyProxies(config)) {
+    try {
+      const backup = `${CONFIG_PATH}.pre-6.0`;
+      if (!fs.existsSync(backup)) fs.copyFileSync(CONFIG_PATH, backup);
+      fs.chmodSync(backup, 0o600);
+    } catch (err) {
+      throw new Error(`config.json has proxy spaces to convert to personal views and the pre-6.0 copy could not be written (${peerText(err)}); config.json was not changed`);
+    }
+  }
+}
+
+/** The boot line the conversion says once. */
+function reportProxyMigration(result: ReturnType<typeof migrateProxiesToViews>): void {
+  log.warn(`Converted ${result.migrated.length} proxy space(s) to personal views (${result.copies} view(s) for the live instance-admin tokens`
+    + `${result.unclaimed.length ? `, ${result.unclaimed.length} kept unclaimed for an instance admin to claim` : ''}); their ids are reserved until purged.`
+    + (result.networksLeft.length ? ` A proxy was in ${result.networksLeft.length} network(s): its peers now see this member as having left that network space.` : ''));
+}
+
 /** Whether a config has been loaded yet. False only before first-run setup or before boot has read the file. */
 export function isConfigLoaded(): boolean {
   return _config !== null && _config !== undefined;
@@ -350,6 +375,8 @@ export function loadConfig(): Config {
   const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
   const parsed = JSON.parse(decodeStateFile(raw, 'config.json')) as Config;
   normaliseLoadedConfig(parsed);
+  // A malformed `views` list refuses the boot, naming the entry: a view nobody can name or delete must not be served (Q-531).
+  validateViews(parsed.views);
   _config = parsed;
   validateOidcBlock(_config);
   // Derive the per-space rights matrix for any token that has none. IN MEMORY ONLY, and deliberately not
@@ -360,6 +387,19 @@ export function loadConfig(): Config {
   // A boot migration is the right shape here at all only because tokens are LOCAL state — config.json does
   // not sync. Synced data must be migrated lazily and self-healingly instead.
   migrateTokenRightsOnBoot(_config);
+
+  // 6.0: a proxy space becomes personal views (Q-531). A pure transform of the object just parsed, so the file is untouched until it
+  // succeeds; a throw in it (named by the transform itself) aborts the boot rather than serve, or save, a half-migrated config.
+  backUpBeforeProxyMigration(_config);
+  const proxyMigration = migrateProxiesToViews(_config);
+  if (proxyMigration.changed) {
+    try {
+      saveConfig(_config);
+      reportProxyMigration(proxyMigration);
+    } catch (err) {
+      log.warn(`Could not persist the proxy-to-personal-view migration (will retry next boot): ${peerText(err)}`);
+    }
+  }
 
   // Durable one-time migration of the removed media-embedding master switch (writes config.json once).
   if (migrateMediaEmbeddingMasterSwitch(_config)) {
@@ -470,7 +510,11 @@ export function reloadConfig(): Config {
     throw new Error('config.json contains invalid JSON; current configuration unchanged');
   }
   normaliseLoadedConfig(parsed);
+  validateViews(parsed.views);
   validateOidcBlock(parsed);
+  // A restored 5.x config brings its proxies back as writable spaces unless it is converted here too. Nothing is saved (this function's
+  // contract): the next write, or the next boot, persists the result, and a repeat run is idempotent by origin.
+  migrateProxiesToViews(parsed);
   // Refresh the EXISTING object in place rather than swapping in a new one.
   //
   // Callers routinely do `const cfg = getConfig()`, await something, then

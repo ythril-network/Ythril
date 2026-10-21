@@ -38,21 +38,6 @@ import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
-import { isProxy } from '../spaces/proxy.js';
-
-/**
- * Whether a space is a SUBJECT of the link conversion: walked, marked, and reported when it was left behind.
- *
- * A proxy is not. It holds no records of its own — its members do, and they convert in their own right — so
- * walking one finds nothing and would then mark it complete on the strength of that, and it is never marked,
- * so any site asking only *"is it marked?"* reports it unconverted for ever. The array clear did exactly
- * that: every boot of an instance with a pre-5.0 proxy warned that the proxy still held its links as arrays
- * (`Q-78`). One question, asked by every site that chooses spaces for link work, so the next one cannot
- * answer it differently.
- */
-export function linkConversionConcerns(space: NonNullable<Parameters<typeof isProxy>[0]>): boolean {
-  return !isProxy(space);
-}
 
 /** What one space's conversion did, per collection and in total. */
 export interface ConversionReport {
@@ -351,9 +336,8 @@ export async function convertAndMarkSpaces(spaces: readonly { id: string }[]): P
 }
 
 /**
- * Convert every space this instance holds, then mark the ones that finished clean ({@link convertAndMarkSpaces}). A proxy is
- * not walked: it holds no records of its own (`linkConversionConcerns`).
+ * Convert every space this instance holds, then mark the ones that finished clean ({@link convertAndMarkSpaces}).
  */
 export async function convertAllLinks(): Promise<ConversionOutcome> {
-  return convertAndMarkSpaces(getConfig().spaces.filter(linkConversionConcerns));
+  return convertAndMarkSpaces(getConfig().spaces);
 }

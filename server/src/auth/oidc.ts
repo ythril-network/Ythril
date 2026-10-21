@@ -110,6 +110,9 @@ export interface OidcTokenRecord {
   admin: boolean;
   readOnly?: boolean;
   spaces?: string[];
+  /** The issuer and the `sub` claim as the IdP signed them: what a personal view's owner key is made of (`viewOwnerOf`). `null` when the token had no `sub`. */
+  oidcIssuer: string;
+  oidcSubject: string | null;
   /**
    * The same rights matrix a PAT carries, derived from the three fields above by `migrateToken` — the very
    * function the boot migration uses, so an OIDC identity and a PAT with the same claims are governed by
@@ -428,6 +431,8 @@ export async function validateOidcJwt(bearer: string): Promise<OidcTokenRecord |
 
     return {
       id: `oidc:${sub}`,
+      oidcIssuer: discovery.issuer,
+      oidcSubject: typeof payload.sub === 'string' && payload.sub ? payload.sub : null,
       name,
       createdAt,
       lastUsed: null,

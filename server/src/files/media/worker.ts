@@ -32,7 +32,7 @@
 
 import { getMediaEmbeddingConfig , getDocumentProcessingConfig } from '../../config/loader.js';
 import { toSafeRelPath } from '../../util/paths.js';
-import { concreteSpaceIds } from '../../spaces/proxy.js';
+import { configuredSpaceIds } from '../../spaces/space-lookup.js';
 import { intervalJob, type IntervalJob } from '../../util/interval-job.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { log } from '../../util/log.js';
@@ -300,7 +300,7 @@ async function workerLoop(): Promise<void> {
 
   // On startup: reset any stalled jobs (crash recovery)
   // The walk isolates a space that fails and quarantines one that hangs (`resetStalledJobs`), so this does not throw for a space.
-  const spaceIds = concreteSpaceIds();
+  const spaceIds = configuredSpaceIds();
   if (spaceIds.length > 0) {
     await resetStalledJobs(spaceIds, startupStalledTimeoutMs).catch(err =>
       log.warn(`Media worker: stalled job reset error: ${err instanceof Error ? err.message : String(err)}`),
@@ -315,7 +315,7 @@ async function workerLoop(): Promise<void> {
   const sweepIntervalMs = Math.max(30_000, Math.floor(startupStalledTimeoutMs / 2));
   stalledSweepJob = intervalJob(STALL_SWEEP_JOB, sweepIntervalMs, async () => {
     if (!running) return;
-    const ids = concreteSpaceIds();
+    const ids = configuredSpaceIds();
     if (ids.length === 0) return;
     // Re-read AND re-floored on every fire: the hop budgets are hot-reloadable too, so a raised OCR timeout
     // must move the stall floor without a restart.
@@ -362,7 +362,7 @@ async function workerLoop(): Promise<void> {
     // Re-read the space list on each claim (handles dynamic space creation/removal). No spaces is an empty
     // claim, which the pool answers with its idle backoff.
     claim: (): Promise<MediaJobDoc | null> => {
-      const activeSpaceIds = concreteSpaceIds();
+      const activeSpaceIds = configuredSpaceIds();
       return activeSpaceIds.length === 0 ? Promise.resolve(null) : claimNextJob(activeSpaceIds);
     },
     onClaimError: err => log.warn(`Media worker: claim error: ${err instanceof Error ? err.message : String(err)}`),

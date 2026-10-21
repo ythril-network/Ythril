@@ -41,6 +41,21 @@ export function publishBrainChange(ev: BrainChangeEvent): void {
   }
 }
 
+/**
+ * Subscribe to changes for SEVERAL spaces with ONE listener on the bus: a stream on a personal view of three members adds one listener, not
+ * three, and a change in each member is delivered once. Returns an unsubscribe function.
+ */
+export function subscribeBrainChangesAcross(spaceIds: readonly string[], listener: (ev: BrainChangeEvent) => void): () => void {
+  const wanted = new Set(spaceIds);
+  const handler = (ev: BrainChangeEvent): void => {
+    if (wanted.has(ev.spaceId)) {
+      try { listener(ev); } catch { /* isolate one subscriber's failure from the others */ }
+    }
+  };
+  _emitter.on('change', handler);
+  return () => { _emitter.off('change', handler); };
+}
+
 /** Subscribe to changes for a single space. Returns an unsubscribe function. */
 export function subscribeBrainChanges(spaceId: string, listener: (ev: BrainChangeEvent) => void): () => void {
   const handler = (ev: BrainChangeEvent): void => {

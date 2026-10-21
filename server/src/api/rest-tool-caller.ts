@@ -18,12 +18,14 @@
  */
 import { auditAuthMethod, auditOidcSubject } from '../audit/middleware.js';
 import type { ToolCaller } from '../mcp/call-tool.js';
+import { callerRecordOf } from '../mcp/caller-record.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import type { Request } from 'express';
 
 export function restToolCaller(req: Request): ToolCaller {
   return {
     rights: (req.authToken as { rights?: TokenRights } | undefined)?.rights,
+    ...(callerRecordOf(req.authToken) ? { record: callerRecordOf(req.authToken)! } : {}),
     tokenId: req.authToken?.id,
     tokenLabel: req.authToken?.name,
     ip: req.ip ?? '',

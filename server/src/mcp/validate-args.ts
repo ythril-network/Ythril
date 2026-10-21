@@ -50,7 +50,7 @@ let compiles = 0;
  * @param accessibleSpaceIds the spaces THIS token reaches. It decides whether `space` is required —
    see `materialisedSchema` — so it has to reach the compile, not just the enum inside `schemas`.
  */
-export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: readonly string[]): ArgsValidator {
+export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: readonly string[], viewIds: readonly string[] = []): ArgsValidator {
   // strict:false — don't throw on benign schema constructs (e.g. `default` with no useDefaults);
   // allowUnionTypes — TTL_DAYS_SCHEMA is `type: ['integer','null']`. Validation itself stays strict.
   // The ONE Ajv construction in the server (a derived gate holds that): an Ajv keeps every schema it has
@@ -75,7 +75,7 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
       if (!validate) {
         // The same materialisation `tools/list` advertises, not a second call to `inputSchema` — see B-6. The tolerant variant is a
         // SHALLOW COPY with the top level opened: never a change to what `materialisedSchema` returned, which `tools/list` shares.
-        const schema = materialisedSchema(tool, schemas, accessibleSpaceIds) as Record<string, unknown>;
+        const schema = materialisedSchema(tool, schemas, accessibleSpaceIds, viewIds) as Record<string, unknown>;
         validate = ajv.compile((tolerant ? { ...schema, additionalProperties: true } : schema) as object);
         cache.set(key, validate);
         compiles++;
@@ -113,7 +113,7 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
 /** How many reaches keep a validator. A COUNT, not bytes: an entry grows with tools times reachable spaces. */
 export const VALIDATOR_CACHE_LIMIT = 64;
 
-const SAFE_ID = /^[a-z0-9-]+$/;
+const SAFE_ID = /^@?[a-z0-9-]+$/;
 // Dropping an entry is what frees its Ajv; the count of drops is what the bound costs.
 const entries = new LruMap<string, ArgsValidator>(VALIDATOR_CACHE_LIMIT, () => toolValidatorCacheTotal.inc({ result: 'evict' }));
 /** Said once: the line names no id (a caller-chosen value), so one condition is one key. Forgotten by {@link _resetValidatorCache}. */
@@ -121,12 +121,15 @@ const UNKEYABLE = 'unkeyable-space-id';
 const unkeyableSaid = warnOnce<string>({ max: 1 });
 
 /** `null` when any id is not a plain space id, so the caller takes the uncached path rather than use a key that could alias. */
-function reachKey(ids: readonly string[]): string | null {
+function reachKey(ids: readonly string[], viewIds: readonly string[]): string | null {
   for (const id of ids) if (!SAFE_ID.test(id)) return null;
-  return ids.join('\0');
+  for (const id of viewIds) if (!SAFE_ID.test(id)) return null;
+  // The read enum and the write enum are told apart: a token that reaches the same spaces WITHOUT the view must not be handed the
+  // owner's validator, and its views with it. The U+0001 separator is no id character and not the one inside each list.
+  return `${ids.join('\0')}\u0001${viewIds.join('\0')}`;
 }
 
-function buildValidator(ids: readonly string[]): ArgsValidator {
+function buildValidator(ids: readonly string[], viewIds: readonly string[]): ArgsValidator {
   // A copy: the caller's array may be reused or mutated, and the enum inside the schemas is built from it.
   const copy = [...ids];
   const schemas = toolSchemasFor(copy);
@@ -134,7 +137,7 @@ function buildValidator(ids: readonly string[]): ArgsValidator {
   // mutating one would change what every later call is validated against. Nothing else is claimed frozen.
   Object.freeze(schemas.requiredSpace);
   Object.freeze(schemas.optionalSpace);
-  return makeArgsValidator(schemas, copy);
+  return makeArgsValidator(schemas, copy, [...viewIds]);
 }
 
 /**
@@ -160,13 +163,13 @@ function buildValidator(ids: readonly string[]): ArgsValidator {
  * because Ajv never evicts a compiled schema, so dropping the entry is what frees them. More reaches in
  * rotation than the limit shows as `ythril_tool_validator_cache_total{result="evict"}`.
  */
-export function validatorFor(accessibleSpaceIds: readonly string[]): ArgsValidator {
-  const key = reachKey(accessibleSpaceIds);
+export function validatorFor(accessibleSpaceIds: readonly string[], viewIds: readonly string[] = []): ArgsValidator {
+  const key = reachKey(accessibleSpaceIds, viewIds);
   if (key === null) {
     unkeyableSaid(UNKEYABLE, () => {
       log.warn('tool validator: a space id outside [a-z0-9-]+ was given; its validator is built per call and not cached');
     });
-    return buildValidator(accessibleSpaceIds);
+    return buildValidator(accessibleSpaceIds, viewIds);
   }
   // `get` makes the entry the most recently used (`util/lru-map.ts`).
   const hit = entries.get(key);
@@ -175,7 +178,7 @@ export function validatorFor(accessibleSpaceIds: readonly string[]): ArgsValidat
     return hit;
   }
   toolValidatorCacheTotal.inc({ result: 'miss' });
-  const built = buildValidator(accessibleSpaceIds);
+  const built = buildValidator(accessibleSpaceIds, viewIds);
   entries.set(key, built);
   return built;
 }

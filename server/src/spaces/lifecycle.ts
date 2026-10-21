@@ -24,7 +24,9 @@ import {
   type SpaceActRequest, type SpaceRoundSettled, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from './space-act-runner.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
-import { concreteSpaceIds, isProxy } from './proxy.js';
+import { configuredSpaceIds } from './space-lookup.js';
+import { assertNotRetiredSpaceId } from './unknown-space.js';
+import { dropSpaceFromViews } from '../config/views.js';
 import { removeTree } from '../files/remove-tree.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { forgetMerkleLeaves } from '../brain/merkle.js';
@@ -346,8 +348,6 @@ export interface AddedSpacesInit {
 
 /** What one pass over the owed spaces did. */
 interface OwedInitPass {
-  /** Owed ids that are proxies: they own no collections, so they owe nothing and are settled without an init. */
-  proxies: string[];
   /** The concrete spaces the pass tried to initialise, in order. */
   toInit: string[];
   /** The ones whose init landed: no longer owed, marked `building`, and handed to the index confirmation. */
@@ -384,12 +384,7 @@ async function initOwedSpaces(): Promise<OwedInitPass> {
   const configured = new Set(getConfig().spaces.map(s => s.id));
   for (const id of [...owedInit]) if (!configured.has(id)) owedInit.delete(id);
 
-  const concrete = new Set(concreteSpaceIds());
-  const owed = [...owedInit];
-  const proxies = owed.filter(id => !concrete.has(id));
-  for (const id of proxies) owedInit.delete(id);
-
-  const toInit = owed.filter(id => concrete.has(id));
+  const toInit = [...owedInit];
   const failures = new Map<string, unknown>();
   const walk = await eachSpace(SPACE_INIT_STEP, toInit, async (spaceId) => {
     log.debug(`Initialising space: ${spaceId}`);
@@ -420,7 +415,7 @@ async function initOwedSpaces(): Promise<OwedInitPass> {
     log.info(`Initialised ${ids.length} space(s); confirming vector index readiness in the background.`);
     void confirmSpaceIndexesInBackground(ids);
   }
-  return { proxies, toInit, landed, failures, walk };
+  return { toInit, landed, failures, walk };
 }
 
 /**
@@ -441,12 +436,14 @@ async function initOwedSpaces(): Promise<OwedInitPass> {
  * store-side member: a route answers `503` + `Retry-After` for it, `500` in our words otherwise, and a watcher records a failed
  * reload. The message holds ids and our words only; the driver's text is in the log and in the members.
  *
- * Proxies own no collections, so an added proxy owes nothing and is audited as applied.
  */
 export async function initAddedSpaces({ added, audit, rearm }: AddedSpacesInit): Promise<void> {
   markSpacesOwedInit(added);
-  const { proxies, toInit, landed, failures, walk } = await initOwedSpaces();
-  for (const id of proxies) audit(id, 200);
+  // A hand-edited added space under a retired proxy id: the reload's migration lifts a reservation that a live space shadows, so this is
+  // the guard against a creation path that skipped it. Said, never silent; the space is initialised as the operator wrote it.
+  const reserved = added.filter(id => { try { assertNotRetiredSpaceId(id); return false; } catch { return true; } });
+  if (reserved.length > 0) log.warn(`Added space(s) ${peerList(reserved, ', ')} use an id reserved by a retired proxy; an instance admin purges a reserved id before it is reused`);
+  const { toInit, landed, failures, walk } = await initOwedSpaces();
   for (const id of toInit) {
     if (landed.has(id)) audit(id, 200);
     else if (failures.has(id)) audit(id, storeFailureAnswer(failures.get(id), 'config reload')?.status ?? 500);
@@ -503,10 +500,7 @@ const confirmWaiterKey = (spaceId: string): string => `confirm-space:${spaceId}`
  * next reload, and the others are initialised and confirmed. The boot's catch is for what is not one space's failure.
  */
 export async function initAllSpaces(): Promise<void> {
-  // Concrete spaces only (`Q-98`). This walked every configured space, so each boot created a proxy's
-  // collections — which its creation never made and its deletion (config-only) never drops — while the
-  // reload path, which initialises spaces added to the file, already skipped proxies.
-  markSpacesOwedInit(concreteSpaceIds());
+  markSpacesOwedInit(configuredSpaceIds());
   // The reload's own init walk (`initOwedSpaces`): each space in its own step, so a space that cannot be initialised is said once
   // and stays owed to the next reload while the others are initialised and confirmed. It used to stop the boot's init at that space.
   await initOwedSpaces();
@@ -588,6 +582,8 @@ async function confirmSpaceIndexesInBackground(spaceIds: readonly string[]): Pro
 export async function ensureGeneralSpace(): Promise<void> {
   const cfg = getConfig();
   if (!cfg.spaces.some(s => s.id === 'general')) {
+    // The built-in id is never a proxy's; a reservation of it would be a corrupt config, and says so here rather than serving a space on top of it.
+    assertNotRetiredSpaceId('general', cfg);
     cfg.spaces.push({
       id: 'general',
       label: 'General',
@@ -616,13 +612,14 @@ export async function createSpace(opts: {
   label: string;
   folders?: string[];
   maxGiB?: number;
-  proxyFor?: string[];
   /** The initial meta, parsed (`Q-216`): a space is stored with the schema it was created with, so it is a store like the others. */
   meta?: ParsedSpaceMeta;
   /** Face descriptor width for this space. Create-only — see `SpaceConfig.faceDescriptorDims`. */
   faceDescriptorDims?: number;
 }, creator: SpaceCreator): Promise<SpaceConfig> {
   const cfg = getConfig();
+  // A pre-6.0 proxy's id stays reserved until an instance admin purges what it still holds: a new space under it would meet that data.
+  assertNotRetiredSpaceId(opts.id);
   if (cfg.spaces.some(s => s.id === opts.id)) {
     throw new Error(`Space '${opts.id}' already exists`);
   }
@@ -646,7 +643,6 @@ export async function createSpace(opts: {
     // Omitted rather than defaulted when absent, so an existing space and a new one at the built-in width
     // are the same shape on disk — a stored `128` would read as a deliberate choice nobody made.
     ...(opts.faceDescriptorDims ? { faceDescriptorDims: opts.faceDescriptorDims } : {}),
-    ...(isProxy(opts) ? { proxyFor: opts.proxyFor } : {}),
     ...(opts.meta ? { meta: opts.meta } : {}),
   };
   // Initialize MongoDB collections/indexes before committing to config so the space
@@ -655,10 +651,8 @@ export async function createSpace(opts: {
   // instead of blocking up to minutes past the client timeout (B1): the indexes are
   // created here, the space is returned as indexStatus 'building', and a background
   // task flips it to 'ready'/'failed' once the builds finish.
-  if (!isProxy(opts)) {
-    await initSpace(opts.id, { waitForVectorReady: false });
-    space.indexStatus = 'building';
-  }
+  await initSpace(opts.id, { waitForVectorReady: false });
+  space.indexStatus = 'building';
   // Safe to commit the `cfg` captured before the await, and worth knowing why, because the same
   // shape is NOT safe a few functions down: `cfg` is a TOP-LEVEL reference, and a reload refreshes
   // that object in place, so it stays current. `space` is a newly built object being added — not a
@@ -677,11 +671,9 @@ export async function createSpace(opts: {
     // An OIDC session: its rights come from the identity provider's mapping, so the grant has nowhere to live.
     log.warn(`Space '${peerText(opts.id)}' was created by a session with no stored rights; its creator reaches it only if its identity mapping does`);
   }
-  if (!isProxy(opts)) {
-    // The same confirmation boot runs: a space created while search is down is deferred, not failed, and is
-    // confirmed when the service returns.
-    void confirmSpaceIndexesInBackground([opts.id]);
-  }
+  // The same confirmation boot runs: a space created while search is down is deferred, not failed, and is
+  // confirmed when the service returns.
+  void confirmSpaceIndexesInBackground([opts.id]);
   return space;
 }
 
@@ -848,14 +840,6 @@ async function removeOwnCopy(spaceId: string, ctx: SpaceActBodyContext): Promise
   const builtIn = builtInRefusal(space, 'delete');
   if (builtIn) throw builtIn;
 
-  // Proxy spaces have no DB collections or files — a pure config removal, atomic
-  // via the single saveConfig, so no write-ahead marker is needed.
-  if (isProxy(space)) {
-    cfg.spaces = cfg.spaces.filter(s => s.id !== spaceId);
-    saveConfig(cfg);
-    return true;
-  }
-
   const resuming = cfg.pendingSpaceOp?.type === 'delete' && cfg.pendingSpaceOp.spaceId === spaceId;
   if (cfg.pendingSpaceOp && !resuming) {
     // Another op's marker: finish it first, or refuse with why it still cannot be finished.
@@ -880,8 +864,10 @@ async function removeOwnCopy(spaceId: string, ctx: SpaceActBodyContext): Promise
     );
   }
 
-  // Commit: drop done — remove from config and clear the marker in one atomic write.
+  // Commit: drop done — remove from config (and from every personal view that listed it, so a recreated id never silently rejoins)
+  // and clear the marker in one atomic write.
   cfg.spaces = cfg.spaces.filter(s => s.id !== spaceId);
+  dropSpaceFromViews(cfg, spaceId);
   delete cfg.pendingSpaceOp;
   saveConfig(cfg);
   // Nothing is waiting for a space that no longer exists: its deferred confirmation and its collections' index waiters.
@@ -1247,6 +1233,7 @@ async function resumePendingSpaceOp(): Promise<ResumeResult> {
       // a spaces array captured before it.
       mutateConfig(fresh => {
         fresh.spaces = fresh.spaces.filter(sp => sp.id !== op.spaceId);
+        dropSpaceFromViews(fresh, op.spaceId);
         delete fresh.pendingSpaceOp;
       });
       log.info(`Completed interrupted deletion ${peerText(target)}`);

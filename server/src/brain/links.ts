@@ -47,7 +47,7 @@ import { removeWithTombstones } from './tombstones.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { assertRefs, missingRefs, missingRefsRefusal, ReferenceRefusal } from './entity-refs.js';
-import { isStrictLinkage } from '../spaces/proxy.js';
+import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { AuthorRef, LinkDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —

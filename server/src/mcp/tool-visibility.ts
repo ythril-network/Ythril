@@ -10,6 +10,8 @@ export interface VisibilityFlags {
   spaceAdmin?: boolean;
   /** Creates a space: reachable with the createSpaces right or instance admin (`Q-134`, `auth/create-spaces.ts`). */
   createsSpaces?: boolean;
+  /** Owner-scoped (a personal view of the caller's own, Q-531): visible to every token with a matrix, a read-only one included. */
+  ownerScoped?: boolean;
 }
 
 /**
@@ -52,6 +54,7 @@ export function toolIsVisible(tool: VisibilityFlags, rights: TokenRights | undef
   // Same correction as the token-routes gate: a floor of `admin` administers every space and holds no
   // per-space rows, so counting rows hid every space-admin tool from a token that fully qualifies.
   if (tool.spaceAdmin) return rights?.instanceAdmin === true || administersAnySpace({ rights });
+  if (tool.ownerScoped) return rights !== undefined;
   if (tool.mutating) return canWriteAnywhere(rights);
   return true;
 }

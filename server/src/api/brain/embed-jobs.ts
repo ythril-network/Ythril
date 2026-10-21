@@ -28,10 +28,10 @@
 import { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { getConfig } from '../../config/loader.js';
-import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import { resolveWriteTarget } from '../../spaces/proxy.js';
-import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
+import { } from '../../config/loader.js';
+import { readSpacesOfRequest } from '../../spaces/read-scope.js';
+import { retiredWriteFieldError } from '../../brain/retired-write-fields.js';
+import { answeredUnknownSpace } from '../write-target-answer.js';
 import {
   retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
 } from '../../brain/embed-queue.js';
@@ -49,10 +49,7 @@ export const embedJobsRouter = Router();
 // space to retry it in, which would make the listing unactionable through the very surface it is meant to enable.
 embedJobsRouter.get('/spaces/:spaceId/embedding-queue/records', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  if (!getConfig().spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
 
   // The query string's text, turned into what the act validates: the caps and refusals are the act's, the same ones
   // `list_embed_jobs` answers with (Q-109). An empty value is an absent one.
@@ -61,7 +58,7 @@ embedJobsRouter.get('/spaces/:spaceId/embedding-queue/records', globalRateLimit,
     return typeof v === 'string' && v !== '' ? v : undefined;
   };
   const num = (v: string | undefined): number | undefined => (v === undefined ? undefined : Number(v));
-  const page = await embedJobsPage(memberSpacesForRequest(req, spaceId), {
+  const page = await embedJobsPage(readSpacesOfRequest(req, spaceId), {
     status: q('status'), limit: num(q('limit')), skip: num(q('skip')),
   });
   if (!page.ok) { res.status(400).json({ error: page.error }); return; }
@@ -78,12 +75,15 @@ embedJobsRouter.get('/spaces/:spaceId/embedding-queue/records', globalRateLimit,
 // path-segment id would 404 on exactly the records most likely to be malformed.
 embedJobsRouter.post('/spaces/:spaceId/embedding-queue/records/retry', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  if (!getConfig().spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
+  // The existence rule first (a view id, a retired id and an unknown id are answered as such), then the retired `targetSpace` by name.
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+
+  const body = (req.body ?? {}) as { recordType?: unknown; recordId?: unknown };
+  const retiredField = retiredWriteFieldError(body);
+  if (retiredField) {
+    res.status(400).json({ error: retiredField });
     return;
   }
-
-  const body = (req.body ?? {}) as { recordType?: unknown; recordId?: unknown; targetSpace?: unknown };
   if (!isEmbedRecordType(body.recordType)) {
     res.status(400).json({ error: `recordType must be one of ${EMBED_RECORD_TYPES.join(', ')}` });
     return;
@@ -94,21 +94,15 @@ embedJobsRouter.post('/spaces/:spaceId/embedding-queue/records/retry', globalRat
     return;
   }
 
-  // A proxy space stores nothing itself, so a retry has to name the member. Same helper the write routes use, so the
-  // error text a caller gets is the one they already know from every other proxy write — including its refusal of a
-  // `targetSpace` that is not a string, which this door used to read as absent and answer with a misleading "specify one".
-  const wt = resolveWriteTarget(spaceId, body.targetSpace, restWriteGrant(req, 'knowledge', 'write'));
-  if (answerWriteTarget(res, wt)) return;
-
-  const result = await retryEmbedJob(wt.target, body.recordType, recordId);
+  const result = await retryEmbedJob(spaceId, body.recordType, recordId);
   if (result === 'not_found') {
     res.status(404).json({
-      error: `No embed job for ${body.recordType} '${recordId}' in space '${wt.target}'`,
+      error: `No embed job for ${body.recordType} '${recordId}' in space '${spaceId}'`,
       result,
     });
     return;
   }
   // `processing` is 200, not a conflict: the job IS queued and IS going to run, which is what the caller wanted. The
   // outcome is returned verbatim so a caller can branch without reading the English.
-  res.status(result === 'ok' ? 202 : 200).json({ result, recordType: body.recordType, recordId, spaceId: wt.target });
+  res.status(result === 'ok' ? 202 : 200).json({ result, recordType: body.recordType, recordId, spaceId: spaceId });
 });

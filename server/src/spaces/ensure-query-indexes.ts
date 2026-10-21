@@ -43,7 +43,7 @@ import { ensureEdgeGuardIndex } from './edge-guard-index.js';
 import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { ensureFileTombstoneIndexes, positionLegacyFileTombstones } from '../files/tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { concreteSpaces } from './proxy.js';
+import { configuredSpaces } from './space-lookup.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 
@@ -87,7 +87,7 @@ const TYPE_FILTERED = Object.values(COLLECTION_SUFFIX);
  */
 export async function ensureQueryIndexes(): Promise<number> {
   let issued = 0;
-  await eachSpace(QUERY_INDEXES_STEP, concreteSpaces(), async (space) => {   // pre-setup: none, so nothing to index yet
+  await eachSpace(QUERY_INDEXES_STEP, configuredSpaces(), async (space) => {   // pre-setup: none, so nothing to index yet
     const keyset: KeysetBuild[] = [];
     const units: Array<{ name: string; ensure: () => Promise<unknown> }> = [
       // The keyset indexes first: the sync readers wait for them, and the others are cheap beside them.

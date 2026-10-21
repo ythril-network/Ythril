@@ -9,9 +9,9 @@ import { addLink, removeLink, LINK_PAIRS, linkLabel } from '../../brain/links.js
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
-import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
-import { DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { isStrictLinkage } from '../../spaces/space-lookup.js';
+import { findFirstAcrossMembers } from '../../spaces/across-members.js';
+import { DELETION_REACH } from './shared.js';
 import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 
 /** Every legal class, as the arrays spell them — used in the schema text and in the refusal. */
@@ -55,7 +55,7 @@ export const save_linkTool: ToolHandler = {
     + 'one is an ERROR: a link hanging off a record that does not exist is the dangling half this refuses '
     + 'to create.\n'
     + '- `to` / `toKind` — the record it concerns.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'RESPONSE: the link record, including the derived `_id` you would pass to `delete_link`.\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
@@ -79,7 +79,6 @@ export const save_linkTool: ToolHandler = {
           + 'traversal that comes back empty.',
       },
       toKind: kindSchema('to'),
-      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'from', 'fromKind', 'to', 'toKind'],
     additionalProperties: false,
@@ -96,15 +95,13 @@ export const save_linkTool: ToolHandler = {
       throw new Error(`a ${fromKind} cannot link to a ${toKind} — the link classes are: ${PAIR_LABELS}`);
     }
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
 
-    if (isStrictLinkage(wt.target)) {
-      await assertRefsResolve(wt.target, 'from', fromKind, [from]);
-      await assertRefsResolve(wt.target, 'to', toKind, [to]);
+    if (isStrictLinkage(callSpace)) {
+      await assertRefsResolve(callSpace, 'from', fromKind, [from]);
+      await assertRefsResolve(callSpace, 'to', toKind, [to]);
     }
 
-    const link = await addLink(wt.target, from, fromKind, to, toKind, ctx.actor);
+    const link = await addLink(callSpace, from, fromKind, to, toKind, ctx.actor);
     // Built once and carried in BOTH halves — see the note on `save_edge`'s return.
     const written = { ...link, label: linkLabel(link.fromKind, link.toKind) };
     return {
@@ -129,7 +126,7 @@ export const delete_linkTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the link\'s `_id`, as `save_link` and `filter` report it. An id that is not a link is an '
     + 'ERROR, not a silent success.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'RESPONSE: one line confirming the id that was removed.',
   mutating: true,
   spaceRequired: true,
@@ -142,7 +139,6 @@ export const delete_linkTool: ToolHandler = {
         description: 'The link\'s `_id`. An id that is not a link is an ERROR, not a silent success. The two '
           + 'records at either end are never touched.',
       },
-      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'id'],
     additionalProperties: false,
@@ -152,10 +148,8 @@ export const delete_linkTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
 
-    const removed = await findFirstAcrossMembers(wt.target, mid => removeLink(mid, id, ctx.actor));
+    const removed = await findFirstAcrossMembers([callSpace], mid => removeLink(mid, id, ctx.actor));
     if (!removed) throw new Error(`Link '${id}' not found`);
     return { content: [{ type: 'text' as const, text: `Link removed (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true } };

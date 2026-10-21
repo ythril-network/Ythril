@@ -7,7 +7,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { previewEntityCascade } from '../../brain/entity-delete-cascade.js';
 import { getEntityById } from '../../brain/entities.js';
-import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
+import { readSpacesOfCall } from '../../spaces/read-scope.js';
 
 export const delete_entity_previewTool: ToolHandler = {
   name: 'delete_entity_preview',
@@ -54,7 +54,7 @@ export const delete_entity_previewTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, accessibleSpaceIds } = ctx;
+    const { args: a, callSpace } = ctx;
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
@@ -68,7 +68,7 @@ export const delete_entity_previewTool: ToolHandler = {
      * what the connection reaches — otherwise a scoped token previews an entity in a member space it cannot
      * see. `proxy-fanout-inventory.test.js` caught it, which is what that inventory is for.
      */
-    for (const mid of memberSpacesWithin(callSpace, accessibleSpaceIds)) {
+    for (const mid of readSpacesOfCall(ctx, callSpace)) {
       if (!(await getEntityById(mid, id))) continue;
       const preview = await previewEntityCascade(mid, id);
       // Not pretty-printed: indentation is billed to the caller's context and read by nothing.

@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEntity, getEntityById, updateEntityById, upsertEntity } from '../../brain/entities.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -11,8 +11,7 @@ import type { UpdateValidation } from '../../brain/write-validation.js';
 import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { type PropertyResolution, type EndpointRuleWarning, mergeEntities, MERGE_MAX_RELINKS } from '../../brain/merge.js';
 import { getConfig } from '../../config/loader.js';
-import { isProxySpace, resolveMemberSpaces, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
+import { findFirstAcrossMembers } from '../../spaces/across-members.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
@@ -58,7 +57,6 @@ export const save_entityTool: ToolHandler = {
               description: 'Key-value properties (e.g. {"wheels": 4, "color": "red"}). Values must be string, number, or boolean. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             checkContradictions: { type: 'boolean', default: false, description: 'Also flag existing entities that CONTRADICT this one — a near-neighbour setting the same single-valued property to a different value. Deterministic only (no model call). The entity is still stored regardless.' },
             checkDuplicates: { type: 'boolean', default: true, description: 'On a NEW entity insert (no id / unknown id), run a semantic near-duplicate check first (default true). Flags highly similar existing entities (id + summary + score) so you can merge or update instead of creating a duplicate. Does not fire on updates. Set false to skip.' },
             waitForEmbedding: waitForEmbeddingSchema('entity', true),
@@ -83,8 +81,6 @@ export const save_entityTool: ToolHandler = {
     const description = typeof a['description'] === 'string' ? a['description'] : undefined;
     const rawId = typeof a['id'] === 'string' ? a['id'].trim() : undefined;
     if (rawId !== undefined && !UUID_V4_RE.test(rawId)) throw new Error('id must be a valid UUID v4');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -94,7 +90,7 @@ export const save_entityTool: ToolHandler = {
     // Schema validation of the record this upsert will PRODUCE, not of the payload. With an `id` that
     // matches, `upsertEntity` merges into the stored record, so validating the payload alone refused
     // partial patches whose merged result was perfectly conformant.
-    const entMetaRaw = getConfig().spaces.find(s => s.id === wt.target)?.meta;
+    const entMetaRaw = getConfig().spaces.find(s => s.id === callSpace)?.meta;
     const entMeta = entMetaRaw ? resolveMetaRefs(entMetaRaw) : undefined;
     // The check runs inside `upsertEntity` now — this tool, the REST route and `bulk.ts` each held a copy of
     // it, and `bulk.ts`'s enforced a different rule. The refusal arrives as `SchemaViolationError`, whose
@@ -110,7 +106,7 @@ export const save_entityTool: ToolHandler = {
     // Refused BEFORE the record is written: the connections' shape, a class this kind cannot hold, under strict
     // linkage an id that names nothing, and every inline edge the space's schema refuses. `applyConnections` runs after
     // the write, so a refusal there would leave the record stored without the connections the same call asked for.
-    await assertConnections(wt.target, 'entity', await connectionSubject(wt.target, 'entity', a, { id: rawId, type: eType.trim() }), a);
+    await assertConnections(callSpace, 'entity', await connectionSubject(callSpace, 'entity', a, { id: rawId, type: eType.trim() }), a);
 
     // The record tier, which no create door stated until 2026-09-02. `parseRecordSuppression` owns the
     // grammar, so a change to it reaches every create door at once rather than one at a time.
@@ -121,7 +117,7 @@ export const save_entityTool: ToolHandler = {
     // A schema refusal is NOT caught here (`Q-315`): it reaches `callTool`, which answers every tool's refusal the one way — the
     // structured body and `Error: schema_violation: <message>`. A tool that caught its own could say something else, and the chrono
     // tool did (it dropped the message).
-    const { entity, warning, similar, contradicts } = await upsertEntity(wt.target, eName, eType, tags, props, description, rawId,
+    const { entity, warning, similar, contradicts } = await upsertEntity(callSpace, eName, eType, tags, props, description, rawId,
       {
         checkDuplicates: entDupeCheck, checkContradictions: entContraCheck, dupeThreshold: entDupeThreshold,
         ...(a['waitForEmbedding'] === true ? { waitForEmbedding: true } : {}),
@@ -132,7 +128,7 @@ export const save_entityTool: ToolHandler = {
 
     // Links REPLACE per class, edges UPSERT. Both semantics live in `applyConnections`, after the record
     // exists — a relationship needs both ends, and the `from` is what was just minted.
-    const connected = await applyConnections(wt.target, entity._id, 'entity', a, entity.author, ctx.actor);
+    const connected = await applyConnections(callSpace, entity._id, 'entity', a, entity.author, ctx.actor);
 
     let msg = `Entity '${entity.name}' (${entity.type}) upserted (ID ${entity._id}).${warning ? `\n⚠️ ${warning}` : ''}`;
     if (similar && similar.length > 0) {
@@ -187,8 +183,7 @@ export const update_entityTool: ToolHandler = {
     + '`_graph`.\n'
     + '- `ttlDays` — this record\'s own expiry, and the MOST specific of three tiers: it beats the type\'s '
     + 'retention window, which beats the space-wide one.\n'
-    + TARGET_SPACE_BULLET + ' Without it the '
-    + 'call is refused rather than guessing which member you meant.\n\n'
+    + '\n'
     + 'RESPONSE: one line naming the entity, its type, its id and its new `seq` — the sync sequence number, '
     + 'which increments on every write and is how a peer knows this version is newer. An id that does not exist '
     + 'is an error, not a silent no-op, so a successful reply means a record really changed.\n\n'
@@ -236,7 +231,6 @@ export const update_entityTool: ToolHandler = {
             },
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             deleteFields: { type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' }, description: 'Dot-notation paths to delete from the entity (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
             // `Q-30`: the same connection fields the CREATE tool takes, from the one builder both read —
@@ -251,8 +245,6 @@ export const update_entityTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -295,7 +287,7 @@ export const update_entityTool: ToolHandler = {
 
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
     // It is also where the record is LOCATED: which member space holds it, and so whose schema judges this edit.
-    const audit = await readEditAudit(wt.target, mid => getEntityById(mid, id), id, a, 'entity');
+    const audit = await readEditAudit(callSpace, mid => getEntityById(mid, id), id, a, 'entity');
     // Refused BEFORE the update lands, or a bad link id or a refused inline edge leaves every other field already
     // changed — once the record is found (a missing one is the not-found below, as REST's `404`), by the schema of the
     // member that holds it, and judged by the type this patch leaves the entity.
@@ -304,13 +296,13 @@ export const update_entityTool: ToolHandler = {
         await connectionSubject(audit.home!, 'entity', a, { stored: audit.prior, type: updates.type }), a);
     }
     let updCheck: UpdateValidation | undefined;
-    const updatedEnt = await findFirstAcrossMembers(wt.target, mid => updateEntityById(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
+    const updatedEnt = await findFirstAcrossMembers([callSpace], mid => updateEntityById(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updatedEnt) { const s = audit.snapshots(updatedEnt); ctx.recordChanges?.(s.before, s.after); }
     // A record the call names and cannot find is a 404, as the PATCH route answers it (`NotFoundError`, mapped once by `callTool`).
     if (!updatedEnt) throw new NotFoundError(`Entity '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both
     // semantics live in `applyConnections`, after the record write, exactly as the create does it.
-    // `updated.spaceId` rather than `wt.target`: a proxy write lands where the record actually is.
+    // `updated.spaceId` rather than `callSpace`: a proxy write lands where the record actually is.
     const connected = await applyConnections(updatedEnt.spaceId, updatedEnt._id, 'entity', a, updatedEnt.author, ctx.actor);
     // What a `warn` space says about the record as the update leaves it, and about its inline edges — from the classification the
     // writer handed back (create says the same, `schemaWarningAnswer`).
@@ -382,7 +374,6 @@ export const graph_mergeTool: ToolHandler = {
                 additionalProperties: false,
               },
             },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space', 'survivorId', 'absorbedId'],
           additionalProperties: false,
@@ -395,10 +386,6 @@ export const graph_mergeTool: ToolHandler = {
     if (!absorbedId || !UUID_V4_RE.test(absorbedId)) throw new Error('absorbedId must be a valid UUID v4');
     if (survivorId === absorbedId) throw new Error('Cannot merge an entity with itself');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
-
-    if (isProxySpace(callSpace)) throw new Error('Entity merge not supported on proxy spaces');
 
     const resolutions: PropertyResolution[] = [];
     if (Array.isArray(a['resolutions'])) {
@@ -416,7 +403,7 @@ export const graph_mergeTool: ToolHandler = {
 
     // The one merge sequence every door runs (`mergeEntities`). A refusal it throws (`merge_too_large`, a strict
     // schema) is answered by `callTool` through `mergeRefusal`, with the status every door gives it.
-    const outcome = await mergeEntities(wt.target, survivorId, absorbedId, resolutions, ctx.actor);
+    const outcome = await mergeEntities(callSpace, survivorId, absorbedId, resolutions, ctx.actor);
     if (outcome.kind === 'not-found' || outcome.kind === 'invalid-resolution') throw new Error(outcome.error);
 
     if (outcome.kind === 'unresolved') {
@@ -516,7 +503,6 @@ export const delete_entityTool: ToolHandler = {
           + 'since the preview — so a record created after you looked cannot be deleted by a decision taken '
           + 'before it existed. Nothing at the other end of those edges is touched.',
       },
-      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'id'],
     additionalProperties: false,
@@ -526,10 +512,8 @@ export const delete_entityTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
 
-    for (const mid of resolveMemberSpaces(wt.target)) {
+    for (const mid of [callSpace]) {
       const existing = await getEntityById(mid, id);
       if (!existing) continue;
       /*

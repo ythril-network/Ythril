@@ -35,7 +35,7 @@
  *
  * Removed at the next major.
  */
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { getDb, col, asFilter } from '../db/mongo.js';
 import { heldFileTombstones, shadowDecision } from '../files/tombstones.js';
 import { writeArrivals, warnArrivalsNotStored } from './arrivals.js';
@@ -80,9 +80,9 @@ const SUB = {
 
 /** Drain every space's stray file-metadata collection. Returns the spaces whose collection was dropped. */
 export async function drainStrayFileMeta({ pageSize = 500, maxPages = 20 }: { pageSize?: number; maxPages?: number } = {}): Promise<string[]> {
-  // Proxy spaces own no collections; `concreteSpaces` is empty before setup. A space whose drain throws is reported once, by
+  // Proxy spaces own no collections; `configuredSpaces` is empty before setup. A space whose drain throws is reported once, by
   // name and sub-step, with its collection kept for the next cycle; the walk goes on to the next.
-  const walk = await walkSpaces(STEP, concreteSpaces(), (space, ctx) => drainSpace(space.id, pageSize, maxPages, ctx));
+  const walk = await walkSpaces(STEP, configuredSpaces(), (space, ctx) => drainSpace(space.id, pageSize, maxPages, ctx));
   return walk.outcomes.filter(o => o.value === true).map(o => o.spaceId);
 }
 

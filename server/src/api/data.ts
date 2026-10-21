@@ -30,7 +30,7 @@ import { dumpDatabase } from '../db/dump.js';
 import { restoreDatabase } from '../db/restore.js';
 import { reportDatabaseReplaced } from '../db/mongo.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 import { ensureEdgeIdentityIndex } from '../spaces/lifecycle.js';
 import { ensureEdgeGuardIndex, edgeIndexFailure } from '../spaces/edge-guard-index.js';
@@ -394,7 +394,7 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     // The leaked-rows scan of every space starts again once the rows are in, and also when the restore stopped part-way: either way the
     // rows now there were never read, and a scan that had completed would sit out its day over them. Nothing is scanned here.
     try { await restoreDatabase(getMongoUri(), backupDir); }
-    finally { restartLeakedRowScans(concreteSpaces().map(s => s.id)); }
+    finally { restartLeakedRowScans(configuredSpaces().map(s => s.id)); }
     // The restore wrote through its own client, which the record-write observer never sees: tell every listener
     // the database was replaced, so nothing keeps answering from the data as it was before (`Q-95`).
     reportDatabaseReplaced();
@@ -414,7 +414,7 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     // indexes, seconds apiece, so a sequential loop grew this request by several seconds per space and
     // timed out on an instance with a few dozen of them — reporting a failed restore that had succeeded.
     // Bounded rather than all at once, so a large instance does not hand mongod every index build together.
-    const spaces = concreteSpaces();   // a proxy owns no collections, so it has no indexes to rebuild
+    const spaces = configuredSpaces();   // a proxy owns no collections, so it has no indexes to rebuild
     const outcomes = await mapLimit(spaces, RESTORE_INDEX_CONCURRENCY, async (space) => {
       /*
        * The edges' unique indexes (`Q-439`, `Q-445`): the identity index and the write guard's. The restore dropped every

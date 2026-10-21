@@ -31,7 +31,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { eachSpace, eachUnit, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { intervalJob } from '../util/interval-job.js';
@@ -88,7 +88,7 @@ export async function pruneTombstonesToFloor(spaceId: string, floor: TombstoneFl
  */
 export async function pruneAllTombstones(): Promise<TombstonePruneResult> {
   const result: TombstonePruneResult = { removed: 0, filesRemoved: 0, blocked: {}, walk: { failed: [], outcomes: [], skipped: [] } };
-  result.walk = await eachSpace(STEP, concreteSpaces(), async (s) => {
+  result.walk = await eachSpace(STEP, configuredSpaces(), async (s) => {
     // Read per space, not once before the loop: the prune awaits, and a floor must come from the networks as
     // they are when this space is pruned.
     const cfg = getConfig();

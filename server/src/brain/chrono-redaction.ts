@@ -38,7 +38,7 @@
  * winning semantic searches over real knowledge, and a record with no vector cannot win one.
  */
 import { col, asFilter, asUpdate } from '../db/mongo.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { log, peerText } from '../util/log.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -197,7 +197,7 @@ interface RetentionUnit { name: string; run: () => Promise<void> }
  */
 export async function sweepChronoRetention(now: Date = new Date()): Promise<ChronoRetentionResult> {
   const result: ChronoRetentionResult = { stamped: 0, redacted: 0 };
-  await eachSpace(CHRONO_RETENTION_STEP, concreteSpaces(), async (s) => {
+  await eachSpace(CHRONO_RETENTION_STEP, configuredSpaces(), async (s) => {
     const space: RetentionSpace = { recordTtlDays: s.recordTtlDays, meta: s.meta };
     const units: RetentionUnit[] = [
       // All four typed collections, not just chrono. The schema tier is documented as reaching every one of

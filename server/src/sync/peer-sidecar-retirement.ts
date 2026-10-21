@@ -34,7 +34,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { getConfig } from '../config/loader.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { CONVERTED_ROOT, EXTRACTED_ROOT } from '../files/moved-paths.js';
 import { resolveSafePathChecked } from '../files/sandbox.js';
 import { removeOneStoredFileHere } from '../files/remove-file-here.js';
@@ -82,6 +82,6 @@ async function retireInSpace(spaceId: string): Promise<number> {
 /** Retire the peer-supplied sidecars of every space. Never throws: a failure is the space's, reported by the walk. */
 export async function retirePeerSidecars(): Promise<number> {
   let total = 0;
-  await eachSpace(STEP, concreteSpaces(), async (space) => { total += await retireInSpace(space.id); });
+  await eachSpace(STEP, configuredSpaces(), async (space) => { total += await retireInSpace(space.id); });
   return total;
 }

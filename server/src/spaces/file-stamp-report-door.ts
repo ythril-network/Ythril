@@ -21,7 +21,6 @@
 import { z } from 'zod';
 import { getConfig } from '../config/loader.js';
 import { refusalOfParse } from '../util/log.js';
-import { isProxy } from './proxy.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
 import { heavyRunner } from '../rate-limit/heavy-run.js';
 import {
@@ -58,9 +57,6 @@ const reports = heavyRunner();
 export async function beginFileStampReport(spaceId: string, body: unknown, callerKey: string): Promise<FileStampReportOutcome> {
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) return { status: 404, error: `Space '${spaceId}' not found` };
-  if (isProxy(space)) {
-    return { status: 400, error: `'${spaceId}' is a proxy space and holds no files of its own. Report on its members instead: ${(space.proxyFor ?? []).join(', ')}.` };
-  }
   const parsed = FileStampReportBody.safeParse(body ?? {});
   // Why a body was refused, naming each parameter — the one sentence both doors send (`refusalOfParse`, which `bodyRefusal` here was a copy of).
   if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };

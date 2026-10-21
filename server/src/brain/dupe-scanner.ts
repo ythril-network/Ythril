@@ -28,7 +28,7 @@ import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { schedule, validate, type ScheduledTask } from 'node-cron';
 import { col, asFilter, asUpdate, isVectorSearchAvailable } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { concreteSpaces, isProxy } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { needsReindex } from '../spaces/_shared.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { log, outsideRequest } from '../util/log.js';
@@ -336,7 +336,7 @@ function effectiveThreshold(spaceId: string): number {
 export async function evaluateRecordForDuplicates(spaceId: string, type: DupeScanType, recordId: string): Promise<void> {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
-  if (!space || isProxy(space) || !space.dupeRulesOnInsert) return;
+  if (!space || !space.dupeRulesOnInsert) return;
   if (!isVectorSearchAvailable() || needsReindex(spaceId)) return;
   try {
     await evalOneRecord(spaceId, type, recordId, effectiveThreshold(spaceId));
@@ -363,7 +363,7 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
   const cfg = getConfig();
   const dc = cfg.dupeScanner ?? {};
   const space = cfg.spaces.find(s => s.id === spaceId);
-  if (!space || isProxy(space)) return { scanned: 0, pairs: 0 };
+  if (!space) return { scanned: 0, pairs: 0 };
   if (!isVectorSearchAvailable() || needsReindex(spaceId)) return { scanned: 0, pairs: 0 };
 
   const threshold = effectiveThreshold(spaceId);
@@ -405,7 +405,7 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
 }
 
 /**
- * Scan every real (non-proxy) space once, incrementally. Used by the scheduled sweep.
+ * Scan every space once, incrementally. Used by the scheduled sweep.
  *
  * A walk (`eachSpace`, `util/housekeeping-walk.ts`): a space whose read fails is reported once and the next is still scanned, and
  * every DATABASE operation inside a space ends at the housekeeping bound, so a hung space costs one bound and not the night. The
@@ -413,7 +413,7 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
  * scanner asks no model: it ranks by the stored vectors. The contradiction scanner's judge calls are the named exemption.)
  */
 export async function runDupeScanAllSpaces(): Promise<void> {
-  await eachSpace(SCAN_STEP, concreteSpaces(), async (s) => {
+  await eachSpace(SCAN_STEP, configuredSpaces(), async (s) => {
     const r = await scanOneSpace(s.id, undefined, seedsInWalk);
     if (r.scanned > 0) log.info(`Dupe scan '${s.id}': scanned ${r.scanned}, pairs ${r.pairs}`);
   });

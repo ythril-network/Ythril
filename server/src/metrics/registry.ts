@@ -22,7 +22,7 @@ import { DEGRADED_REASONS } from '../brain/degraded-reasons.js';
 import { col, getMongo } from '../db/mongo.js';
 import { isStoreUnreachable } from '../db/store-condition.js';
 import { getConfig, getStorageConfig } from '../config/loader.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { oldestHoldAgeSeconds } from '../util/seq.js';
@@ -361,7 +361,7 @@ function storeIsConnected(): boolean {
 export async function collectEachSpace(
   collector: string,
   read: (spaceId: string) => Promise<void>,
-  spaces: ReadonlyArray<{ id: string }> = concreteSpaces(),
+  spaces: ReadonlyArray<{ id: string }> = configuredSpaces(),
 ): Promise<void> {
   const failed: string[] = [];
   let firstFailure: unknown;
@@ -693,6 +693,34 @@ export const spacesTotal = new Gauge({
   },
 });
 
+/** Personal views stored (Q-531). Read off the config at scrape time, never counted by the writers, so no writer can drift from it. */
+export const viewsTotal = new Gauge({
+  name: 'ythril_views_total',
+  help: 'Number of stored personal views',
+  registers: [register],
+  collect() {
+    try { this.set((getConfig().views ?? []).length); } catch { /* config not loaded yet */ }
+  },
+});
+
+/** Personal views deleted, by why: the owner's own delete, a token revoke, the grace sweep, or an instance admin. */
+export const viewsDeletedTotal = new Counter({
+  name: 'ythril_views_deleted_total',
+  help: 'Personal views deleted, by reason (revoke, sweep, owner, admin)',
+  labelNames: ['reason'] as const,
+  registers: [register],
+});
+
+/** Space ids a migrated proxy reserved until an instance admin purges them (Q-531). */
+export const retiredSpaceIdsGauge = new Gauge({
+  name: 'ythril_retired_space_ids',
+  help: 'Number of space ids reserved by a migrated pre-6.0 proxy until purged',
+  registers: [register],
+  collect() {
+    try { this.set((getConfig().retiredSpaceIds ?? []).length); } catch { /* config not loaded yet */ }
+  },
+});
+
 // ── Embeddings ───────────────────────────────────────────────────────────────
 
 export const embeddingDurationSeconds = new Histogram({
@@ -762,7 +790,7 @@ export const embedProcessState = new Gauge({
 });
 
 /**
- * A gauge with one series per space, read at scrape time: `read(spaceId)` for every space `concreteSpaces()` lists NOW. The series
+ * A gauge with one series per space, read at scrape time: `read(spaceId)` for every space `configuredSpaces()` lists NOW. The series
  * set is rebuilt on every scrape (`reset`), so a deleted space's series goes with the space — the half a hand-written collector
  * drops, and a gauge that keeps a gone space's last value reports a hold nobody has. `read` is synchronous: nothing to await.
  */
@@ -771,7 +799,7 @@ function perSpaceGauge({ name, help, read }: { name: string; help: string; read:
     name, help, labelNames: ['space'] as const, registers: [register],
     collect() {
       this.reset();
-      for (const space of concreteSpaces()) this.set({ space: space.id }, read(space.id));
+      for (const space of configuredSpaces()) this.set({ space: space.id }, read(space.id));
     },
   });
 }

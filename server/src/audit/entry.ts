@@ -38,6 +38,10 @@ export interface AuditLogEntry {
   status: number;          // HTTP status code
   entryId: string | null;
   durationMs: number;
+  /** The spaces a read through a personal view read; such an entry has `spaceId: null` (Q-531). */
+  spaces?: string[];
+  /** A personal view's lifecycle row: its owner key and member count, never its name or members (Q-531). */
+  view?: { ownerKey: string; memberCount: number };
   /**
    * What the request actually changed, when the operation has an allowlist in `audit/audit-changes.ts`.
    *

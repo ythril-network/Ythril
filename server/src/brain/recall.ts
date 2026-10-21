@@ -13,7 +13,7 @@
  */
 import { col, isVectorSearchAvailable, asFilter } from '../db/mongo.js';
 import { readRowsById, readStoredById } from '../db/read-by-id.js';
-import { NotFoundError } from '../util/errors.js';
+import { NotFoundError, NotEmbeddedYetError } from '../util/errors.js';
 import { embed } from './embedding.js';
 import type { EmbeddingResult } from './embedding.js';
 import { getEmbeddingConfig } from '../config/loader.js';
@@ -1274,7 +1274,7 @@ export async function findSimilar(
   // whether the seed was reachable, and a test of exactly that could not tell a held seed from a free one.
   const entry = await getEntryEmbedding(spaceId, entryId, entryType);
   if (entry === 'no-embedding') {
-    throw new NotFoundError(
+    throw new NotEmbeddedYetError(
       `Entry '${entryId}' exists in space '${spaceId}' (type: ${entryType}) but is not embedded yet, so ` +
       'there is nothing to compare it against. Embedding is queued and normally completes in milliseconds — ' +
       'retry, or write with waitForEmbedding: true when you need the record searchable the moment the write returns.',

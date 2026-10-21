@@ -14,6 +14,9 @@ import { ALL_TOOLS, type ToolSchemas } from './tools/index.js';
 import { callTool, materialisedSchema } from './call-tool.js';
 import { validatorFor } from './validate-args.js';
 import { spaceScopeSentence } from './space-scope-sentence.js';
+import { callerRecordOf } from './caller-record.js';
+import { viewOwnerOf, viewsOfOwner } from '../config/views.js';
+import type { ToolCallerRecord } from './tools/types.js';
 
 /** Create an MCP Server instance with tools operating across all accessible spaces.
  *
@@ -46,6 +49,9 @@ import { spaceScopeSentence } from './space-scope-sentence.js';
  * The same cast appears at every other rights call site (`middleware.ts`, the rights-narrowed space helpers). It is
  * a narrowing the union cannot express, and writing it once here keeps this file from repeating it per transport.
  */
+/** The tools whose success changes the caller's tool list: the views a read tool's `space` enum offers. */
+const LIST_CHANGING_TOOLS: ReadonlySet<string> = new Set(['view_create', 'view_update', 'view_delete', 'view_claim']);
+
 function tokenRights(record: unknown): TokenRights | undefined {
   return (record as { rights?: TokenRights } | undefined)?.rights;
 }
@@ -59,7 +65,7 @@ function tokenRights(record: unknown): TokenRights | undefined {
  */
 function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   audit?: { ip: string; authMethod: 'pat' | 'oidc' | null; oidcSubject: string | null; transport: 'http' },
-  rights?: TokenRights): Server {
+  rights?: TokenRights, record?: ToolCallerRecord): Server {
   const cfg = getConfig();
   // The rights matrix decides this, with `tokenSpaces` as the fallback for records that carry no rights.
   //
@@ -84,15 +90,20 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   const accessibleSpaceIds = reachableSpaceIds(rights, cfg.spaces.map(s => s.id));
   const accessibleSpaces = cfg.spaces.filter(s => accessibleSpaceIds.includes(s.id));
   // The validator for this reach: built once per reach, so the schemas advertised here and the ones `callTool` enforces are the same objects (`Q-114`).
-  const reach = validatorFor(accessibleSpaceIds);
+  // The caller's own personal views: offered as `space` to the read tools (and no other), named in the instructions, and part of the validator's
+  // key so a token that reaches the same spaces without them is never handed this one's schemas.
+  const ownViews = viewsOfOwner(record ? viewOwnerOf(record) : null, cfg);
+  const ownViewIds = ownViews.map(v => v.id);
+  const reach = validatorFor(accessibleSpaceIds, ownViewIds);
   const spacesLine = accessibleSpaces.length > 0
     ? accessibleSpaces.map(s => s.id + (s.label ? ` ("${s.label.replace(/[\x00-\x1f]/g, '').slice(0, 200)}")` : '')).join(', ')
     : '(none accessible)';
-  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\n${spaceScopeSentence(ALL_TOOLS.filter(t => toolIsVisible(t, rights)), reach.schemas)} Call list_spaces for details. Tool arguments are validated against each tool's inputSchema (from tools/list) — read it before calling.`;
+  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\n${spaceScopeSentence(ALL_TOOLS.filter(t => toolIsVisible(t, rights)), reach.schemas)} ${ownViewIds.length ? `Your personal views (read lenses over spaces you read; pass one as \`space\` to a read tool): ${ownViewIds.join(', ')}.
+` : ''}Call list_spaces for details. Tool arguments are validated against each tool's inputSchema (from tools/list) — read it before calling.`;
 
   const server = new Server(
     { name: 'ythril', version: '0.1.0' },
-    { capabilities: { tools: {} }, instructions },
+    { capabilities: { tools: { listChanged: true } }, instructions },
   );
 
   // The `space` enum depends on this token's accessible spaces, so tool schemas are built per server
@@ -112,7 +123,7 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
       name: t.name,
       description: t.description,
       // Through `materialisedSchema`, so what is ADVERTISED is what the validator enforces — see B-6.
-      inputSchema: materialisedSchema(t, schemas, accessibleSpaceIds),
+      inputSchema: materialisedSchema(t, schemas, accessibleSpaceIds, ownViewIds),
     })),
   }));
 
@@ -129,13 +140,14 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
    * `status` the shared function also returns is discarded here because this transport answers 200 and
    * carries the failure in `isError` — the specification's shape, not a difference of ours.
    */
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
     const outcome = await callTool({
       name,
       args: (args ?? {}) as Record<string, unknown>,
       caller: {
         rights,
+        ...(record ? { record } : {}),
         tokenId,
         tokenLabel,
         ip: audit?.ip ?? '',
@@ -144,6 +156,11 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
         transport: 'mcp',
       },
     });
+    // A view this call made or deleted changes the `space` enum of every read tool: say so, on the stream of THIS request (a stateless
+    // server has no other stream), before the result.
+    if (!outcome.result.isError && LIST_CHANGING_TOOLS.has(name)) {
+      await server.notification({ method: 'notifications/tools/list_changed' }, { relatedRequestId: extra.requestId });
+    }
     return outcome.result;
   });
 
@@ -202,7 +219,7 @@ mcpRouter.post('/messages', globalRateLimit, (_req, res) => {
 mcpRouter.post('/', globalRateLimit, async (req, res) => {
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   const server = createGlobalMcpServer(req.authToken?.id, req.authToken?.name,
-    { ip: req.ip ?? '', authMethod: auditAuthMethod(req.authToken), oidcSubject: auditOidcSubject(req.authToken), transport: 'http' }, tokenRights(req.authToken));
+    { ip: req.ip ?? '', authMethod: auditAuthMethod(req.authToken), oidcSubject: auditOidcSubject(req.authToken), transport: 'http' }, tokenRights(req.authToken), callerRecordOf(req.authToken));
   // Register cleanup before handling the request so it fires regardless of outcome.
   res.on('close', () => {
     transport.close();

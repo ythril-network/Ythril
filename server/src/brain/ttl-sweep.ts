@@ -29,7 +29,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { storeAnswers as defaultStoreAnswers } from '../db/store-answers.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { eachSpace, eachUnit, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep, signalHousekeeping } from '../util/housekeeping-signals.js';
 import { intervalJob } from '../util/interval-job.js';
@@ -50,7 +50,7 @@ import { sweepChronoRetention } from './chrono-redaction.js';
 import { sweepLegacySpills } from '../files/legacy-spill-sweep.js';
 import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
 import { spaceTtlDays } from './chrono-retention.js';
-import { findSpace } from '../spaces/proxy.js';
+import { findSpace } from '../spaces/space-lookup.js';
 import { stripFlaggedRowsOnce } from '../files/derived-fields.js';
 import { leakedRowsDeadline, publishLeakedRowScansOwed, repairLeakedRows } from '../files/leaked-rows-repair.js';
 import { retirePeerSidecars } from '../sync/peer-sidecar-retirement.js';
@@ -295,7 +295,7 @@ export async function sweepExpiredRecords(now: Date): Promise<{ deleted: number;
     if (ok) deleted++;
     return ok;
   };
-  const walk = await eachSpace(STEP, concreteSpaces(), async (space, ctx) => {
+  const walk = await eachSpace(STEP, configuredSpaces(), async (space, ctx) => {
     await eachUnit([...TTL_COLLECTIONS, FLAGGED_UNIT] as TtlCollection[], async (c) => {
       ctx.step = readStep(c);
       // The audit records of deleted files: the same machinery — the batch, the attempt cap, the per-record failure
@@ -334,14 +334,14 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   // File tombstones still pending after their act should have finished: its drop failed, its write landed after it
   // was reported failed, or a restart came between. Settled from the disk (bundle-30 I15, `files/tombstones.ts`):
   // never served while pending, so nothing waits on this but the record of a removal that did happen.
-  await eachSpace(SETTLE_STEP, concreteSpaces(), space => settleStalePendingFileTombstones(space.id, now));
+  await eachSpace(SETTLE_STEP, configuredSpaces(), space => settleStalePendingFileTombstones(space.id, now));
 
   // Moves whose bytes moved and whose records did not, finished by the instance (`files/finish-owed-moves.ts`). After the settle,
   // never inside it: the settle clears the markers of moves that are over, so what is left to look at is what is owed — and a move's
   // completion is a cascade of its own, which one failing move must not turn into a failure of the settle behind it.
   // One deadline for the whole step: the spaces share the time it may spend starting moves, and the rest of the tick keeps its own.
   const startMovesUntil = moveFinishDeadline();
-  await eachSpace(FINISH_MOVES_STEP, concreteSpaces(), space => finishOwedMoves(space.id, now, { deadlineAt: startMovesUntil }));
+  await eachSpace(FINISH_MOVES_STEP, configuredSpaces(), space => finishOwedMoves(space.id, now, { deadlineAt: startMovesUntil }));
 
   // Per-chrono-type retention rides the same cycle: its backfill and content-redaction passes are the same
   // shape of work on the same clock, and running them here means one timer rather than two doing housekeeping
@@ -362,7 +362,7 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   // repair is query-defined and keeps no marker — a stripped row leaves the query — so once there is nothing left to do
   // it costs one read of the sparse `deletedAt` index per space per cycle (`ensureTtlIndex`), never a scan of the files;
   // and a space that fails is passed over rather than stopping the ones behind it.
-  await eachSpace(STRIP_STEP, concreteSpaces(), async space => {
+  await eachSpace(STRIP_STEP, configuredSpaces(), async space => {
     strippedRows += await stripFlaggedRowsOnce(space.id, SWEEP_BATCH);
   });
   if (strippedRows > 0) {
@@ -373,7 +373,7 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   // space per tick inside one time budget for the step, resuming where the last tick stopped, and not starting over within a day of its
   // end. After the strip, so what is repaired here is what the strip left; the spaces share the budget, and a space that fails is passed over.
   const repairUntil = leakedRowsDeadline();
-  await eachSpace(REPAIR_STEP, concreteSpaces(), space => repairLeakedRows(space.id, now, { deadlineAt: repairUntil }));
+  await eachSpace(REPAIR_STEP, configuredSpaces(), space => repairLeakedRows(space.id, now, { deadlineAt: repairUntil }));
 
   return total;
 }
@@ -387,7 +387,7 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
  * in the collection, so a figure sized for a read or a single write would end a legitimate build and leave the sweep unindexed.
  */
 async function ensureSweepIndexes(): Promise<void> {
-  await eachSpace(INDEX_STEP, concreteSpaces(), space => ensureTtlIndex(space.id));
+  await eachSpace(INDEX_STEP, configuredSpaces(), space => ensureTtlIndex(space.id));
 }
 
 const sweepJob = intervalJob('TTL sweep', SWEEP_INTERVAL_MS, () => sweepExpired());

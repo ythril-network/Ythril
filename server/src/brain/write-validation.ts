@@ -49,7 +49,6 @@ import type { SpaceMeta } from '../config/types.js';
 import { isDeepStrictEqual } from 'node:util';
 import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerList, peerText } from '../util/log.js';
 import { ownValue } from '../util/plain-object.js';
-import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { applyValidation, getSpaceMeta } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { isRuleRow, ruleReadsChanged } from '../spaces/schema-rules.js';
@@ -190,30 +189,17 @@ export function classifyUpdateViolations(
 }
 
 /**
- * Find which member space holds the record, and that space's meta.
+ * Find the record in the space a write lands in, and that space's meta.
  *
- * On a proxy space the record lives in exactly one member, and the schema that governs it is **that
- * member's**, not the proxy's. Resolving the two together is the only way an MCP tool can validate
- * against the right meta without re-implementing member resolution per tool — four copies of which is how
- * three of them would end up validating against the proxy.
+ * `writeTarget` is the one space the write names (reach and rung were judged on it by the door's guard). The loop is single-element: a write
+ * lands in the space it names and in no other, a personal view never being a write target. It stays a loop rather than a direct lookup
+ * because `load` is free to return nothing, and the caller reads "not found" off the `undefined`.
  */
 export async function locateForUpdate<T>(
   writeTarget: string,
   load: (memberId: string) => Promise<T | null | undefined>,
 ): Promise<{ memberId: string; record: T; meta: SpaceMeta | undefined } | undefined> {
-  // `writeTarget`, not `spaceId`, and the rename is the point: every one of the four callers passes `wt.target`
-  // from `resolveWriteTarget`, which is ALWAYS a real space the caller reaches and holds the rung in (`Q-440`: it resolves
-  // against the caller's grant). A non-proxy resolves to itself, and a proxy demands an explicit `targetSpace` that must be
-  // one of its members — and members cannot be proxies, since nesting is not allowed. So this loop is provably
-  // single-element, and it is already narrowed to the caller by the resolver that produced its argument.
-  //
-  // It was called `spaceId`, which is what made it read as a proxy fan-out during the Q-6 sweep and put it on the
-  // list of sites to narrow. There is nothing here to narrow: the caller already chose one space. A misnamed
-  // parameter is invisible — it gets classified by its name rather than by what reaches it.
-  //
-  // The loop stays rather than becoming a direct lookup: it is what makes `load` free to return nothing, and
-  // collapsing it would be a behaviour bet on the reasoning above rather than a description of it.
-  for (const memberId of resolveMemberSpaces(writeTarget)) {
+  for (const memberId of [writeTarget]) {
     const record = await load(memberId);
     if (record != null) return { memberId, record, meta: getSpaceMeta(memberId) };
   }

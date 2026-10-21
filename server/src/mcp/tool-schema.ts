@@ -15,6 +15,7 @@
  * the honest signal that this is a third thing rather than part of either.
  */
 import type { ToolSchemas } from './tools/types.js';
+import { toolTakesAView } from '../auth/space-rights.js';
 
 /**
  * The `space` schemas injected into every tool's `inputSchema`.
@@ -57,15 +58,41 @@ export function toolSchemasFor(accessibleSpaceIds: readonly string[]): ToolSchem
  * caller told they may omit `space` and then refused, or told to send it and silently not needing to.
  */
 export function materialisedSchema(
-  tool: { inputSchema: (s: ToolSchemas) => Record<string, unknown> },
+  tool: { name?: string; inputSchema: (s: ToolSchemas) => Record<string, unknown> },
   schemas: ToolSchemas,
   accessibleSpaceIds: readonly string[],
+  /** The caller's own personal views (`@name`): offered to the tools that take one, and to no other (Q-531). */
+  viewIds: readonly string[] = [],
 ): Record<string, unknown> {
-  const schema = tool.inputSchema(schemas);
+  let schema = tool.inputSchema(schemas);
+  if (viewIds.length > 0 && accessibleSpaceIds.length > 0 && tool.name !== undefined && toolTakesAView(tool.name)) {
+    schema = withViewsInSpaceEnum(schema, viewIds);
+  }
+  // The one-space fill counts SPACES only: a view over the one space does not make `space` required.
   if (accessibleSpaceIds.length !== 1) return schema;
   const required = schema['required'];
   if (!Array.isArray(required) || !required.includes('space')) return schema;
   // A COPY. The tool objects are module-level singletons shared by every connection, so mutating one
   // would let the first token to call it decide what every later token is shown.
   return { ...schema, required: required.filter(k => k !== 'space') };
+}
+
+/**
+ * The same schema with the caller's views added to every `enum` of its `space` property: the READ enum (spaces plus views), where the
+ * write enum is the spaces alone. Built from the tool's own schema as a COPY, so the shared singleton is never changed.
+ */
+function withViewsInSpaceEnum(schema: Record<string, unknown>, viewIds: readonly string[]): Record<string, unknown> {
+  const props = schema['properties'] as Record<string, unknown> | undefined;
+  const space = props?.['space'];
+  if (!space || typeof space !== 'object') return schema;
+  const widen = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(widen);
+    if (!node || typeof node !== 'object') return node;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      out[k] = k === 'enum' && Array.isArray(v) ? [...v, ...viewIds.filter(id => !v.includes(id))] : widen(v);
+    }
+    return out;
+  };
+  return { ...schema, properties: { ...props, space: widen(space) } };
 }

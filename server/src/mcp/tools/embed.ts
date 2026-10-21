@@ -13,19 +13,16 @@
  * lastError, claim fields) is a state machine, and a second copy of a state machine is the copy nobody watches when it
  * drifts. What these handlers own is the MCP-shaped part: argument validation and text a model can act on.
  */
-import { resolveWriteTarget, isProxy } from '../../spaces/proxy.js';
-import { toolWriteGrant, assertWriteTarget, toolMemberReach } from '../tool-rights-guard.js';
 import { getConfig } from '../../config/loader.js';
 import { reembedSpace, REEMBED_KINDS, REEMBED_DEFAULT_LIMIT, REEMBED_MAX_LIMIT } from '../../brain/reembed.js';
 import type { BrainEmbedRecordType } from '../../config/types.js';
-import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
+import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import {
   retryEmbedJob, EMBED_RECORD_TYPES, isEmbedRecordType,
 } from '../../brain/embed-queue.js';
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
 import { embedJobsPage, MAX_JOB_PAGE, DEFAULT_JOB_PAGE } from '../../brain/embed-jobs-page.js';
 import { LOST_MARKER, NOT_SENT_MARKER } from '../../brain/embed-errors.js';
-import { TARGET_SPACE_DESCRIPTION } from './shared.js';
 
 const RECORD_TYPES = [...EMBED_RECORD_TYPES];
 
@@ -76,10 +73,9 @@ export const list_embed_jobsTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, accessibleSpaceIds } = ctx;
-    // The act REST calls, over the members of a proxy as REST reads them (Q-109): this read only `callSpace` and took
-    // no `skip`, so a proxy listed nothing of its members and failure #201 was out of reach beside `failed: 500`.
-    const page = await embedJobsPage(memberSpacesWithin(callSpace, accessibleSpaceIds), {
+    const { args: a, callSpace } = ctx;
+    // The act REST calls, over the spaces a read names: the space itself, or the members of the caller's own view (Q-109, Q-531).
+    const page = await embedJobsPage(readSpacesOfCall(ctx, callSpace), {
       status: a['status'], limit: a['limit'], skip: a['skip'],
     });
     if (!page.ok) throw new Error(page.error);
@@ -127,7 +123,6 @@ export const retry_embed_recordTool: ToolHandler = {
           + 'finds nothing rather than finding the wrong thing.',
       },
       recordId: { type: 'string', minLength: 1, description: 'The record\'s _id, as list_embed_jobs reports it.' },
-      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'recordType', 'recordId'],
     additionalProperties: false,
@@ -138,19 +133,17 @@ export const retry_embed_recordTool: ToolHandler = {
     const recordId = String(a['recordId'] ?? '').trim();
     if (!recordId) throw new Error('recordId must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
 
-    const result = await retryEmbedJob(wt.target, a['recordType'], recordId);
+    const result = await retryEmbedJob(callSpace, a['recordType'], recordId);
     const text = result === 'ok'
       ? `Re-queued ${a['recordType']} '${recordId}' for embedding.`
       : result === 'processing'
         ? `${a['recordType']} '${recordId}' is being embedded right now — left alone rather than reset, so the run in progress is not interrupted.`
-        : `No embed job exists for ${a['recordType']} '${recordId}' in '${wt.target}'. Either it embedded successfully, or the record is gone.`;
+        : `No embed job exists for ${a['recordType']} '${recordId}' in '${callSpace}'. Either it embedded successfully, or the record is gone.`;
 
     return {
       content: [{ type: 'text' as const, text }],
-      structuredContent: { result, recordType: a['recordType'], recordId, space: wt.target },
+      structuredContent: { result, recordType: a['recordType'], recordId, space: callSpace },
     };
   },
 };
@@ -165,8 +158,7 @@ export const retry_embed_recordTool: ToolHandler = {
  *
  * Found by the capability matrix (`scripts/surface-matrix.mjs`). Filed as B-22.
  *
- * **Sums across member spaces**, exactly as the route does: on a proxy the failures live in the members, and a
- * caller who asked the proxy to retry means all of them.
+ * A write: it sweeps the one space it names (a view never writes, and a write tool is never offered one).
  */
 export const retry_embed_mediaTool: ToolHandler = {
   name: 'retry_embed_media',
@@ -182,8 +174,7 @@ export const retry_embed_mediaTool: ToolHandler = {
     + 'a loop. Jobs the worker currently holds are left alone rather than interrupted, so a retry during a run '
     + 'cannot take work away from it.\n\n'
     + 'PARAMETERS:\n'
-    + '- `space` — the space to sweep. On a PROXY every member is retried, because that is what asking the '
-    + 'proxy means; the count returned is the total across them.\n\n'
+    + '- `space` — the space to sweep.\n\n'
     + 'RESPONSE: how many jobs were reset. Zero means nothing was failed — not that the call did nothing '
     + 'wrong. Check `list_embed_jobs` for the brain queue, which this does not touch.',
   mutating: true,
@@ -197,13 +188,10 @@ export const retry_embed_mediaTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { callSpace, accessibleSpaceIds } = ctx;
+    const { callSpace } = ctx;
     const { retryFailedJobs } = await import('../../files/media/job-queue.js');
-    // The MCP half of the narrowing the route states with `memberSpacesForRequest` under its area guard: the members the connection
-    // reaches, kept where the token holds the files WRITE rung — the dispatcher checked it on the proxy id alone (`Q-440`).
-    const memberIds = toolMemberReach(ctx, callSpace, accessibleSpaceIds);
-    let retried = 0;
-    for (const mid of memberIds) retried += await retryFailedJobs(mid);
+    // The one space the call named: the dispatcher judged reach and the files WRITE rung on it, and a view is never offered to a write tool.
+    const retried = await retryFailedJobs(callSpace);
 
     const text = retried === 0
       ? `No failed media jobs in '${callSpace}' — nothing to retry.`
@@ -245,7 +233,7 @@ export const retry_embed_mediaTool: ToolHandler = {
  * ## The one argument that differs per surface
  *
  * `memberIds`. REST narrows by request; here it comes from the token's accessible spaces via `memberSpacesWithin`.
- * Getting that wrong is how a tool would re-embed a member of a proxy that the token cannot reach — so the planner
+ * Getting that wrong is how a tool would re-embed a space that the token cannot reach — so the planner
  * takes it as an argument rather than resolving it, and each surface supplies the list it is entitled to.
  */
 
@@ -257,8 +245,8 @@ export const space_reindexTool: ToolHandler = {
     + 'unchanged. Returns as soon as the run STARTS: the records are queued and rebuilt in the background, behind any '
     + 'write somebody is waiting on, so poll `space_meta` — its `reindexRun` field ({running, remaining, failed}) — '
     + 'rather than waiting on this call; `running` turns false when every record is rebuilt. A space with a run '
-    + 'already going refuses a second one (409); any other space starts. A PROXY space is refused by name — it has no '
-    + 'index of its own, and its members are listed in the error so you can reindex them instead. Recall in a space '
+    + 'already going refuses a second one (409); any other space starts. A personal view is not a space: naming '
+    + 'one is answered as an unknown space, before any work. Recall in a space '
     + 'whose `needsReindex` is true refuses until its run finishes.',
   mutating: true,
   admin: true,
@@ -273,37 +261,30 @@ export const space_reindexTool: ToolHandler = {
     // Authorised by `admin: true` in the dispatcher, which refuses this tool unless the token's matrix says
     // `instanceAdmin`. The `if (!isAdmin)` that stood here was a second copy of that rule, reading the legacy
     // boolean — and a second copy of an authorization rule is what this codebase pays most for.
-    const { callSpace, accessibleSpaceIds } = ctx;
+    const { callSpace } = ctx;
 
     const { planReindex, startReindex } = await import('../../brain/reindex.js');
     const space = getConfig().spaces.find(s => s.id === callSpace);
 
-    // The member list comes from what this TOKEN may reach AND administers (the tool's own rung), not from the space's full
-    // membership. A proxy is refused below regardless, but a scoped admin reindexing a normal space must never walk a member it
-    // cannot see or lacks the rung in (`Q-440`).
-    const decision = await planReindex({
-      spaceId: callSpace,
-      space,
-      memberIds: toolMemberReach(ctx, callSpace, accessibleSpaceIds),
-    });
+    // A reindex acts on the one space the call named: the dispatcher judged reach and the tool's own rung on it, and a view id never
+    // reaches here (a write tool is answered an unknown space for one, before any work).
+    const decision = await planReindex({ spaceId: callSpace, space });
     if (!decision.ok) {
-      // The status is reported alongside the message: 409 means "this space's run is still going" and 400 means
-      // "this can never work, reindex the members instead". An agent that cannot tell those apart retries the wrong one.
+      // The status is reported alongside the message: 409 means "this space's run is still going". An agent that cannot tell that
+      // from a refusal that can never work retries the wrong one.
       return {
         content: [{ type: 'text' as const, text: `Error (${decision.refusal.status}): ${decision.refusal.body.error}` }],
         isError: true,
-        // `isProxy` of the refusal body is the question "does it name members" — the same one, so the same answer.
-        ...(isProxy(decision.refusal.body) ? { structuredContent: { proxyFor: decision.refusal.body.proxyFor } } : {}),
       };
     }
 
     await startReindex(decision.plan);
     return {
       content: [{ type: 'text' as const, text:
-        `Reindex STARTED for '${callSpace}' (${decision.plan.memberIds.length === 1 ? '1 space' : `${decision.plan.memberIds.length} member spaces`}). `
+        `Reindex STARTED for '${callSpace}'. `
         + 'It runs in the background — this reply does not mean it finished. space_meta reports its progress in '
         + '`reindexRun` ({running, remaining, failed}); `running` turns false when every record is rebuilt.' }],
-      structuredContent: { status: 'started', spaceId: callSpace, memberSpaces: decision.plan.memberIds },
+      structuredContent: { status: 'started', spaceId: callSpace },
     };
   },
 };

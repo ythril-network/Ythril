@@ -364,6 +364,8 @@ async function main(): Promise<void> {
     stopTtlSweep();
     const { stopCandidatePrune } = await import('./brain/candidate-prune.js');
     stopCandidatePrune();
+    const { stopViewSweep } = await import('./config/views-sweep-job.js');
+    stopViewSweep();
     const { stopTombstonePrune } = await import('./brain/tombstone-prune.js');
     stopTombstonePrune();
     const { stopContradictionScanner } = await import('./brain/contradiction-scanner.js');

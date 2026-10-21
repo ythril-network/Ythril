@@ -47,7 +47,6 @@
 import { getDb } from './mongo.js';
 import { getConfig } from '../config/loader.js';
 import { log, peerList } from '../util/log.js';
-import { linkConversionConcerns } from '../brain/links-conversion.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { outsideWriteBound } from './write-bound.js';
@@ -87,9 +86,6 @@ export async function dropLinkArrays(): Promise<LinkArrayDropOutcome> {
   const converted: { id: string }[] = [];
 
   for (const space of getConfig().spaces) {
-    // A proxy holds no records and is never marked, so asking only "is it marked?" would report it
-    // unconverted on every boot, naming a remedy that never walks it (`Q-78`).
-    if (!linkConversionConcerns(space)) continue;
     if (space.completeLinkage !== true) {
       // The arrays ARE this space's links until the conversion has walked it. See the note above.
       out.unconverted.push(space.id);

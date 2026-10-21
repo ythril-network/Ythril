@@ -57,7 +57,7 @@
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { needsReindex, clearReindexFlag, setReindexNeeded } from '../spaces/_shared.js';
-import { isProxy, concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { reindexInProgress } from '../metrics/registry.js';
 import { log, peerText } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -73,7 +73,7 @@ import type { SpaceConfig, BrainEmbedRecordType } from '../config/types.js';
 /** A refusal, carrying the status the contract suite pins. */
 export type ReindexRefusal = {
   status: 400 | 404 | 409;
-  body: { error: string; proxyFor?: string[] };
+  body: { error: string };
 };
 
 export type ReindexPlan = {
@@ -171,41 +171,18 @@ async function activeRun(spaceId: string): Promise<ReindexRunDoc | null> {
 /**
  * Decide a reindex: refuse it, or return the run to start.
  *
- * `memberIds` is passed in rather than resolved here because scope resolution differs per surface -- REST narrows by
- * request, MCP by the token's accessible spaces -- and re-deriving it here would be a second place for the two to
- * disagree about which spaces a token may touch. The proxy refusal comes before the run check, as it always has.
+ * A reindex acts on the ONE space a door named, which the door's guard has judged (reach, and the tool's or route's own rung). A
+ * personal view is never reindexed: it holds no index, and a door answers it as an unknown space before this is asked (Q-180).
  */
 export async function planReindex(input: {
   spaceId: string;
   space: SpaceConfig | undefined;
-  memberIds: string[];
 }): Promise<ReindexDecision> {
-  const { spaceId, space, memberIds } = input;
+  const { spaceId, space } = input;
+  const memberIds = [spaceId];
 
   if (!space) {
     return { ok: false, refusal: { status: 404, body: { error: `Space '${spaceId}' not found` } } };
-  }
-
-  /**
-   * A PROXY is refused, by name, with its members listed.
-   *
-   * It used to answer `200 {"status":"started"}` and then re-embed the member spaces -- which the caller was also
-   * reindexing individually, because they are in the same space list. A proxy is not a place records live, so the
-   * members are named and the remedy is the response rather than a second lookup.
-   */
-  if (isProxy(space)) {
-    const members = space.proxyFor!;
-    return {
-      ok: false,
-      refusal: {
-        status: 400,
-        body: {
-          error: `'${spaceId}' is a proxy space and has no index of its own. `
-            + `Reindex its members instead: ${members.join(', ')}.`,
-          proxyFor: members,
-        },
-      },
-    };
   }
 
   for (const mid of memberIds) {
@@ -402,7 +379,7 @@ function publishGauge(active: number, answered: boolean): void {
  * themselves (a start, a sweep that gave up); the tick and the boot count while they walk and call {@link publishGauge}.
  */
 async function refreshGauge(): Promise<void> {
-  const spaces = concreteSpaces();
+  const spaces = configuredSpaces();
   let n = 0;
   const walk = await eachSpace(GAUGE_STEP, spaces, async (space) => { if (await activeRun(space.id)) n++; }, { when: WHEN });
   publishGauge(n, walkAnswered(walk, spaces.length));
@@ -421,7 +398,7 @@ async function refreshGauge(): Promise<void> {
  *   complete is never finished here, whoever is or is not sweeping it: an incomplete sweep is a promise of records not yet queued.
  */
 export async function reindexRunTick(): Promise<void> {
-  const spaces = concreteSpaces();
+  const spaces = configuredSpaces();
   const target = currentTarget();
   let active = 0;
   const walk = await eachSpace(WATCH_STEP, spaces, async (space) => {
@@ -477,7 +454,7 @@ export function stopReindexWatcher(): void { watcher.stop(); }
  * to hold a run OR any space could not be asked, and its tick resumes what this boot could not.
  */
 export async function resumeReindexRuns(): Promise<void> {
-  const spaces = concreteSpaces();
+  const spaces = configuredSpaces();
   const target = currentTarget();
   let active = 0;
   const walk = await eachSpace(RESUME_STEP, spaces, async (space) => {

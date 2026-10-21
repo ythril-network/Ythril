@@ -1,5 +1,5 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, filePathSchema, ttlDaysFromArgs, DELETION_REACH } from './shared.js';
 import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { moveFileCascade } from '../../files/move-cascade.js';
@@ -9,9 +9,7 @@ import { assertDestinationReachable } from '../../files/destination.js';
 import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.js';
 import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
 import { deletePath } from '../../files/delete-cascade.js';
-import { resolveWriteTarget } from '../../spaces/proxy.js';
-import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
-import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
+import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { readSpillByPath } from '../../brain/read-spill-act.js';
 import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
@@ -57,7 +55,7 @@ export const read_fileTool: ToolHandler = {
       return { content: [{ type: 'text' as const, text: JSON.stringify(spill.body) }],
         structuredContent: { path: filePath, content: spill.body } };
     }
-    const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
+    const memberIds = readSpacesOfCall(ctx, callSpace);
     let w: MarkdownWindow | null = null;
     for (const mid of memberIds) {
       try {
@@ -142,7 +140,6 @@ export const write_fileTool: ToolHandler = {
               description: 'Optional structured key-value metadata for this file.',
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             ttlDays: TTL_DAYS_SCHEMA,
             inputFormat: {
               type: 'string',
@@ -159,8 +156,6 @@ export const write_fileTool: ToolHandler = {
     const filePath = String(a['path'] ?? '');
     const content = String(a['content'] ?? '');
     if (!filePath.trim()) throw new Error('path must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     /*
      * DECODED FIRST, and through the same module the REST upload uses.
      *
@@ -183,8 +178,8 @@ export const write_fileTool: ToolHandler = {
     // Quota, bytes, metadata, the processing queue and the webhook — one sequence for every door
     // (`files/store-file.ts`). MCP has no Content-Type; the dispatcher derives it from the extension.
     const ifFmt = typeof a['inputFormat'] === 'string' ? a['inputFormat'] as InputFormat : 'auto';
-    await assertDestinationReachable(wt.target, filePath);
-    const { sha256, sizeBytes, quota: wfQuota } = await storeFile(wt.target, filePath, bytes,
+    await assertDestinationReachable(callSpace, filePath);
+    const { sha256, sizeBytes, quota: wfQuota } = await storeFile(callSpace, filePath, bytes,
       { meta, inputFormat: ifFmt, ...(ctx.actor ? { actor: ctx.actor as Record<string, unknown> } : {}) });
     const wfText = `Written (sha256: ${sha256}).`
       + (wfQuota.softBreached ? `\n⚠️ Storage warning: ${wfQuota.warning}` : '');
@@ -202,11 +197,11 @@ export const list_dirTool: ToolHandler = {
     + 'IT IS THE SOURCE OF THE PATHS EVERY OTHER FILE TOOL WANTS. `read_file` and every write-side file tool '
     + 'your token can reach take a path relative to the space root, exactly as it is reported here. '
     + 'Constructing one by hand is where the mistakes come from.\n\n'
-    + 'ON A PROXY SPACE THE MEMBERS ARE MERGED, AND A COLLISION IS RESOLVED SILENTLY. Every member the token '
-    + 'reaches is listed and the results are combined by NAME — so if two members both hold `notes.md`, you '
+    + 'ON A PERSONAL VIEW THE MEMBERS ARE MERGED, AND A COLLISION IS RESOLVED SILENTLY. Every member the view '
+    + 'reads for you is listed and the results are combined by NAME — so if two members both hold `notes.md`, you '
     + 'see one entry and the other is dropped, with nothing saying which member won or that a second existed. '
     + 'A member that has no such directory is skipped rather than erroring. When that ambiguity matters, list '
-    + 'the member space directly instead of the proxy.\n\n'
+    + 'the member space directly instead of the view.\n\n'
     + 'A MISSING DIRECTORY IS AN EMPTY LISTING, not an error. So an empty result means "nothing here OR no '
     + 'such path" and the two are indistinguishable — check the parent if you expected content.\n\n'
     + 'PARAMETERS:\n'
@@ -230,9 +225,9 @@ export const list_dirTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace, accessibleSpaceIds } = ctx;
+    const { args: a, callSpace } = ctx;
     const dirPath = String(a['path'] ?? '');
-    const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
+    const memberIds = readSpacesOfCall(ctx, callSpace);
     const seen = new Set<string>();
     const allEntries: { name: string; type: 'file' | 'dir'; size?: number }[] = [];
     for (const mid of memberIds) {
@@ -296,7 +291,7 @@ export const delete_fileTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `path` — the file or directory path relative to the space root, as `list_dir` reports it.\n'
     + '- `confirm` — `true` to delete a directory; no effect on a file.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'RESPONSE: one line naming the path that was deleted, with `{ path, deleted: true }` as structured content.',
   mutating: true,
   spaceRequired: true,
@@ -309,7 +304,6 @@ export const delete_fileTool: ToolHandler = {
               + 'path deletes everything under it and needs `confirm: true`. A path '
               + 'that does not exist is an error, not a silent success.'),
             confirm: { type: 'boolean', description: 'Required `true` to delete a directory. Ignored for a file.' },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space', 'path'],
           additionalProperties: false,
@@ -318,11 +312,9 @@ export const delete_fileTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const filePath = String(a['path'] ?? '');
     if (!filePath.trim()) throw new Error('path must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // What the path is, and which cascade it gets (a file's, a directory's, or a refusal), is `deletePath`'s one decision —
     // shared with the REST DELETE route, so the doors cannot differ; the TTL sweep deletes through the file cascade itself.
-    const deleted = await deletePath(wt.target, filePath, { confirm: a['confirm'], actor: ctx.actor });
+    const deleted = await deletePath(callSpace, filePath, { confirm: a['confirm'], actor: ctx.actor });
     // The REST twin audits a directory delete with what it was; a single file records nothing, there as here.
     if (deleted === 'directory') ctx.recordChanges?.({}, { kind: 'directory' });
     return { content: [{ type: 'text' as const, text: `Deleted '${filePath}'.` }],
@@ -343,9 +335,8 @@ export const create_dirTool: ToolHandler = {
     + 'carries no metadata: there is nothing to tag or describe until it holds a file.\n\n'
     + 'PARAMETERS:\n'
     + '- `path` — the directory path relative to the space root. Missing parents are created.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
-    + 'RESPONSE: one line confirming the path.'
-    + '\n\nWHEN IT FAILS the result carries a `code` in `structuredContent`: `path_blocked` (`409`) for a name a file holds, `file_system_fault` (`500`, `retryable: false`) when the server\'s own storage refused it.',
+    + '\n'
+    + 'RESPONSE: one line confirming the path.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -353,7 +344,6 @@ export const create_dirTool: ToolHandler = {
           properties: {
             space: s.requiredSpace,
             path: { type: 'string', minLength: 1, description: 'Directory path relative to the space root.' },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space', 'path'],
           additionalProperties: false,
@@ -362,10 +352,8 @@ export const create_dirTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const dirPath = String(a['path'] ?? '');
     if (!dirPath.trim()) throw new Error('path must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
-    await assertDestinationReachable(wt.target, dirPath);
-    await createDir(wt.target, dirPath);
+    await assertDestinationReachable(callSpace, dirPath);
+    await createDir(callSpace, dirPath);
     return { content: [{ type: 'text' as const, text: `Directory '${dirPath}' created.` }],
       structuredContent: { path: dirPath, created: true } };
   },
@@ -415,11 +403,8 @@ export const move_fileTool: ToolHandler = {
     + 'directory.\n'
     + '- `dst` — where it should end up, relative to the space root. Its parent directories are created if '
     + 'missing.\n'
-    + TARGET_SPACE_BULLET + ' This tool moves '
-    + 'WITHIN one space; it cannot move a file between spaces, and naming a different member does not do that '
-    + '— read it and write it instead.\n\n'
-    + 'RESPONSE: one line confirming the move.'
-    + '\n\nWHEN IT FAILS the result carries a `code` in `structuredContent`: `path_blocked` (`409`) for a destination the tree refuses, `destination_exists` (`409`), `move_still_owed` (`503`, retry) or `file_system_fault` (`500`, `retryable: false`) when the server\'s own storage refused the act.',
+    + 'This tool moves WITHIN one space; it cannot move a file between spaces — read it and write it instead.\n\n'
+    + 'RESPONSE: one line confirming the move.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -433,7 +418,6 @@ export const move_fileTool: ToolHandler = {
               + 'name where a file, a folder or a file\'s record already stands (`destination_exists`): a move never replaces '
               + 'anything, so delete the destination first. Missing parent directories are created. The file '
               + 'is not re-read, so a failed extraction stays failed.'),
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space', 'src', 'dst'],
           additionalProperties: false,
@@ -444,10 +428,8 @@ export const move_fileTool: ToolHandler = {
     const dst = String(a['dst'] ?? '');
     if (!src.trim()) throw new Error('src must not be empty');
     if (!dst.trim()) throw new Error('dst must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // One cascade with the REST PATCH route: metadata, derived records, sidecars, jobs, tombstones, webhook.
-    await moveFileCascade(wt.target, src, dst, ctx.actor);
+    await moveFileCascade(callSpace, src, dst, ctx.actor);
     return { content: [{ type: 'text' as const, text: `Moved '${src}' → '${dst}'.` }],
       structuredContent: { from: src, to: dst } };
   },
@@ -485,7 +467,6 @@ export const retry_embed_fileTool: ToolHandler = {
       path: filePathSchema('The file must already exist and its indexing must have FAILED — retrying '
         + 'one that succeeded, or one still queued, does nothing useful. `list_embed_jobs` is where the '
         + 'failures and their reasons are.'),
-      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'path'],
     additionalProperties: false,
@@ -494,8 +475,6 @@ export const retry_embed_fileTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const filePath = String(a['path'] ?? '');
     if (!filePath.trim()) throw new Error('path must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
 
     // Normalised the same way the REST route does it, so a path that works there works here. A raw path would
     // miss the job whose id is the normalised form, and report `not_found` for a file that exists.
@@ -508,7 +487,7 @@ export const retry_embed_fileTool: ToolHandler = {
     }
 
     const { retryJob } = await import('../../files/media/job-queue.js');
-    const result = await retryJob(wt.target, docId);
+    const result = await retryJob(callSpace, docId);
 
     const text = result === 'ok'
       ? `Re-queued '${filePath}' for embedding.`
@@ -565,7 +544,7 @@ export const update_file_metaTool: ToolHandler = {
     + '- `linkEntities` / `linkFacts` / `linkChronos` — REPLACE those link lists. Sending one id drops the rest.\n'
     + '- `deleteFields` — dot-notation paths to remove, permanently and with no undo. Applied after the '
     + 'merge. The only way to unset anything.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'RESPONSE: confirmation naming the path and which fields were changed. A path that does not exist is an '
     + 'error, so a successful reply means a record really was updated.\n\n'
     + UNKNOWN_ARGUMENT_RULE,
@@ -612,7 +591,6 @@ export const update_file_metaTool: ToolHandler = {
       // The description above promises these; declaring them anywhere but here would mean the dispatcher
       // refusing what the text tells a caller to send.
       ...linkInputSchemasFor('file'),
-      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'path'],
     additionalProperties: false,
@@ -622,15 +600,13 @@ export const update_file_metaTool: ToolHandler = {
     const filePath = String(a['path'] ?? '').trim();
     if (!filePath) throw new Error('path must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
 
-    const { isStrictLinkage } = await import('../../spaces/proxy.js');
+    const { isStrictLinkage } = await import('../../spaces/space-lookup.js');
     const { updateFileMeta } = await import('../../files/file-meta.js');
 
     // Only the link classes a FILE holds are read out of the arguments: a link key it cannot hold (`linkFiles`) is an unknown argument,
     // answered by the judge, and neither refused here as a class nor audited as a link change.
-    const linkErr = linkInputError(a, 'file', { strict: isStrictLinkage(wt.target) });
+    const linkErr = linkInputError(a, 'file', { strict: isStrictLinkage(callSpace) });
     if (linkErr) throw new Error(linkErr);
 
     const patch = {
@@ -656,13 +632,13 @@ export const update_file_metaTool: ToolHandler = {
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
     const { getFileMeta } = await import('../../files/file-meta.js');
     const { toDocId } = await import('../../util/paths.js');
-    const audit = await readEditAudit(wt.target, mid => getFileMeta(mid, filePath), toDocId(filePath), a, 'file');
-    const updated = await updateFileMeta(wt.target, filePath, patch, dfPaths);
-    if (!updated) throw new Error(`No file metadata record for '${filePath}' in '${wt.target}'.`);
+    const audit = await readEditAudit(callSpace, mid => getFileMeta(mid, filePath), toDocId(filePath), a, 'file');
+    const updated = await updateFileMeta(callSpace, filePath, patch, dfPaths);
+    if (!updated) throw new Error(`No file metadata record for '${filePath}' in '${callSpace}'.`);
     { const s = audit.snapshots(updated); ctx.recordChanges?.(s.before, s.after); }
 
     return {
-      content: [{ type: 'text' as const, text: `Updated metadata for '${filePath}' in '${wt.target}'.` }],
+      content: [{ type: 'text' as const, text: `Updated metadata for '${filePath}' in '${callSpace}'.` }],
       structuredContent: updated as unknown as Record<string, unknown>,
     };
   },

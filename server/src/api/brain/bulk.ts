@@ -6,10 +6,9 @@
 import { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { bulkWrite, bulkWriteTotal, bulkBatchRefusal, bulkBodyRefusal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
-import { getConfig } from '../../config/loader.js';
-import { resolveWriteTarget } from '../../spaces/proxy.js';
-import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
+import { bulkWrite, bulkWriteTotal, bulkSizeRefusal, bulkBodyRefusal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
+import { } from '../../config/loader.js';
+import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { webhookToken } from './_shared.js';
 
@@ -36,14 +35,9 @@ export const bulkRouter = Router();
  */
 bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
-  if (answerWriteTarget(res, wt)) return;
-  const targetSpace = wt.target;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
+  const targetSpace = spaceId;
 
   // A name this door does not know is refused at the TOP level and a retired name on an item, in every mode — the same check the MCP
   // tool runs (`bulkBodyRefusal`, which says why). An unknown key on an ITEM is answered by this instance's setting for the space, per

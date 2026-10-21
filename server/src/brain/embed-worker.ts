@@ -30,7 +30,7 @@ import {
 import { waitOutLocalInferenceBackoff } from './local-inference.js';
 import { SERVER_VERSION } from '../util/server-version.js';
 import { embedStoredRecord } from './embed-record.js';
-import { concreteSpaceIds } from '../spaces/proxy.js';
+import { configuredSpaceIds } from '../spaces/space-lookup.js';
 import { log, peerText } from '../util/log.js';
 import { intervalJob, INTERVAL_JOB_WINDOW_MS } from '../util/interval-job.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -84,10 +84,10 @@ async function reviveFor(ids: string[]): Promise<void> {
  * complete. Exported for the tests, which drive it directly (as `runOneEmbedJob`); the worker runs it as an interval job.
  */
 export async function runEmbedStallTick(): Promise<void> {
-  await resetStalledEmbedJobs(concreteSpaceIds(), STALL_TIMEOUT_MS);
+  await resetStalledEmbedJobs(configuredSpaceIds(), STALL_TIMEOUT_MS);
   if (reviveOwed.size === 0) return;
   // Only spaces that still exist: a space deleted since boot owes nothing.
-  const existing = new Set(concreteSpaceIds());
+  const existing = new Set(configuredSpaceIds());
   await reviveFor([...reviveOwed].filter(id => existing.has(id)));
 }
 
@@ -101,8 +101,8 @@ export async function runEmbedStallTick(): Promise<void> {
  * nothing happening. A space whose revive failed is retried by {@link runEmbedStallTick}. One-shot: the worker starts it with `void`.
  */
 export async function runEmbedBootSweeps(): Promise<void> {
-  await resetStalledEmbedJobs(concreteSpaceIds(), 0);
-  await reviveFor(concreteSpaceIds());
+  await resetStalledEmbedJobs(configuredSpaceIds(), 0);
+  await reviveFor(configuredSpaceIds());
 }
 
 const stallJob = intervalJob(STALL_SWEEP_JOB, STALL_SWEEP_MS, runEmbedStallTick);
@@ -116,7 +116,7 @@ export async function runOneEmbedJob(opts: { heartbeatMs?: number } = {}): Promi
   // BEFORE the claim: while the inference host is respawning after a loss every embed is refused, and a job claimed
   // in that window would fail at once and spend one of its transient steps for nothing.
   await waitOutLocalInferenceBackoff();
-  const job = await claimNextEmbedJob(concreteSpaceIds());
+  const job = await claimNextEmbedJob(configuredSpaceIds());
   if (!job) return false;
 
   // A slow embed is not a dead worker: keep `progressAt` moving so the stall sweep leaves a live claim alone. An interval job

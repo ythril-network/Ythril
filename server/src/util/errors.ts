@@ -9,6 +9,12 @@ export class NotFoundError extends Error {
 }
 
 /**
+ * A record that EXISTS but cannot be compared yet because it has no vector: a `NotFoundError` that says where the record is. A search that
+ * probes several spaces (a personal view's members) keeps this one over the "not found" of the members that do not hold the record.
+ */
+export class NotEmbeddedYetError extends NotFoundError {}
+
+/**
  * Thrown by a tool handler that a shared module has refused with a status of its own: a `429` from the heavy-call rail, a
  * `409` from a single flight. `callTool` answers it with that status on the REST door; a refusal the handler merely
  * returns is a `422` ("well-formed and refused"), which tells a caller nothing about whether to wait or to change the call.

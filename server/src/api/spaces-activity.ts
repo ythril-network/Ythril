@@ -13,9 +13,10 @@
 import type { Router } from 'express';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireAdminMfaScoped } from '../auth/middleware.js';
-import { getConfig } from '../config/loader.js';
+import { } from '../config/loader.js';
 import { flushSpaceActivity, purgeSpaceActivity } from '../metrics/space-activity-store.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { answeredUnknownSpace } from './write-target-answer.js';
 
 export function registerActivityResetRoute(spacesRouter: Router): void {
   /**
@@ -48,10 +49,7 @@ export function registerActivityResetRoute(spacesRouter: Router): void {
    */
   spacesRouter.post('/:id/activity/reset', globalRateLimit, requireAdminMfaScoped('id'), async (req, res) => {
     const spaceId = req.params['id'] as string;
-    if (!getConfig().spaces.some(s => s.id === spaceId)) {
-      res.status(404).json({ error: `Space '${spaceId}' not found` });
-      return;
-    }
+    if (answeredUnknownSpace(req, res, spaceId)) return;
     try {
       // Flush first. The in-memory counters land in Mongo on a 60 s interval, so a reset that skipped this would
       // leave up to a minute of already-counted traffic to reappear moments later — a panel that un-resets itself.

@@ -75,6 +75,51 @@ export const RETIRED_WRITE_FIELDS: Readonly<Record<string, RetiredWriteField>> =
   },
 });
 
+/**
+ * Addressing fields a record write used to take and no longer does (6.0, Q-531): refused BY NAME, on every door and in both REST spellings
+ * (query and body), with the one sentence. A SECOND table beside {@link RETIRED_WRITE_FIELDS} rather than rows in it: that table's
+ * replacements are fields a body carries (a gate holds each to a name a write door accepts), and these replacements are the `space`
+ * every door already takes.
+ *
+ * `targetSpace` named the member a write to a proxy space landed in. A proxy is a personal view now and a view never writes, so a write
+ * names the member space itself.
+ */
+export const RETIRED_ADDRESSING_FIELDS: Readonly<Record<string, RetiredWriteField>> = Object.freeze({
+  targetSpace: {
+    replacement: 'space',
+    message: '`targetSpace` was removed in 6.0: a proxy space is now a personal view, which never writes. Write to the member space itself: '
+      + 'send `space` (REST: the space in the path) holding the id of that member space.',
+  },
+});
+
+/**
+ * Space fields a space create used to take and no longer does (6.0, Q-531): `proxyFor` made the new space a proxy, and a proxy is a
+ * personal view now - made with `POST /api/views` (MCP `view_create`), by the token that will read through it.
+ */
+export const RETIRED_SPACE_FIELDS: Readonly<Record<string, RetiredWriteField>> = Object.freeze({
+  proxyFor: {
+    replacement: 'members',
+    message: '`proxyFor` was removed in 6.0: a proxy space is now a personal view, owned by the token that makes it. Create one with '
+      + '`POST /api/views` (MCP `view_create`) with the same ids as `members`; nothing is created as a space.',
+  },
+});
+
+const ALL_RETIRED: readonly Readonly<Record<string, RetiredWriteField>>[] = [RETIRED_WRITE_FIELDS, RETIRED_ADDRESSING_FIELDS, RETIRED_SPACE_FIELDS];
+
+/** Why a SPACE create body cannot be honoured because of a retired field, or `null` (`proxyFor`). */
+export function retiredSpaceFieldError(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  for (const name of Object.keys(RETIRED_SPACE_FIELDS)) if (Object.hasOwn(body, name)) return RETIRED_SPACE_FIELDS[name]!.message;
+  return null;
+}
+
+/** Why a request's QUERY string cannot be honoured because of a retired addressing field, or `null` (`?targetSpace=`). */
+export function retiredAddressingQueryError(query: unknown): string | null {
+  if (!query || typeof query !== 'object') return null;
+  for (const name of Object.keys(RETIRED_ADDRESSING_FIELDS)) if (Object.hasOwn(query, name)) return RETIRED_ADDRESSING_FIELDS[name]!.message;
+  return null;
+}
+
 /** Why this body cannot be honoured because of a retired field name, or `null`. */
 export function retiredWriteFieldError(body: unknown): string | null {
   if (!body || typeof body !== 'object') return null;
@@ -83,6 +128,9 @@ export function retiredWriteFieldError(body: unknown): string | null {
   // `hasOwn` — `in` and a bare index would also answer for what `Object.prototype` carries (`constructor`, `__proto__`, `toString`).
   for (const name of Object.keys(RETIRED_WRITE_FIELDS)) {
     if (Object.hasOwn(bag, name)) return RETIRED_WRITE_FIELDS[name]!.message;
+  }
+  for (const name of Object.keys(RETIRED_ADDRESSING_FIELDS)) {
+    if (Object.hasOwn(bag, name)) return RETIRED_ADDRESSING_FIELDS[name]!.message;
   }
   return null;
 }
@@ -94,5 +142,6 @@ export function retiredWriteFieldError(body: unknown): string | null {
  * which refuses from the schema before any handler runs.
  */
 export function retiredWriteFieldHint(name: string): string | null {
-  return Object.hasOwn(RETIRED_WRITE_FIELDS, name) ? RETIRED_WRITE_FIELDS[name]!.message : null;
+  for (const table of ALL_RETIRED) if (Object.hasOwn(table, name)) return table[name]!.message;
+  return null;
 }

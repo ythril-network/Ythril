@@ -244,7 +244,12 @@ export interface SpaceConfig extends SpaceSchemaLayering {
    * fixed — not before, or upgrading from 2.x silently drops the operator's directive.
    */
   description?: string;
-  proxyFor?: string[];  // virtual proxy space — aggregates reads, routes writes to member spaces
+  /**
+   * LEGACY ON-DISK field only (a pre-6.0 proxy space). A proxy is a personal view since 6.0 (Q-531): the boot and reload migration
+   * (`config/migrate-proxies-to-views.ts`) turns every entry that carries it into views and takes the entry out of `spaces`, so nothing
+   * but the migration reads it. It stays on this type because a migration cannot read a field the type denies.
+   */
+  proxyFor?: string[];
   meta?: SpaceMeta;     // structured schema and metadata — all fields optional; the EFFECTIVE meta once layers exist (F-39.2)
   /** Local duplicate-action policy (not governed/synced — operational, per-instance).
    *  Rules are evaluated highest-minScore first; the first match decides the action. */
@@ -1399,6 +1404,62 @@ export interface Config {
   /** Deletions, wipes and renames registered and not yet completed, one entry per act. Only the runner reads them. */
   pendingSpaceActs?: SpaceActEntry[];
   // `removeSpaces` (S-10) is declared beside its only reader, in `reload-space-diff.ts`.
+  /**
+   * Personal views (Q-531, 6.0): a view belongs to ONE owner (a token's stable principal, `viewOwnerOf`), reads per member what the owner
+   * can read at read time, and never writes. Never in `spaces`: a view is not a space, so no walk, network, sync, export or rights table
+   * that reads `spaces` meets it. See `config/views.ts`.
+   */
+  views?: ViewRecord[];
+  /**
+   * The definitions of migrated proxies that no live instance-admin token could own (the upgrade found none): kept, never lost, and an
+   * instance admin takes a copy through the claim door (`POST /api/admin/views/claim`).
+   */
+  unclaimedViews?: UnclaimedViewRecord[];
+  /**
+   * Space ids a pre-6.0 proxy used and that are reserved until an instance admin purges them (`POST /api/admin/views/retired/:id/purge`):
+   * creating, renaming or joining under one is refused, and every door that names one answers `410 space_retired`.
+   */
+  retiredSpaceIds?: string[];
+  /** What the upgrade migration did, kept so the admin door can report it after the boot log is gone (`GET /api/admin/views/migration`). */
+  viewsMigration?: ViewsMigrationReport;
+}
+
+/** A personal view as `config.json` holds it. */
+export interface ViewRecord {
+  /** `@<name>`: `@` is not a legal space-id character, so a view and a space never collide. */
+  id: string;
+  /** `^[a-z0-9-]+$`, at most 40; unique per owner, not instance-wide. */
+  name: string;
+  /** `token:<id>`, `oauth:<clientId>` or `oidc:<issuer>#<sub>`. */
+  ownerId: string;
+  /** Concrete space ids, or `['*']` for every space. Never a view id. */
+  members: string[];
+  createdAt: string;
+  /** The pre-6.0 proxy id this view was made from, for idempotence by origin. */
+  migratedFrom?: string;
+  /** `<owner key>|<source view id>` of the view this one is a copy of, so a repeated copy to one receiver refreshes it instead of making `-N`. */
+  copiedFrom?: string;
+  /** When the last token of the owner went without the views being deleted (a cap eviction), so the grace sweep counts from there. */
+  ownerLeftAt?: string;
+}
+
+/** A migrated proxy definition with no owner yet (see `Config.unclaimedViews`). */
+export interface UnclaimedViewRecord {
+  name: string;
+  members: string[];
+  migratedFrom: string;
+  createdAt: string;
+}
+
+/** The upgrade's own report of itself (`Config.viewsMigration`). */
+export interface ViewsMigrationReport {
+  at: string;
+  /** Proxy ids migrated. */
+  proxies: string[];
+  /** Copies made, by owner kind. */
+  copies: number;
+  /** Networks that lost a proxy id (the peers see this member as having left that network space). */
+  networksLeft: { networkId: string; spaceIds: string[] }[];
 }
 
 /** Records an in-flight space rename/delete so it survives a crash. See the

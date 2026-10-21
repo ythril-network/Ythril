@@ -28,9 +28,10 @@ import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
 import { parseLimit, parseSkip } from '../../util/pagination.js';
-import { resolveWriteTarget, findFirstAcrossMembers, isStrictLinkage } from '../../spaces/proxy.js';
-import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
-import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
+import { findFirstAcrossMembers } from '../../spaces/across-members.js';
+import { isStrictLinkage } from '../../spaces/space-lookup.js';
+import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
+import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { getMediaJobCounts, FAILED_SAMPLE_LIMIT, FAILED_REASON_LIMIT, type MediaJobCounts } from '../../files/media/job-queue.js';
 import { reachesSpace } from '../../auth/space-reach.js';
@@ -92,11 +93,7 @@ const MAX_CONVERTED_CHARS = 256 * 1024;
 
 fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
   const rawPath = req.query['path'];
   if (typeof rawPath !== 'string' || !rawPath.trim()) {
     res.status(400).json({ error: '`path` query parameter required' });
@@ -123,7 +120,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
   // member collection as their parent, and querying another member's would silently return nothing.
   let member: string | null = null;
   let parent: FileMetaDoc | null = null;
-  for (const mid of memberSpacesForRequest(req, spaceId)) {
+  for (const mid of readSpacesOfRequest(req, spaceId)) {
     const found = await getFileMeta(mid, parentId);
     if (found) { member = mid; parent = found; break; }
   }
@@ -237,18 +234,14 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
 // Read-only summary; sums across member spaces for a proxy space (resolveMemberSpaces → [spaceId] otherwise).
 fileMetaRouter.get('/spaces/:spaceId/embedding-queue/media', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
   const total: MediaJobCounts = {
     pending: 0, processing: 0, complete: 0, failed: 0, failedSample: [], failedByReason: [],
   };
   // Reasons are summed across member spaces before truncating, so a proxy space's grouping is the grouping of
   // its whole fleet rather than of whichever member was iterated first.
   const reasons = new Map<string | null, number>();
-  for (const mid of memberSpacesForRequest(req, spaceId)) {
+  for (const mid of readSpacesOfRequest(req, spaceId)) {
     const c = await getMediaJobCounts(mid);
     total.pending += c.pending; total.processing += c.processing; total.complete += c.complete; total.failed += c.failed;
     total.failedSample.push(...c.failedSample);
@@ -266,14 +259,10 @@ fileMetaRouter.get('/spaces/:spaceId/embedding-queue/media', globalRateLimit, re
 // this space (F9 Overview "retry all failed"). Sums across member spaces like the GET above.
 fileMetaRouter.post('/spaces/:spaceId/embedding-queue/media/retry-failed', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
   const { retryFailedJobs } = await import('../../files/media/job-queue.js');
   let retried = 0;
-  for (const mid of memberSpacesForRequest(req, spaceId)) {
+  for (const mid of readSpacesOfRequest(req, spaceId)) {
     retried += await retryFailedJobs(mid);
   }
   res.status(202).json({ retried });
@@ -285,11 +274,7 @@ fileMetaRouter.post('/spaces/:spaceId/embedding-queue/media/retry-failed', globa
 // hash, prefix, or any other secret material.
 fileMetaRouter.get('/spaces/:spaceId/token-access', globalRateLimit, requireSpaceAuth, requireAdmin, (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
   // A token reaches this space when it has no `spaces` allow-list (all spaces) or lists this one.
   // schemaLibrary tokens have no space access at all, so they never appear.
   const tokens = listTokens()
@@ -342,8 +327,7 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   if (typeof path !== 'string' || !path.trim()) {
     res.status(400).json({ error: '`path` query parameter required' }); return;
   }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'files', 'write'));
-  if (answerWriteTarget(res, wt)) return;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
   // The four brain record types honour `If-Match` against their `seq`, which advances on every write. A file
   // row's `seq` does NOT: `updateFileMeta` stamps one only for an AUTHORED write, and a write touching only
   // derived fields (the worker's excerpt, a processing state) leaves it where it was. So the number does not
@@ -357,12 +341,12 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   // The unknown-field judge, after the target and the transport precondition and before the body is read (see `_judged-write.ts`).
   // `linkFiles` is NOT a field of this write (a file holds links to entities, facts and chrono entries): it is an unknown key here, as
   // it is on `update_file_meta`, and the connection helpers below read only the classes a file holds.
-  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'file.meta.update', wt.target, 'rest'))) return;
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'file.meta.update', spaceId, 'rest'))) return;
 
   const { description, tags, properties, deleteFields } = req.body ?? {};
   // The three link classes a file holds. Shape and well-formedness here, existence at the writer — the
   // one refusal both doors share, from `write-connections.ts`.
-  const linkErr = linkInputError(req.body, 'file', { strict: isStrictLinkage(wt.target) });
+  const linkErr = linkInputError(req.body, 'file', { strict: isStrictLinkage(spaceId) });
   if (linkErr) { res.status(400).json({ error: linkErr }); return; }
   // X-6: `properties` MERGE on this route now, matching the four brain types. `deleteFields` lands with the
   // merge and not after it — the merge alone would remove the only way a file property could be cleared, so
@@ -393,8 +377,8 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   // so handing the record over cannot publish it.
   // The before and the link sets, from whichever member holds the file — one read shared with the MCP tool (Q-50).
   // A file is keyed in the links collection by its stored path.
-  const editAudit = await readEditAudit(wt.target, mid => getFileMeta(mid, path), toDocId(path), req.body, 'file');
-  const updated = await findFirstAcrossMembers(wt.target,
+  const editAudit = await readEditAudit(spaceId, mid => getFileMeta(mid, path), toDocId(path), req.body, 'file');
+  const updated = await findFirstAcrossMembers([spaceId],
     mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body, 'file') }, dfPaths));
   if (updated) {
     req.auditSnapshots = editAudit.snapshots(updated);

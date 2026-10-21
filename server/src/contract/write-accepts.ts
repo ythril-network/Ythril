@@ -40,7 +40,7 @@ import * as bulkTools from '../mcp/tools/bulk.js';
 import type { ToolHandler, ToolSchemas } from '../mcp/tools/types.js';
 import { retiredWriteFieldError, retiredWriteFieldHint } from '../brain/retired-write-fields.js';
 import { unknownWriteFieldsMode } from '../spaces/spaces.js';
-import { findSpace } from '../spaces/proxy.js';
+import { findSpace } from '../spaces/space-lookup.js';
 import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerText, unrecognizedKeysIssue, type ParseRefusalIssue } from '../util/log.js';
 import { isPlainObject } from '../util/plain-object.js';
 import { unknownWriteFieldsTotal } from '../metrics/registry.js';

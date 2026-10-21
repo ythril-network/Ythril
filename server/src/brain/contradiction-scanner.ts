@@ -33,7 +33,7 @@ import { schedule, validate, type ScheduledTask } from 'node-cron';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 import { isVectorSearchAvailable } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { concreteSpaces, isProxy } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { needsReindex } from '../spaces/_shared.js';
 import { log, outsideRequest } from '../util/log.js';
 import { findSimilar, DEFAULT_DUPE_THRESHOLD, type RecallKnowledgeType, type RecallResult } from './recall.js';
@@ -309,7 +309,7 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
   const cfg = getConfig();
   const empty: ContradictionScanResult = { scanned: 0, found: 0, nliStalled: false, judgedPairs: 0, modelCalls: 0, budgetExhausted: false };
   const space = cfg.spaces.find(s => s.id === spaceId);
-  if (!space || isProxy(space)) return empty;
+  if (!space) return empty;
   if (!isVectorSearchAvailable() || needsReindex(spaceId)) return empty;
 
   const tune = scanTuning(cfg.contradictionScanner, nliIsLocal());
@@ -397,7 +397,7 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
 }
 
 /**
- * Scan every real (non-proxy) space once, incrementally.
+ * Scan every space once, incrementally.
  *
  * Reports what it did rather than running silently: a sweep that parked because the judge was unreachable
  * has NOT cleared anything, and that has to be distinguishable in the logs from a sweep that found nothing.
@@ -416,7 +416,7 @@ export async function runContradictionScanAllSpaces(): Promise<void> {
   let modelCalls = 0;
   let stalled = false;
   let budgetOut = false;
-  await eachSpace(SCAN_STEP, concreteSpaces(), async (s) => {
+  await eachSpace(SCAN_STEP, configuredSpaces(), async (s) => {
     const r = await scanOneSpace(s.id, undefined, seedsInWalk);
     scanned += r.scanned; found += r.found; judgedPairs += r.judgedPairs; modelCalls += r.modelCalls;
     stalled ||= r.nliStalled; budgetOut ||= r.budgetExhausted;

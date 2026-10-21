@@ -15,15 +15,11 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { deleteEdge, upsertEdge, getEdgeById, updateEdgeById } from '../../brain/edges.js';
 import { edgeIdentityTakenAnswer } from '../../brain/edge-rekey.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
-import { getConfig } from '../../config/loader.js';
-import {
-  resolveMemberSpaces,
-  resolveWriteTarget,
-  isStrictLinkage,
-  findFirstAcrossMembers,
-} from '../../spaces/proxy.js';
-import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
+import { } from '../../config/loader.js';
+import { isStrictLinkage } from '../../spaces/space-lookup.js';
+import { findFirstAcrossMembers } from '../../spaces/across-members.js';
+import { readSpacesOfRequest } from '../../spaces/read-scope.js';
+import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import { webhookToken, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
@@ -37,15 +33,10 @@ export const edgesRouter = Router();
 // What a body may carry is `acceptedWriteKeys('edge.create')`: the paired tool's own schema, not a list kept beside this route.
 edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
-  if (answerWriteTarget(res, wt)) return;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
   // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
-  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'edge.create', wt.target, 'rest'))) return;
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'edge.create', spaceId, 'rest'))) return;
   const { from, to, label, weight, type, description, properties, tags, fromKind, toKind } = req.body ?? {};
   if (!from || typeof from !== 'string') {
     res.status(400).json({ error: '`from` string required' });
@@ -69,7 +60,7 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
       return;
     }
   }
-  if (isStrictLinkage(wt.target)) {
+  if (isStrictLinkage(spaceId)) {
     try {
       // Each endpoint is held to the shape its own kind names. Passing `'entity'` here regardless — which is what
       // this did — would refuse every file-ended edge with "expects entity IDs (UUID v4)". That the ends EXIST is
@@ -145,7 +136,7 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
     if (!susCreate.ok) { res.status(400).json({ error: susCreate.error }); return; }
     const createSuperseded = susCreate.value;
     edge = await upsertEdge(
-      wt.target, from.trim(), to.trim(), label.trim(), weight, type?.trim(),
+      spaceId, from.trim(), to.trim(), label.trim(), weight, type?.trim(),
       typeof description === 'string' ? description : undefined, safeProps, safeTags,
       webhookToken(req), ttlDaysFromBody(req.body),
       {
@@ -178,7 +169,7 @@ edgesRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAu
   // The members THIS token reaches, as every other record delete through a proxy walks (`Q-440`): a walk over the proxy's own id
   // visited them all, and `204` against `404` said whether an edge exists in a member the token cannot see. The rung is the
   // area guard's, held on every member it narrowed to.
-  const deleted = await findFirstAcrossMembers(memberSpacesForRequest(req, spaceId), mid => deleteEdge(mid, id, webhookToken(req)));
+  const deleted = await findFirstAcrossMembers(readSpacesOfRequest(req, spaceId), mid => deleteEdge(mid, id, webhookToken(req)));
   if (deleted) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Edge not found' });
 });
@@ -189,17 +180,12 @@ edgesRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAu
 edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
-  if (answerWriteTarget(res, wt)) return;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
   // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
-  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'edge.update', wt.target, 'rest'))) return;
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'edge.update', spaceId, 'rest'))) return;
   const { label, description, tags, properties, weight, type, deleteFields, fromKind, toKind } = req.body ?? {};
   // Validate deleteFields
   const dfResult = validateDeleteFields(deleteFields);
@@ -264,15 +250,15 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
    * The ENDPOINT comes from the stored edge, because this door does not accept `from`/`to`: an edge whose
    * end changed is a different relationship, and the way to make one is a delete and an upsert.
    */
-  if (isStrictLinkage(wt.target) && (updates.fromKind !== undefined || updates.toKind !== undefined)) {
-    const stored = await findFirstAcrossMembers(wt.target, async mid => await getEdgeById(mid, id));
+  if (isStrictLinkage(spaceId) && (updates.fromKind !== undefined || updates.toKind !== undefined)) {
+    const stored = await findFirstAcrossMembers([spaceId], async mid => await getEdgeById(mid, id));
     if (stored) {
       try {
         if (updates.fromKind !== undefined) {
-          await assertRefsResolve(wt.target, 'from', updates.fromKind, [stored.from]);
+          await assertRefsResolve(spaceId, 'from', updates.fromKind, [stored.from]);
         }
         if (updates.toKind !== undefined) {
-          await assertRefsResolve(wt.target, 'to', updates.toKind, [stored.to]);
+          await assertRefsResolve(spaceId, 'to', updates.toKind, [stored.to]);
         }
       } catch (err) {
         // A missing reference is the caller's 400; a store failure under the lookup is the store's (bundle-30 I12).
@@ -292,7 +278,7 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
   if (sus.value !== undefined) updates.superseded = sus.value;
   // PRESENCE of any field the write takes (`ttlDays: null` and `deleteFields` included), from the one accepted set; the sentence names it.
   if (!carriesAnyAcceptedField(req.body, 'edge.update')) { res.status(400).json({ error: atLeastOneFieldRefusal('edge.update') }); return; }
-  const memberIds = resolveMemberSpaces(wt.target);
+  const memberIds = [spaceId];
   for (const mid of memberIds) {
     // Validate the edge AS IT WILL BE, on every patch — not only when `deleteFields` is present. That
     // branch used to be the whole of update validation, so a patch that moved `label` outside the

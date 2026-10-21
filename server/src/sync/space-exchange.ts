@@ -31,7 +31,7 @@ import { pushFamily } from './push-family.js';
 import { pushTombstones } from './tombstone-transfer.js';
 import { pullSpaceTombstones } from './pull-space-tombstones.js';
 import { refusedTransfers } from './push-refusals.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { isDirectionalNetwork } from '../networks/network-spaces.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
 import { LinkageCheck } from './linkage-check.js';
@@ -143,7 +143,7 @@ async function exchangeSpaceWithMember(
   const out: Turn = { pulled: zero(), pushed: zero(), incomplete: [], refused: [], recorded: [] };
   // Skip spaces that don't exist in local config — prevents orphan data and collection access for space ids that were
   // registered on the network but never created locally.
-  if (!concreteSpaces().some(s => s.id === spaceId)) {
+  if (!configuredSpaces().some(s => s.id === spaceId)) {
     log.warn(`Skipping sync for space '${peerText(spaceId)}' in network '${peerText(net.label)}': space not in local config`);
     return out;
   }

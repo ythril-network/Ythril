@@ -5,7 +5,7 @@
  *
  * B-2's last two capabilities are `save_space` and `reindex`. `createSpace()` already exists in `lifecycle.ts`, so
  * a tool could call it today — and that is the problem. `POST /api/spaces` wraps it in checks that would all be
- * skipped: the two proxy refusals, the schema-library `$ref`, and the strict-flag seeding. A token holding
+ * skipped: the retired-field refusal, the schema-library `$ref`, and the strict-flag seeding. A token holding
  * `createSpaces` would then get a *weaker* create over MCP than over REST, which is the *two surfaces, one rule, one
  * weaker* defect this whole item exists to close, reintroduced by the fix for it.
  *
@@ -15,7 +15,7 @@
  *
  * ## The ordering that is part of the contract
  *
- * Parse, then the proxy checks, then the `$ref` check, and **only then** the create. Every refusal happens before
+ * Parse, then the retired-field check, then the `$ref` check, and **only then** the create. Every refusal happens before
  * anything is written, which is what makes "a refused create leaves no space behind" true — asserted on every
  * refusal in the contract suite, because the natural way to get this wrong is to create first and validate after,
  * which returns the right status while stranding a space the caller has to clean up.
@@ -23,7 +23,6 @@
 import type { SpaceConfig, SpaceMeta } from '../config/types.js';
 import { refusalOfParse } from '../util/log.js';
 import type { z } from 'zod';
-import { getConfig } from '../config/loader.js';
 import { slugify } from './_shared.js';
 import { createSpace, type SpaceCreator } from './lifecycle.js';
 import {
@@ -31,7 +30,8 @@ import {
   parseSpaceMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
-import { isProxy, isWildcardProxy } from './proxy.js';
+import { retiredSpaceFieldError } from '../brain/retired-write-fields.js';
+import { ReservedSpaceIdError } from './unknown-space.js';
 import { refusalText } from '../brain/store-failure.js';
 import { reportServerFailure } from '../util/report-failure.js';
 
@@ -59,43 +59,26 @@ export type SpaceCreateDecision =
 export function planSpaceCreate(body: unknown): SpaceCreateDecision {
   const removed = refuseRemovedDescription(body);
   if (removed) return { ok: false, refusal: removed };
+  // `proxyFor` is retired (6.0): a proxy is a personal view now, made with `POST /api/views` / `view_create`. Refused BY NAME before the
+  // parse, so the sentence says what to do instead and no space is created.
+  const retired = retiredSpaceFieldError(body);
+  if (retired) return { ok: false, refusal: { status: 400, body: { error: retired } } };
 
   // Strip, THEN be strict — the same pair the update path uses, and the same reason. `CreateSpaceBody` is
   // `.strict()` as of the P-4 ruling, so without this a caller copying a space out of `GET /api/spaces` and
   // posting it as a template gets a 400 for `builtIn`/`usageGiB`/`indexStatus` — fields WE emit and they
   // cannot know to remove.
   //
-  // Only the emitted-never-accepted set is dropped here, not the create-only fields: `id`, `folders` and
-  // `proxyFor` are real inputs to a create, and stripping `id` would silently replace a caller's chosen
+  // Only the emitted-never-accepted set is dropped here, not the create-only fields: `id` and `folders`
+  // are real inputs to a create, and stripping `id` would silently replace a caller's chosen
   // space id with a generated slug. `mass-assignment.test.js` is the gate on both halves — it posts
   // `builtIn: true` and requires a 201 with the flag not injectable.
   const parsed = CreateSpaceBody.safeParse(stripServerOwnedSpace(body));
   if (!parsed.success) {
     return { ok: false, refusal: { status: 400, body: refusalOfParse(parsed.error) } };
   }
-  const { id: rawId, label, folders, maxGiB, proxyFor, meta, faceDescriptorDims } = parsed.data;
+  const { id: rawId, label, folders, maxGiB, meta, faceDescriptorDims } = parsed.data;
   const id = rawId ?? slugify(label);
-
-  // Validate proxy members exist and are not themselves proxies.
-  //
-  // `['*']` is the wildcard SENTINEL, not a member list, so per-member validation is skipped for it. Treating it as
-  // an id would refuse every wildcard proxy space with "space '*' not found" — pinned in the contract suite for
-  // exactly that reason.
-  if (isProxy({ proxyFor }) && !isWildcardProxy({ proxyFor })) {
-    const cfg = getConfig();
-    for (const memberId of proxyFor!) {
-      const member = cfg.spaces.find(s => s.id === memberId);
-      if (!member) {
-        return { ok: false, refusal: { status: 400, body: { error: `Proxy member space '${memberId}' not found` } } };
-      }
-      if (isProxy(member)) {
-        return {
-          ok: false,
-          refusal: { status: 400, body: { error: `Proxy member '${memberId}' is itself a proxy space (nesting not allowed)` } },
-        };
-      }
-    }
-  }
 
   const requestMeta = meta as SpaceMeta | undefined;
 
@@ -119,24 +102,22 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
 
   // New user-created spaces default to a fully-strict schema posture (owner decision 2026-07-25):
   // `validationMode: 'strict'` + `strictLinkage: true`, so a space enforces its schema and referential integrity
-  // from day one. An explicit value in the request wins (spread last). Proxy spaces hold no data of their own, so
-  // they are left un-defaulted. The federation-join path calls `createSpace` directly and is intentionally NOT
-  // affected — defaulting strict there would reject incoming off-schema federated records on ingest. With no
-  // typeSchemas yet defined, 'strict' still accepts every type/label, so this never blocks a brand-new empty space.
-  const seededMeta: SpaceMeta | undefined = isProxy({ proxyFor })
-    ? requestMeta
-    : { validationMode: 'strict', strictLinkage: true, ...(requestMeta ?? {}) };
+  // from day one. An explicit value in the request wins (spread last). The federation-join path calls `createSpace`
+  // directly and is intentionally NOT affected — defaulting strict there would reject incoming off-schema federated
+  // records on ingest. With no typeSchemas yet defined, 'strict' still accepts every type/label, so this never blocks
+  // a brand-new empty space.
+  const seededMeta: SpaceMeta = { validationMode: 'strict', strictLinkage: true, ...(requestMeta ?? {}) };
 
   // What `createSpace` stores is parsed: the seeded meta is the caller's parsed meta with two defaults laid under it, and it
   // goes through the one parse again so the plan carries the brand a store takes (`Q-216`).
-  const minted = seededMeta === undefined ? undefined : parseSpaceMeta(seededMeta);
-  if (minted && !minted.ok) {
+  const minted = parseSpaceMeta(seededMeta);
+  if (!minted.ok) {
     return { ok: false, refusal: { status: 400, body: { error: minted.message } } };
   }
 
   return {
     ok: true,
-    plan: { args: { id, label, folders, maxGiB, proxyFor, meta: minted?.ok ? minted.meta : undefined, faceDescriptorDims } },
+    plan: { args: { id, label, folders, maxGiB, meta: minted.meta, faceDescriptorDims } },
   };
 }
 
@@ -165,6 +146,8 @@ export async function applySpaceCreate(plan: SpaceCreatePlan, creator: SpaceCrea
     const space = await createSpace(plan.args, creator);
     return { outcome: 'created', space };
   } catch (err) {
+    // A pre-6.0 proxy's reserved id: the id is not free, which is a conflict in our words (an instance admin purges it first).
+    if (err instanceof ReservedSpaceIdError) return { outcome: 'conflict', error: err.message };
     // The store's failure is not this function's to word: `refusalText` rethrows it, so each door answers it as every
     // door does (bundle-30 I12), and only then is the wording read (bundle-53 G7, Q-335) — a driver text that holds
     // "already exists" was a 409 in the driver's own words while the store was failing.

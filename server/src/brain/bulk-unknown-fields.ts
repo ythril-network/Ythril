@@ -32,7 +32,7 @@ import {
   acceptedKeysSentence, unknownFieldOutcomeWords, unknownFieldText, UNKNOWN_FIELD_CODE, type UnknownFieldOutcome,
 } from '../contract/unknown-field-rows.js';
 import { unknownWriteFieldsMode } from '../spaces/spaces.js';
-import { findSpace } from '../spaces/proxy.js';
+import { findSpace } from '../spaces/space-lookup.js';
 import type { UnknownWriteFieldAnswer } from '../config/types.js';
 
 /** How many items of one batch get a row of their own; the rest are counted in one `…(+N more items)` row. */

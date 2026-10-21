@@ -24,7 +24,7 @@
  * actually needed, because it names the query that clears it.
  */
 import { readStoredById } from '../db/read-by-id.js';
-import { isStrictLinkage } from '../spaces/proxy.js';
+import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { findEntityReferences, type BacklinkEntry } from './entities.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';

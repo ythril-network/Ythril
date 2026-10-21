@@ -11,6 +11,7 @@ import path from 'path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
 import { tokensRouter } from './api/tokens.js';
+import { viewsRouter, adminViewsRouter } from './api/views.js';
 import { brainRouter } from './api/brain/index.js';
 import { spacesRouter } from './api/spaces.js';
 import { spaceSchemaLayersRouter } from './api/spaces-schema-layers.js';
@@ -51,6 +52,7 @@ import { maintenanceMiddleware } from './maintenance.js';
 import { globalRateLimit, ipFloodBackstop } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, loadSecrets, saveConfig, startConfigWatcher } from './config/loader.js';
 import { reloadSpaceDiff } from './config/reload-space-diff.js';
+import { dropSpaceFromViews, restoreViewsMissingAfterReload, snapshotViews } from './config/views.js';
 import { logAuditEntry } from './audit/audit.js';
 import { CONFIG_RELOAD_OPERATIONS } from './audit/middleware.js';
 import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
@@ -314,6 +316,8 @@ export function createApp() {
   // ── API routes ───────────────────────────────────────────────────────────
   app.use('/api/theme', themeRouter);   // public — no auth required
   app.use('/api/tokens', tokensRouter);
+  app.use('/api/views', viewsRouter);
+  app.use('/api/admin/views', adminViewsRouter);
   /*
    * THE TOOL DOOR: `POST /api/<tool-name>`, taking the tool's own arguments, dispatching through the same
    * `callTool` the MCP door uses.
@@ -533,6 +537,7 @@ export function createApp() {
 
   async function applyConfigFromDisk(actor: ReloadActor = WATCHER): Promise<void> {
     const beforeSpaces = structuredClone(getConfig().spaces);
+    const beforeViews = snapshotViews();
     reloadConfig();
     const audit = (operation: string, spaceId: string, status: number) => logAuditEntry({
       tokenId: actor.tokenId ?? null, tokenLabel: actor.tokenLabel ?? null, ip: actor.ip,
@@ -553,7 +558,14 @@ export function createApp() {
         log.warn(`config.json no longer lists space(s) ${diff.kept.map(s => s.id).join(', ')}; kept them. `
           + 'To remove a space by editing the file, list its id in "removeSpaces".');
       }
-      if (diff.kept.length || cfg.removeSpaces) {
+      // A space the file removes on purpose leaves every view's member list too, or a recreated id would silently rejoin it.
+      for (const id of diff.removed) dropSpaceFromViews(cfg, id);
+      // A view the file no longer lists is put back, and said: personal views are their owners' data, as spaces are the operator's (S-10).
+      const viewsKept = restoreViewsMissingAfterReload(beforeViews, cfg);
+      if (viewsKept > 0) {
+        log.warn(`config.json no longer lists ${viewsKept} personal view(s); kept them. A view is its owner's data and is deleted through its owner's doors.`);
+      }
+      if (diff.kept.length || cfg.removeSpaces || viewsKept > 0 || diff.removed.length) {
         delete cfg.removeSpaces;
         saveConfig(cfg);
       }

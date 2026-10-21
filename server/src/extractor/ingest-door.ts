@@ -13,7 +13,6 @@
  * refusals, so a start refused before anything is paid for costs no slot.
  */
 import { getConfig } from '../config/loader.js';
-import { resolveWriteTarget } from '../spaces/proxy.js';
 import { decide, decisionBackend } from './decide.js';
 import { generate, generationBackend } from './generate.js';
 import { isNlpAvailable, spansOf } from './conversation/nlp-client.js';
@@ -22,7 +21,7 @@ import { extractConversation } from './conversation/extract.js';
 import { writeExtraction } from './conversation/write-extraction.js';
 import { parseIngestRequest, ingestRefusals, spaceContextFrom, startIngest, type IngestDeps, type IngestProbes } from './ingest.js';
 import { ingestRuns, INGEST_BUSY, type IngestRun } from './ingest-runs.js';
-import { holdsRung } from '../auth/reachable-spaces.js';
+import { holdsRung, rungRefusal } from '../auth/reachable-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { consumeHeavyToolCall, HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
 
@@ -53,38 +52,40 @@ export type BeginIngest =
   | { status: 409; error: string; refusals: string[] };
 
 export async function beginIngest(
-  spaceId: string, targetSpace: string | undefined, body: unknown, rights: TokenRights | undefined,
+  spaceId: string, body: unknown, rights: TokenRights | undefined,
   /** Who the rail counts against: the calling token's id, or its IP when it has none. */
   callerKey: string,
 ): Promise<BeginIngest> {
   if (!getConfig().spaces.some(s => s.id === spaceId)) return { status: 404, error: `Space '${spaceId}' not found` };
-  // The grant of a START: write on knowledge in the member the run lands in. An absent matrix is refused inside the resolver.
-  const wt = resolveWriteTarget(spaceId, targetSpace, { rights, area: 'knowledge', needs: 'write' });
-  if (!wt.ok) return wt;
+  // A run lands in the space the door named (a view never writes: the doors answer one as an unknown space). The grant of a START - write
+  // on knowledge there - was judged by the door's guard; a missing matrix holds no rung, so it is refused here as well.
+  if (!rights || !holdsRung(rights, spaceId, 'knowledge', 'write')) return { status: 403, error: rungRefusal('write', 'knowledge', spaceId) };
   const parsed = parseIngestRequest(body);
   if (!parsed.ok) return { status: 400, error: parsed.error };
-  const ctx = spaceContextFrom(getConfig().spaces.find(s => s.id === wt.target)?.meta);
+  const ctx = spaceContextFrom(getConfig().spaces.find(s => s.id === spaceId)?.meta);
   const refusals = await ingestRefusals(parsed.request, ctx, INGEST_PROBES);
   if (refusals.length) {
-    return { status: 409, error: `ingest cannot run into '${wt.target}': ${refusals.join('; ')}`, refusals };
+    return { status: 409, error: `ingest cannot run into '${spaceId}': ${refusals.join('; ')}`, refusals };
   }
   // Before the rate limit, so a start refused for capacity costs the caller no slot.
   if (!ingestRuns.hasRoom()) return { status: 429, error: INGEST_BUSY };
   if (!consumeHeavyToolCall(callerKey)) return { status: 429, error: INGEST_RATE_LIMITED };
   // Fails closed: no rights matrix means no second area, so no files.
-  const transcripts = !!rights && holdsRung(rights, wt.target, 'files', 'write');
-  return { status: 202, run: startIngest(wt.target, parsed.request, ctx, productionDeps(wt.target), { transcripts }) };
+  const transcripts = !!rights && holdsRung(rights, spaceId, 'files', 'write');
+  return { status: 202, run: startIngest(spaceId, parsed.request, ctx, productionDeps(spaceId), { transcripts }) };
 }
 
 /**
- * A run, looked up under the space it was started in. A run started through a proxy is held under the MEMBER it
- * wrote into, so the lookup resolves the same write target the start did.
+ * A run, looked up under the spaces a read names: the space it was started in, or the members of the caller's own view.
  *
- * A READ through the write-target resolver, so the grant it carries needs the `read` rung and not `write` (`Q-440`): a read-only
- * token still reads its run. A run in a member the caller does not reach is answered as no run, exactly as one in a space that
- * does not exist — the refusal is not told apart from "nothing there".
+ * A READ, so a read-only token still reads its run. A run in a space the caller does not read is answered as no run, exactly as one in a
+ * space that does not exist - the refusal is not told apart from "nothing there". `spaces` is what the door resolved (`readSpacesOfRequest`,
+ * `readSpacesOfCall`), never a raw id.
  */
-export function ingestStatus(spaceId: string, targetSpace: string | undefined, runId: string, rights: TokenRights | undefined): IngestRun | undefined {
-  const wt = resolveWriteTarget(spaceId, targetSpace, { rights, area: 'knowledge', needs: 'read' });
-  return wt.ok ? ingestRuns.get(wt.target, runId) : undefined;
+export function ingestStatus(spaces: readonly string[], runId: string): IngestRun | undefined {
+  for (const spaceId of spaces) {
+    const run = ingestRuns.get(spaceId, runId);
+    if (run) return run;
+  }
+  return undefined;
 }

@@ -14,12 +14,13 @@ import { getEmbedJobCounts } from '../../brain/embed-queue.js';
 import { getConfig } from '../../config/loader.js';
 import { col } from '../../db/mongo.js';
 import { planReindex, startReindex, reindexStateFor } from '../../brain/reindex.js';
-import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
+import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { rankOf } from '../../brain/recall-shape.js';
 import { statesRetryability } from './_read-failure.js';
 import { sendToolAnswer } from '../send-failure.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { LIVE_FILE_ROW } from '../../files/live-file-row.js';
+import { answeredUnknownSpace } from '../write-target-answer.js';
 
 /*
  * `MAX_GRAPH_NODES` lived here, private to this file, with a comment saying recall shared it. It did not: only
@@ -33,12 +34,8 @@ export const searchRouter = Router();
 // GET /api/brain/spaces/:spaceId/stats
 searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const memberIds = memberSpacesForRequest(req, spaceId);
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  const memberIds = readSpacesOfRequest(req, spaceId);
   const counts = await Promise.all(memberIds.map(async mid => ({
     facts: await countFacts(mid),
     entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
@@ -82,17 +79,13 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
  */
 searchRouter.get('/spaces/:spaceId/activity', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
   // Clamped rather than rejected: this is a dashboard window, and an out-of-range value has an obviously
   // correct interpretation. 90 days is the bucket retention — asking for more would silently return less.
   const raw = Number(req.query['hours'] ?? 24);
   const hours = Number.isFinite(raw) ? Math.max(1, Math.min(90 * 24, Math.floor(raw))) : 24;
 
-  const memberIds = memberSpacesForRequest(req, spaceId);
+  const memberIds = readSpacesOfRequest(req, spaceId);
   const rows = (await Promise.all(memberIds.map(mid => summariseActivity(hours, Date.now(), mid)))).flat();
   res.json({ spaceId, hours, spaces: rows });
 });
@@ -246,21 +239,16 @@ searchRouter.post('/similar', globalRateLimit, requireAuth, statesRetryability, 
 // `reindexRun` is the progress of a running reindex, from the same function `space_meta` answers with on both doors.
 searchRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const state = await reindexStateFor(memberSpacesForRequest(req, spaceId));
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  const state = await reindexStateFor(readSpacesOfRequest(req, spaceId));
   res.json({ spaceId, ...state });
 });
 
 
 // POST /api/brain/spaces/:spaceId/reindex
 //
-// Every refusal -- 404, the proxy 400, the per-space 409 -- and the run itself live in `brain/reindex.ts`, so an
-// MCP tool reaches the same rules instead of a weaker copy of them (B-2). What stays here is resolving the member
-// spaces from the REQUEST (which is where the token's scope is known) and turning a refusal into a status.
+// Every refusal -- 404, the per-space 409 -- and the run itself live in `brain/reindex.ts`, so an MCP tool reaches the same rules instead
+// of a weaker copy of them (B-2). What stays here is turning a refusal into a status.
 //
 // The response is sent as soon as the run is RECORDED, with zeroed counters (kept for older clients; progress is
 // `reindexRun` on reindex-status). Awaiting the rebuild here would turn a multi-minute job into a request timeout.
@@ -268,7 +256,7 @@ searchRouter.post('/spaces/:spaceId/reindex', globalRateLimit, requireSpaceAuth,
   const spaceId = req.params['spaceId'] as string;
   const space = getConfig().spaces.find(s => s.id === spaceId);
 
-  const decision = await planReindex({ spaceId, space, memberIds: memberSpacesForRequest(req, spaceId) });
+  const decision = await planReindex({ spaceId, space });
   if (!decision.ok) {
     res.status(decision.refusal.status).json(decision.refusal.body);
     return;

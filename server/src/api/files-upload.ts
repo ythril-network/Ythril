@@ -99,7 +99,7 @@ export function registerUploadRoute(router: Router): void {
     async (req, res) => {
       const request = requireWritePath(req, res);
       if (request === null) return;
-      const { targetSpace, path: filePath } = request;
+      const { spaceId: targetSpace, path: filePath } = request;
       const cfg = getConfig();
       // A peer pushing a file it holds (sync/file-sync.ts) delivers an ARRIVAL, recorded as the peer's — see
       // `arrivedFrom` in files/store-file.ts. Both branches below pass it.

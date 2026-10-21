@@ -96,7 +96,9 @@ const serveTool: RequestHandler = async (req, res) => {
 export function restToolBody(outcome: Pick<Awaited<ReturnType<typeof callTool>>, 'result'>): Record<string, unknown> {
   const text = outcome.result.content.map(c => c.text).join('\n');
   const data = outcome.result.structuredContent ?? null;
-  if (outcome.result.isError) return { ok: false, error: text, data };
+  // A refusal that carries a machine-readable code (a retired space id's `space_retired`) puts it at the top level too, as the path routes do.
+  const code = typeof outcome.result.structuredContent?.['code'] === 'string' ? { code: outcome.result.structuredContent['code'] } : {};
+  if (outcome.result.isError) return { ok: false, error: text, ...code, data };
   if (data === null) return { ok: true, text, data };
   return { ok: true, text: STRUCTURED_ANSWER_TEXT, data };
 }

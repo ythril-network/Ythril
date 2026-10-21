@@ -60,7 +60,7 @@ export async function pageAcrossMembers<T>(req: PageRequest<T>): Promise<PageRes
   if (window > ceiling) {
     return {
       ok: false,
-      error: `skip + limit must not exceed ${ceiling} on a proxy space (got ${window}). `
+      error: `skip + limit must not exceed ${ceiling} through a personal view (got ${window}). `
         + 'Page a member space directly for a deeper sweep.',
     };
   }

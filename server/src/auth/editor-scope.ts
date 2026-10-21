@@ -41,6 +41,7 @@
 import { SPACE_AREAS } from '../config/rights-shape.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { effectiveRung, administers } from './mint-cap.js';
+import { isInstanceAdmin } from './instance-admin.js';
 
 /**
  * The spaces an administrator is CONFINED to, read from the rights matrix rather than the legacy allowlist.
@@ -292,4 +293,32 @@ export function refusalsOutsideEditorScope(input: {
   if (foreign.length > 0) out.push(`per-space rights for space(s) outside your scope: ${foreign.join(', ')}`);
 
   return out;
+}
+
+/**
+ * What stops THIS caller from managing (editing, rotating, revoking, or giving a view to) THAT token: the refusals of the one guard the
+ * token routes share, fed by the caller's own scope (`editorScopeFor`). Empty means it may. `rights` is what an edit would write, or
+ * `undefined` for an act that changes none (a rotation, a revoke, a view copy), so only the guard's TARGET half applies.
+ *
+ * Extracted at the fourth site: PATCH, regenerate and DELETE each spelled `refusalsOutsideEditorScope({ editorSpaces: editorScopeFor(caller),
+ * ... })` themselves, and a personal-view copy (`mayManageToken`) must refuse exactly when they do.
+ */
+export function refusalsToManageToken(
+  caller: { rights?: TokenRights | null } | undefined,
+  target: { spaces?: string[]; schemaLibrary?: boolean; rights?: TokenRights | null } | undefined,
+  rights?: EditableRights,
+): string[] {
+  return refusalsOutsideEditorScope({ editorSpaces: editorScopeFor(caller), target, rights });
+}
+
+/**
+ * May this caller manage that token: an instance admin or a space administrator (the token routes' own door), and inside the scope
+ * `refusalsToManageToken` allows. A personal-view copy is a grant of reading to that token, so it asks what managing it asks.
+ */
+export function mayManageToken(
+  caller: { rights?: TokenRights | null } | undefined,
+  target: { spaces?: string[]; schemaLibrary?: boolean; rights?: TokenRights | null } | undefined,
+): boolean {
+  if (!caller || !(isInstanceAdmin(caller) || administersAnySpace(caller))) return false;
+  return refusalsToManageToken(caller, target).length === 0;
 }
