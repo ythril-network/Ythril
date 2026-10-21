@@ -47,13 +47,20 @@
  * an entity and call no validator are found; one that validates the WRONG kind is found; one that validates is clean
  * (`doorsWithoutAValidator` is run over an index built from the real sources plus the synthetic file).
  *
+ * And by the act bodies (bundle-157, Q-552): a door that registers a space act reaches the runner, and the runner calls the
+ * body its entry's kind names out of a map, so no call names a body and the walk stopped at the runner. When the restore's
+ * writes moved into its act body the row for them read as stale and was deleted, while the writes still happened. The walk now
+ * follows the dispatch into every body handed to `defineSpaceActBody` (`spaceActBodies`, derived, with a floor of one body per
+ * kind in `SPACE_ACT_KINDS`); on cf3fedeb's tree without the restored row, 25 doors (POST /api/admin/data/restore and every door
+ * that can start an act) were found writing `db/restore.ts:backupLoader` and reaching no validator.
+ *
  * Run: node --test testing/standalone/every-door-that-stores-a-record-reaches-a-validator.test.js   (needs `npm run build` in server/)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { indexSources, toolHandlerRoot, routeHandlerRoots, walkFrom, pathTo } from './_call-graph.mjs';
+import { indexSources, toolHandlerRoot, routeHandlerRoots, walkFrom, pathTo, spaceActBodies, spaceActBodyEdges } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
 import { recordWrites } from './_record-writes.mjs';
 import { validationEntryPoints, callsOf } from './_validation-entry-points.mjs';
@@ -63,6 +70,7 @@ import { stripComments } from './_strip-comments.mjs';
 
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
 const { COLLECTION_METHOD_EFFECT } = await import('../../server/dist/db/record-write-observer.js');
+const { SPACE_ACT_KINDS } = await import('../../server/dist/config/types-space-acts.js');
 const ENTRY_POINTS = await validationEntryPoints();
 
 /** The methods that store content: the observer's writes, less the ones that only delete. */
@@ -111,6 +119,11 @@ function doorsWithoutAValidator({ index, routes, exempt }) {
   const toolObjects = [...index.objects.values()].filter(o => o.strings.get('name') && index.bodies.has(`${o.file}:${o.name}.handle`));
   const dispatchedTools = entry => [...entry.body.matchAll(/\bcallTool\s*\(\s*\{\s*name:\s*['"]([a-z_]+)['"]/g)]
     .map(m => { try { return toolHandlerRoot(index, m[1]); } catch { return null; } }).filter(Boolean);
+  // A door that registers a space act reaches the runner, and the runner calls the body its entry's kind names: the walk follows
+  // the dispatch into every body (`spaceActBodies`), or the writes a body does would be read as no door's.
+  const acts = spaceActBodies(index);
+  const actEdges = spaceActBodyEdges(acts);
+  const edges = entry => [...dispatchedTools(entry), ...actEdges(entry)];
 
   const doors = [
     ...routes.map(r => ({ label: `${r.method} ${r.path}`, kind: 'route', roots: roots.get(`${r.method} ${r.path}`) })),
@@ -121,7 +134,7 @@ function doorsWithoutAValidator({ index, routes, exempt }) {
   const reached = new Map();
   const usedExemptions = new Set();
   for (const door of doors) {
-    const { seen, parent } = walkFrom(index, door.roots, { closures: true, edges: dispatchedTools });
+    const { seen, parent } = walkFrom(index, door.roots, { closures: true, edges });
     // The kinds of validator this door reaches, by name: `Entity` for `validateEntity(` or `classifyEntityUpsertAgainst(`.
     const validatedKinds = new Set();
     for (const key of seen) {
@@ -152,7 +165,7 @@ function doorsWithoutAValidator({ index, routes, exempt }) {
       }
     }
   }
-  return { doors, offenders: [...new Set(offenders)], reached, usedExemptions, records };
+  return { doors, offenders: [...new Set(offenders)], reached, usedExemptions, records, acts };
 }
 
 /**
@@ -170,6 +183,10 @@ const EXEMPT = {
     'space creation reached from membership gossip repairs a stale `spaceId` on records already stored: one field, no property',
   'server/src/sync/delivered-by-backfill.ts:stampCollection':
     'the one-time stamp of who delivered rows stored before `deliveredBy` existed: a local-only field on rows already held',
+  'server/src/db/restore.ts:backupLoader':
+    'the restore act\'s body loads a backup into a space it has just emptied: what it stores is the backup\'s records as they were, '
+    + 'which the space held and validated when they were written; the operator who restores chose the whole of it (a restore, like '
+    + 'an import, keeps what it was given). Reached through the runner\'s dispatch, by every door that can start a space act',
   'server/src/brain/chrono-redaction.ts:redactLapsedChronoContent':
     'the retention sweep REMOVES the content of a chrono entry whose window passed and stamps the redaction marks: no caller-chosen '
     + 'property is written (it is reached from the boot walk, which a setup route starts)',
@@ -199,6 +216,21 @@ describe('the derivation works', () => {
       'MCP save_entity', 'MCP update_chrono', 'MCP save_bulk', 'MCP graph_merge', 'POST /api/sync/batch-upsert', 'POST /api/admin/spaces/:spaceId/import']) {
       assert.ok(RESULT.reached.has(label), `${label} is not among the doors that reach a governed write — the derivation lost a whole door`);
     }
+  });
+
+  it('every space act kind has a body the walk follows, and the door that registers a restore reaches the restore body', () => {
+    const { bodies, dispatchers } = RESULT.acts;
+    assert.ok(dispatchers.length >= 1, 'the runner\'s dispatch (the function that calls a body from defineSpaceActBody\'s map) was not found');
+    const unfollowable = bodies.filter(b => !b.key || !b.kind).map(b => `${b.file}: defineSpaceActBody(…, ${b.fn})`);
+    assert.deepEqual(unfollowable, [], 'a body handed to the runner that the walk cannot enter is a set of writes no door is held to');
+    const kinds = Object.keys(SPACE_ACT_KINDS);
+    assert.ok(kinds.length >= 1, 'SPACE_ACT_KINDS read as empty');
+    const withBody = new Set(bodies.map(b => b.kind));
+    assert.deepEqual(kinds.filter(k => !withBody.has(k)), [], 'a space act kind with no body found by defineSpaceActBody: the derivation lost it');
+    const restore = bodies.find(b => b.kind === 'restore');
+    const writes = RESULT.reached.get('POST /api/admin/data/restore') ?? [];
+    assert.ok(writes.some(w => w.startsWith(`${restore.key}`) || w.includes('restore.ts:')),
+      `POST /api/admin/data/restore reaches none of the restore body's writes (${restore.key}); reached: ${writes.join(', ') || 'none'}`);
   });
 
   it('no governed write sits where the index cannot attribute it to a function', () => {
