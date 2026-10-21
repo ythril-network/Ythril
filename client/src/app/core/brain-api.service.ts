@@ -273,7 +273,7 @@ export class BrainApi {
    *  Authorization header and a raw token in the URL leaks into logs/history, so the stream is opened
    *  with `?ticket=` instead. The ticket is single-use, short-lived, and bound to this space's stream. */
   mintEventsTicket(spaceId: string): Observable<{ ticket: string; expiresInMs: number }> {
-    return this.http.post<{ ticket: string; expiresInMs: number }>(`/api/brain/spaces/${spaceId}/events/ticket`, {});
+    return this.http.post<{ ticket: string; expiresInMs: number }>(`/api/brain/spaces/${encodeURIComponent(spaceId)}/events/ticket`, {});
   }
 
   /**

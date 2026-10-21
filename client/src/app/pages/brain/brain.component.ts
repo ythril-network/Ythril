@@ -568,7 +568,7 @@ export class BrainComponent implements OnInit, OnDestroy {
         this.spaces.set(spaces.map(s => ({ space: s })));
         this.retiredIds.set(retiredSpaceIds ?? null);
         // A link to a view waits for the views list: until it arrives "not one of mine" cannot be told from "not loaded yet".
-        this.loadingSpaces.set((this.route.snapshot.queryParamMap.get('space') ?? '').startsWith('@') && !this.viewsStore.loaded());
+        this.loadingSpaces.set(readSpaceParam(this.route.snapshot.queryParamMap.get('space'), spaces.map(s => s.id), this.viewsStore).kind === 'wait');
         if (spaces.length > 0) {
           this.applyUrlState(spaces);
           // Pre-load stats for all other spaces so counts show on their chips
