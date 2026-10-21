@@ -97,8 +97,9 @@ describe('pool-checkout failures are the store\'s condition', () => {
 });
 
 describe('the server codes that mean "not answerable right now"', () => {
-  // A fixture is allowed to be literal: it states the twelve the module is held to.
-  const CODES = [11600, 91, 11602, 189, 13436, 6, 7, 89, 9001, 10107, 13435, 134];
+  // A fixture is allowed to be literal: it states the thirteen the module is held to (215 DatabaseDropPending: Q-564, a migrate
+  // whose target was still dropping a database turned into an abandon).
+  const CODES = [11600, 91, 11602, 189, 13436, 6, 7, 89, 9001, 10107, 13435, 134, 215];
 
   it('the exported set is exactly these, and neither deadline code is in it', () => {
     assert.deepEqual([...sc.STORE_ERROR_CODES].sort((a, b) => a - b), [...CODES].sort((a, b) => a - b));
