@@ -21,6 +21,12 @@
 /** The symbols the plan names: a file naming one is in the flip set. Built fresh per use (a shared /g regex under-scans). */
 export const proxySymbolPattern = () => /\bproxyFor\b|\bisProxy\w*|\bconcreteSpace\w*|\bmemberSpaces\w*|\btargetSpace\b|\bresolveWriteTarget\b/;
 
+/**
+ * The commit the list was classified against: every `rewrite` row's `base` hashes its file as it was here. It is on `main`, so the
+ * gate derives the flip set AS IT WAS and holds the list to it, which is what keeps a correct rewrite from lowering the gate's floor.
+ */
+export const CLASSIFIED_AT = '18e8d598';
+
 /** Where the flip set is looked for: the test suites, their helpers, and the client specs. */
 export const FLIP_SET_ROOTS = Object.freeze(['testing', 'client/src']);
 
