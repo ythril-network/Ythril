@@ -138,11 +138,14 @@ receiver may copy a view of its own, or of a token it manages, naming the owner 
 tokens hold a view of that name.
 
 - The copy keeps **only the members the receiver reads**; a copy that would read nothing is `400`
-  `view_copy_nothing_readable`.
-- **It is idempotent by receiver and source view.** Repeating it refreshes the earlier copy's members and answers
-  `200`; the first copy answers `201`.
+  `view_copy_nothing_readable`. A `["*"]` view is judged by the spaces it stands for: a receiver that reads none of
+  them gets the same refusal.
+- **It is idempotent by receiver and source view**, and renaming the source does not change which view it is.
+  Repeating it refreshes the earlier copy's members and answers `200`; the first copy answers `201`. Both doors
+  answer `{ view, created }`, `created` saying which of the two happened.
 - A name the receiver already holds becomes `<name>-2` (then `-3`, and so on).
-- A receiver that is not a token you may manage, or does not exist, is one answer: `403` `view_copy_forbidden`.
+- A receiver that is not a token you may manage, or does not exist, is one answer: `403` `view_copy_forbidden`; so
+  is a caller who may manage no token at all, on both doors, before any second factor is asked.
 
 ## Lifecycle
 

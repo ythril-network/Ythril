@@ -17,10 +17,9 @@ import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { ViewRefusal, viewOwnerOf } from '../config/views.js';
 import {
   auditViewAct, claimUnclaimedView, copyViewTo, createView, deleteOwnView, getOwnView, listOwnViews, orphanAnswer,
-  purgeRetiredSpaceId, updateView, viewsMigrationReport, type ViewActor, type ViewAuditDoor,
+  purgeRetiredSpaceId, refuseCopyByNonManager, updateView, viewsMigrationReport, type ViewActor, type ViewAuditDoor,
 } from '../spaces/view-acts.js';
 import { VIEW_OPERATIONS, auditAuthMethod, auditOidcSubject } from '../audit/middleware.js';
-import { NAME_QUOTED, peerText } from '../util/log.js';
 
 export const viewsRouter = Router();
 export const adminViewsRouter = Router();
@@ -90,10 +89,23 @@ viewsRouter.delete('/:id', globalRateLimit, requireAuth, act(async (req, res) =>
 }));
 
 // A copy is a grant of reading to another token: the second factor and the admin door token management has.
-viewsRouter.post('/:id/copy', authRateLimit, requireAdminOrSpaceAdminMfa, act(async (req, res) => {
+// The caller who may manage no token is refused by the act's own rule first, so it gets `view_copy_forbidden` as on MCP, not the
+// step-up guard's generic admin refusal.
+const copierOrRefuse = (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    refuseCopyByNonManager(actorOf(req).record);
+  } catch (err) {
+    if (err instanceof ViewRefusal) { res.status(err.status).json(err.body); return; }
+    next(err);
+    return;
+  }
+  next();
+};
+
+viewsRouter.post('/:id/copy', authRateLimit, requireAuth, copierOrRefuse, requireAdminOrSpaceAdminMfa, act(async (req, res) => {
   const given = copyViewTo(actorOf(req), idOf(req), bodyOf(req)['toTokenId'], bodyOf(req)['fromTokenId']);
   await auditViewAct(doorOf(req, '/api/views/:id/copy'), VIEW_OPERATIONS.copied, given);
-  res.status(given.created ? 201 : 200).json({ view: given.view });
+  res.status(given.created ? 201 : 200).json({ view: given.view, created: given.created });
 }));
 
 // ── The instance admin's doors ─────────────────────────────────────────────────────────────────────────────────────
@@ -112,7 +124,8 @@ adminViewsRouter.post('/retired/:id/purge', authRateLimit, requireAdmin, act(asy
   const { released } = await purgeRetiredSpaceId(idOf(req), { confirmOidcClaims: bodyOf(req)['confirmOidcClaims'] === true });
   const owner = viewOwnerOf(actorOf(req).record) ?? 'unknown';
   await auditViewAct(doorOf(req, '/api/admin/views/retired/:id/purge'), VIEW_OPERATIONS.purgedRetiredId, { ownerKey: owner, memberCount: 0 });
-  res.json({ released: peerText(released, { max: NAME_QUOTED }) });
+  // The id as released, as MCP answers it: a JSON value is not a log line, and escaping it here made one purge answer two ids.
+  res.json({ released });
 }));
 
 adminViewsRouter.get('/migration', globalRateLimit, requireAdmin, act((_req, res) => {

@@ -25,7 +25,7 @@ import {
   type ViewOwnerSource,
 } from '../config/views.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
-import { mayManageToken } from '../auth/editor-scope.js';
+import { mayManageToken, mayManageTokens } from '../auth/editor-scope.js';
 import { logAuditEntry } from '../audit/audit.js';
 import { VIEW_OPERATIONS } from '../audit/middleware.js';
 import { unknownSpaceSentence } from './unknown-space.js';
@@ -200,6 +200,18 @@ function copySourceFor(actor: ViewActor, owner: string, id: string, fromTokenId:
   throw notFound(id);
 }
 
+const copyNotManager = (): ViewRefusal => new ViewRefusal('copyNotManager', 'You may give a view only to a token you may manage');
+
+/**
+ * The copy's first question, asked by each door before its own second factor and again by {@link copyViewTo}: a caller who may manage no
+ * token at all is refused as `view_copy_forbidden`, the answer a copy to a token it may not manage gets. REST's step-up guard would
+ * otherwise answer it first with its generic admin refusal while MCP answered the code, so one act had two answers by door.
+ * @throws ViewRefusal
+ */
+export function refuseCopyByNonManager(record: ViewActor['record'] | undefined): void {
+  if (!mayManageTokens(record)) throw copyNotManager();
+}
+
 /**
  * Give another token a COPY of a view, owned by the receiver (owner ruling 0050bb1e: a view belongs to exactly one owner, and there is no
  * sharing state). Only a caller who may MANAGE the receiver may (`mayManageToken`), and it is refused as one answer whether the receiver is
@@ -210,10 +222,9 @@ function copySourceFor(actor: ViewActor, owner: string, id: string, fromTokenId:
  */
 export function copyViewTo(actor: ViewActor, id: string, toTokenId: unknown, fromTokenId?: unknown): { view: ViewAnswer; created: boolean; ownerKey: string; memberCount: number } {
   const owner = ownerOrRefuse(actor);
+  refuseCopyByNonManager(actor.record);
   const receiver = typeof toTokenId === 'string' ? getConfig().tokens.find(t => t.id === toTokenId) : undefined;
-  if (!receiver || !mayManageToken(actor.record, receiver)) {
-    throw new ViewRefusal('copyNotManager', 'You may give a view only to a token you may manage');
-  }
+  if (!receiver || !mayManageToken(actor.record, receiver)) throw copyNotManager();
   const source = copySourceFor(actor, owner, id, fromTokenId, getConfig());
   const receiverOwner = viewOwnerOf(receiver);
   if (!receiverOwner) throw new ViewRefusal('noOwner', 'That token cannot own a personal view');

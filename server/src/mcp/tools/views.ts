@@ -12,7 +12,7 @@ import {
 } from '../../config/views.js';
 import {
   auditViewAct, claimUnclaimedView, copyViewTo, createView, deleteOwnView, getOwnView, listOwnViews, orphanAnswer,
-  purgeRetiredSpaceId, updateView, viewsMigrationReport, type ViewActor, type ViewAuditDoor,
+  purgeRetiredSpaceId, refuseCopyByNonManager, updateView, viewsMigrationReport, type ViewActor, type ViewAuditDoor,
 } from '../../spaces/view-acts.js';
 import { VIEW_OPERATIONS } from '../../audit/middleware.js';
 import { mfaRequiredFor } from '../../auth/mfa-policy.js';
@@ -152,6 +152,8 @@ export const view_copyTool: ToolHandler = {
   }),
   handle: async (ctx) => answering(async () => {
     const record = ctx.callerRecord;
+    // A caller who may manage no token is refused before the second factor, as REST refuses it before its step-up guard.
+    refuseCopyByNonManager(record ?? undefined);
     // The second factor token management asks, answered honestly: this door has no place for a code, so a caller who would need one on REST
     // is told to use the web UI. The same rule as REST's (`mfaRequiredFor`), not a third divergence.
     if (record && !isOidc(record) && mfaRequiredFor({ mfa: record.mfa }, isMfaEnabled())) {
@@ -168,7 +170,8 @@ export const view_copyTool: ToolHandler = {
 export const view_orphansTool: ToolHandler = {
   name: 'view_orphans',
   admin: true,
-  description: 'Instance admin: count the personal views whose owner holds no token, per owner kind (`token`, `oauth`). Names no view and no owner.',
+  description: 'Instance admin: count the personal views whose owner holds no token, per owner kind (`token`, `oauth`), naming none of those views and no owner; '
+    + 'and list the unclaimed definitions (`unclaimed`: each a name and its members, never an owner), the migrated views no admin token could own, to take with view_claim.',
   inputSchema: () => ({ type: 'object', properties: {}, required: [], additionalProperties: false }),
   handle: async () => answering(() => {
     return json({ ...orphanAnswer() });
