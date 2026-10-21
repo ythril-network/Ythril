@@ -129,12 +129,11 @@ describe('the creation ordering this check depends on', () => {
     // The reload's and the boot's caller is `initOwedSpaces` (`spaces/lifecycle.ts`, bundle-53 G21 and G32; it was a loop in `app.ts`).
     // It no longer polls (it defers the readiness poll to the confirmation, `waitForVectorReady: false`), so it is not among the
     // callers above; but its spaces are still committed by construction: it drops from what it is owed every id the live config does
-    // not hold, and walks only the concrete spaces among the rest (`concreteSpaceIds()` reads the live config, the concrete-space walk
-    // since `Q-98`). Held anyway, so that a change that makes it poll again finds the precondition already stated.
+    // not hold (`getConfig().spaces`), and initialises only the ids that remain. Held anyway, so that a change that makes it poll
+    // again finds the precondition already stated.
     const body = bodyOf(lifecycle, 'initOwedSpaces');
     const committed = body.indexOf('getConfig().spaces');
-    assert.ok(committed > -1 && body.indexOf('concreteSpaceIds()') > committed
-      && body.indexOf('await initSpace(spaceId, { waitForVectorReady: false })') > committed,
+    assert.ok(committed > -1 && body.indexOf('await initSpace(spaceId, { waitForVectorReady: false })') > committed,
     'the shared init walk no longer restricts itself to spaces read from the live config before it initialises them');
   });
 });

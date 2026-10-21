@@ -379,7 +379,7 @@ export function spaceReachers(index) {
 
 /**
  * The loops that ITERATE SPACES, in one body, and whether they reach a space's data. A loop iterates spaces when
- *  - its header names them (`spaceIds`, `concreteSpaces()`, `net.spaces`, `spaceDirs`), or
+ *  - its header names them (`spaceIds`, `configuredSpaces()`, `net.spaces`, `spaceDirs`), or
  *  - it hands its own variable to a function whose first parameter is a `space…` (`sweepSpace(spaceId)`) — the spelling of the
  *    iterable does not matter, which is how a loop over `probe` or `candidates` is found.
  * It is a SUBJECT when it also reaches a per-space primitive (directly or through {@link spaceReachers}).
@@ -389,7 +389,7 @@ export function spaceReachers(index) {
 export function spaceLoopsIn(index, entry, reachers) {
   const out = [];
   for (const loop of loopsIn(entry.body)) {
-    const header = /\bspaces?\b|\bspaceIds?\b|\bspaceDirs?\b|concreteSpace|\.spaces\b/i.test(loop.head);
+    const header = /\bspaces?\b|\bspaceIds?\b|\bspaceDirs?\b|configuredSpace|\.spaces\b/i.test(loop.head);
     let hands = false;
     for (const site of callSitesIn(loop.body, { closures: true })) {
       const target = index.resolve(entry.file, site.name);

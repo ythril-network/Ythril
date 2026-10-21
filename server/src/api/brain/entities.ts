@@ -397,7 +397,7 @@ entitiesRouter.post('/spaces/:spaceId/entities/:survivorId/merge/:absorbedId', g
 
   // A merge is a write: a view id (the caller's own or another's), a retired proxy id and an unknown id all answer as a missing space, in the
   // words `graph_merge` answers them in (Q-499). The judge follows; the UUID checks on the PATH ids are addressing checks, answered after it.
-  if (answeredUnknownSpace(req, res, spaceId)) return;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
   if (applyJudgment(res, answerUnknownWriteFields(req.body, 'entity.merge', spaceId, 'rest'))) return;
   if (!UUID_V4_RE.test(survivorId)) {
     res.status(400).json({ error: '`survivorId` must be a valid UUID v4' });

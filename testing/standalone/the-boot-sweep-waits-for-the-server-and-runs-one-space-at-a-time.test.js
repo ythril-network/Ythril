@@ -57,7 +57,7 @@ describe('the boot sweep waits for the server and runs one space at a time', () 
     // would stop being true: each sweep is an unindexed scan per record kind.
     assert.match(body, /\bawait eachSpace\(/, 'the boot sweep does not await a walk over the spaces through eachSpace');
     const walk = body.slice(body.search(/\beachSpace\(/));
-    assert.match(walk, /\bconcreteSpaces\(\)/, 'the boot sweep no longer walks concreteSpaces() — re-anchor this gate');
+    assert.match(walk, /\bconfiguredSpaces\(\)/, 'the boot sweep no longer walks configuredSpaces() — re-anchor this gate');
     assert.doesNotMatch(walk, /\blimit\s*:/, 'the boot sweep walks several spaces at once');
     assert.match(walk, /\bawait\s+\w*[sS]weep\w*\(/, 'the boot sweep starts a space\'s sweep without waiting for it');
   });

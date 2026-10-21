@@ -65,11 +65,11 @@ function accepted(op, collection) {
 }
 
 /**
- * The keys that ADDRESS a write rather than being part of it (design-v3 2.1): the space, the proxy target, and the record's
+ * The keys that ADDRESS a write rather than being part of it (design-v3 2.1): the space and the record's
  * own id on an update. They are read by both doors and never judged, so they are taken out of a tool's reads.
  */
 const addressing = (pair) => new Set([
-  'space', 'targetSpace',
+  'space',
   ...(pair.tool.startsWith('update_') ? ['id'] : []),
   ...(pair.tool === 'update_file_meta' ? ['path'] : []),
   ...(pair.tool === 'graph_merge' ? ['survivorId', 'absorbedId'] : []),

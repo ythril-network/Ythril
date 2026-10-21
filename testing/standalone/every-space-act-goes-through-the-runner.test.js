@@ -125,6 +125,6 @@ describe('every deletion, wipe and rename of a space goes through the one runner
     assert.equal(definers.length, 1, `resumeSpaceActs is defined in ${definers.length} places: ${definers.join(', ')}`);
     const def = bodyOf(definers[0], 'resumeSpaceActs');
     assert.match(def, /\b(?:walkSpaces|eachSpace|eachUnit)\s*\(/, 'resumeSpaceActs does not walk the entries through the housekeeping walk helper (isolation, bound, one verdict)');
-    assert.doesNotMatch(def, /\bfor\s*\(\s*(?:const|let)\s+\w+\s+of\s+[\w.()]*concreteSpaces/, 'resumeSpaceActs is a bare loop over the spaces');
+    assert.doesNotMatch(def, /\bfor\s*\(\s*(?:const|let)\s+\w+\s+of\s+[\w.()]*configuredSpaces/, 'resumeSpaceActs is a bare loop over the spaces');
   });
 });

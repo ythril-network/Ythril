@@ -1,7 +1,7 @@
 /**
  * The embed-queue listing answers one way on both doors (`Q-109`).
  *
- * REST `GET …/embedding-queue/records` paged across a proxy's members with `skip` and summed their counts; MCP
+ * REST `GET …/embedding-queue/records` paged across a personal view's members with `skip` and summed their counts; MCP
  * `list_embed_jobs` read only the named space, took no `skip`, and so could report `failed: 500` beside a list that
  * never reaches failure #201. The two also disagreed on `limit`: MCP refused above 200 while REST echoed a 500 it then
  * quietly served as 200. One act now answers both, and the caps are its own.
@@ -28,9 +28,11 @@ describe('the embed-queue listing', () => {
     }
   });
 
-  it('MCP reaches the members of a proxy and every page, as REST does', () => {
+  it('MCP reaches the members of a personal view and every page, as REST does', () => {
     const mcp = stripComments(readFileSync('server/src/mcp/tools/embed.ts', 'utf8'));
-    assert.match(mcp, /memberSpacesWithin\(/, 'list_embed_jobs reads only the named space, so a proxy lists nothing of its members');
+    const rest = stripComments(readFileSync('server/src/api/brain/embed-jobs.ts', 'utf8'));
+    assert.match(mcp, /embedJobsPage\(\s*readSpacesOfCall\(/, 'list_embed_jobs reads only the named space, so a view lists nothing of its members');
+    assert.match(rest, /embedJobsPage\(\s*readSpacesOfRequest\(/, 'the REST listing does not read the members the guard resolved for the caller');
     const props = materialisedSchema(TOOLS_BY_NAME.get('list_embed_jobs'), toolSchemasFor(['a', 'b']), ['a', 'b']).properties;
     assert.equal(props.skip?.type, 'integer', 'list_embed_jobs takes no skip, so jobs past the first page are unreachable');
   });

@@ -117,7 +117,7 @@ describe('delete_file describes the cascade it really performs', () => {
     // The handler hands the path and `confirm` straight to `deletePath`, which decides file, directory or refusal; no decision of
     // its own, so the doors cannot differ in what a path is (Q-438). Nothing in it names a cascade, a stat or the root.
     const handler = handlerOf('delete_file');
-    assert.match(handler, /await deletePath\(\s*wt\.target\s*,\s*filePath\s*,\s*\{\s*confirm:\s*a\['confirm'\]\s*,\s*actor:\s*ctx\.actor\s*\}\s*\)/,
+    assert.match(handler, /await deletePath\(\s*callSpace\s*,\s*filePath\s*,\s*\{\s*confirm:\s*a\['confirm'\]\s*,\s*actor:\s*ctx\.actor\s*\}\s*\)/,
       'delete_file does not hand the path, `confirm` and the actor to deletePath as REST does — the doors would decide differently');
     assert.doesNotMatch(handler, /deleteFileCascade|deleteDirectoryCascade|NotFoundError|\.stat\(|spaceRoot|confirm\s*(?:===|!==|\?)|\bif\s*\(\s*!?confirm/,
       'delete_file decides something itself before or after deletePath — the description describes the one decision');
@@ -337,7 +337,7 @@ describe('move_file explains the tombstone and the directory case', () => {
     const tool = stripComments(FILE_TOOLS.slice(FILE_TOOLS.indexOf('name: \'move_file\''), FILE_TOOLS.indexOf('name: \'retry_embed_file\'')));
     const at = tool.indexOf('dst: filePathSchema(');
     assert.ok(at > -1, 'move_file has no `dst` parameter built by filePathSchema — re-anchor this gate');
-    const dst = tool.slice(at, tool.indexOf('targetSpace', at));
+    const dst = tool.slice(at, tool.indexOf('required:', at));
     assert.match(dst, /destination_exists/, 'the dst parameter does not name the refusal a taken destination answers');
     assert.doesNotMatch(dst, /\bREPLACED\b|with no warning/i, 'the dst parameter still says a taken name is replaced');
   });

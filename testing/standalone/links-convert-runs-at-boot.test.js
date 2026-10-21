@@ -97,14 +97,12 @@ describe('what it does to a space, and what it refuses to do', () => {
       'it re-walks converted spaces, so steady-state boot pays for a migration that is done');
   });
 
-  it('skips a proxy, which holds no documents of its own', () => {
-    // A proxy aggregates its members. Walking one finds nothing and would then mark it complete on the
-    // strength of that — the marker is the dangerous half, not the walk.
-    // Matched on the CALL in the pending filter, not on a mention of `proxyFor`: the rule has one home
-    // (`linkConversionConcerns`, Q-78), and a gate on the field name would pass on a comment or go red on
-    // the refactor that moved the rule there.
-    assert.match(mod, /spaces\.filter\([^;]*linkConversionConcerns\(/,
-      'a proxy space would be walked and marked complete on an empty result');
+  it('walks only the configured spaces, so a personal view is never a subject', () => {
+    // A personal view holds no documents and is never in `config.spaces`. The pending list is read from there and nowhere else:
+    // walking anything that owns no collections would find nothing and then mark it complete on the strength of that — the
+    // marker is the dangerous half, not the walk.
+    assert.match(mod, /getConfig\(\)\.spaces\.filter\(/,
+      'the pending list is not read from the configured spaces, so a space that owns no collections could be marked complete on an empty result');
   });
 
   it('marks ONLY on a clean walk', () => {

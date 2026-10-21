@@ -40,8 +40,8 @@ import { moduleIndex, routeHandlerRoots, walkFrom } from './_call-graph.mjs';
 import { toolValidators, zodValidators } from './_validator-schemas.mjs';
 import { BOUND_BY_FIELD } from '../../server/dist/util/request-bounds.js';
 
-/** Keys that are transport on one door (a path segment, a query narrowing) and a parameter on the other. */
-const TRANSPORT = new Set(['space', 'targetSpace']);
+/** Keys that are transport on one door (a path segment) and a parameter on the other. */
+const TRANSPORT = new Set(['space']);
 
 const BOUND_KEYS = ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems'];
 

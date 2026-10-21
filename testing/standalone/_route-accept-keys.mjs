@@ -113,7 +113,7 @@ const queryKeysFrom = body =>
  *
  * A handler passing `req` to one of these has keys that are not all in the handler — `requireQueryPath(req,
  * res)` reads `req.query['path']` one hop away, which is instrument error 5. But most helpers taking `req`
- * read `req.authToken` and nothing else (`accessibleSpaces`, `memberSpacesForRequest`, `requestActor`), and
+ * read `req.authToken` and nothing else (`accessibleSpaces`, `readSpacesOfRequest`, `requestActor`), and
  * disqualifying those left two thirds of the surface unreadable for no reason.
  *
  * So the hop is resolved exactly far enough to answer *can this contribute a parameter at all* — does the
@@ -136,7 +136,10 @@ function requestReadingHelpers(sources) {
        * A window that guesses where its subject ends is this repo's most-repeated instrument bug.
        */
       const open = src.indexOf('{', src.indexOf(')', m.index));
-      const fnBody = open === -1 ? '' : (literalAt(src, open) ?? '');
+      const fnBody = (open === -1 ? '' : (literalAt(src, open) ?? ''))
+        // `writeSpaceOf` hands `req.query` to the retired-name refusal and to nothing else: it refuses a name, it never reads a value a
+        // tool could declare, so it contributes no parameter and a route calling it stays resolvable.
+        .replace(/\bretiredAddressingQueryError\(\s*req\.query\s*\)/g, '');
       if (/req\.(body|query)/.test(fnBody)) names.add(m[1]);
       else bodies.set(m[1], fnBody);
     }
