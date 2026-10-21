@@ -846,8 +846,8 @@ Copies the entire database into a new MongoDB database **online**, then moves th
    replacing whatever a crashed earlier attempt left there, and every index of this database is built on the target. Every
    operation of the copy is bounded (`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS`), on this database and on the target.
 4. **Completed:** the new URI is saved to `config.json` in the same write that removes the migrate acts. **From that write
-   until the process exits, every write is refused** - `409` with `code: "space_being_migrated"` on REST and MCP, an
-   instance-admin token's included, and an exchange, an embedding job or a housekeeping pass already under way is refused the
+   until the process exits, every write to a space is refused** - `409` with `code: "space_being_migrated"` on REST and
+   MCP, an instance-admin token's included, and an exchange, an embedding job or a housekeeping pass already under way is refused the
    same way - because this process is still connected to the old database, and a write there would be missing from the new
    one. Reads still answer. The process then stays in maintenance and **exits**, and the next start connects to the new
    database; under Docker or Kubernetes that is the restart policy. Nothing is read from the old database afterwards, and
