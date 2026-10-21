@@ -155,8 +155,9 @@ describe('the loop visits every member the config holds', () => {
     }
   });
 
-  it('eachMemberMarkOf, when exported, hands out the maps of the members AND of the pending member', () => {
-    if (receiveMarks[HELPER] === undefined) return; // reached through forget/move above; the helper may stay private
+  it('eachMemberMarkOf hands out the maps of the members AND of the pending member', () => {
+    // Exported since the one-loop change (8c12003d); a missing export is a failure here, never a skip.
+    assert.equal(typeof receiveMarks[HELPER], 'function', `sync/receive-marks exports no ${HELPER}`);
     const net = netWith();
     const seen = new Set();
     receiveMarks[HELPER](net, 's', (marks) => { seen.add(marks); });
