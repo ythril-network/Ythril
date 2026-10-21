@@ -143,6 +143,16 @@ describe('pre-6.0 proxies migrate to personal views (Q-531)', () => {
     assert.deepEqual(after.retiredSpaceIds, ['team']);
   });
 
+  it('the network records the proxy as left, by the network\'s id for it, so a peer asking for it is told declined, not refused', async () => {
+    // Without the mark a peer's request for the space is a 403 every cycle (a failed member), never the 423 `space_declined` a sender
+    // records and stops asking for. Seen in the sync suite: 50 consecutive failures for a migrated proxy.
+    const after = await migrate(fixture());
+    const net = after.networks.find(n => n.id === 'net-1');
+    assert.deepEqual(net.dismissedSpaces, ['team-remote']);
+    const again = await migrate(after);
+    assert.deepEqual(again.networks.find(n => n.id === 'net-1').dismissedSpaces, ['team-remote'], 'a second run adds no second mark');
+  });
+
   it('a retired id that is a live space again loses its reservation (the live space wins)', async () => {
     const cfg = fixture();
     cfg.retiredSpaceIds = ['crew'];
