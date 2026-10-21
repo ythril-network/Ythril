@@ -15,13 +15,14 @@
  * question (what is the shape of the indexes, best-effort) and are deliberately not routed through here.
  */
 import { col } from './mongo.js';
+import { isNamespaceNotFound } from './namespace-answers.js';
 
 /** The names of a collection's indexes; `[]` for a collection that does not exist yet; anything else the store throws is thrown. */
 export async function indexNamesOf(collName: string): Promise<string[]> {
   try {
     return (await col(collName).listIndexes().toArray()).map(ix => String(ix['name']));
   } catch (err) {
-    if ((err as { codeName?: string }).codeName === 'NamespaceNotFound' || (err as { code?: number }).code === 26) return [];
+    if (isNamespaceNotFound(err)) return [];
     throw err;
   }
 }

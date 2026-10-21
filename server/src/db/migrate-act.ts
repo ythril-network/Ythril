@@ -39,7 +39,7 @@ import { getDb } from './mongo.js';
 import { restoreDatabase } from './restore.js';
 import { runBackupNow } from './backup-scheduler.js';
 import { dbNameFromUri } from './db-name.js';
-import { boundedClientOptions } from './bounded-client-options.js';
+import { boundedClientOptions, closeWithinBound } from './bounded-client-options.js';
 import { isDuplicateKey } from './write-errors.js';
 import { AUDIT_COLLECTION, auditEntryOf, internalAuditInput, logInternalAudit } from '../audit/audit.js';
 import { MIGRATE_COMPLETED_OPERATION, MIGRATE_FAILED_OPERATION } from '../audit/act-set-operations.js';
@@ -108,7 +108,7 @@ export async function targetHoldsData(uri: string): Promise<boolean> {
     const names = await client.db(dbNameFromUri(uri)).listCollections({}, { nameOnly: true }).toArray();
     return names.some(c => !c.name.startsWith('system.'));
   } finally {
-    await client.close().catch(() => {});
+    await closeWithinBound(client);
   }
 }
 
@@ -183,7 +183,7 @@ async function migrateInstance(ctx: SpaceActBodyContext): Promise<SpaceActBodyOu
     throw new SpaceActInputFailure(`copying backup '${backup.id}' into the new database failed: ${why}. The old database stays in use and `
       + `backup '${backup.id}' holds what was copied; the new database may hold part of it and must be emptied before another migrate.`);
   } finally {
-    await client.close().catch(() => {});
+    await closeWithinBound(client);
   }
   return { report: { backupId: backup.id } };
 }
