@@ -17,7 +17,6 @@ import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
 import { lostSpaceAnswer } from '../../spaces/unknown-space.js';
-import { } from '../../util/request-bounds.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
 
 export const list_spacesTool: ToolHandler = {

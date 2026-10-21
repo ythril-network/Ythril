@@ -180,18 +180,12 @@ export async function planReindex(input: {
   space: SpaceConfig | undefined;
 }): Promise<ReindexDecision> {
   const { spaceId, space } = input;
-  const memberIds = [spaceId];
-
   if (!space) return { ok: false, refusal: lostSpaceAnswer(null, spaceId) };
-
-  for (const mid of memberIds) {
-    if (await activeRun(mid)) {
-      // Names only the space that was asked for: a refusal must not tell a scoped token about other spaces.
-      return { ok: false, refusal: { status: 409, body: { error: `A reindex of '${spaceId}' is already running` } } };
-    }
+  if (await activeRun(spaceId)) {
+    return { ok: false, refusal: { status: 409, body: { error: `A reindex of '${spaceId}' is already running` } } };
   }
 
-  return { ok: true, plan: { spaceId, memberIds } };
+  return { ok: true, plan: { spaceId, memberIds: [spaceId] } };
 }
 
 /**

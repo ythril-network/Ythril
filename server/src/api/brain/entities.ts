@@ -15,7 +15,6 @@ import { deleteEntityCascade, previewEntityCascade } from '../../brain/entity-de
 import { mergeEntities, mergeRefusal, type PropertyResolution } from '../../brain/merge.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { primitivePropertyError } from '../../brain/property-values.js';
-import { } from '../../config/loader.js';
 import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { UUID_V4_RE, webhookToken, ttlDaysFromBody, ttlDaysError, dupeCheckOptsFromBody, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
@@ -166,67 +165,66 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
 entitiesRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const memberIds = readSpacesOfRequest(req, spaceId);
-  for (const mid of memberIds) {
-    const entity = await getEntityById(mid, id);
-    if (!entity) continue;
-    /*
-     * ONE guard for both doors, including the `strictLinkage` check and the face exemption.
-     *
-     * This route and the MCP tool each used to compute the blocking set and word the refusal themselves, and
-     * they said different things: this one claimed "inbound references" while checking both ends of every
-     * edge, and the tool threw prose with no structured rows in it at all. Now the sentence and the rows come
-     * from `entityDeleteBlockers` and this door only decides the status code.
-     *
-     * `backlinks` carries every reference, face labels included, so a UI can warn "this will unlabel N
-     * faces"; `blocking` is what refused it. Each edge row names the end that matched, which is the field the
-     * reporter who found the wrong wording actually needed — it says which query clears it.
-     */
-    /*
-     * `F-17`: a CASCADE, when the caller quotes back a token from the preview (owner's ruling `P-29`).
-     *
-     * The token binds to the SET, so a record added between the preview and this call cannot be removed by
-     * a decision taken before it existed. Everything else about it is in `entity-delete-cascade.ts`.
-     */
-    const cascadeToken = req.query['cascadeToken'];
-    if (cascadeToken !== undefined) {
-      const r = await deleteEntityCascade(mid, id, cascadeToken, webhookToken(req));
-      if (r.ok) { res.status(204).end(); return; }
-      res.status(409).json({ error: r.error, preview: r.preview });
-      return;
-    }
+  // A write names ONE space (the path judge refuses a view on a write door), resolved as every other write resolves its target.
+  const mid = writeSpaceOf(req, res, spaceId);
+  if (mid === null) return;
+  if (!(await getEntityById(mid, id))) { res.status(404).json({ error: 'Entity not found' }); return; }
+  /*
+   * ONE guard for both doors, including the `strictLinkage` check and the face exemption.
+   *
+   * This route and the MCP tool each used to compute the blocking set and word the refusal themselves, and
+   * they said different things: this one claimed "inbound references" while checking both ends of every
+   * edge, and the tool threw prose with no structured rows in it at all. Now the sentence and the rows come
+   * from `entityDeleteBlockers` and this door only decides the status code.
+   *
+   * `backlinks` carries every reference, face labels included, so a UI can warn "this will unlabel N
+   * faces"; `blocking` is what refused it. Each edge row names the end that matched, which is the field the
+   * reporter who found the wrong wording actually needed — it says which query clears it.
+   */
+  /*
+   * `F-17`: a CASCADE, when the caller quotes back a token from the preview (owner's ruling `P-29`).
+   *
+   * The token binds to the SET, so a record added between the preview and this call cannot be removed by
+   * a decision taken before it existed. Everything else about it is in `entity-delete-cascade.ts`.
+   */
+  const cascadeToken = req.query['cascadeToken'];
+  if (cascadeToken !== undefined) {
+    const r = await deleteEntityCascade(mid, id, cascadeToken, webhookToken(req));
+    if (r.ok) { res.status(204).end(); return; }
+    res.status(409).json({ error: r.error, preview: r.preview });
+    return;
+  }
 
-    const block = await entityDeleteBlockers(mid, id);
-    if (block) {
-      /*
-       * THE REFUSAL NAMES BOTH WAYS OUT, and that is the third part of the ruling rather than a nicety.
-       *
-       * Owner's words: *"the 409 tells 'either remove edges by hand or use A when you are sure'."* It has
-       * listed the blocking ids since `W-13` and never said a cascade existed at all — which is why the
-       * reporter spent four probes on `?cascade=true`, `?force=true`, `?deleteEdges=true` and
-       * `?withEdges=true` before implementing clear-then-delete by hand.
-       *
-       * The `cascade` object carries the preview route and the parameter, so the next call is discoverable
-       * from the refusal instead of from the guide.
-       */
-      res.status(409).json({
-        error: block.message,
-        backlinks: block.blocking,
-        references: block.backlinks,
-        cascade: {
-          hint: 'Either clear these edges yourself, or call the preview below and repeat this DELETE '
-            + 'with its `cascadeToken`, which removes the EDGES and this entity and nothing at the other '
-            + 'end of them.',
-          preview: `GET /api/brain/spaces/${spaceId}/entities/${id}/cascade-preview`,
-          parameter: 'cascadeToken',
-        },
-      });
-      return;
-    }
-    if (await deleteEntity(mid, id, webhookToken(req))) {
-      res.status(204).end();
-      return;
-    }
+  const block = await entityDeleteBlockers(mid, id);
+  if (block) {
+    /*
+     * THE REFUSAL NAMES BOTH WAYS OUT, and that is the third part of the ruling rather than a nicety.
+     *
+     * Owner's words: *"the 409 tells 'either remove edges by hand or use A when you are sure'."* It has
+     * listed the blocking ids since `W-13` and never said a cascade existed at all — which is why the
+     * reporter spent four probes on `?cascade=true`, `?force=true`, `?deleteEdges=true` and
+     * `?withEdges=true` before implementing clear-then-delete by hand.
+     *
+     * The `cascade` object carries the preview route and the parameter, so the next call is discoverable
+     * from the refusal instead of from the guide.
+     */
+    res.status(409).json({
+      error: block.message,
+      backlinks: block.blocking,
+      references: block.backlinks,
+      cascade: {
+        hint: 'Either clear these edges yourself, or call the preview below and repeat this DELETE '
+          + 'with its `cascadeToken`, which removes the EDGES and this entity and nothing at the other '
+          + 'end of them.',
+        preview: `GET /api/brain/spaces/${spaceId}/entities/${id}/cascade-preview`,
+        parameter: 'cascadeToken',
+      },
+    });
+    return;
+  }
+  if (await deleteEntity(mid, id, webhookToken(req))) {
+    res.status(204).end();
+    return;
   }
   res.status(404).json({ error: 'Entity not found' });
 });

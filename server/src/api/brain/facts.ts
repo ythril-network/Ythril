@@ -13,8 +13,6 @@ import { answerUnknownWriteFields, atLeastOneFieldRefusal, carriesAnyAcceptedFie
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { listFacts, deleteFact, saveFact, updateFact } from '../../brain/fact.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
-import { } from '../../config/loader.js';
-import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { checkQuota, QuotaError } from '../../quota/quota.js';
 import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import {
@@ -185,14 +183,14 @@ memoriesRouter.delete('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpac
    *
    * `409` and not `404`: the record IS there, and the caller needs to know which references to clear.
    */
-  for (const mid of readSpacesOfRequest(req, spaceId)) {
-    const block = await entityDeleteBlockers(mid, id, 'fact');
-    if (block) {
-      res.status(409).json({ error: block.message, backlinks: block.blocking, references: block.backlinks });
-      return;
-    }
-    if (await deleteFact(mid, id, webhookToken(req))) { res.status(204).end(); return; }
+  const mid = writeSpaceOf(req, res, spaceId);
+  if (mid === null) return;
+  const block = await entityDeleteBlockers(mid, id, 'fact');
+  if (block) {
+    res.status(409).json({ error: block.message, backlinks: block.blocking, references: block.backlinks });
+    return;
   }
+  if (await deleteFact(mid, id, webhookToken(req))) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Fact not found' });
 });
 

@@ -28,7 +28,6 @@
 import { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { } from '../../config/loader.js';
 import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { retiredWriteFieldError } from '../../brain/retired-write-fields.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';

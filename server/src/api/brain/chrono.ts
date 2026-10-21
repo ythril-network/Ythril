@@ -10,8 +10,6 @@ import { applyJudgment } from './_judged-write.js';
 import { answerUnknownWriteFields, atLeastOneFieldRefusal, carriesAnyAcceptedField } from '../../contract/write-accepts.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { createChrono, updateChrono, getChronoById, deleteChrono, parseRecurrence } from '../../brain/chrono.js';
-import { } from '../../config/loader.js';
-import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { findFirstAcrossMembers } from '../../spaces/across-members.js';
 import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
@@ -337,14 +335,14 @@ chronoRouter.delete('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpace
    *
    * ONE guard for both doors, and the same one entities use. `409` and not `404`: the record IS there.
    */
-  for (const mid of readSpacesOfRequest(req, spaceId)) {
-    const block = await entityDeleteBlockers(mid, id, 'chrono');
-    if (block) {
-      res.status(409).json({ error: block.message, backlinks: block.blocking, references: block.backlinks });
-      return;
-    }
-    if (await deleteChrono(mid, id, webhookToken(req))) { res.status(204).end(); return; }
+  const mid = writeSpaceOf(req, res, spaceId);
+  if (mid === null) return;
+  const block = await entityDeleteBlockers(mid, id, 'chrono');
+  if (block) {
+    res.status(409).json({ error: block.message, backlinks: block.blocking, references: block.backlinks });
+    return;
   }
+  if (await deleteChrono(mid, id, webhookToken(req))) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Chrono entry not found' });
 });
 

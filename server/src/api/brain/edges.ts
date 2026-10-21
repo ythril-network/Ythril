@@ -15,10 +15,8 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { deleteEdge, upsertEdge, getEdgeById, updateEdgeById } from '../../brain/edges.js';
 import { edgeIdentityTakenAnswer } from '../../brain/edge-rekey.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
-import { } from '../../config/loader.js';
 import { isStrictLinkage } from '../../spaces/space-lookup.js';
 import { findFirstAcrossMembers } from '../../spaces/across-members.js';
-import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import { webhookToken, ttlDaysFromBody, ttlDaysError, ifMatchFromRequest, preconditionFailedBody } from './_shared.js';
 import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } from '../../brain/write-validation.js';
@@ -166,10 +164,10 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
 edgesRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  // The members THIS token reaches, as every other record delete through a proxy walks (`Q-440`): a walk over the proxy's own id
-  // visited them all, and `204` against `404` said whether an edge exists in a member the token cannot see. The rung is the
-  // area guard's, held on every member it narrowed to.
-  const deleted = await findFirstAcrossMembers(readSpacesOfRequest(req, spaceId), mid => deleteEdge(mid, id, webhookToken(req)));
+  // ONE space, resolved as every write resolves its target: the path judge refuses a view on a write door, so there are no members to walk.
+  const target = writeSpaceOf(req, res, spaceId);
+  if (target === null) return;
+  const deleted = await deleteEdge(target, id, webhookToken(req));
   if (deleted) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Edge not found' });
 });
