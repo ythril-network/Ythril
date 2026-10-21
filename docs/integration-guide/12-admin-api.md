@@ -241,121 +241,9 @@ import searchable at all.
 
 ### Wipe Space
 
-Clear all data — or a specific subset of collection types — from a space, while
-preserving the space itself (label, purpose, config, OIDC mappings, and quota
-settings).
-
-```http
-POST /api/admin/spaces/:spaceId/wipe
-Authorization: Bearer <admin-token>
-X-TOTP-Code: <code>   # required when MFA is enabled
-Content-Type: application/json
-```
-
-**Requires admin token** (and TOTP code when MFA is enabled).
-
-> **`confirm: true` is required on every wipe.** Without it the answer is `400` and nothing is wiped or opened.
->
-> **On a space that belongs to a network, the wipe is a vote.** Emptying a
-> space the network shares is a governed act, like deleting one. A round opens in every network holding the
-> space, this instance votes yes, and the wipe happens on **every member** when a round passes. A single veto
-> stops it there.
->
-> On a club or pub/sub network, or where this instance is the only member, its own yes passes the round and the wipe runs in the same request: the answer is `200` with `{ "status": "wiped", "rounds", "deleted" }`. Otherwise the answer is `202` with `{ "status": "vote_pending", "rounds": [...] }`, and the wipe happens on each member when its round passes. **Treat `vote_pending` as success** — do not retry, and do not read the missing counts as a failure. A vote that passed, whose change here is still running, answers `202` with `status: "passed"` and `queued: true`; it completes on its own. If the vote passed and this instance's change failed during the call, the answer is `500` with `code: "space_act_failed"` and `status: "passed"` (`503` for a store outage): do not retry, the instance retries the change itself. **A wipe no vote decides is not a vote** (a space in no network, or a pub/sub subscriber's own copy): if it outlasts the answer budget the answer is `202` with `{ "queued": true }` (and `retryAt` when it is owed), and if it failed during the call it is `500` with `code: "space_act_failed"` (`503` for a store outage), both with no `status` and no `rounds`; the change is retried automatically and the space's `actPending` on `GET /api/spaces` shows it. Each entry
-> of `rounds` is `{ "networkId", "networkLabel", "roundId", "round" }`, `round` being the round as
-> `GET /api/networks/:id/votes` shows it. Watch the rounds there.
->
-> **A pub/sub subscriber wipes its own copy only**: it opens no round, the answer is `200` with `refills: true`, and the copy refills from its publisher at the next sync.
->
-> **A space in no network is not voted on**: it wipes immediately and answers `200` with `{ "status": "wiped", "deleted" }`
-> and no `rounds`.
->
-> *Why it votes rather than propagating.* A wipe writes no tombstones and deletes the existing ones, and
-> tombstones are the only thing that tells a peer a record is gone — so a local wipe on a shared space was
-> undone by the next sync, which offered everything back to an instance that had no record of any deletion.
-> Voting removes that problem rather than working around it: the peers are wiping too.
->
-> The same rule governs the `delete_space_data` MCP tool, through the same planner.
-
-#### Request body
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `types` | `string[]` *(optional)* | Subset of collection types to wipe: `"facts"`, `"entities"`, `"edges"`, `"chrono"`, `"files"`, `"links"`. Omit to wipe **all** collections. |
-| `confirm` | `boolean` *(required)* | Must be `true`. Without it the answer is `400` and nothing is wiped or opened. |
-
-#### Full wipe (all collections)
-
-```json
-{ "confirm": true }
-```
-
-or explicitly:
-
-```json
-{ "confirm": true, "types": ["facts", "entities", "edges", "chrono", "files", "links"] }
-```
-
-#### Partial wipe (specific types only)
-
-```json
-{ "confirm": true, "types": ["facts"] }
-```
-
-```json
-{ "types": ["entities", "edges"] }
-```
-
-#### Response `200`
-
-```json
-{
-  "deleted": {
-    "facts": 12,
-    "entities": 8,
-    "edges": 5,
-    "chrono": 0,
-    "files": 3,
-    "links": 17
-  }
-}
-```
-
-Each field in `deleted` is the number of documents actually removed from that
-collection.  On a partial wipe the unaffected fields will be `0`.
-
-`"links"` is usually the largest number and it is not a separate thing to clean up. A link record is one
-mention of one record by another, so a space with a few hundred facts that name entities holds a link per
-mention. Wiping `"facts"` alone leaves those links behind pointing at records that are gone — include
-`"links"`, or omit `types` entirely and wipe everything.
-
-#### Behaviour notes
-
-- **Idempotent** — wiping an already-empty space (or a type with no documents) returns `0` for that field; no error is raised.
-- **Tombstones** — internal sync-tombstone records are cleared for the wiped types so peers do not re-sync deleted data. For full wipes all tombstones are cleared.  For partial wipes only the matching type tombstones are removed.
-- **Files** — when `"files"` is included, both the MongoDB metadata collection and the physical files directory on disk are cleared. The directory is recreated empty so new uploads work immediately.
-- **Space preserved** — the space itself is not deleted. Its label, purpose, configuration, OIDC mappings, and quota settings remain unchanged.
-
-#### Error responses
-
-| Status | Meaning |
-|--------|---------|
-| `400` | `types` array contains an unrecognised collection type |
-| `401` | Missing or invalid Authorization header |
-| `403` | Token is not admin-scoped (or MFA code wrong/missing) |
-| `404` | Space not found |
-
-#### Admin UI
-
-In **Settings → Spaces**, every space row has a ⊘ **Wipe space** button.  Clicking it opens a confirmation dialog that shows the current per-collection document counts before proceeding.
-
-#### MCP tool
-
-```text
-delete_space_data(space: string, confirm: true, types?: string[])
-```
-
-Available in MCP-connected clients, and answered by the same planner as the admin route above. It needs space admin on the space named in `space`, not the instance admin rung. When `types` is omitted all collections are wiped. On a networked space it answers the vote, the same as the route; the answer carries `status` (`wiped`, `vote_pending` or `passed`), `rounds` and, where the wipe ran here, the counts. A wipe no vote decides answers `queued: true` with no `status` when it outlasts the answer budget. The full contract is in [Space Deletion and Wipe](06c-space-deletion-and-wipe-api.md) and [Brain API](04-brain-api.md).
+`POST /api/admin/spaces/:spaceId/wipe` empties a space, or some of its collections, and keeps the space. Its request,
+answers, behaviour and the matching MCP tool are documented with the deletion it shares its rules with:
+[Space Deletion and Wipe → The admin wipe route](06c-space-deletion-and-wipe-api.md#the-admin-wipe-route).
 
 ---
 
@@ -419,7 +307,7 @@ Authorization: Bearer <admin-token>
 
 | Value | Meaning |
 |---|---|
-| `"env"` | `MONGO_URI` environment variable — set in deployment config (e.g. `docker-compose.yml`). Always takes precedence. Migration is not available when this is the source. |
+| `"env"` | A non-empty `MONGO_URI` environment variable, set in deployment config (e.g. `docker-compose.yml`). Always takes precedence; an empty one counts as unset. Migration is refused (`409 INFRA_MANAGED`) when this is the source. |
 | `"config"` | Connection string stored in `config.json` — set via database migration or manual edit. |
 | `"default"` | Built-in default (`mongodb://ythril-mongo:27017/ythril`). No custom connection configured. |
 
@@ -453,13 +341,27 @@ GET /api/admin/data/maintenance
 Authorization: Bearer <admin-token>
 ```
 
-**Response `200`:** `{ "active": false }`
+**Response `200`:** `{ "active": false, "manual": false, "heldBy": null }`
+
+Maintenance has two halves, and `active` is either of them:
+
+| Field | Meaning |
+|---|---|
+| `manual` | The operator's toggle ([POST below](#post-apiadmindatamaintenance)). Kept in memory: a restart clears it |
+| `heldBy` | `"restore"` or `"migrate"` while an act standing on every space holds the instance ([restore](#post-apiadmindatarestore), [migrate](#post-apiadmindatamigrate)); `null` otherwise. It is read from the standing acts, so a restart that resumes them resumes it, and it ends when the last act ends |
+| `active` | `manual` or `heldBy` |
+
+While `active`, every request answers `503` with `{ "error": "System is in maintenance mode. Please try again later.", "maintenance": true }`,
+reads included, except `/health`, `/ready`, `/metrics`, the `/api/admin/*` routes and **any request made with an instance-admin
+token**, which passes on every path: the danger tab, the Networks owed list and MCP keep working for the one caller who can act on
+a restore.
 
 ---
 
 ### POST /api/admin/data/maintenance
 
-Enable or disable maintenance mode. While active, all write operations across the instance return `503`; reads continue normally.
+Turn the **manual** half of maintenance mode on or off. It cannot end the half a standing restore or migrate holds: the
+answer is the state above, so `{ "active": false }` sent during a restore answers `active: true`, `manual: false` and `heldBy`.
 
 ```http
 POST /api/admin/data/maintenance
@@ -470,7 +372,7 @@ Content-Type: application/json
 { "active": true }
 ```
 
-**Response `200`:** `{ "active": true }`
+**Response `200`:** `{ "active": true, "manual": true, "heldBy": null }`
 
 ---
 
@@ -544,6 +446,11 @@ X-TOTP-Code: <code>   # required when MFA is enabled
 
 `localPruned` and `offsite.pruned` are only present when backups were actually deleted. `offsite.filesDir` is only present when a `files/` directory exists.
 
+While a [restore](#post-apiadmindatarestore) or a [migrate](#post-apiadmindatamigrate) stands, a backup, manual or scheduled,
+is refused rather than dump a database that is part old and part restored: this endpoint answers `409` with
+`code: "backup_refused_during_restore"`, and a scheduled run is refused the same way and logged as `Scheduled backup failed: …`. Retry once `GET /api/admin/data/restore` (or `/migrate`) says the set has ended.
+Local retention never deletes a backup a standing restore names.
+
 ---
 
 ### GET /api/admin/data/backups
@@ -574,7 +481,10 @@ Authorization: Bearer <admin-token>
 
 ### POST /api/admin/data/restore
 
-Restore the database from a previously created backup. The instance automatically enters maintenance mode for the duration of the restore, then returns to whatever state it was in before.
+Make every space this instance serves equal to a backup. A restore is a **set of space acts**, one `restore` act per served
+space, like a [deletion or wipe](06c-space-deletion-and-wipe-api.md): the request checks the backup and answers `202` before
+anything is replaced, and each space is then replaced in the background under a hold. [`GET /api/admin/data/restore`](#get-apiadmindatarestore)
+reports the progress and the outcome.
 
 ```http
 POST /api/admin/data/restore
@@ -582,36 +492,134 @@ Authorization: Bearer <admin-token>
 X-TOTP-Code: <code>   # required when MFA is enabled
 Content-Type: application/json
 
-{ "backupId": "2026-04-23T10-00-00-000Z" }
+{ "backupId": "2026-04-23T10-00-00-000Z", "leaveOut": ["old-team"] }
 ```
 
-`backupId` must match a directory name under `<data-root>/backups/`. Slashes and `..` are rejected.
+| Field | Meaning |
+|---|---|
+| `backupId` | A directory name under `<data-root>/backups/`. Slashes and `..` are rejected |
+| `leaveOut` | Optional, at most 1 000 ids: spaces the backup holds that this instance no longer serves (renamed or deleted after the backup), restored without them |
 
-**Response `200`:**
+**Nothing is registered until the backup and the space set pass.** The backup must be whole: its `manifest.json` parses,
+every file it names is present, every line can be read (and decrypted, for an encrypted backup) and the counts match. Then:
+
+- a space the backup holds that this instance does not serve is refused, named in `spaces`, unless `leaveOut` lists it: its data
+  has no space to go to;
+- a space this instance serves that the backup does not hold (created after the backup) is **emptied**: that is what "equal to
+  the backup" means.
+
+**Response `202`:**
 
 ```json
 {
-  "ok": true,
-  "vectorIndexes": { "rebuilding": ["general"], "failed": [] },
-  "edgeIndexes": { "failed": [ { "id": "notes", "failures": ["guard index: <reason>"] } ] }
+  "restoreId": "8f0c…",
+  "backupId": "2026-04-23T10-00-00-000Z",
+  "spaces": ["general", "notes", "scratch"],
+  "emptied": ["scratch"],
+  "leftOut": ["old-team"]
 }
 ```
 
-The restore drops every collection and reloads it, which leaves none of the indexes that make an edge unique. Each
-space's edge indexes — the one that keeps an edge's identity unique, and the one that keeps a functional label to one
-edge per subject among concurrent writers — are rebuilt before maintenance mode ends, together with its vector
-indexes. `edgeIndexes.failed` names, per space `id`, each index that could not be rebuilt and why (`[]` when every
-build succeeded); the restore itself still succeeded, the space is tried again at the next start, and until then a
-duplicate edge or a lost race there is not refused by the store. `vectorIndexes.failed` is the spaces whose vector
-index could not be rebuilt, and `rebuilding` those whose builds started and are still warming up.
+**From the `202` until the last space's act ends:**
 
-| Status | Meaning |
-|--------|--------|
-| `400` | Missing or invalid `backupId` |
-| `404` | Backup not found |
-| `500` | Restore operation failed |
+- every space takes no write: a local write answers `409` with `code: "space_being_restored"` on REST and MCP, and the
+  space's peer exchanges are held;
+- the instance is in [maintenance](#get-apiadmindatamaintenance) (`heldBy: "restore"`): every caller but an instance-admin
+  token is answered `503`;
+- a backup is refused (`409 backup_refused_during_restore`), and so is a second restore or a migrate;
+- a restart resumes the acts where they stand, and the holds with them.
+
+**What each space's act does.** It checks the backup again for its space (the files can change on disk), drops the space's
+collections and creates them again, empty, with every index (the unique ones included, so a duplicate the backup holds is
+refused when it is loaded), loads the backup's records, raises the space's sequence counter to at least every seq this
+instance handed out before (a peer never meets a new write under a seq it has already seen), checks the edge identity and
+guard indexes, and starts the vector index builds. When the act completes, the space forgets its **receive marks** in every
+network that carries it: how far it had read each peer, and where its re-reads of a peer's tombstones and file metadata stood.
+The peers therefore send again what reached this instance after the backup. The marks of what this instance **sent** are kept
+([which marks, and why](../sync-protocol.md#the-per-space-marks-and-what-a-restore-does-to-them)).
+
+**A failure.** A store that is down or does not answer is retried: the space is `owed` with a `retryAt`. A backup that is no
+longer whole, or that holds records one of the space's unique indexes refuses, is not retried: the space shows
+`needsAbandon: true` and stays held until an operator [abandons the restore](#post-apiadmindatarestoreabandon).
+
+**What a restore does not restore:**
+
+- the audit log, which records what happened, the restore included; `space_activity`; the webhook subscriptions and delivery
+  queues; the other instance collections; and `config.json`;
+- the files' bytes on disk. A file's record comes back as the backup has it while its bytes stay as they are now, so after a
+  restore a file can be listed without its bytes, or bytes can be on disk that no record names.
+
+**What comes back that you may not expect.** Records erased after the backup come back, erasure requests included, while the
+kept audit log still records the erasure: erase them again. A record deleted here after the backup whose deletion the peers have
+since pruned comes back live here and is not sent to them again. A restore onto an empty database cannot raise the counter past
+seqs peers have already read from this instance, and a peer this instance never pulls from (its own subscribers, when it
+publishes) does not send again what it sent: these belong to the same limit, a peer's numbering starting over, and are not
+solved by a restore.
+
+| Status | `code` | Meaning |
+|---|---|---|
+| `400` | | Missing or invalid `backupId` or `leaveOut` |
+| `400` | `backup_names_unserved_spaces` | The backup holds spaces this instance does not serve (`spaces`); name them in `leaveOut` |
+| `400` | `backup_not_whole` | The backup is incomplete or unreadable; the sentence says what |
+| `404` | | Backup not found |
+| `409` | `space_being_restored`, `space_being_migrated` | A restore or a migrate already stands |
+| `503` | | The server is shutting down |
 
 > All data written after the backup was taken is lost on restore. This operation is not reversible.
+
+### GET /api/admin/data/restore
+
+The restore standing, or the last one this instance ran; `{ "restore": null }` when none ever ran. Admin and MFA, like the
+restore itself.
+
+```json
+{
+  "restoreId": "8f0c…",
+  "backupId": "2026-04-23T10-00-00-000Z",
+  "state": "running",
+  "startedAt": "2026-04-23T10:05:00.000Z",
+  "done": 1,
+  "total": 3,
+  "spaces": [
+    { "id": "general", "state": "done", "attempts": 0, "completedAt": "2026-04-23T10:05:09.000Z",
+      "edgeIndexes": { "failed": [] }, "vectorIndexes": "rebuilding" },
+    { "id": "notes", "state": "owed", "attempts": 2, "lastError": "…", "retryAt": "2026-04-23T10:06:00.000Z" },
+    { "id": "scratch", "state": "running", "attempts": 1 }
+  ],
+  "emptied": ["scratch"],
+  "leftOut": []
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `state` | `running`, `completed` or `abandoned` |
+| `endedAt` | When the set ended; absent while it runs |
+| `lastError` | At the top: the sentence a failure of the whole set ended it with |
+| `done`, `total` | Spaces whose act completed, of all the set's spaces |
+| `spaces[].state` | `owed` (registered, waiting or retrying), `running`, `done`, or `restore_abandoned` |
+| `spaces[].attempts` | Attempts so far of an act that has not completed |
+| `spaces[].lastError` | Our sentence for the last failure, never the database driver's text |
+| `spaces[].retryAt` | When an owed act is tried again |
+| `spaces[].needsAbandon` | `true`: the failure is the backup's, so retrying cannot help; [abandon](#post-apiadmindatarestoreabandon) |
+| `spaces[].vectorIndexes` | `rebuilding` (the builds started and are warming up) or `failed` (they could not start; the space was still restored) |
+| `spaces[].edgeIndexes` | `{ "failed": [] }`: the edge identity and guard indexes stand. One that cannot be built fails the act instead |
+
+Poll it until `state` is not `running`. The Data page does, while it is open.
+
+### POST /api/admin/data/restore/abandon
+
+Lift the holds of the standing restore's acts that have not completed. The spaces whose acts had not completed **keep whatever
+their acts reached and may be half restored**: the answer names them, and the report marks them `restore_abandoned`. Meant for a
+restore whose backup cannot be read (`needsAbandon`). Admin and MFA; audited as `data.restore.abandon`, and the set's end as
+`data.restore.abandoned`.
+
+**Response `200`:** `{ "abandoned": true, "restoreId": "8f0c…", "backupId": "2026-04-23T10-00-00-000Z", "halfRestored": ["notes"], "completed": ["general"] }`
+
+| Status | `code` | Meaning |
+|---|---|---|
+| `404` | `no_restore_standing` | No restore stands |
+| `409` | `restore_act_running` | A space's act is running now; abandon once it has ended (an abandon never cuts an act short) |
 
 ---
 
@@ -811,19 +819,32 @@ wrong guess would run the wrong ones.
 
 > **Feature flag required.** This endpoint returns `403` unless the instance was started with `YTHRIL_DB_MIGRATION_ENABLED=true`. The flag is off by default so that a compromised admin token cannot be used to exfiltrate the entire database to an attacker-controlled server.
 >
-> **Not available when `MONGO_URI` is set.** If the database connection is managed via the `MONGO_URI` environment variable, this endpoint returns `409 INFRA_MANAGED`. Update the environment variable in your deployment configuration instead.
+> **Not available when the URI comes from the environment.** When `MONGO_URI` is set to a non-empty value it overrides the
+> configured URI, so a migrated URI saved to `config.json` would never be used: this endpoint answers `409 INFRA_MANAGED`.
+> Change the environment variable in your deployment configuration instead. An **empty** `MONGO_URI` (the compose default) counts
+> as unset, here and when the server connects ([`GET /api/admin/data/config`](#get-apiadmindataconfig) says `config` or `default`).
+> `YTHRIL_MONGO_INFRA_MANAGED=true` refuses with the same code whatever the URI's source.
 
-Migrates the entire database to a new MongoDB server. The sequence is:
+Copies the entire database into a new MongoDB database **online**, then moves the instance onto it. Like a
+[restore](#post-apiadmindatarestore), a migrate is a set of space acts, one `migrate` act per served space, answered `202`:
 
-1. Validate and test the new URI (SSRF-safe URIs only).
-2. Enter maintenance mode.
-3. Dump the current database to `<data-root>/migration-backup/`.
-4. Write a migration marker (`migration-marker.json`) with the old URI, new URI, and backup path.
-5. Persist the new URI to `config.json`.
-6. Respond `200` to the caller.
-7. Exit the process — Docker / Kubernetes restarts the container automatically.
+1. **Refused before anything is registered:** a URI the environment supplies (`INFRA_MANAGED`), a restore or migrate standing,
+   manual maintenance, an invalid or SSRF-unsafe URI, a target that cannot be reached, and a target that **already holds any
+   collection** (`409 target_not_empty`; the answer never names what it holds). A migrate copies into an empty database only.
+2. **Registered:** from the `202` every space is held (local writes answer `409` with `code: "space_being_migrated"`, peer
+   exchanges wait) and the instance is in maintenance (`heldBy: "migrate"`).
+3. **Copied, once for the whole set:** this database is dumped as a normal backup under `<data-root>/backups/` (listed, pruned
+   by retention and encrypted by the one backup setting), that backup is loaded into the target, collection by collection,
+   replacing whatever a crashed earlier attempt left there, and every index of this database is built on the target. Every
+   operation of the copy is bounded (`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS`), on this database and on the target.
+4. **Completed:** the new URI is saved to `config.json` in the same write that lifts the holds. The process then stays in
+   maintenance and **exits**, and the next start connects to the new database; under Docker or Kubernetes that is the restart
+   policy. Nothing is read from the old database afterwards, and **it still holds every record** until you remove it.
 
-On restart, the server detects the marker and calls `restoreDatabase()` against the new URI before establishing the normal MongoDB connection.
+The receive marks are kept: the data is the same data, so peers do not send anything again. A store outage or a timeout, on
+either side, is retried, and so is a crash before the completion: the next start resumes the act on the old URI and copies
+again. A failure of the copy itself (the target refuses a record) ends the set: the old URI stays, every hold lifts, and the
+report's `lastError` names the backup. The target may then hold part of the copy and must be emptied before another migrate.
 
 ```http
 POST /api/admin/data/migrate
@@ -834,23 +855,27 @@ Content-Type: application/json
 { "uri": "mongodb+srv://user:pass@cluster.mongodb.net/ythril" }
 ```
 
-**Response `200`:**
+**Response `202`:** `{ "migrateId": "3b7e…", "spaces": ["general", "notes"] }`
 
-```json
-{
-  "ok": true,
-  "backupDir": "/data/migration-backup",
-  "message": "Migration started. The server will restart and connect to the new database."
-}
-```
+The target URI is never answered, reported or audited; it is kept on the migrate's own record, sealed with the master secret
+when the instance has one, and only until the set ends.
 
 | Status | Code | Meaning |
 |--------|------|---------|
-| `400` | | Invalid or SSRF-unsafe URI |
+| `400` | | Invalid or SSRF-unsafe URI, or the target cannot be reached |
 | `403` | `FEATURE_DISABLED` | `YTHRIL_DB_MIGRATION_ENABLED` is not `true` |
-| `409` | `INFRA_MANAGED` | `MONGO_URI` env var is set — connection is infra-managed, migration unavailable |
-| `409` | | Maintenance mode already active — deactivate it first |
-| `500` | | Dump failed or new URI unreachable |
+| `409` | `INFRA_MANAGED` | The URI comes from a non-empty `MONGO_URI`, or `YTHRIL_MONGO_INFRA_MANAGED=true` |
+| `409` | `target_not_empty` | The target database already holds data; empty it or name another |
+| `409` | `space_being_restored`, `space_being_migrated` | A restore or a migrate already stands |
+| `409` | | Manual maintenance mode is active; deactivate it first |
+| `503` | | The server is shutting down |
+
+### GET /api/admin/data/migrate
+
+The migrate standing, or the last one; `{ "migrate": null }` when none ever ran. The same report as
+[`GET /api/admin/data/restore`](#get-apiadmindatarestore), under `migrateId`, with `spaces[].state` `migrate_abandoned` for a
+set a failure ended (`state: "abandoned"`, the reason in `lastError`), and `backupId` the backup the copy went through (also on
+each completed space). Admin and MFA; audited as `data.migrate.report`.
 
 #### Enabling migration on a deployment
 

@@ -345,6 +345,10 @@ export async function renameSpace(oldId: string, newId: string): Promise<SpaceCo
 /**
  * A rename meets a deletion or wipe of its space that is owed or running. Refused, never queued behind it: the act would delete what
  * the rename moved, or the rename would move what the act half-deleted.
+ *
+ * Only those two kinds refuse it. A restore or a migrate standing on every space (`SPACE_ACT_KINDS`, `instanceWide`) does not: the
+ * rename registers behind it, runs after the act on its space completes (one space's acts keep their registration order), and its
+ * request waits that long. The sentence below names the two kinds it is said for.
  */
 export class RenameBlockedError extends Error {
   override readonly name = 'RenameBlockedError';

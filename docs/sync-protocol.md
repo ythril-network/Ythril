@@ -58,7 +58,29 @@ Four high-water marks are kept per member. The first two prevent redundant data 
 | `lastSeqServed[spaceId]` | `Record<string,number>` | Highest `sinceSeq` this peer has pulled **our** tombstones from — its confirmed position in our data ([details](#lastseqserved--the-mirror-watermark-and-why-tombstone-retention-needs-it)) |
 | `lastFileTombstoneAckedAt[spaceId]` | `Record<string,string>` | Newest `deletedAt` among FILE tombstones this peer answered `200` to on a push ([details](#lastfiletombstoneackedat--the-same-bound-for-file-tombstones-from-acknowledgement)) |
 
-All four are stored per member in the config file. After a successful sync they are written through the coalesced asynchronous config flush (`saveConfigSoon`) rather than a blocking synchronous write — sync bookkeeping never stalls the event loop. If a sync fails mid-way, the watermark is not advanced past the failure — the next cycle retries from the last safe point, giving at-least-once delivery semantics (re-delivery is harmless: everything is re-derived from `seq`). A further piece of per-member state, where the one-time re-read of an upstream's tombstones stands, is **not a watermark**: it has its own start and its own outcome, and it never limits the four above ([details](#the-one-time-re-read-of-an-upstreams-tombstones)).
+All four are stored per member in the config file. After a successful sync they are written through the coalesced asynchronous config flush (`saveConfigSoon`) rather than a blocking synchronous write — sync bookkeeping never stalls the event loop. If a sync fails mid-way, the watermark is not advanced past the failure — the next cycle retries from the last safe point, giving at-least-once delivery semantics (re-delivery is harmless: everything is re-derived from `seq`). Two further pieces of per-member state, where the one-time re-read of an upstream's tombstones stands and where a re-read of a peer's file rows after a [Merkle divergence](#merkle-divergence-check-opt-in) stands, are **not watermarks**: each has its own start and its own outcome, and neither limits the four above ([details](#the-one-time-re-read-of-an-upstreams-tombstones)).
+
+### The per-space marks, and what a restore does to them
+
+Each member carries six marks per space: the four watermarks and the two re-read states. A rename of the space carries all six,
+a seq-counter wipe clears them, and a [restore](integration-guide/12-admin-api.md#post-apiadmindatarestore) forgets the three that
+say what this instance **received** and keeps the three that say what it **sent** or what the peer acknowledged. The space is
+back at an older snapshot, so what arrived after it is gone here; forgetting the receive marks makes each peer send it again,
+while the sending side is unchanged by the restore and its marks stay true (the restore raises the space's counter, so new local
+writes land above them). A [migrate](integration-guide/12-admin-api.md#post-apiadmindatamigrate) forgets none: the data is the same.
+
+| Mark | Says | On a restore |
+|---|---|---|
+| `lastSeqReceived` | How far this instance has pulled the peer | **Forgotten**: the next pull reads the peer from the start |
+| `tombstoneRereadAt` | Where the one-time re-read of an upstream's tombstones stands | **Forgotten**: the re-read is owed again |
+| `fileMetaRereadAt` | Where a re-read of the peer's file rows stands | **Forgotten**: not owed until a divergence arms it |
+| `lastSeqPushed` | How far this instance has pushed to the peer | Kept: clearing it would push again restored records whose deletions the peers have already pruned, and they would store them again |
+| `lastSeqServed` | How far the peer has pulled this instance's tombstones | Kept: the restore does not change what the peer holds |
+| `lastFileTombstoneAckedAt` | Which file deletions the peer has taken | Kept: the peer still holds them |
+
+A pending join round's member carries the same marks and is treated the same way. What this leaves open: a record deleted here
+after the backup whose tombstone the peers have since pruned comes back here and is not pushed again (its push mark is kept),
+and a peer this instance never pulls from does not send again what it sent.
 
 **One watermark, seven transfers, and that is what "the last safe point" has to mean.** A cycle runs seven independent transfers under each watermark — tombstones plus facts, entities, edges, chrono, links and FILE METADATA — and any one of them can stop early: a non-`2xx` from the peer, a throw, or its page cap — and for the tombstone transfer also a page of one seq it cannot page past, or an element of a type the receiver does not know. **The watermark advances only as far as EVERY transfer in the cycle is complete through.** A transfer that finished places no limit; one that stopped early limits the advance to the seq it is **complete through**, and the lowest such limit wins. "Complete through" is not "the last seq delivered": records relayed from several authors share seqs, so a transfer that stopped inside a run of equal seqs has delivered that seq without finishing it, and claims the seq **before** it (a stop with the run at seq 200 half sent leaves the watermark at 199, and the next cycle sends 200 whole).
 

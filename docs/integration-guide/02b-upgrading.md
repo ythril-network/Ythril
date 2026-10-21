@@ -104,8 +104,8 @@ one. Four things an integrator can see:
 - **`POST /api/spaces/:id/validate-schema` answers a new key, `staleGuards`**, beside `violations`, which is unchanged.
 - **A relabel onto an identity another edge holds answers `409 edge_identity_taken`** on the in-place path too, where it
   answered `500`.
-- **A restore rebuilds the edge indexes before maintenance mode ends**, and `POST /api/admin/data/restore` answers
-  `edgeIndexes.failed` for any space whose build failed.
+- **A restore rebuilds the edge indexes before a space's hold lifts**, and `GET /api/admin/data/restore` reports each space's
+  `edgeIndexes` (a build that fails now fails that space's restore act instead of being reported beside a finished restore).
   A puller that predates it keeps its older mode, and still stops at a run of more than `limit` tombstones at one seq until it
   upgrades.
 
@@ -287,6 +287,29 @@ release adds is named on `space_schema_layers` (`unknownFields`) instead of refu
 
 **Upgrading past 5.6.x answers an unknown top-level field on a brain write by a per-space setting, and an MCP write no longer refuses one by default.** The setting, `unknownWriteFields`, is `warn` unless a space is set to `refuse` (`PATCH /api/spaces/:id`, or `update_space`). Under `warn` the write is stored and each unknown field is named in `warnings`, where an MCP call used to be refused. Under `refuse` the write is refused, and so is a uniform option a route does not read (`checkDuplicates` on an update, `ttlDays` on a link) and a GET-then-PATCH that sends server-written keys back. The setting is per instance and is never replicated, so members of a network may answer differently. Read `warnings` on the writes an integration sends, and set `refuse` only where you want refusal.
 
+**Upgrading past 5.6.x makes a restore and a migrate acts that run after their answer, and changes what they answer.**
+See [Admin API](12-admin-api.md#post-apiadmindatarestore) for the whole contract.
+
+- **`POST /api/admin/data/restore` answers `202`** `{ restoreId, backupId, spaces, emptied, leftOut }` (it answered `200` with
+  the index results once the restore had run). Poll the new `GET /api/admin/data/restore` until `state` is not `running`; the
+  per-space index results (`edgeIndexes`, `vectorIndexes`) are there now. A restore whose backup cannot be read is released with
+  `POST /api/admin/data/restore/abandon`.
+- **A restore makes every space equal to the backup.** A space created after the backup is emptied, a backup naming a space this
+  instance no longer serves is refused (`400 backup_names_unserved_spaces`) unless `leaveOut` names it, and a broken backup is
+  refused before anything is replaced (`400 backup_not_whole`). The audit log, the queues and the files' bytes are not restored,
+  and records erased after the backup come back.
+- **`POST /api/admin/data/migrate` copies the database online and answers `202`** `{ migrateId, spaces }` (it answered `200`
+  and left the copy to a restart that never made it). It is refused with `409 INFRA_MANAGED` when a non-empty `MONGO_URI`
+  supplies the URI, and with `409 target_not_empty` when the target holds anything. **An empty `MONGO_URI` now counts as unset**
+  everywhere, so an instance started with `MONGO_URI=''` connects to the URI in `config.json` (it connected to the bundled
+  default while `GET /api/admin/data/config` said `config`). The old database keeps every record after a migrate.
+- **While either stands, writes answer `409`** `space_being_restored` or `space_being_migrated`, a backup answers `409`
+  `backup_refused_during_restore`, and the instance is in maintenance until the last space's act ends. **An instance-admin token
+  now passes maintenance on every path**, where it was refused outside `/api/admin/*`; every other caller still gets the `503`,
+  reads included. `GET /api/admin/data/maintenance` answers `{ active, manual, heldBy }`.
+- **The audit operation `data.restore` is now `data.restore.requested`, and `data.migrate` is `data.migrate.requested`**; the
+  outcome is a row of its own when the set ends ([Audit log](13-audit-log-api.md)). Change saved audit queries.
+
 ## Rolling Back
 
 **A rollback from 6.0 is `config.json.pre-6.0`, and nothing else brings the proxies back.** A 5.x build does not read
@@ -350,6 +373,11 @@ recall on it answers empty until it is ready. Nothing is lost; the records are u
 - serves a skipped or owed round as it stored it.
 
 **Before rolling back:** no space deleted or wiped by a vote within `votingDeadlineHours` (`GET /api/networks/:id/vote-outcomes`, and the audit operations `network.round.space_act` and `network.round.addition_retired`); no act owed (`owedSpaceActs` on `GET /api/networks/:id`, as an instance administrator); and no `pendingSpaceActs` in `config.json` and no `owedSpaceActs` (`GET /api/networks`, as an instance administrator). A restore of a `config.json` copied with entries finishes those acts after the first listen: before starting from a restored `config.json`, remove `pendingSpaceActs` unless you want those deletions, wipes and renames finished.
+
+**Let every restore and migrate end before rolling back to a 5.x build.** A 5.x build does not know the `restore` and `migrate`
+kinds: an entry of either left in `pendingSpaceActs` is never finished there, and its space stays marked as owing an act for as
+long as that build runs; the set's record (`spaceActSets`) is ignored. Roll back only when `GET /api/admin/data/restore` and `GET /api/admin/data/migrate` answer a `state`
+other than `running` (or `null`) and the danger tab shows no act standing. Abandon a restore that cannot finish first.
 
 **The first boot on a new version rewrites `config.json`, and some of those rewrites drop a field an older
 build reads.** So a rollback is not simply "run the previous image": that path exists, but it needs the copy of
