@@ -126,6 +126,43 @@ describe('My views (Q-531)', () => {
     expect(el.textContent).not.toContain('@lens');
   });
 
+  // b100 lens U1: a rename or delete in flight showed nothing and could be sent again, so a double submit sent two writes.
+  it('a rename in flight disables its save and sends once, however often it is submitted', async () => {
+    const { fixture, el, http, renamed } = await mount();
+    el.querySelector<HTMLButtonElement>('button[aria-label="views.rename.action"]')!.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const input = el.querySelector<HTMLInputElement>('.rename input')!;
+    input.value = 'lens2';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    const form = el.querySelector<HTMLFormElement>('.rename')!;
+    form.dispatchEvent(new Event('submit'));
+    form.dispatchEvent(new Event('submit'));
+    fixture.detectChanges();
+    const pending = http.match(r => r.method === 'PATCH');
+    expect(pending.length, 'a second submit while the first was in flight sent a second rename').toBe(1);
+    expect(el.querySelector<HTMLButtonElement>('.rename button[type="submit"]')!.disabled, 'the save stays enabled while the rename is in flight').toBe(true);
+    pending[0]!.flush({ view: { ...VIEW_LENS, id: '@lens2', name: 'lens2' } });
+    expect(renamed).toEqual([{ from: '@lens', to: '@lens2' }]);
+  });
+
+  it('a delete in flight disables its button and sends once, however often it is clicked', async () => {
+    const { fixture, el, http, removed } = await mount(true);
+    const del = () => el.querySelectorAll<HTMLButtonElement>('button[aria-label="views.delete.action"]')[0]!;
+    del().click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(del().disabled, 'the delete stays enabled while it is in flight').toBe(true);
+    del().click();
+    await fixture.whenStable();
+    const pending = http.match(r => r.method === 'DELETE');
+    expect(pending.length, 'a second click while the first delete was in flight sent a second delete').toBe(1);
+    pending[0]!.flush(null, { status: 204, statusText: 'No Content' });
+    fixture.detectChanges();
+    expect(removed).toEqual(['@lens']);
+  });
+
   it('sends nothing when the delete is not confirmed', async () => {
     const { fixture, el, http, removed } = await mount(false);
     el.querySelectorAll<HTMLButtonElement>('button[aria-label="views.delete.action"]')[0]!.click();
