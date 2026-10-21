@@ -18,9 +18,7 @@
  * classified before it lands. `why` is one line a reviewer can check against the file.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readTrackedSources, REPO_ROOT } from '../standalone/_sources.mjs';
 
 /**
  * The commit the list was classified against: every `rewrite` row's `base` hashes its file as it was here. It is on `main`, so the
@@ -38,8 +36,7 @@ const PROXY_MODULE = /^server\/src\/(?:.+\/)?[^/]*proxy[^/]*\.ts$/;
 const EXPORTED = /^export\s+(?:async\s+)?(?:function\*?|const|let|class|type|interface|enum)\s+(\w+)/gm;
 const PROXY_EXPORTS_FLOOR = 10;
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const git = (...args) => execFileSync('git', ['-C', REPO, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+const git = (...args) => execFileSync('git', ['-C', REPO_ROOT, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
 const exportsOf = (text) => [...text.matchAll(EXPORTED)].map(m => m[1]);
 
 let retired;
@@ -54,9 +51,7 @@ export function retiredProxyExports() {
   if (retired) return retired;
   const modules = git('ls-tree', '-r', '--name-only', CLASSIFIED_AT, '--', 'server/src').split('\n').filter(f => PROXY_MODULE.test(f));
   const then = new Set(modules.flatMap(f => exportsOf(git('show', `${CLASSIFIED_AT}:${f}`))));
-  const nowFiles = git('ls-files', '-z', '--', 'server/src').split('\0').filter(f => f.endsWith('.ts'));
-  if (nowFiles.length < 300) throw new Error(`only ${nowFiles.length} server source(s) listed today; the scan is broken`);
-  const now = new Set(nowFiles.flatMap(f => { try { return exportsOf(readFileSync(join(REPO, f), 'utf8')); } catch { return []; } }));
+  const now = new Set(readTrackedSources('server/src', { floor: 300, specs: false }).flatMap(s => exportsOf(s.text)));
   const names = [...then].filter(n => !now.has(n)).sort();
   if (modules.length === 0 || names.length < PROXY_EXPORTS_FLOOR) {
     throw new Error(`derived ${names.length} retired proxy export(s) from ${modules.length} proxy module(s) at ${CLASSIFIED_AT}; the scan is broken`);

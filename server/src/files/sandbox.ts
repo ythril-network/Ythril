@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
-import { getDataRoot } from '../config/loader.js';
+import { getDataRoot, isConfigLoaded } from '../config/loader.js';
 import { toDocId } from '../util/paths.js';
 import { isRetiredSpaceId } from '../spaces/retired-space-id.js';
 import { SpaceRetired } from './act-answers.js';
@@ -35,7 +35,8 @@ import { SpaceRetired } from './act-answers.js';
  * @throws SpaceRetired if `spaceId` is a retired proxy id
  */
 export function resolveSafePath(spaceId: string, userPath: string): string {
-  if (isRetiredSpaceId(spaceId)) throw new SpaceRetired(spaceId);
+  // No loaded config holds no reservation: the resolver stays callable where nothing has loaded one (a pure path question).
+  if (isConfigLoaded() && isRetiredSpaceId(spaceId)) throw new SpaceRetired(spaceId);
   const spaceRootDir = spaceRoot(spaceId);
 
   // 1. Unicode NFC normalization

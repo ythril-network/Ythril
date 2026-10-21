@@ -9,9 +9,9 @@
  * and a second loop with an admin filter - so a change to what "live" or "owner" means had three places to land and a revoke and a sweep
  * could disagree about one owner. The admin variant is the same question over fewer tokens, so it is a filter on the argument, not a copy.
  *
- * Asserted over every tracked server source (derived, floor inside `trackedSources`): no source outside `view-shape.ts` builds a set of
- * owner keys from `tokenIsLive` and `viewOwnerOf` itself. A per-token check (is THIS caller's token live, whose view is it) is not a set
- * and is not matched.
+ * Asserted over every tracked server source (derived, floor inside `serverSources`), bounded by the FUNCTION, never by a character count:
+ * every function outside `view-shape.ts` that asks `tokenIsLive` and `viewOwnerOf` and collects into a set (`new Set`, `.add(`) is
+ * building the live-owner set itself. A per-token check (is THIS caller's token live, whose view is it) collects nothing and is not matched.
  *
  * ## Seen red at 743562a5
  *
@@ -22,27 +22,19 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
-import { stripComments } from './_strip-comments.mjs';
+import { serverSources, sitesOf } from './_view-gates.mjs';
 
 const HOME = 'server/src/config/view-shape.ts';
-
-/** A set of owner keys built from liveness: a Set over a filter/map, or a loop that adds an owner it judged live. */
-const BUILDS_A_LIVE_OWNER_SET = [
-  /new Set\([^;]*tokenIsLive\([^;]*viewOwnerOf\(/,
-  /tokenIsLive\([^;]*\)[\s\S]{0,160}?viewOwnerOf\([^;]*\);[\s\S]{0,80}?\.add\(/,
-  /viewOwnerOf\([^;]*\);[\s\S]{0,120}?tokenIsLive\([^)]*\)\)?\s*\w+\.add\(/,
-];
+const asksOwner = (text) => /\bviewOwnerOf\s*\(/.test(text);
+const collects = (text) => /\bnew Set\b|\.add\s*\(/.test(text);
 
 describe('the owners holding a live token are counted once (Q-531)', () => {
   it('no source outside view-shape.ts builds the live-owner set itself', () => {
-    const sources = readTrackedSources('server/src', { specs: false, untracked: true });
+    const sources = serverSources();
     const home = sources.find(s => s.file === HOME);
     assert.ok(home && /export function liveOwnerKeys\b/.test(home.text), `${HOME} no longer defines liveOwnerKeys: the rule has lost its home`);
-    const built = sources
-      .filter(s => s.file !== HOME)
-      .filter(s => BUILDS_A_LIVE_OWNER_SET.some(re => re.test(stripComments(s.text))))
-      .map(s => s.file);
-    assert.deepEqual(built, [], 'sites that build the live-owner set themselves; ask liveOwnerKeys');
+    const sites = sitesOf(sources, String.raw`\btokenIsLive\s*\(`, { files: f => f !== HOME, widenUntil: asksOwner });
+    const built = [...new Set(sites.filter(s => asksOwner(s.fnText) && collects(s.fnText)).map(s => `${s.file} ${s.fn}`))];
+    assert.deepEqual(built, [], 'functions that build the live-owner set themselves; ask liveOwnerKeys');
   });
 });
