@@ -14,9 +14,15 @@ Boot an isolated copy instead; it takes ~30 s.
 $env:PORT='3260'; $env:TRUST_PROXY='1'                 # TRUST_PROXY=1 or the dev proxy's xfwd header 500s every API call (rate limiter)
 $env:CONFIG_PATH='<scratch>\config\config.json'        # nonexistent file → server boots in first-run /setup mode
 $env:DATA_ROOT='<scratch>\data'
-$env:MONGO_URI='mongodb://127.0.0.1:27017/ythril_scratch'   # host mongod; distinct DB name isolates it. NO vector search — see below
+docker run -d --name ythril-verify-mongo -p 127.0.0.1:27047:27017 mongodb/mongodb-atlas-local:latest
+$env:MONGO_URI='mongodb://127.0.0.1:27047/ythril_scratch?directConnection=true'
 Set-Location server; npx tsx src/index.ts              # run in background, redirect output to a log
+# ... drive, then: docker rm -f ythril-verify-mongo
 ```
+
+**Every database a drive uses runs in Docker.** Never point a scratch server at a MongoDB installed on the owner's
+machine, or start its binary, not even as a second or throwaway target: a drive that needs a second database (a
+migrate target, one to stop mid-copy) starts a second container on another loopback port and removes it afterwards.
 
 **From a worktree under `.claude/`, every client route 404s.** Express `sendFile` refuses a path with a dot segment,
 so the SPA fallback cannot serve `index.html` out of `.claude\worktrees\<name>\client\dist\browser` — `/setup`
@@ -33,16 +39,8 @@ or an error finds nothing while the text is there. Start the server with
 scratch root downloads the embedding model again before the first embed. Point `MODEL_CACHE_DIR` at a cache an earlier
 run already filled (one scratch cache kept outside the per-run roots) and the server embeds from the first record.
 
-**Anything that runs `recall` or `similar` needs a search engine, and host mongod has none.** Every recall answers
-`SearchNotEnabled` (code 31082) against it — found by the Q-92 verify, 2026-09-28; this line used to say host mongod
-"supports $vectorSearch". For those, give the scratch server its own Atlas-local container and remove it afterwards:
-
-```powershell
-docker run -d --name ythril-verify-mongo -p 127.0.0.1:27047:27017 mongodb/mongodb-atlas-local:latest
-$env:MONGO_URI='mongodb://127.0.0.1:27047/ythril_scratch?directConnection=true'
-# ... drive, then:
-docker rm -f ythril-verify-mongo
-```
+**Anything that runs `recall` or `similar` needs a search engine**, which the Atlas-local image carries: a plain
+mongod answers every recall `SearchNotEnabled` (code 31082).
 
 **The test stack's Mongo needs its credentials.** When the harness Mongo `ythril-mongo-a` is already up (127.0.0.1:27117,
 capped), a scratch server can use it with its own database name, but only with the test login:
@@ -124,7 +122,6 @@ Routes to sweep: `/brain`, `/files/conflicts`, `/schema-library`, `/settings/{to
 - Setup auto-creates a "General" space.
 - Collect page console errors; filter for `NG0`/zone patterns after change-detection work.
 - One benign 500 ("Config not loaded") is logged during first-run before setup completes — pre-existing server behavior, not a client bug.
-- On plain host mongod the server logs "Could not list search indexes" warnings — harmless in scratch runs.
 - From a git worktree under `.claude/` the server will not serve the SPA — see *Isolated server* above for the
   `CLIENT_DIST` junction.
 - **The app has ONE theme.** There is no light/dark switch and no `prefers-color-scheme` rule in `styles.scss`, so a
