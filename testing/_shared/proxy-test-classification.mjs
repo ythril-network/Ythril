@@ -17,15 +17,59 @@
  * `every-proxy-test-is-classified.test.js` holds it: a derived file with no row fails, so a new test naming a proxy symbol is
  * classified before it lands. `why` is one line a reviewer can check against the file.
  */
-
-/** The symbols the plan names: a file naming one is in the flip set. Built fresh per use (a shared /g regex under-scans). */
-export const proxySymbolPattern = () => /\bproxyFor\b|\bisProxy\w*|\bconcreteSpace\w*|\bmemberSpaces\w*|\btargetSpace\b|\bresolveWriteTarget\b/;
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * The commit the list was classified against: every `rewrite` row's `base` hashes its file as it was here. It is on `main`, so the
  * gate derives the flip set AS IT WAS and holds the list to it, which is what keeps a correct rewrite from lowering the gate's floor.
  */
 export const CLASSIFIED_AT = '18e8d598';
+
+/** The symbols the plan names, as stems (the retired fields and the families it deletes by name). */
+const PLAN_STEMS = Object.freeze(['proxyFor', 'isProxy', 'concreteSpace', 'memberSpaces', 'targetSpace', 'resolveWriteTarget']);
+const PLAN_PATTERN = String.raw`\bproxyFor\b|\bisProxy\w*|\bconcreteSpace\w*|\bmemberSpaces\w*|\btargetSpace\b|\bresolveWriteTarget\b`;
+
+/** The server modules that WERE the proxy rule at `CLASSIFIED_AT`: every source whose file name names a proxy. */
+const PROXY_MODULE = /^server\/src\/(?:.+\/)?[^/]*proxy[^/]*\.ts$/;
+/** An exported declaration's name. */
+const EXPORTED = /^export\s+(?:async\s+)?(?:function\*?|const|let|class|type|interface|enum)\s+(\w+)/gm;
+const PROXY_EXPORTS_FLOOR = 10;
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const git = (...args) => execFileSync('git', ['-C', REPO, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+const exportsOf = (text) => [...text.matchAll(EXPORTED)].map(m => m[1]);
+
+let retired;
+/**
+ * Every proxy-era symbol, DERIVED (b100 row G): each name a proxy module exported at `CLASSIFIED_AT` that no server source exports today.
+ * The plan's stems alone missed `resolveMemberSpaces`, so `space-guard-reads-rights` - which named it - escaped the flip set. A symbol
+ * that only MOVED (`findSpace`, now in `spaces/space-lookup.ts`) is still exported and is not proxy-era. Throws rather than answering
+ * empty: a scan that found no proxy module, or too few names, is broken (needs the history `CLASSIFIED_AT` is in).
+ * @returns {string[]}
+ */
+export function retiredProxyExports() {
+  if (retired) return retired;
+  const modules = git('ls-tree', '-r', '--name-only', CLASSIFIED_AT, '--', 'server/src').split('\n').filter(f => PROXY_MODULE.test(f));
+  const then = new Set(modules.flatMap(f => exportsOf(git('show', `${CLASSIFIED_AT}:${f}`))));
+  const nowFiles = git('ls-files', '-z', '--', 'server/src').split('\0').filter(f => f.endsWith('.ts'));
+  if (nowFiles.length < 300) throw new Error(`only ${nowFiles.length} server source(s) listed today; the scan is broken`);
+  const now = new Set(nowFiles.flatMap(f => { try { return exportsOf(readFileSync(join(REPO, f), 'utf8')); } catch { return []; } }));
+  const names = [...then].filter(n => !now.has(n)).sort();
+  if (modules.length === 0 || names.length < PROXY_EXPORTS_FLOOR) {
+    throw new Error(`derived ${names.length} retired proxy export(s) from ${modules.length} proxy module(s) at ${CLASSIFIED_AT}; the scan is broken`);
+  }
+  retired = names;
+  return retired;
+}
+
+/** What a flip-set scan greps for first (fixed strings): the plan's stems and every derived proxy-era symbol. */
+export const proxySymbolStems = () => [...new Set([...PLAN_STEMS, ...retiredProxyExports()])];
+
+/** A file naming one of these is in the flip set. Built fresh per use (a shared /g regex under-scans). */
+export const proxySymbolPattern = () => new RegExp(`${PLAN_PATTERN}|${retiredProxyExports().map(n => String.raw`\b${n}\b`).join('|')}`);
 
 /** Where the flip set is looked for: the test suites, their helpers, and the client specs. */
 export const FLIP_SET_ROOTS = Object.freeze(['testing', 'client/src']);
@@ -95,6 +139,10 @@ export const PROXY_TEST_CLASSIFICATION = Object.freeze([
     why: 'addresses writes through targetSpace on both doors; those cases go' },
   { file: 'testing/standalone/an-unknown-field-rides-every-answer-after-the-judge-db.test.js', verdict: 'rewrite', base: 'b6c724e5ccab9d71',
     why: 'writes through a proxy with targetSpace; those cases go' },
+  { file: 'testing/standalone/area-rung-is-staged.test.js', verdict: 'rewrite', base: '04e8d5bfbe108b3f',
+    why: 'asserted spaceTargets calls resolveMemberSpaces (a proxy\'s members); found by the derived symbols (b100 row G), already rewritten' },
+  { file: 'testing/standalone/column-filters.test.js', verdict: 'unaffected',
+    why: 'a historical note on how the list routes paged (collectAcrossMembers) before the shared pager; it calls nothing' },
   { file: 'testing/standalone/chrono-retention-isolates-a-failing-space-db.test.js', verdict: 'rewrite', base: '585b42083db8c5ea',
     why: 'its comment says concreteSpaces() is the walked set; the walk reads config.spaces' },
   { file: 'testing/standalone/chrono-retention.test.js', verdict: 'rewrite', base: '362afb54a2dae74c',
@@ -125,6 +173,8 @@ export const PROXY_TEST_CLASSIFICATION = Object.freeze([
     why: 'reindex of a view id answers as an unknown space, held by the write-door parity test' },
   { file: 'testing/standalone/space-bodies-are-strict.test.js', verdict: 'rewrite', base: '7de08fa02f453f69',
     why: 'the create strip keeps proxyFor as a real input; it becomes a field refused by name' },
+  { file: 'testing/standalone/space-guard-reads-rights.test.js', verdict: 'rewrite', base: '063b5da1e14b8f20',
+    why: 'held the guard to "at least one member" through resolveMemberSpaces; escaped the plan\'s stems, found by the derived symbols (b100 row G)' },
   { file: 'testing/standalone/space-info-tools-orient-a-caller.test.js', verdict: 'rewrite', base: 'd8b3f16091cc8a5c',
     why: 'its docblock tells a caller a proxy write needs targetSpace; that is retired' },
   { file: 'testing/standalone/the-boot-suppression-sweep-isolates-a-failing-space-db.test.js', verdict: 'rewrite', base: 'd144454cae576f2a',
