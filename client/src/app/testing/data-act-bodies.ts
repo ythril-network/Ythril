@@ -28,11 +28,12 @@ export const INFRA_ENV_SENTENCE = 'Database migration via API is not possible on
 export const TARGET_NOT_EMPTY_SENTENCE = 'The target database already holds data. A migrate copies into an empty database only: empty it, '
   + 'or name another, and migrate again.';
 export const ABANDON_RUNNING_SENTENCE = 'A restore act is running for \'notes\'; abandon once it has ended.';
+export const MIGRATE_ABANDON_RUNNING_SENTENCE = 'The migrate is copying the database now; abandon once its attempt has ended.';
 
 /** The server's English for these refusals, which the Data page must never show: a spec asserts its absence. */
 export const DATA_SERVER_SENTENCES = [
   UNSERVED_SENTENCE, NOT_WHOLE_SENTENCE, RESTORING_SENTENCE, MIGRATE_DURING_RESTORE_SENTENCE, INFRA_FLAG_SENTENCE, INFRA_ENV_SENTENCE,
-  TARGET_NOT_EMPTY_SENTENCE, ABANDON_RUNNING_SENTENCE,
+  TARGET_NOT_EMPTY_SENTENCE, ABANDON_RUNNING_SENTENCE, MIGRATE_ABANDON_RUNNING_SENTENCE,
 ];
 
 export const BACKUP_ID = '2026-10-18T10-00-00-000Z';
@@ -50,7 +51,7 @@ export const RESTORE_ANSWERS = {
 } satisfies Record<string, WireAnswer>;
 
 /** A `RestoreSpaceReport` row. */
-export function restoreSpace(id: string, state: 'owed' | 'running' | 'done' | 'restore_abandoned', over: Record<string, unknown> = {}) {
+export function restoreSpace(id: string, state: 'owed' | 'running' | 'done' | 'restore_abandoned' | 'migrate_abandoned', over: Record<string, unknown> = {}) {
   return { id, state, attempts: state === 'done' ? 0 : 1, ...over };
 }
 
@@ -84,6 +85,13 @@ export const MIGRATE_ANSWERS = {
   infraEnv: { status: 409, body: { error: INFRA_ENV_SENTENCE, code: 'INFRA_MANAGED' } },
   targetNotEmpty: { status: 409, body: { error: TARGET_NOT_EMPTY_SENTENCE, code: 'target_not_empty' } },
   duringRestore: { status: 409, body: { error: MIGRATE_DURING_RESTORE_SENTENCE, code: 'space_being_restored' } },
+} satisfies Record<string, WireAnswer>;
+
+/** `POST /api/admin/data/migrate/abandon` (Q-564): the set and the spaces it released; nothing is saved, the old database stays. */
+export const MIGRATE_ABANDON_ANSWERS = {
+  abandoned: { status: 200, body: { abandoned: true, migrateId: 'set-9', backupId: BACKUP_ID, released: ['general', 'notes'] } },
+  running: { status: 409, body: { error: MIGRATE_ABANDON_RUNNING_SENTENCE, code: 'migrate_act_running' } },
+  none: { status: 404, body: { error: 'No migrate is standing.', code: 'no_migrate_standing' } },
 } satisfies Record<string, WireAnswer>;
 
 /** A migrate report: the restore report's shape (one handler serves both), `migrateId` for `restoreId`. */
