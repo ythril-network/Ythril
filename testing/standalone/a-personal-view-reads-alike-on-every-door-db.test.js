@@ -238,6 +238,31 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
     assert.ok(created.ok, `POST /api/views {name: 'w'} answered ${fmt(created.answer)}`);
   });
 
+  it('a token with no write rung anywhere is answered the same on every door when it writes to its own view: a view, 404, with the hint', async () => {
+    // `owner` holds read rungs only. The MCP dispatcher judged "this token holds no write rung in any space" BEFORE it asked whether the
+    // id was a space, so the same call answered 404 + hint on the REST path route and 403 on MCP: the existence rule precedes rights on
+    // every door (plan rev 3.2 "Doors and answers": the owner writing to its own view gets 404 with the hint).
+    await mustCreate(owner.key, 'ro', [QA]);
+    const body = { name: 'vp-ro-marker', type: 'thing' };
+    const doors = {
+      'REST path': await d.rest(owner.key, 'POST', '/api/brain/spaces/@ro/entities', body),
+      'REST tool door': await d.rest(owner.key, 'POST', '/api/save_entity', { space: '@ro', ...body }),
+      'MCP save_entity': await d.mcp(owner.key, 'save_entity', { space: '@ro', ...body }),
+    };
+    const wrong = [];
+    for (const [where, a] of Object.entries(doors)) {
+      const text = a.error || a.text;
+      const status = where === 'MCP save_entity' ? (a.isError ? 404 : a.status) : a.status;
+      if (status !== 404) wrong.push(`${where}: status ${a.status}: ${text.slice(0, 160)}`);
+      if (!text.includes(UNKNOWN('@ro'))) wrong.push(`${where}: no unknown-space refusal: ${text.slice(0, 160)}`);
+      if (!text.includes(HINT('@ro'))) wrong.push(`${where}: no hint: ${text.slice(0, 160)}`);
+    }
+    assert.deepEqual(wrong, [], 'a read-only token writing to its own view must meet the existence rule before its rungs are judged, on every door');
+    // The control: the same token writing to a real space is still refused for its rungs, so the check above did not widen anything.
+    const real = await d.mcp(owner.key, 'save_entity', { space: QA, ...body });
+    assert.ok(real.isError && /write rung/.test(real.text), `a read-only token writing to a real space: ${real.text.slice(0, 160)}`);
+  });
+
   it('the five record DELETE routes refuse a view id with the space refusal, and the member\'s record remains', async () => {
     await createView(admin.key, 'del', [QA]);
     const seed = async (route, body) => {
