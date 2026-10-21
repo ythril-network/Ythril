@@ -9,6 +9,11 @@ import { StatusPillComponent, type StatusVariant } from '../../shared/status-pil
 import { StepProgressBarComponent } from '../../shared/step-progress-bar.component';
 import type { StepProgress } from '../../shared/step-progress.model';
 
+/** The colour of a set's state pill, as a pure function of the state the reader sees (a set state, or the client's own `stopped`). */
+export function actSetVariant(state: string): StatusVariant {
+  return state === 'completed' ? 'ok' : state === 'abandoned' || state === 'stopped' ? 'warn' : 'pending';
+}
+
 /** A report that may name the spaces a restore emptied or left out (a migrate's names neither). */
 type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
 
@@ -97,8 +102,7 @@ export class ActSetProgressComponent {
   private setState(): string { return this.halted() ? 'stopped' : this.report().state; }
 
   setVariant(): StatusVariant {
-    const s = this.setState();
-    return s === 'completed' ? 'ok' : s === 'abandoned' || s === 'stopped' ? 'warn' : 'pending';
+    return actSetVariant(this.setState());
   }
 
   setStateKey(): string { return `data.progress.state.${this.setState()}`; }
