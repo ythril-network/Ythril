@@ -21,7 +21,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { getConfig, mutateConfig } from '../config/loader.js';
 import {
   MAX_VIEWS_PER_OWNER, MAX_VIEW_MEMBERS, VIEW_NAME_MAX, VIEW_NAME_PATTERN, WILDCARD_MEMBER, ViewMembersInput, ViewRefusal,
-  copySourceKey, deleteView, freeViewName, isValidViewName, isViewId, memberAdmissible, renameView, viewIdOf, resolveOwnView, viewOwnerKind, viewOwnerOf, viewReadMembers, viewsOfOwner,
+  copySourceKey, deleteView, freeViewName, isValidViewName, isViewId, memberAdmissible, membersKeptFor, renameView, viewIdOf, resolveOwnView, viewOwnerKind, viewOwnerOf, viewReadMembers, viewsOfOwner,
   type ViewOwnerSource,
 } from '../config/views.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
@@ -235,12 +235,8 @@ export function copyViewTo(actor: ViewActor, id: string, toTokenId: unknown, fro
     const from = (cfg.views ?? []).find(v => v.ownerId === source.ownerId && v.id === source.id);
     if (!from) throw notFound(id);
     const held = cfg.tokens.find(t => t.id === toTokenId) as TokenRecord | undefined;
-    const admissible = admissibleFor(held?.rights, held ? peerBoundTo(held) : undefined, cfg);
     // A wildcard is judged by what it stands for (every space), so a receiver that reads none of them is refused as for a listed one.
-    const wildcard = from.members.includes(WILDCARD_MEMBER);
-    const kept = wildcard
-      ? (cfg.spaces.some(s => admissible(s.id)) ? [WILDCARD_MEMBER] : [])
-      : from.members.filter(admissible);
+    const kept = membersKeptFor(from.members, { rights: held?.rights ?? undefined, peerId: held ? peerBoundTo(held) : undefined, config: cfg });
     if (kept.length === 0) {
       throw new ViewRefusal('copyNothingReadable', 'That token reads none of the spaces this view lists, so a copy would read nothing');
     }

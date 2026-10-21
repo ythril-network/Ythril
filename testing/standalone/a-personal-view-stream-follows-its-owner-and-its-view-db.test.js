@@ -166,6 +166,8 @@ describe('the change stream on a personal view (Q-531)', { skip }, () => {
       change(QA, 'vs-before-expiry');
       assert.ok(await s.until(b => b.includes('vs-before-expiry')), 'control: the stream delivered nothing before the expiry');
       const expiresAt = Date.parse(d.loader.getConfig().tokens.find(x => x.id === t.id).expiresAt);
+      // waits-differently: it waits for a wall-clock instant (the token's expiry) to pass with nothing changing in between; a poll would
+      // have no condition to read, and any request made while waiting could be the config write this case must not have.
       await new Promise(res => setTimeout(res, Math.max(0, expiresAt - Date.now()) + 250));
       change(QA, 'vs-after-expiry');
       await s.until(() => false, 2_000);
