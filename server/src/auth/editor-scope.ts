@@ -312,13 +312,21 @@ export function refusalsToManageToken(
 }
 
 /**
- * May this caller manage that token: an instance admin or a space administrator (the token routes' own door), and inside the scope
- * `refusalsToManageToken` allows. A personal-view copy is a grant of reading to that token, so it asks what managing it asks.
+ * May this caller manage any token at all: an instance admin or a space administrator, the token routes' own door. What a door asks
+ * BEFORE it knows the target, so a caller who can manage none is refused the same way whichever door it came through.
+ */
+export function mayManageTokens(caller: { rights?: TokenRights | null } | undefined): boolean {
+  return !!caller && (isInstanceAdmin(caller) || administersAnySpace(caller));
+}
+
+/**
+ * May this caller manage that token: {@link mayManageTokens}, and inside the scope `refusalsToManageToken` allows. A personal-view copy
+ * is a grant of reading to that token, so it asks what managing it asks.
  */
 export function mayManageToken(
   caller: { rights?: TokenRights | null } | undefined,
   target: { spaces?: string[]; schemaLibrary?: boolean; rights?: TokenRights | null } | undefined,
 ): boolean {
-  if (!caller || !(isInstanceAdmin(caller) || administersAnySpace(caller))) return false;
+  if (!caller || !mayManageTokens(caller)) return false;
   return refusalsToManageToken(caller, target).length === 0;
 }
