@@ -3,7 +3,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import type { ActSetReport, ActSetSpaceReport } from '../../core/admin-data.types';
 import { DateFormatService } from '../../core/date-format.service';
 import { pluralText } from '../../core/plural-text';
-import { actStateKey, actStateVariant, actWhenText } from '../../core/space-act-view';
+import { actRowView, actWhenText } from '../../core/space-act-view';
 import { SettingsCardComponent } from '../../shared/settings-card.component';
 import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
 import { StepProgressBarComponent } from '../../shared/step-progress-bar.component';
@@ -29,8 +29,11 @@ type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
 <app-settings-card icon="arrows-clockwise" [heading]="(kind() === 'migrate' ? 'data.progress.migrateTitle' : 'data.progress.restoreTitle') | transloco"
   [purpose]="(kind() === 'migrate' ? 'data.progress.migratePurpose' : 'data.progress.restorePurpose') | transloco">
   <app-status-pill pill [variant]="setVariant()" [dot]="true">{{ setStateKey() | transloco }}</app-status-pill>
-  <div style="margin:4px 0 10px;"><app-step-progress-bar [progress]="progress()"/></div>
+  <div style="margin:4px 0 10px;"><app-step-progress-bar [progress]="progress()" [stageLabelKey]="endedStageKey()"/></div>
   <p style="margin:0 0 8px;font-size:13px;">{{ doneText() }}</p>
+  @if (stopped() && kind() === 'migrate') {
+    <p class="alert alert-warning" role="alert" style="margin:0 0 8px;font-size:13px;">{{ 'data.progress.migrateStopped' | transloco }}</p>
+  }
   @if (report().lastError; as e) { <p style="color:var(--text-secondary);margin:0 0 8px;font-size:13px;">{{ 'spaces.dangerZone.act.lastError' | transloco }} {{ e }}</p> }
   @if (emptiedText(); as t) { <p style="color:var(--text-muted);margin:0 0 6px;font-size:12.5px;">{{ t }}</p> }
   @if (leftOutText(); as t) { <p style="color:var(--text-muted);margin:0 0 6px;font-size:12.5px;">{{ t }}</p> }
@@ -38,11 +41,12 @@ type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
     @for (s of report().spaces; track s.id) {
       <li style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
         <span style="font-weight:500;">{{ s.id }}</span>
-        <app-status-pill [variant]="actStateVariant(s.state)" [dot]="true">{{ actStateKey(s.state) | transloco }}</app-status-pill>
-        @if (s.state === 'owed' || s.state === 'running') {
+        @let row = rowView(s);
+        <app-status-pill [variant]="row.variant" [dot]="true">{{ row.stateKey | transloco }}</app-status-pill>
+        @if (row.showsAttempts) {
           <span style="color:var(--text-muted);">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: s.attempts } }}</span>
         }
-        @if (s.state === 'owed') {
+        @if (row.showsNextTry) {
           <span style="color:var(--text-muted);">{{ 'networks.owedActs.nextTry' | transloco: { when: whenText(s) } }}</span>
         }
         @if (s.lastError) { <span style="flex-basis:100%;color:var(--text-secondary);">{{ 'spaces.dangerZone.act.lastError' | transloco }} {{ s.lastError }}</span> }
@@ -67,11 +71,12 @@ export class ActSetProgressComponent {
   readonly report = input.required<ShownReport>();
   readonly abandoning = input(false);
   readonly abandon = output<void>();
+  /** A migrate ends by exiting the process: true once its report can no longer be reached, so the card says the instance has stopped. */
+  readonly stopped = input(false);
 
   private readonly transloco = inject(TranslocoService);
   private readonly dates = inject(DateFormatService);
-  protected readonly actStateVariant = actStateVariant;
-  protected readonly actStateKey = actStateKey;
+  protected readonly rowView = actRowView;
 
   /** k of n as the shared bar draws it: one stage, the spaces done of the spaces in the set. */
   readonly progress = computed<StepProgress>(() => ({ step: this.kind(), steps: [this.kind()], done: this.report().done, total: this.report().total }));
@@ -86,6 +91,9 @@ export class ActSetProgressComponent {
   }
 
   setStateKey(): string { return `data.progress.state.${this.report().state}`; }
+
+  /** The bar's stage label once the set has ended: it names the end (Completed, Abandoned), where it said "Working" for ever. */
+  endedStageKey(): string | null { return this.report().state === 'running' ? null : this.setStateKey(); }
 
   // Methods, not computeds: they translate, and a computed would keep the words of a language file that had not loaded yet.
   doneText(): string {

@@ -29,6 +29,8 @@ export interface PollUntilOptions<T> {
   request: () => Observable<T>;
   /** Take the answer; return true to ask again, false to stop. Not called for a failed request. */
   onAnswer: (value: T) => boolean;
+  /** Told of a failed request, once per failure, for a caller that says so; the next ask is scheduled either way (a blip never ends the chain). */
+  onError?: (err: unknown) => void;
 }
 
 export interface PollHandle {
@@ -58,7 +60,10 @@ export function pollUntil<T>(opts: PollUntilOptions<T>): PollHandle {
         if (opts.onAnswer(value)) schedule();
         else stop();
       },
-      error: () => schedule(),
+      error: (err) => {
+        // A caller's hook that throws must not end the chain: the next ask is scheduled whatever it does.
+        try { if (active) opts.onError?.(err); } finally { schedule(); }
+      },
     });
   };
 

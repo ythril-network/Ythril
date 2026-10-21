@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { DateFormatService } from '../../core/date-format.service';
 import type { OwedSpaceAct } from '../../core/space-act-outcome';
-import { actKindKey, actStateKey, actStateVariant, actWhenText } from '../../core/space-act-view';
+import { actKindKey, actRowView, actWhenText } from '../../core/space-act-view';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 
 /**
@@ -26,9 +26,11 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
       <li style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
         <span style="font-weight:500;">{{ act.localSpaceId }}</span>
         <span>{{ actKindKey(act.kind) | transloco }}</span>
-        <app-status-pill [variant]="actStateVariant(act.state)" [dot]="true">{{ actStateKey(act.state) | transloco }}</app-status-pill>
-        <span style="color:var(--text-muted);">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: act.attempts } }}</span>
-        <span style="color:var(--text-muted);">{{ 'networks.owedActs.nextTry' | transloco: { when: whenText(act.nextRetryAt) } }}</span>
+        @let row = rowView(act);
+        <app-status-pill [variant]="row.variant" [dot]="true">{{ row.stateKey | transloco }}</app-status-pill>
+        @if (row.showsAttempts) { <span style="color:var(--text-muted);">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: act.attempts } }}</span> }
+        @if (row.showsNextTry) { <span style="color:var(--text-muted);">{{ 'networks.owedActs.nextTry' | transloco: { when: whenText(act.nextRetryAt) } }}</span> }
+        @if (act.needsAbandon) { <span style="flex-basis:100%;color:var(--text-secondary);">{{ 'spaces.dangerZone.act.needsAbandon' | transloco }}</span> }
       </li>
     }
   </ul>
@@ -40,8 +42,7 @@ export class NetworkOwedActsComponent {
 
   private readonly transloco = inject(TranslocoService);
   private readonly dates = inject(DateFormatService);
-  protected readonly actStateVariant = actStateVariant;
-  protected readonly actStateKey = actStateKey;
+  protected readonly rowView = actRowView;
   protected readonly actKindKey = actKindKey;
   /** When an owed act's next try is, in words (see `actWhenText`); read against the clock at each render. */
   whenText(retryAt: string | undefined): string { return actWhenText(this.transloco, this.dates, retryAt, Date.now()); }

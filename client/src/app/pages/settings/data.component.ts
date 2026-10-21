@@ -156,7 +156,7 @@ interface BackupConfig {
         <app-act-set-progress kind="restore" [report]="r" [abandoning]="abandoning()" (abandon)="confirmAbandon()"/>
       }
       @if (shownMigrate(); as m) {
-        <app-act-set-progress kind="migrate" [report]="m"/>
+        <app-act-set-progress kind="migrate" [report]="m" [stopped]="migrateStopped()"/>
       }
 
       <!-- ── Backup Destination ───────────────────────────────── -->
@@ -383,6 +383,8 @@ export class DataComponent implements OnInit {
   private readonly followedMigrate = signal(false);
   readonly abandoning = signal(false);
   readonly migrateNotice = signal<string | null>(null);
+  /** The migrate's report poll got no answer at all: the process has exited to switch database. */
+  readonly migrateStopped = signal(false);
   /** The kind of the instance-wide set holding maintenance, or null (`maintenanceState().heldBy`). */
   readonly maintenanceHeldBy = signal<string | null>(null);
 
@@ -568,7 +570,8 @@ export class DataComponent implements OnInit {
     if (running) this.followedRestore.set(true);
     if (was?.state === 'running' && r && !running) {
       const left = r.spaces.filter(s => s.state === 'restore_abandoned').map(s => s.id);
-      this.live.say(r.state === 'abandoned'
+      // The end replaces "Restore accepted ..." in the polite region, so it is both read and heard (the region is always in the DOM).
+      this.restoreNotice.set(r.state === 'abandoned'
         ? this.transloco.translate('data.restore.abandonedOutcome', { spaces: left.join(', ') })
         : this.transloco.translate('data.restore.completed'));
       this.loadMaintenance();
@@ -579,6 +582,7 @@ export class DataComponent implements OnInit {
   private takeMigrate(m: MigrateReport | null): boolean {
     const was = this.migrateReport();
     this.migrateReport.set(m);
+    this.migrateStopped.set(false);
     const running = m?.state === 'running';
     if (running) this.followedMigrate.set(true);
     if (was?.state === 'running' && m && !running) {
@@ -605,6 +609,8 @@ export class DataComponent implements OnInit {
       delayMs: () => SET_POLL_MS,
       request: () => this.adminApi.getMigrateReport(),
       onAnswer: a => this.takeMigrate(reportOf<MigrateReport>(a)),
+      // Status 0 is no answer at all (refused or reset): a migrate that completed has exited. Any answer, even a 503, is the process.
+      onError: err => { if ((err as { status?: number }).status === 0) this.migrateStopped.set(true); },
     });
   }
 
