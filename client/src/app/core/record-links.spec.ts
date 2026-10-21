@@ -92,4 +92,75 @@ describe('record links — one call per page', () => {
     });
     expect(await got).toEqual(['m-1']);
   });
+  /**
+   * A personal view reads a window from every member and refuses `skip + limit` past 1000 (`PROXY_PAGE_CEILING`),
+   * in a sentence. The Facts tab asked for 2000 links on every page, so every view's Facts tab failed - found by
+   * the Q-531 verify drive. The door below is the real rule: it answers the page it is asked for, with the total,
+   * and refuses what the view door refuses.
+   */
+  describe('through a view door that refuses a window past 1000', () => {
+    interface Link { from: string; to: string; toKind: string }
+
+    function answerAsAView(dataset: Link[], key: 'from' | 'to'): { requests: number } {
+      const seen = { requests: 0 };
+      for (let pass = 0; pass < 200; pass++) {
+        const open = ctrl.match('/api/filter');
+        if (open.length === 0) break;
+        for (const r of open) {
+          seen.requests++;
+          const b = r.request.body as { limit: number; skip?: number; filter: Record<string, { $in: string[] }> };
+          const skip = b.skip ?? 0;
+          if (skip + b.limit > 1000) {
+            r.flush({ ok: false, error: `skip + limit must not exceed 1000 through a personal view (got ${skip + b.limit}).` },
+              { status: 400, statusText: 'Bad Request' });
+            continue;
+          }
+          const ids = new Set(b.filter[key]!.$in);
+          const matching = dataset.filter(l => ids.has(l[key]));
+          r.flush({ ok: true, data: { results: matching.slice(skip, skip + b.limit), total: matching.length } });
+        }
+      }
+      return seen;
+    }
+
+    const page = Array.from({ length: 200 }, (_, i) => ({ _id: `f-${i}` }));
+    // Seven links per fact: 1400 links for the page, more than one window of the view door.
+    const dataset: Link[] = page.flatMap(f => Array.from({ length: 7 }, (_, k) => ({ from: f._id, to: `e-${k}`, toKind: 'entity' })));
+
+    it('hydrates a page whose links outnumber one window, every fact with all of its links', async () => {
+      let out: Array<{ _id: string; linkEntities: string[] }> | undefined;
+      let failure: unknown;
+      hydrateLinks(http, '@mine', 'fact', page).subscribe({
+        next: r => { out = r as typeof out; },
+        error: e => { failure = e; },
+      });
+      answerAsAView(dataset, 'from');
+      expect(failure).toBeUndefined();
+      expect(out).toHaveLength(200);
+      expect(out!.every(r => r.linkEntities.length === 7)).toBe(true);
+    });
+
+    it('says the door sentence itself when one entity has more facts than a view can page, rather than a short list', () => {
+      const many: Link[] = Array.from({ length: 1500 }, (_, i) => ({ from: `f-${i}`, to: 'e-1', toKind: 'entity' }));
+      let out: string[] | undefined;
+      let failure: { error?: { error?: string } } | undefined;
+      recordsLinkingTo(http, '@mine', 'fact', ['e-1']).subscribe({ next: r => { out = r; }, error: e => { failure = e; } });
+      answerAsAView(many, 'to');
+      expect(out).toBeUndefined();
+      expect(failure?.error?.error).toContain('must not exceed 1000');
+    });
+
+    it('reads the facts that link to an entity whole while they fit one window', () => {
+      const some: Link[] = Array.from({ length: 900 }, (_, i) => ({ from: `f-${i}`, to: 'e-1', toKind: 'entity' }));
+      let out: string[] | undefined;
+      recordsLinkingTo(http, '@mine', 'fact', ['e-1']).subscribe(r => { out = r; });
+      answerAsAView(some, 'to');
+      expect(out).toHaveLength(900);
+    });
+
+    it('a small page costs one request', () => {
+      hydrateLinks(http, '@mine', 'fact', page.slice(0, 3)).subscribe();
+      expect(answerAsAView(dataset, 'from').requests).toBe(1);
+    });
+  });
 });
