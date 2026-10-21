@@ -132,16 +132,12 @@ describe('the area check', () => {
   });
 
   it('both checks resolve the target spaces the SAME way', () => {
-    // If reach checked a proxy's members while the area check checked the proxy id, the container and its
-    // contents would be governed at different levels — and the weaker one would win silently.
-    assert.ok(body('spaceTargets'), 'the shared resolver is gone; the two checks can now drift');
-    assert.match(body('spaceTargets'), /resolveMemberSpaces\(/);
-    // The record is now part of that resolution, and deliberately: `spaceTargets` NARROWS a proxy to the
-    // members the token may see, so both checks read the same narrowed list. Passing only the id asks the
-    // un-narrowed question, which is what made a scoped token's proxy read refuse on the first member it
-    // lacked — the container governed by a member the caller was never granted.
-    assert.match(code, /enforceAreaRung\(res, record, req, spaceTargets\(spaceId, record\)\)/,
-      'the area check must use the shared, NARROWED target resolution');
+    // A path names ONE space (a personal view is judged first, by `judgeSpaceParam`, and is never a space), so reach and the area rung
+    // are asked of the same id: the id the path named. If one asked about the space and the other about something derived from it, the
+    // two would be governed at different levels — and the weaker one would win silently.
+    assert.ok(body('judgeSpaceParam'), 'the step that judges the path\'s space id first is gone; a view or a retired id would reach the checks below');
+    assert.match(code, /enforceSpaceScope\(res, record, spaceId\)[\s\S]{0,400}enforceAreaRung\(res, record, req, spaceId \? \[spaceId\] : \[\]\)/,
+      'the area check must be asked about the same id the reach check was');
   });
 
   it('refuses with the area and the level, not a bare 403', () => {
