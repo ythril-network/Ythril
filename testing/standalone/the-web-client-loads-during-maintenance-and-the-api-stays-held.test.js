@@ -62,6 +62,10 @@ const HELD = [
   ['POST', '/'],
   ['PUT', '/index.html'],
   ['DELETE', '/brain/notes'],
+  // Express routes case-insensitively, so `/API/spaces` reaches the API router: the client-load pass must not read it as a page load.
+  ['GET', '/API/spaces'],
+  ['GET', '/Api'],
+  ['GET', '/MCP'],
 ];
 
 let maintenance;
