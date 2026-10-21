@@ -220,6 +220,7 @@ The rename atomically:
 | `404`  | Source space does not exist |
 | `409`  | `newId` already exists |
 | `409`  | `code: "space_name_in_use"` — another space already syncs under `newId` in one of this instance's networks; nothing is moved. Pick another name |
+| `409`  | `code: "space_being_restored"` or `"space_being_migrated"` — a restore or migration of the instance stands, so the rename is refused at once and nothing is registered; send it again once the act completes ([acts](06c-space-deletion-and-wipe-api.md#every-kind-of-act)). A standing deletion or wipe of the space is refused `409` as well, without a code |
 | `500`  | Partial rename failure (collections may be in an inconsistent state) |
 | `503`  | The database could not answer, in a step of the rename or while finishing a pending one. Retryable, with `Retry-After`, in our words and not the driver's; it is never reported as one of the refusals above ([Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field)) |
 

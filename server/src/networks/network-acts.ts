@@ -45,6 +45,7 @@ import { ownYesCarries } from './round-forecast.js';
 import { isInstanceAdmin } from '../auth/instance-admin.js';
 import { actEntryView, spaceActsOfNetwork } from '../spaces/space-act-runner.js';
 import type { NetworkRefusalCode } from './refusal-codes.js';
+import type { SpaceWriteClosedCode } from '../config/types-space-acts.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 import { askerOwnerKey, unknownSpaceAnswer } from '../spaces/unknown-space.js';
 
@@ -73,7 +74,7 @@ export type NetworkActResult =
    * is additive: the sentence in `error` is unchanged, and both doors carry it — REST in the body, MCP in its
    * structured content. `deadline` rides with `round_expired` alone: when the round's voting closed, as the round carries it.
    */
-  | { status: 400 | 403 | 404 | 409 | 410 | 500 | 502; error: string; code?: NetworkRefusalCode | 'space_retired'; deadline?: string }
+  | { status: 400 | 403 | 404 | 409 | 410 | 500 | 502; error: string; code?: NetworkRefusalCode | SpaceWriteClosedCode | 'space_retired'; deadline?: string }
   /**
    * What ANOTHER instance answered, relayed as it came: a join's apply or finalize refused by the inviter. REST
    * sends `upstream` verbatim, as it always has; MCP reads `error` — the inviter's own sentence when it gave one.

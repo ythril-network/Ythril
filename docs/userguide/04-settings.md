@@ -239,6 +239,8 @@ administering the space can do the same over MCP with the `space_rename` tool.
 
 A space in a network keeps syncing under the name the network knows it by, so members that joined before the rename see no change. A name another space already syncs under, in any network this instance belongs to, is refused before anything moves — the message names that space and the network; pick another name.
 
+While the instance is being restored from a backup or copied to another database, a rename is refused at once and nothing moves (`409`, `space_being_restored` or `space_being_migrated`; the Danger tab already holds the form while an act stands). Rename again once the restore or migration has completed. The same holds for the MCP `space_rename` tool.
+
 **A rename that meets a database outage says so and can be repeated.** The answer is `503`, *database unavailable, try again*, and it never claims that the name is taken or that the space does not exist. A rename that was interrupted part-way keeps its place: repeat the same rename once the database answers again and it is finished. The same holds for the MCP `space_rename` tool.
 
 ### Deleting a space
