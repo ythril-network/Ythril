@@ -37,10 +37,19 @@ export class ReservedSpaceIdError extends Error {
  * refuses an id a space already holds.
  * @throws ReservedSpaceIdError
  */
-export function assertNotRetiredSpaceId(id: string, config: Config = getConfig()): void {
-  if (isRetiredSpaceId(id, config)) {
-    throw new ReservedSpaceIdError(`'${peerText(id, { max: NAME_QUOTED })}' is reserved: it was a shared proxy and is now personal views, and an instance admin must purge what it still holds before the id is used again`);
-  }
+export function assertNotRetiredSpaceId(id: string, config: Reservations = getConfig()): void {
+  const refusal = retiredSpaceIdRefusal(id, config);
+  if (refusal) throw new ReservedSpaceIdError(refusal);
+}
+
+/**
+ * Why a creation under `id` is refused, or `null`: {@link assertNotRetiredSpaceId} for a site that RECORDS the reason instead of throwing
+ * it (an announced network space waits in `pending` with it).
+ */
+export function retiredSpaceIdRefusal(id: string, config: Reservations = getConfig()): string | null {
+  return isRetiredSpaceId(id, config)
+    ? `'${peerText(id, { max: NAME_QUOTED })}' is reserved: it was a shared proxy and is now personal views, and an instance admin must purge what it still holds before the id is used again`
+    : null;
 }
 
 /** A refusal as a door sends it: its status and its body. */
@@ -49,8 +58,14 @@ export interface SpaceAnswer {
   body: { error: string; code?: string };
 }
 
+/** The half of a config the retired-id rule reads: the reservations and the live spaces (a pure caller may hand just these). */
+export interface Reservations {
+  spaces: readonly { id: string }[];
+  retiredSpaceIds?: readonly string[] | undefined;
+}
+
 /** Whether `id` is a retired proxy id: reserved, and not a live space (a live space wins over a reservation). */
-export function isRetiredSpaceId(id: string, config: Config = getConfig()): boolean {
+export function isRetiredSpaceId(id: string, config: Reservations = getConfig()): boolean {
   return (config.retiredSpaceIds ?? []).includes(id) && !config.spaces.some(s => s.id === id);
 }
 

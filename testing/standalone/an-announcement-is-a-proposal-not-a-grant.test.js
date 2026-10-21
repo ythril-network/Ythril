@@ -51,6 +51,20 @@ describe('who joined decides what an announcement may add', () => {
     assert.deepEqual(d.adopt.map(e => e.localId), ['new-one']);
   });
 
+  it('a space announced under a retired proxy id waits, refused as every creation site refuses it (b100 row 3)', async () => {
+    // Seen red at 743562a5: adoption spelled its own reason ("...personal views; an instance admin...") beside the creation sites' one.
+    const { assertNotRetiredSpaceId } = await import('../../server/dist/spaces/unknown-space.js');
+    const admin = token('tok-joiner', { ...joiner(), instanceAdmin: true });
+    const d = adoptionDecision(net(), [admin], ['mine'], [entry('team')], Date.now(), ['team']);
+    assert.deepEqual(d.adopt, []);
+    let created = null;
+    try { assertNotRetiredSpaceId('team', { spaces: [{ id: 'mine' }], retiredSpaceIds: ['team'] }); } catch (err) { created = err.message; }
+    assert.ok(created, 'a creation under a retired id was not refused');
+    assert.deepEqual(d.pending.map(p => p.why), [created], 'adoption and creation give one reason for one rule');
+    const live = adoptionDecision(net(), [admin], ['mine', 'team'], [entry('team')], Date.now(), ['team']);
+    assert.match(live.pending[0].why, /already exists/i, 'a live space under a reserved id wins over the reservation');
+  });
+
   it('a same-id LOCAL space is never joined to the network by an announcement, whoever joined', () => {
     // Joining a private space that happens to share the id would start syncing it; only an explicit mapping may.
     const admin = token('tok-joiner', { ...joiner(), instanceAdmin: true });

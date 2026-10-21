@@ -45,6 +45,7 @@ import { SPACE_ALIAS_HEAL_OPERATION } from '../audit/middleware.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { networkRole } from './network-role.js';
 import { spaceAdditionOwed } from './round-state.js';
+import { retiredSpaceIdRefusal } from '../spaces/unknown-space.js';
 
 /** The shape a space id has everywhere else it is accepted — create, rename, the join's space map. */
 const SPACE_ID = /^[a-z0-9-]{1,40}$/;
@@ -249,9 +250,12 @@ export function adoptionDecision(
   const joiner = net.joinedBy ? tokens.find(t => t.id === net.joinedBy) : undefined;
   const adopt: { networkId: string; localId: string }[] = [];
   const pending: { networkId: string; localId: string; why: string }[] = [];
+  const reservations = { spaces: localSpaceIds.map(id => ({ id })), retiredSpaceIds: retiredIds };
   for (const e of entries) {
-    if (retiredIds.includes(e.localId) && !localSpaceIds.includes(e.localId)) {
-      pending.push({ ...e, why: `'${e.localId}' is reserved: it was a shared proxy and is now personal views; an instance admin must purge what it still holds before the id is used again` });
+    // The one retired-id rule (`isRetiredSpaceId`, through the creation sites' refusal): an announced space under a reserved id waits.
+    const reserved = retiredSpaceIdRefusal(e.localId, reservations);
+    if (reserved) {
+      pending.push({ ...e, why: reserved });
       continue;
     }
     if (localSpaceIds.includes(e.localId)) {
