@@ -137,13 +137,14 @@ describe('Mass assignment — network creation', () => {
     assert.equal(r.status, 400, `Empty spaces array should be rejected, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
-  it('Network referencing a non-existent space is rejected → 400', async () => {
+  it('Network referencing a non-existent space is rejected → 404', async () => {
     const r = await post(INSTANCES.a, adminToken, '/api/networks', {
       label: 'bad-space-net',
       type: 'closed',
       spaces: ['definitely-does-not-exist-xyz'],
     });
-    assert.equal(r.status, 400, `Non-existent space should be rejected, got ${r.status}: ${JSON.stringify(r.body)}`);
+    // The one existence answer (Q-531): a missing space a body names answers as one a path names.
+    assert.equal(r.status, 404, `Non-existent space should be rejected, got ${r.status}: ${JSON.stringify(r.body)}`);
   });
 
   it('Body as JSON array instead of object returns 400', async () => {

@@ -245,9 +245,9 @@ Adds one of this instance's spaces to a network. Answers `200` with the network 
 
 | status | when |
 |---|---|
-| `400` | `spaceId` missing, or no such space on this instance |
+| `400` | `spaceId` missing |
 | `403` | the token is short on a right above; the refusal names what |
-| `404` | no network with this id that the token may see |
+| `404` | no network with this id that the token may see, or no such space on this instance (`Space '<id>' not found`, as on every door; `400` before 6.0) |
 | `409` | the network already carries the space, a vote to add it is already open, or this instance is not the publisher, root or organiser the type requires |
 | `409` with `code: "space_name_in_use"` | the network still calls ANOTHER space by this name — the old name of a space renamed here. A second space under it would be announced twice and every peer request for it sent to the renamed one, so it would never reach anybody. Choose another name. **New in 5.6.0**; `PATCH /api/spaces/:id/rename` refuses renaming a networked space onto such a name the same way |
 

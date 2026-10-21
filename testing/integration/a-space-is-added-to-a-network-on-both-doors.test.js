@@ -122,8 +122,9 @@ describe('the publisher adds a space', () => {
 
   it('a space that does not exist is refused with the same sentence on both doors', async () => {
     const rest = await post(INSTANCES.a, admin, `/api/networks/${pubNet}/spaces`, { spaceId: `nope-${RUN}` });
-    assert.equal(rest.status, 400, JSON.stringify(rest.body));
-    assert.equal((await tool('network_add_space', { id: pubNet, spaceId: `nope-${RUN}` })).text, `Error (400): ${rest.body.error}`);
+    // The one existence answer (Q-531): a space a body names that does not exist answers as one a path names.
+    assert.equal(rest.status, 404, JSON.stringify(rest.body));
+    assert.equal((await tool('network_add_space', { id: pubNet, spaceId: `nope-${RUN}` })).text, `Error (404): ${rest.body.error}`);
   });
 
   it('a subscriber announcing a space to its publisher changes nothing', async () => {

@@ -325,7 +325,7 @@ describe('Off-grid / fork', () => {
       assert.equal(r.status, 404, `Expected 404, got ${r.status}: ${JSON.stringify(r.body)}`);
     });
 
-    it('spaces containing an unknown space id returns 400', async () => {
+    it('spaces containing an unknown space id returns 404', async () => {
       // First create a real network so the id is known
       const create = await post(INSTANCES.a, tokenA, '/api/networks', {
         label: `SpaceErr-${Date.now()}`,
@@ -340,7 +340,8 @@ describe('Off-grid / fork', () => {
         label: 'Bad spaces fork',
         spaces: ['does-not-exist-space-id'],
       });
-      assert.equal(r.status, 400, `Expected 400, got ${r.status}: ${JSON.stringify(r.body)}`);
+      // The one existence answer (Q-531): a missing space a body names answers as one a path names.
+      assert.equal(r.status, 404, `Expected 404, got ${r.status}: ${JSON.stringify(r.body)}`);
 
       await del(INSTANCES.a, tokenA, `/api/networks/${netId}`).catch(() => {});
     });

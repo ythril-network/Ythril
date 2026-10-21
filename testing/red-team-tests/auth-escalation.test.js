@@ -90,8 +90,17 @@ describe('H1 — a personal view belongs to its owner and reaches only what its 
     assert.equal(mcp.status, 200);
     assert.match(mcp.text, /not found/i,
       `VULNERABILITY: a token read another token's view over MCP. Response: ${mcp.text.slice(0, 300)}`);
+    // Indistinguishable from an id that never existed, on each door: a token scoped to listed spaces is answered 403 for
+    // any id outside them (never a 404 that confirms absence), so the view must get exactly that answer, id aside.
+    const neverId = `@never-${RUN}`;
     const rest = await get(INSTANCES.a, otherToken, `/api/brain/spaces/${encodeURIComponent(viewId)}/stats`);
-    assert.equal(rest.status, 404, `VULNERABILITY: a token read another token's view over REST: ${JSON.stringify(rest.body)}`);
+    const never = await get(INSTANCES.a, otherToken, `/api/brain/spaces/${encodeURIComponent(neverId)}/stats`);
+    assert.ok(rest.status >= 400, `VULNERABILITY: a token read another token's view over REST: ${JSON.stringify(rest.body)}`);
+    assert.equal(rest.status, never.status, `the view answers ${rest.status}, an unknown id ${never.status}`);
+    assert.equal(JSON.stringify(rest.body).replaceAll(viewId, '<id>'), JSON.stringify(never.body).replaceAll(neverId, '<id>'),
+      'another token\'s view must be answered word for word as an unknown id');
+    const mcpNever = await mcpCall(otherToken, 'space_stats', { space: neverId });
+    assert.equal(mcp.text.replaceAll(viewId, '<id>'), mcpNever.text.replaceAll(neverId, '<id>'), 'the same on MCP');
     const list = await get(INSTANCES.a, otherToken, '/api/views');
     assert.equal(list.body.views.some(v => v.id === viewId), false, 'another token\'s view must not be listed');
   });
