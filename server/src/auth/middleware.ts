@@ -30,6 +30,7 @@ import { createSpacesRefusal } from './create-spaces.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { admitPeerOnResponse } from '../sync/peer-space-admission.js';
 import { peerBoundTo } from './peer-bound.js';
+import { decorateJsonAnswer } from '../api/decorate-json-answer.js';
 
 // Augment Express Request type
 declare global {
@@ -487,10 +488,12 @@ function judgeSpaceParam(
   return 'view';
 }
 
-/** The spaces a view read actually read ride on every JSON answer, so a narrowed answer is never silent. */
+/**
+ * The spaces a view read actually read ride on every JSON answer, so a narrowed answer is never silent. Through the one json
+ * decorator (`api/decorate-json-answer.ts`): plain objects only, copied, installed once per request, never throwing.
+ */
 function announceViewMembers(res: Response, spaces: readonly string[]): void {
-  const send = res.json.bind(res);
-  res.json = (body: unknown): Response => send(body !== null && typeof body === 'object' && !Array.isArray(body) ? { ...body, viewMembers: [...spaces] } : body);
+  decorateJsonAnswer(res, 'viewMembers', (_status, body) => ({ ...body, viewMembers: [...spaces] }));
 }
 
 /**
