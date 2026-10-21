@@ -35,7 +35,8 @@ const SUBJECT_FIELDS = ['subjectInstanceId', 'pendingMember'];
 const EXEMPT = Object.freeze({
   'server/src/networks/member-acts.ts::admitByInviteKeyAct': 'answers the joiner polling its OWN round by the invite key it holds: the question is whose key this is, and the standing of a peer is not asked',
   'server/src/api/sync/votes.ts::GET /networks/:networkId/votes': 'serves the rounds a member may act on and strips the credential from the candidate it carries; it decides nothing about any peer',
-  'server/src/util/seq.ts::resetStaleWatermarksIfNeeded': 'clears the candidate\'s own copy of the replication watermarks; it reads no peer\'s standing',
+  // Was `util/seq.ts::resetStaleWatermarksIfNeeded` until bundle-157 put every walk over the member marks through the one loop.
+  'server/src/sync/receive-marks.ts::eachMemberMarkOf': 'visits the candidate\'s own copy of the replication watermarks as it visits every member\'s; it reads no peer\'s standing',
 });
 
 /** The outermost functions of one source that read a join round's subject, with the evidence: `{ key, evidence }`. */

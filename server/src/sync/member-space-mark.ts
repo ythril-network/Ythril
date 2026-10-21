@@ -22,7 +22,7 @@
  * mechanism behind #346/#348/#353/#604).
  */
 import { getConfig, saveConfig } from '../config/loader.js';
-import type { Config, NetworkConfig, NetworkMember } from '../config/types.js';
+import type { Config, NetworkMember } from '../config/types.js';
 import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
 
 /** The member fields this writes: exactly the per-space maps `PER_SPACE_WATERMARKS` lists. */
@@ -105,16 +105,5 @@ export function foldRepairMark(
   return seen;
 }
 
-// The pure half of the marks (forget, carry) is written once, in `receive-marks.ts`, a leaf the proxy migration reaches without the loader;
-// these are the names every caller here has always used.
-import { forgetReceiveMarks as forgetMarksOf, moveReceiveMarks as moveMarksOf } from './receive-marks.js';
-
-/** Forget what every member of `net` was marked for `localSpaceId` (the space was wiped or left). Mutates `net`; the caller saves. */
-export function forgetReceiveMarks(net: NetworkConfig, localSpaceId: string): void {
-  forgetMarksOf(net, localSpaceId);
-}
-
-/** Carry every member's marks on `net` from `oldId` to `newId` (a rename moved the space). Mutates `net`; the caller saves. */
-export function moveReceiveMarks(net: NetworkConfig, oldId: string, newId: string): void {
-  moveMarksOf(net, oldId, newId);
-}
+// The pure half of the marks (forget every mark, forget what was received, carry) is written once, in `receive-marks.ts`, a leaf the
+// proxy migration reaches without the loader; every caller imports it from there.

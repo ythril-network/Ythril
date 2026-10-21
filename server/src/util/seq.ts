@@ -1,6 +1,6 @@
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
-import { PER_SPACE_WATERMARKS } from '../config/types-networks.js';
+import { eachMemberMarkOf } from '../sync/receive-marks.js';
 import { log, peerText } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
@@ -299,18 +299,6 @@ export async function bumpSeq(spaceId: string, minSeq: number): Promise<void> {
 }
 
 /**
- * Every watermark that becomes a LIE when the seq counters are wiped.
- *
- * Each is a `spaceId -> position` map on a network member, and each is meaningless once the counter it was
- * measured against restarts at zero. It IS `PER_SPACE_WATERMARKS` (`config/types-networks.ts`), not a second
- * list of the same maps: the reset used to clear exactly one and the rest were not excluded for a reason, they
- * were not thought of — and a list kept here beside the one the rename carries is the same omission waiting for
- * the next map. The one-time tombstone re-read (`tombstoneRereadAt`) is on it, and re-owing it after a wipe is
- * harmless: the re-read is idempotent. A map that must SURVIVE a wipe is excluded here, by name, with its reason.
- */
-const STALE_ON_COUNTER_WIPE: readonly (typeof PER_SPACE_WATERMARKS)[number][] = PER_SPACE_WATERMARKS;
-
-/**
  * Detects the bind-mount / volume mismatch that occurs when `docker compose
  * down -v` wipes MongoDB but leaves config.json intact on the host bind-mount.
  *
@@ -346,24 +334,14 @@ export async function resetStaleWatermarksIfNeeded(): Promise<void> {
   const cfg = getConfig();
   const cleared: string[] = [];
 
-  /** Clear every stale map on one member, reporting which were actually set. */
-  const clear = (member: Record<string, unknown> | undefined, where: string): void => {
-    if (!member) return;
-    for (const field of STALE_ON_COUNTER_WIPE) {
-      const value = member[field];
-      if (value && typeof value === 'object' && Object.keys(value).length > 0) {
-        member[field] = {};
-        cleared.push(`${where}.${field}`);
-      }
-    }
-  };
-
+  // EVERY per-space mark is a lie once the counter restarts at zero (`PER_SPACE_WATERMARKS`), on every member and on the member a join
+  // round in flight carries (`pendingMember`): the one loop over them visits both, so the reset cannot miss a carrier the forget reaches.
+  // A map that must SURVIVE a counter wipe would be passed over here, by name, with its reason; none does.
   for (const net of cfg.networks) {
-    for (const member of net.members) clear(member as unknown as Record<string, unknown>, member.instanceId);
-    // A vote round in flight carries its own copy of the joining member, with its own watermarks.
-    for (const round of net.pendingRounds) {
-      clear(round.pendingMember as unknown as Record<string, unknown> | undefined, 'pendingMember');
-    }
+    eachMemberMarkOf(net, null, (marks, mark, who) => {
+      for (const spaceId of Object.keys(marks)) delete marks[spaceId];
+      cleared.push(`${who}.${mark}`);
+    });
   }
 
   if (cleared.length > 0) {

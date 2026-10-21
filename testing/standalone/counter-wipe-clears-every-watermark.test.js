@@ -72,13 +72,23 @@ describe('the wipe recovery covers every one of them', () => {
      */
     /*
      * The list IS `PER_SPACE_WATERMARKS` (bundle-51): the rename carries that list and the wipe clears it, so a map is
-     * added to one place and both rules cover it. So this asserts the two halves of that — the wipe's list is the
-     * declared one and nothing else, and the declared one names every per-space map on the member type. An exclusion
-     * (a map that must survive a wipe) would be written in `util/seq.ts` by name and the first assertion would see it.
+     * added to one place and both rules cover it. Since bundle-157 the reset walks it through the ONE loop over the member
+     * marks, `eachMemberMarkOf` (`sync/receive-marks.ts`), for every space (`null`) and with no list of its own (no fourth
+     * argument, so the helper's default, the declared list). So this asserts the two halves — the wipe walks the declared
+     * list and nothing else, and the declared one names every per-space map on the member type. An exclusion (a map that
+     * must survive a wipe) would be written in `util/seq.ts` by name and the first assertion would see it.
      */
-    const decl = seqSrc.slice(seqSrc.indexOf('const STALE_ON_COUNTER_WIPE'));
-    assert.match(decl.slice(0, decl.indexOf(';') + 1), /^const STALE_ON_COUNTER_WIPE[^=]*=\s*PER_SPACE_WATERMARKS\s*;$/,
-      'the wipe\'s list is not exactly PER_SPACE_WATERMARKS — a second list of the same maps is the omission this gate exists to catch');
+    const body = bodyOf(seqSrc, 'resetStaleWatermarksIfNeeded');
+    const walk = body.match(/eachMemberMarkOf\(\s*net\s*,\s*null\s*,\s*\(([^)]*)\)\s*=>/);
+    assert.ok(walk, 'the reset does not walk every space\'s marks through eachMemberMarkOf — a loop of its own is a second list of carriers');
+    // What follows the callback's closing brace: `)` ends the call (the helper's own list); `, <name>` is a list of the reset's own.
+    let at = body.indexOf('{', body.indexOf(walk[0]) + walk[0].length - 2);
+    for (let depth = 0; at < body.length; at++) {
+      if (body[at] === '{') depth++;
+      else if (body[at] === '}' && --depth === 0) break;
+    }
+    assert.match(body.slice(at + 1), /^\s*\)/,
+      'the reset hands eachMemberMarkOf a list of its own — a second list of the same maps is the omission this gate exists to catch');
     const { PER_SPACE_WATERMARKS } = await import('../../server/dist/config/types-networks.js');
     const missing = memberWatermarkFields().filter(f => !PER_SPACE_WATERMARKS.includes(f));
     assert.deepEqual(missing, [],
@@ -90,19 +100,25 @@ describe('the wipe recovery covers every one of them', () => {
   it('the reset iterates the list rather than repeating field names', () => {
     // Four hand-written clears is how the fifth gets forgotten. The loop is what makes the list authoritative.
     const body = bodyOf(seqSrc, 'resetStaleWatermarksIfNeeded');
-    assert.match(body, /for \(const field of STALE_ON_COUNTER_WIPE\)/,
-      'the reset must walk the declared list');
+    assert.match(body, /\beachMemberMarkOf\(/,
+      'the reset must walk the declared list, through the one loop over the member marks');
     for (const f of memberWatermarkFields()) {
       assert.doesNotMatch(body, new RegExp(`member\\.${f}\\s*=`),
         `${f} is cleared by name inside the reset — that is a second copy of the list`);
     }
   });
 
-  it('a vote round in flight is covered too', () => {
+  it('a vote round in flight is covered too', async () => {
     // `pendingMember` is a whole member with its own watermarks, and it was the one place the original DID
-    // remember a second site — for one field.
-    const body = bodyOf(seqSrc, 'resetStaleWatermarksIfNeeded');
-    assert.match(body, /pendingMember/,
+    // remember a second site — for one field. The reset reaches it through the one loop (bundle-157), so this asks the
+    // loop: walked for every space, it hands out the pending member's maps as well as the members'.
+    const { PER_SPACE_WATERMARKS } = await import('../../server/dist/config/types-networks.js');
+    const { eachMemberMarkOf } = await import('../../server/dist/sync/receive-marks.js');
+    const marked = () => Object.fromEntries(PER_SPACE_WATERMARKS.map(k => [k, { s: 1 }]));
+    const net = { members: [{ instanceId: 'm', ...marked() }], pendingRounds: [{ roundId: 'r', pendingMember: { instanceId: 'p', ...marked() } }] };
+    const seen = [];
+    eachMemberMarkOf(net, null, (_marks, mark, who) => { seen.push(`${who}.${mark}`); });
+    assert.deepEqual(PER_SPACE_WATERMARKS.filter(k => !seen.includes(`pendingMember.${k}`)), [],
       'a pending member carries its own watermarks and is stale for the same reason');
   });
 

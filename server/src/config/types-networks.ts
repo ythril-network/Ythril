@@ -151,13 +151,38 @@ export interface MemberRemoval {
  * The next per-space map is added HERE, to the interface above, by somebody who has no reason to open
  * `spaces/rename.ts`. The list sitting beside the fields is what puts the decision in front of them, and
  * `file-tombstone-ack.test.js` reads the interface's own source to check nothing has been added to it and
- * left out of this. The same list is what a seq-counter wipe clears (`STALE_ON_COUNTER_WIPE`, `util/seq.ts`): a
- * map that must survive a wipe is excluded THERE, with its reason, rather than left off this list.
+ * left out of this. The same list is what a seq-counter wipe clears (`resetStaleWatermarksIfNeeded`, `util/seq.ts`): a
+ * map that must survive a wipe is excluded THERE, with its reason, rather than left off this list. Every walk over these maps goes
+ * through ONE loop, `eachMemberMarkOf` (`sync/receive-marks.ts`), which visits the members and a join round's `pendingMember` alike.
  */
 export const PER_SPACE_WATERMARKS = [
   'lastSeqReceived', 'lastSeqPushed', 'lastSeqServed', 'lastFileTombstoneAckedAt', 'tombstoneRereadAt',
   'fileMetaRereadAt',
 ] as const satisfies readonly (keyof NetworkMember)[];
+
+/** One of the per-space marks a member carries. */
+export type PerSpaceWatermark = (typeof PER_SPACE_WATERMARKS)[number];
+
+/**
+ * The marks a RESTORE forgets: how far this instance has read each peer (`lastSeqReceived`) and where the two one-time re-reads of a
+ * peer's tombstones and file metadata stand. A restore went back to an older snapshot, so what arrived after it is gone here, and
+ * forgetting these makes the peers send it again (`forgetWhatWasReceived`, `sync/receive-marks.ts`).
+ *
+ * With {@link KEPT_ON_RESTORE} it is EXACTLY {@link PER_SPACE_WATERMARKS}, and the two do not overlap
+ * (`receive-marks-and-kept-marks-classify-every-mark`), so a mark added to the member type is decided about here, once, and cannot be
+ * forgotten by one door and kept by another.
+ */
+export const RECEIVE_MARKS = ['lastSeqReceived', 'tombstoneRereadAt', 'fileMetaRereadAt'] as const satisfies readonly PerSpaceWatermark[];
+
+/**
+ * The marks a RESTORE keeps, each with the reason. They describe what this instance SENT or what its peers acknowledged, which the
+ * restore does not undo; the counter raise keeps them correct, because new local writes land above them.
+ */
+export const KEPT_ON_RESTORE = {
+  lastSeqPushed: 'Clearing it re-sends restored records whose deletions the peers already pruned, so the peers would store them again.',
+  lastSeqServed: 'It is how far a peer has taken our tombstones; the restore does not change what that peer holds, so it stays true.',
+  lastFileTombstoneAckedAt: 'It records which file deletions a peer has taken; the peer still holds that knowledge after our restore.',
+} as const satisfies Partial<Record<PerSpaceWatermark, string>>;
 
 export interface VoteCast {
   instanceId: string;

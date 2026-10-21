@@ -11,7 +11,7 @@ import { getDb, col, asDoc, asFilter } from '../db/mongo.js';
 import { getConfig, saveConfig, getDataRoot, mutateConfig } from '../config/loader.js';
 import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { Config, SpaceConfig } from '../config/types.js';
-import { moveReceiveMarks } from '../sync/member-space-mark.js';
+import { moveEveryMark } from '../sync/receive-marks.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
 import { repairStaleSpaceIds } from './_shared.js';
 import {
@@ -264,14 +264,15 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
      * "unknown", which is SAFE and invisible. A fifth watermark would have been added to the type by
      * somebody who never opened this file.
      */
-    moveReceiveMarks(net, oldId, newId);
+    moveEveryMark(net, oldId, newId);
   }
 
   // The acts standing for the space follow it (X3): an entry, and a round's recorded `actLocalId`, name the NEW id from this commit on,
   // so a wipe waiting for the rename's slot reads its space from its entry and wipes what the rename moved.
   for (const entry of cfg.pendingSpaceActs ?? []) {
     if (entry.localId === oldId) entry.localId = newId;
-    for (const step of entry.postSteps.forgetReceiveMarks ?? []) if (step.localSpaceId === oldId) step.localSpaceId = newId;
+    // Every post-step names the space it acts on, whichever marks it forgets: each follows the rename.
+    for (const steps of Object.values(entry.postSteps)) for (const step of steps ?? []) if (step.localSpaceId === oldId) step.localSpaceId = newId;
   }
   for (const net of cfg.networks) {
     for (const r of net.pendingRounds ?? []) {

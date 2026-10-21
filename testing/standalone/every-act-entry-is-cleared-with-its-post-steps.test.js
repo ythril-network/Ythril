@@ -13,7 +13,8 @@
  *
  * - **Source (here, pure):** every site that removes an entry from `pendingSpaceActs` (a `delete`, a `filter` that drops one, a `splice`, an empty
  *   assignment) is derived over `server/src` — the runner's source for the removals, the whole tree for a stray — and each is inside a `mutateConfig(`
- *   callback that calls `forgetReceiveMarks(` and `settleSpaceAct(`. The floor: at least one removal site exists (an empty set passes every loop).
+ *   callback that applies both mark steps (`forgetEveryMark(` for `postSteps.forgetReceiveMarks`, `forgetWhatWasReceived(` for
+ *   `postSteps.forgetReceived`, bundle-157) and calls `settleSpaceAct(`. The floor: at least one removal site exists (an empty set passes every loop).
  * - **Driven (`a-space-act-runner-runs-registers-and-retries-db.test.js`):** a completed wipe leaves no entry, forgotten marks and `appliedHere` rounds
  *   in ONE step of `configWriteGeneration()`.
  *
@@ -71,7 +72,8 @@ describe('an act entry is removed only inside the completion\'s one config write
     for (const { at, text } of sites) {
       const callback = enclosingMutateConfig(src, at);
       assert.ok(callback, `a removal (\`${text}\`) is not inside a mutateConfig callback: the entry goes in a write of its own`);
-      assert.match(callback, /\bforgetReceiveMarks\s*\(/, `the write that removes an entry (\`${text}\`) does not forget the receive marks its postSteps name`);
+      assert.match(callback, /\bforgetEveryMark\s*\(/, `the write that removes an entry (\`${text}\`) does not forget the marks its postSteps.forgetReceiveMarks names`);
+      assert.match(callback, /\bforgetWhatWasReceived\s*\(/, `the write that removes an entry (\`${text}\`) does not forget the receive marks its postSteps.forgetReceived names`);
       assert.match(callback, /\bsettleSpaceAct\s*\(/, `the write that removes an entry (\`${text}\`) does not settle the rounds the entry covers`);
     }
   });
@@ -85,9 +87,15 @@ describe('an act entry is removed only inside the completion\'s one config write
     assert.deepEqual(stray, [], `an entry is removed outside the completion: ${stray.join(', ')}`);
   });
 
-  it('the postSteps are carried on the entry (X1), and forgetReceiveMarks lives beside setMemberSpaceMark in sync/member-space-mark.ts', () => {
-    // `SpaceActEntry` is declared in its own module (`types.ts` is frozen by the size ratchet and re-exports it).
-    assert.match(requireSource('server/src/config/types-space-acts.ts'), /postSteps\s*:\s*\{[^}]*forgetReceiveMarks/s, 'SpaceActEntry carries no postSteps.forgetReceiveMarks');
-    assert.match(requireSource('server/src/sync/member-space-mark.ts'), /export\s+function\s+forgetReceiveMarks\s*\(/, 'forgetReceiveMarks is not exported from sync/member-space-mark.ts');
+  it('the postSteps are carried on the entry (X1), and both mark steps live in the one mark loop\'s module, sync/receive-marks.ts', () => {
+    // `SpaceActEntry` is declared in its own module (`types.ts` is frozen by the size ratchet and re-exports it). The persisted key
+    // `forgetReceiveMarks` keeps its 5.x name and meaning (every mark); a restore's `forgetReceived` is a key of its own (bundle-157).
+    const acts = requireSource('server/src/config/types-space-acts.ts');
+    assert.match(acts, /postSteps\s*:\s*\{[\s\S]*forgetReceiveMarks\?:/, 'SpaceActEntry carries no postSteps.forgetReceiveMarks');
+    assert.match(acts, /postSteps\s*:\s*\{[\s\S]*forgetReceived\?:/, 'SpaceActEntry carries no postSteps.forgetReceived');
+    const marks = requireSource('server/src/sync/receive-marks.ts');
+    for (const fn of ['forgetEveryMark', 'forgetWhatWasReceived']) {
+      assert.match(marks, new RegExp(`export\\s+function\\s+${fn}\\s*\\(`), `${fn} is not exported from sync/receive-marks.ts`);
+    }
   });
 });
