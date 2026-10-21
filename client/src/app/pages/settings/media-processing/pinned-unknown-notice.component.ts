@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../../core/plural-text';
 
 /**
  * "These pinned field names matched nothing, so they are not locked."
@@ -32,7 +33,7 @@ import { TranslocoPipe } from '@jsverse/transloco';
   template: `
     @if (paths().length) {
       <div class="alert alert-warning">
-        <div><strong>{{ 'mediaProcessing.pinnedUnknown.title' | transloco: { count: paths().length } }}</strong></div>
+        <div><strong>{{ titleText() }}</strong></div>
         <div data-mono style="font-size:12px; margin-top:4px;">{{ paths().join(', ') }}</div>
         <div style="font-size:12px; margin-top:4px;">{{ 'mediaProcessing.pinnedUnknown.body' | transloco }}</div>
       </div>
@@ -40,6 +41,13 @@ import { TranslocoPipe } from '@jsverse/transloco';
   `,
 })
 export class PinnedUnknownNoticeComponent {
+  private transloco = inject(TranslocoService);
+
+  /** "N pinned field names were not recognised ...", in the plural form the reader's language uses for N. */
+  protected titleText(): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'mediaProcessing.pinnedUnknown.title', this.paths().length);
+  }
+
   /** The unrecognised entries, verbatim from the config response. Empty renders nothing at all. */
   paths = input.required<string[]>();
 }

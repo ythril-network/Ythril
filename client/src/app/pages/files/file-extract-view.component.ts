@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { FileExtract } from '../../core/api.types';
 import { FILE_EXTRACT_STYLES } from './file-manager.styles';
@@ -74,7 +75,7 @@ import { msRange } from './file-format';
         <section>
           <h4>{{ 'files.extract.images' | transloco: { count: x.images.length } }}</h4>
           @if (x.imagesTruncated) {
-            <div class="muted xtr-images-cut">{{ 'files.extract.imagesCut' | transloco: { shown: x.images.length, total: x.imagesTotal } }}</div>
+            <div class="muted xtr-images-cut">{{ imagesCutText(x.images.length, x.imagesTotal) }}</div>
           }
           @for (img of x.images; track img.path) {
             <div class="xtr-image">
@@ -99,7 +100,7 @@ import { msRange } from './file-format';
           <h4>{{ 'files.extract.converted' | transloco }}</h4>
           <div class="muted xtr-path">{{ conv.path }}</div>
           @if (conv.truncated) {
-            <div class="muted">{{ 'files.extract.truncatedAt' | transloco: { shown: conv.markdown.length, total: conv.markdownChars ?? conv.markdown.length } }}</div>
+            <div class="muted">{{ truncatedAtText(conv.markdown.length, conv.markdownChars ?? conv.markdown.length) }}</div>
           }
           @if (conv.unreadable) {
             <div class="muted">{{ 'files.extract.unreadable' | transloco: { reason: conv.unreadable } }}</div>
@@ -115,6 +116,18 @@ import { msRange } from './file-format';
   `,
 })
 export class FileExtractViewComponent {
+  private transloco = inject(TranslocoService);
+
+  /** "Showing k of N images.": the noun agrees with the total, which is what `count` carries. */
+  protected imagesCutText(shown: number, total: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'files.extract.imagesCut', total, { shown });
+  }
+
+  /** "Showing the first k of N characters, in whole paragraphs." */
+  protected truncatedAtText(shown: number, total: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'files.extract.truncatedAt', total, { shown });
+  }
+
   readonly extract = input<FileExtract | null>(null);
   readonly loading = input<boolean>(false);
   readonly error = input<string | null>(null);

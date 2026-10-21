@@ -2,6 +2,7 @@ import { Component, inject, input, signal } from '@angular/core';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { InstantComponent } from '../../shared/instant.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { Network } from '../../core/api.types';
 import type { ChangeNote } from '../../core/change-note.types';
 import { NetworksApi } from '../../core/networks-api.service';
@@ -82,7 +83,7 @@ const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
           <div class="section-title" style="font-size:12px; margin-top:8px;">{{ 'networks.network.changeNotes.sent' | transloco }}</div>
           @for (n of sent(); track n._id) {
             <div class="note">
-              <span class="note-meta"><app-instant [value]="n.createdAt" variant="datetimeSeconds"/> · {{ n.pendingFor?.length ? ('networks.network.changeNotes.pending' | transloco: { count: n.pendingFor!.length }) : ('networks.network.changeNotes.delivered' | transloco) }}{{ n.spaces.length ? ' · ' + n.spaces.join(', ') : '' }}</span>
+              <span class="note-meta"><app-instant [value]="n.createdAt" variant="datetimeSeconds"/> · {{ n.pendingFor?.length ? pendingText(n.pendingFor!.length) : ('networks.network.changeNotes.delivered' | transloco) }}{{ n.spaces.length ? ' · ' + n.spaces.join(', ') : '' }}</span>
               @if (html()[n._id]; as h) { <div class="note-body md" [innerHTML]="h"></div> } @else { <span class="note-body">{{ n.note }}</span> }
             </div>
           } @empty {
@@ -97,6 +98,11 @@ export class NetworkChangeNotesComponent {
   private networksApi = inject(NetworksApi);
   private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
+
+  /** "waiting for N members", in the plural form the reader's language uses for N. */
+  protected pendingText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'networks.network.changeNotes.pending', count);
+  }
   private markdown = inject(MarkdownRenderService);
   private sanitizer = inject(DomSanitizer);
 

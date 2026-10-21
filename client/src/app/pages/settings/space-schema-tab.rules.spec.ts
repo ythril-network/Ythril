@@ -103,7 +103,12 @@ interface MountOptions { schemaRights?: 'admin' | 'write'; layers?: unknown; lib
 async function mount(opts: MountOptions = {}) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
-    imports: [SpaceSettingsPopupComponent, getTranslocoModule()],
+    // The two readout sentences are plural bases said through `pluralText`, which says nothing for a key the harness only echoes;
+    // each form is its own name, so a case can still see WHICH sentence was said.
+    imports: [SpaceSettingsPopupComponent, getTranslocoModule({ translation: { en: {
+      'validate.progress.one': 'validate.progress', 'validate.progress.other': 'validate.progress',
+      'validate.progressOpen.one': 'validate.progressOpen', 'validate.progressOpen.other': 'validate.progressOpen',
+    } } })],
     providers: [
       provideHttpClient(), provideHttpClientTesting(),
       SpaceSettingsState, SpacesStore,

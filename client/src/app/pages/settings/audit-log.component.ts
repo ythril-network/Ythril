@@ -6,6 +6,7 @@ import { AdminApi } from '../../core/admin-api.service';
 import { saveBlob } from '../../core/authenticated-download';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
 import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { ModalDirective } from '../../shared/modal.directive';
@@ -328,7 +329,7 @@ import { refusalText } from '../../core/refusal-text';
       </div>
 
       <div class="pagination">
-        <span>{{ 'auditLog.pagination.total' | transloco: { count: total() } }}</span>
+        <span>{{ totalText(total()) }}</span>
         <div class="pagination-btns">
           <button [disabled]="offset() === 0" (click)="prevPage()">{{ 'auditLog.pagination.prev' | transloco }}</button>
           <button [disabled]="!hasMore()" (click)="nextPage()">{{ 'auditLog.pagination.next' | transloco }}</button>
@@ -425,6 +426,11 @@ export class AuditLogComponent implements OnInit, OnDestroy {
   private adminApi = inject(AdminApi);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
+
+  /** "N entries total", in the plural form the reader's language uses for N. */
+  protected totalText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'auditLog.pagination.total', count);
+  }
 
   activeLogTab = signal<'audit' | 'server'>('audit');
   loading = signal(true);

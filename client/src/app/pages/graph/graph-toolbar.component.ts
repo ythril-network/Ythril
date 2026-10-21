@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { EntitySearchComponent } from '../../shared/entity-search.component';
 import { Entity } from '../../core/api.types';
@@ -74,7 +75,7 @@ import { GRAPH_TOOLBAR_STYLES } from './graph.styles';
     <div class="toolbar-spacer"></div>
 
     @if (stats(); as s) {
-      <span class="graph-stats">{{ 'graph.stats.nodesEdges' | transloco: s }}</span>
+      <span class="graph-stats">{{ statsText(s) }}</span>
     }
     <button class="toolbar-btn" [attr.title]="'graph.toolbar.fitViewport' | transloco" (click)="fit.emit()">
       <ph-icon name="corners-out" [size]="16"/>
@@ -100,6 +101,14 @@ export class GraphToolbarComponent {
   readonly spaceId = input<string>('');
   /** Node and edge counts, or null when there is nothing traversed to count. */
   readonly stats = input<{ nodes: number; edges: number } | null>(null);
+
+  private transloco = inject(TranslocoService);
+
+  /** "N nodes · M edges": each number takes the plural form its own count needs, so it is two sentences joined and not one. */
+  protected statsText(s: { nodes: number; edges: number }): string {
+    const lang = this.transloco.getActiveLang();
+    return `${pluralText(this.transloco, lang, 'graph.stats.nodes', s.nodes)} · ${pluralText(this.transloco, lang, 'graph.stats.edges', s.edges)}`;
+  }
 
   /*
    * Reported, never set here — and that distinction is load-bearing rather than stylistic. Each of these

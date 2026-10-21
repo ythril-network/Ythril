@@ -40,9 +40,9 @@ describe('the notice itself', () => {
   });
 
   it('says what to do, not only that something is wrong', () => {
-    expect(en['mediaProcessing.pinnedUnknown.title']).toBeTruthy();
+    expect(en['mediaProcessing.pinnedUnknown.title.other']).toBeTruthy();
     expect(en['mediaProcessing.pinnedUnknown.body']).toBeTruthy();
-    expect(en['mediaProcessing.pinnedUnknown.title']).toContain('{{count}}');
+    expect(en['mediaProcessing.pinnedUnknown.title.other']).toContain('{{count}}');
     // The body must tell them the rule, or "not recognised" is a dead end.
     expect(en['mediaProcessing.pinnedUnknown.body']).toMatch(/spelling/i);
   });

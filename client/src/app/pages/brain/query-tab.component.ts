@@ -6,6 +6,7 @@ import { recordOf } from './recall-hits';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { QueryCollection, QueryResult, RecallResult, RECORD_TYPES, BRAIN_COLLECTIONS } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -243,7 +244,7 @@ import { refusalText } from '../../core/refusal-text';
                    they are the top of the ranking, with nothing missing from the middle. -->
               @if (recallTruncated(); as t) {
                 <div class="alert alert-warning" style="margin-top:12px;">
-                  <div><strong>{{ 'brain.query.truncated.title' | transloco: { returned: t.returned, count: t.count } }}</strong></div>
+                  <div><strong>{{ truncatedTitleText(t.returned, t.count) }}</strong></div>
                   <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.truncated.body' | transloco }}</div>
                   <!-- WHICH bound stopped it, when it was the graph walk rather than the byte budget: the remedy
                        differs (a shallower walk, not a bigger answer). -->
@@ -253,7 +254,7 @@ import { refusalText } from '../../core/refusal-text';
                   <!-- ONE ENDING, never two that disagree (see SpillEndingComponent). It names the field to raise,
                        the one the server says cut the answer (Q-116), and gives no size advice after a walk ran out. -->
                   <app-spill-ending [link]="recallRemainder()" [refused]="spillRefused()"
-                    labelKey="brain.query.remainder.download" [labelParams]="{ matches: recallRemainder()?.matches }"
+                    [labelText]="remainderLabel()"
                     [fallbackKey]="t.raise ? 'brain.query.truncated.what' : 'brain.query.truncated.whatNarrow'"
                     [fields]="fieldNames(t.raise)" />
                 </div>
@@ -268,7 +269,7 @@ import { refusalText } from '../../core/refusal-text';
                    same reason as the truncation notice. -->
               @if (leftOut(); as lo) {
                 <div class="alert alert-warning" role="status" aria-live="polite" style="margin-top:12px;">
-                  <div><strong>{{ 'brain.query.leftOut.title' | transloco: { count: lo.count } }}</strong></div>
+                  <div><strong>{{ leftOutTitleText(lo.count) }}</strong></div>
                   <div style="font-size:12px; margin-top:4px;">{{ 'brain.query.leftOut.body' | transloco }}</div>
                   <ul class="left-out" style="font-size:12px; margin:6px 0 0 18px;">
                     @for (row of lo.rows; track row._id) {
@@ -301,7 +302,7 @@ import { refusalText } from '../../core/refusal-text';
                     <!-- Grouping makes a topK of 10 look like 6, so the passage count is stated rather than
                          left for the reader to wonder about. Only shown when grouping actually happened. -->
                     @if (recallResults().length !== recallGroups().length) {
-                      <span>{{ 'brain.query.groupedPassages' | transloco: { count: recallResults().length } }}</span>
+                      <span>{{ groupedPassagesText(recallResults().length) }}</span>
                     }
                     @if (answerSize(); as size) {
                       <span>{{ size }}</span>
@@ -344,7 +345,7 @@ import { refusalText } from '../../core/refusal-text';
                         -->
                         <app-result-ordering [hit]="g.hits[0]" />
                         @if (g.hitCount > 1) {
-                          <span class="badge">{{ 'brain.query.passages' | transloco: { count: g.hitCount } }}</span>
+                          <span class="badge">{{ passagesText(g.hitCount) }}</span>
                         }
                       </div>
                       @if (f.description) {
@@ -417,7 +418,7 @@ import { refusalText } from '../../core/refusal-text';
                                 <div class="rel-item">
                                   <div class="rel-meta">
                                     <span class="badge">{{ r.kind }}</span>
-                                    <span>{{ 'brain.query.related.hops' | transloco: { hops: r.hops } }}</span>
+                                    <span>{{ hopsText(r.hops) }}</span>
                                     @if (r.label) { <span class="rel-via">{{ r.label }}</span> }
                                   </div>
                                   <app-json-tree [value]="r.record" [openTo]="1" />
@@ -520,6 +521,27 @@ export class QueryTabComponent {
   private brainApi = inject(BrainApi);
   private store = inject(BrainStore);
   private transloco = inject(TranslocoService);
+
+  /** The counted sentences of this tab, each in the plural form the reader's language uses for its count. */
+  protected truncatedTitleText(returned: number, count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.truncated.title', count, { returned });
+  }
+  protected leftOutTitleText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.leftOut.title', count);
+  }
+  protected hopsText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.related.hops', count);
+  }
+  protected passagesText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.passages', count);
+  }
+  protected groupedPassagesText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.groupedPassages', count);
+  }
+  /** The remainder download's label: how many matches the kept spill holds. */
+  protected remainderLabel(): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.remainder.download', this.recallRemainder()?.matches ?? 0);
+  }
 
   readonly spaceId = input.required<string>();
 

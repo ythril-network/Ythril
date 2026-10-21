@@ -18,6 +18,7 @@
  */
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent, StatusVariant } from '../../shared/status-pill.component';
 import { SkeletonLinesComponent } from '../../shared/skeleton-lines.component';
@@ -345,7 +346,7 @@ import { ReindexNotesComponent } from './reindex-notes.component';
             <div class="panel-b">
               <div class="comp-top">
                 <span class="comp-score" [class.good]="comp.score >= 85" [class.mid]="comp.score >= 60 && comp.score < 85" [class.bad]="comp.score < 60">{{ comp.score }}%</span>
-                <span class="comp-of">{{ 'brain.overview.comp.of' | transloco: { count: comp.checks.length } }}</span>
+                <span class="comp-of">{{ checksOfText(comp.checks.length) }}</span>
               </div>
               <div class="bar"><span [class.warn]="comp.score < 85" [class.err]="comp.score < 60" [style.width.%]="comp.score"></span></div>
 
@@ -468,7 +469,7 @@ import { ReindexNotesComponent } from './reindex-notes.component';
                 }
               </ul>
               @if (q.failed > q.failedSample.length) {
-                <p class="muted fail-more">{{ 'brain.overview.queue.failedMore' | transloco: { shown: q.failedSample.length, total: q.failed } }}</p>
+                <p class="muted fail-more">{{ failedMoreText(q.failedSample.length, q.failed) }}</p>
               }
             }
             @if (q.failed > 0) {
@@ -653,6 +654,16 @@ export class OverviewTabComponent {
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
 
+  /** "across N checks", in the plural form the reader's language uses for N. */
+  protected checksOfText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.comp.of', count);
+  }
+
+  /** "Showing k of N failures.": the noun agrees with the total, which is what `count` carries. */
+  protected failedMoreText(shown: number, total: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.queue.failedMore', total, { shown });
+  }
+
   /**
    * Answered recalls as a percentage, or null when nothing was asked.
    *
@@ -805,7 +816,7 @@ export class OverviewTabComponent {
     if (failed <= 0) return;
     const ok = await this.confirmDialog.confirm({
       title: this.transloco.translate('brain.overview.confirmRetryFailedTitle'),
-      message: this.transloco.translate('brain.overview.confirmRetryFailed', { count: failed }),
+      message: pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.confirmRetryFailed', failed),
       confirmLabel: this.transloco.translate('brain.overview.queue.retryFailed'),
     });
     if (!ok) return;

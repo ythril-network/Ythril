@@ -7,20 +7,20 @@
  */
 import type { Network, NetworkMember } from '../../core/api.types';
 import type { NetworkRole } from '../../core/network-role.types';
+import { pluralText, type PluralTranslator } from '../../core/plural-text';
 
 /**
- * The count the header shows for this role, or null when the role shows none (a subscriber, a lone root).
+ * The count the header shows for this role, in words, or null when the role shows none (a subscriber, a lone root).
  *
- * One member takes the singular key (`…One`), so a card never reads "1 peers" (`Q-54`). A key per form rather than
- * an ICU plural because every string on the page is a plain `{{ count }}` template, and one rule for one page beats
- * a second grammar for three strings.
+ * The count goes through `pluralText` (`networks.role.count.<noun>.one|few|many|other`), so a card never reads "1 peers" (`Q-54`) and
+ * Polish gets the form it needs. It used to be a key per form (`...One`): a hand-rolled plural, which every other page has given up.
  */
-export function roleCountKey(r: NetworkRole): string | null {
-  const one = r.members.length === 1 ? 'One' : '';
-  if (r.role === 'publisher') return `networks.role.count.subscribers${one}`;
+export function roleCountText(transloco: PluralTranslator, language: string, r: NetworkRole): string | null {
+  const count = r.members.length;
+  if (r.role === 'publisher') return pluralText(transloco, language, 'networks.role.count.subscribers', count);
   if (r.role === 'subscriber') return null;
-  if (r.role === 'root' || r.role === 'node' || r.role === 'leaf') return r.members.length ? `networks.role.count.below${one}` : null;
-  return `networks.role.count.peers${one}`;
+  if (r.role === 'root' || r.role === 'node' || r.role === 'leaf') return count ? pluralText(transloco, language, 'networks.role.count.below', count) : null;
+  return pluralText(transloco, language, 'networks.role.count.peers', count);
 }
 
 /** The network space a local space was mapped from on join, when it differs from the local id. */

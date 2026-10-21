@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { NetworksApi } from '../../core/networks-api.service';
@@ -224,7 +225,7 @@ export class OverviewDataService {
     this.spacesApi.resetSpaceActivity(spaceId).subscribe({
       next: ({ cleared }) => {
         this.resettingUsage.set(false);
-        this.usageResetResult.set(this.transloco.translate('brain.overview.usageResetDone', { count: cleared }));
+        this.usageResetResult.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.usageResetDone', cleared));
         this.loadSpaceActivity(spaceId, isActive);
       },
       error: () => {

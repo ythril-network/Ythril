@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { AdminApi } from '../../core/admin-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { ToastService } from '../../core/toast.service';
@@ -206,7 +207,7 @@ interface WebhookForm {
                     <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
                       <app-status-pill [variant]="statusVariant(w.status)" [dot]="true">{{ 'webhooks.status.' + w.status | transloco }}</app-status-pill>
                       @if (w.consecutiveFailures > 0) {
-                        <span class="muted" style="font-size:11px;">{{ 'webhooks.failures' | transloco: { n: w.consecutiveFailures } }}</span>
+                        <span class="muted" style="font-size:11px;">{{ failuresText(w.consecutiveFailures) }}</span>
                       }
                     </span>
                   </td>
@@ -236,6 +237,11 @@ export class WebhooksComponent implements OnInit {
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+
+  /** "N consecutive failures", in the plural form the reader's language uses for N. */
+  protected failuresText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'webhooks.failures', count);
+  }
 
   readonly eventGroups = WEBHOOK_EVENT_GROUPS;
 

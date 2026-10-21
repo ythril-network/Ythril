@@ -88,7 +88,7 @@ describe('the page says when an answer was shortened', () => {
     // And the notice must not have grown one through a locale key either.
     for (const l of LOCALES) {
       const t = locale(l);
-      for (const k of ['brain.query.truncated.title', 'brain.query.truncated.body', 'brain.query.truncated.what']) {
+      for (const k of ['brain.query.truncated.title.one', 'brain.query.truncated.title.other', 'brain.query.truncated.body', 'brain.query.truncated.what']) {
         expect(t[k]).not.toMatch(/\{\{(budgetBytes|bytesReturned|budgetChars|charsReturned)\}\}/);
       }
     }
@@ -146,11 +146,11 @@ describe('the page says when an answer was shortened', () => {
     // states. Without them an operator cannot tell a shortened answer from a broken one.
     for (const l of LOCALES) {
       const t = locale(l);
-      expect(t['brain.query.truncated.title']).toBeTruthy();
+      expect(t['brain.query.truncated.title.other']).toBeTruthy();
       expect(t['brain.query.truncated.body']).toBeTruthy();
       expect(t['brain.query.truncated.what']).toBeTruthy();
-      expect(t['brain.query.truncated.title']).toContain('{{returned}}');
-      expect(t['brain.query.truncated.title']).toContain('{{count}}');
+      expect(t['brain.query.truncated.title.other']).toContain('{{returned}}');
+      expect(t['brain.query.truncated.title.other']).toContain('{{count}}');
     }
   });
 });
@@ -207,7 +207,7 @@ describe('the size ceiling is reachable from the form', () => {
     // on the missing `de`/`pl` pair, and that is not a thing to discover inside a PR that is already red.
     const keys = [
       'brain.query.recallMaxBytes', 'brain.query.recallMaxBytes.tooltip', 'brain.query.recallMaxBytes.default',
-      'brain.query.truncated.title', 'brain.query.truncated.body', 'brain.query.truncated.what',
+      'brain.query.truncated.title.one', 'brain.query.truncated.title.other', 'brain.query.truncated.body', 'brain.query.truncated.what',
     ];
     for (const l of LOCALES) {
       const t = locale(l);
@@ -252,19 +252,23 @@ const MAX_MAX_BYTES = 5_000_000;
 
 /** Rendered text for the keys these cases look for, so a match is on a sentence rather than an echoed key. */
 const T: Record<string, string> = {
-  'brain.query.leftOut.title': 'LEFTOUT-TITLE',
+  // The three counted sentences are plural bases (`<base>.one|other`), said through `pluralText`.
+  'brain.query.leftOut.title.one': 'LEFTOUT-TITLE',
+  'brain.query.leftOut.title.other': 'LEFTOUT-TITLE',
   'brain.query.leftOut.more': 'LEFTOUT-MORE',
   'brain.query.leftOut.reason.walk_ceiling': 'REASON-CEILING',
   'brain.query.leftOut.reason.link_scan': 'REASON-SCAN',
   'brain.query.truncated.by.walk_budget': 'BY-WALK',
   'brain.query.truncated.by.deadline': 'BY-DEADLINE',
-  'brain.query.truncated.title': 'TRUNCATED-TITLE',
+  'brain.query.truncated.title.one': 'TRUNCATED-TITLE',
+  'brain.query.truncated.title.other': 'TRUNCATED-TITLE',
   'brain.query.truncated.what': 'WHAT-ADVICE RAISE[{{fields}}]',
   'brain.query.truncated.whatNarrow': 'NARROW-ADVICE',
   'brain.query.maxChars': 'F-CHARS',
   'brain.query.maxTokens': 'F-TOKENS',
   'brain.query.recallMaxBytes': 'F-BYTES',
-  'brain.query.remainder.download': 'REMAINDER-DOWNLOAD',
+  'brain.query.remainder.download.one': 'REMAINDER-DOWNLOAD',
+  'brain.query.remainder.download.other': 'REMAINDER-DOWNLOAD',
   'brain.query.remainder.expires': 'EXPIRES {{date}}',
   'brain.query.spillRefused': 'SPILL-REFUSED {{reason}} RAISE[{{fields}}]',
   ...Object.fromEntries(SPILL_REFUSAL_CODES.map(c => [`brain.query.spillRefused.reason.${c}`, `R-${c.toUpperCase()}-WORDS`])),
@@ -624,7 +628,7 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
   });
 
   it('every new left-out and walk-bound key exists in en, de and pl, and de/pl are not English', () => {
-    const keys = ['brain.query.leftOut.title', 'brain.query.leftOut.body', 'brain.query.leftOut.more',
+    const keys = ['brain.query.leftOut.title.one', 'brain.query.leftOut.title.other', 'brain.query.leftOut.body', 'brain.query.leftOut.more',
       ...['walk_ceiling', 'link_scan', 'paths', 'deadline'].map(r => `brain.query.leftOut.reason.${r}`),
       'brain.query.truncated.by.walk_budget', 'brain.query.truncated.by.deadline'];
     for (const k of keys) {
@@ -652,7 +656,7 @@ describe('Q-92: the page renders `remainder` and `spillRefused`', () => {
 
 describe('Q-92: the strings no longer say a search writes into the space', () => {
   const NEW_KEYS = [
-    'brain.query.remainder.download', 'brain.query.remainder.expires', 'brain.query.spillRefused',
+    'brain.query.remainder.download.one', 'brain.query.remainder.download.other', 'brain.query.remainder.expires', 'brain.query.spillRefused',
     'brain.query.spill.notFound', 'brain.query.spill.gone',
   ];
 
