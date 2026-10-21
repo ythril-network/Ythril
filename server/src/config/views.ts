@@ -26,7 +26,8 @@
  */
 import { getConfig, mutateConfig } from './loader.js';
 import type { Config, ViewRecord } from './types.js';
-import type { Rung, SpaceArea, TokenRights } from './rights-shape.js';
+import { SPACE_AREAS, type Rung, type SpaceArea, type TokenRights } from './rights-shape.js';
+import { takesAView } from '../auth/space-rights.js';
 import { holdsRung } from '../auth/reachable-spaces.js';
 import { reachesSpace } from '../auth/space-reach.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
@@ -89,6 +90,21 @@ export function viewReadMembers(input: {
   const listed = view.members.includes(WILDCARD_MEMBER) ? allSpaceIds(config) : view.members.filter(id => live.has(id));
   const read = [...new Set(listed)].filter(id => reachesSpace(rights, id) && holdsRung(rights, id, area, needs));
   return withoutHeldFor(read, input.peerId);
+}
+
+/** The areas a view is read in: every area a door that takes a view names (`takesAView`: a read, outside the schema area). */
+const VIEW_READ_AREAS: readonly SpaceArea[] = SPACE_AREAS.filter(area => takesAView({ needs: 'read', area }));
+
+/**
+ * Whether `spaceId` may be listed as a member of a view whose reader holds `rights`: the ONE admission rule, for a view the caller creates
+ * or changes and for a copy given to another token. It is {@link viewReadMembers}' own question asked per area a view is read in - the
+ * space exists, the reader reaches it, holds `read` there in at least one of those areas, and it is not held for the peer a peer-bound
+ * reader is bound to - so a view can never be made to list a member its reader could not read through it. Reach alone (the rule this
+ * replaces, spelled twice) admitted a space the reader held only a schema rung on: listed, and read by no door.
+ */
+export function memberAdmissible(input: { rights: TokenRights | undefined; spaceId: string; peerId?: string | undefined; config?: Config }): boolean {
+  const view = { members: [input.spaceId] };
+  return VIEW_READ_AREAS.some(area => viewReadMembers({ rights: input.rights, view, area, needs: 'read', peerId: input.peerId, config: input.config }).length > 0);
 }
 
 // ── What ends or edits a view ───────────────────────────────────────────────────────────────────────────────────────

@@ -21,10 +21,9 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { getConfig, mutateConfig } from '../config/loader.js';
 import {
   MAX_VIEWS_PER_OWNER, MAX_VIEW_MEMBERS, VIEW_NAME_MAX, VIEW_NAME_PATTERN, WILDCARD_MEMBER, ViewRefusal,
-  deleteView, freeViewName, isValidViewName, isViewId, resolveOwnView, viewOwnerKind, viewOwnerOf, viewReadMembers, viewsOfOwner,
+  deleteView, freeViewName, isValidViewName, isViewId, memberAdmissible, resolveOwnView, viewOwnerKind, viewOwnerOf, viewReadMembers, viewsOfOwner,
   type ViewOwnerSource,
 } from '../config/views.js';
-import { reachesSpace } from '../auth/space-reach.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
 import { mayManageToken } from '../auth/editor-scope.js';
 import { logAuditEntry } from '../audit/audit.js';
@@ -59,8 +58,9 @@ export interface ViewAnswer {
   migratedFrom?: string;
 }
 
-/** Whether `rights` reach `spaceId` at all: the one question a member the caller names is judged by (the members a VIEW reads are `viewReadMembers`'). */
-const reaches = (rights: TokenRights | undefined, spaceId: string): boolean => !!rights && reachesSpace(rights, spaceId);
+/** Whether the holder of `rights` (bound to `peerId`, or none) may have `spaceId` listed in a view: the one admission rule, `memberAdmissible`. */
+const admissibleFor = (rights: TokenRights | null | undefined, peerId: string | undefined, config: Config) =>
+  (spaceId: string): boolean => memberAdmissible({ rights: rights ?? undefined, spaceId, peerId, config });
 
 const ownerOrRefuse = (actor: ViewActor): string => {
   const owner = viewOwnerOf(actor.record);
@@ -83,7 +83,7 @@ const notFound = (id: string): ViewRefusal => new ViewRefusal('notFound', `View 
  * The members of a new or changed view, checked against what the CALLER may read: a list of distinct space ids, or `['*']`.
  * @throws ViewRefusal for an empty list, a view, an over-long list, a space that does not exist or that the caller cannot read.
  */
-function checkedMembers(raw: unknown, withinBounds: boolean, readable: (id: string) => boolean, config: Config): string[] {
+function checkedMembers(raw: unknown, withinBounds: boolean, readable: (id: string) => boolean): string[] {
   if (!withinBounds || !Array.isArray(raw)) {
     // Over the cap is its own refusal (it says the cap); anything else that is not a non-empty list of strings is a missing list.
     if (Array.isArray(raw) && raw.length > MAX_VIEW_MEMBERS) {
@@ -98,7 +98,8 @@ function checkedMembers(raw: unknown, withinBounds: boolean, readable: (id: stri
     if (isViewId(m)) {
       throw new ViewRefusal('memberIsView', `'${peerText(m, { max: NAME_QUOTED })}' is a view; a personal view lists spaces only`, { members: [m] });
     }
-    if (!config.spaces.some(s => s.id === m) || !readable(m)) {
+    // `readable` is the admission rule, which a space that does not exist fails as well: one refusal, so it is no oracle for which exist.
+    if (!readable(m)) {
       throw new ViewRefusal('memberUnknown', unknownSpaceSentence(m), { members: [m] });
     }
   }
@@ -123,7 +124,7 @@ export function createView(actor: ViewActor, input: { name: unknown; members: un
   let made!: ViewRecord;
   mutateConfig(cfg => {
     const mine = viewsOfOwner(owner, cfg);
-    const members = checkedMembers(input.members, ViewCreateInput.safeParse({ members: input.members }).success, id => reaches(actor.rights, id), cfg);
+    const members = checkedMembers(input.members, ViewCreateInput.safeParse({ members: input.members }).success, admissibleFor(actor.rights, peerBoundTo(actor.record), cfg));
     if (mine.some(v => v.name === name)) throw new ViewRefusal('nameTaken', `You already have a view named '${name}'`);
     if (mine.length >= MAX_VIEWS_PER_OWNER) throw tooManyViews();
     made = { id: `@${name}`, name, ownerId: owner, members, createdAt: new Date().toISOString() };
@@ -147,7 +148,7 @@ export function updateView(actor: ViewActor, id: string, input: { name?: unknown
       view.id = `@${name}`;
     }
     if (input.members !== undefined) {
-      view.members = checkedMembers(input.members, ViewUpdateInput.safeParse({ members: input.members }).success, m => reaches(actor.rights, m), cfg);
+      view.members = checkedMembers(input.members, ViewUpdateInput.safeParse({ members: input.members }).success, admissibleFor(actor.rights, peerBoundTo(actor.record), cfg));
     }
     updated = view;
   });
@@ -223,10 +224,10 @@ export function copyViewTo(actor: ViewActor, id: string, toTokenId: unknown, fro
   mutateConfig(cfg => {
     const from = (cfg.views ?? []).find(v => v.ownerId === source.ownerId && v.id === source.id);
     if (!from) throw notFound(id);
-    const rights = (cfg.tokens.find(t => t.id === toTokenId) as TokenRecord | undefined)?.rights;
+    const held = cfg.tokens.find(t => t.id === toTokenId) as TokenRecord | undefined;
     const kept = from.members.includes(WILDCARD_MEMBER)
       ? [WILDCARD_MEMBER]
-      : from.members.filter(m => cfg.spaces.some(s => s.id === m) && reaches(rights ?? undefined, m));
+      : from.members.filter(admissibleFor(held?.rights, held ? peerBoundTo(held) : undefined, cfg));
     if (kept.length === 0) {
       throw new ViewRefusal('copyNothingReadable', 'That token reads none of the spaces this view lists, so a copy would read nothing');
     }
