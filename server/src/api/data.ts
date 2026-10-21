@@ -13,13 +13,14 @@
  *   GET    /api/admin/data/restore          — the restore standing or the last one, per space
  *   POST   /api/admin/data/restore/abandon  — lift the holds of a standing restore's acts that have not completed
  *   POST   /api/admin/data/migrate         — copy the database into a new URI online under migrate acts, save it, exit (202)
+ *   GET    /api/admin/data/migrate         — the migrate standing or the last one, in the restore report's shape
  *   GET    /api/admin/data/backup-config    — read backup.json (scheduled/offsite config)
  *                                             requires YTHRIL_DB_MIGRATION_ENABLED=true
  *   GET    /api/admin/data/browse-dirs      — list child directories at a given path (UI file picker)
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
 import { getDataRoot } from '../config/loader.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
@@ -30,7 +31,8 @@ import { loadBackupConfig, BACKUP_CONFIG_PATH, BackupConfigSchema } from '../db/
 import { startBackupScheduler } from '../db/backup-scheduler.js';
 import { BackupNotWhole } from '../db/restore.js';
 import { backupsRoot, backupDirOf, isBackupId } from '../db/backup-location.js';
-import { planRestore, startRestore, restoreReport, abandonRestore } from '../db/restore-act.js';
+import { planRestore, startRestore, abandonRestore } from '../db/restore-act.js';
+import { actSetReport, type ReportedActSetKind } from '../spaces/act-set-report.js';
 import { targetHoldsData, startMigrate } from '../db/migrate-act.js';
 import { instanceWideActStanding, instanceWideActRefusal, spaceActClosedAnswer } from '../spaces/space-act-runner.js';
 import { effectiveMongoUri, redactUri } from '../config/mongo-uri.js';
@@ -395,14 +397,16 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
   }
 });
 
-// ── GET /restore ──────────────────────────────────────────────────────────────
+// ── GET /restore, GET /migrate ────────────────────────────────────────────────
 //
-// The restore standing, or the last one: per space its state (owed, running, done, restore_abandoned), attempts, our sentence for its
-// last failure and its index results. `{ restore: null }` when no restore ever ran on this instance.
+// The set of that kind standing, or the last one, from ONE report (`spaces/act-set-report.ts`): per space its state (owed, running, done,
+// <kind>_abandoned), attempts, our sentence for its last failure and what its body reported (a restore's index results, the backup a
+// migrate went through), and the set's own `lastError` when a whole-set failure ended it. `{ restore: null }` / `{ migrate: null }` when
+// none ever ran on this instance. A migrate's target URI is never in it.
 
-dataRouter.get('/restore', requireAdminMfa, (_req, res) => {
-  res.json(restoreReport() ?? { restore: null });
-});
+const sendActSetReport = (kind: ReportedActSetKind): RequestHandler => (_req, res) => { res.json(actSetReport(kind)); };
+dataRouter.get('/restore', requireAdminMfa, sendActSetReport('restore'));
+dataRouter.get('/migrate', requireAdminMfa, sendActSetReport('migrate'));
 
 // ── POST /restore/abandon ─────────────────────────────────────────────────────
 //

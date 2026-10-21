@@ -501,6 +501,17 @@ export function spaceActSetOf(kind: SpaceActKind): Omit<SpaceActSet, 'target'> |
   return rest;
 }
 
+/**
+ * Record on the standing set `setId` the backup its body went through (a migrate's dump), so the set's report, its end hook and its
+ * outcome audit row name it as a restore's do. A set that has ended is left as it ended.
+ */
+export function noteSpaceActSetBackup(setId: string, backupId: string): void {
+  mutateConfig(cfg => {
+    const set = cfg.spaceActSets?.find(s => s.id === setId && !s.endedAt);
+    if (set) set.backupId = backupId;
+  });
+}
+
 /** The sealed `target` of the standing set `setId`, for its kind's body and completion only; undefined once the set ended. */
 export function spaceActSetTarget(setId: string): string | undefined {
   return (isConfigLoaded() ? getConfig().spaceActSets ?? [] : []).find(s => s.id === setId && !s.endedAt)?.target;

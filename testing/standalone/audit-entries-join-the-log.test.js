@@ -84,11 +84,17 @@ describe('absent means "written before the field existed", not "no request"', ()
      * A stored `null` would claim the request had no id, and an absent KEY is how a reader marks a row that
      * predates the field. So an entry written today always carries one: the caller's, else the live request's,
      * else `internal-<uuid>` for work no request asked for (a sweep, the config watcher). The fallback lives in
-     * this writer so no caller can drop it (bundle-46: the config-reload writer did).
+     * this writer so no caller can drop it (bundle-46: the config-reload writer did). The record is BUILT by
+     * `auditEntryOf` (bundle-157 I4a: a migrate writes its completion row into another database with it), and the
+     * writer inserts what that builds - so the guard is asserted where it lives, and the writer is held to the builder.
      */
-    const at = AUDIT.indexOf('export function logAuditEntry');
+    const writerAt = AUDIT.indexOf('export function logAuditEntry');
+    assert.ok(writerAt > -1, 're-anchor this gate');
+    assert.match(blockAfter(AUDIT, writerAt, 'logAuditEntry'), /insertOne\(auditEntryOf\(input\)/,
+      'the writer inserts a record it built itself, past the builder that holds the guard');
+    const at = AUDIT.indexOf('export function auditEntryOf');
     assert.ok(at > -1, 're-anchor this gate');
-    const body = blockAfter(AUDIT, at, 'logAuditEntry');
+    const body = blockAfter(AUDIT, at, 'auditEntryOf');
     assert.match(body, /requestId: input\.requestId \|\| currentRequestId\(\) \|\| `internal-\$\{uuidv4\(\)\}`/,
       'an entry written today can lack an id, which a reader takes for one written before the field existed');
     assert.doesNotMatch(body, /requestId: [^,\n]*\?\? null/, 'the write can store a null id');

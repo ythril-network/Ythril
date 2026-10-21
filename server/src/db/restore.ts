@@ -22,6 +22,7 @@ import {
 import { log } from '../util/log.js';
 import { RequestRefusal } from '../util/errors.js';
 import { dbNameFromUri } from './db-name.js';
+import { boundedClientOptions } from './bounded-client-options.js';
 import { parseSpaceCollection } from './space-collection.js';
 
 /**
@@ -206,10 +207,9 @@ export async function restoreDatabase(uri: string, srcDir: string): Promise<void
   const { collections } = manifest;
   const load = backupLoader();
 
-  const client = new MongoClient(uri, {
-    serverSelectionTimeoutMS: 15_000,
-    connectTimeoutMS: 15_000,
-  });
+  // Inside a bound scope (a migrate's act) every operation of this client carries the scope's per-operation figure; a write the client's
+  // clock ended may still land, which a retry overwrites because it drops and reloads every collection (`bounded-client-options.ts`).
+  const client = new MongoClient(uri, boundedClientOptions(uri, { serverSelectionTimeoutMS: 15_000, connectTimeoutMS: 15_000 }));
 
   try {
     await client.connect();

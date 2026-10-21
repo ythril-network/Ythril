@@ -20,8 +20,12 @@
  *   target. Re-run after a crash, it replaces what it copied, so a partly filled target is overwritten; the not-empty check is the door's.
  * - **The completion** is the runner's one write: every migrate entry leaves, and {@link saveTargetUri} saves the URI in that same write.
  *   Then {@link onMigrateEnd} puts this process in maintenance and ends it, so the next start connects to the new database.
- * - **A failure** of the copy is an input failure of the whole set: it ends the set, the old URI stays, every hold lifts, and the sentence
- *   names the backup. A store outage while dumping this database is retried, and so is a crash before the completion write.
+ * - **A failure** of the copy is an input failure of the whole set: it ends the set, the old URI stays, every hold lifts, the sentence
+ *   names the backup, and `data.migrate.failed` is audited in this (kept) database. A store outage or a timeout - of this database or of
+ *   the target - is retried, and so is a crash before the completion write: every client the copy opens carries the runner's
+ *   per-operation bound (`bounded-client-options.ts`), so an operation nobody answers fails the attempt instead of holding every space.
+ * - **The outcome**: the set records the backup it went through (`GET /api/admin/data/migrate` reports it, `spaces/act-set-report.ts`),
+ *   and a completed copy writes `data.migrate.completed` into the TARGET's audit log, the database the instance continues with.
  *
  * Receive marks are NOT forgotten: the data is the same data. The old database still holds every record until the operator removes it.
  */
@@ -30,15 +34,17 @@ import { getDb } from './mongo.js';
 import { restoreDatabase } from './restore.js';
 import { runBackupNow } from './backup-scheduler.js';
 import { dbNameFromUri } from './db-name.js';
-import { mongoClientOptions } from './client-options.js';
+import { boundedClientOptions } from './bounded-client-options.js';
 import { isDuplicateKey } from './write-errors.js';
+import { AUDIT_COLLECTION, auditEntryOf, internalAuditInput, logInternalAudit } from '../audit/audit.js';
+import { MIGRATE_COMPLETED_OPERATION, MIGRATE_FAILED_OPERATION } from '../audit/act-set-operations.js';
 import { getConfig } from '../config/loader.js';
 import { redactUri } from '../config/mongo-uri.js';
 import { resolveMasterSecret, isEnvelope, encryptEnvelope, decryptEnvelope } from '../config/secretbox.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import {
   defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, instanceWideActStanding, spaceActSetTarget,
-  SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
+  noteSpaceActSetBackup, SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from '../spaces/space-act-runner.js';
 import { setMaintenanceActive } from '../maintenance.js';
 import { isStoreSide } from '../brain/store-failure.js';
@@ -48,9 +54,17 @@ import { log, peerText } from '../util/log.js';
 
 const KIND = 'migrate' satisfies SpaceActKind;
 
-/** The client a migrate opens on the target: the whole-database copy's figures, and the operator's own where the URI names them. */
+/**
+ * The client a migrate opens on the target: the whole-database copy's figures, the operator's own where the URI names them, and - inside
+ * the act's body - the runner's per-operation bound on every operation (`bounded-client-options.ts`), the same figure the dump and the
+ * restore into the target carry. A write that bound ended may land later; the retry replaces it, since it drops and reloads every
+ * collection and builds the indexes again.
+ */
 const targetClient = (uri: string): MongoClient =>
-  new MongoClient(uri, mongoClientOptions(uri, { serverSelectionTimeoutMS: 15_000, connectTimeoutMS: 15_000 }));
+  new MongoClient(uri, boundedClientOptions(uri, { serverSelectionTimeoutMS: 15_000, connectTimeoutMS: 15_000 }));
+
+/** The path of a migrate's outcome row: the backup and the set, never the URI. */
+const auditPath = (set: Pick<SpaceActSet, 'id' | 'backupId'>): string => `internal:migrate:${set.backupId ?? ''}:${set.id}`;
 
 // ── the target URI, sealed ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -134,6 +148,7 @@ async function migrateInstance(ctx: SpaceActBodyContext): Promise<SpaceActBodyOu
   if (!sealed) throw new SpaceActInputFailure('the migrate names no target database.');
   const target = unsealTarget(sealed);
 
+  const began = Date.now();
   let backup;
   try {
     backup = await runBackupNow({ underAct: KIND });
@@ -141,13 +156,24 @@ async function migrateInstance(ctx: SpaceActBodyContext): Promise<SpaceActBodyOu
     if (isStoreSide(err)) throw err;
     throw new SpaceActInputFailure(`the dump of this database failed: ${said(err)}`);
   }
+  // The set names the backup from here on: its report, and its outcome row whichever way it ends.
+  if (ctx.entry.setId) noteSpaceActSetBackup(ctx.entry.setId, backup.id);
 
   const client = targetClient(target);
   try {
     await restoreDatabase(target, backup.dir);
     await client.connect();
-    await copyIndexes(getDb(), client.db(dbNameFromUri(target)), backup.manifest.collections.map(c => c.name));
+    const targetDb = client.db(dbNameFromUri(target));
+    await copyIndexes(getDb(), targetDb, backup.manifest.collections.map(c => c.name));
+    // The outcome row, in the database the instance continues with: written last, so it is there only when the copy is. A retry after a
+    // crash before the completion write drops and reloads the target's audit log with every other collection, so it is written once.
+    await targetDb.collection(AUDIT_COLLECTION).insertOne(auditEntryOf(internalAuditInput({
+      method: 'MIGRATE', path: auditPath({ id: ctx.entry.setId ?? '', backupId: backup.id }), operation: MIGRATE_COMPLETED_OPERATION,
+      startedAt: began,
+    })) as never);
   } catch (err) {
+    // The target not answering - a timeout of the bound above, an outage - is retried like this database's; the copy replaces what it wrote.
+    if (isStoreSide(err)) throw err;
     const why = isDuplicateKey(err) ? 'an index of this database refuses records the new database now holds' : said(err);
     throw new SpaceActInputFailure(`copying backup '${backup.id}' into the new database failed: ${why}. The old database stays in use and `
       + `backup '${backup.id}' holds what was copied; the new database may hold part of it and must be emptied before another migrate.`);
@@ -172,6 +198,8 @@ function saveTargetUri(cfg: Config, set: Readonly<SpaceActSet>): void {
  */
 function onMigrateEnd(set: Readonly<SpaceActSet>): void {
   if (set.outcome === 'abandoned') {
+    // Written here, into the database being kept: the instance stays on it.
+    logInternalAudit({ method: 'MIGRATE', path: auditPath(set), operation: MIGRATE_FAILED_OPERATION, startedAt: Date.parse(set.startedAt) });
     log.error(`migrate ${peerText(set.id)} ended without completing; the database URI is unchanged. ${peerText(set.lastError ?? '')}`);
     return;
   }
