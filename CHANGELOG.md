@@ -107,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A restore answers `202` and restores each space after it; `GET /api/admin/data/restore` reports it and its index results, `POST …/restore/abandon` releases it | Poll until `state` is not `running` |
 | A restore empties spaces the backup lacks; it refuses a backup not whole or naming a space not served here (unless in `leaveOut`); audit log, queues, file bytes stay | Name gone spaces in `leaveOut` |
 | A migrate copies online, answers `202` (`GET /api/admin/data/migrate` reports), then exits; `409` `INFRA_MANAGED` if a non-empty `MONGO_URI` is set, `target_not_empty`; an empty `MONGO_URI` is unset | Drop the old database once checked |
-| While either stands the instance is in maintenance (an instance admin passes on every path; `{ active, manual, heldBy }`) and a backup is `409` | Read `heldBy` |
+| While either stands the instance is in maintenance (an instance admin passes on every path; the web client loads for anyone; `{ active, manual, heldBy }`) and a backup is `409` | Read `heldBy` |
 | Audit `data.restore` and `data.migrate` are now `….requested`; a set's end is a row of its own | Update audit queries |
 | A 5.x build never finishes a `restore` or `migrate` act | Let them end before rolling back |
 
