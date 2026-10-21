@@ -69,7 +69,7 @@ export class SpacesApi {
     return this.http.get<SpacesResponse>('/api/spaces');
   }
 
-  createSpace(body: { label: string; id?: string; maxGiB?: number; proxyFor?: string[]; meta?: Partial<SpaceMeta> }): Observable<{ space: Space }> {
+  createSpace(body: { label: string; id?: string; maxGiB?: number; meta?: Partial<SpaceMeta> }): Observable<{ space: Space }> {
     return this.http.post<{ space: Space }>('/api/spaces', body);
   }
 

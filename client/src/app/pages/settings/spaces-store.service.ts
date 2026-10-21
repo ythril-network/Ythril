@@ -62,6 +62,11 @@ export class SpacesStore {
   readonly mediaCeilings = signal<NonNullable<SpacesResponse['mediaCeilings']>>({
     image: 'auto', audio: 'auto', video: 'auto', text: 'auto',
   });
+  /**
+   * Ids that were a proxy space before 6.0 and are reserved until an admin purges them (`core/retired-space-ids.ts`). Served to an
+   * admin ONLY, so `null` is "not yours to see" and `[]` is "an admin, with none reserved": the views admin panel shows for the second only.
+   */
+  readonly retiredSpaceIds = signal<string[] | null>(null);
   readonly loading  = signal(true);
   /** Set when the spaces list fails to load, so the page can show an error state rather than a bare empty list. */
   readonly error    = signal(false);
@@ -97,8 +102,9 @@ export class SpacesStore {
     this.loading.set(true);
     this.error.set(false);
     this.spacesApi.listSpaces().subscribe({
-      next: ({ spaces, docExtractionCeiling, mediaCeilings }) => {
+      next: ({ spaces, docExtractionCeiling, mediaCeilings, retiredSpaceIds }) => {
         this.spaces.set(spaces);
+        this.retiredSpaceIds.set(retiredSpaceIds ?? null);
         if (docExtractionCeiling) this.docExtractionCeiling.set(docExtractionCeiling);
         if (mediaCeilings) this.mediaCeilings.set(mediaCeilings);
         this.loading.set(false);

@@ -550,7 +550,7 @@ describe('SpaceSchemaTabComponent — schema exports (characterization for Q-92)
  * as the raw key, which has none of the words the plan fixes - the right red for copy that was never written.
  *
  * Test ids this spec asks for (chosen here, the plan does not name them): `this-instance-row`, `unknown-fields-select`,
- * `unknown-fields-hint`, `unknown-fields-consequence`, `unknown-fields-readonly-reason`, `unknown-fields-proxy-note`.
+ * `unknown-fields-hint`, `unknown-fields-consequence`, `unknown-fields-readonly-reason`.
  * The state field is `schUnknownWriteFields` ('warn' | 'refuse'); it is reached through a cast so a missing field fails the
  * ASSERTION that names it instead of failing the whole file at compile time.
  *
@@ -567,7 +567,6 @@ describe('SpaceSchemaTabComponent - the "This instance" row: Unknown top-level f
   const HINT = '[data-testid="unknown-fields-hint"]';
   const CONSEQUENCE = '[data-testid="unknown-fields-consequence"]';
   const READONLY_REASON = '[data-testid="unknown-fields-readonly-reason"]';
-  const PROXY_NOTE = '[data-testid="unknown-fields-proxy-note"]';
   const RAW_KEY = /^[a-z]+(\.[A-Za-z]+)+$/;
 
   const work = (over: Record<string, unknown> = {}): Space => ({ id: 'work', label: 'Work', maxGiB: 10, networks: [], ...over }) as unknown as Space;
@@ -707,27 +706,6 @@ describe('SpaceSchemaTabComponent - the "This instance" row: Unknown top-level f
     expect(reason, 'disabled with no reason').not.toBeNull();
     expect((reason!.textContent ?? '').trim().length).toBeGreaterThan(10);
     expect(reason!.textContent).not.toMatch(RAW_KEY);
-  });
-
-  it.each([
-    ['a member list', ['a', 'b']],
-    ['the wildcard', ['*']],
-  ])('on a proxy space (%s) the control is hidden and a one-line note says each member governs', async (_name, proxyFor) => {
-    const { el, select } = await mountRow({ space: work({ proxyFor }) });
-    expect(select(), 'the select shows on a proxy space, where the member\'s own setting governs a write').toBeNull();
-    const note = el.querySelector<HTMLElement>(PROXY_NOTE);
-    expect(note, 'hidden with no note').not.toBeNull();
-    const text = (note!.textContent ?? '').trim();
-    expect(text.length).toBeGreaterThan(10);
-    expect(text).toMatch(/member/i);
-    expect(text).toMatch(/govern|own|decide/i);
-    expect(text, 'the note is more than one line').not.toContain('\n');
-  });
-
-  it('a space that is not a proxy shows no proxy note (control)', async () => {
-    const { el, select } = await mountRow();
-    expect(select(), 'the control did not render').not.toBeNull();
-    expect(el.querySelector(PROXY_NOTE)).toBeNull();
   });
 
   it.each(['de', 'pl'])('is translated into %s: options, hint and consequence are words, not keys, and not the English', async (lang) => {

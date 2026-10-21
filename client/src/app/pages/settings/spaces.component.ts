@@ -1,6 +1,5 @@
 ﻿import { ChangeDetectionStrategy, Component, HostListener, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ProxySpaceBadgeComponent } from '../../shared/proxy-space-badge.component';
 import { FormsModule } from '@angular/forms';
 import {
   Space,
@@ -19,14 +18,15 @@ import { SpacesStore } from './spaces-store.service';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { SpaceSettingsPopupComponent } from './space-settings-popup.component';
 import { SpaceCreateDialogComponent } from './space-create-dialog.component';
+import { ViewsAdminPanelComponent } from './views-admin-panel.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 
 @Component({
   selector: 'app-spaces',
   standalone: true,
-  imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, TranslocoPipe, DragDropModule, PhIconComponent, StatusPillComponent, SummaryStripComponent,
+  imports: [CommonModule, FormsModule, TranslocoPipe, DragDropModule, PhIconComponent, StatusPillComponent, SummaryStripComponent,
     SpaceSettingsPopupComponent,
-    SpaceCreateDialogComponent, HscrollTopDirective],
+    SpaceCreateDialogComponent, ViewsAdminPanelComponent, HscrollTopDirective],
   // Provided here (not root) so each mount gets its own settings state, with a lifetime tied to
   // this component rather than the app.
   providers: [SpacesStore, SpaceSettingsState],
@@ -54,6 +54,11 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
     <!-- Import conflict dialog -->
 
     <!-- Library picker dialog -->
+
+    <!-- What the 6.0 upgrade did with the proxy spaces, and claim / purge: an instance admin's, so it asks nothing of anyone else. -->
+    @if (store.retiredSpaceIds() !== null) {
+      <app-views-admin-panel [retired]="store.retiredSpaceIds()" (purged)="store.load()" />
+    }
 
     <!-- SPACES TABLE -->
     @if (!store.loading() && !store.error()) {
@@ -94,7 +99,7 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
         <div class="table-wrapper" hscrollTop>
           <table>
             <thead>
-              <tr><th style="width:32px;"></th><th>{{ 'spaces.table.column.label' | transloco }}</th><th>{{ 'spaces.table.column.id' | transloco }}</th><th>{{ 'spaces.table.column.storage' | transloco }}</th><th>{{ 'spaces.table.column.usage' | transloco }}</th><th>{{ 'spaces.table.column.networks' | transloco }}</th><th>{{ 'spaces.table.column.proxy' | transloco }}</th><th></th></tr>
+              <tr><th style="width:32px;"></th><th>{{ 'spaces.table.column.label' | transloco }}</th><th>{{ 'spaces.table.column.id' | transloco }}</th><th>{{ 'spaces.table.column.storage' | transloco }}</th><th>{{ 'spaces.table.column.usage' | transloco }}</th><th>{{ 'spaces.table.column.networks' | transloco }}</th><th></th></tr>
             </thead>
             <tbody cdkDropList (cdkDropListDropped)="store.reorder($event.previousIndex, $event.currentIndex)">
               @for (s of sortedSpaces(); track s.id) {
@@ -150,21 +155,10 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
                       }
                     } @else { <span style="color:var(--text-muted)">—</span> }
                   </td>
-                  <td>
-                    @if (s.proxyFor?.[0]==='*') {
-                      <app-proxy-space-badge [proxyFor]="s.proxyFor" [size]="14" [showLabel]="true" />
-                      <span class="badge badge-blue" style="font-style:italic;margin-left:4px;">{{ 'spaces.badge.allSpaces' | transloco }}</span>
-                    } @else if (s.proxyFor?.length) {
-                      <app-proxy-space-badge [proxyFor]="s.proxyFor" [size]="14" style="margin-right:4px" />
-                      @for (pid of s.proxyFor; track pid) {
-                        <span class="badge badge-blue" style="margin-right:4px">{{ pid }}</span>
-                      }
-                    } @else { <span style="color:var(--text-muted)">—</span> }
-                  </td>
                   <td><button class="icon-btn" [attr.title]="'spaces.table.configureTitle' | transloco" (click)="state.openSettings(s)"><ph-icon name="gear" [size]="16"/></button></td>
                 </tr>
               } @empty {
-                <tr><td colspan="8"><div class="empty-state" style="padding:28px 24px;">
+                <tr><td colspan="7"><div class="empty-state" style="padding:28px 24px;">
                   <div class="empty-state-icon"><ph-icon name="package" [size]="40"/></div>
                   <h3>{{ 'spaces.table.empty' | transloco }}</h3>
                   <p>{{ 'spaces.table.emptyBody' | transloco }}</p>

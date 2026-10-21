@@ -74,24 +74,20 @@ import { refusalText } from '../../core/refusal-text';
      the bar's hint promises space-wide, shared behaviour and a local setting inside it would inherit that promise. -->
 <section class="sch-instance" data-testid="this-instance-row">
   <div class="section-title">{{ 'spaces.schema.instance.title' | transloco }}</div>
-  @if (isProxySpace()) {
-    <p class="sch-hint" data-testid="unknown-fields-proxy-note">{{ 'spaces.schema.unknownFields.proxyNote' | transloco }}</p>
-  } @else {
-    <label class="val-lbl inst-lbl">
-      {{ 'spaces.schema.unknownFields.label' | transloco }}
-      <select [(ngModel)]="state.schUnknownWriteFields" class="val-select inst-select" data-testid="unknown-fields-select"
-        [disabled]="!canEditInstanceSetting()" [attr.aria-describedby]="unknownFieldsDescribedBy()">
-        <option value="warn">{{ 'spaces.schema.unknownFields.warn' | transloco }}</option>
-        <option value="refuse">{{ 'spaces.schema.unknownFields.refuse' | transloco }}</option>
-      </select>
-    </label>
-    <p class="inst-hint" id="unknown-fields-hint" data-testid="unknown-fields-hint">{{ 'spaces.schema.unknownFields.hint' | transloco }}</p>
-    @if (state.schUnknownWriteFields === 'refuse') {
-      <p class="inst-hint inst-warn" id="unknown-fields-consequence" data-testid="unknown-fields-consequence">{{ 'spaces.schema.unknownFields.consequence' | transloco }}</p>
-    }
-    @if (!canEditInstanceSetting()) {
-      <p class="inst-hint" id="unknown-fields-readonly-reason" data-testid="unknown-fields-readonly-reason">{{ 'spaces.schema.unknownFields.readonlyReason' | transloco }}</p>
-    }
+  <label class="val-lbl inst-lbl">
+    {{ 'spaces.schema.unknownFields.label' | transloco }}
+    <select [(ngModel)]="state.schUnknownWriteFields" class="val-select inst-select" data-testid="unknown-fields-select"
+      [disabled]="!canEditInstanceSetting()" [attr.aria-describedby]="unknownFieldsDescribedBy()">
+      <option value="warn">{{ 'spaces.schema.unknownFields.warn' | transloco }}</option>
+      <option value="refuse">{{ 'spaces.schema.unknownFields.refuse' | transloco }}</option>
+    </select>
+  </label>
+  <p class="inst-hint" id="unknown-fields-hint" data-testid="unknown-fields-hint">{{ 'spaces.schema.unknownFields.hint' | transloco }}</p>
+  @if (state.schUnknownWriteFields === 'refuse') {
+    <p class="inst-hint inst-warn" id="unknown-fields-consequence" data-testid="unknown-fields-consequence">{{ 'spaces.schema.unknownFields.consequence' | transloco }}</p>
+  }
+  @if (!canEditInstanceSetting()) {
+    <p class="inst-hint" id="unknown-fields-readonly-reason" data-testid="unknown-fields-readonly-reason">{{ 'spaces.schema.unknownFields.readonlyReason' | transloco }}</p>
   }
 </section>
 
@@ -476,11 +472,6 @@ export class SpaceSchemaTabComponent implements OnInit {
    * is its own name because it is not a rule, and a template that asked `canEditRules()` about it would read as a mistake.
    */
   readonly canEditInstanceSetting = computed(() => this.schemaAdmin());
-  /**
-   * A proxy space holds no data of its own and a write to it lands in a member, where the MEMBER's setting governs it, so the
-   * control would promise something this instance cannot keep here. `proxyFor` is non-empty for a member list and for `['*']`.
-   */
-  readonly isProxySpace = (): boolean => (this.state.settingsSpace()?.proxyFor?.length ?? 0) > 0;
   /** The ids the select is described by: the hint always, the consequence while Refuse is chosen, the reason while it is disabled. */
   protected unknownFieldsDescribedBy(): string {
     return ['unknown-fields-hint',

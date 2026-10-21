@@ -342,7 +342,7 @@ import { refusalText } from '../../core/refusal-text';
     <!-- Join Network dialog -->
     @if (showJoinDialog()) {
       <app-network-join-dialog
-        [availableSpaces]="availableSpaces()"
+        [availableSpaces]="availableSpaces()" [retiredSpaceIds]="retiredSpaceIds()"
         [myUrl]="joinMyUrl"
         (joined)="onJoined()"
         (close)="showJoinDialog.set(false)"
@@ -377,6 +377,8 @@ export class NetworksComponent implements OnInit {
   netSchedule: Record<string, string> = {};
 
   availableSpaces = signal<Space[]>([]);
+  /** Ids reserved since they were a proxy space (served to an admin): the join dialog counts them as taken. */
+  retiredSpaceIds = signal<string[]>([]);
   spacesLoadFailed = signal(false);
 
   private syncResults: Record<string, { ok: boolean }> = {};
@@ -430,7 +432,7 @@ export class NetworksComponent implements OnInit {
   ngOnInit(): void {
     this.load();
     this.spacesApi.listSpaces().subscribe({
-      next: ({ spaces }) => this.availableSpaces.set(spaces),
+      next: ({ spaces, retiredSpaceIds }) => { this.availableSpaces.set(spaces); this.retiredSpaceIds.set(retiredSpaceIds ?? []); },
       error: () => this.spacesLoadFailed.set(true),
     });
     // Auto-fill this brain's URL: prefer the server-configured publicUrl, fall
@@ -545,7 +547,7 @@ export class NetworksComponent implements OnInit {
   onJoined(): void {
     this.load();
     this.spacesApi.listSpaces().subscribe({
-      next: ({ spaces }) => this.availableSpaces.set(spaces),
+      next: ({ spaces, retiredSpaceIds }) => { this.availableSpaces.set(spaces); this.retiredSpaceIds.set(retiredSpaceIds ?? []); },
       error: () => {},
     });
   }

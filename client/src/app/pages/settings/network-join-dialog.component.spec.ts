@@ -60,6 +60,20 @@ describe('NetworkJoinDialogComponent (characterization)', () => {
     expect(api.joinRemote).not.toHaveBeenCalled();
   });
 
+  // Q-531: an invited space whose id is reserved since it was a proxy cannot be kept under that id (the server refuses it after the
+  // handshake), so its row starts on a new name rather than on a choice that can only fail.
+  it('an invited space with a reserved id starts on a new name, with the keep-it choice unavailable', () => {
+    const f = make();
+    f.componentRef.setInput('retiredSpaceIds', ['oldteam']);
+    const c = f.componentInstance;
+    c.joinBundle = JSON.stringify({ handshakeId: 'h', inviteUrl: 'u', rsaPublicKeyPem: 'k', networkId: 'n1', spaces: ['oldteam', 'fresh'] });
+    c.joinNetwork();
+    expect(c.joinSpaceActions['oldteam']).toBe('alias');
+    expect(c.joinSpaceAliases['oldteam']).toBe('oldteam-local');
+    expect(c.joinSpaceActions['fresh'], 'an ordinary id lost its default').toBe('merge');
+    expect(api.joinRemote).not.toHaveBeenCalled();
+  });
+
   it('a pasted pub/sub key joins by key with the publisher URL, with no mapping step (F-41)', () => {
     const f = make();
     const c = f.componentInstance;
