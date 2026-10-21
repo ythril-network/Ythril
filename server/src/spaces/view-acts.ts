@@ -20,7 +20,7 @@ import type { Config, TokenRecord, ViewRecord } from '../config/types.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { getConfig, mutateConfig } from '../config/loader.js';
 import {
-  MAX_VIEWS_PER_OWNER, MAX_VIEW_MEMBERS, VIEW_NAME_MAX, VIEW_NAME_PATTERN, WILDCARD_MEMBER, ViewRefusal,
+  MAX_VIEWS_PER_OWNER, MAX_VIEW_MEMBERS, VIEW_NAME_MAX, VIEW_NAME_PATTERN, WILDCARD_MEMBER, ViewMembersInput, ViewRefusal,
   copySourceKey, deleteView, freeViewName, isValidViewName, isViewId, memberAdmissible, renameView, viewIdOf, resolveOwnView, viewOwnerKind, viewOwnerOf, viewReadMembers, viewsOfOwner,
   type ViewOwnerSource,
 } from '../config/views.js';
@@ -39,7 +39,7 @@ import { z } from 'zod';
  * compares. The count is of the list as SENT, as the tool's `maxItems` counts it, so one list is refused or accepted alike whichever
  * door it came through. Which refusal a list outside them gets is `checkedMembers`'s.
  */
-export const ViewCreateInput = z.object({ members: z.array(z.string()).min(1).max(MAX_VIEW_MEMBERS) });
+export const ViewCreateInput = z.object({ members: ViewMembersInput });
 export const ViewUpdateInput = ViewCreateInput.partial();
 
 /** Who is acting: the record that identifies them, and the rights the call is judged by. */

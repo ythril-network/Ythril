@@ -37,7 +37,7 @@ import { VIEW_OWNER_KINDS, WILDCARD_MEMBER, liveOwnerKeys, viewIdOf, viewOwnerKi
 
 export {
   VIEW_NAME_PATTERN, VIEW_NAME_MAX, MAX_VIEWS_PER_OWNER, MAX_VIEW_MEMBERS, WILDCARD_MEMBER, isViewId, isValidViewName, freeViewName,
-  viewOwnerKind, validateViews, viewOwnerOf, liveOwnerKeys, viewIdOf,
+  viewOwnerKind, validateViews, viewOwnerOf, liveOwnerKeys, viewIdOf, ViewMembersInput,
 } from './view-shape.js';
 export type { ViewOwnerSource } from './view-shape.js';
 

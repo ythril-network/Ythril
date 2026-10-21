@@ -13,6 +13,7 @@
  * segment after the `@`, two views of one owner with one name cannot both be addressed, a member that is itself a view would make
  * a read recurse, and an owner key of a kind nothing issues can never be matched by a live token or swept.
  */
+import { z } from 'zod';
 import type { ViewRecord } from './types.js';
 import { tokenIsLive } from '../auth/token-liveness.js';
 import { isOidc } from '../auth/oidc-caller.js';
@@ -24,8 +25,15 @@ export const VIEW_NAME_MAX = 40;
 export const MAX_VIEWS_PER_OWNER = 50;
 /** Members one view may name; `'*'` counts as one. */
 export const MAX_VIEW_MEMBERS = 1000;
-/** The member list that means "every space the caller reads". */
+/** The member that means "every space the caller reads"; a view lists it as the whole list, `[WILDCARD_MEMBER]`. */
 export const WILDCARD_MEMBER = '*';
+
+/**
+ * The shape of a view's `members` as both doors parse it: a LIST of strings, 1 to {@link MAX_VIEW_MEMBERS} long, the wildcard
+ * included (`["*"]`). Here, with no dependency but zod, so the client's contract spec can parse what its dialog sends against the
+ * server's own schema rather than a second spelling of it (a bare `"*"` string was sent by the client and refused here).
+ */
+export const ViewMembersInput = z.array(z.string()).min(1).max(MAX_VIEW_MEMBERS);
 
 /** The owner-key kinds a view may carry, one per way a caller is identified. */
 export const VIEW_OWNER_KINDS = Object.freeze(['token', 'oauth', 'oidc'] as const);
