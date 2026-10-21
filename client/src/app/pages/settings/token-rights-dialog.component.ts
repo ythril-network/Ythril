@@ -10,6 +10,7 @@ import { FormsModule } from '@angular/forms';
 import type { TokenRights } from './rights-glyph.component';
 import type { Space, TokenRecord } from '../../core/api.types';
 import { refusalText } from '../../core/refusal-text';
+import { TokenViewCopyComponent } from './token-view-copy.component';
 
 /**
  * Edit an existing token's rights.
@@ -36,7 +37,7 @@ import { refusalText } from '../../core/refusal-text';
   selector: 'app-token-rights-dialog',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [TranslocoPipe, PhIconComponent, ModalDirective, RightsMatrixComponent, FormsModule],
+  imports: [TranslocoPipe, PhIconComponent, ModalDirective, RightsMatrixComponent, FormsModule, TokenViewCopyComponent],
   styles: [DIALOG_STYLES, `
     /* The matrix is areas x rungs, once per space. At the shared 600px default it renders as a column of
        squeezed cells and the space rows wrap — reported as "too narrow". The --dialog-max-width variable exists
@@ -89,6 +90,9 @@ import { refusalText } from '../../core/refusal-text';
 
         <label style="display:block;margin-bottom:6px;">{{ 'tokens.create.permission' | transloco }}</label>
         <app-rights-matrix [rights]="draft()" [spaces]="spaceIds()" (changed)="draft.set($event)"/>
+
+        <!-- A copy of the caller's own personal views for THIS token: offered where the token is managed, to a caller who may. -->
+        <app-token-view-copy [targetTokenId]="token().id" [mayManage]="mayManage()" />
 
 
         <!-- Danger zone. Present because this editor is where a token is managed, and rotate/revoke were
@@ -153,6 +157,8 @@ export class TokenRightsDialogComponent {
 
   token = input.required<TokenRecord>();
   availableSpaces = input<Space[]>([]);
+  /** The caller may manage tokens (the host's token list answered): the guard behind "Copy personal views to this token". */
+  mayManage = input(false);
   close = output<void>();
   saved = output<TokenRecord>();
   /**

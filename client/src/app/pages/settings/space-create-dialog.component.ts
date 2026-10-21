@@ -1,5 +1,5 @@
 /**
- * Create-space dialog — label/id/quota, proxy targets, and the initial schema/purpose.
+ * Create-space dialog — label/id/quota, and the initial schema/purpose.
  *
  * Extracted from SpacesComponent (A17.8b). It appends the new space through SpacesStore rather
  * than handing it back to a parent, so the only output is `closed` — the dialog's visibility is
@@ -16,13 +16,13 @@ import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { SpacesStore } from './spaces-store.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { SpaceMeta, ValidationMode } from '../../core/api.types';
-import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { refusalText } from '../../core/refusal-text';
+import { retiredAmong } from '../../core/retired-space-ids';
 
 @Component({
   selector: 'app-space-create-dialog',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, HscrollTopDirective],
+  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SPACE_DIALOG_STYLES],
   template: `
@@ -33,6 +33,7 @@ import { refusalText } from '../../core/refusal-text';
       <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="closed.emit()"><ph-icon name="x" [size]="14"/></button>
     </div>
     @if (createError()) { <div class="alert alert-error">{{ createError() }}</div> }
+    @if (retiredId(); as retired) { <div class="alert alert-error" role="alert">{{ 'spaces.create.idRetired' | transloco: { id: retired } }}</div> }
     <form (ngSubmit)="createSpace()" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
       <div class="field" style="flex:1;min-width:140px;margin-bottom:0;">
         <label>{{ 'spaces.create.label' | transloco }}</label>
@@ -51,31 +52,6 @@ import { refusalText } from '../../core/refusal-text';
           <label>{{ 'spaces.create.purpose' | transloco }}</label>
           <textarea [(ngModel)]="form.purpose" name="purpose" maxlength="4000" rows="8" style="resize:vertical;flex:1;min-height:160px;" [placeholder]="'spaces.create.purposePlaceholder' | transloco"></textarea>
         </div>
-        <div class="field" style="flex:1;margin-bottom:0;display:flex;flex-direction:column;">
-          <label>{{ 'spaces.create.proxyFor' | transloco }}</label>
-          @if (store.spaces().length > 0) {
-            <div class="table-wrapper" hscrollTop style="flex:1;min-height:160px;max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);">
-              <table style="margin:0;">
-                <thead><tr><th style="width:40px;"></th><th>{{ 'spaces.table.column.label' | transloco }}</th><th>{{ 'spaces.table.column.id' | transloco }}</th></tr></thead>
-                <tbody>
-                  <tr style="cursor:pointer;background:var(--bg-elevated);" (click)="toggleProxyForAll()">
-                    <td style="text-align:center;"><input type="checkbox" [checked]="proxyForAll" (click)="$event.stopPropagation()" (change)="toggleProxyForAll()" /></td>
-                    <td colspan="2" style="font-style:italic;color:var(--text-muted);">{{ 'spaces.create.proxyForAll' | transloco }}</td>
-                  </tr>
-                  @for (s of store.spaces(); track s.id) {
-                    <tr style="cursor:pointer;" [class.text-muted]="proxyForAll" (click)="!proxyForAll && toggleProxyFor(s.id)">
-                      <td style="text-align:center;"><input type="checkbox" [checked]="proxyForAll || isProxyForSelected(s.id)" [disabled]="proxyForAll" (click)="$event.stopPropagation()" (change)="!proxyForAll && toggleProxyFor(s.id)" /></td>
-                      <td>{{ s.label }}</td>
-                      <td><span class="badge badge-gray mono">{{ s.id }}</span></td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          } @else {
-            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">{{ 'spaces.create.noExistingSpaces' | transloco }}</div>
-          }
-        </div>
       </div>
       <div style="display:flex;gap:12px;flex-basis:100%;align-items:flex-end;">
         <div class="field" style="margin-bottom:0;">
@@ -87,7 +63,7 @@ import { refusalText } from '../../core/refusal-text';
         <label class="field" style="margin-bottom:0;display:flex;flex-direction:row;align-items:center;gap:8px;font-weight:normal;cursor:pointer;height:34px;">
           <input type="checkbox" [(ngModel)]="form.strictLinkage" name="strictLinkage" />{{ 'spaces.create.strictLinkage' | transloco }}
         </label>
-        <button class="btn btn-primary" type="submit" style="margin-left:auto;" [disabled]="creating()||!form.label.trim()">
+        <button class="btn btn-primary" type="submit" style="margin-left:auto;" [disabled]="creating()||!form.label.trim()||!!retiredId()">
           @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.create.submitButton' | transloco }}
         </button>
       </div>
@@ -109,10 +85,6 @@ export class SpaceCreateDialogComponent {
 
   createError      = signal('');
 
-  proxyForSelected: string[] = [];
-
-  proxyForAll = false;
-
   // The Purpose field starts empty — it used to pre-fill a long MCP tool listing, which the owner
   // never wanted persisted (it is exposed over MCP anyway). Validation defaults to the fully-strict
   // posture, matching the server's new-space default (#400), so the form never understates what will
@@ -124,29 +96,19 @@ export class SpaceCreateDialogComponent {
     strictLinkage: true,
   };
 
-  isProxyForSelected(id: string): boolean { return this.proxyForSelected.includes(id); }
-
-  toggleProxyFor(id: string): void {
-    if (this.proxyForAll) return;
-    this.proxyForSelected = this.proxyForSelected.includes(id)
-      ? this.proxyForSelected.filter(s => s !== id)
-      : [...this.proxyForSelected, id];
-  }
-
-  toggleProxyForAll(): void {
-    this.proxyForAll = !this.proxyForAll;
-    if (this.proxyForAll) this.proxyForSelected = [];
+  /** The typed id when it is one of the reserved ids of a former proxy space, else ''; the server refuses it after the request. */
+  retiredId(): string {
+    const id = this.form.id.trim();
+    return id ? retiredAmong([id], this.store.retiredSpaceIds())[0] ?? '' : '';
   }
 
   createSpace(): void {
-    if (!this.form.label.trim()) return;
+    if (!this.form.label.trim() || this.retiredId()) return;
     this.creating.set(true);
     this.createError.set('');
     const body: Parameters<SpacesApi['createSpace']>[0] = { label: this.form.label.trim() };
     if (this.form.id.trim()) body.id = this.form.id.trim();
     if (this.form.maxGiB) body.maxGiB = this.form.maxGiB;
-    if (this.proxyForAll) body.proxyFor = ['*'];
-    else if (this.proxyForSelected.length) body.proxyFor = [...this.proxyForSelected];
     // Send the validation choices EXPLICITLY, always. The server now defaults a new space to a
     // fully-strict posture when they are omitted (#400); if the form quietly dropped an 'off'/unchecked
     // choice it would create a strict space while showing the user 'off' — so the form must be
@@ -165,8 +127,6 @@ export class SpaceCreateDialogComponent {
         this.closed.emit();
         this.store.spaces.update(list => [...list, space]);
         this.form = { label: '', id: '', maxGiB: null, purpose: '', validationMode: 'strict', strictLinkage: true };
-        this.proxyForSelected = [];
-        this.proxyForAll = false;
         // Vector indexes finish building server-side (B1); poll so the "preparing
         // indexes" badge clears on its own when the space is ready.
         if (space.indexStatus === 'building') this.store.pollIndexStatus();

@@ -9,6 +9,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { formatList } from '../../core/list-format';
+import { retiredAmong } from '../../core/retired-space-ids';
 
 /**
  * Join-network dialog, extracted from the (large) NetworksComponent (PR-U3). Owns the invite-bundle
@@ -105,7 +106,7 @@ import { formatList } from '../../core/list-format';
                   [attr.aria-describedby]="collidingRows().includes(remoteId) ? 'join-error' : null"
                   style="width:210px;"
                 >
-                  <option value="merge">{{ (existsLocally(remoteId) ? 'networks.dialog.join.mapping.sameMerge' : 'networks.dialog.join.mapping.sameCreate') | transloco: { remoteId } }}</option>
+                  <option value="merge" [disabled]="isRetired(remoteId)">{{ (isRetired(remoteId) ? 'networks.dialog.join.mapping.sameRetired' : existsLocally(remoteId) ? 'networks.dialog.join.mapping.sameMerge' : 'networks.dialog.join.mapping.sameCreate') | transloco: { remoteId } }}</option>
                   <option value="mapToExisting">{{ 'networks.dialog.join.mapping.mapToExisting' | transloco }}</option>
                   <option value="alias">{{ 'networks.dialog.join.mapping.newName' | transloco }}</option>
                 </select>
@@ -161,6 +162,8 @@ export class NetworkJoinDialogComponent {
 
   /** Local spaces (for collision detection). */
   readonly availableSpaces = input<Space[]>([]);
+  /** Ids reserved since they were a proxy space (`GET /api/spaces`, to an admin): taken for the collision check and refused as an alias. */
+  readonly retiredSpaceIds = input<readonly string[]>([]);
   /** This brain's own URL, computed by the host — used to submit the join (never edited here). */
   readonly myUrl = input('');
 
@@ -244,8 +247,10 @@ export class NetworkJoinDialogComponent {
       this.joinSpaceAliases = {};
       this.joinSpaceTargets = {};
       for (const id of bundle.spaces as string[]) {
-        this.joinSpaceActions[id] = 'merge';
-        this.joinSpaceAliases[id] = '';
+        // A reserved id (a former proxy's) cannot be kept: the row starts on a new name, which the operator can change.
+        const reserved = this.isRetired(id);
+        this.joinSpaceActions[id] = reserved ? 'alias' : 'merge';
+        this.joinSpaceAliases[id] = reserved ? id + '-local' : '';
         this.joinSpaceTargets[id] = '';
       }
       this.joinMapSpaces.set(bundle.spaces as string[]);
@@ -268,7 +273,12 @@ export class NetworkJoinDialogComponent {
 
   /** Whether this instance already holds a space with the invited id — what "same name" then means. */
   existsLocally(remoteId: string): boolean {
-    return this.availableSpaces().some(s => s.id === remoteId);
+    return this.availableSpaces().some(s => s.id === remoteId) || this.isRetired(remoteId);
+  }
+
+  /** Whether `id` is reserved since it was a proxy space: taken, though no space holds it (the server refuses it after the handshake). */
+  isRetired(id: string): boolean {
+    return retiredAmong([id], this.retiredSpaceIds()).length > 0;
   }
 
   confirmJoin(): void {
@@ -287,6 +297,11 @@ export class NetworkJoinDialogComponent {
         }
         if (localIds.has(alias)) {
           this.joinError.set(this.transloco.translate('networks.dialog.join.error.aliasExists', { alias }));
+          return;
+        }
+        if (this.isRetired(alias)) {
+          // The id leads the sentence as data: a reserved id is named even where the sentence is not translated yet.
+          this.joinError.set(`${alias}: ${this.transloco.translate('networks.dialog.join.error.aliasRetired')}`);
           return;
         }
       }

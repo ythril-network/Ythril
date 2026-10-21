@@ -61,7 +61,7 @@ import type { TokenSortField, SortDir } from './token-table';
     @if (editRightsFor(); as t) {
       <app-token-rights-dialog
         [token]="t"
-        [availableSpaces]="availableSpaces()"
+        [availableSpaces]="availableSpaces()" [mayManage]="loadError() === null"
         (close)="editRightsFor.set(null)"
         (saved)="onRightsSaved($event)"
         (rotate)="dangerFromEditor(t, 'rotate')"
