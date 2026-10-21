@@ -1,26 +1,17 @@
 /**
- * Integration tests: Proxy spaces
+ * Integration tests: personal views (Q-531, 6.0) - the contract that replaced the proxy space.
+ *
+ * (The file keeps its name, which the surface-matrix and the board refer to; a proxy is a personal view now.)
  *
  * Covers:
- *  — Create a proxy space grouping two real spaces
- *  — Proxy space appears in space listing with proxyFor field
- *  — Proxy nesting rejected (proxy-of-proxy)
- *  — Non-existent member rejected
- *  — Brain reads aggregate across member spaces
- *  — Brain writes require targetSpace param
- *  — Brain writes without targetSpace return 400
- *  — Brain delete searches across member spaces
- *  — Brain stats sum across members
- *  — File reads aggregate directory listings across members
- *  — File writes require targetSpace
- *  — File reads find files across members
- *  — MCP recall aggregates across member spaces
- *  — MCP remember requires targetSpace for proxy
- *  — MCP read_file / list_dir aggregate across members
- *  — MCP write_file requires targetSpace for proxy
- *  — Entities/edges aggregate across members
- *  — Reindex-status aggregates across members
- *  — Cleanup
+ *  - A view is made by `POST /api/views`, listed by `GET /api/views`, and is NOT a space (absent from `GET /api/spaces`)
+ *  - `proxyFor` is retired on `POST /api/spaces`, refused by name with the view door as its replacement
+ *  - A view lists spaces only: another view and a missing space are refused
+ *  - Brain reads aggregate across the members the caller reads, and the answer says which it read (`viewMembers`)
+ *  - Every write door answers a view id as an unknown space; `targetSpace` is refused by name (query and body)
+ *  - Files: a listing aggregates across members; every file write to a view is refused
+ *  - MCP: `filter`, `list_dir` and `read_file` read through `@view`; `save_fact` refuses it; `view_list` mirrors the REST door
+ *  - Deleting a view deletes no data; deleting a member space drops it from the view
  *
  * Run: node --test testing/integration/proxy-spaces.test.js
  */
@@ -30,7 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, get, del, delWithBody, reqJson, readRecord, readCollection } from '../sync/helpers.js';
+import { INSTANCES, post, get, del, delWithBody, reqJson, readCollection } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,439 +32,210 @@ let tokenA;
 const RUN = `px${Date.now()}`;
 const SPACE_A = `${RUN}-alpha`;
 const SPACE_B = `${RUN}-beta`;
-const PROXY = `${RUN}-proxy`;
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
+const NAME = `${RUN}-team`;
+const VIEW = `@${NAME}`;
+const VIEW_URL = encodeURIComponent(VIEW);
 
 function patch(baseUrl, token, urlPath, data) {
-  return reqJson(baseUrl, token, urlPath, {
-    method: 'PATCH',
-    body: JSON.stringify(data),
-  });
+  return reqJson(baseUrl, token, urlPath, { method: 'PATCH', body: JSON.stringify(data) });
 }
 
-// The MCP client harness lives in ../sync/mcp-session.js. It was copy-pasted into ten files while the
-// transport was SSE; 4.0 removed SSE and one shared `POST /mcp` caller replaced every copy.
-
-// ── Test suite ───────────────────────────────────────────────────────────────
-
-describe('Proxy spaces', () => {
+describe('Personal views', () => {
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
-
-    // Create two member spaces
-    const rA = await post(BASE, tokenA, '/api/spaces', { id: SPACE_A, label: 'Alpha', meta: { strictLinkage: false } });
-    assert.equal(rA.status, 201, `Create alpha: ${JSON.stringify(rA.body)}`);
-    const rB = await post(BASE, tokenA, '/api/spaces', { id: SPACE_B, label: 'Beta', meta: { strictLinkage: false } });
-    assert.equal(rB.status, 201, `Create beta: ${JSON.stringify(rB.body)}`);
-
-    // Create the proxy space
-    const rP = await post(BASE, tokenA, '/api/spaces', {
-      id: PROXY,
-      label: 'Proxy',
-      meta: { purpose: 'Aggregates alpha and beta.' },
-      proxyFor: [SPACE_A, SPACE_B],
-    });
-    assert.equal(rP.status, 201, `Create proxy: ${JSON.stringify(rP.body)}`);
+    for (const [id, label] of [[SPACE_A, 'Alpha'], [SPACE_B, 'Beta']]) {
+      const r = await post(BASE, tokenA, '/api/spaces', { id, label, meta: { strictLinkage: false } });
+      assert.equal(r.status, 201, `Create ${id}: ${JSON.stringify(r.body)}`);
+    }
+    const v = await post(BASE, tokenA, '/api/views', { name: NAME, members: [SPACE_A, SPACE_B] });
+    assert.equal(v.status, 201, `Create view: ${JSON.stringify(v.body)}`);
+    assert.equal(v.body.view.id, VIEW);
   });
 
   after(async () => {
-    for (const id of [PROXY, SPACE_A, SPACE_B]) {
-      await delWithBody(BASE, tokenA, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
-    }
+    await del(BASE, tokenA, `/api/views/${VIEW_URL}`).catch(() => {});
+    for (const id of [SPACE_A, SPACE_B]) await delWithBody(BASE, tokenA, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
   });
 
-  // ── Space creation & listing ─────────────────────────────────────────────
-
-  describe('Space creation', () => {
-    it('Proxy space appears in listing with proxyFor', async () => {
-      const r = await get(BASE, tokenA, '/api/spaces');
-      assert.equal(r.status, 200);
-      const proxy = r.body.spaces.find(s => s.id === PROXY);
-      assert.ok(proxy, 'Proxy space should be in listing');
-      assert.deepEqual(proxy.proxyFor, [SPACE_A, SPACE_B]);
-      assert.equal(proxy.meta?.purpose, 'Aggregates alpha and beta.');
-      assert.equal('description' in proxy, false,
-        'the alias was removed in 3.0 — the list endpoint derived it for longest, so it is the one to check');
+  describe('creation and listing', () => {
+    it('a view is listed with the members the caller reads, and is not a space', async () => {
+      const v = await get(BASE, tokenA, '/api/views');
+      assert.equal(v.status, 200);
+      const mine = v.body.views.find(x => x.id === VIEW);
+      assert.ok(mine, 'the view should be listed');
+      assert.deepEqual([...mine.members].sort(), [SPACE_A, SPACE_B].sort());
+      assert.deepEqual([...mine.readable].sort(), [SPACE_A, SPACE_B].sort());
+      const spaces = await get(BASE, tokenA, '/api/spaces');
+      assert.equal(spaces.body.spaces.some(s => s.id === VIEW), false, 'a view must not be in the space list');
     });
 
-    it('Proxy nesting rejected', async () => {
-      const r = await post(BASE, tokenA, '/api/spaces', {
-        id: `${RUN}-nested`,
-        label: 'Nested proxy',
-        proxyFor: [PROXY],
-      });
+    it('proxyFor is refused by name, pointing at the view door, and no space is created', async () => {
+      const r = await post(BASE, tokenA, '/api/spaces', { id: `${RUN}-old`, label: 'Old proxy', proxyFor: [SPACE_A] });
       assert.equal(r.status, 400);
-      assert.ok(r.body.error.includes('itself a proxy'), r.body.error);
+      assert.match(r.body.error, /proxyFor/);
+      assert.match(r.body.error, /POST \/api\/views/);
+      const spaces = await get(BASE, tokenA, '/api/spaces');
+      assert.equal(spaces.body.spaces.some(s => s.id === `${RUN}-old`), false);
     });
 
-    it('Non-existent member rejected', async () => {
-      const r = await post(BASE, tokenA, '/api/spaces', {
-        id: `${RUN}-bad`,
-        label: 'Bad proxy',
-        proxyFor: ['does-not-exist-99'],
-      });
-      assert.equal(r.status, 400);
-      assert.ok(r.body.error.includes('not found'), r.body.error);
+    it('a view lists spaces only: another view, and a space that does not exist, are refused', async () => {
+      const nested = await post(BASE, tokenA, '/api/views', { name: `${RUN}-nested`, members: [VIEW] });
+      assert.equal(nested.status, 400, JSON.stringify(nested.body));
+      const missing = await post(BASE, tokenA, '/api/views', { name: `${RUN}-bad`, members: ['does-not-exist-99'] });
+      assert.equal(missing.status, 404, JSON.stringify(missing.body));
+      assert.match(missing.body.error, /not found/i);
     });
   });
 
-  // ── Brain API reads/writes ───────────────────────────────────────────────
+  describe('Brain - reads aggregate, writes refuse', () => {
+    let factA;
 
-  describe('Brain — memories', () => {
-    let memIdA, memIdB;
-
-    it('Write to proxy without targetSpace returns 400', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts`, {
-        fact: 'Should fail',
-      });
-      assert.equal(r.status, 400);
-      assert.ok(r.body.error.includes('targetSpace'), r.body.error);
+    before(async () => {
+      const a = await post(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/facts`, { fact: 'Alpha fact', tags: ['alpha'] });
+      assert.equal(a.status, 201, JSON.stringify(a.body));
+      factA = a.body._id;
+      const b = await post(BASE, tokenA, `/api/brain/spaces/${SPACE_B}/facts`, { fact: 'Beta fact', tags: ['beta'] });
+      assert.equal(b.status, 201, JSON.stringify(b.body));
     });
 
-    it('Write to proxy with invalid targetSpace returns 400', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?targetSpace=non-member`, {
-        fact: 'Should fail',
-      });
-      assert.equal(r.status, 400);
-      assert.ok(r.body.error.includes('not a member'), r.body.error);
-    });
-
-    it('Write memory to alpha via proxy', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?targetSpace=${SPACE_A}`, {
-        fact: 'Alpha fact from proxy',
-        tags: ['alpha'],
-      });
-      assert.equal(r.status, 201, JSON.stringify(r.body));
-      memIdA = r.body._id;
-      assert.ok(memIdA);
-    });
-
-    it('Write memory to beta via proxy', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts?targetSpace=${SPACE_B}`, {
-        fact: 'Beta fact from proxy',
-        tags: ['beta'],
-      });
-      assert.equal(r.status, 201, JSON.stringify(r.body));
-      memIdB = r.body._id;
-      assert.ok(memIdB);
-    });
-
-    it('List memories via proxy aggregates both spaces', async () => {
-      const r = await readCollection(BASE, tokenA, PROXY, 'facts', { limit: 100 });
+    it('listing through the view aggregates both members and names the members it read', async () => {
+      const r = await readCollection(BASE, tokenA, VIEW_URL, 'facts', { limit: 100 });
       assert.equal(r.status, 200);
       const facts = r.results.map(m => m.fact);
-      assert.ok(facts.includes('Alpha fact from proxy'), 'Should include alpha memory');
-      assert.ok(facts.includes('Beta fact from proxy'), 'Should include beta memory');
+      assert.ok(facts.includes('Alpha fact') && facts.includes('Beta fact'), `both members are read: ${facts}`);
+      const raw = await get(BASE, tokenA, `/api/brain/spaces/${VIEW_URL}/facts?limit=100`);
+      assert.deepEqual([...raw.body.viewMembers].sort(), [SPACE_A, SPACE_B].sort());
     });
 
-    it('Get memory by ID via proxy finds it across members', async () => {
-      // memIdA is in alpha, try to get via proxy
-      const r = await readRecord(BASE, tokenA, PROXY, 'facts', memIdA);
+    it('stats sum across the members', async () => {
+      const r = await get(BASE, tokenA, `/api/brain/spaces/${VIEW_URL}/stats`);
       assert.equal(r.status, 200);
-      assert.equal(r.body.fact, 'Alpha fact from proxy');
+      assert.ok(r.body.facts >= 2, `Expected facts >= 2, got ${r.body.facts}`);
     });
 
-    it('Long-form list via /spaces/ prefix aggregates', async () => {
-      const r = await readCollection(BASE, tokenA, PROXY, 'facts', { limit: 100 });
-      assert.equal(r.status, 200);
-      assert.ok(r.results.length >= 2, `Expected >=2 memories, got ${r.results.length}`);
+    it('a write through the view answers as an unknown space, with the owner-only hint, and writes nothing', async () => {
+      const r = await post(BASE, tokenA, `/api/brain/spaces/${VIEW_URL}/facts`, { fact: 'Should fail' });
+      assert.equal(r.status, 404, JSON.stringify(r.body));
+      assert.match(r.body.error, /not found/i);
+      assert.match(r.body.error, /is a view; write to one of its member spaces/);
+      const all = await readCollection(BASE, tokenA, SPACE_A, 'facts', { limit: 100 });
+      assert.equal(all.results.some(m => m.fact === 'Should fail'), false);
     });
 
-    it('Stats aggregate counts across member spaces', async () => {
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/stats`);
-      assert.equal(r.status, 200);
-      assert.ok(r.body.facts >= 2, `Expected memories count >=2, got ${r.body.facts}`);
+    it('a delete through the view is refused and the record stays', async () => {
+      const r = await del(BASE, tokenA, `/api/brain/spaces/${VIEW_URL}/facts/${factA}`);
+      assert.equal(r.status, 404, JSON.stringify(r.body));
+      const still = await get(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/facts/${factA}`);
+      assert.equal(still.status, 200);
     });
 
-    it('Delete memory via proxy works (alpha memory)', async () => {
-      const r = await del(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts/${memIdA}`);
-      assert.equal(r.status, 204);
-
-      // Confirm it's gone
-      const r2 = await readRecord(BASE, tokenA, PROXY, 'facts', memIdA);
-      assert.equal(r2.status, 404);
+    it('the retired targetSpace is refused by name on a write, in the query and in the body', async () => {
+      const query = await post(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/facts?targetSpace=${SPACE_B}`, { fact: 'Should fail' });
+      assert.equal(query.status, 400, JSON.stringify(query.body));
+      assert.match(query.body.error, /targetSpace/);
+      const body = await post(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/facts`, { fact: 'Should fail', targetSpace: SPACE_B });
+      assert.equal(body.status, 400, JSON.stringify(body.body));
+      assert.match(body.body.error, /targetSpace/);
     });
 
-    it('Delete memory via proxy works (long-form, beta memory)', async () => {
-      const r = await del(BASE, tokenA, `/api/brain/spaces/${PROXY}/facts/${memIdB}`);
-      assert.equal(r.status, 204);
-    });
-  });
-
-  // ── Brain API — entities & edges ─────────────────────────────────────────
-
-  describe('Brain — entities & edges via proxy', () => {
-    it('Entities listed via proxy aggregate across members', async () => {
-      // Seed one entity in each member space directly via sync API (single doc body)
-      const rA = await post(BASE, tokenA, '/api/sync/entities?spaceId=' + SPACE_A, {
-        _id: `${RUN}-ent-a`, spaceId: SPACE_A, name: 'AlphaEnt', type: 'test', tags: [], seq: 1,
-        author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      });
-      assert.equal(rA.status, 200, `Seed alpha entity: ${JSON.stringify(rA.body)}`);
-
-      const rB = await post(BASE, tokenA, '/api/sync/entities?spaceId=' + SPACE_B, {
-        _id: `${RUN}-ent-b`, spaceId: SPACE_B, name: 'BetaEnt', type: 'test', tags: [], seq: 1,
-        author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      });
-      assert.equal(rB.status, 200, `Seed beta entity: ${JSON.stringify(rB.body)}`);
-
-      const r = await readCollection(BASE, tokenA, PROXY, 'entities', { limit: 100 });
-      assert.equal(r.status, 200);
-      const names = r.results.map(e => e.name);
-      assert.ok(names.includes('AlphaEnt'), 'Should include alpha entity');
-      assert.ok(names.includes('BetaEnt'), 'Should include beta entity');
-    });
-
-    it('Edges listed via proxy aggregate across members', async () => {
-      const rE = await post(BASE, tokenA, '/api/sync/edges?spaceId=' + SPACE_A, {
-        _id: `${RUN}-edge-a`, spaceId: SPACE_A, from: `${RUN}-ent-a`, to: `${RUN}-ent-b`, label: 'alpha-link', weight: 1, seq: 1,
-        author: { instanceId: 'test', instanceLabel: 'test' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      });
-      assert.equal(rE.status, 200, `Seed alpha edge: ${JSON.stringify(rE.body)}`);
-
-      const r = await readCollection(BASE, tokenA, PROXY, 'edges', { limit: 100 });
-      assert.equal(r.status, 200);
-      assert.ok(r.results.some(e => e.label === 'alpha-link'), 'Should include alpha edge');
-    });
-
-    it('Delete entity via proxy finds it across members', async () => {
-      const r = await del(BASE, tokenA, `/api/brain/spaces/${PROXY}/entities/${RUN}-ent-a`);
-      assert.equal(r.status, 204);
-    });
-
-    it('Delete edge via proxy finds it across members', async () => {
-      const r = await del(BASE, tokenA, `/api/brain/spaces/${PROXY}/edges/${RUN}-edge-a`);
-      assert.equal(r.status, 204);
-    });
-  });
-
-  // ── Reindex status ───────────────────────────────────────────────────────
-
-  describe('Reindex status via proxy', () => {
-    it('Returns aggregated reindex status', async () => {
-      const r = await get(BASE, tokenA, `/api/brain/spaces/${PROXY}/reindex-status`);
+    it('reindex-status reads through the view, and a reindex of the view id is an unknown space', async () => {
+      const r = await get(BASE, tokenA, `/api/brain/spaces/${VIEW_URL}/reindex-status`);
       assert.equal(r.status, 200);
       assert.equal(typeof r.body.needsReindex, 'boolean');
+      const re = await post(BASE, tokenA, `/api/brain/spaces/${VIEW_URL}/reindex`, {});
+      assert.equal(re.status, 404, JSON.stringify(re.body));
     });
   });
 
-  // ── Files API ────────────────────────────────────────────────────────────
-
-  describe('Files — read/write via proxy', () => {
-    it('Write file without targetSpace returns 400', async () => {
-      const r = await post(BASE, tokenA, `/api/files/${PROXY}?path=test.txt`, {
-        content: 'should fail', encoding: 'utf8',
-      });
-      assert.equal(r.status, 400);
-      assert.ok(r.body.error.includes('targetSpace'), r.body.error);
+  describe('Files', () => {
+    before(async () => {
+      for (const [space, name] of [[SPACE_A, 'view-alpha.txt'], [SPACE_B, 'view-beta.txt']]) {
+        const r = await post(BASE, tokenA, `/api/files/${space}?path=${name}`, { content: `${name} content`, encoding: 'utf8' });
+        assert.ok([201, 202].includes(r.status), JSON.stringify(r.body));
+      }
     });
 
-    it('Write file to alpha via proxy', async () => {
-      const r = await post(BASE, tokenA, `/api/files/${PROXY}?path=proxy-alpha.txt&targetSpace=${SPACE_A}`, {
-        content: 'alpha file content', encoding: 'utf8',
-      });
-      assert.ok([201, 202].includes(r.status), JSON.stringify(r.body));
-    });
-
-    it('Write file to beta via proxy', async () => {
-      const r = await post(BASE, tokenA, `/api/files/${PROXY}?path=proxy-beta.txt&targetSpace=${SPACE_B}`, {
-        content: 'beta file content', encoding: 'utf8',
-      });
-      assert.ok([201, 202].includes(r.status), JSON.stringify(r.body));
-    });
-
-    it('Read file from alpha via proxy', async () => {
-      const resp = await fetch(`${BASE}/api/files/${PROXY}?path=proxy-alpha.txt`, {
-        headers: { Authorization: `Bearer ${tokenA}` },
-      });
-      assert.equal(resp.status, 200);
-      const text = await resp.text();
-      assert.equal(text, 'alpha file content');
-    });
-
-    it('List root dir via proxy aggregates entries from both members', async () => {
-      const r = await get(BASE, tokenA, `/api/files/${PROXY}`);
+    it('a root listing through the view aggregates the entries of both members', async () => {
+      const r = await get(BASE, tokenA, `/api/files/${VIEW_URL}`);
       assert.equal(r.status, 200);
       const names = r.body.entries.map(e => e.name);
-      assert.ok(names.includes('proxy-alpha.txt'), `Expected proxy-alpha.txt in listing: ${names}`);
-      assert.ok(names.includes('proxy-beta.txt'), `Expected proxy-beta.txt in listing: ${names}`);
+      assert.ok(names.includes('view-alpha.txt') && names.includes('view-beta.txt'), `listing: ${names}`);
     });
 
-    it('mkdir without targetSpace returns 400', async () => {
-      const r = await post(BASE, tokenA, `/api/files/${PROXY}/mkdir?path=newdir`, {});
-      assert.equal(r.status, 400);
+    it('a file is found across the members', async () => {
+      const resp = await fetch(`${BASE}/api/files/${VIEW_URL}?path=view-alpha.txt`, { headers: { Authorization: `Bearer ${tokenA}` } });
+      assert.equal(resp.status, 200);
+      assert.equal(await resp.text(), 'view-alpha.txt content');
     });
 
-    it('mkdir with targetSpace works', async () => {
-      const r = await post(BASE, tokenA, `/api/files/${PROXY}/mkdir?path=newdir&targetSpace=${SPACE_A}`, {});
-      assert.equal(r.status, 201, JSON.stringify(r.body));
-    });
-
-    it('Delete file without targetSpace returns 400', async () => {
-      const r = await del(BASE, tokenA, `/api/files/${PROXY}?path=proxy-alpha.txt`);
-      assert.equal(r.status, 400);
-    });
-
-    it('Delete file with targetSpace works', async () => {
-      const r = await del(BASE, tokenA, `/api/files/${PROXY}?path=proxy-alpha.txt&targetSpace=${SPACE_A}`);
-      assert.equal(r.status, 204);
-    });
-
-    it('Move file without targetSpace returns 400', async () => {
-      const r = await patch(BASE, tokenA, `/api/files/${PROXY}?path=proxy-beta.txt`, {
-        destination: 'renamed.txt',
-      });
-      assert.equal(r.status, 400);
-    });
-
-    it('Move file with targetSpace works', async () => {
-      const r = await patch(BASE, tokenA, `/api/files/${PROXY}?path=proxy-beta.txt&targetSpace=${SPACE_B}`, {
-        destination: 'renamed.txt',
-      });
-      assert.equal(r.status, 200, JSON.stringify(r.body));
+    it('every file write through the view is an unknown space: upload, mkdir, delete, move', async () => {
+      const upload = await post(BASE, tokenA, `/api/files/${VIEW_URL}?path=nope.txt`, { content: 'x', encoding: 'utf8' });
+      const mkdir = await post(BASE, tokenA, `/api/files/${VIEW_URL}/mkdir?path=newdir`, {});
+      const remove = await del(BASE, tokenA, `/api/files/${VIEW_URL}?path=view-alpha.txt`);
+      const move = await patch(BASE, tokenA, `/api/files/${VIEW_URL}?path=view-beta.txt`, { destination: 'renamed.txt' });
+      for (const [what, r] of [['upload', upload], ['mkdir', mkdir], ['delete', remove], ['move', move]]) {
+        assert.equal(r.status, 404, `${what} through a view: ${r.status} ${JSON.stringify(r.body)}`);
+      }
     });
   });
 
-  // ── Regular spaces still work (regression) ──────────────────────────────
-
-  describe('Regular spaces unaffected by proxy code', () => {
-    it('Write memory to alpha directly (no targetSpace needed)', async () => {
-      const r = await post(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/facts`, {
-        fact: 'Direct alpha fact',
-      });
-      assert.equal(r.status, 201, JSON.stringify(r.body));
-    });
-
-    it('Write file to beta directly (no targetSpace needed)', async () => {
-      const r = await post(BASE, tokenA, `/api/files/${SPACE_B}?path=direct.txt`, {
-        content: 'direct content', encoding: 'utf8',
-      });
-      assert.ok([201, 202].includes(r.status), JSON.stringify(r.body));
-    });
-  });
-
-  // ── MCP tools via proxy space ────────────────────────────────────────────
-
-  describe('MCP tools through proxy space', () => {
+  describe('MCP', () => {
     let session;
-    before(async () => {
-      // Seed data: one memory in each member space for recall testing
-      await post(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/facts`, {
-        fact: 'Alpha MCP recall test fact about quantum physics',
-        tags: ['mcp-test'],
-      });
-      await post(BASE, tokenA, `/api/brain/spaces/${SPACE_B}/facts`, {
-        fact: 'Beta MCP recall test fact about machine learning',
-        tags: ['mcp-test'],
-      });
-      // Write a file in alpha for read_file testing
-      await post(BASE, tokenA, `/api/files/${SPACE_A}?path=mcp-test.txt`, {
-        content: 'MCP test file in alpha', encoding: 'utf8',
-      });
+    before(async () => { session = await openMcpSession(tokenA); });
 
-      session = await openMcpSession(tokenA);
-    });
-    after(() => session?.close());
-
-    it('tools/list includes all expected tools', async () => {
-      const tools = await session.listTools();
-      const names = tools.map(t => t.name);
-      assert.ok(names.includes('save_fact'), 'remember tool should be present');
-      assert.ok(names.includes('recall'), 'recall tool should be present');
-      assert.ok(names.includes('read_file'), 'read_file tool should be present');
+    it('filter reads through the view and says which members it read', async () => {
+      const r = await session.callTool('filter', { space: VIEW, collection: 'facts', filter: {} });
+      assert.ok(!r?.isError, JSON.stringify(r));
+      assert.deepEqual([...r.structuredContent.viewMembers].sort(), [SPACE_A, SPACE_B].sort());
+      const facts = (r.structuredContent.results ?? []).map(m => m.fact);
+      assert.ok(facts.includes('Alpha fact') && facts.includes('Beta fact'), `facts: ${facts}`);
     });
 
-    it('remember without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('save_fact', { space: PROXY, fact: 'Should fail without target' });
-      assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
-        `Expected error about targetSpace, got: ${JSON.stringify(result)}`);
+    it('list_dir and read_file read through the view', async () => {
+      const ls = await session.callTool('list_dir', { space: VIEW });
+      assert.ok(!ls?.isError, JSON.stringify(ls));
+      assert.ok(ls.content[0].text.includes('view-alpha.txt') && ls.content[0].text.includes('view-beta.txt'));
+      const read = await session.callTool('read_file', { space: VIEW, path: 'view-beta.txt' });
+      assert.ok(!read?.isError, JSON.stringify(read));
+      assert.ok(read.content[0].text.includes('view-beta.txt content'));
     });
 
-    it('remember with targetSpace works', async () => {
-      const result = await session.callTool('save_fact', {
-        space: PROXY,
-        fact: 'MCP proxy write to alpha',
-        targetSpace: SPACE_A,
-      });
-      assert.ok(!result.isError, `Expected success, got: ${JSON.stringify(result)}`);
-      assert.ok(result.content?.[0]?.text?.includes('Stored fact'));
+    it('save_fact and write_file refuse the view id as an unknown space', async () => {
+      const fact = await session.callTool('save_fact', { space: VIEW, fact: 'Should fail' });
+      assert.ok(fact?.isError, JSON.stringify(fact));
+      assert.match(fact.content[0].text, /not found/i);
+      const file = await session.callTool('write_file', { space: VIEW, path: 'nope.txt', content: 'x' });
+      assert.ok(file?.isError, JSON.stringify(file));
     });
 
-    it('recall aggregates across member spaces (or errors if index not ready)', async () => {
-      // Vector search indexes may not be ready on newly-created spaces.
-      // This test verifies the aggregation path runs without crashing.
-      const result = await session.callTool('recall', { space: PROXY, query: 'quantum physics machine learning', topK: 20 });
-      // Either succeeds with results, or returns a reindex/index error (both acceptable)
-      const text = result.content?.[0]?.text ?? '';
-      assert.ok(text.length > 0, 'Should return some response text');
+    it('a retired targetSpace is refused by name', async () => {
+      const r = await session.callTool('save_fact', { space: SPACE_A, targetSpace: SPACE_B, fact: 'Should fail' });
+      assert.ok(r?.isError, JSON.stringify(r));
+      assert.match(r.content[0].text, /targetSpace/);
     });
 
-    it('query tool aggregates across member spaces', async () => {
-      // Use query (MongoDB find, no vector index needed) to verify aggregation
-      const result = await session.callTool('filter', {
-        space: PROXY, collection: 'facts', filter: { tags: 'mcp-test' }, limit: 50,
-      });
-      assert.ok(!result.isError, JSON.stringify(result));
-      const docs = JSON.parse(result.content?.[0]?.text ?? '[]');
-      assert.ok(docs.length >= 2, `Expected >=2 memories with tag mcp-test, got ${docs.length}`);
+    it('view_list mirrors GET /api/views', async () => {
+      const r = await session.callTool('view_list', {});
+      assert.ok(!r?.isError, JSON.stringify(r));
+      assert.ok(r.structuredContent.views.some(v => v.id === VIEW));
     });
+  });
 
-    it('read_file finds files across member spaces', async () => {
-      const result = await session.callTool('read_file', { space: PROXY, path: 'mcp-test.txt' });
-      assert.ok(!result.isError, JSON.stringify(result));
-      assert.equal(result.content?.[0]?.text, 'MCP test file in alpha');
-    });
-
-    it('list_dir aggregates across member spaces', async () => {
-      const result = await session.callTool('list_dir', { space: PROXY, path: '' });
-      assert.ok(!result.isError, JSON.stringify(result));
-      const text = result.content?.[0]?.text ?? '';
-      // Should see files from both member spaces
-      assert.ok(text.includes('mcp-test.txt') || text.includes('direct.txt') || text.includes('renamed.txt'),
-        `Expected aggregated dir listing, got: ${text}`);
-    });
-
-    it('write_file without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('write_file', { space: PROXY, path: 'fail.txt', content: 'x' });
-      assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
-        `Expected targetSpace error, got: ${JSON.stringify(result)}`);
-    });
-
-    it('write_file with targetSpace works', async () => {
-      const result = await session.callTool('write_file', {
-        space: PROXY, path: 'mcp-written.txt', content: 'written via MCP proxy', targetSpace: SPACE_B,
-      });
-      assert.ok(!result.isError, JSON.stringify(result));
-      assert.ok(result.content?.[0]?.text?.includes('Written'));
-    });
-
-    it('upsert_entity without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('save_entity', { space: PROXY, name: 'Fail', type: 'test' });
-      assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
-        `Expected targetSpace error, got: ${JSON.stringify(result)}`);
-    });
-
-    it('upsert_entity with targetSpace works', async () => {
-      const result = await session.callTool('save_entity', {
-        space: PROXY, name: 'McpEntity', type: 'test', targetSpace: SPACE_A,
-      });
-      assert.ok(!result.isError, JSON.stringify(result));
-      assert.ok(result.content?.[0]?.text?.includes('upserted'));
-    });
-
-    it('delete_file without targetSpace returns error for proxy', async () => {
-      const result = await session.callTool('delete_file', { space: PROXY, path: 'mcp-written.txt' });
-      assert.ok(result.isError || result.content?.[0]?.text?.includes('targetSpace'),
-        `Expected targetSpace error, got: ${JSON.stringify(result)}`);
-    });
-
-    it('delete_file with targetSpace works', async () => {
-      const result = await session.callTool('delete_file', {
-        space: PROXY, path: 'mcp-written.txt', targetSpace: SPACE_B,
-      });
-      assert.ok(!result.isError, JSON.stringify(result));
-      assert.ok(result.content?.[0]?.text?.includes('Deleted'));
+  describe('lifecycle', () => {
+    it('deleting a member space drops it from the view, and deleting the view deletes no data', async () => {
+      const spare = `${RUN}-spare`;
+      assert.equal((await post(BASE, tokenA, '/api/spaces', { id: spare, label: 'Spare' })).status, 201);
+      const made = await post(BASE, tokenA, '/api/views', { name: `${RUN}-life`, members: [SPACE_A, spare] });
+      assert.equal(made.status, 201, JSON.stringify(made.body));
+      const gone = await delWithBody(BASE, tokenA, `/api/spaces/${spare}`, { confirm: true });
+      assert.ok([200, 202, 204].includes(gone.status), `delete the member: ${gone.status} ${JSON.stringify(gone.body)}`);
+      const list = await get(BASE, tokenA, '/api/views');
+      const life = list.body.views.find(v => v.id === `@${RUN}-life`);
+      assert.deepEqual(life.members, [SPACE_A], 'a deleted space must leave the views that listed it');
+      const removed = await del(BASE, tokenA, `/api/views/${encodeURIComponent(`@${RUN}-life`)}`);
+      assert.equal(removed.status, 204);
+      const facts = await readCollection(BASE, tokenA, SPACE_A, 'facts', { limit: 100 });
+      assert.ok(facts.results.length >= 1, 'deleting a view must not touch the data of a member');
     });
   });
 });

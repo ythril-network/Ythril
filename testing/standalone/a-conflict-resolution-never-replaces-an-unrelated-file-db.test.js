@@ -55,7 +55,8 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'confplace';
 /** The space a copy is saved to, and a proxy over it (a target must be a concrete space). */
 const T = 'confplace-target';
-const PROXY = 'confplace-proxy';
+/** A personal view's id: a view is not a space, so it is never a place a copy can be saved to. */
+const VIEW = '@confplace-team';
 const T0 = '2026-09-01T00:00:00.000Z';
 const COPY = 'doc.conflict-peer.txt';
 const ORIGINAL = 'doc.txt';
@@ -89,7 +90,6 @@ const recordOnly = (space, p) => acts.door.coll(space, 'files').insertOne({ _id:
 describe('resolving a conflict never replaces a file it was not about (Q-466)', { skip }, () => {
   before(async () => {
     acts = await openFileActDoors({ suite: 'confplace', space: S, otherSpaces: [T] });
-    (await import('../../server/dist/config/loader.js')).getConfig().spaces.push({ id: PROXY, label: PROXY, folders: [], proxyFor: [T] });
     outside = fs.mkdtempSync(path.join(os.tmpdir(), 'confplace-outside-'));
   });
   after(async () => {
@@ -307,11 +307,11 @@ describe('resolving a conflict never replaces a file it was not about (Q-466)', 
       assert.equal(read(T, COPY), `incoming ${COPY}`);
     });
 
-    it('a proxy space is not a target: 400, and nothing moves', async () => {
+    it('a personal view is not a target: 403, and nothing moves', async () => {
       const id = await conflict();
       const before = await snapshot();
-      const res = await acts.conflicts.resolve(id, 'save-to-space', { targetSpaceId: PROXY });
-      assert.equal(res.code, 400, `answered ${res.code}: ${sentence(res)}`);
+      const res = await acts.conflicts.resolve(id, 'save-to-space', { targetSpaceId: VIEW });
+      assert.equal(res.code, 403, `answered ${res.code}: ${sentence(res)}`);
       assert.deepEqual(await snapshot(), before);
     });
 
@@ -320,8 +320,8 @@ describe('resolving a conflict never replaces a file it was not about (Q-466)', 
       const denied = await acts.conflicts.bulk([id], 'save-to-space', { targetSpaceId: T, rights: rights('read') });
       assert.ok(denied.code === 403 || denied.body?.failed?.[0]?.status === 403, `bulk without files:write on the target: ${denied.code} ${sentence(denied)}`);
       assert.ok(has(S, COPY) && !has(T, COPY), 'the copy was placed without files:write on the target');
-      const proxied = await acts.conflicts.bulk([id], 'save-to-space', { targetSpaceId: PROXY });
-      assert.ok(proxied.code === 400 || proxied.body?.failed?.[0]?.status === 400, `bulk onto a proxy: ${proxied.code} ${sentence(proxied)}`);
+      const viewed = await acts.conflicts.bulk([id], 'save-to-space', { targetSpaceId: VIEW });
+      assert.ok(viewed.code === 403 || viewed.body?.failed?.[0]?.status === 403, `bulk onto a personal view: ${viewed.code} ${sentence(viewed)}`);
     });
   });
 

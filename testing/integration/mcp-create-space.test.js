@@ -91,40 +91,19 @@ describe('create_space is offered and creates', () => {
     assert.equal((await meta(id)).body.validationMode, 'off');
   });
 
-  it('a proxy space is left UN-seeded, because it stores nothing to validate', async () => {
+  it('a retired proxyFor is refused by name, with the view door as its replacement, and no space is created', async () => {
     const member = idFor('proxy-member');
-    const proxy = idFor('proxy');
-    assert.ok(!(await makeSpace({ id: member, label: 'Proxy member' }))?.isError);
-    const r = await makeSpace({ id: proxy, label: 'Proxy over member', proxyFor: [member] });
-    assert.ok(!r?.isError, `refused: ${JSON.stringify(r)}`);
-    assert.equal((await meta(proxy)).body.validationMode, undefined);
+    const refused = idFor('proxy-refused');
+    assert.ok(!(await makeSpace({ id: member, label: 'Member' }))?.isError);
+    const r = await makeSpace({ id: refused, label: 'Refused', proxyFor: [member] });
+    assert.ok(r?.isError, `accepted: ${JSON.stringify(r)}`);
+    assert.match(r.content[0].text, /proxyFor/);
+    assert.match(r.content[0].text, /view_create/);
+    assert.equal((await meta(refused)).status, 404, 'a refusal must not leave the space behind');
   });
 });
 
 describe('create_space is held to the ROUTE rules, not looser ones', () => {
-  it('REFUSES a proxy member that does not exist', async () => {
-    // A direct `createSpace()` call would have accepted this and left a proxy pointing at nothing.
-    const id = idFor('proxy-missing');
-    const r = await makeSpace({ id, label: 'Proxy missing', proxyFor: [`no-such-${RUN}`] });
-    assert.ok(r?.isError, `accepted: ${JSON.stringify(r)}`);
-    assert.match(r.content[0].text, /400/);
-    assert.match(r.content[0].text, /not found/i);
-    assert.equal((await meta(id)).status, 404, 'a refusal must not leave the space behind');
-  });
-
-  it('REFUSES proxy nesting', async () => {
-    const base = idFor('nest-base');
-    const level1 = idFor('nest-1');
-    const level2 = idFor('nest-2');
-    assert.ok(!(await makeSpace({ id: base, label: 'Nest base' }))?.isError);
-    assert.ok(!(await makeSpace({ id: level1, label: 'Nest 1', proxyFor: [base] }))?.isError);
-
-    const r = await makeSpace({ id: level2, label: 'Nest 2', proxyFor: [level1] });
-    assert.ok(r?.isError, `accepted: ${JSON.stringify(r)}`);
-    assert.match(r.content[0].text, /nesting/i);
-    assert.equal((await meta(level2)).status, 404);
-  });
-
   it('REFUSES a $ref to a schema-library entry that does not exist', async () => {
     // 422, and the reason this refusal matters most on CREATE: the seeded posture is `strict`, so an unresolvable ref
     // would leave that type with no constraints at all while its schema looked authored.

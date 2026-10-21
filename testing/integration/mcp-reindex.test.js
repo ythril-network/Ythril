@@ -44,7 +44,8 @@ async function makeSpace(id, body = {}) {
 
 const SPACE = idFor('plain');
 const MEMBER = idFor('member');
-const PROXY = idFor('proxy');
+const VIEW_NAME = idFor('view');
+const VIEW = `@${VIEW_NAME}`;
 const BUSY = idFor('busy');
 const FREE = idFor('free');
 
@@ -52,7 +53,9 @@ before(async () => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   await makeSpace(SPACE);
   await makeSpace(MEMBER);
-  await makeSpace(PROXY, { proxyFor: [MEMBER] });
+  // A personal view over the member: a reindex names a space, and a view is not one.
+  const view = await post(INSTANCES.a, token, '/api/views', { name: VIEW_NAME, members: [MEMBER] });
+  assert.equal(view.status, 201, JSON.stringify(view.body));
   await makeSpace(BUSY);
   await makeSpace(FREE);
   const mem = await post(INSTANCES.a, token, `/api/brain/spaces/${SPACE}/facts`, { fact: `reindex me ${RUN}` });
@@ -85,27 +88,22 @@ describe('reindex is offered and starts a job', () => {
       'the text must say the job is not finished — this is the whole hazard of a fire-and-forget tool');
   });
 
-  it('reports the member spaces it will walk', async () => {
-    // This is the argument that differs per surface, so it is the one worth surfacing to the caller. For a normal
-    // space it is the space itself.
-    //
-    // It used to accept a 409 here and return early, so it passed without ever reading memberSpaces. The guard is
-    // per space now, so wait for the run the case above started to END, then this call must be accepted.
+  it('names the space it started a run for', async () => {
+    // It used to accept a 409 here and return early, so it passed without ever reading the answer. The guard is per space, so wait
+    // for the run the case above started to END, then this call must be accepted.
     await waitForReindexRunEnd(INSTANCES.a, token, SPACE, 180_000);
     const r = await session.callTool('space_reindex', { space: SPACE });
     assert.ok(!r?.isError, `refused after the previous run finished: ${JSON.stringify(r)}`);
-    assert.deepEqual(r?.structuredContent?.memberSpaces, [SPACE]);
+    assert.equal(r?.structuredContent?.spaceId, SPACE);
   });
 });
 
 describe('reindex is held to the ROUTE rules, not looser ones', () => {
-  it('REFUSES a proxy space, naming its members so the caller knows what to do instead', async () => {
-    const r = await session.callTool('space_reindex', { space: PROXY });
-    assert.ok(r?.isError, `accepted a proxy: ${JSON.stringify(r)}`);
-    assert.match(r.content[0].text, /400/);
-    assert.match(r.content[0].text, new RegExp(MEMBER), 'the members must be named');
-    assert.deepEqual(r?.structuredContent?.proxyFor, [MEMBER],
-      'and carried as a field, so an agent need not parse prose to find the remedy');
+  it('answers a personal view id as an unknown space, before any work, and names no member', async () => {
+    const r = await session.callTool('space_reindex', { space: VIEW });
+    assert.ok(r?.isError, `accepted a view: ${JSON.stringify(r)}`);
+    assert.match(r.content[0].text, /not found/i);
+    assert.doesNotMatch(r.content[0].text, new RegExp(MEMBER), 'the members of the view must not be named: that is an inventory');
   });
 
   it('REFUSES a space whose run is active with 409 naming only it — and starts another space meanwhile', async () => {

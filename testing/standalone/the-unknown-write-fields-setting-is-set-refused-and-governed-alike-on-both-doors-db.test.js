@@ -44,7 +44,6 @@ const A = 'b128-set-a';
 const NET_SPACE = 'b128-set-net';
 const REFUSING = 'b128-set-refusing';
 const WARNING = 'b128-set-warning';
-const PROXY = 'b128-set-proxy';
 const NET = 'b128-set-network';
 const SELF = '00000000-0000-4000-8000-0000000000e0';
 const P1 = '00000000-0000-4000-8000-0000000000e1';
@@ -97,8 +96,6 @@ describe('the unknownWriteFields setting is set, refused and governed alike on b
         { id: NET_SPACE, label: NET_SPACE, folders: [], meta: { purpose: 'original', version: 1, updatedAt: '2026-10-01T00:00:00.000Z' } },
         { id: REFUSING, label: REFUSING, folders: [], meta: { suppressEmbeddings: true }, unknownWriteFields: 'refuse' },
         { id: WARNING, label: WARNING, folders: [], meta: { suppressEmbeddings: true } },
-        // The proxy's own stored value must govern nothing: the member's does.
-        { id: PROXY, label: PROXY, folders: [], meta: {}, proxyFor: [REFUSING, WARNING], unknownWriteFields: 'refuse' },
       ],
       networks: [{
         id: NET, label: 'Net', type: 'democratic', origin: 'created', syncSchedule: '', spaces: [NET_SPACE], votingDeadlineHours: 24,
@@ -121,12 +118,11 @@ describe('the unknownWriteFields setting is set, refused and governed alike on b
   });
   beforeEach(async () => {
     for (const s of [REFUSING, WARNING]) await door.coll(s, 'entities').deleteMany({});
-    // Back to the fixture: A absent, REFUSING and PROXY refuse, WARNING absent.
+    // Back to the fixture: A absent, REFUSING refuses, WARNING absent.
     delete spaceOf(A).unknownWriteFields;
     delete spaceOf(NET_SPACE).unknownWriteFields;
     delete spaceOf(WARNING).unknownWriteFields;
     spaceOf(REFUSING).unknownWriteFields = 'refuse';
-    spaceOf(PROXY).unknownWriteFields = 'refuse';
   });
 
   // ── the value ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -230,24 +226,26 @@ describe('the unknownWriteFields setting is set, refused and governed alike on b
     assert.deepEqual(getConfig().networks.find(n => n.id === NET).pendingRounds.map(x => x.roundId).sort(), before, 'a local setting opened a round');
   });
 
-  // ── a proxy write is governed by the member ──────────────────────────────────────────────────────────────────────
+  // ── a write is governed by the setting of the space it lands in ──────────────────────────────────────────────────
 
-  it('a write through a proxy is governed by the MEMBER\'s setting, on REST and on MCP, and never by the proxy\'s own', async () => {
-    assert.equal(stored(PROXY), 'refuse', 'fixture: the proxy itself holds refuse');
-    const entities = `/api/brain/spaces/${PROXY}/entities`;
+  it('a write is governed by the setting of the space it names, on REST and on MCP, and a retired targetSpace is refused by name', async () => {
     const body = { name: 'Acme', type: 'concept', zz: 1 };
+    const restRefusing = await rest('POST', `/api/brain/spaces/${REFUSING}/entities`, body);
+    assert.equal(restRefusing.status, 400, `a space set to refuse accepted the write: ${restRefusing.text}`);
+    const restWarning = await rest('POST', `/api/brain/spaces/${WARNING}/entities`, body);
+    assert.equal(restWarning.status, 201, `a space that warns was refused: ${restWarning.text}`);
 
-    const restRefusing = await rest('POST', `${entities}?targetSpace=${REFUSING}`, body);
-    assert.equal(restRefusing.status, 400, `a member set to refuse accepted the write: ${restRefusing.text}`);
-    const restWarning = await rest('POST', `${entities}?targetSpace=${WARNING}`, body);
-    assert.equal(restWarning.status, 201, `a member that warns was refused because the PROXY holds refuse: ${restWarning.text}`);
+    const mcpRefusing = await mcp('save_entity', { space: REFUSING, ...body });
+    assert.equal(mcpRefusing.refused, true, `a space set to refuse accepted the write over MCP: ${mcpRefusing.text}`);
+    const mcpWarning = await mcp('save_entity', { space: WARNING, ...body });
+    assert.equal(mcpWarning.refused, false, `a space that warns was refused over MCP: ${mcpWarning.text}`);
 
-    const mcpRefusing = await mcp('save_entity', { space: PROXY, targetSpace: REFUSING, ...body });
-    assert.equal(mcpRefusing.refused, true, `a member set to refuse accepted the write over MCP: ${mcpRefusing.text}`);
-    const mcpWarning = await mcp('save_entity', { space: PROXY, targetSpace: WARNING, ...body });
-    assert.equal(mcpWarning.refused, false, `a member that warns was refused over MCP because the PROXY holds refuse: ${mcpWarning.text}`);
+    const retiredRest = await rest('POST', `/api/brain/spaces/${WARNING}/entities?targetSpace=${REFUSING}`, { name: 'Other', type: 'concept' });
+    assert.equal(retiredRest.status, 400, `a retired targetSpace was accepted over REST: ${retiredRest.text}`);
+    const retiredMcp = await mcp('save_entity', { space: WARNING, targetSpace: REFUSING, name: 'Other', type: 'concept' });
+    assert.equal(retiredMcp.refused, true, `a retired targetSpace was accepted over MCP: ${retiredMcp.text}`);
 
-    assert.equal(await door.coll(REFUSING, 'entities').countDocuments({}), 0, 'a refused write landed in the refusing member');
-    assert.equal(await door.coll(WARNING, 'entities').countDocuments({}), 2, 'the warning member holds both writes (REST and MCP)');
+    assert.equal(await door.coll(REFUSING, 'entities').countDocuments({}), 0, 'a refused write landed in the refusing space');
+    assert.equal(await door.coll(WARNING, 'entities').countDocuments({}), 2, 'the warning space holds both writes (REST and MCP) and neither retired-field attempt');
   });
 });

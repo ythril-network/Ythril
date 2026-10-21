@@ -43,7 +43,7 @@ process.env['CONFIG_PATH'] = CONFIG_PATH;
 const DONE = 'general';
 /** NOT converted — its arrays are still the only copy of its links. */
 const LEFT = 'stranded';
-/** A proxy — it holds no records, so it has no arrays and no marker, and is nobody's unconverted space. */
+/** A pre-6.0 proxy in the config file: the load turns it into personal views and takes it out of `spaces`, so it is nobody's unconverted space. */
 const PROXY = 'team';
 
 const ENT = 'aaaaaaaa-0000-4000-8000-0000000000e1';
@@ -63,7 +63,7 @@ describe('the retired link arrays leave the disk', { skip }, () => {
       spaces: [
         { id: DONE, label: 'General', builtIn: true, folders: [], completeLinkage: true },
         { id: LEFT, label: 'Stranded', folders: [] },
-        // A proxy made before 5.0: never marked, because the conversion never walks a proxy (`Q-78`).
+        // A proxy made before 5.0 (a 5.x config): the migration at load converts it to views and retires its id (Q-531).
         { id: PROXY, label: 'Team', folders: [], proxyFor: [DONE] },
       ],
     }, null, 2), { mode: 0o600 });
@@ -141,12 +141,14 @@ describe('the retired link arrays leave the disk', { skip }, () => {
     assert.equal(out.cleared[`${LEFT}_facts`], undefined, 'it reported clearing a space it must not touch');
   });
 
-  it('never names a proxy as unconverted — it holds no links to convert (Q-78)', async () => {
+  it('never names a converted proxy as unconverted — the load took it out of the spaces (Q-78, Q-531)', async () => {
     /*
      * Reported from a fleet instance: every boot warned that two proxies "still hold their links as arrays",
      * naming a remedy that never walks a proxy. A warning that is always there teaches an operator to skip
      * the one that means a real space was left behind.
      */
+    assert.ok(!loader.getConfig().spaces.some(s => s.id === PROXY), 'the proxy is still a space after the load');
+    assert.ok((loader.getConfig().retiredSpaceIds ?? []).includes(PROXY), 'its id is not reserved');
     const out = await drop.dropLinkArrays();
     assert.ok(!out.unconverted.includes(PROXY), `a proxy was reported unconverted: ${JSON.stringify(out.unconverted)}`);
     assert.deepEqual(out.unconverted, [LEFT], 'the real unconverted space must still be named, alone');

@@ -23,7 +23,7 @@
  * **An unknown top-level field, per door** (CHANGED by bundle-128, Q-320: ONE rule, decided by this instance's setting for the space; these spaces carry none, so `warn`).
  *  - REST single-record writes and the MCP record tools both STORE the record without the field and answer one row `{ field, code: 'unknown_field', reason: 'unknown field — ignored. This write accepts: <the keys>', value }`
  *    in `warnings` (MCP also prints a `⚠️ Unknown field: <key> — ignored` line); before bundle-128 REST said `This route accepts:` with no `code`, and the MCP tools REFUSED it with the strict validator's `400`;
- *  - bulk refuses an unknown TOP-LEVEL key on both doors (`400`, the allowed list — and the MCP list also names `space` and `targetSpace`) in every mode, and an unknown key on an ITEM is stored without it and named in one
+ *  - bulk refuses an unknown TOP-LEVEL key on both doors (`400`, the allowed list — and the MCP list also names `space`) in every mode, and an unknown key on an ITEM is stored without it and named in one
  *    `unknown_field:` error row (before bundle-128 it was ignored silently on both).
  *
  * The `refuse` setting's answers (a 400 with the same rows and nothing stored) are asserted by `an-unknown-field-is-answered-alike-on-both-doors-db.test.js`, which owns the setting.
@@ -259,7 +259,7 @@ describe('a warn space, an unknown field and an undeclared key, as every write d
         const rest = await pins.bulkRest(STRICT, body);
         assert.deepEqual([rest.status, rest.body], [400, { error: 'Unknown field(s): bogus. Allowed: facts, entities, edges, chrono', unrecognized_keys: ['bogus'] }]);
         const mcp = await pins.call('save_bulk', { space: STRICT, ...body });
-        assert.deepEqual([mcp.status, mcp.isError, mcp.text], [400, true, 'Error: Unknown field(s): bogus. Allowed: facts, entities, edges, chrono, space, targetSpace']);
+        assert.deepEqual([mcp.status, mcp.isError, mcp.text], [400, true, 'Error: Unknown field(s): bogus. Allowed: facts, entities, edges, chrono, space']);
         assert.equal((await pins.stored(STRICT, 'entity')).some(d => d.name === 'Org Three'), false, 'a refused bulk stored an item');
       });
 

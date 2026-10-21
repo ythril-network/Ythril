@@ -23,7 +23,7 @@
  *
  * ## What is pinned at RUNTIME, and the one thing that cannot be
  *
- * Pinned here: the four answers (`404`, `400` on a proxy, `409` for a space whose run is active, `200 started`), that the response
+ * Pinned here: the four answers (`404` for an unknown space or a personal view id, `409` for a space whose run is active, `200 started`), that the response
  * arrives BEFORE the work, that the job guard is released afterwards, and — the part that matters most — that all
  * five collections actually come out with an embedding.
  *
@@ -50,7 +50,8 @@ const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 const RUN = Date.now();
 const SPACE = `reindex-${RUN}`;
 const MEMBER = `reindex-member-${RUN}`;
-const PROXY = `reindex-proxy-${RUN}`;
+const VIEW_NAME = `reindex-view-${RUN}`;
+const VIEW = `@${VIEW_NAME}`;
 
 let token;
 const created = [];
@@ -109,7 +110,9 @@ before(async () => {
   token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
   await makeSpace(SPACE);
   await makeSpace(MEMBER);
-  await makeSpace(PROXY, { proxyFor: [MEMBER] });
+  // A personal view over the member: a reindex names a space, and a view is not one.
+  const view = await post(INSTANCES.a, token, '/api/views', { name: VIEW_NAME, members: [MEMBER] });
+  assert.equal(view.status, 201, JSON.stringify(view.body));
 });
 
 after(async () => {
@@ -125,15 +128,14 @@ describe('reindex — the four answers', () => {
     assert.match(r.body.error, /not found/i);
   });
 
-  it('400 for a PROXY space, naming its members in both the message and a field', async () => {
-    // It used to answer `200 started` and then re-embed the members — which the caller was ALSO reindexing
-    // individually, because they are in the same space list, so everything under the proxy was embedded twice. The
-    // remedy is in the response because `GET /api/spaces` gives a caller nothing to branch on.
-    const r = await reindex(PROXY);
-    assert.equal(r.status, 400, JSON.stringify(r.body));
-    assert.match(r.body.error, /proxy space/i);
-    assert.match(r.body.error, new RegExp(MEMBER), 'the message must NAME the members to reindex instead');
-    assert.deepEqual(r.body.proxyFor, [MEMBER], 'and carry them as a field, so a client need not parse prose');
+  it('404 for a personal view id, before any work, and no member is named', async () => {
+    // A view holds no index. Its id answers exactly as a space that does not exist; the refusal that used to name every member
+    // of a proxy was an inventory of spaces the caller may not reach.
+    const r = await reindex(VIEW);
+    assert.equal(r.status, 404, JSON.stringify(r.body));
+    assert.match(r.body.error, /not found/i);
+    assert.doesNotMatch(JSON.stringify(r.body), new RegExp(MEMBER), 'a member of the view was named');
+    assert.equal(r.body.proxyFor, undefined);
   });
 
   it('404 and a needsReindex flag on the status route', async () => {

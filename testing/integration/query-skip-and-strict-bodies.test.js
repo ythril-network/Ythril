@@ -38,7 +38,9 @@ const RUN = Date.now();
 const SPACE = `qskip-${RUN}`;
 const M1 = `qskip-m1-${RUN}`;
 const M2 = `qskip-m2-${RUN}`;
-const PROXY = `qskip-proxy-${RUN}`;
+const VIEW_NAME = `qskip-view-${RUN}`;
+/** A personal view over both members: a page through it merges what the members hold. */
+const VIEW = `@${VIEW_NAME}`;
 const TOTAL = 12;
 
 let token;
@@ -58,7 +60,8 @@ before(async () => {
   await makeSpace(SPACE);
   await makeSpace(M1);
   await makeSpace(M2);
-  await makeSpace(PROXY, { proxyFor: [M1, M2] });
+  const view = await post(INSTANCES.a, token, '/api/views', { name: VIEW_NAME, members: [M1, M2] });
+  assert.equal(view.status, 201, JSON.stringify(view.body));
 
   // Sequential, so `seq` is strictly increasing and the documented order is total.
   for (let i = 0; i < TOTAL; i++) {
@@ -67,7 +70,7 @@ before(async () => {
     });
     assert.equal(r.status, 201, JSON.stringify(r.body));
   }
-  // Half in each member, so a proxy page has to interleave rather than concatenate.
+  // Half in each member, so a view page has to interleave rather than concatenate.
   for (let i = 0; i < 6; i++) {
     for (const m of [M1, M2]) {
       await post(INSTANCES.a, token, `/api/brain/spaces/${m}/facts`, { fact: `${m} row ${i} ${RUN}` });
@@ -129,21 +132,21 @@ describe('REST: skip paginates instead of being ignored', () => {
     }
   });
 
-  it('pages a PROXY space over the merged set, not per member', async () => {
+  it('pages a personal view over the merged set, not per member', async () => {
     // The compounding defect: asking each member for [skip, skip+limit) and concatenating skips that many rows PER
     // MEMBER and orders the result by member. Twelve rows across two members must page exactly like twelve in one.
-    const all = await query({ collection: 'facts', filter: {}, limit: 100 }, PROXY);
+    const all = await query({ collection: 'facts', filter: {}, limit: 100 }, VIEW);
     assert.equal(all.status, 200, JSON.stringify(all.body));
     assert.equal(all.body.results.length, 12, 'both members are read');
 
     const stitched = [];
     for (let s = 0; s < 12; s += 4) {
-      const page = await query({ collection: 'facts', filter: {}, limit: 4, skip: s }, PROXY);
+      const page = await query({ collection: 'facts', filter: {}, limit: 4, skip: s }, VIEW);
       assert.ok(page.body.results.length <= 4,
-        `a proxy page returned ${page.body.results.length} rows for limit 4 — the limit is per member, not per page`);
+        `a view page returned ${page.body.results.length} rows for limit 4 — the limit is per member, not per page`);
       stitched.push(...page.body.results);
     }
-    assert.equal(new Set(stitched.map(d => d._id)).size, 12, 'every row exactly once across the proxy pages');
+    assert.equal(new Set(stitched.map(d => d._id)).size, 12, 'every row exactly once across the view pages');
     assert.deepEqual(stitched.map(d => d._id), all.body.results.map(d => d._id),
       'and in the same order as the unpaged read');
   });
@@ -297,13 +300,13 @@ describe('the match TOTAL and a caller-chosen order, on both surfaces', () => {
     assert.equal(r.status, 400, JSON.stringify(r.body));
   });
 
-  it('pages a custom order on a PROXY space in that order', async () => {
+  it('pages a custom order through a personal view in that order', async () => {
     // The comparator is built from the sort handed to Mongo. Hardcoded to the default keys it would merge the members by
     // the wrong order and return a page nobody asked for -- with a 200.
-    const all = await query({ collection: 'facts', filter: {}, sort: 'createdAt', dir: 'asc', limit: 100 }, PROXY);
+    const all = await query({ collection: 'facts', filter: {}, sort: 'createdAt', dir: 'asc', limit: 100 }, VIEW);
     assert.equal(all.status, 200, JSON.stringify(all.body));
     const times = all.body.results.map(d => d.createdAt);
-    assert.deepEqual(times, [...times].sort(), 'a proxy page must honour the caller order across members');
+    assert.deepEqual(times, [...times].sort(), 'a view page must honour the caller order across members');
     assert.equal(all.body.total, 12, 'and the total sums both members');
   });
 

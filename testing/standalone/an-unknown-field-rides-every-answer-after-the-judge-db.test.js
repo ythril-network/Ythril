@@ -50,7 +50,6 @@ const IGNORED = `unknown field ${DASH} ignored`;
 const NOT_ACCEPTED = `unknown field ${DASH} not accepted`;
 const WARN = 'b128-ride-warn';
 const REFUSE = 'b128-ride-refuse';
-const PROXY = 'b128-ride-proxy';
 const UUID = 'dddddddd-0000-4000-8000-0000000000a1';
 
 // The driver the SERVER loads, so the patched class is the one its operations go through (the store-failure gate's own way in).
@@ -88,7 +87,6 @@ describe('an unknown field is named on every answer after the judge', { skip }, 
       spaces: [
         { id: WARN, label: WARN, folders: [], meta: { suppressEmbeddings: true } },
         { id: REFUSE, label: REFUSE, folders: [], meta: { suppressEmbeddings: true }, unknownWriteFields: 'refuse' },
-        { id: PROXY, label: PROXY, folders: [], meta: {}, proxyFor: [WARN, REFUSE] },
       ],
     });
     const tokens = await import('../../server/dist/auth/tokens.js');
@@ -174,12 +172,13 @@ describe('an unknown field is named on every answer after the judge', { skip }, 
     assert.equal((await door.coll(WARN, 'entities').findOne({ _id: madeId })).name, 'Acme', 'a 412 changed the record');
   });
 
-  it('a failed target resolution names nothing (it precedes the judge); the next refusal of the same body does', async () => {
-    const resolved = await send('POST', `${entities(PROXY)}?targetSpace=b128-not-a-member`, { name: 'Acme', type: 'concept', zz: 1 });
-    assert.equal(resolved.status, 400, JSON.stringify(resolved.body));
-    assert.equal(resolved.body.warnings, undefined, `rows rode an answer that never reached the judge: ${JSON.stringify(resolved.body)}`);
-    const judged = await send('POST', `${entities(PROXY)}?targetSpace=${WARN}`, { type: 'concept', zz: 1 });
-    assert.ok(rowOf(judged.body, 'zz'), `control: the same unknown key after a resolved target is named: ${JSON.stringify(judged.body)}`);
+  it('a retired targetSpace is refused by name before the judge and names nothing about the body; the next refusal of the same body does', async () => {
+    const retired = await send('POST', `${entities(WARN)}?targetSpace=${REFUSE}`, { name: 'Acme', type: 'concept', zz: 1 });
+    assert.equal(retired.status, 400, JSON.stringify(retired.body));
+    assert.ok(String(retired.body.error).includes('targetSpace'), `the refusal does not name the field: ${JSON.stringify(retired.body)}`);
+    assert.equal(retired.body.warnings, undefined, `rows rode an answer that never reached the judge: ${JSON.stringify(retired.body)}`);
+    const judged = await send('POST', entities(WARN), { type: 'concept', zz: 1 });
+    assert.ok(rowOf(judged.body, 'zz'), `control: the same unknown key without the retired field is named: ${JSON.stringify(judged.body)}`);
   });
 
   it('a store failure with nothing stored carries no rows, and the same body refused with the store up does', async () => {

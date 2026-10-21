@@ -389,14 +389,13 @@ export async function waitForEmbedQueueEmpty(baseUrl, token, spaceId, timeoutMs 
  * `reindexRun.running` boolean is a server this helper cannot read, and it THROWS rather than reading "absent" as
  * "finished" — the quiet answer is the one that would let a suite start on a half-built index.
  *
- * A proxy is never POSTed: it has no index of its own and the route refuses it with 400. A 409 is accepted, because
- * it means a run for that space already exists — which is the state this then waits out.
+ * A 409 is accepted, because it means a run for that space already exists — which is the state this then waits out. Every space the
+ * list answers owns an index (a personal view is not a space and is never listed).
  */
 export async function ensureReindexed(baseUrl, token, timeoutMs = INDEX_LAG_TIMEOUT_MS) {
   const { body } = await get(baseUrl, token, '/api/spaces');
   const spaces = body?.spaces ?? [];
   for (const space of spaces) {
-    if ((space.proxyFor?.length ?? 0) > 0) continue;
     const { body: st } = await get(baseUrl, token, `/api/brain/spaces/${space.id}/reindex-status`);
     if (st?.needsReindex) {
       const r = await post(baseUrl, token, `/api/brain/spaces/${space.id}/reindex`, {});
@@ -406,7 +405,6 @@ export async function ensureReindexed(baseUrl, token, timeoutMs = INDEX_LAG_TIME
     }
   }
   for (const space of spaces) {
-    if ((space.proxyFor?.length ?? 0) > 0) continue;
     await waitForReindexRunEnd(baseUrl, token, space.id, timeoutMs);
   }
 }

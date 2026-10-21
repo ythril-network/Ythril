@@ -51,45 +51,70 @@ before(() => {
 
 // ── H1 — MCP proxy fan-out scope ─────────────────────────────────────────────
 
-describe('H1 — MCP proxy space cannot exceed member-space token scope', () => {
+describe('H1 — a personal view belongs to its owner and reaches only what its reader reaches', () => {
   const spaceA = `esc-a-${RUN}`;
   const spaceB = `esc-b-${RUN}`;
-  const proxyId = `esc-proxy-${RUN}`;
-  let proxyOnlyToken, fullToken;
+  const viewName = `esc-view-${RUN}`;
+  const viewId = `@${viewName}`;
+  let ownerToken, otherToken, narrowToken;
   const tokenIds = [];
 
   before(async () => {
     await post(INSTANCES.a, adminToken, '/api/spaces', { id: spaceA, label: 'Esc A' });
     await post(INSTANCES.a, adminToken, '/api/spaces', { id: spaceB, label: 'Esc B' });
-    const p = await post(INSTANCES.a, adminToken, '/api/spaces', { id: proxyId, label: 'Esc Proxy', proxyFor: [spaceA, spaceB] });
-    assert.equal(p.status, 201, `create proxy: ${JSON.stringify(p.body)}`);
 
-    const t1 = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `esc-proxy-only-${RUN}`, rights: legacyRights({ spaces: [proxyId] })});
+    const t1 = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `esc-owner-${RUN}`, rights: legacyRights({ spaces: [spaceA, spaceB] })});
     assert.equal(t1.status, 201, JSON.stringify(t1.body));
-    proxyOnlyToken = t1.body.plaintext; tokenIds.push(t1.body.token.id);
+    ownerToken = t1.body.plaintext; tokenIds.push(t1.body.token.id);
 
-    const t2 = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `esc-full-${RUN}`, rights: legacyRights({ spaces: [proxyId, spaceA, spaceB] })});
+    const t2 = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `esc-other-${RUN}`, rights: legacyRights({ spaces: [spaceA, spaceB] })});
     assert.equal(t2.status, 201, JSON.stringify(t2.body));
-    fullToken = t2.body.plaintext; tokenIds.push(t2.body.token.id);
+    otherToken = t2.body.plaintext; tokenIds.push(t2.body.token.id);
+
+    const t3 = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `esc-narrow-${RUN}`, rights: legacyRights({ spaces: [spaceA] })});
+    assert.equal(t3.status, 201, JSON.stringify(t3.body));
+    narrowToken = t3.body.plaintext; tokenIds.push(t3.body.token.id);
+
+    const v = await post(INSTANCES.a, ownerToken, '/api/views', { name: viewName, members: [spaceA, spaceB] });
+    assert.equal(v.status, 201, `create view: ${JSON.stringify(v.body)}`);
   });
 
   after(async () => {
+    await del(INSTANCES.a, ownerToken, `/api/views/${encodeURIComponent(viewId)}`).catch(() => {});
     for (const id of tokenIds) await del(INSTANCES.a, adminToken, `/api/tokens/${id}`).catch(() => {});
-    for (const id of [proxyId, spaceA, spaceB]) await delWithBody(INSTANCES.a, adminToken, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
+    for (const id of [spaceA, spaceB]) await delWithBody(INSTANCES.a, adminToken, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
   });
 
-  it('a proxy-only token is DENIED access to the proxy\'s member spaces', async () => {
-    const r = await mcpCall(proxyOnlyToken, 'space_stats', { space: proxyId });
-    assert.equal(r.status, 200);
-    assert.match(r.text, /member space/i,
-      `VULNERABILITY: proxy-only token reached member spaces via MCP. Response: ${r.text.slice(0, 300)}`);
+  it('another token\'s view is answered as an unknown space, over MCP and over REST', async () => {
+    const mcp = await mcpCall(otherToken, 'space_stats', { space: viewId });
+    assert.equal(mcp.status, 200);
+    assert.match(mcp.text, /not found/i,
+      `VULNERABILITY: a token read another token's view over MCP. Response: ${mcp.text.slice(0, 300)}`);
+    const rest = await get(INSTANCES.a, otherToken, `/api/brain/spaces/${encodeURIComponent(viewId)}/stats`);
+    assert.equal(rest.status, 404, `VULNERABILITY: a token read another token's view over REST: ${JSON.stringify(rest.body)}`);
+    const list = await get(INSTANCES.a, otherToken, '/api/views');
+    assert.equal(list.body.views.some(v => v.id === viewId), false, 'another token\'s view must not be listed');
   });
 
-  it('a token scoped to all member spaces IS allowed', async () => {
-    const r = await mcpCall(fullToken, 'space_stats', { space: proxyId });
+  it('the owner reads through the view', async () => {
+    const r = await mcpCall(ownerToken, 'space_stats', { space: viewId });
     assert.equal(r.status, 200);
-    assert.doesNotMatch(r.text, /does not have access to member space/i,
-      `Regression: full-scope token was wrongly denied. Response: ${r.text.slice(0, 300)}`);
+    assert.doesNotMatch(r.text, /not found/i,
+      `Regression: the owner was refused its own view. Response: ${r.text.slice(0, 300)}`);
+  });
+
+  it('a view never widens its reader: a token that reaches one member reads only that member through it', async () => {
+    const name = `esc-narrow-view-${RUN}`;
+    const own = await post(INSTANCES.a, narrowToken, '/api/views', { name, members: [spaceA, spaceB] });
+    // Listing a space this token cannot reach is refused outright, or accepted and narrowed on every read; never widened.
+    if (own.status === 201) {
+      const read = await get(INSTANCES.a, narrowToken, `/api/brain/spaces/${encodeURIComponent('@' + name)}/stats`);
+      assert.equal(read.status, 200, JSON.stringify(read.body));
+      assert.deepEqual(read.body.viewMembers, [spaceA], 'VULNERABILITY: a view widened its owner to a member the token does not reach');
+      await del(INSTANCES.a, narrowToken, `/api/views/${encodeURIComponent('@' + name)}`).catch(() => {});
+    } else {
+      assert.ok([403, 404].includes(own.status), `unexpected answer: ${own.status} ${JSON.stringify(own.body)}`);
+    }
   });
 });
 

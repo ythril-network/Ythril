@@ -71,7 +71,7 @@ after(async () => {
  *
  * That very defect shipped in the fold and was caught on a live instance rather than by a build — the fold
  * went in on MCP first, leaving REST without the capability at all, and then returned `{ members }` where
- * the proxy form must be `{ spaceId, members }`.
+ * the answer must be `{ spaceId, ... }` and not a bare member list.
  */
 describe('the actual schema reaches both doors with the same answer', () => {
   it('REST reports the two types and the relationship', async () => {
@@ -104,7 +104,7 @@ describe('the actual schema reaches both doors with the same answer', () => {
   });
 
   it('a space the token cannot reach is refused, not answered', async (t) => {
-    // The tool narrows with `memberSpacesWithin`; a tool that ignored it would answer for any space id.
+    // The tool answers only for the spaces the connection reaches (`accessibleSpaceIds`); a tool that ignored it would answer for any space id.
     let session;
     try {
       session = await openMcpSession(token());
