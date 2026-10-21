@@ -677,6 +677,63 @@ export function intervalJobEdges(runs) {
     .map(r => r.key);
 }
 
+/**
+ * Every space act body handed to the runner (`defineSpaceActBody(kind, body)`), and the runner function that calls them.
+ *
+ * ## Why the walk cannot do this by itself
+ *
+ * A body is HANDED to the runner, which keeps it in a map and calls the one its persisted entry's kind names
+ * (`bodies.get(entry.kind)`). No call names the body, so a door that registers an act reached the runner and stopped there: a
+ * gate rooted at the doors read every write a body does as unreached (bundle-157 moved the restore's writes into one, and
+ * `every-door-that-stores-a-record-reaches-a-validator` dropped its row for them as stale while the writes still happened).
+ *
+ * - **The bodies** are every `defineSpaceActBody(kind, fn)` call in the index; `fn` is followed to its declaration and the kind
+ *   is a string literal or a `const` of one in that file. Anything else is returned with `key: null` (`unfollowable`), never
+ *   dropped, so a gate counts it and fails.
+ * - **The dispatch** is derived from `defineSpaceActBody` itself: the map its body `.set`s, and every function of that file
+ *   whose body `.get`s from it.
+ *
+ * @param {ReturnType<typeof moduleIndex>} index
+ * @returns {{ bodies: {file: string, kind: string|null, fn: string, key: string|null}[], dispatchers: string[] }}
+ */
+export function spaceActBodies(index) {
+  const bodies = [];
+  let dispatchers = [];
+  for (const [file, src] of index.sources) {
+    for (const m of src.matchAll(/(?<![.\w$])defineSpaceActBody\s*\(/g)) {
+      if (/\bfunction\s*$/.test(src.slice(Math.max(0, m.index - 12), m.index))) {
+        const decl = index.bodies.get(`${file}:defineSpaceActBody`);
+        assert.ok(decl, `${file} declares defineSpaceActBody, but the index has no body for it - re-anchor`);
+        const map = /([A-Za-z_$][\w$]*)\s*\.\s*set\s*\(/.exec(decl.body)?.[1];
+        assert.ok(map, `defineSpaceActBody in ${file} no longer .set()s a map, so the runner's dispatch cannot be found - re-anchor`);
+        const get = new RegExp(`(?<![\\w$])${map}\\s*\\.\\s*get\\s*\\(`);
+        dispatchers = [...index.bodies.entries()].filter(([, b]) => b.file === file && get.test(b.body)).map(([k]) => k);
+        continue;
+      }
+      const args = argumentsOf(src, m.index + m[0].length - 1, `the defineSpaceActBody call in ${file}`);
+      const [kindArg = '', fn = ''] = args;
+      const literal = /^['"]([\w-]+)['"]$/.exec(kindArg)?.[1];
+      const constant = /^[A-Za-z_$][\w$]*$/.test(kindArg)
+        ? new RegExp(`\\bconst\\s+${kindArg}\\s*=\\s*['"]([\\w-]+)['"]`).exec(src)?.[1] : undefined;
+      const key = /^[A-Za-z_$][\w$]*$/.test(fn) ? index.resolve(file, fn) : null;
+      bodies.push({ file, kind: literal ?? constant ?? null, fn, key: key ?? null });
+    }
+  }
+  return { bodies, dispatchers };
+}
+
+/**
+ * The `edges` option of `walkFrom` that makes the runner's dispatch reach every act body. Every body, not the kind's: the dispatch
+ * reads the kind from a persisted entry, which no source tells, so a door that reaches the runner may cause any of them.
+ *
+ * @param {ReturnType<typeof spaceActBodies>} acts
+ */
+export function spaceActBodyEdges(acts) {
+  const from = new Set(acts.dispatchers);
+  const to = acts.bodies.map(b => b.key).filter(Boolean);
+  return (entry) => (from.has(`${entry.file}:${entry.name}`) ? to : []);
+}
+
 /** The chain of keys from a root to `key`, root first, read off `walkFrom`'s parent map. */
 export function pathTo(parent, key) {
   const chain = [key];
