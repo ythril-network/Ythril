@@ -26,6 +26,7 @@ import { EJSON } from 'bson';
 import { log } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
 import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
+import { redactUri } from '../config/mongo-uri.js';
 
 const MANIFEST_VERSION = 1 as const;
 const CURSOR_BATCH_SIZE = 500;
@@ -60,10 +61,6 @@ export interface DumpOptions {
    * key to hand *before* the restore.
    */
   encrypt?: boolean;
-}
-
-function redactUri(uri: string): string {
-  return uri.replace(/\/\/[^@]+@/, '//[credentials]@');
 }
 
 /**

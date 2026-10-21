@@ -236,6 +236,11 @@ export interface SpaceActBodyOutcome {
 /** What a kind that runs as an act set does once, when the last member of a set ends: after the write that ends it, never inside it. */
 export interface SpaceActSetHooks {
   onSetEnd(set: Readonly<SpaceActSet>): void;
+  /**
+   * What its COMPLETION changes in the same config write that ends the set (a migrate saves its target URI there, so the URI is saved
+   * exactly when every hold lifts). A throw aborts the write: nothing is removed, and the member that completed is recorded as failed.
+   */
+  inCompletionWrite?(cfg: Config, set: Readonly<SpaceActSet>): void;
 }
 
 const setHooks = new Map<SpaceActKind, SpaceActSetHooks>();
@@ -463,6 +468,8 @@ export interface SpaceActSetRequest {
   backupId?: string;
   emptied?: readonly string[];
   leftOut?: readonly string[];
+  /** What the set acts toward, opaque here and sealed by its kind's module (a migrate's target URI); see `SpaceActSet.target`. */
+  target?: string;
 }
 
 /** Does an act of a kind that stands on every space stand now, and which kind: THE answer for maintenance, the backup refusal and a door. */
@@ -470,16 +477,44 @@ export function instanceWideActStanding(cfg: Pick<Config, 'pendingSpaceActs'> | 
   return (cfg?.pendingSpaceActs ?? []).find(e => isInstanceWide(e.kind))?.kind ?? null;
 }
 
+/**
+ * The refusal of a door's instance-wide `action` (a restore, a migrate) while an act of `kind` stands on every space: the code that kind
+ * refuses writes with, so a client reads one vocabulary for "the instance is busy" whichever door it met.
+ */
+export function instanceWideActRefusal(action: string, kind: SpaceActKind): { error: string; code: string } {
+  return { error: `A ${action} cannot start: ${SPACE_ACT_KINDS[kind].writeRefusalWhy({})}.`, code: SPACE_ACT_KINDS[kind].writeRefusalCode };
+}
+
 /** The backups a standing act names: what a backup's retention keeps whatever its count. */
 export function backupsNamedByActs(): ReadonlySet<string> {
   return new Set(standingEntries().flatMap(e => (e.backupId ? [e.backupId] : [])));
 }
 
-/** The act set of `kind`: the one standing, or the last that ended; undefined when none ever ran. A copy, never the live record. */
-export function spaceActSetOf(kind: SpaceActKind): SpaceActSet | undefined {
+/**
+ * The act set of `kind`: the one standing, or the last that ended; undefined when none ever ran. A copy, never the live record, and
+ * WITHOUT its `target`: this is what a report reads, and a migrate's target URI carries credentials ({@link spaceActSetTarget}).
+ */
+export function spaceActSetOf(kind: SpaceActKind): Omit<SpaceActSet, 'target'> | undefined {
   const set = (isConfigLoaded() ? getConfig().spaceActSets ?? [] : []).find(s => s.kind === kind);
-  return set ? structuredClone(set) : undefined;
+  if (!set) return undefined;
+  const { target: _target, ...rest } = structuredClone(set);
+  return rest;
 }
+
+/** The sealed `target` of the standing set `setId`, for its kind's body and completion only; undefined once the set ended. */
+export function spaceActSetTarget(setId: string): string | undefined {
+  return (isConfigLoaded() ? getConfig().spaceActSets ?? [] : []).find(s => s.id === setId && !s.endedAt)?.target;
+}
+
+/**
+ * The entry of set `setId` that runs a {@link SpaceActKindSpec.wholeSet} kind's one body: its first standing entry in the config's order,
+ * which stays the same while the set stands because every member leaves in one write.
+ */
+function leadOfSet(setId: string): SpaceActEntry | undefined {
+  return standingEntries().find(e => e.setId === setId);
+}
+
+const runsWholeSet = (e: Pick<SpaceActEntry, 'kind' | 'setId'>): boolean => SPACE_ACT_KINDS[e.kind].wholeSet && e.setId !== undefined;
 
 /** The entries of set `setId` standing now, for its report. Copies. */
 export function entriesOfSet(setId: string): SpaceActEntry[] {
@@ -492,7 +527,7 @@ export function entriesOfSet(setId: string): SpaceActEntry[] {
  * {@link SpaceActsClosedError} once shutdown closed the runner. Whether another instance-wide act stands is the door's question
  * ({@link instanceWideActStanding}), asked before this.
  */
-export function registerSpaceActSet(req: SpaceActSetRequest): { set: SpaceActSet; entryIds: string[] } {
+export function registerSpaceActSet(req: SpaceActSetRequest): { set: Omit<SpaceActSet, 'target'>; entryIds: string[] } {
   if (closed) throw new SpaceActsClosedError();
   const now = Date.now();
   const set: SpaceActSet = {
@@ -501,6 +536,7 @@ export function registerSpaceActSet(req: SpaceActSetRequest): { set: SpaceActSet
     members: Object.fromEntries(req.localIds.map(id => [id, { state: 'standing' as const }])),
     ...(req.emptied ? { emptied: [...req.emptied] } : {}),
     ...(req.leftOut ? { leftOut: [...req.leftOut] } : {}),
+    ...(req.target ? { target: req.target } : {}),
   };
   const entryIds: string[] = [];
   mutateConfig(cfg => {
@@ -509,10 +545,11 @@ export function registerSpaceActSet(req: SpaceActSetRequest): { set: SpaceActSet
       entryIds.push(registerSpaceAct(cfg, { kind: req.kind, localId, setId: set.id, ...(req.backupId ? { backupId: req.backupId } : {}) }, now).entry.id);
     }
     // A set with no member ends as it begins.
-    if (req.localIds.length === 0) { set.endedAt = set.startedAt; set.outcome = 'completed'; }
+    if (req.localIds.length === 0) { set.endedAt = set.startedAt; set.outcome = 'completed'; delete set.target; }
   });
   if (set.endedAt) setEnded(set);
-  return { set: structuredClone(set), entryIds };
+  const { target: _target, ...shown } = structuredClone(set);
+  return { set: shown, entryIds };
 }
 
 /** What an abandon came to: refused while a member's body runs, else the spaces it left as they were. */
@@ -536,14 +573,24 @@ export async function abandonSpaceActSet(kind: SpaceActKind): Promise<SpaceActSe
   const running = standingEntries().filter(e => e.setId === standing.id && (e.state === 'running' || spaceActRunning(e.localId)))
     .map(e => e.localId);
   if (running.length > 0) return { abandoned: false, reason: 'running', running };
+  const { left, ended } = endSetAbandoned(standing.id);
+  return { abandoned: true, set: ended ?? structuredClone(standing), left };
+}
+
+/**
+ * End set `setId` as abandoned in ONE write: remove every entry of it (lifting their holds), forget the marks their post-steps name and
+ * settle their rounds `not-carried` - a removal like the completion's - mark the members not done `abandoned`, record `lastError` when
+ * given, and drop the set's `target`. The set's end hook runs after the write. Whether an abandon may happen now is the caller's question.
+ */
+function endSetAbandoned(setId: string, lastError?: string): { left: string[]; ended: SpaceActSet | undefined } {
   const left: string[] = [];
   const removed: string[] = [];
   let ended: SpaceActSet | undefined;
   mutateConfig(cfg => {
-    const set = cfg.spaceActSets?.find(s => s.id === standing.id);
-    const mine = (cfg.pendingSpaceActs ?? []).filter(e => e.setId === standing.id);
+    const set = cfg.spaceActSets?.find(s => s.id === setId);
+    const mine = (cfg.pendingSpaceActs ?? []).filter(e => e.setId === setId);
     for (const e of mine) { left.push(e.localId); removed.push(e.id); }
-    cfg.pendingSpaceActs = (cfg.pendingSpaceActs ?? []).filter(e => e.setId !== standing.id);
+    cfg.pendingSpaceActs = (cfg.pendingSpaceActs ?? []).filter(e => e.setId !== setId);
     if (cfg.pendingSpaceActs.length === 0) delete cfg.pendingSpaceActs;
     for (const e of mine) {
       for (const step of e.postSteps.forgetReceiveMarks ?? []) {
@@ -565,11 +612,13 @@ export async function abandonSpaceActSet(kind: SpaceActKind): Promise<SpaceActSe
     for (const m of Object.values(set.members)) if (m.state === 'standing') m.state = 'abandoned';
     set.endedAt = new Date().toISOString();
     set.outcome = 'abandoned';
+    if (lastError) set.lastError = lastError;
+    delete set.target;
     ended = structuredClone(set);
   });
   for (const id of removed) { failureSaid.forget(id); waitingSaid.forget(id); }
   if (ended) setEnded(ended);
-  return { abandoned: true, set: ended ?? structuredClone(standing), left: left.sort() };
+  return { left: left.sort(), ended };
 }
 
 /** Run the ended set's hook once, after the write that ended it; a hook that throws is said and never undoes the end. */
@@ -641,10 +690,16 @@ function inLane<T>(lane: Lane, fn: () => Promise<T>, onClosed: () => T): Promise
  * {@link releaseSpaceActWaiter}. `via` names who started it, for the counter.
  */
 export function runSpaceAct(entryId: string, opts: { waiter?: boolean; via?: string } = {}): Promise<SpaceRoundSettled> {
+  // A member of a set whose kind has one body for the whole set runs as that set's lead: the body runs once, whichever member is asked.
+  const asked = readEntry(entryId);
+  if (asked && runsWholeSet(asked)) {
+    const lead = leadOfSet(asked.setId!);
+    if (lead && lead.id !== entryId) return runSpaceAct(lead.id, opts);
+  }
   if (opts.waiter) waiters.set(entryId, (waiters.get(entryId) ?? 0) + 1);
   const running = jobs.get(entryId);
   if (running) return running;
-  const entry = readEntry(entryId);
+  const entry = asked;
   if (!entry) return Promise.resolve(result(undefined, entryId, { ok: true }));
   if (closed) return Promise.resolve(interrupted(entry, entryId));
   const via = opts.via ?? 'door';
@@ -673,7 +728,12 @@ async function runJob(id: string, via: string): Promise<SpaceRoundSettled> {
     await countersLoaded();
     for (;;) {
       if (closed) return interrupted(entry, id);
-      const drained = await awaitSpaceTransfersDrained(entry.localId, spaceActKnob('EXCHANGE_DRAIN_MS'));
+      // One body for the whole set acts on every member's space, so it waits for the transfers of every one of them.
+      const spaces = runsWholeSet(entry) ? entriesOfSet(entry.setId!).map(e => e.localId) : [entry.localId];
+      let drained: 'drained' | 'waiting' = 'drained';
+      for (const localId of spaces) {
+        if (await awaitSpaceTransfersDrained(localId, spaceActKnob('EXCHANGE_DRAIN_MS')) !== 'drained') { drained = 'waiting'; break; }
+      }
       if (drained === 'drained') break;
       setState(id, 'draining');
       const localId = entry.localId; const kind = entry.kind;
@@ -723,13 +783,16 @@ async function runBody(id: string, via: string): Promise<SpaceRoundSettled> {
 function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome, via: string): SpaceRoundSettled {
   const refused = outcome.refusal !== undefined;
   const spaceGone = entry.kind === 'delete' && !getConfig().spaces.some(s => s.id === entry.localId);
+  // One body for the whole set: its completion is every member's, in this one write.
+  const wholeSet = runsWholeSet(entry);
   let covered: SpaceActRound[] = entry.rounds;
   let setDone: SpaceActSet | undefined;
   mutateConfig(cfg => {
     if (!cfg.pendingSpaceActs) return;
     const self = cfg.pendingSpaceActs.find(e => e.id === id) ?? entry;
     covered = self.rounds;
-    const leaving = cfg.pendingSpaceActs.filter(e => e.id === id || (spaceGone && e.localId === self.localId));
+    const leaving = cfg.pendingSpaceActs.filter(e => e.id === id || (spaceGone && e.localId === self.localId)
+      || (wholeSet && !refused && e.setId === self.setId));
     const leavingIds = new Set(leaving.map(e => e.id));
     cfg.pendingSpaceActs = cfg.pendingSpaceActs.filter(e => !leavingIds.has(e.id));
     if (cfg.pendingSpaceActs.length === 0) delete cfg.pendingSpaceActs;
@@ -738,10 +801,14 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
     const set = self.setId ? cfg.spaceActSets?.find(s => s.id === self.setId && !s.endedAt) : undefined;
     if (set) {
       const at = new Date().toISOString();
-      set.members[self.localId] = { state: 'done', completedAt: at, ...(outcome.report ? { report: outcome.report } : {}) };
+      const done = { state: 'done' as const, completedAt: at, ...(outcome.report ? { report: outcome.report } : {}) };
+      for (const e of leaving) if (e.setId === set.id) set.members[e.localId] = { ...done };
       if (!(cfg.pendingSpaceActs ?? []).some(e => e.setId === set.id)) {
         set.endedAt = at;
         set.outcome = 'completed';
+        // What the kind's completion changes rides this write (a migrate's URI), and the set's target never outlives it.
+        setHooks.get(set.kind)?.inCompletionWrite?.(cfg, set);
+        delete set.target;
         setDone = structuredClone(set);
       }
     }
@@ -769,7 +836,10 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
   failureSaid.forget(id);
   waitingSaid.forget(id);
   if (setDone) setEnded(setDone);
-  if (!waiters.has(id) && covered.length === 0) {
+  if (wholeSet) {
+    // No completion row: a whole-set body moved what the audit log is written to (a migrate's database is no longer this one), so the
+    // row would land where nobody reads it. The set's own end hook says what happened.
+  } else if (!waiters.has(id) && covered.length === 0) {
     // Nobody is told of this completion — the door answered `queued`, or the act was resumed — so it is said in the audit log.
     logInternalAudit({ method: 'DELETE', path: `internal:space-act:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId });
   } else if (!waiters.has(id)) {
@@ -801,15 +871,29 @@ function failed(id: string, entry: SpaceActEntry, err: unknown, via: string): Sp
   // An input failure is never retried (another attempt meets the same input): no `retryAt`, and the sentence says what ends it.
   const input = err instanceof SpaceActInputFailure;
   const retryAt = input ? undefined : new Date(Date.now() + backoffDelayMs(attempts - 1, 60_000, 3_600_000)).toISOString();
+  const wholeSet = runsWholeSet(entry);
+  if (wholeSet && input) {
+    // One body for the whole set met an input it cannot act on: the set ends here, every hold lifts, and nothing it acted toward is kept.
+    const sentence = `The ${entry.kind} of this instance ended without completing: ${err.message} Every space takes writes again.`;
+    try { endSetAbandoned(entry.setId!, sentence); }
+    catch (writeErr) { log.error(`the failed ${entry.kind} could not be ended: ${peerText(writeErr)}`); }
+    counters?.spaceActsTotal.inc({ kind: entry.kind, via, outcome: 'failed' });
+    log.error(`${peerText(sentence)} Cause: ${peerText(err)}`);
+    return result(entry, id, { ok: false, error: sentence, cause: err });
+  }
   const sentence = input
     ? `The ${entry.kind} of space '${entry.localId}' cannot complete: ${err.message} It is not retried; abandon it to lift the hold.`
-    : `The ${entry.kind} of space '${entry.localId}' did not complete; it is retried automatically at ${retryAt}.`;
+    : wholeSet
+      ? `The ${entry.kind} of this instance did not complete; it is retried automatically at ${retryAt}.`
+      : `The ${entry.kind} of space '${entry.localId}' did not complete; it is retried automatically at ${retryAt}.`;
   try {
     mutateConfig(cfg => {
-      const e = cfg.pendingSpaceActs?.find(x => x.id === id);
-      if (!e) return;
-      e.attempts = attempts; e.state = 'owed'; e.lastError = sentence;
-      if (retryAt) { e.retryAt = retryAt; delete e.needsAbandon; } else { delete e.retryAt; e.needsAbandon = true; }
+      // One body for the whole set failed for every member alike, so every member carries the one retry clock and is due together.
+      const failing = (cfg.pendingSpaceActs ?? []).filter(x => x.id === id || (wholeSet && x.setId === entry.setId));
+      for (const e of failing) {
+        e.attempts = attempts; e.state = 'owed'; e.lastError = sentence;
+        if (retryAt) { e.retryAt = retryAt; delete e.needsAbandon; } else { delete e.retryAt; e.needsAbandon = true; }
+      }
     });
   } catch (writeErr) {
     log.error(`the failed ${entry.kind} of '${peerText(entry.localId)}' could not be recorded as owed: ${peerText(writeErr)}`);

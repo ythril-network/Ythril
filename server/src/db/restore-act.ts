@@ -45,7 +45,6 @@ import {
   defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, abandonSpaceActSet, instanceWideActStanding,
   spaceActSetOf, entriesOfSet, SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from '../spaces/space-act-runner.js';
-import { SPACE_ACT_KINDS } from '../config/types-space-acts.js';
 import type { SpaceActKind, SpaceActSet } from '../config/types.js';
 import { seqFloor, bumpSeq } from '../util/seq.js';
 import { logInternalAudit } from '../audit/audit.js';
@@ -102,10 +101,6 @@ export function startRestore(plan: Extract<RestorePlan, { ok: true }>): RestoreS
   return { restoreId: set.id, backupId: plan.backupId, spaces: plan.spaces, emptied: plan.emptied, leftOut: plan.leftOut };
 }
 
-/** The refusal of a restore while an act that stands on every space stands: the code its kind refuses writes with. */
-export function restoreStandingRefusal(kind: SpaceActKind): { error: string; code: string } {
-  return { error: `A restore cannot start: ${SPACE_ACT_KINDS[kind].writeRefusalWhy({})}.`, code: SPACE_ACT_KINDS[kind].writeRefusalCode };
-}
 
 // ── the report ─────────────────────────────────────────────────────────────────────────────────────────────────
 

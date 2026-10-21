@@ -71,11 +71,14 @@ export interface BackupResult {
  * not invalidate the local backup.
  *
  * Returns metadata about what was done, including the dump manifest.
+ *
+ * `underAct` says the caller IS the body of the instance-wide act of that kind standing now (a migrate's dump of the database it is
+ * about to copy): every space is held by it, so the dump is consistent, and only then is the refusal below passed.
  */
-export async function runBackupNow(): Promise<BackupResult> {
+export async function runBackupNow({ underAct }: { underAct?: SpaceActKind } = {}): Promise<BackupResult> {
   // Never while a restore stands: the dump would be half old and half restored, and become the newest backup (bundle-157, R4.1, R5.4).
   const standing = instanceWideActStanding();
-  if (standing) throw new BackupRefusedDuringRestore(standing);
+  if (standing && standing !== underAct) throw new BackupRefusedDuringRestore(standing);
   const cfg = loadBackupConfig();
   const dataRoot = getDataRoot();
   const ts = new Date().toISOString().replace(/[:.]/g, '-');

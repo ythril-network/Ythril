@@ -39,6 +39,12 @@ export interface SpaceActKindSpec {
   readonly keyFields: readonly SpaceActKeyField[];
   /** The member-mark step its registration computes from the networks carrying the space, or null when it forgets no mark. */
   readonly forgetsMarks: keyof SpaceActEntry['postSteps'] | null;
+  /**
+   * Its set has ONE body for every space (a migrate copies the whole database at once): the set's first entry runs it, a run of any
+   * other entry joins that one, the completion ends every member in one write, and a failure is recorded on every member alike - an
+   * input failure ends the set. False for a kind whose body acts on its own space (a restore).
+   */
+  readonly wholeSet: boolean;
 }
 
 /**
@@ -58,26 +64,26 @@ export interface SpaceActKindSpec {
 export const SPACE_ACT_KINDS = {
   delete: {
     lane: 'space-op', writeRefusalCode: 'space_being_deleted', writeRefusalWhy: () => 'it is being deleted',
-    instanceWide: false, keyFields: ['networkId'], forgetsMarks: null,
+    instanceWide: false, keyFields: ['networkId'], forgetsMarks: null, wholeSet: false,
   },
   wipe: {
     lane: 'wipe', writeRefusalCode: 'space_being_wiped', writeRefusalWhy: () => 'it is being wiped; retry once the wipe completes',
-    instanceWide: false, keyFields: ['types'], forgetsMarks: 'forgetReceiveMarks',
+    instanceWide: false, keyFields: ['types'], forgetsMarks: 'forgetReceiveMarks', wholeSet: false,
   },
   rename: {
     lane: 'space-op', writeRefusalCode: 'space_being_renamed',
     writeRefusalWhy: (act) => `it is being renamed to '${act.newId ?? ''}'; retry under the new id once the rename completes`,
-    instanceWide: false, keyFields: ['newId'], forgetsMarks: null,
+    instanceWide: false, keyFields: ['newId'], forgetsMarks: null, wholeSet: false,
   },
   restore: {
     lane: 'restore', writeRefusalCode: 'space_being_restored',
     writeRefusalWhy: () => 'the instance is being restored from a backup; retry once the restore completes',
-    instanceWide: true, keyFields: [], forgetsMarks: 'forgetReceived',
+    instanceWide: true, keyFields: [], forgetsMarks: 'forgetReceived', wholeSet: false,
   },
   migrate: {
     lane: 'restore', writeRefusalCode: 'space_being_migrated',
     writeRefusalWhy: () => 'the instance is being copied to another database; retry once the migration completes',
-    instanceWide: true, keyFields: [], forgetsMarks: null,
+    instanceWide: true, keyFields: [], forgetsMarks: null, wholeSet: true,
   },
 } as const satisfies Record<string, SpaceActKindSpec>;
 
@@ -188,4 +194,11 @@ export interface SpaceActSet {
   emptied?: string[];
   /** A restore: the spaces the backup holds that this instance does not serve, left out at the operator's word (`leaveOut`). */
   leftOut?: string[];
+  /**
+   * What the set acts toward, opaque to the runner: a migrate's target URI, sealed with the master secret when one exists. Read only by
+   * its kind's body and completion (`spaceActSetTarget`), never projected, and removed in the write that ends the set.
+   */
+  target?: string;
+  /** Our sentence for the failure that ended the set (a migrate whose copy failed), naming its backup; never a driver's text. */
+  lastError?: string;
 }

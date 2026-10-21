@@ -13,6 +13,7 @@ import { migrateTokenRightsOnBoot } from '../auth/backfill-token-rights.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { migrateProxiesToViews, holdsLegacyProxies } from './migrate-proxies-to-views.js';
 import { validateViews } from './view-shape.js';
+import { effectiveMongoUri, readConfiguredMongoUriFrom } from './mongo-uri.js';
 
 const CONFIG_PATH = process.env['CONFIG_PATH'] ?? '/config/config.json';
 const SECRETS_PATH = path.join(path.dirname(CONFIG_PATH), 'secrets.json');
@@ -1042,31 +1043,12 @@ export function getEmbeddingApiKey(): string | undefined {
   return getEmbeddingConfig().apiKey;
 }
 
+// The one rule for where the database URI comes from lives in `mongo-uri.ts`; it reads the configured URI through this reader.
+readConfiguredMongoUriFrom(() => _config?.mongo?.uri);
+
+/** The URI the process connects to: `effectiveMongoUri` (`config/mongo-uri.ts`), where an empty `MONGO_URI` is unset. */
 export function getMongoUri(): string {
-  const cfg = _config;
-  // An explicit URI always wins — infra-managed deployments (managed Atlas, an existing
-  // cluster) must be able to override, and they carry their own credentials.
-  const explicit = process.env['MONGO_URI'] ?? cfg?.mongo?.uri;
-  if (explicit) return explicit;
-
-  // Otherwise we are talking to the BUNDLED `ythril-mongo` container. If the operator
-  // supplied credentials for it, authenticate — the bundled database is unauthenticated
-  // by default, which means anything that can reach port 27017 can read and rewrite every
-  // space, bypassing tokens, space scoping and the audit log entirely (see S7).
-  //
-  // Credentials are optional so that EXISTING installs keep working: MongoDB cannot have
-  // auth switched on in place (the Atlas Local image only provisions the replica-set
-  // keyfile on a first init), so an existing database must be migrated deliberately.
-  const user = process.env['MONGO_USERNAME'];
-  const pass = process.env['MONGO_PASSWORD'];
-  if (user && pass) {
-    // Percent-encode: a password may legitimately contain `@`, `:`, `/` etc., which would
-    // otherwise be parsed as URI delimiters and produce a confusing connection failure.
-    const creds = `${encodeURIComponent(user)}:${encodeURIComponent(pass)}`;
-    return `mongodb://${creds}@ythril-mongo:27017/ythril?directConnection=true&authSource=admin`;
-  }
-
-  return 'mongodb://ythril-mongo:27017/ythril?directConnection=true';
+  return effectiveMongoUri().uri;
 }
 
 export function getDataRoot(): string {

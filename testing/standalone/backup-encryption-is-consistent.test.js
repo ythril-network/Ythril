@@ -63,9 +63,14 @@ describe('backup encryption is consistent across every path', () => {
       + offenders.join('\n  '));
   });
 
+  // The callers are DERIVED: a hand-written list of them is how a gate goes on checking files that no longer call the writer, and
+  // misses the one that started to. Since bundle-157 every backup (scheduled, manual, a migrate's dump) goes through `runBackupNow`,
+  // so the floor is one caller; zero would be a vacuous pass.
+  const writerCallers = () => files.filter(f => f !== 'server/src/db/dump.ts' && read(f).includes(`${WRITER}(`));
+
   it('every caller of the writer passes the encryption setting', () => {
-    const callers = files.filter(f => f !== 'server/src/db/dump.ts' && read(f).includes(`${WRITER}(`));
-    assert.ok(callers.length >= 2, `expected at least 2 callers of ${WRITER}, found ${callers.length}`);
+    const callers = writerCallers();
+    assert.ok(callers.length >= 1, `expected at least 1 caller of ${WRITER}, found ${callers.length}`);
 
     for (const f of callers) {
       const src = read(f);
@@ -78,9 +83,9 @@ describe('backup encryption is consistent across every path', () => {
   });
 
   it('the setting is one value in one place, not a per-path default', () => {
-    // Both callers must read it from the backup config rather than hardcoding a boolean, or the manual and
-    // scheduled paths could disagree about whether a backup is encrypted.
-    for (const f of ['server/src/db/backup-scheduler.ts', 'server/src/api/data.ts']) {
+    // Every caller must read it from the backup config rather than hardcoding a boolean, or two backup paths
+    // could disagree about whether a backup is encrypted.
+    for (const f of writerCallers()) {
       const src = read(f);
       assert.match(src, /encrypt:\s*(cfg|loadBackupConfig\(\))\??\.?e?n?c?r?y?p?t?/,
         `${f} must derive \`encrypt\` from the backup config, not from a literal`);
@@ -94,7 +99,7 @@ describe('backup encryption is consistent across every path', () => {
     assert.match(cfg, /encrypt:\s*z\.boolean\(\)\.optional\(\)/,
       'backup.json must declare an optional `encrypt` — optional means absent = plaintext');
     // `=== true` at both call sites is what makes absent mean false rather than undefined-ish.
-    for (const f of ['server/src/db/backup-scheduler.ts', 'server/src/api/data.ts']) {
+    for (const f of writerCallers()) {
       assert.match(read(f), /encrypt.*===\s*true/s, `${f} must treat an absent setting as plaintext`);
     }
   });
