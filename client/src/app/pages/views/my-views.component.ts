@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { finalize } from 'rxjs';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { ToastService } from '../../core/toast.service';
@@ -73,7 +74,7 @@ import { ViewCreateDialogComponent, type ViewMemberChoice } from '../brain/view-
               <form class="rename" (ngSubmit)="saveRename(v)">
                 <label class="sr" [for]="'view-rename-' + v.name">{{ 'views.rename.label' | transloco: { name: v.name } }}</label>
                 <input type="text" [id]="'view-rename-' + v.name" name="rename" [(ngModel)]="draft" maxlength="40" pattern="[a-z0-9-]+" required />
-                <button class="btn btn-sm btn-primary" type="submit" [disabled]="!draft.trim() || draft.trim() === v.name">{{ 'common.save' | transloco }}</button>
+                <button class="btn btn-sm btn-primary" type="submit" [disabled]="!draft.trim() || draft.trim() === v.name || busy().has(v.id)" [attr.aria-busy]="busy().has(v.id) ? 'true' : null">{{ 'common.save' | transloco }}</button>
                 <button class="btn btn-sm btn-secondary" type="button" (click)="renaming.set('')">{{ 'common.cancel' | transloco }}</button>
               </form>
             } @else {
@@ -83,7 +84,7 @@ import { ViewCreateDialogComponent, type ViewMemberChoice } from '../brain/view-
                 <span class="marker"><ph-icon name="eye" [size]="11"/>{{ 'views.marker' | transloco }}</span>
               </button>
               <button class="icon-btn" type="button" [attr.aria-label]="'views.rename.action' | transloco: { name: v.name }" [attr.title]="'views.rename.action' | transloco: { name: v.name }" (click)="startRename(v)"><ph-icon name="pencil-simple" [size]="14"/></button>
-              <button class="icon-btn" type="button" [attr.aria-label]="'views.delete.action' | transloco: { name: v.name }" [attr.title]="'views.delete.action' | transloco: { name: v.name }" (click)="remove(v)"><ph-icon name="trash" [size]="14"/></button>
+              <button class="icon-btn" type="button" [attr.aria-label]="'views.delete.action' | transloco: { name: v.name }" [attr.title]="'views.delete.action' | transloco: { name: v.name }" [disabled]="busy().has(v.id)" [attr.aria-busy]="busy().has(v.id) ? 'true' : null" (click)="remove(v)"><ph-icon name="trash" [size]="14"/></button>
             }
           </li>
         }
@@ -118,6 +119,10 @@ export class MyViewsComponent {
   protected readonly renaming = signal('');
   protected readonly error = signal('');
   protected draft = '';
+  /** The views with a rename or delete in flight: their controls are disabled and busy, so a double submit sends one write. */
+  protected readonly busy = signal<ReadonlySet<string>>(new Set());
+  private hold(id: string): void { this.busy.update(s => new Set(s).add(id)); }
+  private release(id: string): void { this.busy.update(s => { const next = new Set(s); next.delete(id); return next; }); }
 
   protected onCreated(view: PersonalView): void {
     this.creating.set(false);
@@ -133,23 +138,27 @@ export class MyViewsComponent {
 
   protected saveRename(view: PersonalView): void {
     const name = this.draft.trim();
-    if (!name || name === view.name) return;
-    this.store.rename(view.id, name).subscribe({
+    if (!name || name === view.name || this.busy().has(view.id)) return;
+    this.hold(view.id);
+    this.store.rename(view.id, name).pipe(finalize(() => this.release(view.id))).subscribe({
       next: renamed => { this.renaming.set(''); this.renamed.emit({ from: view.id, to: renamed.id }); },
       error: err => this.error.set(viewRefusalText(this.transloco, err)),
     });
   }
 
   protected async remove(view: PersonalView): Promise<void> {
+    if (this.busy().has(view.id)) return;
     this.error.set('');
+    // Held from the question on, so a second click while the dialog is open or the delete is in flight sends nothing more.
+    this.hold(view.id);
     const ok = await this.confirmDialog.confirm({
       title: this.transloco.translate('views.delete.title', { name: view.name }),
       message: this.transloco.translate('views.delete.confirm', { name: view.name }),
       confirmLabel: this.transloco.translate('views.delete.button'),
       danger: true,
-    });
-    if (!ok) return;
-    this.store.remove(view.id).subscribe({
+    }).catch(() => false);
+    if (!ok) { this.release(view.id); return; }
+    this.store.remove(view.id).pipe(finalize(() => this.release(view.id))).subscribe({
       next: () => { this.toast.success(this.transloco.translate('views.deleted', { name: view.name })); this.removed.emit(view.id); },
       error: err => this.error.set(viewRefusalText(this.transloco, err)),
     });
