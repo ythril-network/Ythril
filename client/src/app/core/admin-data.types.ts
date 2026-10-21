@@ -69,6 +69,15 @@ export interface RestoreAbandoned {
   completed: string[];
 }
 
+/** `POST /api/admin/data/migrate/abandon` (Q-564): the spaces it released. Nothing was saved: the old database stays in use. */
+export interface MigrateAbandoned {
+  abandoned?: true;
+  migrateId: string;
+  backupId?: string;
+  released: string[];
+  completed?: string[];
+}
+
 /** The 202 of `POST /api/admin/data/migrate`. */
 export interface MigrateStarted {
   migrateId: string;

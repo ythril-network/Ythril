@@ -19,7 +19,7 @@ const LOCALES = ['en', 'de', 'pl'] as const;
 const dict = (loc: string): Record<string, string> => JSON.parse(readFileSync(resolve(I18N, `${loc}.json`), 'utf8'));
 
 /** The kinds the server's runtime list declares, in its order. */
-function serverActKinds(): { kinds: string[]; instanceWideCodes: string[] } {
+function serverActKinds(): { kinds: string[]; instanceWideKinds: string[]; instanceWideCodes: string[] } {
   const src = readRepoSource('server/src/config/types-space-acts.ts');
   const start = src.indexOf('SPACE_ACT_KINDS = {');
   const end = src.indexOf('} as const', start);
@@ -27,21 +27,33 @@ function serverActKinds(): { kinds: string[]; instanceWideCodes: string[] } {
   const body = src.slice(start, end);
   const entries = [...body.matchAll(/\n {2}([a-z][A-Za-z]*): \{([\s\S]*?)\n {2}\}/g)];
   const kinds = entries.map(m => m[1]!);
-  const instanceWideCodes = entries
-    .filter(m => /instanceWide:\s*true/.test(m[2]!))
+  const instanceWide = entries.filter(m => /instanceWide:\s*true/.test(m[2]!));
+  const instanceWideKinds = instanceWide.map(m => m[1]!);
+  const instanceWideCodes = instanceWide
     .map(m => /writeRefusalCode:\s*'([a-z_]+)'/.exec(m[2]!)?.[1])
     .filter((c): c is string => !!c);
   // The kind count when this gate was written: delete, wipe, rename, restore, migrate.
   if (kinds.length < 5) throw new Error(`found ${kinds.length} act kinds - fewer than 5, so the record's spelling changed and a check over each kind would report clean about nothing`);
   if (instanceWideCodes.length < 2) throw new Error(`found ${instanceWideCodes.length} instance-wide refusal codes - fewer than 2`);
-  return { kinds, instanceWideCodes };
+  return { kinds, instanceWideKinds, instanceWideCodes };
+}
+
+/**
+ * The codes the abandon doors answer with (`server/src/spaces/act-set-abandon.ts`, Q-564): spelled per kind as a template
+ * (`no_${kind}_standing`), so each template is expanded over every instance-wide kind - a literal match would find none of them.
+ */
+function abandonCodes(): string[] {
+  const src = readRepoSource('server/src/spaces/act-set-abandon.ts');
+  const templates = [...src.matchAll(/code: `([a-z_]*)\$\{kind\}([a-z_]*)`/g)].map(m => [m[1]!, m[2]!] as const);
+  if (templates.length < 2) throw new Error(`found ${templates.length} abandon code templates - fewer than 2, so act-set-abandon.ts moved or its spelling changed`);
+  return serverActKinds().instanceWideKinds.flatMap(k => templates.map(([pre, post]) => `${pre}${k}${post}`));
 }
 
 /** Every code the restore, migrate and backup doors answer with. */
 function dataRefusalCodes(): string[] {
   const routes = [...readRepoSource('server/src/api/data.ts').matchAll(/code: '([A-Za-z_]+)'/g)].map(m => m[1]!);
   const backup = [...readRepoSource('server/src/db/backup-scheduler.ts').matchAll(/readonly code = '([A-Za-z_]+)'/g)].map(m => m[1]!);
-  const codes = [...new Set([...routes, ...backup, ...serverActKinds().instanceWideCodes])];
+  const codes = [...new Set([...routes, ...backup, ...abandonCodes(), ...serverActKinds().instanceWideCodes])];
   if (codes.length < 9) throw new Error(`found ${codes.length} data refusal codes - fewer than 9, so a source moved or its spelling changed`);
   return codes;
 }
@@ -57,10 +69,11 @@ describe('every act kind has its words in every locale (bundle-157)', () => {
     });
   }
 
-  it('the states a restore report row can carry have their pill words (done, restore_abandoned)', () => {
+  it('the states a restore or migrate report row can carry have their pill words (done, <kind>_abandoned for each instance-wide kind)', () => {
+    const abandoned = serverActKinds().instanceWideKinds.map(k => `${k}_abandoned`);
     for (const loc of LOCALES) {
       const d = dict(loc);
-      for (const s of ['owed', 'running', 'done', 'restore_abandoned']) expect(d[`spaces.dangerZone.act.state.${s}`], `${loc}: state ${s}`).toBeTruthy();
+      for (const s of ['owed', 'running', 'done', ...abandoned]) expect(d[`spaces.dangerZone.act.state.${s}`], `${loc}: state ${s}`).toBeTruthy();
     }
   });
 });

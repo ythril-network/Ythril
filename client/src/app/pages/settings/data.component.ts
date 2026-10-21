@@ -116,6 +116,8 @@ interface BackupConfig {
               }
             </div>
           }
+          @if (migrateAbandonNotice(); as n) { <div class="alert alert-success" style="margin-bottom:12px;">{{ n }}</div> }
+          @if (migrateAbandonError(); as e) { <div class="alert alert-error" style="margin-bottom:12px;">{{ e }}</div> }
         </div>
 
         @if (loadingBackups()) {
@@ -156,7 +158,7 @@ interface BackupConfig {
         <app-act-set-progress kind="restore" [report]="r" [abandoning]="abandoning()" (abandon)="confirmAbandon()"/>
       }
       @if (shownMigrate(); as m) {
-        <app-act-set-progress kind="migrate" [report]="m" [stopped]="migrateStopped()"/>
+        <app-act-set-progress kind="migrate" [report]="m" [stopped]="migrateStopped()" [abandoning]="abandoningMigrate()" (abandon)="confirmMigrateAbandon()"/>
       }
 
       <!-- ── Backup Destination ───────────────────────────────── -->
@@ -383,6 +385,10 @@ export class DataComponent implements OnInit {
   private readonly followedMigrate = signal(false);
   readonly abandoning = signal(false);
   readonly migrateNotice = signal<string | null>(null);
+  /** A migrate abandon in flight, and what it came to (Q-564): shown in the set's live region beside the restore's. */
+  readonly abandoningMigrate = signal(false);
+  readonly migrateAbandonNotice = signal<string | null>(null);
+  readonly migrateAbandonError = signal<string | null>(null);
   /** The migrate's report poll got no answer at all: the process has exited to switch database. */
   readonly migrateStopped = signal(false);
   /** The kind of the instance-wide set holding maintenance, or null (`maintenanceState().heldBy`). */
@@ -784,6 +790,39 @@ export class DataComponent implements OnInit {
         this.abandoning.set(false);
         if (this.destroyed) return;
         this.restoreError.set(refusalText(this.transloco, err, 'data.progress.abandonFailed', DATA_REFUSALS));
+      },
+    });
+  }
+
+  /**
+   * Abandon the standing migrate, once confirmed (Q-564): its holds lift and nothing is saved, so the old database stays in use; the new
+   * one may hold part of the copy and must be emptied before another migrate, which the confirm says before anything is sent.
+   */
+  async confirmMigrateAbandon(): Promise<void> {
+    const ok = await this.confirmDialog.confirm({
+      title: this.transloco.translate('data.migrate.abandonTitle'),
+      message: this.transloco.translate('data.migrate.abandonConfirm'),
+      confirmLabel: this.transloco.translate('data.progress.abandonMigrate'),
+      danger: true,
+    });
+    if (!ok) return;
+    this.abandoningMigrate.set(true);
+    this.migrateAbandonError.set(null);
+    this.adminApi.abandonMigrate().subscribe({
+      next: () => {
+        this.abandoningMigrate.set(false);
+        if (this.destroyed) return;
+        this.migrateAbandonNotice.set(this.transloco.translate('data.migrate.abandoned'));
+        // Said here, in the region; the poll that sees the set end must not say it a second time.
+        this.migrateReport.update(cur => (cur ? { ...cur, state: 'abandoned' } : cur));
+        this.migratePoll?.stop();
+        this.loadMaintenance();
+        this.refreshMigrate();
+      },
+      error: err => {
+        this.abandoningMigrate.set(false);
+        if (this.destroyed) return;
+        this.migrateAbandonError.set(refusalText(this.transloco, err, 'data.migrate.abandonFailed', DATA_REFUSALS));
       },
     });
   }

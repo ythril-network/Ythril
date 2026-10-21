@@ -321,12 +321,17 @@ request is accepted at once and the copy runs in the background:
 1. The instance enters maintenance mode and every space stops taking writes; you, as an administrator, keep working.
 2. The current database is backed up like any other backup (it appears in the **Backups** table), and that backup is copied
    into the new database with every index.
-3. The new URI is saved to `config.json`, and the server process exits. When Docker or Kubernetes restarts the
-   container, the server connects to the new database. Without a restart policy, start it again yourself.
+3. The new URI is saved to `config.json`, and the server process exits. From that moment until it exits, **nothing is
+   written**, not even by an administrator: any change answers that the instance is being migrated, because it would land in
+   the old database and be missing from the new one. Reading still works. When Docker or Kubernetes restarts the container,
+   the server connects to the new database. Without a restart policy, start it again yourself.
 
 If the copy fails, the instance stays on the old database, maintenance ends and the reason names the backup; the new database
 may hold part of the copy and must be emptied before you try again. A database that is slow or briefly unreachable is
-retried by itself. Peers notice nothing: the data is the same, so nothing is sent again.
+retried by itself - and one that never answers is retried for ever, so the migration card offers **Abandon migration** while
+its copy is waiting to be tried again. Abandoning saves nothing: the instance keeps using its old database, every space takes
+writes again and maintenance ends; empty the new database before you migrate again. Peers notice nothing: the data is the
+same, so nothing is sent again.
 
 **The old database still holds every record afterwards.** Nothing reads it any more; keep it until you have confirmed the
 migrated instance is healthy, then remove it yourself.
@@ -335,7 +340,7 @@ migrated instance is healthy, then remove it yourself.
 
 ## Settings — Audit Log
 
-**Settings → Logs** (admin only) shows a searchable log of every API operation on this instance. A deletion or wipe a passed vote applied here is recorded as `network.round.space_act`, a passed space addition that a later deletion of the same space retired, so it was never applied, as `network.round.addition_retired`, and a deletion, wipe or rename a request queued and then finished as `space.act_completed` (so is each space's share of a restore); a concluded vote round is `network.round.expired`. A restore is recorded when you ask for it (`data.restore.requested`) and once more when it ends (`data.restore.completed`, or `data.restore.abandoned` naming the backup); a migration likewise (`data.migrate.requested`, then `data.migrate.failed` here or `data.migrate.completed` in the new database's log). The page has two sub-tabs, toggled at the top: **Audit Log** (the operation table below) and **Server Log** (the live server log described at the end).
+**Settings → Logs** (admin only) shows a searchable log of every API operation on this instance. A deletion or wipe a passed vote applied here is recorded as `network.round.space_act`, a passed space addition that a later deletion of the same space retired, so it was never applied, as `network.round.addition_retired`, and a deletion, wipe or rename a request queued and then finished as `space.act_completed` (so is each space's share of a restore); a concluded vote round is `network.round.expired`. A restore is recorded when you ask for it (`data.restore.requested`) and once more when it ends (`data.restore.completed`, or `data.restore.abandoned` naming the backup); a migration likewise (`data.migrate.requested`, then `data.migrate.failed` here or `data.migrate.completed` in the new database's log; abandoning one is `data.migrate.abandon`). The page has two sub-tabs, toggled at the top: **Audit Log** (the operation table below) and **Server Log** (the live server log described at the end).
 
 **Filtering:** Filter by date range, operation type, space, HTTP status, or client IP.
 

@@ -286,6 +286,7 @@ export const ROUTE_RULES: RouteRule[] = [
   // The REQUEST of a migrate, the same way: the outcome is `data.migrate.completed` (in the new database) or `data.migrate.failed`.
   { method: 'POST',   pattern: /^\/api\/admin\/data\/migrate$/,                    operation: 'data.migrate.requested' },
   { method: 'GET',    pattern: /^\/api\/admin\/data\/migrate$/,                    operation: 'data.migrate.report', read: true },
+  { method: 'POST',   pattern: /^\/api\/admin\/data\/migrate\/abandon$/,           operation: 'data.migrate.abandon' },
   { method: 'POST',   pattern: /^\/api\/admin\/data\/maintenance$/,                operation: 'data.maintenance.toggle' },
   { method: 'PUT',    pattern: /^\/api\/admin\/data\/backup-config$/,              operation: 'data.backup_config.update' },
   // A connection test does not mutate, but it does reach out to an operator-supplied URI.
