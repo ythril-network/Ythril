@@ -9,6 +9,7 @@ import { markListening } from './util/after-listening.js';
 import { stopSyncScheduler } from './sync/scheduler.js';
 import { stopBackupScheduler } from './db/backup-scheduler.js';
 import { stopDupeScanner } from './brain/dupe-scanner.js';
+import { closeScheduling } from './schedulers.js';
 import { cleanupStaleChunks } from './files/chunks.js';
 import { intervalJob } from './util/interval-job.js';
 import { log, redactSecrets, peerText } from './util/log.js';
@@ -319,6 +320,11 @@ async function main(): Promise<void> {
     beginShutdown();
     if (READY_GRACE_MS > 0) await new Promise(r => setTimeout(r, READY_GRACE_MS));
 
+    // Before any stop below: the config watcher stops, a reload in flight is waited for, and cron arming closes, so nothing
+    // re-arms a scheduler this handler stops (a reload during the drain used to re-arm three of them; `Q-570`). The direct
+    // stops stay, one per module, because `every-started-job-is-stopped-at-shutdown` holds each module's stop to this handler.
+    // Bounded well inside the drain budget: a reload stuck in a space's init must not spend the orchestrator's grace.
+    await closeScheduling({ withinMs: Math.min(2_000, DRAIN_MS) });
     stopSyncScheduler();
     stopBackupScheduler();
     stopDupeScanner();

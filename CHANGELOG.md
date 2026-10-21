@@ -184,6 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Configuration:** The instance's own writes to `config.json` no longer reload it as an outside edit (a reload, audit entries and a cron re-arm per burst of its own writes). A shutdown stops the config watcher and waits for a reload in flight before it stops the schedulers, and from then on no sync, backup or scanner schedule is armed again.
 - **Errors:** An error that only names `maxTimeMS` is no longer read as a missed deadline (no retryable `503`); a missing reference named like `mongot` stays `400`. A write the store could not finish answers `503 retryable`.
 - **Sync:** A chrono `type` outside the space's vocabulary is still stored on pull (a push answers `unknownType`). Two peers pushing different text for one fact at one seq keep both (a fork), with the divergent copy's `createdAt` and `updatedAt`.
 - **Sync:** Strict-linkage violations are recorded for every landed edge and link on every door, once per dangling end after a pull or push is whole (one `link_violation.created`). A push no longer waits for the check; a part-way pull still checks what landed.

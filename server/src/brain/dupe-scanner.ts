@@ -45,7 +45,7 @@ import { runExclusive } from '../util/single-flight.js';
 import { readAfterSeq } from '../util/seq-keyset.js';
 import { readScanStart, writeScanPosition, advanceScanPosition } from './scan-cursor.js';
 import { summariseRecall } from './recall-shape.js';
-import { armedSchedules } from '../util/armed-schedule.js';
+import { armedSchedules, cronArmingRefused } from '../util/armed-schedule.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { NotFoundError } from '../util/errors.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
@@ -423,10 +423,11 @@ export async function runDupeScanAllSpaces(): Promise<void> {
 
 let _task: ScheduledTask | null = null;
 /** See `util/armed-schedule.ts`: re-arming an unchanged expression resets the task's phase. */
-const _armed = armedSchedules();
+const _armed = armedSchedules('duplicate scanner');
 const ARMED = 'the one task';
 
 export function startDupeScanner(): void {
+  if (cronArmingRefused('the duplicate scanner')) return;   // the process is ending (`util/armed-schedule.ts`)
   const dc = getConfig().dupeScanner;
   const cron = dc?.enabled ? (dc.schedule ?? DEFAULT_SCHEDULE) : null;
   if (cron !== null && _task && _armed.isArmed(ARMED, cron)) return;   // already running on exactly this expression

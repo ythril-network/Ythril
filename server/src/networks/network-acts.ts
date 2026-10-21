@@ -31,6 +31,7 @@ import type { Config, NetworkConfig, SpaceMeta } from '../config/types.js';
 import { replicatedMetaOf } from '../sync/replicated-meta.js';
 import { queueGeneratedNote } from '../sync/change-notes.js';
 import { syncScheduleRefusal } from '../sync/schedule.js';
+import { scheduleSyncForNetwork } from '../sync/scheduler.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
 import { log, peerText, refusalOfParse } from '../util/log.js';
 import { networkRole } from './network-role.js';
@@ -226,9 +227,9 @@ export function updateNetworkAct(caller: Caller, id: string, input: unknown): Ne
     // `''` is stored, not dropped: manual chosen is a setting, and `undefined` means never stated, which the boot
     // rule gives the join default (`defaultUnstatedJoinedSchedules`).
     net.syncSchedule = parsed.data.syncSchedule.trim();
-    import('../sync/scheduler.js').then(({ scheduleSyncForNetwork }) => {
-      scheduleSyncForNetwork(net.id, net.syncSchedule);
-    }).catch(err => log.warn(`Failed to reschedule sync for ${peerText(net.id)}: ${peerText(err)}`));
+    // Inside the request, not behind a detached import: an arm that lands after the request answered can land after the
+    // process stopped its schedulers, and a task armed then holds it open (`Q-474`, `join-remote-act.ts` arms the same way).
+    scheduleSyncForNetwork(net.id, net.syncSchedule);
   }
   if (parsed.data.label) net.label = parsed.data.label;
   if (parsed.data.requireSignedVotes !== undefined) net.requireSignedVotes = parsed.data.requireSignedVotes;

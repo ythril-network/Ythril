@@ -26,7 +26,7 @@ import { dumpDatabase, type DumpManifest } from './dump.js';
 import { copyBackupOffsite, copyFilesOffsite, pruneBackups } from './offsite.js';
 import { loadBackupConfig } from './backup-config.js';
 import { log, outsideRequest } from '../util/log.js';
-import { armedSchedules } from '../util/armed-schedule.js';
+import { armedSchedules, cronArmingRefused } from '../util/armed-schedule.js';
 import { runExclusive } from '../util/single-flight.js';
 import { backupsRoot } from './backup-location.js';
 import { instanceWideActStanding, backupsNamedByActs } from '../spaces/space-act-runner.js';
@@ -36,7 +36,7 @@ const DEFAULT_KEEP_OFFSITE = 14;
 
 let _task: ScheduledTask | null = null;
 /** See `util/armed-schedule.ts`: this route is called on every save, most of which do not touch the cron. */
-const _armed = armedSchedules();
+const _armed = armedSchedules('scheduled backup');
 const ARMED = 'the one task';
 
 function isBackupFeatureEnabled(): boolean {
@@ -150,6 +150,7 @@ export async function runBackupNow({ underAct }: { underAct?: SpaceActKind } = {
  * Call this from index.ts after MongoDB is connected.
  */
 export function startBackupScheduler(): void {
+  if (cronArmingRefused('the backup scheduler')) return;   // the process is ending (`util/armed-schedule.ts`)
   if (!isBackupFeatureEnabled()) return;
 
   const cfg = loadBackupConfig();

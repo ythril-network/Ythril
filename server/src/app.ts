@@ -51,7 +51,7 @@ import { pipelineStatusRouter } from './api/pipeline-status.js';
 import { spaceActivityRouter } from './api/space-activity.js';
 import { maintenanceMiddleware } from './maintenance.js';
 import { globalRateLimit, ipFloodBackstop } from './rate-limit/middleware.js';
-import { configExists, reloadConfig, getConfig, loadSecrets, saveConfig, startConfigWatcher } from './config/loader.js';
+import { configExists, reloadConfig, getConfig, loadSecrets, saveConfig, startConfigWatcher, runConfigReload } from './config/loader.js';
 import { reloadSpaceDiff } from './config/reload-space-diff.js';
 import { restoreViewsMissingAfterReload, snapshotViews } from './config/views.js';
 import { logAuditEntry } from './audit/audit.js';
@@ -622,7 +622,8 @@ export function createApp() {
   startConfigWatcher(() => applyConfigFromDisk(), undefined, noteReloadOutcome);
   app.post('/api/admin/reload-config', globalRateLimit, requireAdminMfa, async (req, res) => {
     try {
-      await applyConfigFromDisk({ tokenId: req.authToken?.id ?? null, tokenLabel: req.authToken?.name ?? null, ip: req.ip ?? '-', method: 'POST', path: '/api/admin/reload-config' });
+      // Under the watcher's lock: two reloads never overlap, and a shutdown waiting for reloads to settle waits for this one too.
+      await runConfigReload(() => applyConfigFromDisk({ tokenId: req.authToken?.id ?? null, tokenLabel: req.authToken?.name ?? null, ip: req.ip ?? '-', method: 'POST', path: '/api/admin/reload-config' }));
       noteReloadOutcome(true);
       res.json({ ok: true });
     } catch (err) {

@@ -19,13 +19,13 @@
 import { schedule as cronSchedule, type ScheduledTask } from 'node-cron';
 import { getConfig } from '../config/loader.js';
 import { log, outsideRequest, peerText } from '../util/log.js';
-import { armedSchedules } from '../util/armed-schedule.js';
+import { armedSchedules, cronArmingRefused } from '../util/armed-schedule.js';
 import { resolveSyncCron } from './schedule.js';
 import { runSyncForNetwork } from './engine.js';
 
 const _scheduledTasks = new Map<string, ScheduledTask>();
 /** Keyed by network id — see `util/armed-schedule.ts` for why re-arming an unchanged expression is not free. */
-const _armed = armedSchedules();
+const _armed = armedSchedules('sync');
 
 /**
  * Start cron-based sync for every network that has a `syncSchedule`.
@@ -63,6 +63,8 @@ export function stopSyncScheduler(): void {
  * manual sync only, and clearing a schedule stops the running task rather than waiting for a restart.
  */
 export function scheduleSyncForNetwork(networkId: string, schedule?: string): void {
+  // Once arming has closed the process is ending: a task armed now would hold it open (`util/armed-schedule.ts`).
+  if (cronArmingRefused('the sync scheduler')) return;
   const cronExpr = schedule ? resolveSyncCron(schedule) : null;
 
   /*

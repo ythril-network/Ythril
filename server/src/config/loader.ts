@@ -640,15 +640,88 @@ export function saveConfig(config: Config): void {
 // reloadConfig. Polling a single stat every couple of seconds costs nothing and
 // works the same on every host.
 
+/**
+ * What identifies one version of config.json on disk. The mtime alone is not enough: on a filesystem with coarse
+ * timestamps two writes in one tick share it. Every write of ours is a rename, so the inode moves with each one too.
+ */
+export interface ConfigFileSignature { mtimeMs: number; size: number; ino: number }
+
 let _configWatchActive = false;
-let _lastKnownMtimeMs = 0;
-/** The watched reloads, one at a time in the order the changes were seen: a reload never starts over one still running. One key, because there is one file. */
+/** The listener `startConfigWatcher` registered, so `stopConfigWatcher` removes exactly it and no other. */
+let _configWatchListener: ((curr: fs.Stats, prev: fs.Stats) => void) | null = null;
+/** The file as this instance last wrote or read it; `null` until there is one. */
+let _lastKnown: ConfigFileSignature | null = null;
+/** The reloads, one at a time in the order they were asked for: a reload never starts over one still running. One key, because there is one file. */
 const _reloadLock = keyedLock();
 const RELOAD_KEY = 'config.json reload';
 
-/** Remember the mtime we just produced, so our own writes don't look foreign. */
+/** The file as it is now, or `null` when it cannot be read (removed, mid-rename, a bind mount that blinked). Never throws. */
+function configFileNow(): ConfigFileSignature | null {
+  try {
+    const s = fs.statSync(CONFIG_PATH);
+    return { mtimeMs: s.mtimeMs, size: s.size, ino: s.ino };
+  } catch {
+    return null;
+  }
+}
+
+/** Remember the version we just produced (or read), so our own writes don't look foreign. */
 function recordConfigMtime(): void {
-  try { _lastKnownMtimeMs = fs.statSync(CONFIG_PATH).mtimeMs; } catch { /* file may not exist yet */ }
+  const now = configFileNow();
+  if (now) _lastKnown = now;
+}
+
+/**
+ * Is the change the watcher saw ours, somebody else's, or not knowable yet (`Q-570`)?
+ *
+ * Asked of the file as it is NOW, never of the stat the poll delivered: `fs.watchFile` samples on the threadpool, so
+ * after two quick writes of ours it can hand over the FIRST one's stat when the second is already recorded, and that
+ * stale stat used to read as a foreign edit - a full reload and a re-arm of every cron scheduler per burst of our own
+ * writes, and in CI a re-armed sync cron that held a test process until the job was cancelled.
+ *
+ * - `own`: the file is exactly the version this instance last wrote or read.
+ * - `foreign`: it differs in any part of the signature, so somebody else wrote it; it is reloaded.
+ * - `unknown`: it could not be read just now, or a write of ours is still in flight (a reload now would read our own
+ *   bytes back as foreign and drop the change still waiting to be flushed). Never `own`: a failed read must not hide an
+ *   operator's edit. The watcher skips it and judges the next change.
+ */
+export function configChangeVerdict(
+  now: ConfigFileSignature | null,
+  lastKnown: ConfigFileSignature | null,
+  writeInFlight: boolean,
+): 'own' | 'foreign' | 'unknown' {
+  if (!now) return 'unknown';
+  if (lastKnown && now.mtimeMs === lastKnown.mtimeMs && now.size === lastKnown.size && now.ino === lastKnown.ino) return 'own';
+  return writeInFlight ? 'unknown' : 'foreign';
+}
+
+/**
+ * Run a reload of config.json under the one reload lock, so the watcher's reloads and `POST /api/admin/reload-config`
+ * never overlap and {@link configReloadsSettled} waits for both kinds.
+ */
+export function runConfigReload<T>(reload: () => Promise<T>): Promise<T> {
+  return _reloadLock.run(RELOAD_KEY, reload);
+}
+
+/**
+ * Resolve once no reload is running, or after `withinMs`, whichever is first; true when they settled. A reload stuck in a
+ * space's init must not hold a shutdown or a test teardown for ever.
+ */
+export async function configReloadsSettled({ withinMs }: { withinMs: number }): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const bound = new Promise<false>(r => { timer = setTimeout(() => r(false), withinMs); timer.unref?.(); });
+  try {
+    return await Promise.race([_reloadLock.idle(RELOAD_KEY).then(() => true as const), bound]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Stop watching config.json: removes exactly the listener `startConfigWatcher` registered. Idempotent. */
+export function stopConfigWatcher(): void {
+  if (_configWatchListener) fs.unwatchFile(CONFIG_PATH, _configWatchListener);
+  _configWatchListener = null;
+  _configWatchActive = false;
 }
 
 /**
@@ -680,22 +753,22 @@ export function startConfigWatcher(
   _configWatchActive = true;
   recordConfigMtime();
 
-  fs.watchFile(CONFIG_PATH, { interval: intervalMs, persistent: false }, curr => {
+  const listener = (curr: fs.Stats): void => {
     if (curr.mtimeMs === 0) return;                    // removed, or mid-replace
-    if (curr.mtimeMs === _lastKnownMtimeMs) return;    // our own write
-    // A write of ours is in flight — either the coalesced flush has not run yet, or
-    // it has renamed the file but not yet recorded the resulting mtime. Reloading now
-    // would read our own bytes back as if they were foreign and, worse, discard the
-    // in-memory change that is still waiting to be flushed. Skip; the next poll sees
-    // any genuinely foreign edit.
-    if (_writeGeneration > _flushedGeneration) return;
+    // Judged on the file as it is now, not on the stat this poll delivered: see `configChangeVerdict`.
+    const now = configFileNow();
+    const verdict = configChangeVerdict(now, _lastKnown, _writeGeneration > _flushedGeneration);
+    if (verdict !== 'foreign') {
+      if (verdict === 'unknown') log.debug('config.json changed, but it could not be read or a write of ours is in flight; judged on the next change');
+      return;
+    }
     // Claim this version before reloading. If the reload throws — an operator
     // saved half a file — we do not retry the same broken bytes every tick; the
-    // next edit changes the mtime and we try again.
-    _lastKnownMtimeMs = curr.mtimeMs;
+    // next edit changes the file and we try again.
+    _lastKnown = now;
     log.info('config.json changed on disk — reloading');
     // The lock never lets one reload's failure stop the next; the failure is handled inside, because nobody awaits it.
-    void _reloadLock.run(RELOAD_KEY, async () => {
+    void runConfigReload(async () => {
       try {
         await onExternalChange();
         recordConfigMtime();
@@ -716,7 +789,9 @@ export function startConfigWatcher(
         log.error(`Reload after external config change failed; keeping current config: ${err}`);
       }
     });
-  });
+  };
+  _configWatchListener = listener;
+  fs.watchFile(CONFIG_PATH, { interval: intervalMs, persistent: false }, listener);
 }
 
 /**
