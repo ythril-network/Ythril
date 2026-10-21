@@ -4,6 +4,7 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { FILE_TOOLBAR_STYLES } from './file-manager.styles';
 import type { Space } from '../../core/api.types';
+import { injectIsView } from '../../core/views.store';
 
 /**
  * One step of the breadcrumb: a label and the path clicking it navigates to.
@@ -71,8 +72,10 @@ export interface BreadcrumbSegment { label: string; path: string; }
         }
       </div>
 
-      <!-- New folder -->
-      @if (!folderFormOpen()) {
+      <!-- New folder, and Upload below it: neither is offered on a personal view, which never writes. -->
+      @if (isView()) {
+        <!-- read-only -->
+      } @else if (!folderFormOpen()) {
         <button class="btn-secondary btn btn-sm" (click)="folderFormOpen.set(true)">{{ 'files.newFolder' | transloco }}</button>
       } @else {
         <form class="rename-form" (ngSubmit)="createFolder.emit()">
@@ -82,11 +85,12 @@ export interface BreadcrumbSegment { label: string; path: string; }
         </form>
       }
 
-      <!-- Upload -->
-      <label class="btn-secondary btn btn-sm" style="cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
-        <ph-icon name="upload" [size]="14"/> {{ 'files.upload' | transloco }}
-        <input type="file" multiple hidden (change)="onFileInput($event)" />
-      </label>
+      @if (!isView()) {
+        <label class="btn-secondary btn btn-sm" style="cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+          <ph-icon name="upload" [size]="14"/> {{ 'files.upload' | transloco }}
+          <input type="file" multiple hidden (change)="onFileInput($event)" />
+        </label>
+      }
 
       <button class="sidebar-toggle" (click)="toggleSidebar.emit()">
         @if (sidebarOpen()) { <ph-icon name="caret-left" [size]="12"/> {{ 'files.sidebar.hideTree' | transloco }} }
@@ -98,6 +102,8 @@ export interface BreadcrumbSegment { label: string; path: string; }
 export class FileToolbarComponent {
   readonly spaces = input<readonly Space[]>([]);
   readonly activeSpaceId = input('');
+  /** THE flag: the open id is a personal view, which never writes, so no new folder and no upload (`injectIsView`). */
+  readonly isView = injectIsView(() => this.activeSpaceId());
   /** Hides the space selector: embedded in the Brain, the host has already chosen the space. */
   readonly embedded = input(false);
   readonly breadcrumbs = input<readonly BreadcrumbSegment[]>([]);

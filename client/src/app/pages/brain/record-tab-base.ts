@@ -5,6 +5,7 @@ import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordListState } from './record-list-state.service';
 import type { ListSort } from '../../core/brain-api.service';
 import { LatestWins } from '../../core/latest-wins';
+import { injectIsView } from '../../core/views.store';
 import { httpErrorReason } from '../../core/http-error';
 import type { WireRow } from '../../core/refusal-text';
 import { splitWriteWarnings } from '../../core/write-warnings';
@@ -70,6 +71,8 @@ export abstract class RecordTabBase {
   readonly recordList = inject(RecordListState);
 
   readonly spaceId = input.required<string>();
+  /** THE flag (`injectIsView`): the space this tab shows is a personal view, which never writes. Every tab's write controls ask it. */
+  readonly isView = injectIsView(() => this.spaceId());
 
   /**
    * The `warnings` of the last successful write made from this tab (its create form or an inline row): under `warn` mode the

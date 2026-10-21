@@ -54,7 +54,9 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
             <app-record-search-bar
               [value]="store.chronoSearch()" (valueChange)="onChronoSearch($event)"
               placeholder="brain.chrono.searchPlaceholder" />
-            <button class="btn-primary btn btn-sm" (click)="openChronoForm()" [disabled]="showChronoForm()">{{ 'brain.chrono.addButton' | transloco }}</button>
+            @if (!isView()) {
+              <button class="btn-primary btn btn-sm" (click)="openChronoForm()" [disabled]="showChronoForm()">{{ 'brain.chrono.addButton' | transloco }}</button>
+            }
           </div>
 
           @if (showChronoForm()) {
@@ -248,7 +250,9 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                       <td><app-timestamp [value]="entry.createdAt"/></td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="drawerState.open('chrono', entry)"><ph-icon name="eye" [size]="16"/></button>
-                        @if (recordList.confirmDeleteId() === entry._id) {
+                        @if (isView()) {
+                          <!-- a personal view never writes: no delete -->
+                        } @else if (recordList.confirmDeleteId() === entry._id) {
                           <span class="inline-confirm">
                             {{ 'common.deleteConfirm' | transloco }}
                             <button class="btn btn-sm btn-danger" (click)="deleteChrono(entry._id)">{{ 'common.yes' | transloco }}</button>

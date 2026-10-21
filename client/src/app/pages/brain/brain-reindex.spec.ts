@@ -5,7 +5,7 @@
  *
  * *"on clicking reindex on overview it sais reindexed 0 documents in green as if it worked on an unclosable
  * inline message (should be notification) and fails instantly."* — and *"the reindex button should not appear
- * on proxy spaces at all."*
+ * on proxy spaces at all."* (Since 6.0 a proxy is a personal view; the second report now holds for a view.)
  *
  * The first is not a rendering bug. `POST /reindex` **never awaits the job**: it schedules the work and both
  * surfaces answer immediately with ZEROED counters, deliberately, so the call does not hang for the length of
@@ -16,13 +16,18 @@
  * response, because no count exists at that moment. A test that only checked "some message appears" would
  * pass on the defect.
  *
- * The second is a condition the client already had everything for: `Space.proxyFor` is on the record, and the
- * chip strip beside the panel already branches on it to draw the proxy badge.
+ * The second is a condition the client already had everything for: the open id is one of the caller's personal
+ * views (`ViewsStore.isView`), which has no index of its own and is no space the server can reindex. Q-531 moved the
+ * rule from `Space.proxyFor` to the view store; the Indexing panel's proxy branch went with the proxy space.
  */
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EMPTY, of, throwError } from 'rxjs';
 import { ActivatedRoute } from '@angular/router';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { ViewsStore } from '../../core/views.store';
+import { VIEW_LENS, flushViews } from '../../testing/personal-views';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { FilesApi } from '../../core/files-api.service';
@@ -33,10 +38,10 @@ import { ToastService } from '../../core/toast.service';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { BrainComponent } from './brain.component';
 
-/** The proxy space is second so the default selection is the ordinary one. */
+/** Two ordinary spaces; the personal view of the second describe is `VIEW_LENS` (`@lens`), read from the ViewsStore. */
 const SPACES = [
   { id: 'work', label: 'Work' },
-  { id: 'everything', label: 'Everything', proxyFor: ['work', 'research'] },
+  { id: 'research', label: 'Research' },
 ];
 
 function makeApi(over: Record<string, unknown> = {}) {
@@ -70,6 +75,7 @@ function create(over: Record<string, unknown> = {}) {
   TestBed.configureTestingModule({
     imports: [BrainComponent, getTranslocoModule()],
     providers: [
+      provideHttpClient(), provideHttpClientTesting(),
       { provide: SpacesApi, useValue: api },
       { provide: BrainApi, useValue: api },
       { provide: FilesApi, useValue: api },
@@ -118,14 +124,14 @@ describe('reindex reports a START, never a count', () => {
   });
 
   it('a failure is a toast too, and repeats the SERVER\'s reason when it has one', () => {
-    // The proxy refusal names the member spaces to reindex instead. "Check server logs" would send the
-    // reader to the one place that does not say it.
+    // A refusal can name what to do instead (an index still being built, say). "Check server logs" would
+    // send the reader to the one place that does not say it.
     const { c, toast } = create({
-      reindex: () => throwError(() => ({ error: { error: "'everything' is a proxy space and has no index of its own." } })),
+      reindex: () => throwError(() => ({ error: { error: "'work' is still building its index; try again when it is ready." } })),
     });
     c.runReindex();
     expect(toast.error).toHaveBeenCalledTimes(1);
-    expect(String(toast.error.mock.calls[0][0])).toContain('proxy space');
+    expect(String(toast.error.mock.calls[0][0])).toContain('still building its index');
     expect(c.reindexing()).toBe(false);
   });
 
@@ -136,24 +142,42 @@ describe('reindex reports a START, never a count', () => {
   });
 });
 
-describe('a proxy space is never offered a reindex', () => {
+describe('a personal view is never offered a reindex', () => {
   beforeEach(() => TestBed.resetTestingModule());
 
-  it('knows which spaces are proxies', () => {
-    const { c } = create();
-    expect(c.activeSpaceIsProxy()).toBe(false);
-    c.selectSpace('everything');
-    expect(c.activeSpaceIsProxy()).toBe(true);
+  /** The page with the caller's one view loaded into the store, as the shell does for every page under it. */
+  function createWithView() {
+    const made = create();
+    TestBed.inject(ViewsStore).load();
+    flushViews(TestBed.inject(HttpTestingController), [VIEW_LENS]);
+    return made;
+  }
+
+  it('knows which open id is a personal view', () => {
+    const { c } = createWithView();
+    expect(c.isView()).toBe(false);
+    c.selectSpace('@lens');
+    expect(c.isView()).toBe(true);
   });
 
-  it('hides the stale-index banner on a proxy, and keeps it on an ordinary space', () => {
-    // `needsReindex` is true for both in this stub — the banner must go on the proxy anyway, because the
-    // only button it carries is one the server answers with a 400.
-    const { fixture, c, el } = create();
+  it('hides the stale-index banner on a view, and keeps it on an ordinary space', () => {
+    // `needsReindex` is true for a space in this stub — the banner must go on the view anyway, because its
+    // only button asks the server to reindex something that is no space.
+    const { fixture, c, el } = createWithView();
     expect(el.querySelector('.reindex-banner')).toBeTruthy();
 
-    c.selectSpace('everything');
+    c.selectSpace('@lens');
     fixture.detectChanges();
     expect(el.querySelector('.reindex-banner')).toBeNull();
+  });
+
+  it('asks the server for no reindex status of a view', () => {
+    // The status is a space's, and the server answers a view as a space that does not exist: asking would be a request
+    // that can only fail, on every open of a view.
+    const { c } = createWithView();
+    const asked: string[] = [];
+    (c as any).spacesApi.getReindexStatus = (id: string) => { asked.push(id); return of({ needsReindex: true }); };
+    c.selectSpace('@lens');
+    expect(asked).not.toContain('@lens');
   });
 });

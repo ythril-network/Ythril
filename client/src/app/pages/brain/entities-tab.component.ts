@@ -60,7 +60,9 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
               (cleared)="onEntitySearchClear()"
               (selected)="onEntitySearchPick($event)"
             />
-            <button class="btn-primary btn btn-sm" (click)="openEntityForm()" [disabled]="showEntityForm()">{{ 'brain.entities.addButton' | transloco }}</button>
+            @if (!isView()) {
+              <button class="btn-primary btn btn-sm" (click)="openEntityForm()" [disabled]="showEntityForm()">{{ 'brain.entities.addButton' | transloco }}</button>
+            }
           </div>
 
           @if (showEntityForm()) {
@@ -231,7 +233,9 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="drawerState.open('entity', ent)"><ph-icon name="eye" [size]="16"/></button>
                         <button class="icon-btn" [attr.title]="'common.viewInGraph' | transloco" [attr.aria-label]="'common.viewInGraph' | transloco" (click)="viewInGraph.emit(ent._id)"><ph-icon name="graph" [size]="16"/></button>
-                        @if (recordList.confirmDeleteId() === ent._id) {
+                        @if (isView()) {
+                          <!-- a personal view never writes: no delete -->
+                        } @else if (recordList.confirmDeleteId() === ent._id) {
                           <span class="inline-confirm">
                             Delete?
                             <button class="btn btn-sm btn-danger" (click)="deleteEntity(ent._id)">{{ 'common.yes' | transloco }}</button>

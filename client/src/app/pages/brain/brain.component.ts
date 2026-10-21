@@ -1,6 +1,14 @@
-﻿import { ChangeDetectionStrategy, Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
+﻿import { ChangeDetectionStrategy, Component, inject, signal, computed, effect, untracked, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ProxySpaceBadgeComponent } from '../../shared/proxy-space-badge.component';
+import { UnknownSpaceNoticeComponent } from '../../shared/unknown-space-notice.component';
+import { MyViewsComponent } from '../views/my-views.component';
+import { ViewOverviewComponent } from './view-overview.component';
+import { ViewsMigrationBannerComponent } from '../views/views-migration-banner.component';
+import { ViewReadsFromComponent } from './view-reads-from.component';
+import { BrainLiveStream } from './brain-live-stream';
+import { networkChipTitle, spaceChipTotal } from './space-chip';
+import { ViewsStore } from '../../core/views.store';
+import { readSpaceParam } from '../../core/space-param';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
@@ -51,7 +59,7 @@ interface SpaceView {
   // or happens in a template event handler, both of which mark the view dirty. That coupling is
   // load-bearing and pinned by the specs (the drawer's own version lives in the drawer component).
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, GraphComponent, FileManagerComponent, PhIconComponent, RecordDrawerComponent, QueryTabComponent, FactsTabComponent, EntitiesTabComponent, EdgesTabComponent, ChronoTabComponent, OverviewTabComponent, ReviewTabComponent, ErrorStateComponent, TranslocoPipe, SpaceSettingsPopupComponent],
+  imports: [ViewsMigrationBannerComponent, UnknownSpaceNoticeComponent, MyViewsComponent, ViewOverviewComponent, ViewReadsFromComponent, CommonModule, FormsModule, GraphComponent, FileManagerComponent, PhIconComponent, RecordDrawerComponent, QueryTabComponent, FactsTabComponent, EntitiesTabComponent, EdgesTabComponent, ChronoTabComponent, OverviewTabComponent, ReviewTabComponent, ErrorStateComponent, TranslocoPipe, SpaceSettingsPopupComponent],
   providers: [BrainStore, EntityRefPicker, RecordDrawerState, RecordListState, OverviewDataService, SpacesStore, SpaceSettingsState],
   styles: [`
     .space-tabs {
@@ -193,6 +201,7 @@ interface SpaceView {
       </div>
     } @else {
 
+      <app-views-migration-banner [retired]="retiredIds()" />
       <!-- Space selector -->
       <div class="space-tabs">
         @for (sv of spaces(); track sv.space.id) {
@@ -204,9 +213,6 @@ interface SpaceView {
           >
             <span class="space-chip-label">{{ sv.space.label }}</span>
             <span class="space-chip-id">{{ sv.space.id }}</span>
-            @if (sv.space.proxyFor?.length) {
-              <app-proxy-space-badge [proxyFor]="sv.space.proxyFor" [size]="12" />
-            }
             @if (sv.space.networkStatus) {
               <span class="space-chip-net" [class]="'net-' + sv.space.networkStatus" [title]="networkChipTitle(sv.space)">
                 <ph-icon name="link" [size]="12"/>
@@ -219,11 +225,20 @@ interface SpaceView {
         }
       </div>
 
-      <!-- Never offered on a proxy: it has no index of its own and the server refuses it with a 400.
+      <!-- The caller's own personal views, then what the link asked for when it was not openable (never a silent fallback),
+           then what the open view reads right now. -->
+      @defer (on immediate) {
+        <app-my-views [spaces]="viewMemberChoices()" [activeId]="activeSpaceId()" (opened)="selectSpace($event)"
+          (renamed)="onViewRenamed($event)" (removed)="onViewRemoved($event)" />
+      }
+      @if (unknownParam(); as n) { <app-unknown-space-notice [requested]="n.requested" [shown]="n.shown" /> }
+      @if (activeView(); as v) { <app-view-reads-from [view]="v" /> }
+
+      <!-- Never offered on a view: it has no index of its own and is not a space the server can reindex.
            The outcome is a TOAST, not a line in this banner -- see runReindex(). An inline result had no
            dismiss and was cleared only by switching space, so a message about a finished job sat on screen
            through everything that came after it. -->
-      @if (needsReindex() && !activeSpaceIsProxy()) {
+      @if (needsReindex() && !isView()) {
         <div class="reindex-banner">
           <span><ph-icon name="warning" [size]="16" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.reindex.stale' | transloco }}</span>
           <button class="btn btn-sm btn-primary" [disabled]="reindexing()" [attr.aria-busy]="reindexing() ? 'true' : null"
@@ -250,9 +265,11 @@ interface SpaceView {
         </button>
         <!-- Review (F-REVIEW): duplicate pairs awaiting a decision in this space. Grouped with the
              other whole-space views rather than after Files — it is a workflow, not a record collection. -->
-        <button class="tab" type="button" role="tab" [class.active]="activeTab() === 'review'" [attr.aria-selected]="activeTab() === 'review'" (click)="setTab('review')">
-          <ph-icon name="copy" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.review' | transloco }}
-        </button>
+        @if (!isView()) {
+          <button class="tab" type="button" role="tab" [class.active]="activeTab() === 'review'" [attr.aria-selected]="activeTab() === 'review'" (click)="setTab('review')">
+            <ph-icon name="copy" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.review' | transloco }}
+          </button>
+        }
         <span class="tab-spacer"></span>
         @for (tab of collectionTabs; track tab.key) {
           <button class="tab" type="button" role="tab" [class.active]="activeTab() === tab.key" [attr.aria-selected]="activeTab() === tab.key" (click)="setTab(tab.key)">
@@ -348,14 +365,16 @@ interface SpaceView {
 
         <!-- Query -->
         @if (activeTab() === 'overview') {
-          @if (activeSpace(); as sp) {
+          @if (isView()) {
+            <app-view-overview [stats]="activeStats()" />
+          } @else if (activeSpace(); as sp) {
             <app-overview-tab [space]="sp" [stats]="activeStats()" [needsReindex]="needsReindex()"
               [reindexing]="reindexing()" [reindexRun]="reindexRun()" [about]="aboutInfo()" [embeddingQueue]="ov.embeddingQueue()"
               [openVotes]="ov.overviewVotes()" [tokenAccess]="ov.tokenAccess()" [completeness]="ov.completeness()" [activity]="ov.spaceActivity()"
               [pending]="ov.overviewPending()"
               (reindex)="runReindex()" (retryFailed)="runRetryFailedEmbeddings()"
               (openTab)="setTab($event)"
-              [resettingUsage]="resettingUsage()" [usageResetResult]="usageResetResult()"
+              [resettingUsage]="ov.resettingUsage()" [usageResetResult]="ov.usageResetResult()"
               (resetUsage)="resetSpaceUsage()" />
           }
         }
@@ -374,7 +393,7 @@ interface SpaceView {
              pair only ever means something inside one space, so it belongs beside the space's data. -->
         @if (activeTab() === 'review') {
           @defer (on immediate) {
-            <app-review-tab [spaceId]="activeSpaceId()" (openTab)="setTab($event)" />
+            <app-review-tab [spaceId]="activeSpaceId()" [isView]="isView()" (openTab)="setTab($event)" />
           } @loading (minimum 200ms) {
             <div class="loading-overlay loading-overlay--float" data-tab-defer="review"><span class="spinner"></span></div>
           }
@@ -465,13 +484,28 @@ export class BrainComponent implements OnInit, OnDestroy {
   // Entity picker
 
   activeStats = computed(() =>
-    this.spaces().find(sv => sv.space.id === this.activeSpaceId())?.stats,
+    this.isView() ? this.viewStats() : this.spaces().find(sv => sv.space.id === this.activeSpaceId())?.stats,
   );
 
-  /** The active space object (for the Overview tab's index-status + quota panels). */
+  /** The active space object (for the Overview tab's index-status + quota panels); none while a view is open. */
   activeSpace = computed(() =>
     this.spaces().find(sv => sv.space.id === this.activeSpaceId())?.space,
   );
+
+  // ── Personal views (Q-531): the store is loaded by the shell; this page only reads it ─────────────────────
+  private readonly viewsStore = inject(ViewsStore);
+  /** THE flag: the open id is one of the caller's personal views. Every write control on the page asks it (a view never writes). */
+  readonly isView = computed(() => this.viewsStore.isView(this.activeSpaceId()));
+  /** The open view with what it reads now, or undefined while a space is open. */
+  readonly activeView = computed(() => this.viewsStore.byId(this.activeSpaceId()));
+  /** The spaces the caller reads, as the create dialog's member picker offers them (a view is never a member). */
+  readonly viewMemberChoices = computed(() => this.spaces().map(sv => ({ id: sv.space.id, label: sv.space.label })));
+  /** The open view's counts, read through it (a view is not in `spaces()`, which holds the per-space counts). */
+  private readonly viewStats = signal<SpaceStats | undefined>(undefined);
+  /** What a `?space=` asked for when it was neither a space nor an own view: said on the page, never a silent fallback. */
+  readonly unknownParam = signal<{ requested: string; shown: string } | null>(null);
+  /** Pre-6.0 proxy ids still reserved: served to an admin only (`null` otherwise), and what the migration banner is about. */
+  readonly retiredIds = signal<string[] | null>(null);
 
   /**
    * Open the space settings dialog on the space already selected here.
@@ -498,18 +532,21 @@ export class BrainComponent implements OnInit, OnDestroy {
     this.spaces.update(list => list.map(sv => sv.space.id === space.id ? { ...sv, space } : sv));
   }
 
-  spaceTotal(stats: SpaceStats): number {
-    return stats.facts + stats.entities + stats.edges + stats.chrono + stats.files;
-  }
+  /** The chip's record count and network tooltip are `space-chip.ts`'s. */
+  spaceTotal = spaceChipTotal;
+  networkChipTitle = (space: Space): string => networkChipTitle(space, key => this.transloco.translate(key));
 
-  /** Tooltip for the space-chip network indicator (F8): the network name(s) plus
-   *  the human-readable status. Colour alone must not carry the meaning (a11y). */
-  networkChipTitle(space: Space): string {
-    const status = space.networkStatus ?? 'idle';
-    const names = (space.networks ?? []).map(n => n.label).join(', ');
-    const statusText = this.transloco.translate(`brain.spaceChip.network.${status}`);
-    const prefix = this.transloco.translate('brain.spaceChip.network.prefix');
-    return names ? `${prefix}: ${names} — ${statusText}` : statusText;
+  constructor() {
+    // A link to a view waits for the views list; when it arrives the pending `?space=` is decided (`readSpaceParam`).
+    effect(() => {
+      if (!this.viewsStore.loaded()) return;
+      untracked(() => {
+        const spaces = this.spaces();
+        if (spaces.length === 0) return;
+        this.loadingSpaces.set(false);
+        this.applyQueryParams(spaces.map(sv => sv.space));
+      });
+    });
   }
 
   ngOnInit(): void {
@@ -527,9 +564,11 @@ export class BrainComponent implements OnInit, OnDestroy {
     this.loadingSpaces.set(true);
     this.spacesError.set(null);
     this.spacesApi.listSpaces().subscribe({
-      next: ({ spaces }) => {
+      next: ({ spaces, retiredSpaceIds }) => {
         this.spaces.set(spaces.map(s => ({ space: s })));
-        this.loadingSpaces.set(false);
+        this.retiredIds.set(retiredSpaceIds ?? null);
+        // A link to a view waits for the views list: until it arrives "not one of mine" cannot be told from "not loaded yet".
+        this.loadingSpaces.set((this.route.snapshot.queryParamMap.get('space') ?? '').startsWith('@') && !this.viewsStore.loaded());
         if (spaces.length > 0) {
           this.applyUrlState(spaces);
           // Pre-load stats for all other spaces so counts show on their chips
@@ -541,65 +580,19 @@ export class BrainComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.closeLiveStream();
+    this.live.close();
     clearTimeout(this.liveRefreshTimer);
     this.rx.stop();
   }
 
-  // ── Live updates (F12) ──────────────────────────────────────────────────────
-  private liveStream?: EventSource;
+  // ── Live updates (F12) — the connection is `brain-live-stream.ts`; this is what a change does ──────────────
+  private readonly live = new BrainLiveStream({
+    brainApi: this.brainApi, activeSpaceId: () => this.activeSpaceId(), onEvent: (id, event) => this.onLiveEvent(id, event),
+  });
   private liveRefreshTimer?: ReturnType<typeof setTimeout>;
-  private liveReconnectTimer?: ReturnType<typeof setTimeout>;
-  private static readonly LIVE_RECONNECT_MS = 3000;
   private static readonly TAB_FOR_COLLECTION: Record<string, CollectionTab> = {
     fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono', file: 'files',
   };
-
-  /** (Re)open the live-change SSE stream for a space. EventSource can't send an Authorization header, and
-   *  a raw token in the URL leaks into logs/history/Referer, so we mint a single-use `?ticket=` first. */
-  private openLiveStream(spaceId: string): void {
-    this.closeLiveStream();
-    if (typeof EventSource === 'undefined') return; // non-browser (SSR/test) environment
-    if (!spaceId) return;
-    this.connectLiveStream(spaceId);
-  }
-
-  /** Mint a ticket, then open the stream. Because the ticket is single-use, the browser's native
-   *  auto-reconnect (which would replay the now-dead ticket) is useless — so on error we close and
-   *  reconnect ourselves with a FRESH ticket after a fixed backoff, and only while this space is still
-   *  active. The backoff + active-space guard keep a persistently-failing stream to ~1 attempt / 3s
-   *  (never a request storm) and stop it entirely once the user navigates away. */
-  private connectLiveStream(spaceId: string): void {
-    if (spaceId !== this.activeSpaceId()) return; // space switched (or torn down) before we got here
-    this.brainApi.mintEventsTicket(spaceId).subscribe({
-      next: ({ ticket }) => {
-        if (spaceId !== this.activeSpaceId()) return; // switched while minting — drop this ticket
-        const url = `/api/brain/spaces/${encodeURIComponent(spaceId)}/events?ticket=${encodeURIComponent(ticket)}`;
-        const es = new EventSource(url);
-        es.onmessage = (e) => {
-          let payload: { event?: string };
-          try { payload = JSON.parse(e.data); } catch { return; }
-          this.onLiveEvent(spaceId, payload.event ?? '');
-        };
-        es.onerror = () => {
-          es.close();
-          if (this.liveStream === es) this.liveStream = undefined;
-          clearTimeout(this.liveReconnectTimer);
-          this.liveReconnectTimer = setTimeout(() => this.connectLiveStream(spaceId), BrainComponent.LIVE_RECONNECT_MS);
-        };
-        this.liveStream = es;
-      },
-      // Mint failed (auth / rate limit / offline): stay closed — the next space switch retries. Not
-      // retried on a timer here to avoid hammering the mint endpoint when auth is genuinely broken.
-      error: () => { /* no-op */ },
-    });
-  }
-
-  private closeLiveStream(): void {
-    clearTimeout(this.liveReconnectTimer);
-    this.liveStream?.close();
-    this.liveStream = undefined;
-  }
 
   /** Debounced refresh: any change updates the count badges; a change to the ACTIVE tab's collection
    *  (or any bulk write) also reloads its current page via the store tick. */
@@ -629,15 +622,21 @@ export class BrainComponent implements OnInit, OnDestroy {
     this.activeSpaceId.set(id);
     this.picker.spaceId.set(id);
     this.drawerState.spaceId.set(id);
-    this.openLiveStream(id);
+    this.live.open(id);
+    this.unknownParam.set(null);
     this.store.memorySearch.set('');
     this.store.edgeSearch.set('');
     this.store.chronoSearch.set('');
     this.recordList.confirmDeleteId.set('');
     this.ov.blankForSpaceSwitch();
     this.loadStats(id);
-    this.loadSpaceMeta(id);
-    this.ov.loadAll(id, () => this.activeSpaceId() === id, this.spaces().find(sv => sv.space.id === id)?.space.networks ?? []);
+    // The config reads (meta, completeness, schema, layers, activity, token access) answer a view as a space that does not exist, so a view
+    // loads none of them; its Overview says so instead (`app-view-overview`).
+    if (this.viewsStore.isView(id)) this.store.spaceMeta.set(null);
+    else {
+      this.loadSpaceMeta(id);
+      this.ov.loadAll(id, () => this.activeSpaceId() === id, this.spaces().find(sv => sv.space.id === id)?.space.networks ?? []);
+    }
     /*
      * The selected space is deliberately NOT written to the URL. Owner, 2026-08-30: *"dont use the url please
      * — i use ythril iframed a lot"*, and a page that rewrites its own address inside somebody else's frame
@@ -725,17 +724,22 @@ export class BrainComponent implements OnInit, OnDestroy {
      */
     const current = this.activeSpaceId();
     const fresh = wanted !== this.lastAppliedSpaceParam;
+    // What the link asks for: a space, an own view, or something neither (said on the page, never a silent fallback). A link to a view
+    // waits for the views list, and is decided again when it arrives (the effect in the constructor).
+    const asked = fresh ? readSpaceParam(wanted, spaces.map(s => s.id), this.viewsStore) : { kind: 'none' as const };
+    if (asked.kind === 'wait') return;
     this.lastAppliedSpaceParam = wanted;
-    const known = fresh && wanted && spaces.some(s => s.id === wanted) ? wanted : undefined;
-    const initial = known ?? (current || spaces[0]!.id);
+    const initial = asked.kind === 'open' ? asked.id : (current || spaces[0]!.id);
     // Only when it CHANGES: selectSpace reloads the space's data, so calling it on every query-param event
     // would refetch on each tab switch this component itself performs.
     if (initial !== current) this.selectSpace(initial);
+    if (fresh && wanted) this.unknownParam.set(asked.kind === 'unknown' ? { requested: asked.id, shown: initial } : null);
 
     // Only a tab that exists. An unknown value in a hand-edited URL must land on the default rather than a
     // blank pane, and `BRAIN_TABS` is the same list the strip renders from.
     const tab = (qp.get('tab') ?? undefined) as BrainTab | undefined;
-    if (tab && tab !== this.activeTab() && (BRAIN_TABS as readonly string[]).includes(tab)) this.activeTab.set(tab);
+    // A view has no Review tab (its duplicate pairs are a space's, decided by writes a view never makes).
+    if (tab && tab !== this.activeTab() && (BRAIN_TABS as readonly string[]).includes(tab) && !(tab === 'review' && this.isView())) this.activeTab.set(tab);
   }
 
   /**
@@ -782,8 +786,10 @@ export class BrainComponent implements OnInit, OnDestroy {
   }
 
   loadStats(spaceId: string): void {
+    const isView = this.viewsStore.isView(spaceId);
     this.spacesApi.getSpaceStats(spaceId).subscribe({
       next: (stats) => {
+        if (isView) { if (spaceId === this.activeSpaceId()) this.viewStats.set(stats); return; }
         this.spaces.update(list =>
           list.map(sv => sv.space.id === spaceId ? { ...sv, stats } : sv),
         );
@@ -792,48 +798,30 @@ export class BrainComponent implements OnInit, OnDestroy {
       // they just no longer drive a skeleton on this tab.
       error: () => { /* stats are best-effort here; no Overview panel blanks on them */ },
     });
+    // A view has no index of its own: the reindex status is a space's, and the server answers it for a view as a missing space.
+    if (isView) return;
     this.spacesApi.getReindexStatus(spaceId).subscribe({
       next: (st) => this.rx.apply(spaceId, st),
       error: () => {},
     });
   }
 
-  requestDelete(id: string): void { this.recordList.confirmDeleteId.set(id); }
-  cancelDelete(): void { this.recordList.confirmDeleteId.set(''); }
-
-
-  /** Set while the usage reset is in flight, so the panel can disable its own button. */
-  resettingUsage = signal(false);
-  /** The cleared-bucket count from the last reset, reported inline the way runReindex reports its result. */
-  usageResetResult = signal('');
-
-  /**
-   * Clear this space's recorded usage. The PANEL confirmed already — it owns the dialog, the same way it does
-   * for reindex and retry-failed — so this performs the request and reloads.
-   *
-   * Reloaded rather than zeroed locally: a local zero would be a guess about what the server did, and the count
-   * in the response exists precisely because a reset and a genuinely idle space look identical afterwards.
-   */
-  resetSpaceUsage(): void {
-    const spaceId = this.activeSpaceId();
-    if (!spaceId || this.resettingUsage()) return;
-    this.resettingUsage.set(true);
-    this.usageResetResult.set('');
-    this.spacesApi.resetSpaceActivity(spaceId).subscribe({
-      next: ({ cleared }) => {
-        this.resettingUsage.set(false);
-        this.usageResetResult.set(`Cleared ${cleared} usage buckets.`);
-        this.ov.loadSpaceActivity(spaceId, () => this.activeSpaceId() === spaceId);
-      },
-      error: () => {
-        this.resettingUsage.set(false);
-        this.usageResetResult.set('Usage reset failed — check server logs.');
-      },
-    });
+  /** A view was renamed: its id is its name, so the page follows it when it was the one open. */
+  onViewRenamed(e: { from: string; to: string }): void {
+    if (this.activeSpaceId() === e.from) this.selectSpace(e.to);
   }
 
-  /** A proxy holds no records of its own, so it has no index — and the server refuses to reindex one. */
-  activeSpaceIsProxy = (): boolean => (this.activeSpace()?.proxyFor?.length ?? 0) > 0;
+  /** A view was deleted: leave it for the first space when it was the one open. */
+  onViewRemoved(id: string): void {
+    const first = this.spaces()[0]?.space.id;
+    if (this.activeSpaceId() === id && first) this.selectSpace(first);
+  }
+
+  /** The Overview's usage reset: the panel confirmed, the request and its state are `OverviewDataService`'s. */
+  resetSpaceUsage(): void {
+    const id = this.activeSpaceId();
+    this.ov.resetUsage(id, () => this.activeSpaceId() === id);
+  }
 
   /** Start a reindex and say that it STARTED — see `BrainReindex.run` for why there is no count to show. */
   runReindex(): void { this.rx.run(); }
@@ -851,10 +839,7 @@ export class BrainComponent implements OnInit, OnDestroy {
 
   loadSpaceMeta(spaceId: string): void {
     if (!spaceId) return;
-    this.spacesApi.getSpaceMeta(spaceId).subscribe({
-      next: (meta) => this.store.spaceMeta.set(meta),
-      error: () => this.store.spaceMeta.set(null),
-    });
+    this.spacesApi.getSpaceMeta(spaceId).subscribe({ next: (meta) => this.store.spaceMeta.set(meta), error: () => this.store.spaceMeta.set(null) });
   }
 
   // ── Form openers with schema prefill ────────────────────────────────────

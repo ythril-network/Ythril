@@ -132,7 +132,7 @@ export interface FileRow {
                       [attr.aria-label]="'files.downloadAriaLabel' | transloco"
                     ><ph-icon name="download-simple" [size]="16"/></button>
                   }
-                  @if (row.canRequeue) {
+                  @if (row.canRequeue && !isView()) {
                     <!-- Re-embedding was reachable only from the detail pane, so fixing a file whose
                          embedding failed meant OPENING it first — and the row already tells you it
                          failed. The action belongs where the diagnosis is. Hidden while a job is
@@ -150,13 +150,15 @@ export interface FileRow {
                   <!-- Rename is a pencil, not the word: it sat as the one text button among icons, so it
                        set the width of the actions column on every row and pushed delete off the edge on
                        a narrow window. Same label, on hover and for assistive tech. -->
-                  <button class="btn-ghost btn btn-sm" (click)="renameStart.emit(row.entry)"
-                    [attr.title]="'files.rename' | transloco"
-                    [attr.aria-label]="'files.renameEntryAriaLabel' | transloco"
-                  ><ph-icon name="pencil-simple" [size]="16"/></button>
-                  <button class="icon-btn danger" type="button" [disabled]="row.deleting" (click)="remove.emit(row.entry)"
-                    [attr.title]="'files.deleteEntryAriaLabel' | transloco: { name: row.entry.name }"
-                    [attr.aria-label]="'files.deleteEntryAriaLabel' | transloco: { name: row.entry.name }"><ph-icon name="x" [size]="16"/></button>
+                  @if (!isView()) {
+                    <button class="btn-ghost btn btn-sm" (click)="renameStart.emit(row.entry)"
+                      [attr.title]="'files.rename' | transloco"
+                      [attr.aria-label]="'files.renameEntryAriaLabel' | transloco"
+                    ><ph-icon name="pencil-simple" [size]="16"/></button>
+                    <button class="icon-btn danger" type="button" [disabled]="row.deleting" (click)="remove.emit(row.entry)"
+                      [attr.title]="'files.deleteEntryAriaLabel' | transloco: { name: row.entry.name }"
+                      [attr.aria-label]="'files.deleteEntryAriaLabel' | transloco: { name: row.entry.name }"><ph-icon name="x" [size]="16"/></button>
+                  }
                 </div>
               </td>
             </tr>
@@ -184,6 +186,8 @@ export class FileListingComponent {
   readonly sortDir = input<'asc' | 'desc'>('asc');
   /** The directory load's failure, shown in place of the empty state — an empty folder is not an error. */
   readonly error = input<string | null>(null);
+  /** THE flag, from the page: the open id is a personal view, which never writes, so no re-embed, rename or delete. */
+  readonly isView = input(false);
 
   /** Two-way: the text box is here, and the page reads the value when the form is submitted. */
   readonly renameValue = model<string>('');

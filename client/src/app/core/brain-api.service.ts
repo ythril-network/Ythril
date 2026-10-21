@@ -9,7 +9,7 @@ import { hydrateLinks, recordsLinkingTo, type LinkFromKind } from './record-link
 import type {
   Fact, Entity, Edge, ChronoEntry, ChronoType, ChronoStatus,
   QueryCollection, QueryResult, RecallKnowledgeType, RecallResponse, TraverseResult, EmbeddingQueue,
-  TokenAccessEntry, ErModel, ErModelMembers,
+  TokenAccessEntry, ErModel,
 } from './api.types';
 import type { CascadePreview } from './cascade-preview.types';
 
@@ -672,17 +672,15 @@ export class BrainApi {
   /**
    * The space’s inferred entity-relationship model.
    *
-   * A proxy space answers with `{ spaceId, members: [...] }` instead of a single model, so a caller must
-   * narrow before reading `entityTypes`. Kept as a union rather than flattened here: merging members would
-   * sum two types that share a name across spaces and show relationships that can never be joined.
+   * Asked of one space only: a personal view has no model of its own (the config reads answer a view as a missing space).
    */
-  getErModel(spaceId: string): Observable<ErModel | ErModelMembers> {
+  getErModel(spaceId: string): Observable<ErModel> {
     /*
      * From the space's meta since 5.0. `GET /er-model` was folded into it with its MCP tool, because the
      * declared and the actual shape are two halves of one question and a caller needed both.
      */
     return this.http
-      .get<{ actualSchema: ErModel | ErModelMembers }>(`/api/spaces/${spaceId}/meta`)
+      .get<{ actualSchema: ErModel }>(`/api/spaces/${spaceId}/meta`)
       .pipe(map(m => m.actualSchema));
   }
 }
