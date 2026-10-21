@@ -56,3 +56,24 @@ describe('a database drop still pending is the store\'s condition, retried and n
     assert.equal(isNamespaceExists(dropPending()), false);
   });
 });
+
+/**
+ * The same race one step later, seen on the harness after the 215 fix (local rerun of migrate-db row 5): the drop is no longer pending
+ * when the copy creates its collections, but it aborts an index build the copy started on them - `IndexBuildAborted` (276), "caused by
+ * :: dropDatabase command". Something other than the request ended the build; the same build succeeds when tried again, so it is the
+ * store's condition too, not a refusal of the data (a duplicate key a unique index refuses is `DuplicateKey`, 11000, and stays an
+ * input failure).
+ */
+const buildAborted = () => new MongoServerError({
+  ok: 0, code: 276, codeName: 'IndexBuildAborted',
+  errmsg: 'Index build failed: 1a6e66fc: Collection ythril_migrate_target.m-b_facts ( b4f8032f ) :: caused by :: dropDatabase command',
+});
+
+describe('an index build a concurrent drop aborted is the store\'s condition, retried and never a refusal', () => {
+  it('isStoreSide is true, and classifyReadFailure answers 503 retryable', () => {
+    assert.equal(isStoreSide(buildAborted()), true, 'an index build a drop aborted was read as a database refusal: the act would end as abandoned');
+    const r = classifyReadFailure(buildAborted());
+    assert.equal(r.status, 503, `answered ${r.status}: ${JSON.stringify(r)}`);
+    assert.equal(r.retryable, true);
+  });
+});

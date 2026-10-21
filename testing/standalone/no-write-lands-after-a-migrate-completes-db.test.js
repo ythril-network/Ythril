@@ -38,6 +38,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import dns from 'node:dns';
 import http from 'node:http';
+import { emptyTarget } from './_migrate-target.mjs';
 import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest } from './_space-act-harness.mjs';
@@ -93,7 +94,7 @@ describe('no write lands after a migrate completes, on any door (real MongoDB)',
     fixture = new MongoClient(SOURCE_URI);
     target = new MongoClient(testMongoUri(TARGET_DB));
     await Promise.all([fixture.connect(), target.connect()]);
-    await target.db(TARGET_DB).dropDatabase();
+    await emptyTarget(target, TARGET_DB);
 
     resetRunnerForTest(runner);
     clearActEntries(loader);

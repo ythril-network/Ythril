@@ -41,6 +41,7 @@
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import dns from 'node:dns';
+import { emptyTarget } from './_migrate-target.mjs';
 import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest } from './_space-act-harness.mjs';
@@ -116,7 +117,7 @@ describe('a migrate is reported, audited and bounded like a restore', { skip }, 
       await door.coll(s, 'facts').deleteMany({});
       await door.coll(s, 'facts').insertMany([1, 2, 3].map(i => ({ _id: `${s}-f${i}`, spaceId: s, fact: `fact ${i}`, tags: [], seq: i })));
     }
-    await target.db(TARGET_DB).dropDatabase();
+    await emptyTarget(target, TARGET_DB);
   });
   afterEach(async () => {
     faults.clear();
