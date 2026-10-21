@@ -82,8 +82,10 @@ describe('one scope rule, used by every route that applies it', () => {
      * because the other three calls are in this same module — a file-wide match passes while the mint
      * route runs its own copy, which is exactly the state this was written from.
      */
+    // b100 row 5: through `refusalsToManageToken`, the entry PATCH, regenerate and DELETE use, not the rule fed by hand - a mint that
+    // assembled `{ editorSpaces: editorScopeFor(...) }` itself was the fourth spelling of the caller's scope.
     const post = handlerFor(code(TOKENS), "tokensRouter.post('/'");
-    assert.match(post, /refusalsOutsideEditorScope\(/,
+    assert.match(post, /refusalsToManageToken\(/,
       'the mint route decides "outside your scope" with its own inline check while three other routes use '
       + 'the shared one. It is a privilege boundary, and the PATCH route already claims in a comment that '
       + 'the two are unified');

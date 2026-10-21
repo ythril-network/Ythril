@@ -9,7 +9,7 @@ import { isMfaEnabled, verifyMfaCode } from '../auth/totp.js';
 import { z } from 'zod';
 import { SPACE_AREAS, RUNGS, RUNG_IMPLICATIONS, DERIVED_RUNGS } from '../config/rights-shape.js';
 import { ROUTE_RIGHTS, NOT_AREA_SCOPED } from '../auth/space-rights.js';
-import { refusalsOutsideEditorScope, refusalsToManageToken, editorScopeFor } from '../auth/editor-scope.js';
+import { refusalsToManageToken, editorScopeFor } from '../auth/editor-scope.js';
 import { capRights, describeExcess } from '../auth/mint-cap.js';
 import { reportServerFailure } from '../util/report-failure.js';
 import { refuseSelfFloorRaise } from '../auth/floor-guard.js';
@@ -433,11 +433,8 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
    * `editorScopeFor` answers `undefined` for them and the block was skipped entirely — so the people
    * most likely to exercise the form are exactly the ones the defect could not reach.
    */
-  const scopeRefusals = refusalsOutsideEditorScope({
-    editorSpaces: editorScopeFor(req.authToken),
-    target: { schemaLibrary, rights: (rights ?? null) as never },
-    rights: rights as never,
-  });
+  // The token being minted is the target: the same `refusalsToManageToken` PATCH, rotate and DELETE ask.
+  const scopeRefusals = refusalsToManageToken(req.authToken, { schemaLibrary, rights: (rights ?? null) as never }, rights as never);
   if (scopeRefusals.length > 0) {
     res.status(403).json({
       error: `A space-restricted administrator cannot mint this token — ${scopeRefusals.join('; ')}.`,
