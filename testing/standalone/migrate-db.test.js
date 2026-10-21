@@ -42,6 +42,7 @@ import dns from 'node:dns';
 import fs from 'node:fs';
 import path from 'node:path';
 import { emptyTarget } from './_migrate-target.mjs';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest, netFixture, untilRunnerIdle } from './_space-act-harness.mjs';
@@ -53,6 +54,8 @@ process.env['YTHRIL_DB_MIGRATION_ENABLED'] = 'true';
 delete process.env['YTHRIL_MONGO_INFRA_MANAGED'];
 
 const T = { timeout: 90_000 };
+/** How long a whole copy into the target may take on the harness before a row says it never completed, ms. */
+const COPY_MS = 30_000;
 const SUITE = 'migrate';
 const SPACES = ['m-a', 'm-b'];
 const TARGET_HOST = 'ythril-target.test';
@@ -127,12 +130,11 @@ describe('migrate copies before it saves the URI, refuses what would lose data a
   const targetCollections = async () => (await target.db(TARGET_DB).listCollections({}, { nameOnly: true }).toArray()).map(c => c.name).sort();
   const idsOf = async (client, db, name) => (await client.db(db).collection(name).find({}, { projection: { _id: 1 } }).toArray()).map(d => String(d._id)).sort();
   const migrateEntries = () => entriesOf(loader).filter(e => e.kind === 'migrate');
-  /** Until the config holds the target URI and no migrate entry stands, bounded by turns of the event loop; THROWS when it never does. */
+  /** Until the config holds the target URI and no migrate entry stands, within {@link COPY_MS}; THROWS when it never does. */
   async function untilMigrated() {
-    for (let i = 0; i < 4000; i++) {
-      if (loader.getConfig().mongo?.uri === TARGET_URI && migrateEntries().length === 0) return;
-      await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 15) : setImmediate(resolve)));
-    }
+    // A whole-database copy, every index rebuilt on the target: seconds on the harness, which a bound of event-loop turns (about a
+    // second) did not always cover - a row then failed, and its teardown cut a copy still running. Bounded by the clock instead.
+    if (await holdsWithin(() => loader.getConfig().mongo?.uri === TARGET_URI && migrateEntries().length === 0, COPY_MS, 20, { what: 'the migrate to complete' })) return;
     throw new Error(`the migrate never completed: uri=${loader.getConfig().mongo?.uri}, entries=${JSON.stringify(migrateEntries().map(e => [e.localId, e.state]))}`);
   }
   const sourceCollections = async () => (await fixture.db(SOURCE_DB).listCollections({}, { nameOnly: true }).toArray()).map(c => c.name).filter(n => !n.startsWith('system.')).sort();
@@ -216,7 +218,7 @@ describe('migrate copies before it saves the URI, refuses what would lose data a
     const out = await migrate();
     assert.ok(out.status >= 200 && out.status < 300, `the migrate was refused: ${out.status} ${JSON.stringify(out.body)}`);
     // The act runs in the background: wait until the hook has fired (the copy is on the target by then) and the runner has settled.
-    for (let i = 0; i < 4000 && crashed === 0; i++) await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 15) : setImmediate(resolve)));
+    await holdsWithin(() => crashed > 0, COPY_MS, 20, { what: 'the migrate reaching its completion' });
     assert.equal(crashed, 1, 'the migrate act never reached its completion: it ran no body');
     assert.equal(loader.getConfig().mongo?.uri, SOURCE_URI, 'the URI was saved before the completion write');
     assert.deepEqual(await idsOf(target, TARGET_DB, 'm-a_facts'), ['m-a-f1', 'm-a-f2', 'm-a-f3'], 'the copy had not reached the target when the crash came');
