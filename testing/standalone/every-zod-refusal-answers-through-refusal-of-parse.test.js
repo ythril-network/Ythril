@@ -44,9 +44,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, sep } from 'node:path';
 import ts from 'typescript';
 import { REPO_ROOT } from './_sources.mjs';
+import { serverProgram } from '../_shared/server-program.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const PARSE_METHODS = new Set(['parse', 'safeParse', 'parseAsync', 'safeParseAsync']);
@@ -221,14 +222,10 @@ function sourceMentionsRefusal(sf, site) {
 // ---------------------------------------------------------------------------------------------------------------
 // The server program, built once.
 
-const PROGRAM = (() => {
-  const cfg = ts.readConfigFile(join(REPO_ROOT, 'server', 'tsconfig.json'), ts.sys.readFile);
-  const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, join(REPO_ROOT, 'server'));
-  return ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, noEmit: true } });
-})();
+const { program: PROGRAM, repoPath } = serverProgram();
 
 const inServerSrc = (sf) => {
-  const rel = posix(relative(REPO_ROOT, sf.fileName));
+  const rel = repoPath(sf.fileName);
   return rel.startsWith('server/src/') && !rel.endsWith('.d.ts') ? rel : null;
 };
 

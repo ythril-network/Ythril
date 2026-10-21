@@ -67,11 +67,10 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { join, relative, sep } from 'node:path';
 import ts from 'typescript';
 import { moduleIndex, routeHandlerRoots, walkFrom } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
-import { REPO_ROOT } from './_sources.mjs';
+import { serverProgram } from '../_shared/server-program.mjs';
 
 const LOG_MODULE = 'server/src/util/log.ts';
 /** The functions that bound a value for a log line. `logSafe` is the older name, kept as an alias of `peerText`. */
@@ -100,17 +99,7 @@ const LOCAL_SITES = new Map(LOCAL.flatMap(g => g.sites.map(s => [s, g.why])));
 // ---------------------------------------------------------------------------------------------------------------
 // The program, the call graph and the doors.
 
-const posix = p => p.split(sep).join('/');
-const repoPath = abs => posix(relative(REPO_ROOT, abs));
-
-const PROGRAM = (() => {
-  const cfgPath = join(REPO_ROOT, 'server', 'tsconfig.json');
-  const cfg = ts.readConfigFile(cfgPath, ts.sys.readFile);
-  const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, join(REPO_ROOT, 'server'));
-  return ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, noEmit: true } });
-})();
-const CHECKER = PROGRAM.getTypeChecker();
-const SOURCE = new Map(PROGRAM.getSourceFiles().map(sf => [repoPath(sf.fileName), sf]));
+const { program: PROGRAM, checker: CHECKER, sourceOf: SOURCE, repoPath } = serverProgram();
 const inTree = file => file.startsWith('server/src/');
 
 const INDEX = moduleIndex('server/src');
