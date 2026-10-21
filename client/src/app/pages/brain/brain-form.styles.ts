@@ -70,6 +70,8 @@ export const BRAIN_DRAWER_STYLES = `
     }
     .drawer-value { font-size: 13px; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
     .drawer-muted { color: var(--text-muted); }
+    .drawer-view-notice { margin: 0 0 12px; font-size: 12px; color: var(--text-muted); }
+    .drawer fieldset:disabled { opacity: 0.65; cursor: not-allowed; }
     .drawer-hr { border: none; border-top: 1px solid var(--border-muted); margin: 16px 0; }
     .drawer-readonly-value {
       font-size: 13px; color: var(--text-muted); padding: 5px 8px;

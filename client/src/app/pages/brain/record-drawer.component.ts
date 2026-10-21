@@ -64,6 +64,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
             <app-write-warnings [warnings]="state.drawerWarnings()" [truncated]="state.drawerWarningsTruncated()" (dismissed)="state.dismissWarnings()" />
 
             <!-- A record opened through a personal view is read, not edited: the fieldset disables every field under it, and there is no Save. -->
+            @if (isView()) { <p class="drawer-view-notice" role="note">{{ 'brain.drawer.viewNotice' | transloco }}</p> }
             <form><fieldset [disabled]="isView()" style="border:0;margin:0;padding:0;min-width:0;">
               <!-- ── MEMORY ── -->
               @if (dr.kind === 'fact') {

@@ -283,6 +283,7 @@
   "common.searchMemoriesPlaceholder": "Szukaj wspomnień…",
   "brain.drawer.recordDetailsAriaLabel": "Szczegóły rekordu",
   "brain.drawer.closeDetailsAriaLabel": "Zamknij szczegóły",
+  "brain.drawer.viewNotice": "Ten rekord oglądasz przez widok osobisty. Widok tylko odczytuje, więc nic tu nie można zmienić.",
   "brain.drawer.badge.fact": "pamięć",
   "brain.drawer.badge.entity": "podmiot",
   "brain.drawer.badge.edge": "krawędź",

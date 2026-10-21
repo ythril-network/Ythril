@@ -283,6 +283,7 @@
   "common.searchMemoriesPlaceholder": "Search facts…",
   "brain.drawer.recordDetailsAriaLabel": "Record details",
   "brain.drawer.closeDetailsAriaLabel": "Close details",
+  "brain.drawer.viewNotice": "You are looking at this record through a personal view. A view only reads, so nothing here can be changed.",
   "brain.drawer.badge.fact": "fact",
   "brain.drawer.badge.entity": "entity",
   "brain.drawer.badge.edge": "edge",

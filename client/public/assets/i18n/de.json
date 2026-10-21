@@ -283,6 +283,7 @@
   "common.searchMemoriesPlaceholder": "Erinnerungen suchen…",
   "brain.drawer.recordDetailsAriaLabel": "Datensatzdetails",
   "brain.drawer.closeDetailsAriaLabel": "Details schließen",
+  "brain.drawer.viewNotice": "Sie sehen diesen Datensatz über eine persönliche Ansicht. Eine Ansicht liest nur, daher kann hier nichts geändert werden.",
   "brain.drawer.badge.fact": "Erinnerung",
   "brain.drawer.badge.entity": "Entität",
   "brain.drawer.badge.edge": "Kante",
