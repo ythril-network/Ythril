@@ -51,9 +51,10 @@ the MCP tools, with the `code` and `codeName` in the tool's structured result.
 
 ### Maintenance mode
 
-Maintenance mode answers every request with `503 Service Unavailable`, reads included, **except an instance administrator's**:
-you keep working, and so do the health and metrics endpoints. Every other token, and every person signed in without
-administrator rights, waits until it ends.
+Maintenance mode answers every API and MCP request with `503 Service Unavailable`, reads included, **except an instance
+administrator's**: you keep working, and so do the health and metrics endpoints. Every other token, and every person signed in
+without administrator rights, waits until it ends. The web interface itself still loads for anyone, so you can always open it
+to end maintenance or a stuck restore; everyone else sees it but cannot read or change data through it.
 
 Use it before a manual database operation where you want nobody else writing. A restore and a migration do not need it: each
 puts the instance in maintenance by itself, from the moment you confirm until the last space is done, and takes it out again.
@@ -277,8 +278,9 @@ this instance does not have, is refused and nothing changes. A space the backup 
 
 Once you confirm, the request is accepted at once and the work runs in the background, one space at a time:
 
-1. The instance enters maintenance mode, and every space stops taking writes. You, as an administrator, keep working;
-   everyone else waits. The page shows how many spaces are done, and why any is waiting.
+1. The instance enters maintenance mode, and every space stops taking writes until its own part of the restore is done. You,
+   as an administrator, keep working, and can write to a space that is done while others are still running; everyone else
+   waits until the last space is done. The page shows how many spaces are done, and why any is waiting.
 2. Each space's data is replaced with the backup's, its indexes are built again (the search indexes, and the ones that
    stop the same edge, or two edges under a one-per-subject label, being stored twice by writers working at the same
    moment), and its sequence counter is kept above every number this instance already handed out.

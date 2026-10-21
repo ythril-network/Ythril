@@ -29,8 +29,7 @@ import { answerForCaught } from '../util/answer-for-caught.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 import type { FileActAnswer } from '../files/act-answers.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
-import { spaceWriteClosedAnswer } from '../spaces/space-write-gate.js';
-import { spaceActClosedAnswer } from '../spaces/space-act-runner.js';
+import { spaceActAnswer } from '../spaces/space-act-answer.js';
 
 /**
  * Put a store failure's answer on the wire: status, `Retry-After` when the answer is retryable, and the body —
@@ -99,9 +98,9 @@ export function sendCaughtFailure(res: express.Response, where: string, err: unk
   // `RangeError`, so a route's own `RangeError` branch above this call cannot take one for a malformed path.
   const fileAct = answerFileActFailure(err, where);
   if (fileAct) { sendFileActAnswer(res, fileAct); return; }
-  // A write the space's standing deletion, wipe or rename refused (409), and an act refused because shutdown closed the runner (503):
-  // the same answers `callTool` gives, built by the one function each.
-  const closed = spaceWriteClosedAnswer(err) ?? spaceActClosedAnswer(err);
+  // A write a space's standing act refused (409, the act's code), and an act refused because shutdown closed the runner (503): the
+  // same answer `callTool` and the app's final handler give, from the one function all three ask (`spaceActAnswer`, Q-560).
+  const closed = spaceActAnswer(err);
   if (closed) { res.status(closed.status).json(closed.body); return; }
   const store = storeFailureAnswer(err, where);
   if (store) { sendStoreFailure(res, store); return; }

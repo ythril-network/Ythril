@@ -22,8 +22,9 @@ empty database.
 ## Decision
 
 1. **A restore is a set of space acts, one per served space, registered in one config write.** The space-act machinery that
-   finishes a deletion or wipe (decision 12) finishes a restore: from that write every space takes no writes (`409
-   space_being_restored`) and its exchanges are held, the instance is in maintenance for as long as an act stands (derived
+   finishes a deletion or wipe (decision 12) finishes a restore: from that write each space takes no writes (`409
+   space_being_restored`) and its exchanges are held until ITS OWN act completes, the instance is in maintenance for as long as
+   any act stands, so meanwhile only an instance admin can write to a space whose act has completed (derived
    from the acts, so a restart resumes both), and a crash resumes the act. A migrate is the same set with one body for the
    whole database, and it saves the new URI in the write that lifts the holds.
 2. **A restore makes each space equal to the backup.** Its collections are dropped and created again with every index before
