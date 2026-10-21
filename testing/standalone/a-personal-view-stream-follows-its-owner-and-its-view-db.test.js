@@ -67,6 +67,8 @@ async function openStream(key, mintSpelling, openSpelling = mintSpelling) {
   /** Read until `pred(buffer)` or `ms` pass; answers whether it held, and whether the server ended the stream. */
   async function until(pred, ms = 3_000) {
     const deadline = Date.now() + ms;
+    // waits-differently: it reads a stream chunk by chunk until a predicate over what arrived holds, and some calls wait out the whole
+    // window on purpose (that nothing more arrives, or that the server ends the stream); waitFor polls a condition, it reads nothing.
     while (!pred(buf) && !ended && Date.now() < deadline) {
       const next = await Promise.race([reader.read(), new Promise(res => setTimeout(() => res(null), Math.max(1, deadline - Date.now())))]);
       if (next === null) break;
