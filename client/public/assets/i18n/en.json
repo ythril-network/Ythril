@@ -1251,6 +1251,7 @@
   "spaces.dangerZone.act.refills": "This space is a subscriber's copy: it refills from the publisher at the next sync.",
   "spaces.dangerZone.act.wiped": "Wipe finished on this instance.",
   "spaces.dangerZone.act.standing": "Still owed here: {{kind}}, started {{since}}. Next try: {{when}}.",
+  "spaces.dangerZone.act.standingNoRetry": "Still owed here: {{kind}}, started {{since}}.",
   "spaces.dangerZone.act.attempts": "Attempts so far: {{count}}",
   "spaces.dangerZone.act.renameHint": "A space cannot be renamed while a change to it is owed or running.",
   "spaces.dangerZone.act.ended": "The pending change on this space has ended.",

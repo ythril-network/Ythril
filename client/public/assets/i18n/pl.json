@@ -1251,6 +1251,7 @@
   "spaces.dangerZone.act.refills": "Ta przestrzeń jest kopią subskrybenta: przy następnej synchronizacji zapełni się ponownie z wydawcy.",
   "spaces.dangerZone.act.wiped": "Czyszczenie danych w tej instancji zakończone.",
   "spaces.dangerZone.act.standing": "Wciąż do wykonania tutaj: {{kind}}, rozpoczęte {{since}}. Następna próba: {{when}}.",
+  "spaces.dangerZone.act.standingNoRetry": "Wciąż do wykonania tutaj: {{kind}}, rozpoczęte {{since}}.",
   "spaces.dangerZone.act.attempts": "Dotychczasowe próby: {{count}}",
   "spaces.dangerZone.act.renameHint": "Nie można zmienić nazwy przestrzeni, dopóki zmiana w niej jest zaległa albo trwa.",
   "spaces.dangerZone.act.ended": "Oczekująca zmiana tej przestrzeni zakończyła się.",
