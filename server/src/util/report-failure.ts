@@ -44,6 +44,7 @@
  */
 import { log, peerText } from './log.js';
 import { warnOnce } from './warn-once.js';
+import { errorChain } from '../db/error-chain.js';
 
 /**
  * Record the cause of a 5xx the route is about to send.
@@ -57,16 +58,37 @@ export function reportServerFailure(where: string, cause: unknown): void {
   log.error(`${peerText(where)} failed with a 5xx:`, cause);
 }
 
-/** The window a repeated fault is said once in, and how many (operation, class) pairs are remembered: one number for every reporter of a fault. */
+/** The window a repeated fault is said once in, and how many distinct failures are remembered: one number for every reporter of a fault. */
 export const FAULT_REPORT_WINDOW = { max: 256, every: 60_000 } as const;
 
 const saidOnce = warnOnce<string>(FAULT_REPORT_WINDOW);
 
 /**
- * {@link reportServerFailure} for a failure a caller can repeat without bound: said once per operation and `kind` per window, so a bulk
- * resolution of two thousand ids on a disk that answers `EIO` writes one line with a stack and not two thousand. The ANSWER is still given
- * every time, and counted by whoever counts it: only the operator's line is thinned, and the first of a window carries the cause.
+ * What makes two failures the SAME failure for the window: the class name and code of every error down the cause chain. Never a message
+ * (it carries ids, so every repeat would be news). Without it, the key was the operation and the answer's class alone, and `driver_refusal`
+ * is every store refusal a door can meet: a push whose seq counter could not move and the next push whose record write the store refused
+ * were one key, so the second, a different step failing, was not said for a minute (CI run 39520466507, `sync POST batch-upsert`).
+ */
+function sameFailure(cause: unknown): string {
+  return errorChain(cause).map(e => {
+    const code = (e as { code?: unknown }).code;
+    const name = (e as { constructor?: { name?: unknown } }).constructor?.name;
+    return `${typeof name === 'string' ? name : 'object'}${typeof code === 'string' || typeof code === 'number' ? `:${code}` : ''}`;
+  }).join('<');
+}
+
+/**
+ * {@link reportServerFailure} for a failure a caller can repeat without bound: said once per operation, `kind` and failure (its error
+ * classes and codes, {@link sameFailure}) per window, so a bulk resolution of two thousand ids on a disk that answers `EIO` writes one
+ * line with a stack and not two thousand, and a different failure at the same door is still said. The ANSWER is still given every time,
+ * and counted by whoever counts it: only the operator's line is thinned, and the first of a window carries the cause. Every reporter of
+ * a fault comes through here (the file acts' and `answerForCaught`'s), so there is one window and not one per reporter.
  */
 export function reportServerFailureOncePerWindow(where: string, kind: string, cause: unknown): void {
-  saidOnce(`${where}|${kind}`, () => reportServerFailure(where, cause));
+  saidOnce(`${where}|${kind}|${sameFailure(cause)}`, () => log.error(`${peerText(where)} failed with a 5xx (${peerText(kind)}):`, cause));
+}
+
+/** Forget every failure the window remembers, so each is said again. For a test whose cases each repeat one failure and read its line. */
+export function forgetFaultReports(): void {
+  saidOnce.forgetAll();
 }
