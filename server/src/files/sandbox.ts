@@ -4,6 +4,7 @@ import { getDataRoot, isConfigLoaded } from '../config/loader.js';
 import { toDocId } from '../util/paths.js';
 import { isRetiredSpaceId } from '../spaces/retired-space-id.js';
 import { SpaceRetired } from './act-answers.js';
+import { RequestRefusal } from '../util/errors.js';
 
 /**
  * Resolve a user-supplied path within a space's data directory (LEXICAL check).

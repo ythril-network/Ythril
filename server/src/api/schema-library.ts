@@ -47,7 +47,7 @@ import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { libraryUsages } from '../spaces/library-usages.js';
 import { mergeTypeDefinition } from '../spaces/meta-fields.js';
 import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.js';
-import { peerText, peerList, refusalOfParse } from '../util/log.js';
+import { log, peerText, peerList, refusalOfParse } from '../util/log.js';
 import { sendLostSpace } from './write-target-answer.js';
 
 export const schemaLibraryRouter = Router();
