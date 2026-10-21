@@ -19,6 +19,8 @@
  *    `Space not found`, or `Unknown space(s):` - a site that spells them decided existence itself.
  * 2. **the REST half has one wrapper.** The request-shaped answers (`answerUnknownSpace`, `answerLostSpace`) are called from
  *    `api/write-target-answer.ts` alone; every route goes through it.
+ * 3. **the 410 is built once.** `retiredSpaceSentence` is called by the module and by the file acts' `SpaceRetired` (whose message it is)
+ *    alone; the MCP dispatcher used to build `{ error, code: 'space_retired' }` by hand.
  *
  * Both sets are DERIVED from the tracked sources (`trackedSources`, floor inside), and the askers of the module carry a floor of their own,
  * so a broken import scan cannot pass about nothing.
@@ -37,6 +39,8 @@ import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/spaces/unknown-space.ts';
 const REST_WRAPPER = 'server/src/api/write-target-answer.ts';
+/** The file acts' typed refusal, `SpaceRetired`, whose message is the module's sentence (b100 row 2). */
+const FILE_ACT_ANSWERS = 'server/src/files/act-answers.ts';
 
 const sources = readTrackedSources('server/src', { specs: false, untracked: true })
   .filter(s => s.file !== MODULE)
@@ -62,5 +66,11 @@ describe('a door decides space existence only through the one answer (Q-531)', (
       .filter(s => s.file !== REST_WRAPPER && /\b(answerUnknownSpace|answerLostSpace)\s*\(/.test(s.code))
       .map(s => s.file);
     assert.deepEqual(outside, [], `routes that call the request-shaped answer themselves; go through ${REST_WRAPPER}`);
+  });
+
+  it('the retired-id answer is built by the module alone (the file act\'s SpaceRetired carries its sentence)', () => {
+    // Seen red at 743562a5: mcp/call-tool.ts built `{ error: retiredSpaceSentence(id), code: 'space_retired' }` by hand.
+    const builders = sources.filter(s => /\bretiredSpaceSentence\s*\(/.test(s.code)).map(s => s.file);
+    assert.deepEqual(builders, [FILE_ACT_ANSWERS], 'sites that build the retired-id answer themselves; ask unknownSpaceAnswer');
   });
 });

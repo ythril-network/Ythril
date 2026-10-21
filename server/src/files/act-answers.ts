@@ -42,6 +42,7 @@
  *   storage, said in words that name no path.
  */
 import { fileSystemRefusalMessage } from '../util/fs-failure-words.js';
+import { retiredSpaceSentence } from '../spaces/unknown-space.js';
 /** The caller's path cannot be used: a regular file stands where a directory must be, it is the source itself or inside it, or the file system refuses it. Answered `path_blocked`. */
 export class PathBlocked extends Error {
   override readonly name = 'PathBlocked';
@@ -163,12 +164,15 @@ export class FileSystemFault extends Error {
 }
 
 /**
- * A file act addressed to a RETIRED proxy id (Q-531): the id a pre-6.0 proxy used, reserved until an instance admin purges it. The same
- * answer every door gives for that id (`410`, `space_retired`, one sentence): the file doors name a space in their path like every other
- * door, so the answer reaches them as a file act's own refusal as well.
+ * A file act addressed to a RETIRED proxy id (Q-531): the id a pre-6.0 proxy used, reserved until an instance admin purges it. Thrown by
+ * `resolveSafePath`, where every caller's path into a space's files is resolved, and answered as every door answers that id (`410`,
+ * `space_retired`, the one sentence `retiredSpaceSentence`), never in words of its own.
  */
 export class SpaceRetired extends Error {
   override readonly name = 'SpaceRetired';
+  constructor(readonly spaceId: string) {
+    super(retiredSpaceSentence(spaceId));
+  }
 }
 
 /** How long a caller is told to wait before retrying an owed move, in seconds. */

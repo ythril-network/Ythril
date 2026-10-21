@@ -106,6 +106,17 @@ describe('a retired proxy id answers 410 space_retired on every door (Q-531)', {
     assert.deepEqual(wrong, [], 'body-named routes that do not answer 410 space_retired with the sentence');
   });
 
+  it('a file act that meets a retired id answers the one 410 (b100 row 2)', async () => {
+    // Seen red at 743562a5: `SpaceRetired` was never constructed, so a caller's path under a retired id resolved into its directory.
+    const { resolveSafePath } = await import('../../server/dist/files/sandbox.js');
+    const { fileActAnswerOf } = await import('../../server/dist/files/act-answers.js');
+    let thrown = null;
+    try { resolveSafePath(RETIRED, 'notes/a.md'); } catch (err) { thrown = err; }
+    assert.ok(thrown, 'a path under a retired id resolved');
+    assert.deepEqual(fileActAnswerOf(thrown), { status: 410, body: { error: SENTENCE, code: 'space_retired' } });
+    assert.doesNotThrow(() => resolveSafePath(QA, 'notes/a.md'), 'a live space still resolves');
+  });
+
   it('MCP for every tool: an error carrying the sentence', async () => {
     const tools = TOOL_RIGHTS.filter(r => r.tool !== 'read_spill' && r.needs !== 'admin');
     const wrong = [];

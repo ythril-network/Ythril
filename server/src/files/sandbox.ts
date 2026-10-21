@@ -2,7 +2,8 @@ import path from 'path';
 import fs from 'fs/promises';
 import { getDataRoot } from '../config/loader.js';
 import { toDocId } from '../util/paths.js';
-import { RequestRefusal } from '../util/errors.js';
+import { isRetiredSpaceId } from '../spaces/unknown-space.js';
+import { SpaceRetired } from './act-answers.js';
 
 /**
  * Resolve a user-supplied path within a space's data directory (LEXICAL check).
@@ -25,10 +26,16 @@ import { RequestRefusal } from '../util/errors.js';
  * {@link assertNoSymlinkEscape} (async) before an actual filesystem operation
  * to close the symlink TOCTOU.
  *
+ * A RETIRED proxy id (Q-531) is refused before any path is resolved under it: every caller's path into a space's files is resolved here,
+ * so a file act that meets one answers the one `410 space_retired` (`SpaceRetired`, answered by `fileActAnswer`) instead of reading or
+ * writing a directory a purge has not yet dropped. The purge itself removes the directory by its root and never asks this.
+ *
  * @returns The absolute safe path
  * @throws RangeError if the path attempts to escape the space root
+ * @throws SpaceRetired if `spaceId` is a retired proxy id
  */
 export function resolveSafePath(spaceId: string, userPath: string): string {
+  if (isRetiredSpaceId(spaceId)) throw new SpaceRetired(spaceId);
   const spaceRootDir = spaceRoot(spaceId);
 
   // 1. Unicode NFC normalization
