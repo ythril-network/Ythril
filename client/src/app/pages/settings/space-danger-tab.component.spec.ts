@@ -215,13 +215,14 @@ interface Wired {
  * The tab with the real SpacesApi; `space` is merged into the open space (e.g. `{ actPending }`), `nets` is what networksForSpace gives,
  * and `networksLoaded: false` is a networks list that never arrived (its request failed).
  */
-function wired(opts: { space?: Record<string, unknown>; nets?: Record<string, unknown>[]; networksLoaded?: boolean } = {}): Wired {
+function wired(opts: { space?: Record<string, unknown>; nets?: Record<string, unknown>[]; networksLoaded?: boolean; words?: Record<string, string> } = {}): Wired {
   const confirm = vi.fn((_data: unknown) => Promise.resolve(true));
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     imports: [SpaceDangerTabComponent, getTranslocoModule({ translation: { en: {
       // A parametrised key echoes its own name AND its parameter, so a spec can see both the line and what filled it.
       [K.queued]: `${K.queued} {{when}}`,
+      ...opts.words,
     } } })],
     providers: [
       SpaceSettingsState,
@@ -544,5 +545,63 @@ describe('the confirm text forecasts what the act will do (Q-535 design 7)', () 
     const h = wired({ nets: [{ id: 'n1', label: 'Team', ownYesCarries: true }, { id: 'n2', label: 'Wide', ownYesCarries: false }] });
     await h.c.confirmDangerWipe();
     expect(asked(h)).toContain(K.forecastOpensVote);
+  });
+});
+
+/*
+ * bundle-157 (R5.6, vet C U2): ANY standing act blocks the rename and gets a repeat hint true for its kind. The rename form and the hint
+ * covered delete and wipe only, so during a restore the form stayed enabled and the server refused with text about "deletion or wipe".
+ * The kind stays the server's string: no closed client set decides what blocks; the hint's words come from the locale, per kind, with a
+ * generic sentence for a kind this client has no words for.
+ */
+describe('any standing act blocks the rename and gets its own repeat hint (bundle-157)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Each kind's hint resolves to text naming the kind, so a spec can see which one was chosen. */
+  const HINT_WORDS: Record<string, string> = Object.fromEntries(
+    ['delete', 'wipe', 'rename', 'restore', 'migrate', 'other'].map(k => [`${K.repeatHint}.${k}`, `HINT-${k}`]),
+  );
+  const renameButton = (h: Wired) =>
+    Array.from((h.fixture.nativeElement as HTMLElement).querySelectorAll('button')).find(b => b.textContent?.includes('spaces.dangerZone.renameButton'));
+
+  for (const kind of ['delete', 'wipe', 'rename', 'restore', 'migrate', 'a-kind-this-client-has-never-seen']) {
+    it(`a standing ${kind}: the rename button is disabled and the hint says why`, () => {
+      const h = wired({ space: { actPending: actPending({ kind, state: 'running' }) } });
+      h.state.dangerRenameId = 'proj-2';
+      h.fixture.detectChanges();
+      expect(h.c.renameBlockedByAct()).toBe(true);
+      expect(pageText(h)).toContain(K.renameHint);
+      expect(renameButton(h)?.disabled).toBe(true);
+    });
+  }
+
+  it('no standing act: the rename is not blocked', () => {
+    const h = wired();
+    h.state.dangerRenameId = 'proj-2';
+    h.fixture.detectChanges();
+    expect(h.c.renameBlockedByAct()).toBe(false);
+    expect(pageText(h)).not.toContain(K.renameHint);
+  });
+
+  it('the repeat hint is shown for every standing kind, in the words for that kind', () => {
+    for (const kind of ['delete', 'wipe', 'rename', 'restore', 'migrate']) {
+      const h = wired({ space: { actPending: actPending({ kind }) }, words: HINT_WORDS });
+      expect(statusText(h), kind).toContain(`HINT-${kind}`);
+    }
+  });
+
+  it('a kind with no words of its own gets the generic hint, never the delete-or-wipe one', () => {
+    const h = wired({ space: { actPending: actPending({ kind: 'a-kind-this-client-has-never-seen' }) }, words: HINT_WORDS });
+    expect(statusText(h)).toContain('HINT-other');
+    expect(statusText(h)).not.toContain('HINT-delete');
+  });
+
+  it('an owed act shows our sentence for its last failure, and that only an abandon ends it when it needs one', () => {
+    const h = wired({ space: { actPending: {
+      ...actPending({ kind: 'restore', state: 'owed' }), lastError: 'the backup holds records that one of its unique indexes refuses.',
+      needsAbandon: true, backupId: '2026-10-18T10-00-00-000Z',
+    } } });
+    expect(statusText(h)).toContain('unique indexes refuses');
+    expect(statusText(h)).toContain('spaces.dangerZone.act.needsAbandon');
   });
 });
