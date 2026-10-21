@@ -29,15 +29,14 @@ import type { Config, ViewRecord } from './types.js';
 import type { Rung, SpaceArea, TokenRights } from './rights-shape.js';
 import { holdsRung } from '../auth/reachable-spaces.js';
 import { reachesSpace } from '../auth/space-reach.js';
-import { tokenIsLive } from '../auth/token-liveness.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { viewsDeletedTotal } from '../metrics/registry.js';
 import { log } from '../util/log.js';
-import { VIEW_OWNER_KINDS, WILDCARD_MEMBER, viewOwnerKind, viewOwnerOf } from './view-shape.js';
+import { VIEW_OWNER_KINDS, WILDCARD_MEMBER, liveOwnerKeys, viewOwnerKind, viewOwnerOf } from './view-shape.js';
 
 export {
   VIEW_NAME_PATTERN, VIEW_NAME_MAX, MAX_VIEWS_PER_OWNER, MAX_VIEW_MEMBERS, WILDCARD_MEMBER, isViewId, isValidViewName, freeViewName,
-  viewOwnerKind, validateViews, viewOwnerOf,
+  viewOwnerKind, validateViews, viewOwnerOf, liveOwnerKeys,
 } from './view-shape.js';
 export type { ViewOwnerSource } from './view-shape.js';
 
@@ -164,13 +163,12 @@ export function restoreViewsMissingAfterReload(before: readonly ViewRecord[], co
 /** What the sweep would do to a config, as data: the views to delete and the stale marks to clear. Pure. */
 function sweepPlan(config: Config, now: number): { remove: ViewRecord[]; clear: ViewRecord[] } {
   const tokens = config.tokens ?? [];
-  const liveOwners = new Set<string>();
+  const liveOwners = liveOwnerKeys(tokens, now);
   const lastLive = new Map<string, number>();
   for (const t of tokens) {
     const owner = viewOwnerOf(t);
-    if (!owner) continue;
-    if (tokenIsLive(t, now)) liveOwners.add(owner);
-    else if (t.expiresAt) lastLive.set(owner, Math.max(lastLive.get(owner) ?? -Infinity, Date.parse(t.expiresAt)));
+    if (!owner || liveOwners.has(owner) || !t.expiresAt) continue;
+    lastLive.set(owner, Math.max(lastLive.get(owner) ?? -Infinity, Date.parse(t.expiresAt)));
   }
   const remove: ViewRecord[] = [];
   const clear: ViewRecord[] = [];

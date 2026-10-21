@@ -21,9 +21,8 @@
  */
 import type { Config, TokenRecord, ViewRecord } from './types.js';
 import { isInstanceAdmin } from '../auth/instance-admin.js';
-import { tokenIsLive } from '../auth/token-liveness.js';
 import { takeSpaceOutOfNetwork } from '../networks/take-space-out-of-network.js';
-import { freeViewName, viewOwnerOf } from './view-shape.js';
+import { freeViewName, liveOwnerKeys } from './view-shape.js';
 
 /** What a run did, for the boot log and the durable report. */
 export interface ProxyMigrationResult {
@@ -46,13 +45,7 @@ export const holdsLegacyProxies = (cfg: Pick<Config, 'spaces'>): boolean => (cfg
 
 /** The owner keys of the live instance-admin tokens, each once (two tokens of one connector are one owner). */
 function adminOwners(tokens: readonly TokenRecord[], now: number): string[] {
-  const owners = new Set<string>();
-  for (const t of tokens) {
-    if (!tokenIsLive(t, now) || !isInstanceAdmin(t)) continue;
-    const owner = viewOwnerOf(t);
-    if (owner) owners.add(owner);
-  }
-  return [...owners];
+  return [...liveOwnerKeys(tokens.filter(t => isInstanceAdmin(t)), now)];
 }
 
 export function migrateProxiesToViews(cfg: Config, now: number = Date.now()): ProxyMigrationResult {
