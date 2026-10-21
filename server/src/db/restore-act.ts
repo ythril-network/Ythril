@@ -34,7 +34,7 @@
 import { getDb, reportDatabaseReplaced } from './mongo.js';
 import { backupIsWhole, backupLoader, backupRecords, BackupNotWhole, type BackupCollection } from './restore.js';
 import { backupDirOf } from './backup-location.js';
-import { parseSpaceCollection } from './space-collection.js';
+import { parseSpaceCollection, spaceCollection } from './space-collection.js';
 import { isDuplicateKey } from './write-errors.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { initSpace, ensureEdgeIdentityIndex } from '../spaces/lifecycle.js';
@@ -248,7 +248,7 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
     await ensureEdgeIdentityIndex(spaceId);
     await ensureEdgeGuardIndex(spaceId);
   } catch (err) {
-    throw inputFailure(err, `${spaceId}_edges`) ?? err;
+    throw inputFailure(err, spaceCollection(spaceId, 'edges')) ?? err;
   }
 
   // The vector indexes of each collection that now holds a record (`Q-165`); a failure is reported, never a failed restore.
