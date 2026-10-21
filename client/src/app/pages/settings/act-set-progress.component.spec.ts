@@ -18,12 +18,13 @@ const en: Record<string, string> = JSON.parse(readFileSync(resolve(__dirname, '.
 const NOW = Date.parse('2026-10-18T12:00:00.000Z');
 const AHEAD = '2026-10-18T12:05:00.000Z';
 
-function card(kind: 'restore' | 'migrate', report: Record<string, unknown>): ComponentFixture<ActSetProgressComponent> {
+function card(kind: 'restore' | 'migrate', report: Record<string, unknown>, stopped = false): ComponentFixture<ActSetProgressComponent> {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({ imports: [ActSetProgressComponent, getTranslocoModule({ translation: { en } })] });
   const fixture = TestBed.createComponent(ActSetProgressComponent);
   fixture.componentRef.setInput('kind', kind);
   fixture.componentRef.setInput('report', report);
+  fixture.componentRef.setInput('stopped', stopped);
   fixture.detectChanges();
   return fixture;
 }
@@ -122,5 +123,43 @@ describe('a standing migrate says what happens when it ends (Q-561, finding 5)',
   it('a restore card says nothing about the process exiting', () => {
     const f = card('restore', restoreReport());
     expect(cardText(f)).not.toContain('next start connects');
+  });
+});
+
+describe('a migrate whose process has exited does not claim to be running (Q-561, re-drive)', () => {
+  const stoppedCard = () => card('migrate', migrateReport({
+    done: 0, spaces: [restoreSpace('general', 'running', { attempts: 0 }), restoreSpace('notes', 'owed', { attempts: 0 }), restoreSpace('proj', 'done')],
+  }), true);
+
+  it('the card says the instance has stopped, and names the state Stopped in its pill and its bar, never Running or Working', () => {
+    const f = stoppedCard();
+    expect(cardText(f)).toContain('The instance has stopped');
+    expect(cardText(f)).toContain('Stopped');
+    expect(barLabel(f)).toContain('Stopped');
+    expect(cardText(f)).not.toContain('Running');
+    expect(cardText(f)).not.toContain('Working');
+  });
+
+  it('a space that had not finished is not shown as Running; a finished one keeps Done', () => {
+    const f = stoppedCard();
+    expect(rowOf(f, 'general')).not.toContain('Running');
+    expect(rowOf(f, 'general')).toContain('Stopped');
+    expect(rowOf(f, 'notes')).not.toContain('Waiting');
+    expect(rowOf(f, 'proj')).toContain('Done');
+  });
+
+  it('the same migrate while its process still answers is Running, as before', () => {
+    const f = card('migrate', migrateReport({ spaces: [restoreSpace('general', 'running', { attempts: 0 })] }), false);
+    expect(rowOf(f, 'general')).toContain('Running');
+    expect(cardText(f)).not.toContain('Stopped');
+  });
+});
+
+describe('a registered space with no try yet is Waiting and names no next try (Q-561, re-drive)', () => {
+  it('on the card: Waiting, no attempts line, no next try', () => {
+    const f = card('migrate', migrateReport({ spaces: [restoreSpace('alpha', 'registered', { attempts: 0 })] }));
+    expect(rowOf(f, 'alpha')).toContain('Waiting');
+    expect(rowOf(f, 'alpha')).not.toContain('Next try');
+    expect(rowOf(f, 'alpha')).not.toContain('Attempts so far');
   });
 });
