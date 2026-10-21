@@ -506,15 +506,14 @@ describe('Migration — POST /api/admin/data/migrate (auth + validation)', () =>
     assert.ok(r.body.error, 'error must describe the connection failure');
   });
 
-  it('in test mode: migrate to current URI runs dump+marker without restart', async () => {
-    // NODE_ENV=test: server skips process.exit(); maintenance must be cleaned up after
+  it('a migrate to the current URI is refused before anything is registered: its URI is the environment\'s, or the target holds data', async () => {
+    // A migrate copies into an EMPTY database whose URI the API may save (bundle-157, Q-553). The test instances take MONGO_URI from the
+    // environment (INFRA_MANAGED); one that did not would meet its own non-empty database (target_not_empty). Either way nothing starts.
     const r = await adminPost('/api/admin/data/migrate', { uri: CURRENT_MONGO_URI });
-    assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.ok(r.body.backupDir, 'backupDir must be present in response');
-    assert.ok(r.body.manifest, 'manifest must be present in response');
-
-    // Maintenance was activated during migration — clean up
-    await ensureMaintenanceOff();
+    assert.equal(r.status, 409, JSON.stringify(r.body));
+    assert.ok(['INFRA_MANAGED', 'target_not_empty'].includes(r.body.code), JSON.stringify(r.body));
+    const m = await adminGet('/api/admin/data/maintenance');
+    assert.equal(m.body?.active, false, `a refused migrate left the instance in maintenance: ${JSON.stringify(m.body)}`);
   });
 
   it('returns 409 when maintenance mode is already active', async () => {

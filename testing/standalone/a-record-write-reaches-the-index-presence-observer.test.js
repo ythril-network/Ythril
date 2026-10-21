@@ -164,6 +164,7 @@ describe('4. there is one door onto the database', () => {
     'server/src/db/conn-test.ts': 'A connection test: it pings admin and writes nothing.',
     'server/src/db/dump.ts': 'A backup: it reads every collection and writes nothing.',
     'server/src/db/restore.ts': 'WRITES through `restoreDatabase` only, a whole-database copy on a client of its own (the migration\'s target), which the boot after it reconciles space by space (`initSpace`). The online restore loads through `getDb` (`db/restore-act.ts`), held below to a forced reconcile of each space it replaced.',
+    'server/src/db/migrate-act.ts': 'A migrate\'s TARGET, which is not this process\'s database: it lists the target\'s collections (a read) and builds the source\'s indexes there after `restoreDatabase` copied into it. It writes no record; the process ends after the copy, and the boot on the new URI reconciles every space (`initSpace`).',
     'server/src/ready.ts': 'A readiness probe: admin ping and listSearchIndexes, both reads.',
     'server/src/api/about.ts': 'serverInfo for the About page — a read of the admin database.',
     'server/src/db/store-answers.ts': 'storeAnswers: a ping of the admin database, writes nothing, and goes around getDb() on purpose: it carries its own timeoutMS, and a housekeeping scope\'s bound laid over a ping about the bound would be a bound about itself.',

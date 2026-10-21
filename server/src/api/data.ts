@@ -12,7 +12,7 @@
  *   POST   /api/admin/data/restore          — restore from a named backup: one restore act per space, answered 202
  *   GET    /api/admin/data/restore          — the restore standing or the last one, per space
  *   POST   /api/admin/data/restore/abandon  — lift the holds of a standing restore's acts that have not completed
- *   POST   /api/admin/data/migrate         — full DB migration (dump → marker → exit)
+ *   POST   /api/admin/data/migrate         — copy the database into a new URI online under migrate acts, save it, exit (202)
  *   GET    /api/admin/data/backup-config    — read backup.json (scheduled/offsite config)
  *                                             requires YTHRIL_DB_MIGRATION_ENABLED=true
  *   GET    /api/admin/data/browse-dirs      — list child directories at a given path (UI file picker)
@@ -21,21 +21,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Router } from 'express';
 import { z } from 'zod';
-import { getConfig, getMongoUri, saveConfig, getDataRoot } from '../config/loader.js';
+import { getDataRoot } from '../config/loader.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { isMaintenanceActive, maintenanceState, setMaintenanceActive } from '../maintenance.js';
 import { runBackupNow, BackupRefusedDuringRestore } from '../db/backup-scheduler.js';
 import { loadBackupConfig, BACKUP_CONFIG_PATH, BackupConfigSchema } from '../db/backup-config.js';
 import { startBackupScheduler } from '../db/backup-scheduler.js';
-import { dumpDatabase } from '../db/dump.js';
 import { BackupNotWhole } from '../db/restore.js';
 import { backupsRoot, backupDirOf, isBackupId } from '../db/backup-location.js';
-import { planRestore, startRestore, restoreReport, abandonRestore, restoreStandingRefusal } from '../db/restore-act.js';
-import { instanceWideActStanding, spaceActClosedAnswer } from '../spaces/space-act-runner.js';
+import { planRestore, startRestore, restoreReport, abandonRestore } from '../db/restore-act.js';
+import { targetHoldsData, startMigrate } from '../db/migrate-act.js';
+import { instanceWideActStanding, instanceWideActRefusal, spaceActClosedAnswer } from '../spaces/space-act-runner.js';
+import { effectiveMongoUri, redactUri } from '../config/mongo-uri.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
-import { log, refusalOfParse } from '../util/log.js';
+import { refusalOfParse } from '../util/log.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { isMissingPath } from '../files/stored-bytes.js';
 
@@ -46,29 +47,6 @@ export const dataRouter = Router();
 dataRouter.use(globalRateLimit, requireAdmin);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function migrationBackupRoot(): string {
-  return path.join(getDataRoot(), 'migration-backup');
-}
-
-function migrationMarkerPath(): string {
-  return path.join(getDataRoot(), 'migration-marker.json');
-}
-
-/**
- * Derive the URI source: env var > config file > built-in default.
- * Must match the priority order of getMongoUri() in config/loader.ts.
- */
-function getMongoUriSource(): 'env' | 'config' | 'default' {
-  if (process.env['MONGO_URI']) return 'env';
-  const cfg = getConfig();
-  if (cfg.mongo?.uri) return 'config';
-  return 'default';
-}
-
-function redactUri(uri: string): string {
-  return uri.replace(/\/\/[^@]+@/, '//[credentials]@');
-}
 
 /**
  * Whether the live database migration feature is enabled on this instance.
@@ -135,8 +113,8 @@ function validateMongoUri(uri: unknown): { valid: true; uri: string } | { valid:
 
 dataRouter.get('/config', (_req, res) => {
   try {
-    const source = getMongoUriSource();
-    const mongoUriRedacted = redactUri(getMongoUri());
+    const { uri, source } = effectiveMongoUri();
+    const mongoUriRedacted = redactUri(uri);
     const migrationEnabled = isDbMigrationEnabled();
     res.json({ source, mongoUriRedacted, migrationEnabled });
   } catch (err) {
@@ -386,7 +364,7 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
 
   const standing = instanceWideActStanding();
   if (standing) {
-    res.status(409).json(restoreStandingRefusal(standing));
+    res.status(409).json(instanceWideActRefusal('restore', standing));
     return;
   }
 
@@ -402,7 +380,7 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     }
     const started = startRestore(plan);
     if (!started) {
-      res.status(409).json(restoreStandingRefusal(instanceWideActStanding() ?? 'restore'));
+      res.status(409).json(instanceWideActRefusal('restore', instanceWideActStanding() ?? 'restore'));
       return;
     }
     res.status(202).json(started);
@@ -447,20 +425,14 @@ dataRouter.post('/restore/abandon', requireAdminMfa, async (_req, res) => {
 
 // ── POST /migrate ─────────────────────────────────────────────────────────────
 //
-// Full database migration:
-//   1. Validate + test the new URI
-//   2. Enter maintenance mode
-//   3. Dump current DB
-//   4. Write migration marker (old URI, new URI, backup dir)
-//   5. Persist new URI to config.json
-//   6. Respond 200 to the client
-//   7. Exit (Docker/K8s restart policy brings the container back)
+// Move this instance to another database ONLINE (bundle-157, Q-553): after the refusals below, one `migrate` act per served space is
+// registered in one config write and answered 202. The act set's one body dumps this database as a normal backup, restores it into the
+// new URI and builds the indexes there; its completion saves the URI in the write that lifts the holds, and the process then ends so
+// the next start connects to the new database (`db/migrate-act.ts`). Refused before anything is registered: a URI the environment
+// supplies (`INFRA_MANAGED`: the infrastructure owns it), an act standing on every space, manual maintenance, a target that cannot be
+// reached, and a target that already holds data (`target_not_empty`; never its collection names).
 //
-// On restart, index.ts detects the marker and runs restoreDatabase() against
-// the new URI before calling connectMongo().
-//
-// In NODE_ENV=test: steps 4-5 run but step 7 (process.exit) is skipped so the
-// test suite remains connected. Maintenance stays active — tests must clean up.
+// In NODE_ENV=test the process is not ended; maintenance stays on after the completion.
 
 dataRouter.post('/migrate', requireAdminMfa, async (req, res) => {
   // Guard: feature must be explicitly enabled by the infrastructure admin
@@ -484,6 +456,13 @@ dataRouter.post('/migrate', requireAdminMfa, async (req, res) => {
     return;
   }
 
+  // Guard: an act standing on every space (a restore, another migrate) answers with its own kind's code.
+  const standing = instanceWideActStanding();
+  if (standing) {
+    res.status(409).json(instanceWideActRefusal('migrate', standing));
+    return;
+  }
+
   // Guard: cannot start migration while maintenance is already active
   if (isMaintenanceActive()) {
     res.status(409).json({
@@ -500,7 +479,7 @@ dataRouter.post('/migrate', requireAdminMfa, async (req, res) => {
 
   const newUri = validation.uri;
 
-  // Step 1: verify the new URI is reachable before committing to anything
+  // Verify the new URI is reachable before committing to anything
   const connResult = await testConnection(newUri);
   if (!connResult.ok) {
     res.status(400).json({
@@ -509,48 +488,34 @@ dataRouter.post('/migrate', requireAdminMfa, async (req, res) => {
     return;
   }
 
-  // Step 2: enter maintenance mode — quiesces all writes
-  setMaintenanceActive(true);
+  // Guard: a URI the environment supplies is the infrastructure's. A migrate would save a config URI the environment then overrides,
+  // so the instance would come back on the old database. An EMPTY MONGO_URI is unset (`effectiveMongoUri`), so it is not refused.
+  if (effectiveMongoUri().source === 'env') {
+    res.status(409).json({
+      error: 'Database migration via API is not possible on this instance: the MongoDB URI comes from the MONGO_URI environment variable, which overrides the configured one. Change it in your infrastructure configuration instead.',
+      code: 'INFRA_MANAGED',
+    });
+    return;
+  }
 
   try {
-    // Step 3: dump current DB
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupDir = path.join(migrationBackupRoot(), ts);
-    // Same setting as the scheduled run — read here rather than defaulted, so the manual and automatic paths
-    // cannot disagree about whether a backup is encrypted.
-    const manifest = await dumpDatabase(getMongoUri(), backupDir, { encrypt: loadBackupConfig()?.encrypt === true });
-
-    // Step 4: write migration marker (used by startup hook on next boot)
-    const oldUri = getMongoUri();
-    const marker = {
-      oldUri,
-      newUri,
-      backupDir,
-      startedAt: new Date().toISOString(),
-    };
-    fs.writeFileSync(migrationMarkerPath(), JSON.stringify(marker, null, 2), 'utf8');
-
-    // Step 5: persist the new URI to config.json
-    const cfg = getConfig();
-    cfg.mongo = { ...cfg.mongo, uri: newUri };
-    saveConfig(cfg);
-
-    // Step 6: respond before we exit
-    res.json({ ok: true, backupDir, manifest });
-
-    // Step 7: exit so the container restarts with the new config
-    // In NODE_ENV=test we skip the exit so the test suite stays alive.
-    if (process.env['NODE_ENV'] !== 'test') {
-      log.info('migrate: restarting to connect to new database…');
-      setTimeout(() => process.exit(0), 200);
-    } else {
-      log.warn('migrate: NODE_ENV=test — skipping process.exit(); maintenance remains active');
+    // Guard: the target is copied into, never merged with. Its contents are not named in the answer.
+    if (await targetHoldsData(newUri)) {
+      res.status(409).json({
+        error: 'The target database already holds data. A migrate copies into an empty database only: empty it, or name another, and migrate again.',
+        code: 'target_not_empty',
+      });
+      return;
     }
+    const started = startMigrate(newUri);
+    if (!started) {
+      res.status(409).json(instanceWideActRefusal('migrate', instanceWideActStanding() ?? 'migrate'));
+      return;
+    }
+    res.status(202).json(started);
   } catch (err) {
-    // Roll back maintenance mode on failure — the DB state is unchanged
-    setMaintenanceActive(false);
-    // If the marker was written before the error, clean it up
-    try { if (fs.existsSync(migrationMarkerPath())) fs.unlinkSync(migrationMarkerPath()); } catch { /* best-effort */ }
-    sendCaughtFailure(res, `POST /api/admin/data/migrate`, err, { error: err instanceof Error ? err.message : String(err) });
+    const closed = spaceActClosedAnswer(err);
+    if (closed) { res.status(closed.status).json(closed.body); return; }
+    sendCaughtFailure(res, `POST /api/admin/data/migrate`, err);
   }
 });

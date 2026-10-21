@@ -1,27 +1,27 @@
 /**
- * CHARACTERIZATION - green on today's code, on purpose. Pins how the server picks the database URI it CONNECTS to, and what the admin
- * route reports as its source, before bundle-157 changes the rule (plan rev 4 R4.4, rev 5 R5.5).
+ * CHARACTERIZATION - pins how the server picks the database URI it CONNECTS to, and what the admin route reports as its source
+ * (bundle-157, plan rev 4 R4.4, rev 5 R5.5; Q-553).
  *
  * ## What it pins
  *
- * `getMongoUri()` (`config/loader.ts`) reads `process.env.MONGO_URI ?? config.mongo.uri`, then the bundled default. `??` keeps an EMPTY
- * string, so `MONGO_URI=''` (what `docker-compose.yml` writes for `MONGO_URI: ${MONGO_URI:-}` when the operator sets nothing) is found,
- * is falsy, and the connection goes to the BUNDLED default - the config's own URI is ignored. `GET /api/admin/data/config` derives its
- * `source` by truthiness (`getMongoUriSource`, `api/data.ts`), so for the same environment it says `'config'`. The two disagree: the
- * operator is told the URI comes from the config file while the process connects somewhere else.
+ * `getMongoUri()` (`config/loader.ts`) and `GET /api/admin/data/config` both ask `effectiveMongoUri()` (`config/mongo-uri.ts`): a
+ * non-empty `MONGO_URI`, else the config's `mongo.uri`, else the bundled default. An EMPTY `MONGO_URI` (what `docker-compose.yml` writes
+ * for `MONGO_URI: ${MONGO_URI:-}` when the operator sets nothing) is UNSET, so the process connects to the config's URI and the route says
+ * `config` - the same answer from both.
  *
  * | env MONGO_URI | config mongo.uri | connects to | route says |
  * |---|---|---|---|
  * | unset | set | the config's | config |
  * | unset | unset | the bundled default | default |
  * | a value | any | the value | env |
- * | `''` | set | the BUNDLED DEFAULT (config ignored) | config  <- the disagreement |
+ * | `''` | set | the config's (an empty MONGO_URI is unset) | config |
  *
- * ## Why it exists before the rule does
+ * ## The row that changed, and why
  *
- * The rule test (`one-uri-rule.test.js`) states what the design wants. This states what the code does now, so the change is a visible
- * edit of a pinned row and not a silent one: the last row is the one the rule changes (`''` is read as unset everywhere, so it connects to
- * the config's URI and the route says `config`). When the rule lands, that row is rewritten, and only that row.
+ * Before the rule, the last row pinned the disagreement: `getMongoUri` read `MONGO_URI ?? config.mongo.uri`, `??` kept the empty string,
+ * and the process connected to the BUNDLED default with the config's URI ignored, while the route (reading by truthiness) said `config`.
+ * The operator was told the URI came from the config file while the process connected somewhere else. The rule landed, and that row
+ * was rewritten - and only that row - so the change is a visible edit of a pinned row and not a silent one.
  *
  * Run: node --test testing/standalone/characterization-the-mongo-uri-today-env-then-config-then-default.test.js (a prior `npx tsc -p server`)
  */
@@ -57,7 +57,7 @@ const setup = ({ env, config }) => {
   loader.mutateConfig(cfg => { if (config === undefined) delete cfg.mongo; else cfg.mongo = { uri: config }; });
 };
 
-describe('TODAY: the connect URI is env ?? config ?? bundled default, and the route reads the source by truthiness', () => {
+describe('the connect URI is a non-empty env, else config, else the bundled default, and the route names the same source', () => {
   before(async () => {
     fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
       instanceId: 'uri-characterization', instanceLabel: 'test', tokens: [], networks: [],
@@ -93,9 +93,9 @@ describe('TODAY: the connect URI is env ?? config ?? bundled default, and the ro
     assert.equal(sourceTold(), 'env');
   });
 
-  it('env set to the EMPTY string, config set: connects to the bundled default (the config is ignored) while the route says config', () => {
+  it('env set to the EMPTY string, config set: an empty MONGO_URI is unset, so it connects to the config\'s URI and the route says config', () => {
     setup({ env: '', config: FROM_CONFIG });
-    assert.equal(loader.getMongoUri(), BUNDLED, 'an empty MONGO_URI no longer ignores the config - the rule has landed; rewrite this row');
-    assert.equal(sourceTold(), 'config', 'the route no longer reads an empty MONGO_URI by truthiness - the rule has landed; rewrite this row');
+    assert.equal(loader.getMongoUri(), FROM_CONFIG, 'an empty MONGO_URI made the process ignore the config\'s URI again');
+    assert.equal(sourceTold(), 'config', 'the route names another source than the one the process connects by');
   });
 });

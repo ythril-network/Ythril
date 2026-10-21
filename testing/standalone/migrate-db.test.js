@@ -172,7 +172,15 @@ describe('migrate copies before it saves the URI, refuses what would lose data a
       const out = await migrate();
       let completed = true; let why = '';
       if (out.status >= 200 && out.status < 300) { try { await untilMigrated(); } catch (err) { completed = false; why = String(err.message); } }
-      answered = { out, completed, why };
+      // What the run left on disk, read NOW: the suite's beforeEach empties the backups directory before every later row.
+      const root = path.join(DATA_ROOT, 'backups');
+      const onDisk = {
+        root,
+        backups: fs.existsSync(root) ? fs.readdirSync(root).filter(n => fs.existsSync(path.join(root, n, 'manifest.json'))) : [],
+        migrationBackup: fs.existsSync(path.join(DATA_ROOT, 'migration-backup')),
+        marker: fs.existsSync(path.join(DATA_ROOT, 'migration-marker.json')),
+      };
+      answered = { out, completed, why, onDisk };
       return answered;
     };
 
@@ -194,12 +202,10 @@ describe('migrate copies before it saves the URI, refuses what would lose data a
     });
 
     it('row 4: the dump is a normal backup under backupsRoot, not a migration-backup of its own', T, async () => {
-      await runOnce();
-      const root = path.join(DATA_ROOT, 'backups');
-      const dirs = fs.existsSync(root) ? fs.readdirSync(root).filter(n => fs.existsSync(path.join(root, n, 'manifest.json'))) : [];
-      assert.ok(dirs.length >= 1, `no backup with a manifest under ${root}: the migrate's dump is somewhere a backup list never shows`);
-      assert.equal(fs.existsSync(path.join(DATA_ROOT, 'migration-backup')), false, 'a migration-backup directory was written beside the backups');
-      assert.equal(fs.existsSync(path.join(DATA_ROOT, 'migration-marker.json')), false, 'a migration marker was written: the copy is online, there is nothing to resume at boot');
+      const { onDisk } = await runOnce();
+      assert.ok(onDisk.backups.length >= 1, `no backup with a manifest under ${onDisk.root}: the migrate's dump is somewhere a backup list never shows`);
+      assert.equal(onDisk.migrationBackup, false, 'a migration-backup directory was written beside the backups');
+      assert.equal(onDisk.marker, false, 'a migration marker was written: the copy is online, there is nothing to resume at boot');
     });
   });
 
