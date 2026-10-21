@@ -104,6 +104,12 @@ export const STORE_ERROR_CODES: ReadonlySet<number> = new Set([
   10107,  // NotWritablePrimary
   13435,  // NotPrimaryNoSecondaryOk
   134,    // ReadConcernMajorityNotAvailableYet
+  // A database whose drop is still in progress: a create or a write meeting it succeeds once the drop is done. Read as a refusal,
+  // a migrate whose target had just been emptied ended as abandoned instead of trying again a moment later (Q-564).
+  215,    // DatabaseDropPending
+  // An index build something other than the request ended - a concurrent drop of its database or collection, a shutdown: the same
+  // build succeeds when tried again. A key the index refuses is `DuplicateKey` (11000), never this, and stays the data's refusal.
+  276,    // IndexBuildAborted
 ]);
 
 /**
