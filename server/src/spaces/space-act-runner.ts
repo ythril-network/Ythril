@@ -1,6 +1,6 @@
 /**
- * Register a deletion, wipe or rename of a space durably, let its space's admitted transfers end, run it once in its lane, and say
- * whether one stands for a space (bundle-106, design v5 §2.5, §2.5a, §2.6; X1, X3, X4, X5, X6, X9).
+ * Register an act on a space (a deletion, wipe, rename, restore or migration) durably, let its space's admitted transfers end, run it
+ * once in its lane, and say whether one stands for a space (bundle-106, design v5 §2.5, §2.5a, §2.6; X1, X3, X4, X5, X6, X9).
  *
  * ## What went wrong before it
  *
@@ -23,14 +23,19 @@
  *    settles every round it covers. A body that fails leaves the entry `owed` with its one retry clock (`attempts`, `retryAt`), and the
  *    space stays closed and held until a retry completes it.
  *
- * ## Two lanes, and why not one (ruling R-P6)
+ * ## Lanes, and why not one (ruling R-P6)
  *
  * The delete and rename bodies write the instance-wide `pendingSpaceOp` write-ahead, of which there is ONE: two of them at once would
  * overwrite each other's crash marker. That is the whole reason bodies were ever serialised, so those two kinds share the lane
  * `space-op`. A wipe writes no such marker (its entry is its write-ahead), so wipes have the lane `wipe` of their own, serial among
  * themselves so one batched wipe at a time loads the store. A long wipe therefore never holds up a rename or a delete of ANOTHER space.
- * Acts on ONE space keep their registration order across both lanes: each act first waits its turn in a per-space queue, and only then
+ * Acts on ONE space keep their registration order across every lane: each act first waits its turn in a per-space queue, and only then
  * enters its lane, so a job holding a lane never waits for another job.
+ *
+ * A restore and a migration have the third lane, `restore`, of their own (bundle-157): they stand on every space at once, one body at a
+ * time, apart from both. Which lane a kind runs in, its key and the marks it forgets are declared by `SPACE_ACT_KINDS`
+ * (`config/types-space-acts.ts`) and read here, never switched on by kind. A kind whose module has not handed over a body fails each
+ * attempt and stays owed, holding its space, until one does.
  *
  * ## Shutdown (W8, X9)
  *
@@ -52,7 +57,8 @@ import { isWriteTimeout } from '../db/write-timeout.js';
 import { isStoreSide } from '../brain/store-failure.js';
 import { PEER_TRANSFER_TIMEOUT_MS } from '../sync/peer-fetch.js';
 import { abortTransfersOf, awaitSpaceTransfersDrained, resetSpaceTransfersForTest } from '../sync/space-transfer-fence.js';
-import { forgetReceiveMarks } from '../sync/member-space-mark.js';
+import { forgetEveryMark, forgetWhatWasReceived } from '../sync/receive-marks.js';
+import { SPACE_ACT_KINDS, perSpaceActKind, type SpaceActKeyField, type SpaceActLane } from '../config/types-space-acts.js';
 import type * as SpaceRounds from './apply-wipe-round.js';
 import { keyedLimiter, type KeyedLimiter } from '../util/keyed-limiter.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -249,11 +255,34 @@ export function canonicalWipeTypes(types: readonly string[] | undefined): BrainC
   return covered.length === BRAIN_COLLECTIONS.length ? undefined : covered;
 }
 
-/** The key two requests are the same act by: a deletion's network is part of it (X4), a wipe's covered set is. */
-function keyOf(e: Pick<SpaceActEntry, 'kind' | 'localId' | 'types' | 'networkId' | 'newId'>): string {
-  if (e.kind === 'wipe') return `wipe|${e.localId}|${e.types ? e.types.join(',') : 'all'}`;
-  if (e.kind === 'delete') return `delete|${e.localId}|${e.networkId ?? 'solo'}`;
-  return `rename|${e.localId}|${e.newId ?? ''}`;
+/** What identifies an act: its kind, its space, and the request fields its kind is keyed by. */
+type SpaceActShape = Pick<SpaceActEntry, 'kind' | 'localId' | 'types' | 'networkId' | 'newId'>;
+
+/** How each key field is written into a key; an absent field has a spelling of its own, so "all" and "solo" are keys too. */
+const KEY_PART: { readonly [F in SpaceActKeyField]: (e: SpaceActShape) => string } = {
+  types: (e) => (e.types ? e.types.join(',') : 'all'),
+  networkId: (e) => e.networkId ?? 'solo',
+  newId: (e) => e.newId ?? '',
+};
+
+/**
+ * The key two requests are the same act by: the kind, the space and the fields its kind declares (`SPACE_ACT_KINDS[kind].keyFields`) - a
+ * deletion's network is part of it (X4), a wipe's covered set is, a rename's new id is; a restore or a migration has none, so one stands
+ * per space.
+ */
+function keyOf(e: SpaceActShape): string {
+  return [e.kind, e.localId, ...SPACE_ACT_KINDS[e.kind].keyFields.map(f => KEY_PART[f](e))].join('|');
+}
+
+/** The shape `req` registers as: only the fields its kind is keyed by, a wipe's types canonical. THROWS for a type a wipe cannot cover. */
+function shapeOf(req: SpaceActRequest): SpaceActShape {
+  const keyed: readonly SpaceActKeyField[] = SPACE_ACT_KINDS[req.kind].keyFields;
+  return {
+    kind: req.kind, localId: req.localId,
+    types: keyed.includes('types') ? canonicalWipeTypes(req.types) : undefined,
+    networkId: keyed.includes('networkId') ? req.networkId : undefined,
+    newId: keyed.includes('newId') ? req.newId : undefined,
+  };
 }
 
 /**
@@ -276,9 +305,10 @@ export function spaceActStands(
   for (const [i, e] of list.entries()) {
     if (e.localId !== localId || e.id === opts.except) continue;
     if (asker >= 0 && i > asker) continue;
-    if (opts.types && e.kind === 'wipe' && e.types && !opts.types.some(t => e.types!.includes(t))) continue;
+    // Only a kind keyed by its types stores them (a wipe): an act that names no types closes every family.
+    if (opts.types && e.types && !opts.types.some(t => e.types!.includes(t))) continue;
     return {
-      entryId: e.id, kind: e.kind, types: e.kind === 'wipe' && e.types ? e.types : 'all', state: e.state,
+      entryId: e.id, kind: e.kind, types: e.types ?? 'all', state: e.state,
       ...(e.newId ? { newId: e.newId } : {}),
     };
   }
@@ -301,9 +331,7 @@ export function spaceActOfRound(cfg: Pick<Config, 'pendingSpaceActs'>, networkId
 
 /** The entry `req` would join — the same act by key — if one stands: a door that repeats a local act answers that one. */
 export function spaceActJoinedBy(cfg: Pick<Config, 'pendingSpaceActs'>, req: SpaceActRequest): SpaceActEntry | undefined {
-  const types = req.kind === 'wipe' ? canonicalWipeTypes(req.types) : undefined;
-  const key = keyOf({ kind: req.kind, localId: req.localId, types, networkId: req.kind === 'delete' ? req.networkId : undefined,
-    newId: req.kind === 'rename' ? req.newId : undefined });
+  const key = keyOf(shapeOf(req));
   return (cfg.pendingSpaceActs ?? []).find(e => keyOf(e) === key);
 }
 
@@ -314,7 +342,8 @@ export function spaceActsOfSpace(cfg: Pick<Config, 'pendingSpaceActs'>, localId:
 
 /** The entries that carry a round of network `networkId`, or its deletion's network half: what the network answer lists as owed. */
 export function spaceActsOfNetwork(cfg: Pick<Config, 'pendingSpaceActs'>, networkId: string): readonly SpaceActEntry[] {
-  return (cfg.pendingSpaceActs ?? []).filter(e => e.rounds.some(r => r.networkId === networkId) || (e.kind === 'delete' && e.networkId === networkId));
+  // Only a kind keyed by its network stores one (a deletion).
+  return (cfg.pendingSpaceActs ?? []).filter(e => e.rounds.some(r => r.networkId === networkId) || e.networkId === networkId);
 }
 
 /** What an operator reads of one act entry: what it is, since when, how often it has failed, when it is retried, and where it stands. */
@@ -343,9 +372,7 @@ let closed = false;
  */
 export function registerSpaceAct(cfg: Config, req: SpaceActRequest, now: number): { entry: SpaceActEntry; joined: boolean } {
   if (closed) throw new SpaceActsClosedError();
-  const types = req.kind === 'wipe' ? canonicalWipeTypes(req.types) : undefined;
-  const shape = { kind: req.kind, localId: req.localId, types, networkId: req.kind === 'delete' ? req.networkId : undefined,
-    newId: req.kind === 'rename' ? req.newId : undefined };
+  const shape = shapeOf(req);
   const key = keyOf(shape);
   const list = (cfg.pendingSpaceActs ??= []);
   const same = list.find(e => keyOf(e) === key);
@@ -355,17 +382,18 @@ export function registerSpaceAct(cfg: Config, req: SpaceActRequest, now: number)
     }
     return { entry: same, joined: true };
   }
-  // A wipe forgets what each member of every network carrying the space was marked for it, so the space is read again from the start.
-  const forget = req.kind === 'wipe'
-    ? (cfg.networks ?? []).filter(n => n.spaces.includes(req.localId)).map(n => ({ networkId: n.id, localSpaceId: req.localId }))
-    : [];
+  // The marks a kind forgets (`forgetsMarks`) are named NOW, for the networks carrying the space at registration, and applied by the
+  // completion write: a wipe forgets every mark, so the space is read again from the start; a restore forgets what it received.
+  const step = SPACE_ACT_KINDS[req.kind].forgetsMarks;
+  const forget = step === null ? []
+    : (cfg.networks ?? []).filter(n => n.spaces.includes(req.localId)).map(n => ({ networkId: n.id, localSpaceId: req.localId }));
   const entry: SpaceActEntry = {
     id: randomUUID(), kind: req.kind, localId: req.localId,
-    ...(types ? { types } : {}),
+    ...(shape.types ? { types: shape.types } : {}),
     ...(shape.networkId ? { networkId: shape.networkId } : {}),
     ...(shape.newId ? { newId: shape.newId } : {}),
     rounds: req.round ? [{ ...req.round }] : [],
-    postSteps: forget.length > 0 ? { forgetReceiveMarks: forget } : {},
+    postSteps: step !== null && forget.length > 0 ? { [step]: forget } : {},
     registeredAt: new Date(now).toISOString(), state: 'registered', attempts: 0,
   };
   list.push(entry);
@@ -387,8 +415,8 @@ export function registerOwnSpaceAct(req: SpaceActRequest): string {
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-type Lane = 'space-op' | 'wipe';
-const laneOf = (kind: SpaceActKind): Lane => (kind === 'wipe' ? 'wipe' : 'space-op');
+type Lane = SpaceActLane;
+const laneOf = (kind: SpaceActKind): Lane => SPACE_ACT_KINDS[kind].lane;
 
 interface Queued { start(): Promise<void>; abandon(): void }
 
@@ -405,7 +433,7 @@ const jobs = new Map<string, Promise<SpaceRoundSettled>>();
 const waiters = new Map<string, number>();
 const runningBySpace = new Map<string, number>();
 let runningCount = 0;
-let bodyRuns: Record<SpaceActKind, number> = { delete: 0, wipe: 0, rename: 0 };
+let bodyRuns: Record<SpaceActKind, number> = perSpaceActKind(0);
 const startedAt = new Map<string, { kind: SpaceActKind; localId: string; at: number }>();
 
 const waitingSaid = warnOnce<string>({ every: 10 * 60_000 });
@@ -540,9 +568,14 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
     cfg.pendingSpaceActs = cfg.pendingSpaceActs.filter(e => !leavingIds.has(e.id));
     if (cfg.pendingSpaceActs.length === 0) delete cfg.pendingSpaceActs;
     if (refused) return;
+    // `forgetReceiveMarks` keeps its 5.x key and meaning (every mark); `forgetReceived` is a restore's (what was received only).
     for (const step of self.postSteps.forgetReceiveMarks ?? []) {
       const net = cfg.networks.find(n => n.id === step.networkId);
-      if (net) forgetReceiveMarks(net, step.localSpaceId);
+      if (net) forgetEveryMark(net, step.localSpaceId);
+    }
+    for (const step of self.postSteps.forgetReceived ?? []) {
+      const net = cfg.networks.find(n => n.id === step.networkId);
+      if (net) forgetWhatWasReceived(net, step.localSpaceId);
     }
     for (const e of leaving) {
       for (const r of e.rounds) {
@@ -726,7 +759,7 @@ export function oldestOwedSpaceActSeconds(now: number = Date.now()): number {
 
 /** Entries waiting for their space's transfers to end, by kind. */
 export function waitingSpaceActs(): Record<SpaceActKind, number> {
-  const out: Record<SpaceActKind, number> = { delete: 0, wipe: 0, rename: 0 };
+  const out = perSpaceActKind(0);
   for (const e of standingEntries()) if (e.state === 'draining') out[e.kind]++;
   return out;
 }
@@ -758,6 +791,6 @@ export function reopenSpaceActsForTest(): void {
   runningBySpace.clear();
   runningCount = 0;
   startedAt.clear();
-  bodyRuns = { delete: 0, wipe: 0, rename: 0 };
+  bodyRuns = perSpaceActKind(0);
   resetSpaceTransfersForTest();
 }

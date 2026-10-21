@@ -15,7 +15,7 @@
  */
 import type { NetworkConfig } from '../config/types.js';
 import { forgetSpaceAliases, localToRemote } from '../sync/space-map.js';
-import { forgetReceiveMarks } from '../sync/receive-marks.js';
+import { forgetEveryMark } from '../sync/receive-marks.js';
 
 /**
  * A network space that is now carried is no longer a proposal: a pending entry left behind would offer to add it a second time, and the
@@ -54,7 +54,7 @@ export function takeSpaceOutOfNetwork(
   if (net.schemaLayers) delete net.schemaLayers[localId];
   if (net.schemaLayerUnread) delete net.schemaLayerUnread[localId];
   if (net.spaceOrigins) delete net.spaceOrigins[localId];
-  forgetReceiveMarks(net, localId);
+  forgetEveryMark(net, localId);
   forgetPendingOffer(net, networkSpaceId);
   return { carried: true, hadLayer, networkSpaceId };
 }

@@ -1,6 +1,6 @@
 /**
- * Whether a space may take a write now — refused while a deletion, wipe or rename of it stands, or once it is no longer configured;
- * asked IN EVERY WRITER, per write unit (bundle-106, design v5 §2.6b, X2).
+ * Whether a space may take a write now — refused while any act of it stands (a deletion, wipe, rename, restore or migration), or once it
+ * is no longer configured; asked IN EVERY WRITER, per write unit (bundle-106, design v5 §2.6b, X2).
  *
  * ## Why in the writers and not at a door
  *
@@ -13,8 +13,8 @@
  * ## What it answers from
  *
  * ONE predicate, `spaceActStands` (`space-act-runner.ts`), which reads the act entries and the delete or rename body's own
- * `pendingSpaceOp`. A write names its family, so a `facts` wipe refuses fact writes only and leaves file writes and media jobs alone; a
- * deletion and a rename close every family.
+ * `pendingSpaceOp`. A write names its family, so a `facts` wipe refuses fact writes only and leaves file writes and media jobs alone; every
+ * other kind closes every family.
  *
  * ## The act's own writes
  *
@@ -27,13 +27,14 @@
 import { getConfig, isConfigLoaded } from '../config/loader.js';
 import type { Config } from '../config/types.js';
 import type { BrainCollection } from '../config/types-knowledge.js';
+import { SPACE_ACT_KINDS, type SpaceWriteClosedCode } from '../config/types-space-acts.js';
 import { spaceActStands, type SpaceActStanding } from './space-act-runner.js';
 import { enterSpaceWrite } from '../sync/space-transfer-fence.js';
 
-/** Why a space takes no writes: the act standing for it. */
-export type SpaceWriteClosedCode = 'space_being_wiped' | 'space_being_deleted' | 'space_being_renamed';
+/** Why a space takes no writes: the act standing for it, one code per kind (`SPACE_ACT_KINDS`). */
+export type { SpaceWriteClosedCode };
 
-/** A write refused because its space is being deleted, wiped or renamed, or no longer exists. Not a failure of the work. */
+/** A write refused because an act stands for its space (`SPACE_ACT_KINDS`), or it no longer exists. Not a failure of the work. */
 export class SpaceNotWritableError extends Error {
   readonly spaceId: string;
   readonly code?: SpaceWriteClosedCode;
@@ -50,12 +51,15 @@ export function isSpaceNotWritable(err: unknown): err is SpaceNotWritableError {
   return err instanceof SpaceNotWritableError || (err instanceof Error && err.name === 'SpaceNotWritableError');
 }
 
-/** The refusal for a write of `family` to `spaceId`, with its code when an act is behind it, or null when the write may land. */
+/**
+ * The refusal for a write of `family` to `spaceId`, with its code when an act is behind it, or null when the write may land. ANY standing
+ * act refuses, with its kind's own code and sentence read from `SPACE_ACT_KINDS`: an `if` per kind here let a fourth kind stand for its
+ * space and refuse nothing (bundle-157, R3.1).
+ */
 function refusalFor(cfg: Config, spaceId: string, stands: SpaceActStanding | null): { why: string; code?: SpaceWriteClosedCode } | null {
-  if (stands?.kind === 'wipe') return { why: 'it is being wiped; retry once the wipe completes', code: 'space_being_wiped' };
-  if (stands?.kind === 'delete') return { why: 'it is being deleted', code: 'space_being_deleted' };
-  if (stands?.kind === 'rename') {
-    return { why: `it is being renamed to '${stands.newId ?? ''}'; retry under the new id once the rename completes`, code: 'space_being_renamed' };
+  if (stands) {
+    const spec = SPACE_ACT_KINDS[stands.kind];
+    return { why: spec.writeRefusalWhy(stands), code: spec.writeRefusalCode };
   }
   if (!cfg.spaces.some(s => s.id === spaceId)) return { why: 'it is not configured on this instance' };
   return null;
