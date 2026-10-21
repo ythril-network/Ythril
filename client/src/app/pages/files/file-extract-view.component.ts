@@ -75,7 +75,7 @@ import { msRange } from './file-format';
         <section>
           <h4>{{ 'files.extract.images' | transloco: { count: x.images.length } }}</h4>
           @if (x.imagesTruncated) {
-            <div class="muted xtr-images-cut">{{ imagesCutText(x.images.length, x.imagesTotal) }}</div>
+            <div class="muted xtr-images-cut">{{ imagesCutText(x.images.length, x.imagesTotal ?? x.images.length) }}</div>
           }
           @for (img of x.images; track img.path) {
             <div class="xtr-image">
