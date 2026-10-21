@@ -852,7 +852,10 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
     // row would land where nobody reads it. The set's own end hook says what happened.
   } else if (!waiters.has(id) && covered.length === 0) {
     // Nobody is told of this completion — the door answered `queued`, or the act was resumed — so it is said in the audit log.
-    logInternalAudit({ method: 'DELETE', path: `internal:space-act:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId });
+    // The kind is in the path, so a restore's per-space rows read apart from a wipe's or a deletion's.
+    logInternalAudit({
+      method: 'DELETE', path: `internal:space-act:${entry.kind}:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId,
+    });
   } else if (!waiters.has(id)) {
     // A passed round's act nobody is waiting for — a relay, gossip, the tick, or a door that already answered (X17, VR7): one entry
     // per round it carried out. The request a door is still waiting on is that door's route's own entry.

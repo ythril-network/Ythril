@@ -340,6 +340,9 @@ describe('the space-act runner registers, runs once, completes in one write, ret
     assert.equal(await factCount('wipe-a'), 0, 'the queued wipe did not complete');
     const audited = await auditRowsOf(door.mongo, 'space.act_completed');
     assert.ok(audited.length >= 1, 'a completion after the door answered was not audited as space.act_completed');
+    // The row names its kind (bundle-157 R4.3): a restore's per-space rows and a wipe's would otherwise read alike.
+    assert.ok(audited.some(r => String(r.path).startsWith('internal:space-act:wipe:wipe-a:')),
+      `the completion row does not name its kind: ${audited.map(r => r.path).join(', ')}`);
   });
 
   it('R-W6b: a bounded operation that ends with no progress FAILS the attempt into owed — the run answers, it does not hang', T, async () => {
