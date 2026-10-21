@@ -327,7 +327,7 @@ describe('the pull handler is actually wired to record it', () => {
     // The rename carries the marks through `moveReceiveMarks` (bundle-106), which loops the list beside the wipe's forget.
     const rename = readFileSync(join(ROOT, 'server/src/spaces/rename.ts'), 'utf8');
     assert.match(rename, /\bmoveReceiveMarks\s*\(/, 'the rename no longer carries its watermarks through the one loop');
-    assert.match(readFileSync(join(ROOT, 'server/src/sync/member-space-mark.ts'), 'utf8'), /for \(const key of PER_SPACE_WATERMARKS\)/,
+    assert.match(readFileSync(join(ROOT, 'server/src/sync/receive-marks.ts'), 'utf8'), /for \(const key of PER_SPACE_WATERMARKS\)/,
       'the rename carries its watermarks by name again, so the next one added is carried by nobody');
     assert.ok(memberWatermarks().includes('lastSeqServed'),
       'lastSeqServed is no longer a per-space map on NetworkMember — this floor has moved, re-anchor here');

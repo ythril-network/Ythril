@@ -65,33 +65,23 @@ describe('the space guard', () => {
      */
     assert.doesNotMatch(guardBody(), /legacySpacesOf|\.spaces\b/,
       'the guard must read the matrix and nothing else');
-    assert.match(guardBody(), /rights \? targets\.filter\(sid => reachesSpace\(rights, sid\)\) : \[\]/,
+    // Q-531: the guard asks of ONE id, so the fail-closed answer is the absent matrix refused in the same condition as an
+    // unreached space (it was a member filter that returned [] for no matrix, while a proxy had members).
+    assert.match(guardBody(), /if \(!rights \|\| !reachesSpace\(rights, spaceId\)\)/,
       'and say so explicitly, so the fail-closed answer is not arrived at by accident');
   });
 
-  it('applies the proxy rule — AT LEAST ONE member, since Q-6', () => {
+  /*
+   * Q-531 retired the proxy rule this file held ("AT LEAST ONE member, since Q-6", with its `[spaceId]` fallback): a proxy is a
+   * personal view, outside `config.spaces`, and a path naming a view is judged BEFORE this guard (`judgeSpaceParam`), so a path
+   * reaching here names one space. The safety property that fallback carried — an unknown id never yields an empty target list
+   * that a `.some()`-shaped check passes vacuously — now holds by construction, and is asserted as that: one id, asked once.
+   */
+  it('asks reach of the ONE id the path named, with no member expansion', () => {
     const body = guardBody();
-    assert.match(body, /resolveMemberSpaces\(/, 'proxy members are no longer resolved');
-
-    // This assertion used to demand the opposite: `missing.length > 0`, i.e. EVERY member must be reachable. That
-    // rule meant a proxy could not be granted to a scoped token at all, which is what the fleet integrator reported. It is now
-    // deliberately "at least one", and the read paths serve only the members the caller reaches.
-    //
-    // The old comment here argued that ANY-member access "would unlock a proxy over spaces the token cannot see".
-    // That was true when the fan-outs were wide, and it is exactly why the flip came LAST: all 29 read fan-outs were
-    // narrowed first, and `proxy-fanout-inventory.test.js` asserts none is left.
-    assert.match(body, /reachable\.length === 0/, 'the at-least-one rule is gone');
-    assert.doesNotMatch(body, /missing\.length > 0/, 'the old all-members rule is back');
-  });
-
-  it('is UNCHANGED for a non-proxy space, which is the safety property', () => {
-    // A real space resolves to `[spaceId]`, so "reaches at least one of one" is the same predicate as "reaches all
-    // of one". Pinned because it is the claim that makes the flip safe, and it rests on the fallback below rather
-    // than on the predicate: without `memberIds.length > 0 ? … : [spaceId]` an unknown space would resolve to `[]`
-    // and an empty target list would pass a `.some()`-shaped check vacuously.
-    const body = guardBody();
-    assert.match(body, /memberIds\.length > 0 \? memberIds : \[spaceId\]/,
-      'the single-space fallback is gone; an unknown space would produce an empty target list');
+    assert.match(body, /reachesSpace\(rights, spaceId\)/, 'the guard no longer asks reach of the id the path named');
+    assert.doesNotMatch(body, /resolveMemberSpaces|memberIds|targets|\.some\(|\.filter\(/,
+      'the guard expands the id to a list again: a list is what an unknown id once emptied into a vacuous pass');
   });
 
   it('refuses rather than falling through when a space is unreachable', () => {

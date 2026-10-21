@@ -87,6 +87,14 @@ const SPACE_ROUTERS = [
    * Left out, the new rows would have looked like rows for routes that do not exist.
    */
   { glob: 'server/src/api/networks', mount: '/api/networks' },
+  /*
+   * THE VIEWS ROUTERS, added with personal views (Q-531). A view lists spaces as its members, so its doors are a question this
+   * gate must put: the plan's answer is that each is owner-scoped (or instance-admin) and exempted with a reason, not rated in a
+   * space's area. ONE file mounts TWO routers at two prefixes, so each is scanned by its router's name and given its own mount;
+   * a file-wide scan would file the admin routes under `/api/views`.
+   */
+  { glob: 'server/src/api/views.ts', mount: '/api/views', router: 'viewsRouter' },
+  { glob: 'server/src/api/views.ts', mount: '/api/admin/views', router: 'adminViewsRouter' },
 ];
 
 function filesUnder(p) {
@@ -98,12 +106,14 @@ function filesUnder(p) {
 /** Every `router.VERB('path')` in the given routers, as `METHOD mount+path`. */
 function discoveredRoutes() {
   const out = new Set();
-  for (const { glob, mount } of SPACE_ROUTERS) {
+  for (const { glob, mount, router } of SPACE_ROUTERS) {
+    // A named router is scanned alone (its file holds another router mounted elsewhere); otherwise every route in the file.
+    const verb = new RegExp(`${router ? `\\b${router}` : ''}\\.(get|post|patch|put|delete)\\(\\s*'(\\/[^']*)'`, 'g');
     for (const f of filesUnder(glob)) {
       const code = withoutComments(read(f));
       // The path must START with '/'. Without that, `res.set('If-Match', …)` and any other
       // `.get('Header-Name')` read as a route and the gate demands they be classified.
-      for (const m of code.matchAll(/\.(get|post|patch|put|delete)\(\s*'(\/[^']*)'/g)) {
+      for (const m of code.matchAll(verb)) {
         const path = m[2] === '/' ? '' : m[2];
         out.add(`${m[1].toUpperCase()} ${mount}${path}`);
       }

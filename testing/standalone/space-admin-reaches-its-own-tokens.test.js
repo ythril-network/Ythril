@@ -158,9 +158,19 @@ describe('the guard is applied where a space can be named, and nowhere else', ()
     // administrator gets that space's own SETTINGS as well as its tokens. Two names in a list is exactly how
     // this assertion would rot into a formality, so `space-admin-reaches-its-own-space-settings.test.js` pins
     // WHICH routes in `spaces.ts` may be widened and requires delete/create/reorder to stay shut.
-    const ALLOWED = ['server/src/api/tokens.ts', 'server/src/api/spaces.ts'];
+    //
+    // `views.ts` joined for ONE route (Q-531, plan rev 3.2 "copy guard"): `POST /api/views/:id/copy` gives a token the caller may
+    // MANAGE a copy of a view, so it admits whoever the token routes admit, through `mayManageToken`. Pinned below to that route alone.
+    const ALLOWED = ['server/src/api/tokens.ts', 'server/src/api/spaces.ts', 'server/src/api/views.ts'];
     const { execSync } = await import('node:child_process');
     const { readFileSync } = await import('node:fs');
+    const views = readFileSync('server/src/api/views.ts', 'utf8');
+    const widenedViewRoutes = [...views.matchAll(/(\w+)\.(get|post|patch|put|delete)\(\s*'([^']*)'[^\n]*requireAdminOrSpaceAdmin/g)]
+      .map(m => `${m[1]} ${m[2].toUpperCase()} ${m[3]}`);
+    assert.deepEqual(widenedViewRoutes, ['viewsRouter POST /:id/copy'],
+      'only the view copy may admit a space administrator in views.ts: the rest are owner-scoped or instance-admin');
+    const mentions = views.split('\n').filter(l => /requireAdminOrSpaceAdmin/.test(l) && !/^import\b/.test(l));
+    assert.equal(mentions.length, 1, `views.ts names the widened guard outside the copy route:\n  ${mentions.join('\n  ')}`);
     const files = execSync('git ls-files "server/src/api/*.ts"', { encoding: 'utf8' })
       .split('\n').map(s => s.trim()).filter(Boolean).filter(f => !ALLOWED.includes(f));
     // The floor: an empty offender list over an empty enumeration is green and means nothing.

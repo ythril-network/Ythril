@@ -82,6 +82,9 @@ const AMBIGUOUS = new Set([
   // route caps it at 100, matching this form. Verified by the last test in this file, so the exemption cannot
   // outlive the fact that justifies it.
   'label@client/src/app/pages/setup/setup.component.ts',
+  // A personal view's name (Q-531). It is not the `name` of a schema-library entry (capped at 200); the views store caps it at
+  // `VIEW_NAME_MAX = 40`, matching this form. Verified by the test below, so the exemption cannot outlive its fact.
+  'name@client/src/app/pages/brain/view-create-dialog.component.ts',
 ]);
 
 describe('no UI field truncates below the API limit', () => {
@@ -136,6 +139,14 @@ describe('no UI field truncates below the API limit', () => {
     assert.match(src, /label\.trim\(\)\.length > SETUP_LABEL_MAX/,
       'the cap must be enforced server-side on the value that is STORED, not only in the form');
     assert.match(src, /setupRouter\.post\('\/json'/, 'and on the path that actually runs');
+  });
+
+  it('the view name exemption is justified — the views store caps a name at the form\'s 40, and refuses beyond it', () => {
+    const shape = readFileSync(join(ROOT, 'server/src/config/view-shape.ts'), 'utf8');
+    assert.match(shape, /export const VIEW_NAME_MAX = 40;/, 'the view name cap moved; update the dialog\'s maxlength and this gate together');
+    assert.match(shape, /name\.length <= VIEW_NAME_MAX/, 'the cap is declared and no longer enforced on a view name');
+    const dialog = readFileSync(join(ROOT, 'client/src/app/pages/brain/view-create-dialog.component.ts'), 'utf8');
+    assert.match(dialog, /name="name"[^>]*maxlength="40"/, 'the dialog\'s name field no longer caps at 40');
   });
 
   it('the API really does allow 50 000 there — or the fix is aimed at nothing', () => {
