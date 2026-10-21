@@ -15,6 +15,7 @@
  */
 import type { ViewRecord } from './types.js';
 import { tokenIsLive } from '../auth/token-liveness.js';
+import { isOidc } from '../auth/oidc-caller.js';
 
 /** A view's name: what follows the `@` in its id. */
 export const VIEW_NAME_PATTERN = /^[a-z0-9-]+$/;
@@ -74,6 +75,8 @@ export function validateViews(views: unknown): void {
 /** What identifies a caller as a view owner: a stored token, a connector token (it has a client id), or an OIDC identity. */
 export interface ViewOwnerSource {
   id: string;
+  /** `'oidc'` on an OIDC session (`isOidc`, the one test of what kind of caller this is). */
+  source?: string | undefined;
   oauthClientId?: string | undefined;
   oidcIssuer?: string | undefined;
   oidcSubject?: string | null | undefined;
@@ -87,7 +90,7 @@ export interface ViewOwnerSource {
  * key: a shared 'unknown' principal would make every such caller one owner of every other's views.
  */
 export function viewOwnerOf(token: ViewOwnerSource): string | null {
-  if (token.oidcIssuer !== undefined) return token.oidcSubject ? `oidc:${token.oidcIssuer}#${token.oidcSubject}` : null;
+  if (isOidc(token)) return token.oidcIssuer && token.oidcSubject ? `oidc:${token.oidcIssuer}#${token.oidcSubject}` : null;
   if (token.oauthClientId) return `oauth:${token.oauthClientId}`;
   return `token:${token.id}`;
 }

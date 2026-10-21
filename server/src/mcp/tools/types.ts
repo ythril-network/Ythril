@@ -80,6 +80,12 @@ export interface ToolContext {
    *  mutation functions so agent-driven writes emit attributed webhooks like REST writes. */
   actor?: WebhookActor;
   /**
+   * How the caller authenticated, as the audit trail records it: what the door derived at its edge through `auditAuthMethod` /
+   * `auditOidcSubject` (`audit/middleware.ts`), handed on so a handler that writes its own audit row (a view act) reads the one answer
+   * instead of re-deriving it from the record.
+   */
+  auditIdentity?: { authMethod: 'pat' | 'oidc' | null; oidcSubject: string | null };
+  /**
    * Hand the audit entry the record as it was and as it now is (`Q-50`). The REST twin of every editing tool sets
    * `req.auditSnapshots`, and the audit middleware turns it into the entry's `changes`; without this the same edit
    * left a thinner entry on MCP. Called once, after a successful write. `callTool` supplies it on every call.
@@ -93,6 +99,8 @@ export interface ToolContext {
  */
 export interface ToolCallerRecord {
   id: string;
+  /** `'oidc'` on an OIDC session: what `isOidc` reads. */
+  source?: string | undefined;
   oauthClientId?: string | undefined;
   oidcIssuer?: string | undefined;
   oidcSubject?: string | null | undefined;

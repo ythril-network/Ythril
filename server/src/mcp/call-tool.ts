@@ -567,6 +567,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
       ...(caller.record ? { callerRecord: caller.record } : {}),
       viewReads,
       actor: { tokenId: caller.tokenId, tokenLabel: caller.tokenLabel },
+      auditIdentity: { authMethod: caller.authMethod, oidcSubject: caller.oidcSubject },
       recordChanges: (before, after) => { snapshots = { before, after }; },
     });
     // A tool that returns `isError` failed on its own terms, so the status has to come from the RESULT or
