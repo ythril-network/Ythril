@@ -81,6 +81,38 @@ describe('the file listing', () => {
   });
 });
 
+describe('the empty listing', () => {
+  function mount(isView: boolean) {
+    TestBed.configureTestingModule({ imports: [FileListingComponent, getTranslocoModule()] });
+    const f = TestBed.createComponent(FileListingComponent);
+    f.componentRef.setInput('rows', []);
+    f.componentRef.setInput('isView', isView);
+    f.detectChanges();
+    return (f.nativeElement as HTMLElement).textContent ?? '';
+  }
+
+  it('does not tell the caller of a view to upload or create a folder, which a view has no control for', () => {
+    const text = mount(true);
+    expect(text).not.toContain('files.emptyFolder.body');
+    expect(text).toContain('files.emptyFolder.viewBody');
+  });
+
+  it('tells the caller of a space to upload or create a folder (control)', () => {
+    const text = mount(false);
+    expect(text).toContain('files.emptyFolder.body');
+    expect(text).not.toContain('files.emptyFolder.viewBody');
+  });
+
+  it('has the view text in every language the app ships', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const lang of ['en', 'de', 'pl']) {
+      const dict = JSON.parse(readFileSync(`public/assets/i18n/${lang}.json`, 'utf8')) as Record<string, string>;
+      expect(dict['files.emptyFolder.viewBody'], lang).toBeTruthy();
+      expect(dict['files.emptyFolder.viewBody'], `${lang} must not name a control a view lacks`).not.toBe(dict['files.emptyFolder.body']);
+    }
+  });
+});
+
 describe('the upload queue', () => {
   const failed: UploadItem = { id: 1, file: new File(['x'], 'a.txt'), name: 'a.txt', status: 'failed', percent: 0, error: 'refused' };
   function mount(isView: boolean) {
