@@ -49,7 +49,7 @@ const BIG_FILE = PARAGRAPH.repeat(2000);
 let mongo, filterTool, readFileTool, restBody;
 
 const ctx = (name, args, transport) => ({
-  args, name, transport, callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE],
+  args, name, transport, callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE], viewReads: new Map(),
   accessibleSpaces: [{ id: SPACE, label: 'General' }], cfg: {}, rateKey: 'test',
 });
 const wireBytes = v => Buffer.byteLength(JSON.stringify(v), 'utf8');

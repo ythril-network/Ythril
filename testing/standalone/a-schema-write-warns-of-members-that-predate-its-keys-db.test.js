@@ -101,7 +101,7 @@ describe('a schema write warns of members that predate its keys', { skip }, () =
     it('names no member to a token that may not read networks, and still tells it that members are behind', async () => {
       inst.reset();
       const result = await spacesTools.schema_updateTool.handle({
-        callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE], args: { space: SPACE, ...NEW_KEY }, rights: SCHEMA_ADMIN_ONLY,
+        callSpace: SPACE, callSpaces: [SPACE], accessibleSpaceIds: [SPACE], viewReads: new Map(), args: { space: SPACE, ...NEW_KEY }, rights: SCHEMA_ADMIN_ONLY,
       });
       const said = (result.content ?? []).map(c => c.text).join('\n');
       assert.notEqual(result.isError, true, `a schema-admin token was refused the write: ${said.slice(0, 300)}`);

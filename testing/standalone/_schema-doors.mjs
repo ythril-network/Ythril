@@ -54,7 +54,7 @@ export async function bootSchemaInstance(dir, { spaces, library = [], networks =
   const metaSeed = new Map(seed.map(s => [s.id, JSON.parse(JSON.stringify(s.meta ?? {}))]));
 
   const mcpCtx = (spaceId, args) => ({
-    callSpace: spaceId, callSpaces: [spaceId], accessibleSpaceIds: [spaceId], args: { space: spaceId, ...args }, rights: RIGHTS,
+    callSpace: spaceId, callSpaces: [spaceId], accessibleSpaceIds: [spaceId], viewReads: new Map(), args: { space: spaceId, ...args }, rights: RIGHTS,
   });
 
   /** @type {SchemaInstance} */
