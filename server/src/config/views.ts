@@ -107,6 +107,17 @@ export function memberAdmissible(input: { rights: TokenRights | undefined; space
   return VIEW_READ_AREAS.some(area => viewReadMembers({ rights: input.rights, view, area, needs: 'read', peerId: input.peerId, config: input.config }).length > 0);
 }
 
+/**
+ * The members a view listing `members` keeps for a reader holding `rights`: the listed ones {@link memberAdmissible} admits, or the
+ * wildcard when the reader may list at least one of the spaces it stands for. A wildcard judged as the string '*' admitted a reader
+ * that reads nothing (b100 lens D2); an empty answer means the view would read nothing for that reader.
+ */
+export function membersKeptFor(members: readonly string[], input: { rights: TokenRights | undefined; peerId?: string | undefined; config: Config }): string[] {
+  const admits = (spaceId: string) => memberAdmissible({ ...input, spaceId });
+  if (members.includes(WILDCARD_MEMBER)) return allSpaceIds(input.config).some(admits) ? [WILDCARD_MEMBER] : [];
+  return members.filter(admits);
+}
+
 // ── What ends or edits a view ───────────────────────────────────────────────────────────────────────────────────────
 
 /**

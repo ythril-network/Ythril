@@ -336,9 +336,9 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
     for (const p of pairs) {
       app.post(`/probe/${p.area}/${p.needs}`, requireBodyScopedSpace(p.area, p.needs), (req, res) => { reached.push(`${p.area}/${p.needs}`); res.json({ spaces: req.authorisedSpaces }); });
     }
-    const server = http.createServer(app);
-    await new Promise(res => server.listen(0, '127.0.0.1', res));
-    const url = `http://127.0.0.1:${server.address().port}`;
+    const { listenOnLoopback } = await import('../_shared/local-server.mjs');
+    const server = await listenOnLoopback(http.createServer(app));
+    const url = server.url;
     try {
       const wrong = [];
       for (const p of pairs) {
@@ -354,6 +354,6 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
       }
       assert.deepEqual(wrong, []);
       assert.deepEqual(reached.filter(k => refusing.some(p => `${p.area}/${p.needs}` === k)), [], 'a body-scoped route that does not take a view reached its handler with a view');
-    } finally { await new Promise(res => server.close(res)); }
+    } finally { await server.close(); }
   });
 });
