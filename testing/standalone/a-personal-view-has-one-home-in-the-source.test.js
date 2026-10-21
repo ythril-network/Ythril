@@ -56,6 +56,14 @@ describe('a personal view has one home in the source (Q-531)', () => {
       `the functions that narrow a member list by reach or rung are:${list(found)}\nThere must be exactly one, ${THE_VIEW_MEMBER_FUNCTION}; every door asks it.`);
   });
 
+  it('a view id is written by viewIdOf alone (b100 row 10b)', () => {
+    // Seen red at 743562a5: the migration, create, rename, copy and claim each wrote `@${name}`, and validateViews compared against its own.
+    const HOME = 'server/src/config/view-shape.ts';
+    assert.ok(sources.some(s => s.file === HOME && /export const viewIdOf\b/.test(s.text)), `${HOME} no longer defines viewIdOf`);
+    const built = sources.filter(s => s.file !== HOME && /`@\$\{/.test(s.text)).map(s => s.file);
+    assert.deepEqual(built, [], `sites that build a view id themselves; ask viewIdOf:${list(built)}`);
+  });
+
   it(`every site that brings a space id into config calls ${RETIRED_CHECK}`, () => {
     const sites = creationSites(sources);
     assert.ok(sites.length >= 3, `only ${sites.length} creation site(s) found; the scan is broken`);
