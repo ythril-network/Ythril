@@ -47,7 +47,8 @@ import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { libraryUsages } from '../spaces/library-usages.js';
 import { mergeTypeDefinition } from '../spaces/meta-fields.js';
 import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.js';
-import { log, peerText, peerList, refusalOfParse } from '../util/log.js';
+import { peerText, peerList, refusalOfParse } from '../util/log.js';
+import { sendLostSpace } from './write-target-answer.js';
 
 export const schemaLibraryRouter = Router();
 
@@ -302,7 +303,7 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    sendLostSpace(req, res, spaceId);
     return;
   }
 
@@ -419,7 +420,7 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    sendLostSpace(req, res, spaceId);
     return;
   }
 
@@ -456,7 +457,7 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
   });
 
   if (!updated) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
+    sendLostSpace(req, res, spaceId);
     return;
   }
 

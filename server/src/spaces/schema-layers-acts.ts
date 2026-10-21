@@ -15,15 +15,17 @@ import { getConfig, saveConfig } from '../config/loader.js';
 import { clashesOf, ownAgainstEffective, replicatedMetaOf } from '../sync/replicated-meta.js';
 import { carriedLocalId } from '../sync/space-map.js';
 import { layersFor, recomputeEffectiveMeta } from './effective-meta.js';
+import { lostSpaceAnswer } from './unknown-space.js';
 
 /** An act's answer: the HTTP status is the contract, so both doors carry it. */
 export type SchemaLayersActResult =
   | { status: 200; body: Record<string, unknown> }
-  | { status: 400 | 404; error: string };
+  | { status: 400 | 404 | 410; error: string };
 
 export const NetworkPrecedenceBody = z.object({ networks: z.array(z.string().min(1)).max(100) });
 
-const notFound = (id: string) => ({ status: 404 as const, error: `Space '${id}' not found` });
+/** The one existence answer (`lostSpaceAnswer`), in this act's shape. */
+const notFound = (id: string): SchemaLayersActResult => { const lost = lostSpaceAnswer(null, id); return { status: lost.status, error: lost.body.error }; };
 
 /**
  * The space's own definitions, each network layer in the order it applies, every clash between layers — the

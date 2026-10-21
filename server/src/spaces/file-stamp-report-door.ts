@@ -21,6 +21,7 @@
 import { z } from 'zod';
 import { getConfig } from '../config/loader.js';
 import { refusalOfParse } from '../util/log.js';
+import { lostSpaceAnswer } from './unknown-space.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
 import { heavyRunner } from '../rate-limit/heavy-run.js';
 import {
@@ -39,7 +40,7 @@ export const FileStampReportBody = z.object({
 
 export type FileStampReportOutcome =
   | { status: 200; answer: FileStampAnswer }
-  | { status: 400 | 404 | 409 | 429; error: string };
+  | { status: 400 | 404 | 409 | 410 | 429; error: string };
 
 /** The refusal a caller over the rail gets, the same words on both doors. */
 export const FILE_STAMP_REPORT_RATE_LIMITED = `file_stamp_report is rate limited — at most ${HEAVY_CALLS_PER_WINDOW} runs a minute per token, `
@@ -56,7 +57,7 @@ const reports = heavyRunner();
  */
 export async function beginFileStampReport(spaceId: string, body: unknown, callerKey: string): Promise<FileStampReportOutcome> {
   const space = getConfig().spaces.find(s => s.id === spaceId);
-  if (!space) return { status: 404, error: `Space '${spaceId}' not found` };
+  if (!space) { const lost = lostSpaceAnswer(null, spaceId); return { status: lost.status, error: lost.body.error }; }
   const parsed = FileStampReportBody.safeParse(body ?? {});
   // Why a body was refused, naming each parameter — the one sentence both doors send (`refusalOfParse`, which `bodyRefusal` here was a copy of).
   if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };

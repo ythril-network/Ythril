@@ -14,8 +14,7 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { getConfig } from '../config/loader.js';
-import { answerUnknownSpace } from '../spaces/unknown-space.js';
-import { retiredAddressingQueryError } from '../brain/retired-write-fields.js';
+import { writeSpaceOf } from './write-target-answer.js';
 
 /** Extract token identification from the request for webhook payloads. */
 export function webhookToken(req: Request): { tokenId?: string; tokenLabel?: string } {
@@ -49,34 +48,18 @@ export function requireQueryPath(req: Request, res: Response): string | null {
   return p;
 }
 
-/**
- * The space a file route names, or `null` after answering: the one place the existence answer is built (`answerUnknownSpace`), so a route
- * cannot name a space the instance does not have - or a personal view, which holds no files of its own - and reach the filesystem with it.
- */
-export function requireKnownSpace(req: Request, res: Response): string | null {
-  const spaceId = req.params['spaceId'] as string;
-  const unknown = answerUnknownSpace(req, spaceId);
-  if (unknown) {
-    res.status(unknown.status).json(unknown.body);
-    return null;
-  }
-  return spaceId;
-}
-
 /** The space a write route names, which is the space it writes to. */
 export interface WriteTarget { spaceId: string }
 /** A {@link WriteTarget} and the path the route acts on. */
 export interface WritePath extends WriteTarget { path: string }
 
 /**
- * The space a file WRITE route names, or `null` after answering: the retired `?targetSpace=` is refused by name (`400`), and an id that
- * is not a configured space is answered as such (`requireKnownSpace`). The route's guard has judged reach and the rung on the space the
- * path names; a write lands in that space and in no other, since a view never writes.
+ * The space a file WRITE route names, or `null` after answering: the write prologue every write route asks (`writeSpaceOf` - the retired
+ * `?targetSpace=` refused by name, then the one existence answer). The route's guard has judged reach and the rung on the space the path
+ * names; a write lands in that space and in no other, since a view never writes.
  */
 export function requireWriteTarget(req: Request, res: Response): WriteTarget | null {
-  const retired = retiredAddressingQueryError(req.query);
-  if (retired) { res.status(400).json({ error: retired }); return null; }
-  const spaceId = requireKnownSpace(req, res);
+  const spaceId = writeSpaceOf(req, res, req.params['spaceId'] as string);
   return spaceId === null ? null : { spaceId };
 }
 

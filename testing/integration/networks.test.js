@@ -185,7 +185,8 @@ describe('Network CRUD', () => {
       spaces: ['nonexistent-space'],
       votingDeadlineHours: 1,
     });
-    assert.equal(r.status, 400, `Expected 400, got ${r.status}`);
+    // The one existence answer (Q-531): an unknown space a body names answers as one a path names.
+    assert.equal(r.status, 404, `Expected 404, got ${r.status}`);
   });
 
   after(async () => {

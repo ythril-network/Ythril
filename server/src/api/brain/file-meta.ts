@@ -25,7 +25,6 @@ import { readFileWindow } from '../../files/files.js';
 import { parentOfSidecar } from '../../files/moved-paths.js';
 import { log, peerText } from '../../util/log.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
-import { getConfig } from '../../config/loader.js';
 import { col, asFilter } from '../../db/mongo.js';
 import { parseLimit, parseSkip } from '../../util/pagination.js';
 import { findFirstAcrossMembers } from '../../spaces/across-members.js';
@@ -319,15 +318,11 @@ fileMetaRouter.get('/spaces/:spaceId/token-access', globalRateLimit, requireSpac
 // PATCH /api/brain/spaces/:spaceId/files — update file metadata by path (query param ?path=)
 fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` }); return;
-  }
+  if (writeSpaceOf(req, res, spaceId) === null) return;
   const path = req.query['path'];
   if (typeof path !== 'string' || !path.trim()) {
     res.status(400).json({ error: '`path` query parameter required' }); return;
   }
-  if (writeSpaceOf(req, res, spaceId) === null) return;
   // The four brain record types honour `If-Match` against their `seq`, which advances on every write. A file
   // row's `seq` does NOT: `updateFileMeta` stamps one only for an AUTHORED write, and a write touching only
   // derived fields (the worker's excerpt, a processing state) leaves it where it was. So the number does not

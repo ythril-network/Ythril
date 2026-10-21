@@ -19,7 +19,7 @@ import {
   type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from './space-act-runner.js';
 import { RenameSpaceBody } from './body-schemas.js';
-import { assertNotRetiredSpaceId, ReservedSpaceIdError } from './unknown-space.js';
+import { assertNotRetiredSpaceId, ReservedSpaceIdError, unknownSpaceSentence } from './unknown-space.js';
 import { renameSpaceInViews } from '../config/views.js';
 import { builtInRefusal } from './built-in-space.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
@@ -355,7 +355,7 @@ export class RenameBlockedError extends Error {
 /** Why `oldId` may not be renamed to `newId` now, as the error the doors answer, or null. `except`: the rename's own entry. */
 function renameRefusal(cfg: Config, oldId: string, newId: string, except?: string): Error | null {
   const space = cfg.spaces.find(s => s.id === oldId);
-  if (!space) return new Error(`Space '${oldId}' not found`);
+  if (!space) return new Error(unknownSpaceSentence(oldId));
   const builtIn = builtInRefusal(space, 'rename');
   if (builtIn) return builtIn;
   if (cfg.spaces.some(s => s.id === newId)) return new Error(`Space '${newId}' already exists`);
@@ -445,7 +445,7 @@ async function renameSpaceInner(
     // at the call because `lifecycle.ts` imports this module — a static import back would close a cycle.
     const { settlePendingSpaceOpBefore } = await import('./lifecycle.js');
     await settlePendingSpaceOpBefore(`rename space '${oldId}'`);
-    if (!cfg.spaces.some(s => s.id === oldId)) throw new Error(`Space '${oldId}' not found`);
+    if (!cfg.spaces.some(s => s.id === oldId)) throw new Error(unknownSpaceSentence(oldId));
     if (cfg.spaces.some(s => s.id === newId)) throw new Error(`Space '${newId}' already exists`);
   }
 

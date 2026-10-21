@@ -54,6 +54,7 @@ import { metaFieldKind } from './meta-fields.js';
 import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { spaceForWire } from './space-for-wire.js';
+import { lostSpaceAnswer } from './unknown-space.js';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
 // The merge a write makes, and the base it is merged over, live with the rights check's copy of the same question (`meta-write-base.ts`).
@@ -190,8 +191,8 @@ function memberSkewWarnings(skew: readonly MemberSkew[], caller: WriteCaller): R
  * tool maps these to its own error shape; it does not decide them.
  */
 export type MetaUpdateRefusal = {
-  status: 400 | 404 | 412 | 422;
-  body: { error: string; expectedVersion?: number; currentVersion?: number };
+  status: 400 | 404 | 410 | 412 | 422;
+  body: { error: string; code?: string; expectedVersion?: number; currentVersion?: number };
 };
 
 /** What a caller must write, with every decision already made. */
@@ -251,9 +252,7 @@ export function planSpaceMetaUpdate(input: {
 }): MetaUpdateDecision {
   const { spaceId, space, body, ifMatch } = input;
 
-  if (!space) {
-    return { ok: false, refusal: { status: 404, body: { error: `Space '${spaceId}' not found` } } };
-  }
+  if (!space) return { ok: false, refusal: lostSpaceAnswer(null, spaceId) };
 
   const removed = refuseRemovedDescription(body);
   if (removed) return { ok: false, refusal: removed };
@@ -632,7 +631,7 @@ export async function voteOnSchemaEditIfNetworked(
   if (result.outcome === 'vote_pending') {
     return { status: 202, body: { status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkWriteNotice(result, caller) } };
   }
-  if (result.outcome === 'not_found') return { status: 404, body: { error: `Space '${spaceId}' not found` } };
+  if (result.outcome === 'not_found') { const lost = lostSpaceAnswer(null, spaceId); return { status: lost.status, body: lost.body }; }
   // Every round passed on this instance's own yes (a club organiser, a publisher, a lone member): applied already.
   return { status: 200, body: { space: spaceForWire(result.space), ...networkWriteNotice(result, caller) } };
 }
