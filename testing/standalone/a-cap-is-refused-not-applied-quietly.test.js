@@ -37,7 +37,8 @@ describe('a bulk write', () => {
 
   it('the shared writer refuses too, so no door can reach the old cut', () => {
     const src = stripComments(readFileSync('server/src/brain/bulk.ts', 'utf8'));
-    assert.match(bodyOf(src, 'bulkWrite'), /bulkSizeRefusal\(/, 'bulkWrite no longer checks the size itself');
+    assert.match(bodyOf(src, 'bulkWrite'), /bulkBatchRefusal\(/, 'bulkWrite no longer checks the batch itself');
+    assert.match(bodyOf(src, 'bulkBatchRefusal'), /bulkSizeRefusal\(/, 'bulkBatchRefusal no longer asks the size cap');
     assert.doesNotMatch(src, /\.slice\(0, BULK_MAX_PER_TYPE\)/, 'the silent slice is back');
   });
 });

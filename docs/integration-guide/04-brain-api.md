@@ -218,7 +218,7 @@ item's row in `errors` ([Bulk](04d-brain-ops-api.md)).
 
 `POST /api/brain/spaces/:spaceId/bulk` and `save_bulk` take facts, entities, chrono entries and edges in
 one payload, at most 500 of each. A longer array refuses the whole batch with a `400` naming it, before anything is
-written — it used to be cut at 500 and answered with the same `207` as a clean batch (`Q-109`). Identities are minted server-side, so an id you invent for a record in the payload is not the id
+written — it used to be cut at 500 and answered with the same `207` as a clean batch (`Q-109`). So does an array holding anything but JSON objects (`{"facts":[null]}` names `facts[0]`): a `400` before anything is written, on both doors. Identities are minted server-side, so an id you invent for a record in the payload is not the id
 it gets, and an edge naming it would point at nothing.
 
 Put `"$ref"` on an item and name it later in the same call:
