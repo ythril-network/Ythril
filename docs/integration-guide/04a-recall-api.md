@@ -207,8 +207,8 @@ unavailable, and **none of them can fail a search** — a stage that cannot answ
 actually knows — **and a result carrying a `rerankScore` ranks above every result without one**, whatever
 the numbers, because the three are on unrelated scales.
 
-**Across spaces, the merged answer is fused once.** A recall over several spaces — a list of spaces, a proxy, or
-no `space` at all — gathers each space's candidates and then fuses the MERGED pool: one ranking by meaning over
+**Across spaces, the merged answer is fused once.** A recall over several spaces — a list of spaces, one of your personal views
+(`@team`, the members it reads for you), or no `space` at all — gathers each space's candidates and then fuses the MERGED pool: one ranking by meaning over
 every candidate (the cosine scores are comparable across spaces: one query, one model), and each space's text
 ranking per record type as a ranking of its own. So every merged result carries a `fusedScore` from the same
 fusion, `vectorRank` is its place by meaning among all the merged candidates, and a space whose text search found

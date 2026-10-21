@@ -38,7 +38,7 @@ Use it to answer "is this space ready to search". A steady `pending` that never 
 `failed`, means recall is quietly returning less than the space contains. Rewriting a record requeues it,
 which is the way back from `failed` without an operator touching the queue.
 
-For a proxy space the numbers are its **members'**, summed — matching the record counts above.
+Through a personal view the numbers are those of the **members the view read**, summed — matching the record counts above.
 
 ---
 
@@ -51,8 +51,9 @@ anything *out* of it.
 GET /api/brain/spaces/:spaceId/activity?hours=24
 ```
 
-`hours` defaults to 24 and is clamped to 1…2160 (90 days, the bucket retention). A proxy space reports its
-members' rows.
+`hours` defaults to 24 and is clamped to 1…2160 (90 days, the bucket retention). Activity is instance-level
+observability keyed by space, not a read of a space's data, so a personal view id answers as a missing space here:
+ask each member. A read made through a view is counted as one call in each member it read.
 
 **Response** `200`:
 
@@ -176,15 +177,8 @@ Re-computes **every** embedding in the space with the current configuration — 
 
 Returns `409 { "error": "A reindex of 'general' is already running" }` while **this space** has a run going. Any other space starts: the records are queued, the queue embeds one at a time, and a second space's run waits in the same queue rather than being refused. (Before, one reindex ran per instance and every other request was refused; a client that retries on `409` still works, it simply sees none for different spaces.)
 
-Returns `400` with the member spaces named if `:spaceId` is a **proxy**:
-
-```json
-{ "error": "'team' is a proxy space and has no index of its own. Reindex its members instead: qa, research.",
-  "proxyFor": ["qa", "research"] }
-```
-
-A proxy has no index of its own — its members do; reindex each member. `GET /api/spaces` carries `proxyFor` on any space that has one, so a client can skip proxies without
-discovering this by trying.
+A personal view id (`@team`) answers as a missing space (`404 Space '@team' not found`), on both doors and before any work is
+queued: a view holds no index, so there is nothing to rebuild. Reindex each member space by its own id.
 
 **What a run does when the embedder is away.** A rebuild that fails because the embedder cannot be reached leaves the record exactly as it was and is retried; nothing is stripped. A record whose own text the embedder refuses fails like any other embed job and is counted in `reindexRun.failed`.
 
@@ -270,8 +264,8 @@ collection with a separate worker.
 }
 ```
 
-Summed across member spaces for a proxy space. `failedByReason` is grouped across the whole fleet before truncation, so a
-proxy's grouping describes its members rather than whichever one was read first.
+Through a personal view the numbers are summed across the members the view read. `failedByReason` is grouped across all
+of them before truncation, so a view's grouping describes its members rather than whichever one was read first.
 
 ---
 
@@ -281,7 +275,7 @@ proxy's grouping describes its members rather than whichever one was read first.
 POST /api/brain/spaces/:spaceId/embedding-queue/media/retry-failed
 ```
 
-Re-queues **all** failed media jobs in the space (and across members for a proxy). Requires `files: write`.
+Re-queues **all** failed media jobs in the space. Requires `files: write`; it is a write, so a personal view id answers as a missing space (`404`) — name the member space.
 
 **Response** `202`: `{ "retried": 7 }`.
 
@@ -339,7 +333,7 @@ GET /api/brain/spaces/:spaceId/embedding-queue/records
 
 Newest-first by `updatedAt`, with the record id breaking ties so the order is **total** and pages cannot overlap. `attempts === maxAttempts` with `status: "failed"` means the queue has **given up** — it
 will not retry on its own, and the record stays unfindable until you retry it or rewrite it. Each row carries its own
-`spaceId`, which for a **proxy space** is the member space the record actually lives in — that is the space to retry it
+`spaceId`, which through a **personal view** is the member space the record actually lives in — that is the space to retry it
 in. `counts` is returned whether or not you filtered, so a caller can filter to `failed` and still see the whole picture.
 
 `transientFailures` counts the times the embedder did not answer at all — connection refused, a timeout, a 429 or 5xx —
@@ -359,8 +353,8 @@ does this on its own, and only the record in flight is counted: a record that wa
 while the process was being replaced, fails with `lastError` beginning `embedding process unavailable`, is retried as
 transient, and is never counted toward the three.
 
-**MCP `list_embed_jobs` is the same act** (`Q-109`): the same `status`, `limit` and `skip`, the same refusals, and a proxy
-space's members read and summed exactly as here. It used to read only the named space and take no `skip`.
+**MCP `list_embed_jobs` is the same act** (`Q-109`): the same `status`, `limit` and `skip`, the same refusals, and a personal
+view's members read and summed exactly as here. It used to read only the named space and take no `skip`.
 
 Requires `knowledge: read`. Deliberately readable by a token that cannot write: an operator who cannot fix the queue
 still needs to be able to see it.
@@ -381,7 +375,9 @@ POST /api/brain/spaces/:spaceId/embedding-queue/records/retry
 |-------|-------------|
 | `recordType` | `fact`, `entity`, `edge`, `chrono`, or `file`. Anything else is a `400` |
 | `recordId` | The record's `_id`, as the listing reports it. Required |
-| `targetSpace` | Required when `:spaceId` is a **proxy** space: the member space holding the record |
+
+`:spaceId` is the member space the listing reported on the row (`spaceId`); a retry is a write, so a personal view id there
+answers as a missing space (`404`).
 
 Resets the job to `pending`, clears `attempts` and `lastError`, and wakes the worker. The record's stored text is
 untouched — this re-embeds what is already there rather than re-writing it.
@@ -555,7 +551,7 @@ Fact, entity and chrono items accept an optional `id` field (UUID v4). If `id` n
 
 **Schema validation:** When the target space has `validationMode` set to `strict` or `warn`, each item is validated against the space schema before writing. In strict mode, violating items are skipped and recorded in `errors` (e.g. `"schema_violation: not in entityTypes allowlist: Person, Service"`). In warn mode, violations are recorded as warnings but the item is written. **A row a schema refusal made carries `violation`** beside its `reason` string: the refusal body a single-record caller reads (`error`, `message`, `introduced`, `preExisting`, `truncated?`, without the duplicate `violations` list), so a client branches on the same object here as on `POST /entities` and does not parse a sentence to find which of its fields to fix; `reason` stays a string and names only what the item introduced. An item that names a refused item through `$ref` is told the same `reason` and carries its `violation`. An undeclared property key, a rule and the inline `edges` of an item are judged as on every other door ([Property keys a type does not declare](06a-schema-api.md#property-keys-a-type-does-not-declare), [Rules](06a-schema-api.md#rules)); in a `warn` space the item's own inline edges are named in the warnings too (`edges[1].properties.k`). See [Schema Validation](06a-schema-api.md#schema-validation) for the full schema specification.
 
-**Proxy spaces:** add `?targetSpace=<member>` to route all writes to a specific member space.
+**Personal views:** a bulk write is a write, so a view id as `:spaceId` answers `404 Space '@team' not found`; name the member space that should hold the records.
 
 ---
 
@@ -598,7 +594,7 @@ read them from `data` instead.
 | `collection` | ✅ | One of: `facts`, `entities`, `edges`, `chrono`, `files`, `links` |
 | `filter` | — | Query filter object (defaults to `{}`) |
 | `projection` | — | Projection object (`1` include / `0` exclude). A field a read never sends cannot be asked for by name: the vector and an edge's write guard are withheld, and an inclusion naming only withheld fields answers the `_id` alone |
-| `limit` | — | Max rows, default `200` and NOT capped. What bounds an answer instead: the byte budget (`maxChars`/`maxBytes`) trims it and returns `nextSkip`, `maxTimeMS` bounds the query's duration, and on a PROXY space a `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
+| `limit` | — | Max rows, default `200` and NOT capped. What bounds an answer instead: the byte budget (`maxChars`/`maxBytes`) trims it and returns `nextSkip`, `maxTimeMS` bounds the query's duration, and through a personal view over more than one member a `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
 | `skip` | — | Rows to discard before the page (default `0`) — see below |
 | `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first. `links` sorts by `createdAt`, `updatedAt`, `from` and `to`; a link has no name, title or type of its own.|
 | `dir` | — | `asc` or `desc` (default `desc`). Only meaningful with `sort` |
@@ -645,7 +641,7 @@ embedding, so a link never competes in a meaning-ranked search.
 
 `count` is **this page**. `total` is **every document the filter matches**, ignoring `limit` and `skip` — that is the
 number you need to know whether a sweep is finished, and without it a short last page is indistinguishable from a
-truncated one. On a proxy space it is the sum across member spaces. It costs one count per member per call, bounded by
+truncated one. Through a personal view it is the sum across the members the view read. It costs one count per member per call, bounded by
 `maxTimeMS`, and it is always returned: a caller who does not know to ask for it is exactly the caller who ends up
 guessing.
 
@@ -683,9 +679,9 @@ seen twice or missed. Concatenating `skip=0,5,10,…` gives you the collection e
 capped it to*. A `skip` past the end returns an empty `results` — it does **not** return the last page, so a loop that
 stops on an empty page terminates.
 
-On a **proxy space** the page is computed over the **merged** set of all member spaces, not per member: the server takes
+Through a **personal view** the page is computed over the **merged** set of the members the view read, not per member: the server takes
 the first `skip + limit` rows from each member, merges them into the documented order, and returns the window. A deep
-page therefore costs more on a proxy space than on a plain one, but it is the same page.
+page therefore costs more through a view than on a plain space, but it is the same page.
 
 #### A read result too large to return inline is bounded, and you page through the rest
 

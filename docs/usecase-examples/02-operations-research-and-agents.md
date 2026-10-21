@@ -77,24 +77,25 @@ graph TD
 ```mermaid
 graph LR
     subgraph "SaaS Knowledge"
-        Support["🎧 Support Agent<br/>(proxy space)"]
+        Support["🎧 Support Agent<br/>(personal view @customers)"]
         CustA["Customer A<br/>(space: acme)"]
         CustB["Customer B<br/>(space: globex)"]
         CustC["Customer C<br/>(space: initech)"]
     end
-    Support -.->|proxy| CustA
-    Support -.->|proxy| CustB
-    Support -.->|proxy| CustC
+    Support -.->|reads| CustA
+    Support -.->|reads| CustB
+    Support -.->|reads| CustC
 ```
 
-**Source:** Each customer's LLM writes to their own space via space-scoped tokens. Support agents use a proxy space.
+**Source:** Each customer's LLM writes to their own space via space-scoped tokens. The support agent's token can read all of them, and makes one personal view over them: `view_create({ name: "customers", members: ["acme", "globex", "initech"] })` (REST: `POST /api/views`).
 **Consumers:** Customers see only their data. Support agents search across all customers.
 
 **Wow factor:**
 
 - One Ythril instance, N customers, full isolation via spaces + space-scoped tokens. No separate databases, no tenant ID middleware hell.
 - Customer gives their MCP client a space-scoped token → the LLM can `save_fact`, `recall`, `write_file` only within their silo. Zero chance of cross-tenant leakage — it's token-enforced at the API layer, not application-logic.
-- Support agent connects with a proxy space → `recall("connection timeout")` with `space` omitted → finds matching incidents across ALL customers, ranked by relevance. "This looks like the same issue Customer B had last week."
+- Support agent reads through its personal view → `recall("connection timeout")` with `space: "@customers"` → finds matching incidents across ALL customers, ranked by relevance, and the answer's `viewMembers` names the customers it read. "This looks like the same issue Customer B had last week." The view never writes; a fix is saved into the customer's own space.
+- A customer's token reaches only its own space, and another token's view is invisible to it — the support agent's view is the support agent's alone.
 - Read-only tokens for customer-facing dashboards — they can query their knowledge but not accidentally corrupt it.
 
 ---

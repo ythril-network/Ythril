@@ -38,7 +38,6 @@ Two of the table's columns are not self-explanatory.
 | **Storage** | **One column, not two.** `1.20 GiB / 5 GiB` when the space has a quota, just the amount used when it does not, and `—` when it is empty and unlimited. A bar behind it turns amber past 70% of the quota and red past 90% |
 | **Usage (7d)** | Calls in the last seven days, and the share of recalls that **found something**. A low percentage is the one number on this page worth acting on — it means people are asking that space questions it cannot answer |
 | **Networks** | Which networks share this space |
-| **Proxy** | Marked when this space stands in for others |
 
 Storage shows **megabytes** below 1 GiB, so a small space reads `40 MB` rather than `0.04 GiB`.
 
@@ -55,9 +54,10 @@ Click **Create New Space**. Fill in:
 - **ID** — optional. Short lowercase identifier (auto-generated from the name if left blank).
 - **Max GiB** — optional storage quota. Leave blank for unlimited.
 - **Purpose** — optional description of what this space is for. Visible to AI assistants.
-- **Proxy for** — optionally mark this as a proxy space standing in for one or more other spaces (tick individual spaces or "all"). A proxy stores nothing of its own, so it gets no collections, is never embedded, scanned or swept, and deleting it removes only its entry. A token sees through a proxy only the spaces it can already reach, and writes through it only into a space it can write. A space whose `config.json` entry says `"proxyFor": []` (only a hand edit writes one) is an ordinary space: the server removes the empty list when it reads the file and logs a warning naming the space.
 - **Validation mode** — the schema-validation posture for the new space: `off`, `warn`, or `strict`.
 - **Strict linkage** — a tickbox, on by default. While it is on, the space refuses to delete a record that another record still points at, and refuses a link or an edge to something that is not there, whatever kind of item it points at and including an edge saved together with its record (nothing is saved then, the record included). Untick it to allow both. This is the seventh field and the note below is about it as much as about validation.
+
+**This dialog makes a space and nothing else.** To read several spaces together, make a **personal view** on the Brain page instead (see *Personal views* in the Brain chapter); a view is not listed here and has no settings of its own. Before 6.0 a space could be marked as reading others on behalf of everyone; that choice is gone, and each such space became personal views at the upgrade (see *After the 6.0 upgrade* below).
 
 > **New spaces start strict.** A freshly created space defaults to **`strict` validation** *and*
 > **strict linkage** — it enforces its schema and referential integrity from day one. You can relax
@@ -127,8 +127,7 @@ you opened it* and a **Reload the schema** button; reloading drops your unsaved 
   not an undeclared property of a type (the Validation control's job). *Warn — store the write, name each field*: the
   record is stored without them and the answer names them. *Refuse — refuse the write, store nothing*. **Refuse** means integrations that send extra fields
   start getting `400`. The setting applies to this instance only and is **not shared with networks**: each member of a
-  network decides its own. A token without schema admin sees it disabled, with the reason beside it. A proxy space hides
-  it, because each member's own setting governs a write that lands in that member.
+  network decides its own. A token without schema admin sees it disabled, with the reason beside it.
 - **Strict linkage** — when on, references between items must be valid IDs of items that exist, and deletion of referenced items is blocked. That covers every link and every edge, including the far end of an edge saved together with its record, whether it points at an entity, a fact, a chrono entry or a file.
 - **Space rules** — under the validation bar, rules that apply to **every** type (*Apply to every type, or to the kinds a rule names*). Each has the same two boxes as a type's rule and **Applies to** checkboxes for the kinds it governs (entity, fact, edge, chrono); *with no kind ticked, the rule applies to every kind* whose record has what the rule reads (`self.title` reaches entities, facts and chrono entries, not edges). A space rule is a rule a record breaks in any type, so saving one needs the Schema right at **admin** — the right that **Validation mode** needs — and a token with only **write** sees them read-only. In a space in a network a space's rules travel with its schema, and **a member on an earlier release refuses a schema that carries rules** until it is upgraded: the save warns which members are behind.
 - **Type schemas** — define per-type rules under each knowledge type (entity, fact, edge, chrono). For each named type you can set:
@@ -218,6 +217,21 @@ The other three are guarded: because renaming changes the space ID (which breaks
 
 Each space row carries only a gear/configure (⚙) button — there is no pencil icon. Rebuilding indexes, renaming, wiping, and deleting all live inside the space's settings panel, on the **Danger** tab.
 
+### After the 6.0 upgrade: what became of the read-across spaces
+
+Before 6.0 an administrator could make a space that read several others on behalf of everyone who could see it. 6.0 replaces that with a **personal view**, which belongs to one token (see *Personal views* in the Brain chapter). At the upgrade each such space became a personal view of **every instance-admin token that was live then**, under the same name. Where no admin token was live, the definition waits to be claimed.
+
+Only an instance administrator sees what follows. The notice on the Brain page appears while old ids are still reserved; the panel on this page is always there for an administrator, and says *Nothing to report* when there is nothing to do.
+
+- **A notice on the Brain page** says how many old ids are still reserved and names them. **Spaces** takes you here; **Dismiss** hides it until the set of ids changes.
+- **A panel above the space list, *Personal views after the upgrade*,** reports what the upgrade did: how many views it made, the networks that lost a space id (their peers see this instance as having left that network space), views waiting for an owner, and views whose owner is gone (counted by kind of owner, never named).
+- **Claim** beside a waiting view gives it to you as your own personal view.
+- **Purge** beside a reserved id deletes any records still stored under that id and releases the id so a new space can take it. It cannot be undone. The dialog asks you to type the id, and warns that users whose sign-in claim from your identity provider still names it will reach a space created under it.
+
+Until it is purged, the old id is not an ordinary space and cannot be created again. Anyone who asks for it, on any page or through the API, is told that the id belonged to a space that is now personal views, and to ask the instance administrator.
+
+A pre-6.0 read-across space that sat in a network **left that network space** at the upgrade. Your database backups do not hold personal views, because views live in `config.json`: restore `config.json` to get them back. The upgrade keeps `config.json.pre-6.0` beside it.
+
 ### Renaming a space
 
 Open the space's settings panel and go to the **Danger** tab to rename its ID. All data, files, token scopes, and network sync mappings are updated automatically. An agent
@@ -239,6 +253,8 @@ What the delete came to is shown in a status box on the tab, not in a pop-up tha
 - **Failed.** The error line says whether the change is retried automatically.
 
 The buttons stay available while a change is owed: pressing **Delete** or **Wipe** again joins the change and runs it again now. A space cannot be renamed until its owed deletion or wipe has ended. Only an instance administrator sees what is owed; for anyone else the box stays empty, which means unknown, not "nothing owed".
+
+A deleted space is also taken out of every personal view that listed it, so a space created later under the same id does not silently rejoin one.
 
 ### Wiping a space
 
@@ -519,7 +535,17 @@ Click the ↺ icon on any token row. A new secret is generated; the old one stop
 
 ### Revoking a token
 
-Click the ✕ icon and confirm. The token is deleted and can never be used again.
+Click the ✕ icon and confirm. The token is deleted and can never be used again. **Its personal views are deleted with it, at once.** A connector sign-in that merely expires keeps its views for 30 days.
+
+### Copying your personal views to another token
+
+A personal view belongs to the one token that made it, so a second token you manage — an agent's, say — starts with none. To give it yours, open the **rights editor** (the pencil in the **Permission** column) and use **Copy personal views to this token**. It lists your views, each with a **Copy** button.
+
+- **It is a copy.** The token gets its own view under the same name, and a later change to either one does not touch the other.
+- **Only what the token can read.** Spaces the receiving token cannot read are left out of the copy. If it can read none of them, nothing is copied and you are told so.
+- **A name that is taken.** If the token already has a view of that name, the copy gets a new name, and the line under the button says which.
+- **A copy counts against the receiving token's limit** of 50 views.
+- It needs the same right as managing that token, and the second factor (see *Multi-factor authentication*) when MFA is on. A token you may not manage does not show the control.
 
 Your current session token is marked **(current session)** in the list.
 

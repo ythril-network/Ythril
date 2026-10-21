@@ -21,9 +21,10 @@ if one door accepts less:
 - A parameter added to one surface alone is the same defect arriving as an omission. When `/query` gained `skip`, `sort`,
   `dir` and `total`, the MCP tool gained them in the same commit.
 
-**When they must differ, the difference is the narrowing, not the vocabulary.** REST narrows a proxy space by request
-(`memberSpacesForRequest`); MCP narrows by the connection's accessible spaces (`memberSpacesWithin`). That is one rule
-expressed against two different sources of scope — it is not one surface offering less.
+**When they must differ, the difference is the narrowing, not the vocabulary.** REST reads the spaces a request names
+(`readSpacesOfRequest`); MCP reads the connection's accessible spaces that the call names (`readSpacesOfCall`). A personal
+view's members are decided once, by `viewReadMembers` at each door's guard, and no handler recomputes them. That is one
+rule expressed against two different sources of scope — it is not one surface offering less.
 
 **There are exactly two sanctioned divergences, and the second is a DEFAULT rather than a scope.** The byte budget an
 answer is trimmed to defaults lower on MCP than on REST — `MCP_DEFAULT_MAX_CHARS` against `DEFAULT_MAX_CHARS` in
@@ -149,7 +150,7 @@ use to find their subjects — not about the expected values they compare agains
 
 ## The defect class this repo produces most
 
-One rule, two implementations, and the weaker one wins silently. It has shipped as: a proxy lens computed and discarded on
+One rule, two implementations, and the weaker one wins silently. It has shipped as: a read scope computed and discarded on
 three routes; an empty allowlist read as "unrestricted" on three more; REST validating existence where MCP checked only
 shape; a paging window inline in one route and correct in another. When you find yourself writing the same rule a second
 time, extract it instead — `spaces/page-across-members.ts` exists because of this.

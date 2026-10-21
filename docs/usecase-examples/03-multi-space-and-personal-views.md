@@ -1,19 +1,21 @@
-# Proxy, Multi-Space & Personal
+# Multi-Space & Personal Views
 
 > Part of the [Ythril Use Case Examples](../usecase-examples.md).
 
-## Proxy, Multi-Space & Personal
+## Multi-Space & Personal Views
 
-## 17. M&A Due Diligence — Multi-Space Deal Rooms With Proxy Oversight
+> **How a personal view works in these examples.** A personal view is a named, read-only lens, id `@<name>`, over spaces its owner's token can read (or all of them with `["*"]`). It is made with `POST /api/views` `{ "name": "...", "members": [...] }` or the MCP tool `view_create`, and read by passing `"@name"` as `space` to `recall`, `filter`, `similar`, `graph_traverse`, `space_stats` and the other reads. At the moment of each call it reads, member by member, what its owner can read; a member the owner cannot read is dropped, and the answer's `viewMembers` names the spaces it read. It **never writes** — to change data, write to a member space. **Only its owner sees it**: another token asking for the id is told there is no such space. It ends with its owner: revoking the token deletes its views at once. In the web app it lives under **My personal views** on the Brain page; to give another token a copy, use **Copy personal views to this token** in Settings → Tokens.
 
-**Use Case:** Each acquisition target gets its own space. A proxy space gives the deal team a single pane of glass across all active deals — without merging any data.
+## 17. M&A Due Diligence — Multi-Space Deal Rooms With a Personal Oversight View
+
+**Use Case:** Each acquisition target gets its own space. A personal view gives the M&A lead a single pane of glass across all active deals — without merging any data.
 
 **Network Topology:**
 
 ```mermaid
 graph TD
     subgraph "Instance: Deal Team HQ"
-        Proxy["🔍 deal-overview<br/>(proxy for: acme, globex, initech)"]
+        View["🔍 @deal-overview<br/>(personal view of the M&A lead: acme, globex, initech)"]
         Acme["📁 acme<br/>(space)"]
         Globex["📁 globex<br/>(space)"]
         Initech["📁 initech<br/>(space)"]
@@ -28,21 +30,21 @@ graph TD
 
     Acme <-->|closed| AcmeExt
     Globex <-->|closed| GlobexExt
-    Proxy -.->|reads| Acme
-    Proxy -.->|reads| Globex
-    Proxy -.->|reads| Initech
+    View -.->|reads| Acme
+    View -.->|reads| Globex
+    View -.->|reads| Initech
 ```
 
 **Source:** Each deal team writes due diligence findings, risks, and documents into their target's space. External advisors sync into the same space via closed networks.
-**Consumers:** The M&A lead connects their LLM to the `deal-overview` proxy space.
+**Consumers:** The M&A lead makes the view once with their own token — `view_create({ name: "deal-overview", members: ["acme", "globex", "initech"] })` — and connects their LLM with it, reading `space: "@deal-overview"`.
 
 **Wow factor:**
 
-- `recall("antitrust risk")` on the proxy → semantic search fans out across all three deal spaces in parallel, returns ranked results with `spaceId` attribution. One query, three deals, zero data mixing.
-- Each space syncs with its own closed network — Acme's advisor sees only Acme's space, Globex's advisor sees only Globex. The proxy never syncs externally — it's a local read-only aggregation layer.
-- `filter(entities, {type: "risk"})` on the proxy → entities from all three deals. `filter(edges, {label: "mitigated_by"})` → which risks have mitigation plans across all targets.
-- Write operations on the proxy require `?targetSpace=acme` — the proxy enforces explicit targeting. No accidental cross-contamination between deal rooms.
-- Kill a deal? Remove the space from `proxyFor`. The data stays isolated in its own space, the proxy just stops including it.
+- `recall("antitrust risk", space: "@deal-overview")` → semantic search fans out across all three deal spaces in parallel, returns ranked results with `spaceId` attribution, and `viewMembers` lists the three deals it read. One query, three deals, zero data mixing.
+- Each space syncs with its own closed network — Acme's advisor sees only Acme's space, Globex's advisor sees only Globex. The view never syncs and nobody else can see it — it is a read-only lens owned by the lead's token.
+- `filter(entities, {type: "risk"}, space: "@deal-overview")` → entities from all three deals. `filter(edges, {label: "mitigated_by"})` → which risks have mitigation plans across all targets.
+- The view never writes. A finding goes into the deal's own space — `save_fact(..., space: "acme")` — so there is no way to drop a note into the wrong deal room through the overview.
+- Kill a deal? Take the space out of the view with `view_update` (REST: `PATCH /api/views/:id`). The data stays isolated in its own space, the view just stops reading it. A deal whose space the lead's token can no longer read is left out of the answer, and the answer says so.
 
 ---
 
@@ -91,9 +93,9 @@ graph TD
 
 ---
 
-## 19. Consulting Firm — Client Spaces, Internal Space, Proxy Dashboard
+## 19. Consulting Firm — Client Spaces, Internal Space, Personal Partner View
 
-**Use Case:** Consultants maintain separate spaces per client (strict isolation), an internal knowledge base, and a proxy space that lets partners search across everything.
+**Use Case:** Consultants maintain separate spaces per client (strict isolation), an internal knowledge base, and a personal view each partner makes to search across everything their token can read.
 
 **Network Topology:**
 
@@ -103,7 +105,7 @@ graph TD
         Internal["📚 internal-kb<br/>(space)"]
         ClientA["📁 client-alpha<br/>(space)"]
         ClientB["📁 client-beta<br/>(space)"]
-        Dashboard["🔍 partner-view<br/>(proxy for: internal, alpha, beta)"]
+        Dashboard["🔍 @partner-view<br/>(personal view: internal-kb, client-alpha, client-beta)"]
     end
 
     subgraph "Instance: Client Alpha"
@@ -131,23 +133,24 @@ graph TD
 
 - `internal-kb` (club network): Templates, methodologies, lessons learned. All consultants sync.
 - `client-alpha`, `client-beta` (closed networks each): Client-specific findings, deliverables, files. Each client syncs only their own space.
-- `partner-view` (proxy, local only): Aggregates all three spaces. Never syncs externally.
+- `@partner-view` (personal view, local only): Reads all three spaces. Never syncs externally, and never writes.
 
-**Consumers:** Partners and practice leads connect their LLM to `partner-view`.
+**Consumers:** Each partner and practice lead has their own token and makes their own `@partner-view` (or an administrator copies one with **Copy personal views to this token**). A view belongs to one token, so a partner's view is not shared with the rest of the firm.
 
 **Wow factor:**
 
-- Partner asks: `recall("cloud migration cost overrun")` on the proxy → gets results from internal templates AND both client engagements, ranked by relevance, with `spaceId` showing which client each result came from.
+- Partner asks: `recall("cloud migration cost overrun", space: "@partner-view")` → gets results from internal templates AND both client engagements, ranked by relevance, with `spaceId` showing which client each result came from and `viewMembers` listing the spaces read.
 - Consultant on-site with Client Alpha has two spaces syncing to their laptop: `internal-kb` (club) and `client-alpha` (closed). Their LLM uses `recall` with `space` omitted to search both. They get the firm's methodology templates alongside Alpha-specific context in one query.
 - Client Alpha's external instance syncs only `client-alpha` — they never see `internal-kb` or `client-beta`. Token-scoped, network-scoped, zero crossover.
-- `filter(entities, {type: "deliverable", properties.status: "overdue"})` on the proxy → overdue deliverables across all clients. `filter(chrono, {status: "upcoming", type: "deadline"})` → upcoming deadlines across all engagements.
-- New client onboarded? Create space, create closed network, add to `proxyFor` on `partner-view`. The proxy starts including it immediately — no data migration, no restructuring.
+- `filter(entities, {type: "deliverable", properties.status: "overdue"})` on the view → overdue deliverables across all clients. `filter(chrono, {status: "upcoming", type: "deadline"})` → upcoming deadlines across all engagements.
+- A practice lead whose token reads only `internal-kb` and `client-alpha` can list only those two — a view cannot list a space its owner cannot read. If a token later loses read on a listed space, that space is left out of the answer and the answer says so. A view never reads more than its owner's token can.
+- New client onboarded? Create space, create closed network, add it to the view with `view_update`. Or make the view with `members: ["*"]` — every space the token can read, including ones added later — and a new client appears without touching the view. No data migration, no restructuring.
 
 ---
 
 ## 20. Hospital Network — Departmental Spaces With Hierarchical Distribution and Cross-Department Search
 
-**Use Case:** Each hospital department has its own space. Medical director pushes protocols top-down via braintree. Department heads collaborate via democratic network. A proxy space enables cross-department clinical search.
+**Use Case:** Each hospital department has its own space. Medical director pushes protocols top-down via braintree. Department heads collaborate via democratic network. A personal view on a search instance enables cross-department clinical search.
 
 **Network Topology:**
 
@@ -171,7 +174,7 @@ graph TD
     end
 
     subgraph "Instance: Clinical Search Hub"
-        ClinProxy["🔍 clinical-search<br/>(proxy for: ed, cardio, radio)"]
+        ClinView["🔍 @clinical-search<br/>(personal view of the search token: ed, cardio, radio)"]
     end
 
     Protocols -->|braintree| EDProtocols
@@ -180,9 +183,9 @@ graph TD
     EDKnowledge <-->|democratic| CardKnowledge
     EDKnowledge <-->|democratic| RadKnowledge
     CardKnowledge <-->|democratic| RadKnowledge
-    ClinProxy -.->|reads| EDKnowledge
-    ClinProxy -.->|reads| CardKnowledge
-    ClinProxy -.->|reads| RadKnowledge
+    ClinView -.->|reads| EDKnowledge
+    ClinView -.->|reads| CardKnowledge
+    ClinView -.->|reads| RadKnowledge
 ```
 
 **Three networks, three patterns, one hospital:**
@@ -191,14 +194,14 @@ graph TD
 
 2. **`knowledge` democratic** — Department heads share clinical learnings peer-to-peer. ED learns that a specific drug interaction is common → `save_fact(...)` → cardiology and radiology receive it on next sync. Majority+veto governance prevents a single department from pushing contested clinical claims.
 
-3. **`clinical-search` proxy** — On a dedicated search instance. `recall("drug interaction with warfarin in elderly patients")` → searches ED, cardiology, and radiology knowledge spaces in parallel. Results come back with `spaceId` attribution — the clinician sees which department reported each finding.
+3. **`@clinical-search` personal view** — Owned by the read-only token the clinical search hub uses, on a dedicated search instance. `recall("drug interaction with warfarin in elderly patients", space: "@clinical-search")` → searches ED, cardiology, and radiology knowledge spaces in parallel. Results come back with `spaceId` attribution — the clinician sees which department reported each finding.
 
 **Wow factor:**
 
 - Each department runs its own Ythril instance with two spaces: `protocols` (receive-only from braintree) and their own knowledge space (democratic peer-to-peer). Two different governance models on the same instance, zero conflict.
-- The proxy search hub has read-only tokens — it can query but never write. Even if compromised, clinical data integrity is preserved.
-- `filter(entities, {type: "drug"})` on the proxy → every drug entity across all departments. `filter(edges, {from: "warfarin", label: "interacts_with"})` → cross-department interaction graph built from real clinical observations.
-- A new department joins? Add their knowledge space to the proxy's `proxyFor` and add them to the democratic network. Two config changes, instant integration.
+- The search hub uses a read-only token — it can query but never write, and a personal view never writes either. Even if compromised, clinical data integrity is preserved.
+- `filter(entities, {type: "drug"})` on the view → every drug entity across all departments. `filter(edges, {from: "warfarin", label: "interacts_with"})` → cross-department interaction graph built from real clinical observations.
+- A new department joins? Add their knowledge space to the view with `view_update` and add them to the democratic network. Two config changes, instant integration.
 - Protocols push is one-way and authoritative. Knowledge sharing is peer-to-peer and democratic. Clinical search is read-only and aggregated. Three completely different trust models, cleanly separated by network type.
 
 ---
@@ -212,7 +215,7 @@ graph TD
 ```mermaid
 graph LR
     subgraph "Your Ythril Instance"
-        Proxy["🔍 finance-overview<br/>(proxy for: trading, savings, property)"]
+        View["🔍 @finance-overview<br/>(personal view: trading, savings, property)"]
         Trading["📈 trading<br/>(space)"]
         Savings["🏦 savings<br/>(space)"]
         Property["🏠 property<br/>(space)"]
@@ -223,20 +226,20 @@ graph LR
     end
     Trading <-->|closed| TradingL
     Savings <-->|closed| SavingsL
-    Proxy -.->|reads| Trading
-    Proxy -.->|reads| Savings
-    Proxy -.->|reads| Property
+    View -.->|reads| Trading
+    View -.->|reads| Savings
+    View -.->|reads| Property
 ```
 
 **Source:** You log financial events through your LLM: trades, dividends, property expenses, savings milestones. Each account type stays in its own space.
-**Consumers:** Your LLM connected to `finance-overview` proxy.
+**Consumers:** Your LLM, connected with your token, reading through your `@finance-overview` personal view. Nobody else sees the view, and it is deleted with the token.
 
 **Wow factor:**
 
 - `save_fact("Sold 50 NVDA at $180, bought 100 AMD at $165. Thesis: AMD catching up on inference chips.", entities: ["NVDA", "AMD"], tags: ["trade", "semiconductor"])` into `trading` space.
 - `save_fact("Roof repair $12k on rental property. Insurance claim filed ref #4821.", entities: ["rental-oak-st", "insurance"], tags: ["expense", "maintenance"])` into `property` space.
-- `recall("semiconductor exposure")` on the proxy → pulls trade history from `trading`, any related notes from `savings` (maybe a semiconductor ETF in your 401k), all ranked by relevance with `spaceId` attribution.
-- `filter(entities, {type: "stock"})` on the proxy → every position across all accounts. `filter(edges, {label: "thesis_for"})` → your investment thesis graph. "Why did I buy AMD again?" — instant recall.
+- `recall("semiconductor exposure", space: "@finance-overview")` → pulls trade history from `trading`, any related notes from `savings` (maybe a semiconductor ETF in your 401k), all ranked by relevance with `spaceId` attribution.
+- `filter(entities, {type: "stock"})` on the view → every position across all accounts. `filter(edges, {label: "thesis_for"})` → your investment thesis graph. "Why did I buy AMD again?" — instant recall.
 - `save_chrono({type: "event", title: "NVDA earnings Q1 2026", startsAt: "2026-05-28", linkEntities: ["<id of NVDA>"]})` → `filter(chrono, {status: "upcoming"})` → your LLM reminds you of catalysts tied to positions you actually hold.
 - `save_chrono({type: "prediction", title: "AMD will outperform NVDA in inference workloads by Q4", confidence: 0.6, linkEntities: ["<id of AMD>", "<id of NVDA>"]})` → track your own predictions. `filter(chrono, {type: "prediction", status: "completed"})` → "How good were my calls?"
 - Everything stays on your hardware. Your brokerage data, trade theses, and spending patterns never touch a third-party API. Closed network sync to your laptop = offline access.
@@ -245,14 +248,14 @@ graph LR
 
 ## 22. Market Analysis Desk — Analysts + Feeds + Broker Overlay
 
-**Use Case:** Trading desk where multiple analysts contribute research, market data gets ingested as facts, and a proxy space gives the desk head a unified view.
+**Use Case:** Trading desk where multiple analysts contribute research, market data gets ingested as facts, and a personal view gives the desk head a unified view.
 
 **Network Topology:**
 
 ```mermaid
 graph TD
     subgraph "Instance: Desk Head"
-        Overview["🔍 desk-overview<br/>(proxy for: macro, equities, fx)"]
+        Overview["🔍 @desk-overview<br/>(personal view of the desk head: macro, equities, fx)"]
         Macro["🌍 macro<br/>(space)"]
         Equities["📈 equities<br/>(space)"]
         FX["💱 fx<br/>(space)"]
@@ -272,29 +275,29 @@ graph TD
     FX <-->|democratic| FXA
 ```
 
-**Source:** Each analyst writes into their domain space. The desk head's proxy reads across all three.
-**Consumers:** Desk head's LLM queries the proxy; individual analysts query their own space.
+**Source:** Each analyst writes into their domain space. The desk head's personal view reads across all three.
+**Consumers:** Desk head's LLM queries `@desk-overview`; individual analysts query their own space, or make a view of their own over the desks they follow.
 
 **Wow factor:**
 
 - FX analyst: `save_fact("EUR/USD broke 1.12 support on weak PMI. Next support at 1.095. ECB likely dovish June.", entities: ["EUR/USD", "ECB"], tags: ["technical", "macro"])`. Macro analyst: `save_fact("US PMI miss — manufacturing at 48.2, services at 51.1. Dollar weakening thesis intact.", entities: ["US-PMI", "USD"], tags: ["data", "leading-indicator"])`.
-- Desk head on the proxy: `recall("dollar weakening")` → gets the FX technical AND the macro data backing it, cross-correlated by semantic relevance. Two analysts, two spaces, one coherent picture.
+- Desk head on the view: `recall("dollar weakening", space: "@desk-overview")` → gets the FX technical AND the macro data backing it, cross-correlated by semantic relevance. Two analysts, two spaces, one coherent picture.
 - `upsert_edge("EUR/USD", "ECB", "driven_by")` + `upsert_edge("ECB", "US-PMI", "reacts_to")` → the knowledge graph connects the causal chain across desks. `filter(edges, {from: "ECB"})` → every factor the team has linked to ECB decisions.
 - `save_chrono({type: "prediction", title: "EUR/USD hits 1.15 by August", confidence: 0.65, linkEntities: ["<id of EUR/USD>"]})` → desk tracks analyst predictions over time. `filter(chrono, {type: "prediction", linkEntities: "EUR/USD"})` → full prediction history with confidence scores.
 - Each desk is its own democratic network — analyst departure doesn't nuke the knowledge base. New analyst joins, syncs, instant full context.
 
 ---
 
-## 23. Intelligence Collection — Compartmented Sources With Fusion Proxy
+## 23. Intelligence Collection — Compartmented Sources With a Fusion View
 
-**Use Case:** Each intelligence source/method gets its own compartmented space. A fusion proxy lets analysts search across compartments they're cleared for — without merging databases.
+**Use Case:** Each intelligence source/method gets its own compartmented space. A fusion personal view lets each analyst search across the compartments their token is cleared for — without merging databases.
 
 **Network Topology:**
 
 ```mermaid
 graph TD
     subgraph "Instance: Fusion Center"
-        Fusion["🔍 fusion<br/>(proxy for: osint, humint, sigint)"]
+        Fusion["🔍 @fusion<br/>(personal view of an all-source analyst: osint, humint, sigint)"]
         OSINT["🌐 osint<br/>(space)"]
         HUMINT["🕵️ humint<br/>(space)"]
         SIGINT["📡 sigint<br/>(space)"]
@@ -318,14 +321,14 @@ graph TD
 ```
 
 **Source:** Each collection discipline writes to its own space via its own network type — OSINT uses club (easy to add new open-source researchers), HUMINT and SIGINT use closed (strict need-to-know).
-**Consumers:** Fusion analysts connect to the proxy. Compartment analysts see only their space.
+**Consumers:** Fusion analysts connect with a token cleared for the compartments they work across, and make `@fusion` over them. Compartment analysts see only their space.
 
 **Wow factor:**
 
 - HUMINT: `save_fact("Source JADE reports facility X expanded production capacity — 3 new buildings observed.", entities: ["facility-X", "JADE"], tags: ["humint", "production"])`. SIGINT: `save_fact("Intercept confirms increased shipments from facility X to port Y.", entities: ["facility-X", "port-Y"], tags: ["sigint", "logistics"])`. OSINT: `save_fact("Satellite imagery shows construction at facility X coordinates 34.05N 118.25W.", entities: ["facility-X"], tags: ["osint", "imagery"])`.
-- Fusion analyst: `recall("facility X activity")` on the proxy → all three sources, correlated by semantic similarity, attributed by `spaceId` (source discipline). The analyst sees HUMINT, SIGINT, and OSINT concur — without any single source team seeing the other disciplines.
-- `filter(entities, {name: "facility-X"})` on the proxy → entity exists in all three spaces. `filter(edges, {from: "facility-X"})` → relationships mapped by each discipline independently.
-- Different `proxyFor` lists per clearance level: one proxy for all-source, another for OSINT+HUMINT only. Token-scoped access — the proxy itself enforces the compartmentation.
+- Fusion analyst: `recall("facility X activity", space: "@fusion")` → all three sources, correlated by semantic similarity, attributed by `spaceId` (source discipline). The analyst sees HUMINT, SIGINT, and OSINT concur — without any single source team seeing the other disciplines.
+- `filter(entities, {name: "facility-X"})` on the view → entity exists in all three spaces. `filter(edges, {from: "facility-X"})` → relationships mapped by each discipline independently.
+- Different clearance levels, different views: an all-source analyst's token reads all three and their `@fusion` lists all three; another analyst's token reads OSINT and HUMINT only, so their view can list only those two. The token's rights do the compartmenting — a view can never list or read a space its owner's token cannot read, and nobody else can see it.
 - Each closed network syncs independently. SIGINT station goes dark? OSINT and HUMINT continue unaffected. No single point of failure.
 
 ---
@@ -387,7 +390,7 @@ graph TD
         Energy["⚡ energy<br/>(space)"]
         Devices["🔧 devices<br/>(space)"]
         Automations["🤖 automations<br/>(space)"]
-        SmartProxy["🔍 home-brain<br/>(proxy for: energy, devices, automations)"]
+        SmartView["🔍 @home-brain<br/>(personal view: energy, devices, automations)"]
     end
     subgraph "Instance: Phone"
         EnergyP["⚡ energy"]
@@ -395,9 +398,9 @@ graph TD
     end
     Energy <-->|closed| EnergyP
     Devices <-->|closed| DevicesP
-    SmartProxy -.->|reads| Energy
-    SmartProxy -.->|reads| Devices
-    SmartProxy -.->|reads| Automations
+    SmartView -.->|reads| Energy
+    SmartView -.->|reads| Devices
+    SmartView -.->|reads| Automations
 ```
 
 **Source:**
@@ -406,23 +409,23 @@ graph TD
 - `devices`: Device inventory, firmware versions, maintenance dates, failure history.
 - `automations`: Home Assistant rules, automations rationale, "why I set this up" context.
 
-**Consumers:** Your LLM connected to `home-brain` proxy. Phone syncs energy and devices for on-the-go queries.
+**Consumers:** Your LLM, reading through your `@home-brain` personal view. Phone syncs energy and devices for on-the-go queries.
 
 **Wow factor:**
 
 - `save_fact("HVAC compressor failed 2026-03-15. Error code E-48. Tech replaced capacitor, $180.", entities: ["hvac-main", "E-48"], tags: ["failure", "repair"])` in `devices`. `save_fact("Energy spike 2026-03-14: 38 kWh consumed (vs 22 kWh avg). HVAC ran continuously.", entities: ["hvac-main"], tags: ["anomaly", "consumption"])` in `energy`.
-- `recall("why was energy high last week")` on the proxy → correlates the energy anomaly with the HVAC failure across two different spaces. Your LLM connects the dots: "The HVAC compressor was failing, causing it to run continuously the day before it died."
+- `recall("why was energy high last week", space: "@home-brain")` → correlates the energy anomaly with the HVAC failure across two different spaces. Your LLM connects the dots: "The HVAC compressor was failing, causing it to run continuously the day before it died."
 - `save_entity("hvac-main", "device", ["climate"], {model: "Daikin RXB35", installed: "2022-06", warrantyEnd: "2027-06"})` → `filter(entities, {type: "device", properties.warrantyEnd: {$lte: "2026-12"}})` → "Which devices have warranties expiring this year?"
 - `save_chrono({type: "event", title: "Solar panels cleaned", startsAt: "2026-03-20", linkEntities: ["<id of solar-array>"]})` + production data in `energy` space → correlate cleaning dates with production improvements over time.
 - `save_fact("Set automation: if solar production > 4kW and battery > 80%, start dishwasher. Reason: minimize grid draw during peak tariff.", tags: ["automation", "solar", "tariff"])` in `automations` → six months later, `recall("why does the dishwasher run midday")` → instant answer with the original reasoning.
-- `filter(edges, {label: "controls"})` → which automations control which devices. `filter(edges, {from: "hvac-main"})` → everything linked to the HVAC: energy readings, failure history, automations, warranty info — across all three spaces via the proxy.
+- `filter(edges, {label: "controls"})` → which automations control which devices. `filter(edges, {from: "hvac-main"})` → everything linked to the HVAC: energy readings, failure history, automations, warranty info — across all three spaces through the view.
 - Phone sync means you can check energy production and device status from anywhere. Closed network = your smart home data never touches a cloud.
 
 ---
 
 ## 26. Dev Project Brain — Per-Dependency Documentation Spaces
 
-**Use Case:** Each library/framework you use gets its own space with ingested docs, examples, and gotchas. A proxy space gives your coding LLM instant cross-library search — like a local, semantic, always-up-to-date devdocs.io.
+**Use Case:** Each library/framework you use gets its own space with ingested docs, examples, and gotchas. A personal view gives your coding LLM instant cross-library search — like a local, semantic, always-up-to-date devdocs.io.
 
 **Network Topology:**
 
@@ -433,17 +436,17 @@ graph TD
         React["📦 react-docs<br/>(space)"]
         Prisma["📦 prisma-docs<br/>(space)"]
         Tailwind["📦 tailwind-docs<br/>(space)"]
-        DevProxy["🔍 fullstack-brain<br/>(proxy for: project, react, prisma, tailwind)"]
+        DevView["🔍 @fullstack-brain<br/>(personal view: my-project, react-docs, prisma-docs, tailwind-docs)"]
     end
     subgraph "Instance: Team Lead"
         ProjectT["🛠️ my-project"]
     end
 
     Project <-->|democratic| ProjectT
-    DevProxy -.->|reads| Project
-    DevProxy -.->|reads| React
-    DevProxy -.->|reads| Prisma
-    DevProxy -.->|reads| Tailwind
+    DevView -.->|reads| Project
+    DevView -.->|reads| React
+    DevView -.->|reads| Prisma
+    DevView -.->|reads| Tailwind
 ```
 
 **Source:**
@@ -451,18 +454,18 @@ graph TD
 - `my-project` (democratic network): Your team's ADRs, architecture notes, bug postmortems, gotchas. Syncs with the team.
 - `react-docs`, `prisma-docs`, `tailwind-docs` (no network — local only): Ingested library documentation. Populate via `write_file` for markdown pages, `save_fact` for key concepts and patterns, `save_entity` + `save_edge` for API relationships.
 
-**Consumers:** Your IDE's LLM connects to `fullstack-brain` proxy.
+**Consumers:** Your IDE's LLM connects with your token and reads through `@fullstack-brain`. To give the IDE's own token the same view, copy it with **Copy personal views to this token** in Settings → Tokens.
 
 **Wow factor:**
 
 - Ingest React docs into `react-docs`: `save_fact("useEffect cleanup runs before re-execution and on unmount. Return a function from the effect callback.", entities: ["useEffect"], tags: ["hooks", "lifecycle"])`. Do the same for Prisma: `save_fact("Prisma $transaction sequential mode runs queries in order; interactive mode gives you a tx client.", entities: ["$transaction"], tags: ["orm", "transactions"])`.
-- You're coding and ask: `recall("how to handle cleanup in effects")` on the proxy → React docs hit. `recall("nested writes with transactions")` → Prisma docs hit. **Your LLM gets library-specific answers without hallucinating** — the docs are right there in the brain, semantically indexed.
+- You're coding and ask: `recall("how to handle cleanup in effects", space: "@fullstack-brain")` → React docs hit. `recall("nested writes with transactions")` → Prisma docs hit. **Your LLM gets library-specific answers without hallucinating** — the docs are right there in the brain, semantically indexed.
 - `save_entity("useEffect", "hook", ["react"], {since: "16.8"})` + `upsert_edge("useEffect", "useState", "commonly_used_with")` → build a relationship graph of the API surface. `filter(edges, {from: "useEffect"})` → "What's commonly used with useEffect?"
 - `save_fact("Gotcha: Prisma $transaction has a 5s default timeout. Hit this in the bulk import job — set timeout: 30000.", entities: ["$transaction"], tags: ["gotcha", "timeout"])` in `my-project` → next time anyone on the team hits a transaction timeout, `recall("prisma transaction timeout")` returns the gotcha from your project space AND the official docs from `prisma-docs`.
-- Swap projects? Create a new proxy with different `proxyFor`: `["new-project", "vue-docs", "drizzle-docs", "tailwind-docs"]`. Reuse `tailwind-docs` across both — it's just a space reference.
+- Swap projects? Make a second view, `@new-project`, with `members: ["new-project", "vue-docs", "drizzle-docs", "tailwind-docs"]`. Reuse `tailwind-docs` across both — a view is just a list of space ids.
 - Version upgrade? Wipe `react-docs` space, re-ingest React 20 docs. Project notes with your real-world gotchas in `my-project` stay untouched — they're in a separate space.
 - `write_file` for full markdown pages (migration guides, changelog summaries), `save_fact` for atomic facts, `save_entity`/`save_edge` for API structure. Three ingestion modes, one unified brain.
-- Library docs never sync anywhere — they're local-only spaces. Your project notes sync with the team. Different lifecycle, different governance, same proxy.
+- Library docs never sync anywhere — they're local-only spaces. Your project notes sync with the team. Different lifecycle, different governance, same view.
 
 ---
 

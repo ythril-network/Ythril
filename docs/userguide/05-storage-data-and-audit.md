@@ -68,6 +68,8 @@ and last up to a day; in a backup they would outlive that day — including reco
 for as long as the backup is kept. So they are left out of every backup, manual, scheduled and offsite, and a
 restore leaves the ones currently kept alone.
 
+**Personal views are not in a backup.** A backup is a copy of the database, and personal views live in `config.json`, which it does not hold. After a restore, bring `config.json` back with the rest of the instance's files to get the views back. The 6.0 upgrade keeps the file it started from as `config.json.pre-6.0` beside it. Deleting a space takes it out of every view that listed it, so an id created again later never silently rejoins one.
+
 ### Scheduled and offsite backups
 
 > **This feature must be explicitly enabled by your infrastructure administrator** (`YTHRIL_DB_MIGRATION_ENABLED=true`). It is disabled by default.
@@ -324,6 +326,8 @@ whatever its author wrote. A type the edit did not mention is not shown as remov
 minutes (`stampSkew.warnMinutes`) is a recorded field of the same row. **A write an assistant tried and was refused is a
 row too** (with the status of the refusal and no change list, because nothing changed), so a refused attempt is as visible
 here as one made through the API. A **schema check** (`space.schema.validate`) is recorded only when the audit log is set to record reads.
+
+**Personal views are in the log too, and the log never names them.** Making, renaming, deleting, copying or claiming a personal view is a row (`view.create`, `view.update`, `view.delete`, `view.copy`, `view.claim`) that holds the owner's key and **how many** spaces the view lists — never its name and never which spaces, because a view is its owner's and the log is read by an admin. A **read through a view** is one row with no single space: the row's **spaces** field lists the spaces that read actually reached, and the row counts one call in the Usage panel of each of those spaces and nothing under the view. Like any read, it is written only when the audit log is set to record reads. Releasing a reserved id after the 6.0 upgrade is `space.retired_id.purge` (see [Settings → Spaces](04-settings.md#after-the-60-upgrade-what-became-of-the-read-across-spaces)).
 
 **Metrics to alert on for schemas.** `ythril_schema_rules_invalid` above `0` means a stored rule no longer compiles
 and is *skipped, not enforced* (`space_meta` names it): fix or remove it. `ythril_schema_rule_engine_available` at

@@ -21,6 +21,45 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 
 **Breaking changes**, when they occur, will be listed in `CHANGELOG.md` with migration steps.
 
+**Upgrading to 6.0 turns every proxy space into personal views. It is breaking, and a 5.x build cannot read the result.**
+A proxy was a space whose `proxyFor` listed other spaces, shared by everyone who could reach it. It is no longer a space:
+the same idea is now a **personal view**, a named list of spaces that one token reads through
+([Personal views](06d-personal-views.md)). What the upgrade does, at boot and again at every config reload:
+
+- **Each proxy becomes a view for each live instance-admin token**, with the same members and the proxy's id as its name
+  (`@team` for a proxy `team`). A name an admin already holds becomes `<name>-2`. Running the conversion again adds
+  nothing for an owner that already holds the view made from that proxy. With **no live instance-admin token** the
+  definition waits as an *unclaimed view*: `GET /api/admin/views/orphans` lists it, `POST /api/admin/views/claim { name }`
+  (MCP `view_claim`) gives it to the calling admin, and nothing is lost meanwhile.
+- **A token other than an admin's receives no view.** An integrator that read through a shared proxy must create its own
+  view (`POST /api/views`, MCP `view_create`) or read the member spaces directly; a token manager may give a token a copy
+  of a view it holds or manages (`POST /api/views/:id/copy`, MFA step-up like token management). An integrator that
+  reported its proxies, such as a team or crafts proxy, recreates each as its own view.
+- **The old id leaves `spaces`, every network that carried it, and every token's rights rows, and it is reserved.**
+  Peers see this member as having **left** that network space, which is permanent and quiet. A reserved id answers `410 Gone` with `code: "space_retired"` and a sentence that it was a shared proxy
+  and is now personal views, on **every** door and to every caller. Creating a space under it, renaming a space to it and
+  joining a network space under it are `409` until an instance admin purges it.
+- **Purging a retired id** (`POST /api/admin/views/retired/:id/purge`, MCP `view_purge_retired`) drops everything the id
+  still holds (its collections, vector indexes, files and activity) and releases it. If it fails part way the id stays
+  reserved and running it again resumes. While OIDC maps spaces from a claim, it is refused `409`
+  `retired_purge_unconfirmed` naming `confirmOidcClaims`, because a user whose claim still names the id would reach a
+  space created under it later; send `confirmOidcClaims: true` to go ahead. `GET /api/admin/views/migration` (MCP
+  `view_migration`) reports what the upgrade converted, the networks that lost an id, the unclaimed definitions and the
+  ids still reserved; `GET /api/spaces` also lists `retiredSpaceIds`, to instance admins only.
+- **A webhook subscription that named only retired ids is disabled, not emptied**, because an empty `spaces` list means
+  every space.
+- **`targetSpace` is refused by name on every write door**, both REST spellings (query and body) and MCP, with `space` as
+  the replacement: name the member space. **`proxyFor` on `POST /api/spaces` and `save_space` is refused by name**,
+  pointing at `POST /api/views` / `view_create`. A merge, a reindex or a reembed of a view id answers as a missing space.
+- **A read through a view is judged per member, at call time, by what the caller can read there**; a member it cannot
+  read drops out, and the answer's `viewMembers` says which were read. A proxy used to hand every caller the members
+  they reached, and wrote through a member it named; a view never writes.
+
+**Before the first conversion the upgrade writes `config.json.pre-6.0` beside `config.json`.** It holds the file exactly as
+5.x left it. Views live in `config.json`, not in the database, so a Mongo backup does not carry them: back up the config
+with the data. A config reload that finds a file without the views the process holds keeps them and logs a line.
+
+
 **Upgrading past 5.6.x changes what `MONGO_URI` does and the answers an integrator can branch on.**
 
 - **Options in `MONGO_URI` win, and three defaults now apply.** `connectTimeoutMS`, `heartbeatFrequencyMS` and `serverSelectionTimeoutMS` default to figures that notice a database that stopped answering (see the `MONGO_URI` row in [Hosting](02-hosting.md)); a string that names one keeps its own. A `serverSelectionTimeoutMS` your string already carried was silently overridden before and is **honoured now**, so a very long one makes an outage last that long. A changed string takes a restart. The boot retry also covers more "not up yet" failures (a node that is not yet primary, a pool with no free connection) and still fails at once on bad credentials or a malformed string.
@@ -28,7 +67,7 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 - **Background jobs no longer stop at the first failing space.** A failing or hanging space is reported (see [Background jobs and the spaces they walk](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and the other spaces are processed; four new metrics count it. Nothing needs configuring: `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` is optional.
 
 <!-- file-act-codes -->
-**The codes a file act answers** are `path_blocked`, `destination_exists`, `destination_held_after_move`, `confirm_required`, `space_root_refused`, `move_still_owed`, `act_not_recorded` and `file_system_fault`; a client that meets one it does not know acts on the HTTP status. `destination_held_after_move` (`409`, with `heldBy`) is a move whose bytes moved while the records of another file hold an id its records need: delete that file and repeat the move. See [Files](05-files-api.md#every-code-a-file-act-answers).
+**The codes a file act answers** are `path_blocked`, `destination_exists`, `destination_held_after_move`, `confirm_required`, `space_root_refused`, `move_still_owed`, `act_not_recorded`, `file_system_fault` and `space_retired` (`410`, a retired space id); a client that meets one it does not know acts on the HTTP status. `destination_held_after_move` (`409`, with `heldBy`) is a move whose bytes moved while the records of another file hold an id its records need: delete that file and repeat the move. See [Files](05-files-api.md#every-code-a-file-act-answers).
 
 **The first sweep cycles after upgrading remove rows that earlier releases left behind when a file was deleted or moved, and that is irreversible.** The retention sweep gains a step (`TTL sweep: repairing rows a deleted file left`) that scans each space in the background, a few pages per cycle, and removes (1) the derived rows (chunks, converted and extracted copies, caption and face rows) whose file has no record, has a deleted file's audit record, or is another file, and (2) the links from a path whose file **this instance** deleted, written by this instance, with no record, no bytes and no move in progress at that path, each with a tombstone so peers drop theirs. It removes nothing authored and nothing of a file that is there; a row it cannot explain, or one written while it scans, is kept. A second scan starts no sooner than a day after the first finished, and a restore or an import starts it over. Progress is kept in this instance's own configuration (`leakedRowScan` on the space's entry, never replicated), so **rolling back to an earlier build is harmless**: it ignores that key and removes nothing. What it did stays done. `ythril_leaked_rows_removed_total` and `ythril_leaked_rows_kept_total` say how much it removed and kept, and the gauge `ythril_leaked_rows_repair_pending_spaces` how many spaces still owe a scan ([Setup](11-setup-api.md#background-jobs-and-the-spaces-they-walk)).
 
@@ -250,6 +289,13 @@ release adds is named on `space_schema_layers` (`unknownFields`) instead of refu
 **Upgrading past 5.6.x answers an unknown top-level field on a brain write by a per-space setting, and an MCP write no longer refuses one by default.** The setting, `unknownWriteFields`, is `warn` unless a space is set to `refuse` (`PATCH /api/spaces/:id`, or `update_space`). Under `warn` the write is stored and each unknown field is named in `warnings`, where an MCP call used to be refused. Under `refuse` the write is refused, and so is a uniform option a route does not read (`checkDuplicates` on an update, `ttlDays` on a link) and a GET-then-PATCH that sends server-written keys back. The setting is per instance and is never replicated, so members of a network may answer differently. Read `warnings` on the writes an integration sends, and set `refuse` only where you want refusal.
 
 ## Rolling Back
+
+**A rollback from 6.0 is `config.json.pre-6.0`, and nothing else brings the proxies back.** A 5.x build does not read
+`views`, `unclaimedViews`, `retiredSpaceIds` or `viewsMigration` (the report `GET /api/admin/views/migration` answers from), and the 6.0 conversion already removed each proxy (a space entry carrying `proxyFor`) from `spaces`, every
+network and every token's rights rows, so a 5.x started on the 6.0 `config.json` runs without them. To return: stop the
+stack, put the `config.json.pre-6.0` copy back as `config.json`, then start the older image. Views made since the upgrade
+exist only in the 6.0 file and are lost with the swap; keep the 6.0 `config.json` aside if they matter. The peers' view of
+the network spaces this member left at the upgrade is permanent; the swap does not undo it.
 
 **A rollback to 5.6.x ignores `unknownWriteFields`.** An older build neither reads nor enforces the setting: a space set to `refuse` warns again on REST, and an unknown argument on MCP is refused again by the tool's schema, whatever the space says. The setting stays in the space configuration and takes effect again on an upgrade.
 

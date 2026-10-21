@@ -6,7 +6,7 @@
 
 Base path: `/api/brain`
 
-> **Proxy spaces:** Read operations aggregate across all member spaces. Write operations require `?targetSpace=<member>` in the query string, a member the token can write (see [Spaces API](06-spaces-api.md)).
+> **Personal views:** a read operation accepts the caller's own view (`@team`, percent-encoded `%40team` in a path) in place of a space and reads each member the token can read, naming them in `viewMembers`. A write operation never does: a view id there answers `404 Space '@team' not found` (see [Personal views](06d-personal-views.md)). To write, name a member space as the `space`; the pre-6.0 write-routing parameter is refused by name ([Upgrading](02b-upgrading.md)).
 
 ### Route prefix
 
@@ -543,7 +543,7 @@ Every parameter the removed list route took, `filter` takes: `tag`, `type`, `des
 `filter`'s body is strictly allowlisted, so `offset` is a `400` that names `skip` rather than a silently
 ignored key.
 
-On a **proxy space** the page is computed over the merged set of member spaces, not per member, so `skip`
+Through a **personal view** the page is computed over the merged set of the members the view read, not per member, so `skip`
 means the same thing it does on a plain space. `skip + limit` is bounded there — a deep page needs that many
 rows from every member — and exceeding the bound is a `400` naming the ceiling.
 
@@ -600,7 +600,7 @@ belonging to the types you named.
 tool. Zeroes mean the space was already empty, not that anything refused.
 
 `data.status` says what the call came to. `"wiped"`: the data is gone from this instance, and `data.deleted` holds the counts (a repeat carries `repeated: true` and no counts). Where a network carries the space, the proposer's own yes decided it (a club, a publisher, or the only member), so the wipe ran in this call and `data.rounds` lists the rounds that passed. A pub/sub subscriber wipes its own copy only, with `refills: true`, and it refills from its publisher at the next sync. `"vote_pending"`: no round has passed; nothing is wiped here yet, and `data.rounds` lists the open votes. Each member is wiped when a round passes there, and a single veto stops it there. `"passed"` with `queued: true`: a round passed and its change is still running, or is owed and retried at `data.retryAt`. Do not repeat the call. If this instance's change failed during the call, the answer is `ok: false` with `data.status: "passed"`, `data.rounds`, and `data.code: "space_act_failed"` (or the store's `503` code); do not retry, because the instance retries the change itself. A wipe no vote decided (a space in no network, or a pub/sub subscriber's own copy) is not a vote: when it outlasts the answer budget the answer is `data.queued: true` (with `data.retryAt` when it is owed) and when it failed during the call it is `ok: false` with `data.code: "space_act_failed"`, both with no `data.status` and no `data.rounds`; the change is retried automatically, and the space's `actPending` shows it. A repeat of the call while its vote is open or its change is applying answers that round with `data.repeated: true`. Throttled to 5 calls a minute per
-token **on both doors**, and rejected on a proxy space (`400`) — target member spaces individually.
+token **on both doors**, and answered on a view id as a missing space (`404`) — name member spaces individually.
 
 `confirm: true` is required. The act is irreversible: no undo, no trash.
 

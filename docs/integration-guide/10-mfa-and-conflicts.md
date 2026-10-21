@@ -152,7 +152,7 @@ POST /api/conflicts/:id/resolve
 |-------|----------|-------------|
 | `action` | yes | One of: `keep-local`, `keep-incoming`, `keep-both`, `save-to-space` |
 | `rename` | no | New path for the conflict copy under `keep-both`, or the destination path in the target space for `save-to-space`. A string; an empty one is no rename |
-| `targetSpaceId` | when `save-to-space` | Space the incoming file is **moved** into. A string naming a concrete space (a proxy space is `400`) |
+| `targetSpaceId` | when `save-to-space` | Space the incoming file is **moved** into. A string naming a concrete space; a personal view id names none and is refused as a target the token has no access to (`403`) |
 
 | Action | Result |
 |--------|--------|
@@ -219,7 +219,7 @@ POST /api/conflicts/bulk-resolve
 
 Accepts the same `action`, `rename`, and `targetSpaceId` fields as single resolve, under the same rules. Applies the action to all listed conflicts.
 A `rename` shared by several ids is one destination, so the first conflict is placed there and the others are refused as occupied.
-A malformed body, a `save-to-space` target the token may not write files in, and a proxy target are one `400` or `403` for the whole request;
+A malformed body, a `save-to-space` target the token may not write files in, and a personal view id as the target are one `400` or `403` for the whole request;
 a refusal about one conflict is that conflict's failure, and the rest are resolved.
 
 `ids` holds at most **2 000** — the most the conflict list returns — and every entry must be a non-empty string.

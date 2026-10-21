@@ -72,8 +72,8 @@ or filter the `links` collection directly.
 
 **You do not have to run anything.** Every start converts each space that still holds the 4.x lists and
 marks the ones whose walk finished cleanly — additive, so an interrupted run is fixed by the next boot and
-an already-marked space is skipped. **A proxy space is never walked, marked or reported:** it holds no
-records of its own, its member spaces convert in their own right, and a link read through it is answered by
+an already-marked space is skipped. **A personal view is never walked, marked or reported:** it is not a space and holds no
+records of its own, the spaces it lists convert in their own right, and a link read through it is answered by
 its members.
 
 **A space whose conversion FAILED is refused rather than answered.** Every link read on it returns an error

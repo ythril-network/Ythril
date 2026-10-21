@@ -6,7 +6,7 @@
 
 Base path: `/api/files`
 
-> **Proxy spaces:** Read operations (GET) search across all member spaces. Write operations (POST, DELETE, PATCH, mkdir) require `?targetSpace=<member>` in the query string, a member the token can write (see [Spaces API](06-spaces-api.md)).
+> **Personal views:** Read operations (GET) accept the caller's own view (`@team`, `%40team` in a path) and read each member the token can read in the files area, naming them in `viewMembers`. Write operations (POST, DELETE, PATCH, mkdir) never do: a view id there answers `404 Space '@team' not found`, so name the member space (see [Personal views](06d-personal-views.md)).
 
 ### Upload a File (raw bytes)
 
@@ -544,3 +544,4 @@ A refused or failed file act (an upload, a directory create, a move, a delete) c
 | `move_still_owed` | `503` | The bytes moved and some records did not follow yet; `Retry-After` and `retryable: true` | Wait or retry: the server finishes it |
 | `act_not_recorded` | `500` | The deletion could not be recorded, so nothing was moved or deleted | Report it if a retry fails the same way |
 | `file_system_fault` | `500` | The server's storage refused the act; the body names no path | Report it if a retry fails the same way |
+| `space_retired` | `410` | The space id is one the 6.0 upgrade retired (it was a shared grouping of spaces and is now personal views); no file was touched | Name a member space, or ask the instance admin ([Upgrading](02b-upgrading.md)) |
