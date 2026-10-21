@@ -47,6 +47,10 @@ export interface RefusalBody {
   code?: string;
   path?: string;
   heldBy?: string;
+  /** The id a refusal is about (a view or a retired space id), for a sentence that names it. */
+  id?: string;
+  /** Space ids a refusal names (the members a view could not list); a sentence's `{{members}}` is the list in the reader's language. */
+  members?: string[];
 }
 
 /** What a failed request looks like to this module: an `HttpErrorResponse`, or anything thrown. Everything optional. */
@@ -283,7 +287,10 @@ export function describeRefusal(
 
   const code = nonEmpty(body?.['code']);
   if (code) {
-    const sentence = translatedOrEmpty(transloco, `${keyPrefix}.${code}`, { path: nonEmpty(body?.['path']), heldBy: nonEmpty(body?.['heldBy']) });
+    const members = Array.isArray(body?.['members']) ? (body!['members'] as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+    const sentence = translatedOrEmpty(transloco, `${keyPrefix}.${code}`, {
+      path: nonEmpty(body?.['path']), heldBy: nonEmpty(body?.['heldBy']), id: nonEmpty(body?.['id']), members: formatList(members, lang),
+    });
     if (sentence) return plain(withRequestId(sentence, err));
   }
   const prose = proseOf(err);

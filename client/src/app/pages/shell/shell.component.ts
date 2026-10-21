@@ -6,6 +6,7 @@ import { Subscription } from 'rxjs';
 import { AuthService } from '../../core/auth.service';
 import { FilesApi } from '../../core/files-api.service';
 import { EmbedService } from '../../core/embed.service';
+import { ViewsStore } from '../../core/views.store';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { BrandLogoComponent } from '../../shared/brand-logo.component';
 import { HelpLinkComponent } from '../../shared/help-link.component';
@@ -335,6 +336,8 @@ export class ShellComponent implements OnInit, OnDestroy {
   private auth = inject(AuthService);
   private router = inject(Router);
   private filesApi = inject(FilesApi);
+  /** The caller's personal views, loaded once here for every page under the shell (Brain, Files, Graph, Settings > Tokens). */
+  private views = inject(ViewsStore);
   /** Public — the template reads embed.embedded() to hide the topbar. */
   protected embed = inject(EmbedService);
 
@@ -364,6 +367,7 @@ export class ShellComponent implements OnInit, OnDestroy {
   onResize(): void { if (this.drawerOpen() && window.innerWidth > 768) this.closeDrawer(); }
 
   ngOnInit(): void {
+    this.views.load();
     this.loadConflictCount();
     // Refresh badge every 60 s so it tracks new conflicts without a page reload
     this._pollTimer = setInterval(() => this.loadConflictCount(), 60_000);
