@@ -18,7 +18,7 @@ import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { locale } from '../../testing/files-page-harness';
-import { serverActCodes } from '../../testing/server-act-codes';
+import { serverActCodes, serverWriteClosedCodes } from '../../testing/server-act-codes';
 import { ConflictsComponent } from './conflicts.component';
 
 const LANGS = ['en', 'de', 'pl'] as const;
@@ -272,7 +272,7 @@ describe('every conflicts.refusal.* sentence is one the server can answer, in ev
 
   it('a conflicts sentence for a code the server does not answer is a sentence nobody can reach', () => {
     for (const lang of LANGS) {
-      expect(refusalCodes(lang).filter(code => !codes.includes(code)), lang).toEqual([]);
+      expect(refusalCodes(lang).filter(code => ![...codes, ...serverWriteClosedCodes()].includes(code)), lang).toEqual([]);
     }
   });
 

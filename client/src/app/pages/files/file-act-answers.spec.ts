@@ -21,7 +21,7 @@ import { BrainApi } from '../../core/brain-api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
 import { getTranslocoModule } from '../../testing/transloco-testing';
-import { serverActCodes } from '../../testing/server-act-codes';
+import { serverActCodes, serverWriteClosedCodes } from '../../testing/server-act-codes';
 import { FileManagerComponent } from './file-manager.component';
 import { FILE_REFUSALS_WITH_REMEDY } from './file-listing.store';
 
@@ -372,7 +372,7 @@ describe('every answer a file act can give has words in every locale', () => {
     for (const lang of ['en', 'de', 'pl']) {
       const stale = Object.keys(locale(lang))
         .filter(key => key.startsWith('files.refusal.'))
-        .filter(key => !codes.includes(key.slice('files.refusal.'.length)));
+        .filter(key => ![...codes, ...serverWriteClosedCodes()].includes(key.slice('files.refusal.'.length)));
       expect(stale, lang).toEqual([]);
     }
   });

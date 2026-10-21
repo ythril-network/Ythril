@@ -48,6 +48,13 @@ export type ActSetReport = {
   leftOut: string[];
 } & { [idKey in `${ReportedActSetKind}Id`]?: string };
 
+/**
+ * The set states (`ActSetReport['state']`) after which a set no longer changes. A reader that paints a set by its state (the client's
+ * status pill) keeps no list of its own: it asks this one, and the client never paints any of these as pending, whatever the set's
+ * rows say.
+ */
+export const TERMINAL_ACT_SET_STATES = ['completed', 'abandoned'] as const satisfies readonly ActSetReport['state'][];
+
 /** The report of the `kind` set standing or last ended; `{ [kind]: null }` when none ever ran on this instance. */
 export function actSetReport(kind: ReportedActSetKind): ActSetReport | { [k in ReportedActSetKind]?: null } {
   const set = spaceActSetOf(kind);
