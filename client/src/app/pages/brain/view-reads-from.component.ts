@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 import { toSignal } from '@angular/core/rxjs-interop';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { formatList } from '../../core/list-format';
-import type { PersonalView } from '../../core/views-api.service';
+import { listsEverySpace, type PersonalView } from '../../core/views-api.service';
 
 /**
  * What an open personal view is reading right now, and what it left out (Q-531, ux S3, a11y S4).
@@ -38,15 +38,15 @@ export class ViewReadsFromComponent {
 
   readonly view = input.required<PersonalView>();
 
-  protected readonly listsAll = computed(() => this.view().members === '*');
+  protected readonly listsAll = computed(() => listsEverySpace(this.view().members));
   protected readonly readable = computed(() => this.view().readable);
-  /** Listed members the caller cannot read now, in the order the view lists them ('*' lists none, so it drops none). */
+  /** Listed members the caller cannot read now, in the order the view lists them (every space lists none, so it drops none). */
   protected readonly dropped = computed(() => {
     const { members, readable } = this.view();
-    return members === '*' ? [] : members.filter(m => !readable.includes(m));
+    return this.listsAll() ? [] : members.filter(m => !readable.includes(m));
   });
   protected readonly readNow = computed(() => formatList(this.readable(), this.lang()));
   protected readonly droppedList = computed(() => formatList(this.dropped(), this.lang()));
   /** What the view lists, for the sentence of a view that reads nothing. */
-  protected readonly listed = computed(() => { const m = this.view().members; return m === '*' ? '' : formatList(m, this.lang()); });
+  protected readonly listed = computed(() => (this.listsAll() ? '' : formatList(this.view().members, this.lang())));
 }
