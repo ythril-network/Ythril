@@ -712,6 +712,7 @@
   "files.closePreviewAriaLabel": "Close preview",
   "files.emptyFolder.title": "Empty folder",
   "files.emptyFolder.body": "Upload files or create a folder.",
+  "files.emptyFolder.viewBody": "Nothing here yet. A personal view shows files and cannot change them.",
   "files.tree.loadFailed": "Could not load the folder tree",
   "files.tree.expandFailed": "Could not open this folder",
   "files.tree.loading": "Loading…",

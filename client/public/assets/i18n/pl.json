@@ -712,6 +712,7 @@
   "files.closePreviewAriaLabel": "Zamknij podgląd",
   "files.emptyFolder.title": "Pusty folder",
   "files.emptyFolder.body": "Prześlij pliki lub utwórz folder.",
+  "files.emptyFolder.viewBody": "Nic tu jeszcze nie ma. Widok osobisty pokazuje pliki i nie może ich zmieniać.",
   "files.tree.loadFailed": "Nie można wczytać drzewa folderów",
   "files.tree.expandFailed": "Nie można otworzyć tego folderu",
   "files.tree.loading": "Załadunek…",
