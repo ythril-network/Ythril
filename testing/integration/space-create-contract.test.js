@@ -162,19 +162,19 @@ describe('POST /api/spaces — a refusal is complete, never partial', () => {
     assert.equal(await exists(id), false);
   });
 
-  it('a proxy space is left un-seeded, while a normal one gets the strict posture', async () => {
-    // The seeding decision is a REFUSAL's mirror image and belongs in the same extracted function: a proxy space
-    // holds no data of its own, so defaulting it to strict would be enforcing a schema on records it never stores.
+  it('a new space gets the strict posture, and a retired proxyFor is refused whole', async () => {
+    // A proxy is no longer a space (6.0, Q-531): `proxyFor` is refused by name, so there is no un-seeded kind left,
+    // and the refusal creates nothing.
     const plain = idFor('seed-plain');
     const proxy = idFor('seed-proxy');
     assert.equal((await create({ id: plain, label: 'Seed plain' })).status, 201);
-    assert.equal((await create({ id: proxy, label: 'Seed proxy', proxyFor: ['*'] })).status, 201);
+    const refused = await create({ id: proxy, label: 'Seed proxy', proxyFor: ['*'] });
+    assert.equal(refused.status, 400, JSON.stringify(refused.body));
+    assert.match(refused.body.error, /proxyFor/);
+    assert.equal(await exists(proxy), false);
 
     const plainMeta = await get(INSTANCES.a, token, `/api/spaces/${plain}/meta`);
     assert.equal(plainMeta.body.validationMode, 'strict', 'a new space enforces its schema from day one');
     assert.equal(plainMeta.body.strictLinkage, true);
-
-    const proxyMeta = await get(INSTANCES.a, token, `/api/spaces/${proxy}/meta`);
-    assert.equal(proxyMeta.body.validationMode, undefined, 'a proxy space is not seeded — it stores nothing to validate');
   });
 });

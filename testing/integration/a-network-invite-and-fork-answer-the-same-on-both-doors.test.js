@@ -88,7 +88,8 @@ describe('a fork through MCP and through REST', () => {
   it('an unknown space is refused with the same sentence on both doors', async () => {
     const args = { label: `f363-bad-${RUN}`, spaces: [`nope-${RUN}`] };
     const rest = await post(INSTANCES.a, admin, `/api/networks/${networks[1]}/fork`, args);
-    assert.equal(rest.status, 400, JSON.stringify(rest.body));
-    assert.equal((await tool(mcp, 'network_fork', { id: networks[1], ...args })).text, `Error (400): ${rest.body.error}`);
+    // The one existence answer (Q-531): a space a body names that does not exist answers as one a path names.
+    assert.equal(rest.status, 404, JSON.stringify(rest.body));
+    assert.equal((await tool(mcp, 'network_fork', { id: networks[1], ...args })).text, `Error (404): ${rest.body.error}`);
   });
 });

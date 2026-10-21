@@ -99,12 +99,12 @@ describe('Personal views', () => {
     });
 
     it('listing through the view aggregates both members and names the members it read', async () => {
-      const r = await readCollection(BASE, tokenA, VIEW_URL, 'facts', { limit: 100 });
-      assert.equal(r.status, 200);
+      // A body names the view as it is spelled; only a URL path takes the encoded form.
+      const r = await readCollection(BASE, tokenA, VIEW, 'facts', { limit: 100 });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
       const facts = r.results.map(m => m.fact);
       assert.ok(facts.includes('Alpha fact') && facts.includes('Beta fact'), `both members are read: ${facts}`);
-      const raw = await get(BASE, tokenA, `/api/brain/spaces/${VIEW_URL}/facts?limit=100`);
-      assert.deepEqual([...raw.body.viewMembers].sort(), [SPACE_A, SPACE_B].sort());
+      assert.deepEqual([...r.body.viewMembers].sort(), [SPACE_A, SPACE_B].sort());
     });
 
     it('stats sum across the members', async () => {
@@ -125,8 +125,10 @@ describe('Personal views', () => {
     it('a delete through the view is refused and the record stays', async () => {
       const r = await del(BASE, tokenA, `/api/brain/spaces/${VIEW_URL}/facts/${factA}`);
       assert.equal(r.status, 404, JSON.stringify(r.body));
-      const still = await get(BASE, tokenA, `/api/brain/spaces/${SPACE_A}/facts/${factA}`);
-      assert.equal(still.status, 200);
+      // A record is read through filter: the by-id GETs are gone.
+      const still = await readCollection(BASE, tokenA, SPACE_A, 'facts', { filter: { _id: factA } });
+      assert.equal(still.status, 200, JSON.stringify(still.body));
+      assert.deepEqual(still.results.map(m => m._id), [factA], 'the record must still be in its member space');
     });
 
     it('the retired targetSpace is refused by name on a write, in the query and in the body', async () => {
