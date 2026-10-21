@@ -21,8 +21,8 @@ import { AdminApi } from '../../core/admin-api.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import type { WireAnswer } from '../../testing/space-act-bodies';
 import {
-  ABANDON_ANSWERS, BACKUP_ID, DATA_SERVER_SENTENCES, MAINTENANCE, MIGRATE_ANSWERS, RESTORE_ANSWERS, SET_FAILED_SENTENCE, migrateReport,
-  restoreReport, restoreSpace,
+  ABANDON_ANSWERS, BACKUP_ID, DATA_SERVER_SENTENCES, MAINTENANCE, MIGRATE_ABANDON_ANSWERS, MIGRATE_ANSWERS, RESTORE_ANSWERS,
+  SET_FAILED_SENTENCE, migrateReport, restoreReport, restoreSpace,
 } from '../../testing/data-act-bodies';
 
 const NOW = Date.parse('2026-10-18T12:00:00.000Z');
@@ -45,7 +45,7 @@ const WORDS: Record<string, string> = {
   // would be shown instead); each carries its own key so a case can see which one was chosen.
   ...Object.fromEntries([
     'backup_names_unserved_spaces', 'backup_not_whole', 'space_being_restored', 'space_being_migrated', 'restore_act_running',
-    'no_restore_standing',
+    'no_restore_standing', 'migrate_act_running', 'no_migrate_standing',
   ].map(code => [`data.refusal.${code}`, `data.refusal.${code} (words)`])),
 };
 
@@ -472,5 +472,66 @@ describe('the end of a restore is shown, and a migrate that stops the instance s
     reportPolls(p)[0]!.error(new ProgressEvent('error'));
     p.fixture.detectChanges();
     expect(cardText(p, 'restore')).not.toMatch(/has stopped/i);
+  });
+});
+
+describe('a migrate that cannot finish can be abandoned from its card, as a restore can (Q-564 F5)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A running migrate whose set is owed: its copy failed and is retried, as a target that keeps timing out leaves it. */
+  const owedMigrate = () => migrateReport({
+    done: 0, spaces: [restoreSpace('general', 'owed', { attempts: 3, retryAt: '2026-10-18T12:05:00.000Z' }), restoreSpace('notes', 'owed', { attempts: 3 })],
+  });
+  const migrateAbandonButton = (p: Page) => Array.from(el(p).querySelectorAll('app-act-set-progress[kind="migrate"] button'))
+    .find(b => b.textContent?.includes('data.progress.abandon')) as HTMLButtonElement | undefined;
+  /** Click the migrate card's abandon and let the confirm's promise settle. */
+  async function clickAbandon(p: Page): Promise<void> {
+    migrateAbandonButton(p)!.click();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    p.fixture.detectChanges();
+  }
+
+  it('a running migrate with an owed space offers abandon on its own card; a confirmed abandon posts to the migrate door', async () => {
+    const p = open({ migrate: owedMigrate() });
+    expect(migrateAbandonButton(p), 'the migrate card offers no abandon').toBeTruthy();
+    await clickAbandon(p);
+    expect(p.confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true }));
+    expect(JSON.stringify(p.confirm.mock.calls[0]?.[0])).toContain('data.migrate.abandonConfirm');
+    flushWire(p.http.expectOne(r => r.method === 'POST' && r.url === '/api/admin/data/migrate/abandon'), MIGRATE_ABANDON_ANSWERS.abandoned);
+    expect(p.http.match(r => r.url === '/api/admin/data/restore/abandon'), 'a migrate abandon went to the restore door').toHaveLength(0);
+    p.fixture.detectChanges();
+    expect(statusText(p)).toContain('data.migrate.abandoned');
+  });
+
+  it('a cancelled confirm abandons nothing', async () => {
+    const p = open({ migrate: owedMigrate() });
+    p.confirm.mockResolvedValueOnce(false);
+    await clickAbandon(p);
+    expect(p.http.match(r => r.url === '/api/admin/data/migrate/abandon')).toHaveLength(0);
+  });
+
+  it('a migrate with no owed space (running) offers no abandon', () => {
+    const p = open({ migrate: migrateReport() });
+    expect(migrateAbandonButton(p)).toBeUndefined();
+  });
+
+  it('an abandon refused because the copy runs says so in our words, never the server\'s', async () => {
+    const p = open({ migrate: owedMigrate() });
+    await clickAbandon(p);
+    flushWire(p.http.expectOne(r => r.url === '/api/admin/data/migrate/abandon'), MIGRATE_ABANDON_ANSWERS.running);
+    p.fixture.detectChanges();
+    expect(pageText(p)).toContain('data.refusal.migrate_act_running');
+    for (const s of DATA_SERVER_SENTENCES) expect(pageText(p)).not.toContain(s);
+  });
+
+  it('the confirm says the old database stays in use and the new one must be emptied before another migrate, in every language', () => {
+    for (const lang of ['en', 'de', 'pl']) {
+      const d: Record<string, string> = JSON.parse(readFileSync(resolve(__dirname, `../../../../public/assets/i18n/${lang}.json`), 'utf8'));
+      for (const key of ['data.migrate.abandonConfirm', 'data.migrate.abandoned', 'data.refusal.migrate_act_running', 'data.refusal.no_migrate_standing']) {
+        expect(d[key]?.trim(), `${lang} has no words for ${key}`).toBeTruthy();
+      }
+    }
+    expect(EN['data.migrate.abandonConfirm']).toMatch(/old database/i);
+    expect(EN['data.migrate.abandonConfirm']).toMatch(/empt/i);
   });
 });
