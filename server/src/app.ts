@@ -531,6 +531,7 @@ export function createApp() {
   async function applyConfigFromDisk(actor: ReloadActor = WATCHER): Promise<void> {
     const beforeSpaces = structuredClone(getConfig().spaces);
     const beforeViews = snapshotViews();
+    const reservedBefore = [...(getConfig().retiredSpaceIds ?? [])];
     reloadConfig();
     const audit = (operation: string, spaceId: string, status: number) => logAuditEntry({
       tokenId: actor.tokenId ?? null, tokenLabel: actor.tokenLabel ?? null, ip: actor.ip,
@@ -594,7 +595,7 @@ export function createApp() {
      * scheduler re-armed cannot fire against a space that does not exist yet, and it runs even when a space failed. See
      * `schedulers.ts` for why the interval-driven sweeps are NOT re-armed here.
      */
-    await initAddedSpaces({ added, audit: (spaceId, status) => audit(CONFIG_RELOAD_OPERATIONS.added, spaceId, status), rearm: rearmCronSchedulers });
+    await initAddedSpaces({ added, reservedBefore, audit: (spaceId, status) => audit(CONFIG_RELOAD_OPERATIONS.added, spaceId, status), rearm: rearmCronSchedulers });
   }
 
   /**
