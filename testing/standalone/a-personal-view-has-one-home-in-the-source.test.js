@@ -13,7 +13,9 @@
  * 3. **Every creation site refuses a retired id** (`assertNotRetiredSpaceId`): every function that pushes a new entry into
  *    `config.spaces`, rewrites a space entry's id, or initialises the spaces a reload added.
  * 4. **Every place a space leaves config drops it from every view** (`dropSpaceFromViews`): every filter that takes an entry out of
- *    `config.spaces`, and the reload's `removeSpaces`.
+ *    `config.spaces`, the reload's `removeSpaces`, and every call of the one removal (`removeSpaceFromConfig`, b100 row 13). The
+ *    removal drops the space from every view; every other site calls it and writes no filter of its own (seen red at 743562a5 on the
+ *    delete's, the resumed delete's and the reload's hand-written halves).
  * 5. **One function removes tokens from `config.tokens`**, in `auth/tokens.ts`, and `revokeToken` and `createOAuthToken` (rotation
  *    and cap eviction) both go through it, so the views cascade has one place to live. No writer of `oauthClients` deletes views
  *    (a client eviction is forced by any low-privilege registrar; its owners' views fall to the 30-day grace sweep).

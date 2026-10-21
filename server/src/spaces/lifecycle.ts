@@ -13,7 +13,7 @@ import { getConfig, saveConfig, mutateConfig, getEmbeddingConfig, getDataRoot } 
 import { ensureSpaceFilesDir } from '../files/files.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { log, peerList, peerText } from '../util/log.js';
-import type { SpaceConfig, FactDoc } from '../config/types.js';
+import type { Config, SpaceConfig, FactDoc } from '../config/types.js';
 import type { ParsedSpaceMeta } from './body-schemas.js';
 import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady } from './vector-index.js';
 import { armSearchIndexPresence, reconcileSpaceSearchIndexes, forgetSpaceSearchIndexWaiters } from './search-index-presence.js';
@@ -875,19 +875,37 @@ async function removeOwnCopy(spaceId: string, ctx: SpaceActBodyContext): Promise
     );
   }
 
-  // Commit: drop done — remove from config (and from every personal view that listed it, so a recreated id never silently rejoins)
-  // and clear the marker in one atomic write.
+  // Commit: drop done — remove from config and clear the marker in one atomic write, then forget it.
+  commitSpaceDeletion(spaceId, apply => { apply(cfg); saveConfig(cfg); });
+  return true;
+}
+
+/**
+ * Take `spaceId` out of a config inside the caller's write: out of `spaces`, and out of every personal view that listed it, so a recreated
+ * id never silently rejoins one. The ONE removal every place a space leaves config makes (a delete, a resumed delete, a reload whose file
+ * names it in `removeSpaces`); a no-op for a space already gone from `spaces`, which is how the reload finds it.
+ */
+export function removeSpaceFromConfig(cfg: Config, spaceId: string): void {
   cfg.spaces = cfg.spaces.filter(s => s.id !== spaceId);
   dropSpaceFromViews(cfg, spaceId);
-  delete cfg.pendingSpaceOp;
-  saveConfig(cfg);
-  // Nothing is waiting for a space that no longer exists: its deferred confirmation and its collections' index waiters.
+}
+
+/**
+ * Commit a deletion whose data is dropped: remove the space from config and clear the marker in ONE write (`write` runs it - the direct
+ * delete on the config it holds, the resumed delete through `mutateConfig`), then forget what this process keeps for it. Both delete paths
+ * end here, so the resumed one cannot leave behind what the direct one forgets: nothing waits for a space that no longer exists (its
+ * deferred confirmation, its collections' index waiters), and no Merkle leaves or space shape outlive it (both caches are bounded; a
+ * deleted space's entry would only take a slot).
+ */
+function commitSpaceDeletion(spaceId: string, write: (apply: (cfg: Config) => void) => void): void {
+  write(cfg => {
+    removeSpaceFromConfig(cfg, spaceId);
+    delete cfg.pendingSpaceOp;
+  });
   forgetSearchWaiter(confirmWaiterKey(spaceId));
   forgetSpaceSearchIndexWaiters(spaceId);
-  // And no Merkle leaves or space shape outlive it (both caches are bounded; a deleted space's entry would only take a slot).
   forgetMerkleLeaves(spaceId);
   forgetSpaceShape(spaceId);
-  return true;
 }
 
 /** What a wipe clears: every knowledge collection, so a new one cannot be left behind by one. */
@@ -1240,13 +1258,9 @@ async function resumePendingSpaceOp(): Promise<ResumeResult> {
         log.error(`Could not complete pending delete ${peerText(target)}; marker kept for the next space op or restart. Errors: ${peerList(errors, '; ')}`);
         return { completed: false, reason: errors.join('; ') };
       }
-      // Same treatment: `dropSpaceData` is slow, so re-read before committing rather than writing
-      // a spaces array captured before it.
-      mutateConfig(fresh => {
-        fresh.spaces = fresh.spaces.filter(sp => sp.id !== op.spaceId);
-        dropSpaceFromViews(fresh, op.spaceId);
-        delete fresh.pendingSpaceOp;
-      });
+      // Same treatment: `dropSpaceData` is slow, so re-read before committing (`mutateConfig`) rather than writing
+      // a spaces array captured before it - and the same commit as the direct delete, forgetting included.
+      commitSpaceDeletion(op.spaceId, mutateConfig);
       log.info(`Completed interrupted deletion ${peerText(target)}`);
       return { completed: true };
     } else {

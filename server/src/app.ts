@@ -52,13 +52,13 @@ import { maintenanceMiddleware } from './maintenance.js';
 import { globalRateLimit, ipFloodBackstop } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, loadSecrets, saveConfig, startConfigWatcher } from './config/loader.js';
 import { reloadSpaceDiff } from './config/reload-space-diff.js';
-import { dropSpaceFromViews, restoreViewsMissingAfterReload, snapshotViews } from './config/views.js';
+import { restoreViewsMissingAfterReload, snapshotViews } from './config/views.js';
 import { logAuditEntry } from './audit/audit.js';
 import { CONFIG_RELOAD_OPERATIONS } from './audit/middleware.js';
 import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
-import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, reconcilePendingSpaceOp, WIPE_COLLECTION_TYPES, wipeTypesOf } from './spaces/lifecycle.js';
+import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, reconcilePendingSpaceOp, removeSpaceFromConfig, WIPE_COLLECTION_TYPES, wipeTypesOf } from './spaces/lifecycle.js';
 import { col } from './db/mongo.js';
 import { log, peerText, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
@@ -552,8 +552,9 @@ export function createApp() {
         log.warn(`config.json no longer lists space(s) ${diff.kept.map(s => s.id).join(', ')}; kept them. `
           + 'To remove a space by editing the file, list its id in "removeSpaces".');
       }
-      // A space the file removes on purpose leaves every view's member list too, or a recreated id would silently rejoin it.
-      for (const id of diff.removed) dropSpaceFromViews(cfg, id);
+      // A space the file removes on purpose leaves config through the one removal (`removeSpaceFromConfig`): every view's member list
+      // too, or a recreated id would silently rejoin it.
+      for (const id of diff.removed) removeSpaceFromConfig(cfg, id);
       // A view the file no longer lists is put back, and said: personal views are their owners' data, as spaces are the operator's (S-10).
       const viewsKept = restoreViewsMissingAfterReload(beforeViews, cfg);
       if (viewsKept > 0) {
