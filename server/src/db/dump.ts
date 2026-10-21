@@ -25,7 +25,7 @@ import { MongoClient } from 'mongodb';
 import { EJSON } from 'bson';
 import { log } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
-import { boundedClientOptions, perBatchTimeout } from './bounded-client-options.js';
+import { boundedClientOptions, closeWithinBound, perBatchTimeout } from './bounded-client-options.js';
 import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
 import { redactUri } from '../config/mongo-uri.js';
 
@@ -187,6 +187,6 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
     log.info(`dump: complete — ${manifestCollections.length} collections in ${destDir}`);
     return manifest;
   } finally {
-    await client.close().catch(() => {});
+    await closeWithinBound(client);
   }
 }

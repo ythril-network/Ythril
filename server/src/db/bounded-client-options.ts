@@ -35,6 +35,30 @@ export function boundedClientOptions(uri: string, callerDefaults: CallerDefaults
   return { ...options, timeoutMS: Number.isFinite(named) && named > 0 ? Math.min(named, bound) : bound };
 }
 
+/**
+ * Close a client opened on its own (a dump's, a restore's, a migrate's target client), waiting at most one bound for it: the active
+ * scope's per-operation figure, else the client's own `timeoutMS`, else its `connectTimeoutMS`. Never throws.
+ *
+ * ## What it prevents (Q-564)
+ *
+ * `MongoClient.close()` ends the client's sessions on the server before it lets go, and that command carries no bound: against a target
+ * that had stopped answering it took 25.5 s at an operation bound of 1.5 s, awaited in the `finally` of the act's body, so a migrate's
+ * attempt could not end - and could not be abandoned - until it did. Past the figure the close is left to finish in the background
+ * (the driver squashes its failure) and the caller goes on; nothing it closes is used again. Every act body's client closes through
+ * here, so the restore's close and the migrate's cannot differ.
+ */
+export async function closeWithinBound(client: { close(): Promise<void>; readonly timeoutMS?: number; readonly options?: { connectTimeoutMS?: number } }): Promise<void> {
+  const ms = boundOperationMs() ?? (typeof client.timeoutMS === 'number' && client.timeoutMS > 0 ? client.timeoutMS : undefined)
+    ?? client.options?.connectTimeoutMS ?? 10_000;
+  let timer: NodeJS.Timeout | undefined;
+  const elapsed = new Promise<void>(resolve => { timer = setTimeout(resolve, ms); timer.unref?.(); });
+  try {
+    await Promise.race([client.close().catch(() => { /* the close's own failure: nothing is left to undo */ }), elapsed]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** A cursor's options on a client of {@link boundedClientOptions}: each batch bounded when the client carries a figure, else none. */
 export function perBatchTimeout(client: { readonly timeoutMS?: number }): { timeoutMode?: 'iteration' } {
   return typeof client.timeoutMS === 'number' && client.timeoutMS > 0 ? { timeoutMode: 'iteration' } : {};

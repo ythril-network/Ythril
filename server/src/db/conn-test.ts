@@ -18,6 +18,7 @@
  */
 import { MongoClient } from 'mongodb';
 import { mongoClientOptions, uriQueryOptions } from './client-options.js';
+import { closeWithinBound } from './bounded-client-options.js';
 
 const TEST_TIMEOUT_MS = 5_000;
 
@@ -37,6 +38,6 @@ export async function testConnection(uri: string): Promise<{ ok: boolean; error?
       error: err instanceof Error ? err.message : String(err),
     };
   } finally {
-    await client.close().catch(() => {});
+    await closeWithinBound(client);
   }
 }

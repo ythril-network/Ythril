@@ -22,7 +22,8 @@ import {
 import { log } from '../util/log.js';
 import { RequestRefusal } from '../util/errors.js';
 import { dbNameFromUri } from './db-name.js';
-import { boundedClientOptions } from './bounded-client-options.js';
+import { boundedClientOptions, closeWithinBound } from './bounded-client-options.js';
+import { isNamespaceExists, isNamespaceNotFound } from './namespace-answers.js';
 import { parseSpaceCollection } from './space-collection.js';
 
 /**
@@ -216,22 +217,26 @@ export async function restoreDatabase(uri: string, srcDir: string): Promise<void
     const db = client.db(dbNameFromUri(uri));
     const named = new Set(collections.map(c => c.name));
 
+    // Only the store's "not there" and "already there" are tolerated below; anything else - a timeout of a target that stopped answering
+    // above all - is thrown, so the attempt ends at the first failed operation instead of paying a bound for each one after it (Q-564).
     for (const entry of collections) {
-      await db.collection(entry.name).drop().catch(() => {
-        // Ignore "ns not found" — collection may not exist yet on a fresh DB
-      });
-      // A collection the dump recorded as EMPTY still has to come back: skipping it left the restored instance without it.
-      await db.createCollection(entry.name).catch(() => { /* created by a concurrent writer: it is empty either way */ });
+      // A collection a fresh database does not have yet.
+      await db.collection(entry.name).drop().catch((err: unknown) => { if (!isNamespaceNotFound(err)) throw err; });
+      // A collection the dump recorded as EMPTY still has to come back: skipping it left the restored instance without it. One a
+      // concurrent writer created is empty either way.
+      await db.createCollection(entry.name).catch((err: unknown) => { if (!isNamespaceExists(err)) throw err; });
       await load(db, srcDir, entry);
     }
 
     // A space's collection the backup does not hold was written after it: dropped, so the database is the backup.
     for (const { name } of await db.listCollections({}, { nameOnly: true }).toArray()) {
-      if (!named.has(name) && parseSpaceCollection(name)) await db.collection(name).drop().catch(() => { /* gone already */ });
+      if (!named.has(name) && parseSpaceCollection(name)) {
+        await db.collection(name).drop().catch((err: unknown) => { if (!isNamespaceNotFound(err)) throw err; });
+      }
     }
 
     log.info(`restore: complete — ${collections.length} collections restored from ${srcDir}`);
   } finally {
-    await client.close().catch(() => {});
+    await closeWithinBound(client);
   }
 }
