@@ -40,17 +40,20 @@ export interface ActSetReport {
   state: string;
   startedAt: string;
   endedAt?: string;
+  /** The backup the set restores from, or (a migrate) the dump it copies; set once known. */
+  backupId?: string;
+  /** Our sentence for a failure that ended the whole set (never a driver's text, never a URI). */
+  lastError?: string;
   done: number;
   total: number;
   spaces: ActSetSpaceReport[];
+  emptied: string[];
+  leftOut: string[];
 }
 
 /** `GET /api/admin/data/restore` while a restore stands, or after the last one. */
 export interface RestoreReport extends ActSetReport {
   restoreId: string;
-  backupId?: string;
-  emptied: string[];
-  leftOut: string[];
 }
 
 /** `GET /api/admin/data/restore`: the report, or `{ restore: null }` when no restore ever ran here. */
@@ -72,10 +75,7 @@ export interface MigrateStarted {
   spaces: string[];
 }
 
-/**
- * `GET /api/admin/data/migrate` (slice I4a). GUESSED from the plan's "in the restore report's shape": `migrateId` for `restoreId`, no
- * backup. Re-read against the server when I4a lands.
- */
+/** `GET /api/admin/data/migrate`: the same report as a restore's (`spaces/act-set-report.ts`, one handler for both kinds). */
 export interface MigrateReport extends ActSetReport {
   migrateId: string;
 }

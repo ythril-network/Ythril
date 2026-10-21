@@ -19,7 +19,8 @@ import { AdminApi } from '../../core/admin-api.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import type { WireAnswer } from '../../testing/space-act-bodies';
 import {
-  ABANDON_ANSWERS, BACKUP_ID, DATA_SERVER_SENTENCES, MAINTENANCE, MIGRATE_ANSWERS, RESTORE_ANSWERS, migrateReport, restoreReport, restoreSpace,
+  ABANDON_ANSWERS, BACKUP_ID, DATA_SERVER_SENTENCES, MAINTENANCE, MIGRATE_ANSWERS, RESTORE_ANSWERS, SET_FAILED_SENTENCE, migrateReport,
+  restoreReport, restoreSpace,
 } from '../../testing/data-act-bodies';
 
 const NOW = Date.parse('2026-10-18T12:00:00.000Z');
@@ -143,11 +144,14 @@ describe('a restore is accepted, then shown as it runs (bundle-157)', () => {
     flushWire(p.http.expectOne(r => r.method === 'POST' && r.url === '/api/admin/data/restore'), RESTORE_ANSWERS.accepted);
   });
 
-  it('the confirm text names what is replaced and what is not, that peers re-send, and that erased records come back', async () => {
+  it('the confirm text names what is replaced and what is not, that peers re-send, that erased records come back, and what a restore cannot repair', async () => {
     const p = open();
     await p.c.confirmRestore(BACKUP_ID);
     const asked = JSON.stringify(p.confirm.mock.calls[0]?.[0] ?? null);
-    for (const key of ['data.restore.confirmMessage', 'data.restore.confirmNotReplaced', 'data.restore.confirmPeers', 'data.restore.confirmErasures']) {
+    for (const key of [
+      'data.restore.confirmMessage', 'data.restore.confirmNotReplaced', 'data.restore.confirmPeers', 'data.restore.confirmErasures',
+      'data.restore.confirmLimits',
+    ]) {
       expect(asked, key).toContain(key);
     }
     p.http.match(r => r.method === 'POST').forEach(r => flushWire(r, RESTORE_ANSWERS.accepted));
@@ -208,6 +212,18 @@ describe('a restore is accepted, then shown as it runs (bundle-157)', () => {
     vi.advanceTimersByTime(1_000);
     p.fixture.detectChanges();
     expect(statusText(p)).toContain('data.restore.abandonedOutcome');
+  });
+
+  it('a restore this page started is shown even when its first report says it already ended', async () => {
+    const p = open();
+    await restoreAnswered(p, RESTORE_ANSWERS.acceptedOne);
+    p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/restore').forEach(r => r.flush(restoreReport({
+      state: 'completed', endedAt: '2026-10-18T11:56:00.000Z', emptied: [],
+      spaces: [restoreSpace('general', 'done', { completedAt: '2026-10-18T11:56:00.000Z' })],
+    })));
+    p.fixture.detectChanges();
+    expect(pageText(p)).toContain('data.progress.restoreTitle');
+    expect(pageText(p)).toContain('DONE 1 of 1');
   });
 });
 
@@ -309,6 +325,16 @@ describe('the migrate card maps its refusals to keys and says what a migrate doe
     p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/migrate').forEach(r => r.flush(migrateReport()));
     p.fixture.detectChanges();
     expect(pageText(p)).toContain('DONE 1 of 2');
+  });
+
+  it('a migrate that failed whole shows the sentence it ended with, which names the backup (the set-level lastError)', async () => {
+    const p = open({ migrationEnabled: true });
+    await migrateAnswered(p, MIGRATE_ANSWERS.accepted);
+    p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/migrate')
+      .forEach(r => r.flush(migrateReport({ state: 'abandoned', lastError: SET_FAILED_SENTENCE, endedAt: '2026-10-18T11:58:00.000Z' })));
+    p.fixture.detectChanges();
+    expect(pageText(p)).toContain(SET_FAILED_SENTENCE);
+    expect(pageText(p)).toContain(BACKUP_ID);
   });
 });
 

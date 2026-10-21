@@ -8,8 +8,8 @@
  * - `GET /api/admin/data/restore`: `restoreReport()` (`RestoreReport`), or `{ restore: null }`;
  * - `POST /api/admin/data/restore/abandon`: `abandonRestore()` (200), `no_restore_standing` (404), `restore_act_running` (409);
  * - `POST /api/admin/data/migrate`: `startMigrate`'s `{ migrateId, spaces }` (202), the two `INFRA_MANAGED` 409s, `target_not_empty`;
- * - `GET /api/admin/data/migrate`: GUESSED. Slice I4a adds it "in the restore report's shape"; it is coded here as `restoreReport()` with
- *   `migrateId` for `restoreId` and no `backupId`, `emptied` or `leftOut`. Re-copy it when I4a lands;
+ * - `GET /api/admin/data/migrate`: `actSetReport('migrate')` (`spaces/act-set-report.ts`), the restore report's shape with `migrateId`;
+ *   a set that failed whole carries its own `lastError`;
  * - `GET /api/admin/data/maintenance`: `maintenanceState()` (`{ active, manual, heldBy }`).
  *
  * A fixture is allowed to be literal (project rule): these are the expected values, not derived from the code under test.
@@ -86,11 +86,17 @@ export const MIGRATE_ANSWERS = {
   duringRestore: { status: 409, body: { error: MIGRATE_DURING_RESTORE_SENTENCE, code: 'space_being_restored' } },
 } satisfies Record<string, WireAnswer>;
 
-/** GUESSED (slice I4a): the migrate report in the restore report's shape, `migrateId` for `restoreId`. */
+/** A migrate report: the restore report's shape (one handler serves both), `migrateId` for `restoreId`. */
 export function migrateReport(over: Record<string, unknown> = {}) {
   const spaces = [restoreSpace('general', 'done'), restoreSpace('notes', 'running')];
-  return { migrateId: 'set-9', state: 'running', startedAt: '2026-10-18T11:55:00.000Z', done: 1, total: 2, spaces, ...over };
+  return {
+    migrateId: 'set-9', backupId: BACKUP_ID, state: 'running', startedAt: '2026-10-18T11:55:00.000Z', done: 1, total: 2, spaces,
+    emptied: [], leftOut: [], ...over,
+  };
 }
+
+/** The sentence a whole-set failure ends a migrate with: ours, naming the backup, never the URI. */
+export const SET_FAILED_SENTENCE = `The migrate did not complete: the copy into the new database was refused. The instance stays on its database; the copy of it is backup '${BACKUP_ID}'.`;
 
 export const MAINTENANCE = {
   off: { active: false, manual: false, heldBy: null },

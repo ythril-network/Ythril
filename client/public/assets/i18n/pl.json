@@ -1770,6 +1770,7 @@
   "data.restore.confirmNotReplaced": "Nie są zastępowane: dziennik audytu, kolejki zadań i zapisane bajty plików, więc wpis pliku i jego bajty mogą przestać do siebie pasować.",
   "data.restore.confirmPeers": "Węzły partnerskie wyślą ponownie to, co ta instancja otrzymała od nich od czasu kopii.",
   "data.restore.confirmErasures": "Wpisy usunięte po wykonaniu kopii wracają, także te usunięte na żądanie usunięcia danych; dziennik audytu nadal odnotowuje to usunięcie.",
+  "data.restore.confirmLimits": "Przywracanie nie odzyska tego, co mają tylko węzły, które nigdy nic nie wysyłają do tej instancji, a po przywróceniu do pustej bazy węzły mogą pomijać jej kolejne zapisy, dopóki sieć się nie zsynchronizuje.",
   "data.restore.leaveOutRetry": "Przywróć bez nich",
   "data.restore.leaveOutConfirm": "Przywrócić kopię bez {{spaces}}? Ich dane z kopii nie zostaną nigdzie przywrócone.",
   "data.restore.completed": "Przywracanie zakończone: każda przestrzeń zawiera teraz kopię zapasową.",
