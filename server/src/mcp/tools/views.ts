@@ -18,6 +18,7 @@ import { VIEW_OPERATIONS } from '../../audit/middleware.js';
 import { mfaRequiredFor } from '../../auth/mfa-policy.js';
 import { isMfaEnabled } from '../../auth/totp.js';
 import { ToolRefusal } from '../../util/errors.js';
+import { isOidc } from '../../auth/oidc-caller.js';
 
 const json = (data: Record<string, unknown>, text?: string): ToolResult => ({
   content: [{ type: 'text' as const, text: text ?? JSON.stringify(data) }],
@@ -36,8 +37,9 @@ function doorOf(ctx: ToolContext): ViewAuditDoor {
     ip: '', method: ctx.transport === 'mcp' ? 'MCP' : 'POST',
     path: ctx.transport === 'mcp' ? `http:${ctx.name}` : `/api/${ctx.name}`,
     tokenId: ctx.actor?.tokenId ?? null, tokenLabel: ctx.actor?.tokenLabel ?? null,
-    authMethod: ctx.callerRecord?.oidcIssuer !== undefined ? 'oidc' : 'pat',
-    oidcSubject: ctx.callerRecord?.oidcSubject ?? null,
+    // As the door derived it (`auditAuthMethod` / `auditOidcSubject`), the same answer REST's view routes record.
+    authMethod: ctx.auditIdentity?.authMethod ?? null,
+    oidcSubject: ctx.auditIdentity?.oidcSubject ?? null,
   };
 }
 
@@ -146,7 +148,7 @@ export const view_copyTool: ToolHandler = {
     const record = ctx.callerRecord;
     // The second factor token management asks, answered honestly: this door has no place for a code, so a caller who would need one on REST
     // is told to use the web UI. The same rule as REST's (`mfaRequiredFor`), not a third divergence.
-    if (record && record.oidcIssuer === undefined && mfaRequiredFor({ mfa: record.mfa }, isMfaEnabled())) {
+    if (record && !isOidc(record) && mfaRequiredFor({ mfa: record.mfa }, isMfaEnabled())) {
       throw new ViewRefusal('copyNeedsMfa', 'Giving a view to a token needs MFA step-up, which this door cannot present; use the web UI (Settings > Tokens)');
     }
     const given = copyViewTo(actorOf(ctx), String(ctx.args['view'] ?? ''), ctx.args['toTokenId'], ctx.args['fromTokenId']);

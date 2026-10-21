@@ -6,7 +6,8 @@
  *
  * - **Owner keys** (`viewOwnerOf` in `config/views.ts`): `token:<id>`, `oauth:<clientId>` for an MCP connector token (its id changes
  *   on every rotation), `oidc:<issuer>#<sub>` for an OIDC caller; an OIDC caller with no `sub` has no owner key (no shared
- *   'unknown' principal), so it cannot create a view. The OIDC record is read as `{ oidcIssuer, oidcSubject }`.
+ *   'unknown' principal), so it cannot create a view. The OIDC record is read as `validateOidcJwt` builds it: `{ source: 'oidc', oidcIssuer, oidcSubject }`, its
+ *   kind told by `isOidc` (b100 row 8).
  * - **Lifecycle**: a connector rotation keeps the views (same client id); an explicit revoke deletes the owner's views at once; a
  *   cap EVICTION does not (any low-privilege registrar can force one) and leaves them to the sweep; the sweep
  *   (`sweepOwnerlessViews({ now })`) deletes a view only after its owner has had no live token for `VIEW_OWNER_GRACE_MS` (30 days),
@@ -79,9 +80,9 @@ describe('a personal view belongs to its owner (Q-531)', { skip }, () => {
       const { viewOwnerOf } = await views();
       assert.equal(viewOwnerOf({ id: 'pat-1', name: 'p' }), 'token:pat-1');
       assert.equal(viewOwnerOf({ id: 'conn-7', name: 'c', oauthClientId: 'client-3' }), 'oauth:client-3');
-      assert.equal(viewOwnerOf({ id: 'oidc:abc', name: 'o', oidcIssuer: 'https://idp.example', oidcSubject: 'abc' }), 'oidc:https://idp.example#abc');
+      assert.equal(viewOwnerOf({ id: 'oidc:abc', name: 'o', source: 'oidc', oidcIssuer: 'https://idp.example', oidcSubject: 'abc' }), 'oidc:https://idp.example#abc');
       let noSub;
-      try { noSub = viewOwnerOf({ id: 'oidc:unknown', name: 'o', oidcIssuer: 'https://idp.example', oidcSubject: null }); } catch { noSub = null; }
+      try { noSub = viewOwnerOf({ id: 'oidc:unknown', name: 'o', source: 'oidc', oidcIssuer: 'https://idp.example', oidcSubject: null }); } catch { noSub = null; }
       assert.equal(noSub ?? null, null, `an OIDC caller without a sub got the owner key ${noSub}: every such caller would share one owner`);
     });
   });

@@ -11,6 +11,7 @@
 import { configWriteGeneration, getConfig } from '../config/loader.js';
 import { tokenIsLive } from '../auth/token-liveness.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
+import { isOidc } from '../auth/oidc-caller.js';
 import { resolveOwnView, viewOwnerOf, viewReadMembers, type ViewOwnerSource } from '../config/views.js';
 import type { TokenRights } from '../config/rights-shape.js';
 
@@ -36,7 +37,7 @@ export function viewStreamGuard(snapshot: ViewStreamSnapshot): { holds(): boolea
       const cfg = getConfig();
       // A stored token must still exist and be live; an OIDC session has no stored row and is judged by the identity it carried.
       const stored = cfg.tokens.find(t => t.id === snapshot.token.id);
-      const isSession = snapshot.token.oidcIssuer !== undefined;
+      const isSession = isOidc(snapshot.token);
       if (!isSession && (!stored || !tokenIsLive(stored))) return false;
       const owner = viewOwnerOf(snapshot.token);
       const view = resolveOwnView(owner, snapshot.viewId, cfg);

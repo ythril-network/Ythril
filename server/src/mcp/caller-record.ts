@@ -15,6 +15,8 @@ export function callerRecordOf(token: unknown): ToolCallerRecord | undefined {
   const mfa = t['mfa'] === 'inherit' || t['mfa'] === 'exempt' || t['mfa'] === 'required' ? t['mfa'] : undefined;
   return {
     id: t['id'],
+    // The mark `isOidc` reads: a snapshot without it would turn an OIDC session into a stored token for every view rule.
+    source: str('source'),
     oauthClientId: str('oauthClientId'),
     oidcIssuer: str('oidcIssuer'),
     ...(Object.hasOwn(t, 'oidcSubject') ? { oidcSubject: typeof t['oidcSubject'] === 'string' && t['oidcSubject'] ? t['oidcSubject'] as string : null } : {}),
