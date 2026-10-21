@@ -40,8 +40,9 @@ describe('ViewsStore writes (Q-531)', () => {
 
   it('create with every space the caller reads sends the wildcard', () => {
     const { store, http } = setup();
-    store.create({ name: 'all', members: '*' }).subscribe();
-    expect(http.expectOne('/api/views').request.body).toEqual({ name: 'all', members: '*' });
+    // The server's shape, a list (`view-members-contract.spec` parses it against the server's schema); a bare '*' is refused there.
+    store.create({ name: 'all', members: ['*'] }).subscribe();
+    expect(http.expectOne('/api/views').request.body).toEqual({ name: 'all', members: ['*'] });
   });
 
   it('rename patches the encoded id and replaces the view in place', () => {

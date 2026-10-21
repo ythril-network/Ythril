@@ -19,26 +19,34 @@ export function viewRefusalText(transloco: RefusalTranslator, err: unknown): str
  * read NOW. A view belongs to exactly one owner and is never a space; its id is `@<name>`.
  *
  * `readable` is what a read through the view really reads (rights are judged at read time, so a member the caller lost drops out and a
- * later grant brings it back). `members` is what the view lists, `'*'` for "every space the caller reads, including later ones".
+ * later grant brings it back). `members` is what the view lists: space ids, or {@link EVERY_SPACE} for "every space the caller reads,
+ * including later ones".
  */
 export interface PersonalView {
   id: string;
   name: string;
-  members: readonly string[] | '*';
+  members: readonly string[];
   readable: readonly string[];
   createdAt?: string;
 }
 
+/** The member that stands for every space the caller reads; the server's `WILDCARD_MEMBER` (`view-members-contract.spec` holds them equal). */
+export const WILDCARD_MEMBER = '*';
+/** The member list of a view over every space the caller reads, as the server takes and answers it: a list, never a bare `'*'`. */
+export const EVERY_SPACE: readonly string[] = Object.freeze([WILDCARD_MEMBER]);
+/** Whether a member list stands for every space (the server reduces a list holding the wildcard to the wildcard alone). */
+export const listsEverySpace = (members: readonly string[] | undefined): boolean => !!members?.includes(WILDCARD_MEMBER);
+
 /** What the create door takes: a name (lower-case letters, digits and hyphens) and the spaces to read. */
 export interface ViewCreateBody {
   name: string;
-  members: readonly string[] | '*';
+  members: readonly string[];
 }
 
 /** One definition the upgrade could not give to a live admin token, waiting for an instance admin to claim it (`unclaimedViews`). */
 export interface UnclaimedView {
   name: string;
-  members?: readonly string[] | '*';
+  members?: readonly string[];
 }
 
 /** `GET /api/admin/views/orphans`: views nobody owns any more, counted by kind of owner (never named), and the definitions to claim. */

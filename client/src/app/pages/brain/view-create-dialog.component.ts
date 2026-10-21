@@ -6,7 +6,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { DIALOG_STYLES } from '../settings/dialog.styles';
 import { ViewsStore } from '../../core/views.store';
-import { viewRefusalText, type PersonalView } from '../../core/views-api.service';
+import { EVERY_SPACE, viewRefusalText, type PersonalView } from '../../core/views-api.service';
 
 /** The shape of a space as this picker needs it: an id, and the label to show beside it. */
 export interface ViewMemberChoice { id: string; label: string }
@@ -116,7 +116,7 @@ export class ViewCreateDialogComponent {
     if (!name || !this.canSubmit() || this.saving()) return;
     this.saving.set(true);
     this.error.set('');
-    const members = this.mode() === 'all' ? '*' : this.spaces().map(s => s.id).filter(id => this.chosen().has(id));
+    const members = this.mode() === 'all' ? EVERY_SPACE : this.spaces().map(s => s.id).filter(id => this.chosen().has(id));
     this.views.create({ name, members }).pipe(finalize(() => this.saving.set(false))).subscribe({
       next: view => this.created.emit(view),
       error: err => this.error.set(viewRefusalText(this.transloco, err)),

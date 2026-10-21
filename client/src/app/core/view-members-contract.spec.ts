@@ -54,6 +54,8 @@ describe('a view\'s members travel in the server\'s shape (Q-531)', () => {
     const sent = (req.request.body as { members: unknown }).members;
     expect(ViewMembersInput.safeParse(sent).success, `the server's schema refuses members ${JSON.stringify(sent)}`).toBe(true);
     expect(sent).toEqual([WILDCARD_MEMBER]);
+    const clientApi = await import('./views-api.service') as { WILDCARD_MEMBER?: unknown };
+    expect(clientApi.WILDCARD_MEMBER, 'the client\'s wildcard is not the server\'s').toBe(WILDCARD_MEMBER);
     req.flush({ view: { id: '@everything', name: 'everything', members: [WILDCARD_MEMBER], readable: ['qa'] } });
   });
 
