@@ -17,10 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A webhook subscription that named only retired ids is disabled, not emptied | Subscribe to the member spaces |
 | `targetSpace` is refused by name on every write door (both REST spellings, MCP) and `proxyFor` on `POST /api/spaces` and `save_space` is refused by name | Send `space`; make a view with `POST /api/views` or `view_create` |
 | New REST and MCP doors: `/api/views` (list, read, create, rename, delete, copy) and `view_list`, `view_get`, `view_create`, `view_update`, `view_delete`, `view_copy` | A view id in a URL is percent-encoded (`%40team`) |
-| New admin doors `/api/admin/views/orphans`, `/claim`, `/retired/:id/purge`, `/migration` and `view_orphans`, `view_claim`, `view_purge_retired`, `view_migration`; `GET /api/spaces` lists `retiredSpaceIds` to admins | Read the migration report after upgrading |
+| New admin doors `/api/admin/views/{orphans,claim,retired/:id/purge,migration}` and their `view_*` tools; `GET /api/spaces` lists `retiredSpaceIds` to admins | Read the migration report after upgrading |
 | A read door takes your view as `space`, reads each member you can read at that moment and names them in `viewMembers`; a view never writes; 50 views per owner, 1 000 members | Name a member space to write |
-| A write or config door given a view id (owner hinted), and any door given a missing space in its body, answers `404 Space '<id>' not found`; network create, fork, add-space answered `400`; `graph_merge`, merge, `reindex`, `reembed` refuse before any work | Name a member space; branch on `404` |
-| The `reindex` refusal that listed every member of a proxy is gone; a view id answers as a missing space | Reindex each member space |
+| A write or config door given a view id, and any door given a missing space in its body, answers `404 Space '<id>' not found`; network create, fork, add-space answered `400`; `graph_merge`, merge, `reindex`, `reembed` refuse before any work | Name a member space; branch on `404` |
 | Revoking a token deletes its owner's views at once; a connector rotation keeps them; a sweep ends the views of an owner with no live token for 30 days (OIDC owners' views are kept) | Copy a view first (`view_copy`) to keep it |
 | A read through a view is one audit row with `spaceId: null` and `spaces`; `view.create`, `view.update`, `view.delete`, `view.copy`, `view.claim` and `space.retired_id.purge` rows carry the owner key and member count, never a name | Query by `operation`, not `spaceId` |
 | New metrics `ythril_views_total`, `ythril_views_deleted_total{reason}` and `ythril_retired_space_ids` | Alert on `ythril_retired_space_ids > 0` until each id is purged |
@@ -32,8 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A path a regular file blocks (move, `mkdir`, upload, `write_file`; a directory into itself) is `409` `path_blocked`, was REST `500`, MCP `400` | Branch on `code` |
 | A move onto a file, folder or file record is `409` `destination_exists` and changes nothing, was a `200` replace (upload, restore and `keep-incoming` still replace) | Delete the destination first (deleted on every replica) |
 | `keep-both` (`rename`) and `save-to-space` onto a file, folder or record are `409` `destination_exists`, were a `200` replace; `save-to-space` needs `files: write` there | Choose another name or space |
-| A directory delete needs `confirm: true` (`422` `confirm_required`; space root `400`), on MCP too; a `files: write` token can delete a tree | Send `confirm`; review `files: write` tokens |
-| A directory delete fires one `file.deleted` per file it removed (it fired none) | Deduplicate on `X-Ythril-Delivery` |
+| A directory delete needs `confirm: true` (`422` `confirm_required`; space root `400`), on MCP too; a `files: write` token can delete a tree; one `file.deleted` per file removed (was none) | Send `confirm`; review `files: write` tokens |
 | A file act whose own file-system call fails is `500` `file_system_fault` with `retryable: false` on every door, `write_file`, upload and chunked upload included (was `400` with the data path on `write_file`, a bare `500` on upload) | Update body matchers |
 | A name that fits a path component but whose temporary name does not is `file_system_fault`, never `path_blocked` about your path | Shorten the name if it recurs |
 | A delete the storage refuses is `500` `file_system_fault` (an unreadable path was `404`); REST's other delete failure is `500` `Failed to delete`, was `… file` / `… directory` | Update body matchers |
@@ -45,8 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | `GET /api/admin/data/browse-dirs` answers `404` for a directory that is gone, `403` for one the server may not read, `500` otherwise, in our words (was `400` with the runtime's sentence) | Update body matchers |
 | New counter `ythril_tool_failures_total{door,tool,class}`: tool calls answered by the caught-failure classifier, `class` from a fixed set | Alert on a rising `internal` or `file_system` |
 | A partly finished move is `503` `move_still_owed` with `Retry-After`; an act whose deletion cannot be recorded is `500` `act_not_recorded` | Retry (a `404` can mean it finished); repeat a move an older version stranded |
-| A move another file's records hold back is `409` `destination_held_after_move` (`path`, `heldBy`) | Delete the file in `heldBy`, repeat the move |
-| A move whose sidecar destination was taken after its bytes moved finishes without that sidecar; it stayed `503` `move_still_owed` | Reprocess the file |
+| A move another file's records hold back is `409` `destination_held_after_move` (`path`, `heldBy`); one whose sidecar target was taken finishes without it (was `503`) | Delete `heldBy`, repeat; reprocess the file |
 | The sweep removes what earlier releases left behind deleted files, irreversibly | Watch `ythril_leaked_rows_removed_total` |
 | `POST /api/admin/reload-config` answers `500` naming spaces that failed to initialise, or `503` with `Retry-After` when the database was down, where it answered success | The next reload retries them |
 | `npm run links:convert` exits non-zero when a space could not be converted; the other spaces are still converted | Check the exit code in upgrade scripts |
@@ -98,21 +95,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | `validate-schema` pages by `nextAfter` and stops at a full page (`skip`, `count`, `total`, `nextSkip`, `totalViolations` gone; `truncated` = size budget cut); a value needs `knowledge: read`; MCP `save_edge` answers `warnings` | Page by `nextAfter` |
 | `meta.rules` and a type's rules need `schema: admin` (single-type `PUT`, and a `validate-schema` proposing rules: `403`); `meta.stampSkew` is accepted (was `400`); a library entry cannot change kind while used (`409`) | Grant admin to tokens that edit rules |
 | A member on 5.6.x refuses a schema carrying `rules` or `stampSkew` whole; a write setting one warns, naming them | Upgrade every instance of a network first |
-| **MCP:** a top-level argument a brain write does not take is stored with a warning, not refused; a space set to Refuse refuses it | Read `warnings`; set Refuse to keep refusals |
+| **MCP:** a top-level argument a brain write does not take is stored with a warning, not refused; Refuse refuses it, and an unread option or a server-written key sent back (`400`) | Read `warnings`; send only what you change |
 | New per-space, per-instance setting `unknownWriteFields` (`warn` or `refuse`; `PATCH /api/spaces/:id`, `update_space`, Schema tab "This instance"); never shared with a network; read back as `refuse` only | Set `refuse` only on the instances that want it |
-| Under Refuse, an option a route does not read (`ttlDays` on a link) or a server-written key sent back gets `400` | Send only what you change |
-| A refused brain write names its unknown fields in `warnings`, without values; so does a stored record whose connections failed | Read `warnings` on a refusal |
-| A non-string `targetSpace` answers `400` `targetSpace must be a string` on every write door; a merge into a proxy space is refused before a malformed path id; superseded by 6.0 personal views | Send one space id |
+| A refused brain write names its unknown fields in `warnings`, without values; so does a stored record whose connections failed; `bulk.write` `errorCount` counts them | Read `warnings`; do not alarm on `errorCount` alone |
 | Chrono `PATCH {superseded: true}` is accepted (was `400`); an empty PATCH names the accepted fields; a link field a record cannot hold (`linkFiles` anywhere) is an unknown field: Warn stores without it (a bulk item's was refused) | Read `warnings` |
-| `bulk.write` `errorCount` counts unknown-field warning rows | Do not alarm on `errorCount` alone |
 | Sync votes, members and change-notes answer `403` to a user token, an unlisted or other-network peer, or for a network not held (was `404`) | Read votes at `/api/networks/:id/votes` |
-| A write through a proxy into a space the token cannot reach or write is refused (`400` not found, `403` without the rung); superseded by 6.0 personal views | Grant the write rung on the member space |
 | Add-space's `202` carries `round` as the vote list shows it (no `pendingMeta`); other opening doors gain `round` | Read proposals on the space |
 | `DELETE /api/spaces/:id` and the admin wipe answer `200` (was `202`) when this instance's own yes passes the round and the change ran | Branch on `status`, not `202` |
-| `202` `status: "passed"`, `queued: true` while the change runs; `500` `space_act_failed` (`503` for a store outage) if it failed in the call | Do not retry a passed `500` or `503` |
-| A networked `DELETE /api/spaces/:id`, and the admin wipe on any space, need `{ "confirm": true }`; without it the answer is `400` | Send `confirm` |
-| Writes into a space being deleted, wiped or renamed answer `409` (`space_being_deleted`, `space_being_wiped`, `space_being_renamed`) | Retry once the change completes |
-| After a networked wipe, a member re-reads that space from its members once | Expect one full re-read per member pair |
+| `202` `status: "passed"`, `queued: true` while the change runs; `500` `space_act_failed` (`503` for a store outage) if it failed in the call ; a networked delete and any admin wipe need `{ "confirm": true }` (else `400`) | Send `confirm`; do not retry a passed `500` or `503` |
+| Writes into a space being deleted, wiped or renamed answer `409` (`space_being_deleted`, `space_being_wiped`, `space_being_renamed`); after a networked wipe each member re-reads the space once | Retry once the change completes |
 
 ### Added
 
