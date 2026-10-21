@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { sleep } from '../_shared/sleep.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-own-write-'));
 const cfgPath = path.join(dir, 'config.json');
