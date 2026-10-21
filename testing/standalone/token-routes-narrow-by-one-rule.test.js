@@ -83,7 +83,8 @@ describe('every route a space admin can reach narrows by the shared rule', () =>
         // The handler body, bounded by its own brace — the registration line ends before the handler starts,
         // so the guard list alone cannot answer this.
         const body = blockAfter(SRC, r.at, `${r.verb} ${r.path}`);
-        return !/refusalsOutsideEditorScope\(|editorScopeFor\(/.test(body);
+        // `refusalsToManageToken` is the shared rule fed by the caller's scope (held to that by minting-and-editing-share-one-scope-rule).
+        return !/refusalsOutsideEditorScope\(|refusalsToManageToken\(|editorScopeFor\(/.test(body);
       })
       .map(r => `${r.verb} ${r.path}`);
 

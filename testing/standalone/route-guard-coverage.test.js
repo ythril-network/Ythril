@@ -253,6 +253,15 @@ const WRITE_EXEMPT = new Map([
    */
   ['toolsRouter', 'read-only is enforced per tool by `callTool`, the same function the MCP door uses — a '
     + 'per-route guard cannot express forty-five different requirements on one path'],
+  /*
+   * Personal views (Q-531, plan rev 3.2 posture S6, the owner's ruling "anyone with a token"): a token, read-only included, may
+   * create, rename and delete its OWN views. A view writes nothing to any space — it is a read lens over what the token already
+   * reads — so a read-only credential managing one writes no data it could not read. Bounded instead by the per-owner cap and
+   * `authRateLimit` on create and copy. The copy is guarded anyway (`requireAdminOrSpaceAdminMfa`), and the MCP twins are
+   * `ownerScoped`, never `mutating`, for the same reason.
+   */
+  ['viewsRouter', 'a personal view is its owner\'s own read lens: a read-only token may manage its OWN views (plan S6), '
+    + 'and none of these routes writes to a space'],
 ]);
 
 /**

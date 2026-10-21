@@ -62,13 +62,18 @@ describe('one scope rule, used by every route that applies it', () => {
      * The vacuity guard. A gate asserting "the mint route calls X" says nothing if X has been renamed
      * away and nobody calls it — every route would then be equally, silently, non-compliant.
      */
+    // Q-531: PATCH, regenerate and DELETE call `refusalsToManageToken`, the rule fed by the caller's own scope, extracted when a
+    // personal-view copy became the fourth site that must refuse exactly when they do. It is the same rule, held below: its body
+    // IS a call of `refusalsOutsideEditorScope` with `editorScopeFor(caller)`.
     const src = code(TOKENS);
-    const calls = [...src.matchAll(/refusalsOutsideEditorScope\(/g)].length;
+    const calls = [...src.matchAll(/refusalsOutsideEditorScope\(|refusalsToManageToken\(/g)].length;
     assert.ok(calls >= 3,
-      `only ${calls} call(s) to refusalsOutsideEditorScope — the shared rule has stopped being shared, so `
+      `only ${calls} call(s) to refusalsOutsideEditorScope or refusalsToManageToken — the shared rule has stopped being shared, so `
       + 'this gate is measuring nothing');
     assert.match(code(SCOPE), /export function refusalsOutsideEditorScope/,
       'the shared rule is gone from editor-scope.ts');
+    assert.match(code(SCOPE), /export function refusalsToManageToken\([\s\S]*?\)[^{]*\{\s*return refusalsOutsideEditorScope\(\{ editorSpaces: editorScopeFor\(caller\)/,
+      'refusalsToManageToken no longer IS the shared rule fed by the caller\'s scope, so the routes calling it have a second rule');
   });
 
   it('THE MINT ROUTE IS ONE OF THEM', () => {

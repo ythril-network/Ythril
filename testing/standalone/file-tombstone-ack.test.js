@@ -210,10 +210,11 @@ describe('file sync is wired to ack only a 200', () => {
     assert.ok(PER_SPACE_WATERMARKS.length >= 4,
       `only ${PER_SPACE_WATERMARKS.length} watermark(s) declared — the import is stale`);
 
-    // The rename carries the marks through `moveReceiveMarks` (bundle-106), which loops the list beside the wipe's forget.
+    // The rename carries the marks through `moveReceiveMarks` (bundle-106), which loops the list beside the wipe's forget; the loop is
+    // in `receive-marks.ts` since Q-531 made it a leaf the proxy migration reaches without the loader.
     const rename = readFileSync(join(ROOT, 'server/src/spaces/rename.ts'), 'utf8');
     assert.match(rename, /\bmoveReceiveMarks\s*\(/, 'the rename no longer carries its watermarks through the one loop');
-    const marks = readFileSync(join(ROOT, 'server/src/sync/member-space-mark.ts'), 'utf8');
+    const marks = readFileSync(join(ROOT, 'server/src/sync/receive-marks.ts'), 'utf8');
     assert.match(marks, /for \(const key of PER_SPACE_WATERMARKS\)/,
       'the rename carries its watermarks by name instead of looping the declared list, so a fifth one is '
       + 'carried by nobody and resets to "unknown" without a word');

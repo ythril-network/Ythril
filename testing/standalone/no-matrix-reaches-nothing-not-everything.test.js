@@ -201,7 +201,9 @@ describe('and every other guard that can see an absent matrix answers the same w
       `only ${callers.length} caller(s) of the reach rule found — the sweep is wrong, and an empty one `
       + 'reports every caller clean');
     const offenders = [];
-    for (const f of [...new Set([...callers, MIDDLEWARE, 'server/src/auth/proxy-reach.ts'])]) {
+    // `config/views.ts` threads the token's scope into a personal view's members (Q-531), as `auth/proxy-reach.ts` did for a
+    // proxy before it was deleted with proxies; named so the sweep reads it even if its call is ever spelled another way.
+    for (const f of [...new Set([...callers, MIDDLEWARE, 'server/src/config/views.ts'])]) {
       const s2 = code(f);
       if (/legacySpacesOf\(/.test(s2)) offenders.push(`${f}: passes a legacy allowlist`);
       if (/spacesWhereTokenMay\([^)]*\?\.spaces/.test(s2)) offenders.push(`${f}: passes record.spaces`);

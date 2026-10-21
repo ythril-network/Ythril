@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { blockAfter } from './_structural-window.mjs';
+import { blockAfter, enclosingBlockAround } from './_structural-window.mjs';
 
 const ROOT = process.cwd();
 const SRC = 'server/src/auth/middleware.ts';
@@ -136,8 +136,14 @@ describe('the area check', () => {
     // are asked of the same id: the id the path named. If one asked about the space and the other about something derived from it, the
     // two would be governed at different levels — and the weaker one would win silently.
     assert.ok(body('judgeSpaceParam'), 'the step that judges the path\'s space id first is gone; a view or a retired id would reach the checks below');
-    assert.match(code, /enforceSpaceScope\(res, record, spaceId\)[\s\S]{0,400}enforceAreaRung\(res, record, req, spaceId \? \[spaceId\] : \[\]\)/,
-      'the area check must be asked about the same id the reach check was');
+    // Every guard that asks reach about the path's id asks the area rung about the same id, in the same block (bounded by the block,
+    // never by a character count).
+    const reachCalls = [...code.matchAll(/enforceSpaceScope\(res, record, spaceId\)/g)].map(m => m.index);
+    assert.ok(reachCalls.length >= 2, `only ${reachCalls.length} guard(s) ask reach about the path's id; the anchor moved`);
+    for (const at of reachCalls) {
+      assert.match(enclosingBlockAround(code, at, 'the block asking reach'), /enforceAreaRung\(res, record, req, spaceId \? \[spaceId\] : \[\]\)/,
+        'the area check must be asked about the same id the reach check was');
+    }
   });
 
   it('refuses with the area and the level, not a bare 403', () => {

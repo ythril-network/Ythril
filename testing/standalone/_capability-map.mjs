@@ -153,6 +153,14 @@ export const CAPABILITIES = [
   ['Networks', 'network_member_revert_parent', 'POST /api/networks/:id/members/:instanceId/revert-parent'],
   ['Networks', 'network_sync', 'POST /api/networks/:id/sync'],
   ['Networks', 'network_sync', 'POST /api/networks/peers/:peerId/sync'],
+
+  // A personal view is the caller's own lens (Q-531): each route is the same act as its tool, on the caller's own views.
+  ['Personal views', 'view_list', 'GET /api/views'],
+  ['Personal views', 'view_get', 'GET /api/views/:id'],
+  ['Personal views', 'view_create', 'POST /api/views'],
+  ['Personal views', 'view_update', 'PATCH /api/views/:id'],
+  ['Personal views', 'view_delete', 'DELETE /api/views/:id'],
+  ['Personal views', 'view_copy', 'POST /api/views/:id/copy'],
 ];
 
 /**

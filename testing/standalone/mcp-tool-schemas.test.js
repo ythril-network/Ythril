@@ -128,7 +128,12 @@ describe('MCP tool schemas — universal invariants', () => {
     // 75 -> 76: `schema_validate` (F-46), the door onto `spaces/schema-validate-door.ts` like
     // `POST /api/spaces/:id/validate-schema`: not mutating, `spaceRequired`, a TOOL_RIGHTS row at the route's `schema: read`,
     // an audit-map entry under `space.schema.validate`. (`16-mcp.md` rows are wave 3's docs.)
-    assert.equal(ALL_TOOLS.length, 76);
+    // 76 -> 86: the ten personal-view tools (Q-531): `view_list`, `view_get`, `view_create`, `view_update`, `view_delete`,
+    // `view_copy` (owner-scoped: `ownerScoped`, visible to a read-only token, never `mutating`) and the instance-admin
+    // `view_orphans`, `view_claim`, `view_purge_retired`, `view_migration`. Prerequisites done: each is classified in
+    // `audit-map.ts` (`null`, because the shared view acts record `VIEW_OPERATIONS` themselves on both doors), the read-only
+    // posture is the plan's (a token may manage its OWN views), and `16-mcp.md` carries a row for each.
+    assert.equal(ALL_TOOLS.length, 86);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {
@@ -294,9 +299,13 @@ describe('resolveFindSimilarScope (find_similar space resolution)', () => {
     assert.equal(r.searchIds, undefined);
   });
 
-  it('with a proxy space: base is the first member', () => {
+  // Q-531: a personal view of several members is searched as the list it stands for, and the seed is located in whichever member
+  // holds it (plan rev 3.2: `similar` on an own view locates a member's seed). The pre-6.0 proxy answer, "base is the first
+  // member", would miss a seed held by the second.
+  it('with a view of several members: every member is a base and the search spans them', () => {
     const r = resolveFindSimilarScope(['proxy'], false, accessible, members);
-    assert.deepEqual(r.candidateBases, ['m1']);
+    assert.deepEqual(r.candidateBases, ['m1', 'm2']);
+    assert.deepEqual(r.searchIds, ['m1', 'm2']);
   });
 
   it('omitting the space searches all accessible spaces and probes each for the source', () => {
