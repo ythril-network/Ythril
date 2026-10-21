@@ -12,9 +12,9 @@
   viewChild,
   ElementRef,
   DestroyRef,
+  Injector,
 } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
-import { ProxySpaceBadgeComponent } from '../../shared/proxy-space-badge.component';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { Subscription, TimeoutError, of } from 'rxjs';
@@ -60,9 +60,13 @@ import {
   TraversalCache, emptyCache, decideFetch, applyResult, filterToDepth,
 } from './graph-traversal-cache';
 import {
-  GraphTheme, DEFAULT_GRAPH_THEME, readGraphTheme, typeColor,
+  GraphTheme, DEFAULT_GRAPH_THEME, readGraphTheme,
   buildElements, createGraphCytoscape, renderElements, type GraphInstance,
 } from './graph-cytoscape';
+import { panelColorOf, panelTitleOf } from './graph-panel';
+import { openSpaceFromLink } from '../../core/space-param';
+import { ViewsStore } from '../../core/views.store';
+import { UnknownSpaceNoticeComponent } from '../../shared/unknown-space-notice.component';
 import { GRAPH_STYLES } from './graph.styles';
 import { canWriteAnywhere } from '../../core/token-capability';
 import { lookupForNode, lookupForEdge } from './graph-record-lookup';
@@ -82,7 +86,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
   // `openBrainDrawer` alongside the `drawerRecord` signal that guards the drawer's `@if`, the same
   // load-bearing coupling pinned by the brain spec.
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ProxySpaceBadgeComponent, CommonModule, FormsModule, EntryPopupComponent, PhIconComponent, ErrorStateComponent, TranslocoPipe, RecordDrawerComponent, GraphLinkedRecordsComponent, GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent, GraphPanelHeaderComponent, GraphToolbarComponent],
+  imports: [UnknownSpaceNoticeComponent, CommonModule, FormsModule, EntryPopupComponent, PhIconComponent, ErrorStateComponent, TranslocoPipe, RecordDrawerComponent, GraphLinkedRecordsComponent, GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent, GraphPanelHeaderComponent, GraphToolbarComponent],
   // Its own drawer collaborators, so the standalone `/graph` route works with nothing above it. When
   // this page is embedded as Brain's Graph tab these SHADOW Brain's instances, which is deliberate:
   // the drawer then patches this page's per-node lists, exactly as the forked drawer did. The cost is
@@ -92,10 +96,11 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
   styles: [GRAPH_STYLES],
   template: `
     <!-- ═══ Space selector ══════════════════════════════════════════════════ -->
+    @if (unknownParam(); as n) { <app-unknown-space-notice [requested]="n.requested" [shown]="n.shown" /> }
     @if (!isEmbedded() && spaces().length > 0) {
       <div class="space-tabs">
         @for (s of spaces(); track s.id) {
-          <button class="space-chip" type="button" [class.active]="activeSpaceId() === s.id" [attr.aria-current]="activeSpaceId() === s.id ? 'true' : null" (click)="onSpaceChange(s.id)">{{ s.label }}@if (s.proxyFor?.length) { <app-proxy-space-badge [proxyFor]="s.proxyFor" [size]="12" /> }</button>
+          <button class="space-chip" type="button" [class.active]="activeSpaceId() === s.id" [attr.aria-current]="activeSpaceId() === s.id ? 'true' : null" (click)="onSpaceChange(s.id)">{{ s.label }}</button>
         }
       </div>
     }
@@ -245,6 +250,10 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
 export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── DI ──────────────────────────────────────────────────────────────────────
   private spacesApi = inject(SpacesApi);
+  private views = inject(ViewsStore);
+  private injector = inject(Injector);
+  /** What a standalone `?space=` asked for when it was neither a space nor an own view: said above the chips, never a silent fallback. */
+  protected readonly unknownParam = signal<{ requested: string; shown: string } | null>(null);
   private brainApi = inject(BrainApi);
   private authApi = inject(AuthApi);
   private location = inject(Location);
@@ -383,21 +392,8 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   waitReasons = this.loadWatch.reasons;
 
   // ── Computed ────────────────────────────────────────────────────────────────
-  panelTitle = computed(() => {
-    const n = this.selectedNode();
-    if (n) return n.name;
-    const e = this.selectedEdge();
-    if (e) return e.label || 'edge';
-    return '';
-  });
-
-  panelColor = computed(() => {
-    const n = this.selectedNode();
-    if (n) return this.typeColor(n.type || 'default');
-    const e = this.selectedEdgeRecord();
-    if (e) return this.typeColor(e.label || 'edge');
-    return this.theme.fallback;
-  });
+  panelTitle = computed(() => panelTitleOf(this.selectedNode(), this.selectedEdge()));
+  panelColor = computed(() => panelColorOf(this.theme, this.selectedNode(), this.selectedEdgeRecord()));
 
   // ── Private state ───────────────────────────────────────────────────────────
   private cy: GraphInstance | null = null;
@@ -415,10 +411,6 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Palette read from CSS vars once the view exists; the default until then. */
   private theme: GraphTheme = DEFAULT_GRAPH_THEME;
 
-  private typeColor(type: string): string {
-    return typeColor(this.theme, type);
-  }
-
   // Currently rendered (depth-filtered) view
   private graphNodes: TraverseNode[] = [];
   private graphEdges: TraverseEdge[] = [];
@@ -434,17 +426,20 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
       this.spacesApi.listSpaces().subscribe(res => {
         this.spaces.set(res.spaces);
         const qp = this.route.snapshot.queryParams;
-        const initial = qp['space'] || (res.spaces.length ? res.spaces[0].id : '');
-        this.activeSpaceId.set(initial);
+        openSpaceFromLink(qp['space'], res.spaces.map(s => s.id), this.views, this.injector, (asked, unknown) => {
+          const initial = asked || res.spaces[0]?.id || '';
+          this.activeSpaceId.set(initial);
+          this.unknownParam.set(unknown === null ? null : { requested: unknown, shown: initial });
 
-        // If entity query-param present, load it as root
-        if (qp['entity'] && initial) {
-          this.brainApi.getEntity(initial, qp['entity']).pipe(
-            catchError(() => of(null)),
-          ).subscribe(ent => {
-            if (ent) this.selectRoot(ent);
-          });
-        }
+          // If entity query-param present, load it as root
+          if (qp['entity'] && initial) {
+            this.brainApi.getEntity(initial, qp['entity']).pipe(
+              catchError(() => of(null)),
+            ).subscribe(ent => {
+              if (ent) this.selectRoot(ent);
+            });
+          }
+        });
       });
     }
 

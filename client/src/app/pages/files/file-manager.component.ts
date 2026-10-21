@@ -7,6 +7,10 @@ import { FilePreviewComponent } from './file-preview.component';
 import { UploadQueueComponent, type UploadItem } from './upload-queue.component';
 import type { FileMetaModel } from './file-meta-editor.component';
 import { FileListingComponent, type FileRow } from './file-listing.component';
+import { sortFileEntries } from './file-sort';
+import { ViewsStore, injectIsView } from '../../core/views.store';
+import { openSpaceFromLink } from '../../core/space-param';
+import { UnknownSpaceNoticeComponent } from '../../shared/unknown-space-notice.component';
 import { baseName, formatSize, joinPath, parentPath } from './file-format';
 import { FileTreeComponent, type TreeNode } from './file-tree.component';
 import { FileToolbarComponent, type BreadcrumbSegment } from './file-toolbar.component';
@@ -54,7 +58,7 @@ import { ModalDirective } from '../../shared/modal.directive';
    * provider does for free.
    */
   providers: [FileTreeStore, FileListingStore, FileExtractStore, FileMetaStore, FileUploadStore, FilePreviewStore],
-  imports: [CommonModule, FormsModule, PhIconComponent, TranslocoPipe, ErrorStateComponent, ModalDirective, FilePreviewComponent, UploadQueueComponent, FileListingComponent, FileTreeComponent, FileToolbarComponent, FileDetailPaneComponent],
+  imports: [UnknownSpaceNoticeComponent, CommonModule, FormsModule, PhIconComponent, TranslocoPipe, ErrorStateComponent, ModalDirective, FilePreviewComponent, UploadQueueComponent, FileListingComponent, FileTreeComponent, FileToolbarComponent, FileDetailPaneComponent],
   styles: [`
     /* A background refresh, as a 2px indeterminate hairline above the table. Deliberately NOT a spinner and
        deliberately not an overlay: the whole point is that nothing on screen moves or disappears while a poll
@@ -162,6 +166,7 @@ import { ModalDirective } from '../../shared/modal.directive';
       <app-error-state [message]="'files.loadSpacesError' | transloco" [reason]="spacesError() ?? ''" (retry)="retrySpaces()" />
     } @else {
 
+      @if (unknownParam(); as n) { <app-unknown-space-notice [requested]="n.requested" [shown]="n.shown" /> }
       <app-file-toolbar
         [spaces]="spaces()"
         [activeSpaceId]="activeSpaceId()"
@@ -182,7 +187,7 @@ import { ModalDirective } from '../../shared/modal.directive';
         @if (uploads.items().length) {
           <app-upload-queue
             [uploads]="uploads.items()"
-            [hasFinished]="hasFinishedUploads()"
+            [hasFinished]="hasFinishedUploads()" [isView]="isView()"
             (retry)="retryUpload($event)"
             (cancel)="cancelUpload($event)"
             (dismiss)="dismissUpload($event)"
@@ -215,7 +220,7 @@ import { ModalDirective } from '../../shared/modal.directive';
             [rows]="fileRows()"
             [sortField]="sortField()"
             [sortDir]="sortDir()"
-            [error]="listing.loadError()"
+            [error]="listing.loadError()" [isView]="isView()"
             [(renameValue)]="renameValue"
             (sort)="setSort($event)"
             (open)="open($event)"
@@ -281,6 +286,9 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private injector = inject(Injector);
+  private views = inject(ViewsStore);
+  /** What a standalone `?space=` asked for when it was neither a space nor an own view (said above the toolbar). */
+  protected readonly unknownParam = signal<{ requested: string; shown: string } | null>(null);
   private detailPaneRef = viewChild(FileDetailPaneComponent);
   private listingRef = viewChild(FileListingComponent);
   // Brain-provided (only present when embedded in the Brain). Optional so the standalone /files route,
@@ -447,6 +455,8 @@ export class FileManagerComponent implements OnInit, OnDestroy {
 
   spaces = signal<Space[]>([]);
   activeSpaceId = signal('');
+  /** THE flag: the open id is one of the caller's personal views, which never writes. Every write control below asks it (`injectIsView`). */
+  readonly isView = injectIsView(() => this.activeSpaceId());
   currentPath = signal('/');
 
   // ── Column sort (restores what #421 dropped) ───────────────────────────────
@@ -491,28 +501,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
     }));
   });
 
-  sortedEntries = computed<FileEntry[]>(() => {
-    const list = this.listing.entries();
-    const field = this.sortField();
-    if (!field) return list;
-    const sign = this.sortDir() === 'asc' ? 1 : -1;
-    const key = (e: FileEntry): string | number => {
-      switch (field) {
-        case 'size': return e.size ?? 0;
-        case 'modified': return e.modified ?? '';
-        case 'status': return e.embeddingStatus ?? '';
-        default: return e.name.toLowerCase();
-      }
-    };
-    return [...list].sort((a, b) => {
-      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-      const ka = key(a), kb = key(b);
-      if (ka === kb) return a.name.localeCompare(b.name);   // stable, human tiebreak
-      return (typeof ka === 'number' && typeof kb === 'number')
-        ? (ka - kb) * sign
-        : String(ka).localeCompare(String(kb)) * sign;
-    });
-  });
+  sortedEntries = computed<FileEntry[]>(() => sortFileEntries(this.listing.entries(), this.sortField(), this.sortDir()));
   loadingSpaces = signal(true);
   /** Null until the space list failed to load — else the page renders with no selector and no body. */
   spacesError = signal<string | null>(null);
@@ -671,10 +660,12 @@ export class FileManagerComponent implements OnInit, OnDestroy {
         this.spaces.set(spaces);
         this.loadingSpaces.set(false);
         if (spaces.length > 0) {
-          const target = requestedSpace
-            ? (spaces.find(s => s.id === requestedSpace) ?? spaces[0])
-            : spaces[0];
-          this.selectSpace(target.id);
+          // A link to a view waits for the views list; one that is neither a space nor an own view is said, never silently replaced.
+          openSpaceFromLink(requestedSpace, spaces.map(s => s.id), this.views, this.injector, (asked, unknown) => {
+            const shown = asked || spaces[0].id;
+            this.selectSpace(shown);
+            this.unknownParam.set(unknown === null ? null : { requested: unknown, shown });
+          });
         }
       },
       error: (err) => { this.spacesError.set(httpErrorReason(err)); this.loadingSpaces.set(false); },
@@ -801,6 +792,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
    * collide should be one question, not three.
    */
   private async enqueueUploads(files: FileList): Promise<void> {
+    if (this.isView()) return; // a personal view never writes: a drop or a pick onto it is ignored, the toolbar offers neither
     const picked = Array.from(files);
     const existing = new Set(this.listing.entries().filter(e => e.isFile).map(e => e.name));
     const clashes = picked.filter(f => existing.has(f.name)).map(f => f.name);

@@ -6,6 +6,7 @@ import { EntityRefFieldComponent } from '../brain/entity-ref-field.component';
 import { FactRefFieldComponent } from '../brain/fact-ref-field.component';
 import { ChronoRefFieldComponent } from '../brain/chrono-ref-field.component';
 import { FILE_META_EDITOR_STYLES } from './file-manager.styles';
+import { injectIsView } from '../../core/views.store';
 
 /**
  * The edit model for a file's metadata record.
@@ -52,7 +53,7 @@ export interface FileMetaModel {
   styles: [FILE_META_EDITOR_STYLES],
   template: `
     @if (model(); as m) {
-      <form class="detail-meta-form" (ngSubmit)="save.emit()">
+      <form class="detail-meta-form" (ngSubmit)="save.emit()"><fieldset [disabled]="isView()" style="border:0;margin:0;padding:0;min-width:0;">
         <div class="field">
           <label>{{ 'brain.fileMeta.table.description' | transloco }}</label>
           <textarea [(ngModel)]="m.description" name="detailDesc" rows="3"></textarea>
@@ -74,10 +75,13 @@ export interface FileMetaModel {
           <app-chrono-ref-field [target]="m" />
         </div>
         @if (error()) { <div class="alert alert-error" role="alert">{{ error() }}</div> }
+        </fieldset>
         <div class="detail-meta-actions">
-          <button class="btn btn-sm btn-primary" type="submit" [disabled]="saving()">{{ 'common.save' | transloco }}</button>
+          @if (!isView()) {
+            <button class="btn btn-sm btn-primary" type="submit" [disabled]="saving()">{{ 'common.save' | transloco }}</button>
+          }
           <button class="btn btn-sm btn-secondary" type="button" (click)="cancel.emit()">{{ 'common.cancel' | transloco }}</button>
-          @if (canRetryEmbedding()) {
+          @if (canRetryEmbedding() && !isView()) {
             <button class="btn btn-sm btn-ghost" type="button" [disabled]="retryPending()"
               (click)="retryEmbedding.emit()">{{ 'brain.fileMeta.retryEmbedding' | transloco }}</button>
           }
@@ -90,6 +94,8 @@ export class FileMetaEditorComponent {
   /** Passed through unwrapped — the reference widgets write into this object. See the class docblock. */
   readonly model = input<FileMetaModel | null>(null);
   readonly spaceId = input<string>('');
+  /** THE flag: the file's space is a personal view, which never writes, so the fields are read-only and there is no Save (`injectIsView`). */
+  readonly isView = injectIsView(() => this.spaceId());
   readonly error = input<string | null>(null);
   readonly saving = input<boolean>(false);
 

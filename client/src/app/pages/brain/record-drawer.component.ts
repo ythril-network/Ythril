@@ -12,6 +12,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { RefusalAlertComponent } from '../../shared/refusal-alert.component';
 import { WriteWarningsComponent } from '../../shared/write-warnings.component';
 import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
+import { injectIsView } from '../../core/views.store';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
@@ -51,16 +52,19 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                 </div>
               </div>
               <div style="display:flex; gap:8px; flex-shrink:0; align-items:flex-start; padding-top:2px;">
-                <button class="btn btn-sm btn-primary" [disabled]="state.drawerSaving()" (click)="state.save()">
-                  @if (state.drawerSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } {{ 'common.save' | transloco }}
-                </button>
+                @if (!isView()) {
+                  <button class="btn btn-sm btn-primary" [disabled]="state.drawerSaving()" (click)="state.save()">
+                    @if (state.drawerSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } {{ 'common.save' | transloco }}
+                  </button>
+                }
                 <button class="icon-btn" [attr.title]="'common.close' | transloco" [attr.aria-label]="'brain.drawer.closeDetailsAriaLabel' | transloco" (click)="state.close()"><ph-icon name="x" [size]="16"/></button>
               </div>
             </div>
             <app-refusal-alert [view]="refusal()" idPrefix="drw-refusal" />
             <app-write-warnings [warnings]="state.drawerWarnings()" [truncated]="state.drawerWarningsTruncated()" (dismissed)="state.dismissWarnings()" />
 
-            <form>
+            <!-- A record opened through a personal view is read, not edited: the fieldset disables every field under it, and there is no Save. -->
+            <form><fieldset [disabled]="isView()" style="border:0;margin:0;padding:0;min-width:0;">
               <!-- ── MEMORY ── -->
               @if (dr.kind === 'fact') {
                 <div class="drawer-field">
@@ -301,7 +305,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                   <div class="drawer-readonly-value"><app-instant [value]="dr.record.updatedAt" variant="datetimeSeconds"/></div>
                 </div>
               }
-            </form>
+            </fieldset></form>
 
           </div>
         </div>
@@ -313,6 +317,8 @@ export class RecordDrawerComponent {
   readonly store = inject(BrainStore);
   readonly picker = inject(EntityRefPicker);
   private readonly transloco = inject(TranslocoService);
+  /** THE flag: the record was opened through a personal view, which never writes (`injectIsView`). */
+  readonly isView = injectIsView(() => this.state.spaceId());
 
   /** The last refused save, in words and rows; the properties editors mark the rows it names. */
   readonly refusal = refusalViewOf(this.transloco, this.state.drawerFailure, 'refusal.failed.save');

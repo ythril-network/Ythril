@@ -50,7 +50,9 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
             <app-record-search-bar
               [value]="store.edgeSearch()" (valueChange)="onEdgeSearch($event)"
               placeholder="brain.edges.searchPlaceholder" />
-            <button class="btn-primary btn btn-sm" (click)="openEdgeForm()" [disabled]="showEdgeForm()">{{ 'brain.edges.addButton' | transloco }}</button>
+            @if (!isView()) {
+              <button class="btn-primary btn btn-sm" (click)="openEdgeForm()" [disabled]="showEdgeForm()">{{ 'brain.edges.addButton' | transloco }}</button>
+            }
           </div>
 
           @if (showEdgeForm()) {
@@ -238,7 +240,9 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" [attr.title]="'common.viewInGraph' | transloco" [attr.aria-label]="'common.viewInGraph' | transloco" (click)="viewInGraph.emit(edge.from)"><ph-icon name="graph" [size]="16"/></button>
                         <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="drawerState.open('edge', edge)"><ph-icon name="eye" [size]="16"/></button>
-                        @if (recordList.confirmDeleteId() === edge._id) {
+                        @if (isView()) {
+                          <!-- a personal view never writes: no delete -->
+                        } @else if (recordList.confirmDeleteId() === edge._id) {
                           <span class="inline-confirm">
                             {{ 'common.deleteConfirm' | transloco }}
                             <button class="btn btn-sm btn-danger" (click)="deleteEdge(edge._id)">{{ 'common.yes' | transloco }}</button>

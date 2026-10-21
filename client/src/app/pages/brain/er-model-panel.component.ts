@@ -304,10 +304,7 @@ export class ErModelPanelComponent {
     this.error.set('');
     this.api.getErModel(spaceId).subscribe({
       next: res => {
-        // A proxy space answers with its members rather than one model. Showing the first would be a
-        // diagram labelled with the proxy's name and drawn from one member's data, which is worse than
-        // saying it is not supported here.
-        this.model.set('members' in res ? null : res);
+        this.model.set(res);
         this.loading.set(false);
       },
       error: (err: unknown) => {

@@ -83,6 +83,8 @@ export interface UploadItem {
             </div>
           }
         </div>
+        <!-- a personal view never uploads: nothing here can be retried, cancelled or dismissed -->
+        @if (!isView()) {
         <div class="upload-row-actions">
           @if (u.status === 'failed') {
             <button class="btn-ghost btn btn-sm" type="button" (click)="retry.emit(u)">{{ 'common.retry' | transloco }}</button>
@@ -96,6 +98,7 @@ export interface UploadItem {
             </button>
           }
         </div>
+        }
       </div>
     }
   `,
@@ -104,6 +107,8 @@ export class UploadQueueComponent {
   readonly uploads = input<readonly UploadItem[]>([]);
   /** Whether any row is finished — the page decides, because it is the page that knows the whole queue. */
   readonly hasFinished = input<boolean>(false);
+  /** THE flag, from the page: the open id is a personal view, which never uploads (and so has no queue to act on). */
+  readonly isView = input(false);
 
   readonly retry = output<UploadItem>();
   readonly cancel = output<UploadItem>();

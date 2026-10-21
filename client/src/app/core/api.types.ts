@@ -91,7 +91,6 @@ export interface Space {
    * space indistinguishable from an empty one — the bar read 0% against a quota that was being approached.
    */
   usageIncomplete?: string[];
-  proxyFor?: string[];
   meta?: SpaceMeta;
   dupeRules?: DupeActionRule[];
   dupeMergeSurvivor?: 'older' | 'newer';
@@ -258,6 +257,8 @@ export interface SpaceMetaResponse extends SpaceMeta {
 
 export interface SpacesResponse {
   spaces: Space[];
+  /** Ids of pre-6.0 proxy spaces, reserved until an instance admin purges them; served to an admin only (`core/retired-space-ids.ts`). */
+  retiredSpaceIds?: string[];
   /** The instance document-extraction ceiling — the highest mode any space may pick. 'auto' = no
    *  policy limit. Used to constrain the per-space extraction dropdown. */
   docExtractionCeiling?: 'off' | 'ocr' | 'vlm' | 'repair' | 'auto';
@@ -1233,10 +1234,4 @@ export interface ErModel {
   truncated: null | { scan: 'entities' | 'edges' | 'links'; limit: number };
   /** Measured BEFORE any cap, so a caller can see what share of the space the model covers. */
   totals: { entities: number; edges: number };
-}
-
-/** A proxy space reports its members separately — merging would invent relationships that cannot exist. */
-export interface ErModelMembers {
-  spaceId: string;
-  members: ErModel[];
 }

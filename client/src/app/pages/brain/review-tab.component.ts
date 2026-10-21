@@ -15,7 +15,8 @@ import { httpErrorReason } from '../../core/http-error';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
-import { describeRefusal, refusalText, type RefusalSource, type RefusalView } from '../../core/refusal-text';
+import { refusalText } from '../../core/refusal-text';
+import { MergeRefusals } from './merge-refusals';
 
 @Component({
   selector: 'app-review-tab',
@@ -113,6 +114,10 @@ import { describeRefusal, refusalText, type RefusalSource, type RefusalView } fr
     .sug-passing ph-icon { color: var(--success); flex: none; margin-top: 2px; }
   `],
   template: `
+    @if (isView) {
+      <!-- Duplicate pairs are a space's, decided by merges and dismissals a personal view never makes; Brain does not offer this tab on a view. -->
+      <p class="intro" role="status">{{ 'views.notAvailable' | transloco }}</p>
+    } @else {
     <h2 class="page-title">{{ 'review.title' | transloco }}</h2>
 
     <!-- Sub-tabs, not a compact toggle: this is the space's record-QA queue and it will grow past two
@@ -546,6 +551,7 @@ import { describeRefusal, refusalText, type RefusalSource, type RefusalView } fr
     }
     </section>
     }
+    }
   `,
 })
 export class ReviewTabComponent implements OnInit, OnChanges {
@@ -688,6 +694,8 @@ export class ReviewTabComponent implements OnInit, OnChanges {
 
   /** The space being reviewed. Required: this view is per-space now, never instance-wide. */
   @Input({ required: true }) spaceId = '';
+  /** THE flag, from the page: the space is a personal view, which never writes (`injectIsView`). */
+  @Input() isView = false;
 
   private duplicatesApi = inject(DuplicatesApi);
   private spacesApi = inject(SpacesApi);
@@ -701,22 +709,10 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   scanning = signal(false);
   busy = signal<string | null>(null);
 
-  /** The refusals of merges, by duplicate pair id: held as the answers they were, so they stay until dismissed or the merge goes through. */
-  private readonly mergeFailures = signal<Record<string, RefusalSource>>({});
-  /** The same, in words and rows, in the viewer's language. */
-  readonly mergeRefusals = computed<Record<string, RefusalView>>(() =>
-    Object.fromEntries(Object.entries(this.mergeFailures()).map(([id, failure]) => [id, describeRefusal(this.transloco, '', failure, 'duplicates.mergeError')])));
-
-  dismissMergeRefusal(d: DuplicateRecord): void {
-    this.setMergeFailure(d.id, null);
-  }
-
-  private setMergeFailure(id: string, failure: RefusalSource | null): void {
-    this.mergeFailures.update(all => {
-      const { [id]: _gone, ...rest } = all;
-      return failure ? { ...rest, [id]: failure } : rest;
-    });
-  }
+  /** The refusals of merges, by duplicate pair id, held as the answers they were (`merge-refusals.ts`). */
+  private readonly mergeFailures = new MergeRefusals(this.transloco);
+  readonly mergeRefusals = this.mergeFailures.views;
+  dismissMergeRefusal(d: DuplicateRecord): void { this.mergeFailures.set(d.id, null); }
   rows = signal<DuplicateRecord[]>([]);
   statusFilter: 'open' | 'dismissed' | 'all' = 'open';
   /** Free-text filter over the loaded list — a dismissed pile can grow large, so it is searchable. */
@@ -930,10 +926,10 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   scorePct(s: number): number { return Math.round(Math.min(Math.max(s, 0), 1) * 100); }
   scoreVariant(s: number): 'high' | 'mid' | 'low' { return s >= 0.95 ? 'high' : s >= 0.85 ? 'mid' : 'low'; }
 
-  ngOnInit(): void { this.load(); this.loadContradictions(); this.loadCompleteness(); }
-  /** Switching space in the Brain re-points this tab rather than leaving another space's pairs on screen. */
+  ngOnInit(): void { if (!this.isView) { this.load(); this.loadContradictions(); this.loadCompleteness(); } }
+  /** Switching space in the Brain re-points this tab rather than leaving another space's pairs on screen. A view reads none of it. */
   ngOnChanges(ch: SimpleChanges): void {
-    if (ch['spaceId'] && !ch['spaceId'].firstChange) { this.load(); this.loadContradictions(); this.loadCompleteness(); }
+    if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.loadContradictions(); this.loadCompleteness(); }
   }
 
   load(): void {
@@ -1001,10 +997,10 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     });
     if (!ok) return;
     this.busy.set(d.id);
-    this.setMergeFailure(d.id, null);
+    this.mergeFailures.set(d.id, null);
     this.duplicatesApi.mergeDuplicate(d.id).subscribe({
       next: () => { this.rows.update(list => list.filter(x => x.id !== d.id)); this.busy.set(null); },
-      error: (e) => { this.busy.set(null); this.setMergeFailure(d.id, e); },
+      error: (e) => { this.busy.set(null); this.mergeFailures.set(d.id, e); },
     });
   }
 }

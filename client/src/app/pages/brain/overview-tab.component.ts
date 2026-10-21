@@ -401,7 +401,7 @@ import { ReindexNotesComponent } from './reindex-notes.component';
             <app-status-pill [variant]="indexVariant()" [dot]="true">{{ 'brain.overview.idx.' + indexState() | transloco }}</app-status-pill>
           </div>
 
-          <app-reindex-notes [needsReindex]="needsReindex()" [isProxy]="isProxy()" [run]="reindexRun()" />
+          <app-reindex-notes [needsReindex]="needsReindex()" [run]="reindexRun()" />
 
           <!-- Retention belongs on this card: both answers here are about the lifecycle of what is stored,
                and "why did that record disappear?" is asked far more often than it is answered. Read-only —
@@ -420,18 +420,13 @@ import { ReindexNotesComponent } from './reindex-notes.component';
             <p class="muted ret-edit">{{ 'brain.overview.retentionEdit' | transloco }}</p>
           </div>
 
-          <!-- Not offered on a proxy at all. The server has refused it since the double-embed fix -- a proxy
-               has no index of its own, and reindexing one re-embedded every member a second time -- so the
-               button could only ever produce a 400. -->
-          @if (!isProxy()) {
-            <div class="actions">
-              <button class="btn btn-sm btn-secondary" type="button" [disabled]="reindexing()"
-                [attr.aria-busy]="reindexing() ? 'true' : null" (click)="requestReindex()">
-                @if (reindexing()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-                <ph-icon name="arrows-clockwise" [size]="14" style="margin-right:5px;vertical-align:-2px;"/>{{ 'brain.overview.reindexButton' | transloco }}
-              </button>
-            </div>
-          }
+          <div class="actions">
+            <button class="btn btn-sm btn-secondary" type="button" [disabled]="reindexing()"
+              [attr.aria-busy]="reindexing() ? 'true' : null" (click)="requestReindex()">
+              @if (reindexing()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
+              <ph-icon name="arrows-clockwise" [size]="14" style="margin-right:5px;vertical-align:-2px;"/>{{ 'brain.overview.reindexButton' | transloco }}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -614,15 +609,6 @@ export class OverviewTabComponent {
   reindexing = input(false);
   /** The space's reindex run as the server reports it, or null before the first answer. */
   reindexRun = input<ReindexRunState | null>(null);
-  /**
-   * A proxy space stands in for its members and holds no records — so it has no index of its own and
-   * nothing to reindex. The server has refused the call since the double-embed fix (`planReindex` answers
-   * 400 naming the members), so offering the button could only ever produce that refusal.
-   *
-   * Read from the space this panel was already given, not fetched: `proxyFor` is on the record, and the
-   * space chip beside this panel already branches on it to draw the proxy badge.
-   */
-  isProxy = () => (this.space().proxyFor?.length ?? 0) > 0;
   needsReindex = input(false);
   /** Instance identity/health (from /api/about), preloaded by the shell — null until it lands. */
   about = input<AboutInfo | null>(null);

@@ -1,8 +1,7 @@
 /**
- * What the Indexing panel says about reindexing: that one is needed, how far a running one has got, or that a proxy
- * has nothing to reindex.
+ * What the Indexing panel says about reindexing: that one is needed, or how far a running one has got.
  *
- * Its own component because `overview-tab.component.ts` is frozen by the size ratchet, and these three lines answer
+ * Its own component because `overview-tab.component.ts` is frozen by the size ratchet, and these lines answer
  * one question together — they replace one another as the state changes, and reading them apart is how the panel once
  * recommended a reindex directly above the progress of the one already running (Q-99 part 2).
  */
@@ -24,14 +23,7 @@ import type { ReindexRunState } from '../../core/embed-ops.types';
     .reindex-note .spinner { width: 12px; height: 12px; border-width: 2px; flex: none; margin-top: 2px; }
   `],
   template: `
-    @if (isProxy()) {
-      <!-- Said rather than left blank: a card whose action silently vanishes reads as broken, and the remedy
-           (reindex the members) is not guessable from an absent button. -->
-      <div class="reindex-note">
-        <ph-icon name="info" [size]="15"/>
-        <span>{{ 'brain.overview.reindexProxy' | transloco }}</span>
-      </div>
-    } @else if (run()?.running) {
+    @if (run()?.running) {
       <!-- A run's progress, read from the server while it lasts: role=status so a screen reader hears it change
            without the focus moving. It replaces the recommendation, which would point at a button held for exactly
            this reason. -->
@@ -49,6 +41,5 @@ import type { ReindexRunState } from '../../core/embed-ops.types';
 })
 export class ReindexNotesComponent {
   readonly needsReindex = input(false);
-  readonly isProxy = input(false);
   readonly run = input<ReindexRunState | null>(null);
 }

@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
+import { TranslocoService } from '@jsverse/transloco';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { NetworksApi } from '../../core/networks-api.service';
@@ -38,6 +39,7 @@ export class OverviewDataService {
   private spacesApi = inject(SpacesApi);
   private brainApi = inject(BrainApi);
   private networksApi = inject(NetworksApi);
+  private transloco = inject(TranslocoService);
 
   /** Embedding-job backlog for the ACTIVE space (Overview embedding-queue panel); refreshed on space switch + live events. */
   embeddingQueue = signal<EmbeddingQueue | null>(null);
@@ -200,6 +202,36 @@ export class OverviewDataService {
     this.completeness.set(null);
     this.spaceActivity.set(null);
     this.overviewPending.update(p => ({ ...p, activity: true, completeness: true, queue: true, tokens: true }));
+  }
+
+  /** Set while the usage reset is in flight, so the panel can disable its own button. */
+  readonly resettingUsage = signal(false);
+  /** The cleared-bucket count from the last reset, reported inline the way the reindex reports its result. */
+  readonly usageResetResult = signal('');
+
+  /**
+   * Clear one space's recorded usage. The PANEL confirmed already (it owns the dialog, as it does for reindex and retry-failed), so this
+   * performs the request and reloads.
+   *
+   * Reloaded rather than zeroed locally: a local zero would be a guess about what the server did, and the count in the response exists
+   * precisely because a reset and a genuinely idle space look identical afterwards. Moved here from the shell with the rest of the Overview's
+   * data when personal views needed its lines.
+   */
+  resetUsage(spaceId: string, isActive: () => boolean): void {
+    if (!spaceId || this.resettingUsage()) return;
+    this.resettingUsage.set(true);
+    this.usageResetResult.set('');
+    this.spacesApi.resetSpaceActivity(spaceId).subscribe({
+      next: ({ cleared }) => {
+        this.resettingUsage.set(false);
+        this.usageResetResult.set(this.transloco.translate('brain.overview.usageResetDone', { count: cleared }));
+        this.loadSpaceActivity(spaceId, isActive);
+      },
+      error: () => {
+        this.resettingUsage.set(false);
+        this.usageResetResult.set(this.transloco.translate('brain.overview.usageResetFailed'));
+      },
+    });
   }
 
   /** Every Overview loader for one space, in one call — so a caller cannot start four of the five. */

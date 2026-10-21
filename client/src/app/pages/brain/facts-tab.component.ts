@@ -57,7 +57,9 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
             <app-record-search-bar
               [value]="store.memorySearch()" (valueChange)="onMemorySearch($event)"
               placeholder="brain.facts.searchPlaceholder" />
-            <button class="btn-primary btn btn-sm" (click)="openMemoryForm()" [disabled]="showMemoryForm()">{{ 'brain.facts.addButton' | transloco }}</button>
+            @if (!isView()) {
+              <button class="btn-primary btn btn-sm" (click)="openMemoryForm()" [disabled]="showMemoryForm()">{{ 'brain.facts.addButton' | transloco }}</button>
+            }
           </div>
 
           <!-- Add memory form -->
@@ -248,7 +250,9 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                       <td><app-timestamp [value]="mem.createdAt"/></td>
                       <td style="white-space:nowrap;">
                         <button class="icon-btn" [attr.title]="'common.viewDetails' | transloco" [attr.aria-label]="'common.viewDetails' | transloco" (click)="drawerState.open('fact', mem)"><ph-icon name="eye" [size]="16"/></button>
-                        @if (recordList.confirmDeleteId() === mem._id) {
+                        @if (isView()) {
+                          <!-- a personal view never writes: no delete -->
+                        } @else if (recordList.confirmDeleteId() === mem._id) {
                           <span class="inline-confirm">
                             {{ 'common.deleteConfirm' | transloco }}
                             <button class="btn btn-sm btn-danger" (click)="deleteFact(mem._id)">{{ 'common.yes' | transloco }}</button>
