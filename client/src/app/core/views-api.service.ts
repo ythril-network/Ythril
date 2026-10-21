@@ -49,12 +49,12 @@ export interface ViewOrphans {
 
 /** `GET /api/admin/views/migration`: what the 6.0 upgrade did with the proxy spaces, kept for the admin to read after the boot log is gone. */
 export interface ViewsMigrationReport {
-  /** How many proxies became views. */
-  migrated?: number;
+  /** The proxy ids the upgrade turned into views (the server answers the ids, not a count). */
+  migrated?: string[];
   /** Networks that lost a member id, so their peers see this instance as having left that network space. */
   networksLostIds?: { networkId: string; label?: string; spaceIds: string[] }[];
-  /** Retired ids that still hold rows, with how many collections or rows (the purge door drops them). */
-  retired?: { id: string; rows?: number }[];
+  /** The ids still reserved (`GET /api/spaces` serves the same list to an admin). */
+  retiredSpaceIds?: string[];
   unclaimed?: UnclaimedView[];
 }
 

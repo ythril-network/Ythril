@@ -108,7 +108,7 @@ export class ViewsAdminPanelComponent {
   protected readonly error = signal('');
 
   protected readonly reserved = computed(() => this.retired() ?? []);
-  protected readonly migratedCount = computed(() => this.report()?.migrated ?? 0);
+  protected readonly migratedCount = computed(() => this.report()?.migrated?.length ?? 0);
   protected readonly networksLost = computed(() => this.report()?.networksLostIds ?? []);
   protected readonly orphans = computed(() => this.orphanList()?.orphans ?? []);
   /** Unclaimed definitions: the orphan door's list, which is the live one; the report's is what the upgrade left. */
