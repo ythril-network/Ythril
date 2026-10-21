@@ -127,6 +127,7 @@ export const HELP_DOCS = [
       'decisions/10-a-rule-is-saved-only-when-the-instance-can-apply-it-and-an-unknown-key-is-named-not-refused.md',
       'decisions/11-an-unknown-write-field-is-answered-by-the-instances-setting-for-its-space.md',
       'decisions/12-an-act-a-vote-passed-is-the-instances-to-finish.md',
+      'decisions/13-a-restore-is-a-set-of-space-acts-and-forgets-only-what-it-received.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },
