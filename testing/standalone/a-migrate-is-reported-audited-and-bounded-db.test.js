@@ -21,16 +21,19 @@
  * 3. **A failed copy is reported and audited.** The target refuses an insert as a duplicate (an input failure: never retried): the report
  *    says `abandoned` with our sentence naming the backup (no driver text, no URI), and `data.migrate.failed` lands in the database being
  *    kept (the old one). Red: no report door, no row.
- * 4. **The copy is bounded.** The target holds one insert without answering (a `failCommand` that blocks the connection) and the act's
- *    per-operation bound is 1 s: the attempt fails within the bound, the act is owed with a retry time (a store outage, not an input
- *    failure: the set stands, the URI is unchanged), and once the target answers again the act comes due and completes. Red: the act is
- *    still running past the bound, because the copy's client carries none.
+ * 4. **The copy is bounded.** The target holds one of its collections under a real lock (another session's open, uncommitted
+ *    transaction, `holdDocumentLock`), so the copy's drop of it waits inside the server, and the act's per-operation bound is 1 s: the
+ *    attempt fails within the bound, the act is owed with a retry time (a store outage, not an input failure: the set stands, the URI is
+ *    unchanged), and once the lock is let go the act comes due and completes. Red: the act is still running past the bound, because the
+ *    copy's client carries none.
  *
  * ## How it is driven
  *
  * In-process, past auth, as `migrate-db.test.js` drives it: the target is addressed by a hostname patched to resolve to the harness Mongo
- * (the route refuses loopback addresses), and its URI names an `appName` so a `failCommand` fail point matches the copy's target client
- * and nothing else. The fail point needs a mongod started with `enableTestCommands=1`; without it rows 3 and 4 fail naming that.
+ * (the route refuses loopback addresses). The faults are the repo's own (`_write-faults.mjs`), conditions of the real store or errors
+ * the driver itself produced, so the rows run on a plain mongod (no fail points, which the test store does not enable): row 3 arms
+ * `failWrites` on the target collection's `insertMany` with the duplicate-key error `driverWriteFailures` made, row 4 takes the lock in
+ * the runner's `afterDrain` hook, after the door's not-empty check and before the body.
  *
  * Run: node --test testing/standalone/a-migrate-is-reported-audited-and-bounded-db.test.js (a Mongo the harness accepts; a prior
  * `npx tsc -p server`)
@@ -41,6 +44,7 @@ import dns from 'node:dns';
 import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest } from './_space-act-harness.mjs';
+import { driverWriteFailures, failWrites, holdDocumentLock } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -54,8 +58,8 @@ const SPACES = ['mr-a', 'mr-b'];
 const TARGET_HOST = 'ythril-report-target.test';
 const TARGET_DB = 'ythril_migrate_report_target';
 const SOURCE_DB = `ythril_harness_${SUITE}`;
-const APP = 'ythril-migrate-report-target';
-const TARGET_URI = testMongoUri(TARGET_DB, { query: `&appName=${APP}` })
+const FAULTS_DB = 'ythril_migrate_report_faults';
+const TARGET_URI = testMongoUri(TARGET_DB)
   .replace(`@${TEST_MONGO_HOST}:`, `@${TARGET_HOST}:`).replace(`//${TEST_MONGO_HOST}:`, `//${TARGET_HOST}:`);
 const SOURCE_URI = testMongoUri(SOURCE_DB);
 const DRIVER_TEXT = /E11000|MongoServerError|MongoNetworkError|MongoOperationTimeoutError|ECONN|ENOTFOUND/;
@@ -80,7 +84,7 @@ async function until(holds, what, ms = 30_000) {
 }
 
 describe('a migrate is reported, audited and bounded like a restore', { skip }, () => {
-  let door, loader, runner, dataRouter, maintenance, audit, fixture, target, admin, postMigrate;
+  let door, loader, runner, dataRouter, maintenance, audit, fixture, target, postMigrate, faults, lock;
 
   before(async () => {
     patchDns();
@@ -93,15 +97,17 @@ describe('a migrate is reported, audited and bounded like a restore', { skip }, 
     const { MongoClient } = await import('mongodb');
     fixture = new MongoClient(SOURCE_URI);
     target = new MongoClient(testMongoUri(TARGET_DB));
-    admin = new MongoClient(testMongoUri('admin'));
-    await Promise.all([fixture.connect(), target.connect(), admin.connect()]);
+    await Promise.all([fixture.connect(), target.connect()]);
+    // The prototype the server's own driver builds its collections from: the target client's included.
+    faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['insertMany']);
   });
   after(async () => {
     dns.lookup = realLookup;
-    await failPoint('off').catch(() => {});
+    faults?.restore();
+    await lock?.release().catch(() => {});
     try { resetRunnerForTest(runner); } catch { /* the runner never loaded */ }
     await target?.db(TARGET_DB).dropDatabase().catch(() => {});
-    await Promise.all([fixture?.close(), target?.close(), admin?.close()]);
+    await Promise.all([fixture?.close(), target?.close()]);
     await door?.close();
   });
 
@@ -119,18 +125,14 @@ describe('a migrate is reported, audited and bounded like a restore', { skip }, 
     await target.db(TARGET_DB).dropDatabase();
   });
   afterEach(async () => {
-    await failPoint('off').catch(() => {});
+    faults.clear();
+    await lock?.release().catch(() => {});
+    lock = undefined;
     try { clearActEntries(loader); maintenance.setMaintenanceActive(false); resetRunnerForTest(runner); } catch { /* best effort */ }
   });
 
-  /** Set the `failCommand` fail point on the target's inserts (matched by the target URI's appName), or turn it off. */
-  async function failPoint(mode, data = {}) {
-    try {
-      await admin.db('admin').command({ configureFailPoint: 'failCommand', mode, ...(mode === 'off' ? {} : { data: { failCommands: ['insert'], appName: APP, ...data } }) });
-    } catch (err) {
-      throw new Error(`the harness mongod refuses failCommand (start it with --setParameter enableTestCommands=1): ${err.message}`);
-    }
-  }
+  /** The target database in the shape `_write-faults.mjs` takes a store: its client, and the database a lock is held in. */
+  const targetStore = () => ({ getMongo: () => target, getDb: () => target.db(TARGET_DB) });
 
   const migrate = () => door.request(postMigrate, { body: { uri: TARGET_URI } });
   const migrateEntries = () => entriesOf(loader).filter(e => e.kind === 'migrate');
@@ -191,10 +193,16 @@ describe('a migrate is reported, audited and bounded like a restore', { skip }, 
   });
 
   it('row 3: a copy the target refuses is reported abandoned in our words naming the backup, and audited in the database kept', T, async () => {
-    await failPoint({ times: 1 }, { errorCode: 11000 });
+    // The duplicate-key error the driver itself produced, handed to the copy's load of one collection (nothing else inserts into
+    // `mr-a_facts` while every space is held).
+    // Made in a database of its own: the target must be empty for the door to accept the migrate.
+    const { refused } = await driverWriteFailures(FAULTS_DB);
+    await target.db(FAULTS_DB).dropDatabase();
+    faults.fail('insertMany', 'mr-a_facts', refused.duplicateKey);
     const out = await migrate();
     assert.equal(out.status, 202, `the migrate was refused: ${out.status} ${JSON.stringify(out.body)}`);
     await until(() => migrateEntries().length === 0, 'the failed migrate ended');
+    assert.equal(faults.fired('insertMany', 'mr-a_facts'), 1, 'the copy never reached the armed fault: the row injected nothing');
     assert.equal(loader.getConfig().mongo?.uri, SOURCE_URI, 'a failed migrate changed the saved URI');
     const body = await report();
     assert.equal(body.state, 'abandoned', `the report: ${JSON.stringify(body)}`);
@@ -208,10 +216,15 @@ describe('a migrate is reported, audited and bounded like a restore', { skip }, 
     assert.ok(!JSON.stringify(row).includes(TARGET_HOST), 'the failure row carries the URI');
   });
 
-  it('row 4: a target that holds an insert unanswered fails the attempt within the bound, the act stays owed, and comes due again', T, async () => {
+  it('row 4: a target that holds an operation unanswered fails the attempt within the bound, the act stays owed, and comes due again', T, async () => {
     runner.setSpaceActKnobsForTest({ SPACE_ACT_OP_MS: 1_000 });
-    const BLOCK_MS = 6_000;
-    await failPoint({ times: 1 }, { blockConnection: true, blockTimeMS: BLOCK_MS });
+    // A real lock on a collection the copy drops and reloads, taken after the door's not-empty check and before the body runs.
+    runner.setSpaceActHooksForTest({
+      afterDrain: async (entry) => {
+        if (entry.kind !== 'migrate' || lock) return;
+        lock = await holdDocumentLock(targetStore(), 'mr-b_facts', { insert: { _id: 'held-by-the-test' } });
+      },
+    });
     const started = Date.now();
     const out = await migrate();
     assert.equal(out.status, 202, `the migrate was refused: ${out.status} ${JSON.stringify(out.body)}`);
@@ -219,7 +232,8 @@ describe('a migrate is reported, audited and bounded like a restore', { skip }, 
     try {
       await until(owed, 'the act owed with a retry time', 4_000);
     } catch {
-      assert.fail(`the copy's insert was not bounded: ${Date.now() - started} ms after the request the migrate entries are `
+      assert.ok(lock, 'the lock was never taken: the row stalled nothing');
+      assert.fail(`the copy's operation was not bounded: ${Date.now() - started} ms after the request the migrate entries are `
         + `${JSON.stringify(migrateEntries().map(e => [e.localId, e.state, e.lastError ?? null]))} and the set is `
         + `${JSON.stringify(loader.getConfig().spaceActSets?.find(s => s.kind === 'migrate')?.outcome ?? 'standing')}`);
     }
@@ -228,9 +242,8 @@ describe('a migrate is reported, audited and bounded like a restore', { skip }, 
     const [e] = migrateEntries();
     assert.ok(!DRIVER_TEXT.test(e.lastError ?? ''), `the owed act's lastError carries driver text: ${e.lastError}`);
 
-    // The held insert is released and lands (or fails) on the server; then the act comes due and replaces what it copied.
-    await failPoint('off');
-    await new Promise(resolve => setTimeout(resolve, Math.max(0, BLOCK_MS + 500 - (Date.now() - started))));
+    // The lock is let go (its insert aborted, the server drained); then the act comes due and replaces what it copied.
+    await lock.release();
     runner.setSpaceActKnobsForTest(null);
     await runner.resumeSpaceActs(Date.now() + 3_600_000);
     await until(migrated, 'the retried migrate completed');
