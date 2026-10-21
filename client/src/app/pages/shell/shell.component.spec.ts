@@ -13,6 +13,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Subject } from 'rxjs';
 import { provideRouter, Router, NavigationEnd } from '@angular/router';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { FilesApi } from '../../core/files-api.service';
 import { AuthService } from '../../core/auth.service';
@@ -26,6 +28,7 @@ function make(embedded = false) {
     imports: [ShellComponent, getTranslocoModule()],
     providers: [
       provideRouter([]),
+      provideHttpClient(), provideHttpClientTesting(), // the shell loads the caller's personal views once
       { provide: FilesApi, useValue: { listConflicts: () => of({ conflicts: [] }) } as any },
       { provide: AuthService, useValue: { logout: () => {}, logoutOidc: async () => false } as unknown as AuthService },
       { provide: EmbedService, useValue: { embedded: () => embedded } as unknown as EmbedService },
@@ -150,5 +153,13 @@ describe('ShellComponent — drawer', () => {
     expect(cmp.drawerOpen()).toBe(true);
     events.next(new NavigationEnd(1, '/settings/spaces', '/settings/spaces'));
     expect(cmp.drawerOpen()).toBe(false);
+  });
+
+  it('loads the caller\'s personal views once, for every page under it (Q-531)', () => {
+    // The Brain, Files and Graph pages and Settings > Tokens read the ViewsStore and none of them loads it: a page that did would ask
+    // again on every visit, and one that did not would show no views. The shell is the one place all of them sit under.
+    const { fixture } = make();
+    fixture.detectChanges();
+    TestBed.inject(HttpTestingController).expectOne(r => r.method === 'GET' && r.url === '/api/views');
   });
 });
