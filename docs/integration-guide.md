@@ -29,8 +29,8 @@ stands on its own.
    Conflicts API
 11. [Setup API](integration-guide/11-setup-api.md) — first-run setup, health and readiness probes, and the
     **Prometheus metrics reference** (every series `/metrics` exposes, with what each one means)
-12. [Admin & Data Management APIs](integration-guide/12-admin-api.md)
-   Reference integrity · Data Management API
+12. [Admin API](integration-guide/12-admin-api.md)
+   Reference integrity · [Data Management API](integration-guide/12a-data-management-api.md)
 13. [Audit Log API](integration-guide/13-audit-log-api.md)
 14. [Duplicates & Webhooks](integration-guide/14-duplicates-and-webhooks.md)
    Webhooks API

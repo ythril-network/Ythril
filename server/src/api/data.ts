@@ -422,7 +422,8 @@ const sendActSetAbandon = (kind: ReportedActSetKind): RequestHandler => async (_
     const a = await abandonActSet(kind);
     res.status(a.status).json(a.body);
   } catch (err) {
-    sendCaughtFailure(res, `POST /api/admin/data/${kind}/abandon`, err, { error: err instanceof Error ? err.message : String(err) });
+    // Answered by what it is (`sendCaughtFailure` classifies it), never by the caught text: the abandon raises no refusal of its own.
+    sendCaughtFailure(res, `POST /api/admin/data/${kind}/abandon`, err);
   }
 };
 dataRouter.post('/restore/abandon', requireAdminMfa, sendActSetAbandon('restore'));

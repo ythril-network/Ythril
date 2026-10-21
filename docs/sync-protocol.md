@@ -63,11 +63,11 @@ All four are stored per member in the config file. After a successful sync they 
 ### The per-space marks, and what a restore does to them
 
 Each member carries six marks per space: the four watermarks and the two re-read states. A rename of the space carries all six,
-a seq-counter wipe clears them, and a [restore](integration-guide/12-admin-api.md#post-apiadmindatarestore) forgets the three that
+a seq-counter wipe clears them, and a [restore](integration-guide/12a-data-management-api.md#post-apiadmindatarestore) forgets the three that
 say what this instance **received** and keeps the three that say what it **sent** or what the peer acknowledged. The space is
 back at an older snapshot, so what arrived after it is gone here; forgetting the receive marks makes each peer send it again,
 while the sending side is unchanged by the restore and its marks stay true (the restore raises the space's counter, so new local
-writes land above them). A [migrate](integration-guide/12-admin-api.md#post-apiadmindatamigrate) forgets none: the data is the same.
+writes land above them). A [migrate](integration-guide/12a-data-management-api.md#post-apiadmindatamigrate) forgets none: the data is the same.
 
 | Mark | Says | On a restore |
 |---|---|---|

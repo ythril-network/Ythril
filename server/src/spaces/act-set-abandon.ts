@@ -23,22 +23,32 @@ import type { ReportedActSetKind } from './act-set-report.js';
 export interface ActSetAbandonAnswer { status: 200 | 404 | 409; body: Record<string, unknown> }
 
 /**
+ * Each kind's words on its abandon door, spelled out: the answer's id key and the two refusal codes. A record over every reported kind,
+ * so a kind added there without its codes here does not compile; literal, so a reader (and the client's words gate) finds each code.
+ */
+const ABANDON_WORDS = {
+  restore: { idKey: 'restoreId', none: 'no_restore_standing', running: 'restore_act_running' },
+  migrate: { idKey: 'migrateId', none: 'no_migrate_standing', running: 'migrate_act_running' },
+} as const satisfies Record<ReportedActSetKind, { idKey: string; none: string; running: string }>;
+
+/**
  * Abandon the standing set of `kind` and answer as its door does:
- * - `200` `{ abandoned: true, <kind>Id, backupId?, released, completed }`: `released` are the spaces whose acts had not completed (a
+ * - `200` `{ abandoned: true, <idKey>, backupId?, released, completed }`: `released` are the spaces whose acts had not completed (a
  *   restore's may be half restored, and its answer also names them `halfRestored`, the word its door has always used);
- * - `404` `no_<kind>_standing` when none stands; `409` `<kind>_act_running` while a member's body runs.
+ * - `404` with the kind's `none` code when none stands; `409` with its `running` code while a member's body runs.
  */
 export async function abandonActSet(kind: ReportedActSetKind): Promise<ActSetAbandonAnswer> {
+  const words = ABANDON_WORDS[kind];
   const r = await abandonSpaceActSet(kind);
   if (!r.abandoned && r.reason === 'none_standing') {
-    return { status: 404, body: { error: `No ${kind} is standing.`, code: `no_${kind}_standing` } };
+    return { status: 404, body: { error: `No ${kind} is standing.`, code: words.none } };
   }
   if (!r.abandoned) {
     return {
       status: 409,
       body: {
         error: `A ${kind} act is running for ${(r.running ?? []).map(s => `'${s}'`).join(', ')}; abandon once it has ended.`,
-        code: `${kind}_act_running`,
+        code: words.running,
       },
     };
   }
@@ -47,7 +57,7 @@ export async function abandonActSet(kind: ReportedActSetKind): Promise<ActSetAba
   return {
     status: 200,
     body: {
-      abandoned: true, [`${kind}Id`]: r.set.id, ...(r.set.backupId ? { backupId: r.set.backupId } : {}), released, completed,
+      abandoned: true, [words.idKey]: r.set.id, ...(r.set.backupId ? { backupId: r.set.backupId } : {}), released, completed,
       ...(kind === 'restore' ? { halfRestored: released } : {}),
     },
   };

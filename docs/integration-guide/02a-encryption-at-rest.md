@@ -81,7 +81,7 @@ Stated here because the section title invites the wider reading:
 - **database backups** under `<data-root>/backups/` are plaintext NDJSON unless the backup configuration's
   `encrypt` option is on — a dump reads *through* `mongod`, so an encrypted `mongod` does not protect it, and
   `requireEncryptedAtRest` does not cover it. See
-  [POST /api/admin/data/backup](12-admin-api.md#post-apiadmindatabackup);
+  [POST /api/admin/data/backup](12a-data-management-api.md#post-apiadmindatabackup);
 - **brain data in MongoDB itself** — that is the encrypted-`mongod` job described below;
 - **an offsite copy** of `files/` taken alongside a backup is a copy of what is on disk — so it is ciphertext once the
   files are encrypted, and restoring it needs the same master secret.

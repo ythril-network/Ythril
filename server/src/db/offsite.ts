@@ -78,7 +78,7 @@ export function copyBackupOffsite(srcDir: string, destRoot: string, backupId: st
   // it is the DIRECTORY that would otherwise be created world-readable.
   //
   // This narrows the exposure; it does not remove it. The destination is usually a mounted share, and its own
-  // permissions and encryption are the operator's to arrange — which is why `12-admin-api.md` now says so instead
+  // permissions and encryption are the operator's to arrange — which is why `12a-data-management-api.md` now says so instead
   // of leaving a reader to assume that "encryption at rest" covered this.
   assertCopyable(srcDir, 'the database dump');
   mkdirPrivateSync(destDir);

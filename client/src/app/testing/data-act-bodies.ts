@@ -15,6 +15,7 @@
  * A fixture is allowed to be literal (project rule): these are the expected values, not derived from the code under test.
  */
 import type { WireAnswer } from './space-act-bodies';
+import type { ActSetSpaceReport } from '../core/admin-data.types';
 
 export const UNSERVED_SENTENCE = 'The backup holds space(s) this instance does not serve: \'old-notes\', \'retired\'. They were renamed or '
   + 'deleted after the backup, so their data has no space to be restored into. Name them in leaveOut to restore without them.';
@@ -50,8 +51,12 @@ export const RESTORE_ANSWERS = {
   restoring: { status: 409, body: { error: RESTORING_SENTENCE, code: 'space_being_restored' } },
 } satisfies Record<string, WireAnswer>;
 
-/** A `RestoreSpaceReport` row. */
-export function restoreSpace(id: string, state: 'owed' | 'running' | 'done' | 'restore_abandoned' | 'migrate_abandoned', over: Record<string, unknown> = {}) {
+/**
+ * A `RestoreSpaceReport` row. Its state is the server's string, typed as the client reads it (`ActSetSpaceReport['state']`), never a
+ * closed list here: the server sends states this fixture's author did not list (`registered`, a newer kind's `<kind>_abandoned`), and a
+ * spec must be able to hand the client every one of them.
+ */
+export function restoreSpace(id: string, state: ActSetSpaceReport['state'], over: Record<string, unknown> = {}) {
   return { id, state, attempts: state === 'done' ? 0 : 1, ...over };
 }
 

@@ -92,6 +92,8 @@ export const HELP_DOCS = [
       'integration-guide/07-tokens-api.md', 'integration-guide/08-networks-api.md', 'integration-guide/08a-invite-api.md',
       'integration-guide/09-sync-api.md', 'integration-guide/10-mfa-and-conflicts.md',
       'integration-guide/11-setup-api.md', 'integration-guide/12-admin-api.md',
+      // Backups, restore, maintenance and migrate came out of 12 when that page reached its ceiling (Q-564): a seam of its own.
+      'integration-guide/12a-data-management-api.md',
       'integration-guide/13-audit-log-api.md', 'integration-guide/14-duplicates-and-webhooks.md',
       'integration-guide/15-about-and-embedding.md', 'integration-guide/16-mcp.md',
       'integration-guide/17-quotas-pagination-oidc.md',

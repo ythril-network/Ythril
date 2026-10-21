@@ -21,7 +21,7 @@ reserved ([Upgrading](02b-upgrading.md)); no one else sees the field. A space se
 
 Add `?counts=true` to include per-space document counts (facts, entities,
 edges, chrono). Useful for agents deciding which spaces are populated and
-worth querying. A space's `actPending` (here and on MCP `list_spaces`) is the act owed or running on it, shown to instance administrators only: a deletion, wipe or rename of the space, or a restore or migrate of the whole instance ([Admin API](12-admin-api.md#post-apiadmindatarestore)); a space with one takes no writes until it completes. It reads `{ kind, since, attempts, state, nextRetryAt?, lastError?, needsAbandon?, backupId? }`: `lastError` is our sentence for the last failure, `needsAbandon` marks a restore whose backup cannot be read, and `backupId` names a restore's backup. Its `kind` is the server's word, and a client that meets a kind it does not know shows the space as busy.
+worth querying. A space's `actPending` (here and on MCP `list_spaces`) is the act owed or running on it, shown to instance administrators only: a deletion, wipe or rename of the space, or a restore or migrate of the whole instance ([Admin API](12a-data-management-api.md#post-apiadmindatarestore)); a space with one takes no writes until it completes. It reads `{ kind, since, attempts, state, nextRetryAt?, lastError?, needsAbandon?, backupId? }`: `lastError` is our sentence for the last failure, `needsAbandon` marks a restore whose backup cannot be read, and `backupId` names a restore's backup. Its `kind` is the server's word, and a client that meets a kind it does not know shows the space as busy.
 
 **Response** `200`:
 

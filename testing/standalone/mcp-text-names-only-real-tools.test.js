@@ -67,7 +67,13 @@ before(async () => {
   // And the `code` a file act's refusal carries (`destination_exists`, `confirm_required`, ...), from the tally that holds one
   // entry per code of the answer's own union (`fileActAnswerCounts`).
   const { fileActAnswerCounts } = await import('../../server/dist/files/act-answers.js');
-  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts())];
+  // And the `code` a write a standing space act refuses carries (`space_being_restored`, `space_being_migrated`, ...), from the one
+  // list of act kinds (`SPACE_ACT_KINDS`, each kind's `writeRefusalCode`): `space_rename` and help() name the ones a rename meets.
+  const { SPACE_ACT_KINDS } = await import('../../server/dist/config/types-space-acts.js');
+  const actCodes = Object.values(SPACE_ACT_KINDS).map(k => k.writeRefusalCode);
+  assert.ok(actCodes.length >= 5, `only ${actCodes.length} space act refusal codes were read`);
+  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
+    ...actCodes];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 

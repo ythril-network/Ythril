@@ -39,14 +39,16 @@ function serverActKinds(): { kinds: string[]; instanceWideKinds: string[]; insta
 }
 
 /**
- * The codes the abandon doors answer with (`server/src/spaces/act-set-abandon.ts`, Q-564): spelled per kind as a template
- * (`no_${kind}_standing`), so each template is expanded over every instance-wide kind - a literal match would find none of them.
+ * The codes the abandon doors answer with (`server/src/spaces/act-set-abandon.ts`, Q-564): its `ABANDON_WORDS` record spells a `none`
+ * and a `running` code per kind, and the module refuses to compile without both for every reported kind. Read from that record, with a
+ * floor of two per instance-wide kind, so a kind whose codes this gate cannot see fails here rather than passing over nothing.
  */
 function abandonCodes(): string[] {
   const src = readRepoSource('server/src/spaces/act-set-abandon.ts');
-  const templates = [...src.matchAll(/code: `([a-z_]*)\$\{kind\}([a-z_]*)`/g)].map(m => [m[1]!, m[2]!] as const);
-  if (templates.length < 2) throw new Error(`found ${templates.length} abandon code templates - fewer than 2, so act-set-abandon.ts moved or its spelling changed`);
-  return serverActKinds().instanceWideKinds.flatMap(k => templates.map(([pre, post]) => `${pre}${k}${post}`));
+  const codes = [...src.matchAll(/\b(?:none|running): '([a-z_]+)'/g)].map(m => m[1]!);
+  const floor = 2 * serverActKinds().instanceWideKinds.length;
+  if (codes.length < floor) throw new Error(`found ${codes.length} abandon codes - fewer than ${floor}, so act-set-abandon.ts moved or its spelling changed`);
+  return codes;
 }
 
 /** Every code the restore, migrate and backup doors answer with. */

@@ -161,8 +161,8 @@ Available in MCP-connected clients, and answered by the same planner as the admi
 
 A deletion, a wipe and a rename are acts of one space. A **restore** from a backup and a **migrate** to another database are
 acts of the whole instance: one act on every space it serves, registered together, answered `202` by their own doors and
-reported at [`GET /api/admin/data/restore`](12-admin-api.md#get-apiadmindatarestore) and
-[`GET /api/admin/data/migrate`](12-admin-api.md#get-apiadmindatamigrate), never through a vote. While any act stands for a space,
+reported at [`GET /api/admin/data/restore`](12a-data-management-api.md#get-apiadmindatarestore) and
+[`GET /api/admin/data/migrate`](12a-data-management-api.md#get-apiadmindatamigrate), never through a vote. While any act stands for a space,
 the space takes no writes (`409` with the kind's own code: `space_being_deleted`, `space_being_wiped`, `space_being_renamed`,
 `space_being_restored`, `space_being_migrated`) and its peer exchanges are held; the space's `actPending` names it.
 

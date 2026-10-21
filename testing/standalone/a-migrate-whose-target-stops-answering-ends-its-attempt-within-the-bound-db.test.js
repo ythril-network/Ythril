@@ -20,7 +20,7 @@
  * set short (`SPACE_ACT_OP_MS`), so "within the bound" is seconds, and the attempt must end - its entries owed, attempts counted, the
  * runner idle - within {@link ENDS_WITHIN_BOUNDS} bounds. Then the abandon answers 200 and the URI is unchanged.
  *
- * The wait for the end is time-boxed by the clock (`waits-differently`): a hang is the defect, so the row fails at the box rather than
+ * The wait for the end is time-boxed by the clock (`holdsWithin`, `testing/_shared/wait-for.mjs`): a hang is the defect, so the row fails at the box rather than
  * hanging the run, and the box names how long it waited.
  *
  * ## Seen red
@@ -48,6 +48,7 @@ import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST, TEST_MONGO_PORT } from 
 import { openToolDoor } from './_tool-door.mjs';
 import { startTcpRelay } from './_tcp-relay.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest } from './_space-act-harness.mjs';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -133,12 +134,11 @@ describe('a migrate whose target stops answering mid-copy ends its attempt withi
     const started = await door.request(door.routeHandler(dataRouter, 'post', '/migrate'), { body: { uri: targetUri } });
     assert.ok(started.status >= 200 && started.status < 300, `the migrate was refused: ${started.status} ${JSON.stringify(started.body)}`);
 
-    // waits-differently: a clock box, not turns - the defect is a hang, and the box is what turns it into a failure that names its length.
+    // A box by the clock: the defect is a hang, and the box is what turns it into a failure that names its length.
     const box = 90_000;
-    const t0 = Date.now();
-    while (!frozen && Date.now() - t0 < box) await new Promise(r => setTimeout(r, 25));
+    await holdsWithin(() => frozen, box, 25, { what: 'the copy reaching the target' });
     assert.ok(frozen, `the copy never sent a command naming a seeded collection to the target within ${box} ms: the relay froze nothing`);
-    while (!attemptEnded() && Date.now() - frozeAt < box) await new Promise(r => setTimeout(r, 50));
+    await holdsWithin(attemptEnded, box, 50, { what: 'the attempt ending after the target went silent' });
     const took = Date.now() - frozeAt;
     assert.ok(droppedToServer > 0, 'the frozen target was sent nothing: the freeze happened after the copy, not during it');
     assert.ok(attemptEnded(), `the attempt had not ended ${took} ms after the target went silent (bound ${OP_MS} ms): `
