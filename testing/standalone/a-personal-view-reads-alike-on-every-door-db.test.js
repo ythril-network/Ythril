@@ -315,4 +315,45 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
     if (made.length) wrong.push(`created: ${made}`);
     assert.deepEqual(wrong, []);
   });
+
+  // b100 lens S2: the body-scoped guard expanded a view whatever its area and rung, so a write route mounted on it would have written
+  // to the view's members. Every (area, rung) the guard can be built for that does not take a view must answer the view as a space
+  // that is not one, with the hint, and never reach the handler.
+  it('the body-scoped guard expands a view only for an area and rung that take a view', async () => {
+    const express = (await import('express')).default;
+    const http = await import('node:http');
+    const { requireBodyScopedSpace } = await import('../../server/dist/auth/middleware.js');
+    const { takesAView } = await import('../../server/dist/auth/space-rights.js');
+    const { RUNGS } = await import('../../server/dist/config/rights-shape.js');
+    const writer = await d.mint('vp-body-writer', { [QA]: d.row({}, 'admin'), [OPS]: d.row({}, 'admin') });
+    await mustCreate(writer.key, 'body', [QA, OPS]);
+    const pairs = d.SPACE_AREAS.flatMap(area => RUNGS.filter(r => r !== 'none').map(needs => ({ area, needs })));
+    const refusing = pairs.filter(p => !takesAView(p));
+    assert.ok(refusing.length >= 2 && pairs.length > refusing.length, `derived ${refusing.length} of ${pairs.length} (area, rung) pairs as not taking a view`);
+    const app = express();
+    app.use(express.json());
+    const reached = [];
+    for (const p of pairs) {
+      app.post(`/probe/${p.area}/${p.needs}`, requireBodyScopedSpace(p.area, p.needs), (req, res) => { reached.push(`${p.area}/${p.needs}`); res.json({ spaces: req.authorisedSpaces }); });
+    }
+    const server = http.createServer(app);
+    await new Promise(res => server.listen(0, '127.0.0.1', res));
+    const url = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const wrong = [];
+      for (const p of pairs) {
+        const r = await fetch(`${url}/probe/${p.area}/${p.needs}`, {
+          method: 'POST', headers: { Authorization: `Bearer ${writer.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ space: '@body' }),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (takesAView(p)) {
+          if (r.status !== 200) wrong.push(`${p.area}/${p.needs}: a read that takes a view answered ${r.status} ${JSON.stringify(body)}`);
+        } else if (r.status !== 404 || !String(body.error ?? '').includes(HINT('@body'))) {
+          wrong.push(`${p.area}/${p.needs}: ${r.status} ${JSON.stringify(body).slice(0, 160)}`);
+        }
+      }
+      assert.deepEqual(wrong, []);
+      assert.deepEqual(reached.filter(k => refusing.some(p => `${p.area}/${p.needs}` === k)), [], 'a body-scoped route that does not take a view reached its handler with a view');
+    } finally { await new Promise(res => server.close(res)); }
+  });
 });

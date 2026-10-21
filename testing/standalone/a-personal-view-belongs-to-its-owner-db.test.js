@@ -227,6 +227,57 @@ describe('a personal view belongs to its owner (Q-531)', { skip }, () => {
       assert.ok(!storedViews().some(v => v.ownerId === `token:${blind.id}`), 'an empty copy was stored');
     });
 
+    // b100 lens D1: a rename changes the source's id, and a copy keyed by the id made a second copy after it instead of refreshing.
+    it('a copy after the source was renamed refreshes the earlier copy instead of making a second', async () => {
+      const receiver = await d.mint(uniq('vo-ren-receiver'), { [QA]: d.row({ knowledge: 'read' }), [OPS]: d.row({ knowledge: 'read' }) });
+      await createView(admin.key, 'ren-src', [QA]);
+      const first = await d.rest(admin.key, 'POST', '/api/views/@ren-src/copy', { toTokenId: receiver.id });
+      assert.equal(first.status, 201, `the first copy: ${fmt(first)}`);
+      const renamed = await d.rest(admin.key, 'PATCH', '/api/views/@ren-src', { name: 'ren-dst', members: [QA, OPS] });
+      assert.equal(renamed.status, 200, `control: the rename: ${fmt(renamed)}`);
+      const again = await d.rest(admin.key, 'POST', '/api/views/@ren-dst/copy', { toTokenId: receiver.id });
+      assert.equal(again.status, 200, `a copy of the renamed source: ${fmt(again)} (201 is a second copy)`);
+      const theirs = storedViews().filter(v => v.ownerId === `token:${receiver.id}`).map(v => ({ id: v.id, members: v.members }));
+      assert.deepEqual(theirs, [{ id: '@ren-src', members: [QA, OPS] }], 'the receiver holds other than one refreshed copy');
+    });
+
+    // b100 lens D2: a wildcard copy skipped the receiver check, so a token that reads nothing was given a view.
+    it('a wildcard copy to a token that reads no space is refused, as a listed one is', async () => {
+      const nothing = await d.mint(uniq('vo-reads-nothing'), {});
+      await createView(admin.key, 'all-of-it', ['*']);
+      const a = await d.rest(admin.key, 'POST', '/api/views/@all-of-it/copy', { toTokenId: nothing.id });
+      assert.ok(a.status >= 400 && a.status < 500, `a wildcard copy to a token that reads nothing: ${fmt(a)}`);
+      assert.equal(a.body?.code, 'view_copy_nothing_readable', `the refusal: ${fmt(a)}`);
+      assert.ok(!storedViews().some(v => v.ownerId === `token:${nothing.id}`), 'a copy that reads nothing was stored');
+      const some = await d.mint(uniq('vo-reads-qa'), { [QA]: d.row({ knowledge: 'read' }) });
+      const kept = await d.rest(admin.key, 'POST', '/api/views/@all-of-it/copy', { toTokenId: some.id });
+      assert.equal(kept.status, 201, `control: a wildcard copy to a token that reads a space: ${fmt(kept)}`);
+      assert.deepEqual(storedViews().filter(v => v.ownerId === `token:${some.id}`).map(v => v.members), [['*']]);
+    });
+
+    // b100 lens S3: one answer per act on both doors - a non-manager's refusal, and whether the copy was made or refreshed.
+    it('a copy answers alike on REST and MCP: the non-manager refusal\'s code, and `created`', async () => {
+      await createView(other.key, 'not-mine-to-give', [QA]);
+      const target = await d.mint(uniq('vo-parity-target'), { [QA]: d.row({ knowledge: 'read' }) });
+      const restNo = await d.rest(other.key, 'POST', '/api/views/@not-mine-to-give/copy', { toTokenId: target.id });
+      const mcpNo = await d.mcp(other.key, 'view_copy', { view: '@not-mine-to-give', toTokenId: target.id });
+      assert.ok(mcpNo.isError, `control: MCP refused the non-manager: ${mcpNo.text.slice(0, 160)}`);
+      assert.deepEqual([restNo.status, restNo.body?.code], [403, mcpNo.structured?.code], `REST ${fmt(restNo)} / MCP ${JSON.stringify(mcpNo.structured)}`);
+      assert.equal(mcpNo.structured?.code, 'view_copy_forbidden');
+      await createView(admin.key, 'parity-src', [QA]);
+      const created = [];
+      for (const door of ['rest', 'mcp']) {
+        const to = await d.mint(uniq(`vo-parity-${door}`), { [QA]: d.row({ knowledge: 'read' }) });
+        for (let i = 0; i < 2; i++) {
+          const a = door === 'rest'
+            ? await d.rest(admin.key, 'POST', '/api/views/@parity-src/copy', { toTokenId: to.id })
+            : await d.mcp(admin.key, 'view_copy', { view: '@parity-src', toTokenId: to.id });
+          created.push(`${door} ${i}: ${(door === 'rest' ? a.body : a.structured)?.created}`);
+        }
+      }
+      assert.deepEqual(created, ['rest 0: true', 'rest 1: false', 'mcp 0: true', 'mcp 1: false']);
+    });
+
     it('MCP view_copy answers the MFA sentence whenever REST would ask for MFA', async () => {
       const totp = await import('../../server/dist/auth/totp.js');
       const receiver = await d.mint(uniq('vo-mfa-receiver'), { [QA]: d.row({ knowledge: 'read' }) });
