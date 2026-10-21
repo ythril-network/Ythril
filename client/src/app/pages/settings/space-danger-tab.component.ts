@@ -26,7 +26,7 @@ import { LiveAnnouncement } from '../../core/live-announcement';
 import { pollUntil, type PollHandle } from '../../core/poll-until';
 import type { ActEntryView, SpaceActOutcome } from '../../core/space-act-outcome';
 import { StatusPillComponent } from '../../shared/status-pill.component';
-import { actKindKey, actRepeatHintKey, actStateKey, actStateVariant, actWhenText } from '../../core/space-act-view';
+import { actKindKey, actRepeatHintKey, actRowView, actWhenText } from '../../core/space-act-view';
 
 /** How often a standing delete or wipe is asked after, while this tab is open. */
 const ACT_POLL_MS = 5000;
@@ -179,10 +179,15 @@ type ActNotice =
   @if (standing(); as s) {
     <div class="alert alert-warning" style="margin-bottom:16px;font-size:13px;">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <app-status-pill [variant]="actStateVariant(s.state)" [dot]="true">{{ actStateKey(s.state) | transloco }}</app-status-pill>
-        <span>{{ 'spaces.dangerZone.act.standing' | transloco: { kind: (actKindKey(s.kind) | transloco), since: sinceText(s.since), when: whenText(s.nextRetryAt) } }}</span>
+        @let row = rowView(s);
+        <app-status-pill [variant]="row.variant" [dot]="true">{{ row.stateKey | transloco }}</app-status-pill>
+        @if (row.showsNextTry) {
+          <span>{{ 'spaces.dangerZone.act.standing' | transloco: { kind: (actKindKey(s.kind) | transloco), since: sinceText(s.since), when: whenText(s.nextRetryAt) } }}</span>
+        } @else {
+          <span>{{ 'spaces.dangerZone.act.standingNoRetry' | transloco: { kind: (actKindKey(s.kind) | transloco), since: sinceText(s.since) } }}</span>
+        }
       </div>
-      <div class="dz-hint" style="margin-top:6px;">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: s.attempts } }}</div>
+      @if (row.showsAttempts) { <div class="dz-hint" style="margin-top:6px;">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: s.attempts } }}</div> }
       @if (s.lastError) { <div class="dz-hint">{{ 'spaces.dangerZone.act.lastError' | transloco }} {{ s.lastError }}</div> }
       @if (s.needsAbandon) { <div class="dz-hint">{{ 'spaces.dangerZone.act.needsAbandon' | transloco }}</div> }
       <div class="dz-hint">{{ repeatHintKey(s.kind) | transloco }}</div>
@@ -288,8 +293,7 @@ export class SpaceDangerTabComponent {
    */
   readonly renameBlockedByAct = computed(() => this.standing() !== null);
 
-  protected readonly actStateVariant = actStateVariant;
-  protected readonly actStateKey = actStateKey;
+  protected readonly rowView = actRowView;
   protected readonly actKindKey = actKindKey;
   repeatHintKey(kind: string): string { return actRepeatHintKey(this.transloco, kind); }
   sinceText(since: string): string { return this.dates.format(since, 'datetime'); }

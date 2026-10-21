@@ -603,6 +603,42 @@ describe('any standing act blocks the rename and gets its own repeat hint (bundl
   });
 
   /*
+   * Q-561: the tab's standing-act line reads a row by the same rule as the Data card and the Networks list (`actRowView`): an act only an
+   * abandon ends is not "Retry owed" and names no next try; an act with no try yet is Waiting. Real en.json: the sentence read is pinned.
+   */
+  describe('the standing act reads by the one row rule (Q-561)', () => {
+    const en: Record<string, string> = JSON.parse(readFileSync(resolve(__dirname, '../../../../public/assets/i18n/en.json'), 'utf8'));
+    const withEn = (actPendingBody: Record<string, unknown>) => wired({
+      space: { actPending: actPendingBody },
+      i18n: { langs: { en }, translocoConfig: { availableLangs: ['en'], defaultLang: 'en' } } as SpecTranslocoOptions,
+    });
+    const said = (h: Wired) => statusText(h).replace(/\s+/g, ' ');
+
+    it('an act only an abandon ends reads "Needs an abandon": no "Retry owed", no next try, and the abandon sentence', () => {
+      const h = withEn({ ...actPending({ kind: 'restore', state: 'owed', attempts: 2 }), needsAbandon: true });
+      expect(said(h)).toContain('Needs an abandon');
+      expect(said(h)).not.toContain('Retry owed');
+      expect(said(h)).not.toContain('Next try');
+      expect(said(h)).toContain(en['spaces.dangerZone.act.needsAbandon']);
+    });
+
+    it('an act with no try yet (owed, attempt 0) reads Waiting, with no tries and no next try', () => {
+      const h = withEn(actPending({ kind: 'restore', state: 'owed', attempts: 0 }));
+      expect(said(h)).toContain('Waiting');
+      expect(said(h)).not.toContain('Retry owed');
+      expect(said(h)).not.toContain('Next try');
+      expect(said(h)).not.toContain('Attempts so far');
+    });
+
+    it('a real retry keeps "Retry owed", its tries and its next try', () => {
+      const h = withEn(actPending({ kind: 'delete', state: 'owed', attempts: 2, nextRetryAt: RETRY_AHEAD }));
+      expect(said(h)).toContain('Retry owed');
+      expect(said(h)).toContain('Attempts so far: 2');
+      expect(said(h)).toContain('Next try:');
+    });
+  });
+
+  /*
    * Q-561, finding 6: a rename refused because a restore or migrate stands answers `409 { error, code }` with the server's English. The
    * tab showed that sentence in de and pl. The code is the contract: each language has the sentence for it (the same words the Data
    * page says for the same code, `data.refusal.<code>`), and the server's English is never what is read.

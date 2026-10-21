@@ -1251,6 +1251,7 @@
   "spaces.dangerZone.act.refills": "Dieser Raum ist die Kopie eines Abonnenten: Er füllt sich bei der nächsten Synchronisierung wieder vom Herausgeber.",
   "spaces.dangerZone.act.wiped": "Löschen der Daten auf dieser Instanz abgeschlossen.",
   "spaces.dangerZone.act.standing": "Hier noch offen: {{kind}}, begonnen {{since}}. Nächster Versuch: {{when}}.",
+  "spaces.dangerZone.act.standingNoRetry": "Hier noch offen: {{kind}}, begonnen {{since}}.",
   "spaces.dangerZone.act.attempts": "Bisherige Versuche: {{count}}",
   "spaces.dangerZone.act.renameHint": "Ein Raum kann nicht umbenannt werden, solange eine Änderung an ihm aussteht oder läuft.",
   "spaces.dangerZone.act.ended": "Die ausstehende Änderung an diesem Raum ist beendet.",
