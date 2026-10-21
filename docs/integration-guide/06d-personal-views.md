@@ -62,7 +62,8 @@ MCP argument it is written `@team`.
 
 `POST /api/views` takes `name` (1 to 40 characters of `a-z`, `0-9` and `-`, unique among the owner's views) and
 `members`: a list of space ids, or exactly `["*"]`. A listed member must exist and be readable by the caller when the
-view is made or changed. A member may not be a view. Duplicates in the list are collapsed. `PATCH` sends only what
+view is made or changed: a `read` rung in an area a view is read in, so a space the token holds only a schema rung on is
+refused (`view_member_unknown`), as it would be read by no door. A member may not be a view. Duplicates in the list are collapsed. `PATCH` sends only what
 changes, and an empty body is `400` (`view_nothing_to_change`).
 
 ## Reading through a view
