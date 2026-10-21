@@ -17,10 +17,11 @@
  * NORMAL — and without being told, it reads as a broken index. This is the same family of misreading as an
  * empty `similar`: the number is right and the inference from it is wrong.
  *
- * ## Proxy spaces aggregate
+ * ## A personal view is not a space
  *
- * Both tools report a proxy's members combined. A caller who does not know that will read one large space
- * where there are four, and will write to it without the `targetSpace` a proxy write requires.
+ * `list_spaces` lists spaces only and says where the caller's views are listed; `space_stats` through a view reports its
+ * members combined. A caller who does not know that will look for a view among the spaces, or read one large space where
+ * there are four.
  *
  * Run: node --test testing/standalone/space-info-tools-orient-a-caller.test.js
  */
@@ -78,14 +79,20 @@ describe('get_stats says what its numbers do NOT mean', () => {
   });
 });
 
-describe('both say a proxy aggregates', () => {
-  for (const [label, text] of [['list_spaces', LIST], ['space_stats', STATS]]) {
-    it(`${label} says a proxy reports its members combined`, () => {
-      assert.match(text, /PROXY|proxy/, 'a proxy is not one space and the numbers are not one space\'s');
-      // Matched without the apostrophe: it is escaped as \' inside the single-quoted TS string, so a regex
-      // written against the rendered text does not match the source.
-      assert.match(text, /totals combined/,
-        'say that the figure is a sum, or four spaces read as one large one');
-    });
-  }
+describe('the tools say what a personal view is', () => {
+  it('list_spaces says a view is not a space and where views are listed', () => {
+    assert.match(LIST, /personal views are listed by `view_list`, not here/, 'a caller looks for a view among the spaces and reports it missing');
+    assert.match(LIST, /a view is not a space/, 'say what a view is, or it is read as a space this token cannot reach');
+  });
+
+  it('space_stats says a personal view reports the totals of its members combined', () => {
+    // Matched without the apostrophe: it is escaped inside the single-quoted TS string, so a regex written against the rendered text
+    // does not match the source.
+    assert.match(STATS, /personal view/, 'a view is not one space and the numbers are not one space');
+    assert.match(STATS, /totals combined/, 'say that the figure is a sum, or four spaces read as one large one');
+  });
+
+  it('neither tells a caller to write through a view with a target, a field that is retired', () => {
+    assert.doesNotMatch(LIST + STATS, /targetSpace/, 'a retired field is advertised as a way to write');
+  });
 });

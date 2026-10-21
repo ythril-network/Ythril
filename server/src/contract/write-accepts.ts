@@ -71,11 +71,11 @@ export function forwardedArgNames(tool: ToolHandler, exclude: ReadonlySet<string
   return Object.keys(props).filter(k => !exclude.has(k));
 }
 
-/** What addresses a write rather than being part of it: the space and the proxy target, on every write. */
-const ADDRESSING_BASE = ['space', 'targetSpace'] as const;
+/** What addresses a write rather than being part of it: the space, on every write. (`targetSpace` is retired: it stays in the body so the judge refuses it by name.) */
+const ADDRESSING_BASE = ['space'] as const;
 
 /**
- * The keys that ADDRESS an operation's write and are never judged: the space and the proxy target, the record's own `id` on an update
+ * The keys that ADDRESS an operation's write and are never judged: the space, the record's own `id` on an update
  * (REST takes it from the path), the file's `path` on a file-metadata update, and the two ids of a merge. `id` on a create stays a body
  * key — REST's create takes it in the body.
  */
@@ -88,7 +88,7 @@ function addressingOf(operation: string): ReadonlySet<string> {
 }
 
 /**
- * The body a TOOL call's arguments make, for the judge: the arguments minus what ADDRESSES the write (`space`, `targetSpace`, the record's
+ * The body a TOOL call's arguments make, for the judge: the arguments minus what ADDRESSES the write (`space`, the record's
  * `id` on an update, a file's `path`, a merge's two ids). A REST body carries none of those (they ride in the path and the query), so a REST
  * route judges its body as it is; a tool call carries them beside the payload, and judging them would name `space` an unknown field on every
  * call. One function, so a door that judges arguments cannot forget the half of the arguments that are not the record.

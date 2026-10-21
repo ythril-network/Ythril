@@ -4,7 +4,7 @@
  *
  * ## What it pins
  *
- * `sweepEverySpaceAtBoot` was a bare `for` over `concreteSpaces()`. The per-space catch lived in `sweepLatestMeta`, the
+ * `sweepEverySpaceAtBoot` was a bare `for` over `configuredSpaces()`. The per-space catch lived in `sweepLatestMeta`, the
  * non-loop caller, as an ad-hoc `log.warn`: no shared words, no counter (`ythril_housekeeping_space_failures_total`), no step
  * name the registry could pre-declare, and nothing bounding a space whose read hangs — the sweep is an unindexed scan per record
  * kind, so a hung space held the whole boot sweep for as long as the driver waited.

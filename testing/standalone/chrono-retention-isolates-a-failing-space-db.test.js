@@ -58,7 +58,7 @@ const SCHEMAS = {
 };
 const policy = (...kinds) => ({ typeSchemas: Object.fromEntries(kinds.map(k => [k, SCHEMAS[k]])) });
 
-/** Write the config with exactly these spaces (id, optional policy) and read it, so `concreteSpaces()` is them. */
+/** Write the config with exactly these spaces (id, optional policy) and read it, so `configuredSpaces()` is them. */
 function configure(spaces) {
   fs.writeFileSync(TEMP_CONFIG, JSON.stringify({
     instanceId: 'g13-chrono', instanceName: 'G13', tokens: [], networks: [],

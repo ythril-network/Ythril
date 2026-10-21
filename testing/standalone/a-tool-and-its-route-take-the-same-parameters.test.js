@@ -59,10 +59,10 @@ function exportedSets() {
 /**
  * Keys that are TRANSPORT on one door and not a parameter on the other, so their absence is never a gap.
  *
- * `space` names the space in a tool argument and is a path segment on REST; `targetSpace` narrows a proxy
- * write and rides the query string. Neither is a body key, and neither is a capability.
+ * `space` names the space in a tool argument and is a path segment on REST. It is not a body key and not a capability.
+ * (`targetSpace` is not here: it is a retired field refused by name on both doors, so a tool declaring it would be a gap.)
  */
-const TRANSPORT = new Set(['space', 'targetSpace']);
+const TRANSPORT = new Set(['space']);
 
 /**
  * Pairs that legitimately differ, each with its reason. Never a bare name — an exemption with no `why` is

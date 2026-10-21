@@ -161,13 +161,25 @@ describe('a GET body PATCHed back still works — strip, THEN be strict', () => 
     assert.equal(UpdateSpaceBody.safeParse(stripServerOwnedSpace(AS_RETURNED, { forUpdate: true })).success, true);
   });
 
-  it('the CREATE strip keeps `id`, `folders` and `proxyFor` — they are real inputs there', () => {
+  it('the CREATE strip keeps `id` and `folders` — they are real inputs there', () => {
     // The gap CI caught. `mass-assignment.test.js` posts `{id, label, builtIn: true}` and requires a 201
     // with `builtIn` not injectable — so create must strip `builtIn` and must NOT strip `id`, or a caller's
     // chosen space id is silently replaced by a generated slug.
     const out = stripServerOwnedSpace({ id: 'qa', label: 'QA', folders: ['a'], builtIn: true, usageGiB: 3 });
     assert.deepEqual(out, { id: 'qa', label: 'QA', folders: ['a'] });
     assert.equal(CreateSpaceBody.safeParse(out).success, true);
+  });
+
+  it('`proxyFor` is a retired field: the CREATE strip leaves it in place and the create door refuses it by name, never as a strict-body typo', async () => {
+    // Stripped, it would vanish and the space would be created without a word; left in, the strict parse alone would say only
+    // "unrecognised key". The refusal names the field and what replaced it, and runs before the parse.
+    const { retiredSpaceFieldError } = await import('../../server/dist/brain/retired-write-fields.js');
+    const body = { label: 'QA', proxyFor: ['a'] };
+    assert.deepEqual(stripServerOwnedSpace(body), body);
+    assert.equal(CreateSpaceBody.safeParse(body).success, false, 'proxyFor is a declared create field again');
+    const said = retiredSpaceFieldError(body);
+    assert.match(said ?? '', /`proxyFor` was removed/);
+    assert.match(said ?? '', /view_create/);
   });
 
   it('and a real typo is STILL refused after either strip', () => {

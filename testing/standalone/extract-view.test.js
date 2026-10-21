@@ -101,13 +101,13 @@ describe('the extract route', () => {
   });
 
   it('resolves the member and KEEPS it', () => {
-    // On a proxy space the derived records live in the same member collection as their parent. Looking
+    // On a personal view the derived records live in the same member collection as their parent. Looking
     // them up in another member's collection returns nothing, with no error — the failure mode that made
     // `pipeline-status` report every index missing on a working instance.
-    // Q-6 narrowed this fan-out: the members are now the ones the CALLER may see, not every member of the proxy.
-    // The property this test is about is unchanged — it iterates members and keeps the one it found the record in —
-    // and pinning the narrowed form keeps it honest, since reverting to the unnarrowed call would fail here too.
-    assert.match(handler, /for \(const mid of memberSpacesForRequest\(req, spaceId\)\)/);
+    // The members are the ones the CALLER reads, decided once at the guard (`readSpacesOfRequest`), never every member of the view.
+    // The property this test is about — it iterates members and keeps the one it found the record in — is pinned in that
+    // narrowed form, since a call that was not narrowed would fail here too.
+    assert.match(handler, /for \(const mid of readSpacesOfRequest\(req, spaceId\)\)/);
     assert.match(handler, /member = mid/);
     assert.match(handler, /col<FileMetaDoc>\(spaceCollection\(member, 'files'\)\)/);
   });

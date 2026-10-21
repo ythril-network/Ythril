@@ -303,10 +303,10 @@ describe('the retention sweep is walked, not looped (bundle-53 G13)', () => {
     const src = SRC();
     assert.match(src, /const \w+ = declareStep\('Chrono retention'\)/, 'the step is declared once, at module scope, so its counters start at 0');
     const body = bodyOf(src, 'sweepChronoRetention');
-    assert.match(body, /eachSpace\(\s*\w+,\s*concreteSpaces\(\)/, 'the spaces are not handed to the walk');
+    assert.match(body, /eachSpace\(\s*\w+,\s*configuredSpaces\(\)/, 'the spaces are not handed to the walk');
     assert.match(body, /eachUnit\(/, 'the halves of a space are not units of the walk');
     assert.doesNotMatch(body, /\bcatch\b/, 'the sweep has a catch of its own again: a failure it swallows is one the walk never reports or counts');
-    assert.doesNotMatch(body, /for \(const s of concreteSpaces\(\)\)/, 'a hand loop over the spaces is back');
+    assert.doesNotMatch(body, /for \(const s of configuredSpaces\(\)\)/, 'a hand loop over the spaces is back');
   });
 
   it('the announcement is a bounded warnOnce, not a Set that grows for the life of the process', () => {

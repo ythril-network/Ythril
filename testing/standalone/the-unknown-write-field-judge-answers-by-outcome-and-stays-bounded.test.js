@@ -40,7 +40,7 @@ const DASH = '—';
 const IGNORED = `unknown field ${DASH} ignored`;
 const NOT_ACCEPTED = `unknown field ${DASH} not accepted`;
 /** Keys that are addressing, never body keys of a write: the judge does not count them as accepted. */
-const ADDRESSING = new Set(['space', 'targetSpace']);
+const ADDRESSING = new Set(['space']);
 const OPERATION = 'entity.create';
 const TOOL = 'save_entity';
 
@@ -114,6 +114,7 @@ describe('the judge answers an unknown field by the outcome of the write', () =>
       assert.deepEqual(listed.map(x => x.field), ['zz'], `${space}: the list must be on the FIRST row and on no other`);
       for (const k of acceptedByTool) assert.ok(listed[0].reason.includes(k), `${space}: the accepted list omits ${k}, a key ${TOOL} declares`);
       for (const k of ADDRESSING) assert.ok(!new RegExp(`accepts:.*\\b${k}\\b`).test(listed[0].reason), `${space}: addressing key ${k} listed as a body key`);
+      assert.ok(!listed[0].reason.includes('targetSpace'), `${space}: the accepted list names targetSpace, a retired field that both doors refuse by name`);
     }
   });
 
