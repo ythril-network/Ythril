@@ -203,7 +203,9 @@ export interface ToolHandler {
    * its full schema for discovery). For partial-success tools like `save_bulk`, whose contract is to
    * process the valid items and report per-item errors in the RESULT rather than reject the whole call —
    * enforcing the item schemas up front would wrongly abort the batch. Such tools validate each item in
-   * their handler.
+   * their handler. And for a tool whose shared act judges the whole body with the coded refusals its REST
+   * twin answers (the personal-view acts, the heavy runs): checked here first, the same mistake would be
+   * answered in the validator's words and without the code on one door only.
    */
   skipSchemaValidation?: boolean;
   inputSchema(s: ToolSchemas): Record<string, unknown>;

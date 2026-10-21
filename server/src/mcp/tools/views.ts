@@ -78,6 +78,10 @@ export const view_createTool: ToolHandler = {
   description: 'Create a personal view of your own: a named read lens over spaces you read, id "@<name>". Read tools (recall, filter, similar, graph_traverse, '
     + 'space_stats and the other reads) accept it as `space` and read each member you can read at that moment, naming the members read in `viewMembers`. '
     + 'It never writes: write to one of its member spaces. At most 50 views per token; names are 1-40 characters of a-z, 0-9 and hyphen, unique per token.',
+  // The shared act judges the whole body with the coded refusals REST answers (`view_members_empty`, `view_members_limit`, `view_name_invalid`
+  // ...), so the dispatcher's schema check would only answer the same mistakes first, in the validator's words and with no code (b100 row P).
+  // The schema stays for discovery and still states every limit.
+  skipSchemaValidation: true,
   inputSchema: () => ({
     type: 'object',
     properties: {
@@ -98,6 +102,8 @@ export const view_updateTool: ToolHandler = {
   name: 'view_update',
   ownerScoped: true,
   description: 'Rename and/or change the members of one of YOUR personal views. Send only what changes.',
+  // As `view_create`: the act's coded refusals are the answer on both doors, not the validator's words (b100 row P).
+  skipSchemaValidation: true,
   inputSchema: () => ({
     type: 'object',
     properties: {
