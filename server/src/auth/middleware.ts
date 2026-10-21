@@ -13,7 +13,7 @@ import { isRetiredSpaceId, unknownSpaceAnswer } from '../spaces/unknown-space.js
 import { isViewId, resolveOwnView, viewOwnerOf, viewReadMembers } from '../config/views.js';
 import { spacesForBodyScopedRequest } from './body-scoped-space.js';
 import type { SpaceArea } from '../config/rights-shape.js';
-import type { Rung } from './space-rights.js';
+import { takesAView, type Rung } from './space-rights.js';
 import { rungFor, satisfies } from './required-rung.js';
 import { effectiveRung } from './mint-cap.js';
 import { authAttemptsTotal } from '../metrics/registry.js';
@@ -475,7 +475,7 @@ function judgeSpaceParam(
   if (!view) return 'space';
   const routePath = `${req.baseUrl ?? ''}${(req.route as { path?: string } | undefined)?.path ?? ''}`;
   const verdict = rungFor(req.method, routePath);
-  const readsData = verdict.kind === 'requires' && verdict.scope === 'path' && verdict.needs === 'read' && verdict.area !== 'schema';
+  const readsData = verdict.kind === 'requires' && verdict.scope === 'path' && takesAView(verdict);
   const rights = (record as { rights?: TokenRights }).rights;
   if (!readsData || verdict.kind !== 'requires' || !rights) {
     const a = unknownSpaceAnswer(owner, spaceId, false, cfg);
@@ -683,12 +683,15 @@ export function requireBodyScopedSpace(area: SpaceArea, needs: Exclude<Rung, 'no
     const peerId = peerBoundTo(record as { peerInstanceId?: unknown });
     // The caller's own views among the names, each with the spaces it reads in THIS route's area (Q-531). A retired proxy id answers 410
     // to every caller; another token's view is an unknown id, exactly.
+    // A view is expanded only where its area and rung take one (`takesAView`, the rule the path-scoped judge asks): elsewhere the owner's
+    // view is answered as a space that is not one, with the hint, so a write route built on this guard can never write to its members.
+    const viewsTaken = takesAView({ needs, area });
     const ownViews = new Map<string, string[]>();
     for (const raw of namedList) {
       if (typeof raw !== 'string') continue;   // shape is the resolver's refusal to make, with its wording
       const sid = raw.trim();
       if (!sid) continue;
-      const view = isViewId(sid) ? resolveOwnView(owner, sid, cfg) : null;
+      const view = viewsTaken && isViewId(sid) ? resolveOwnView(owner, sid, cfg) : null;
       if (view) {
         ownViews.set(sid, viewReadMembers({ rights, view, area, needs, peerId }));
         continue;
