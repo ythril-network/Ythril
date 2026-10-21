@@ -19,7 +19,8 @@
 import { schedule as cronSchedule, type ScheduledTask } from 'node-cron';
 import { getConfig } from '../config/loader.js';
 import { log, outsideRequest, peerText } from '../util/log.js';
-import { armedSchedules, cronArmingRefused } from '../util/armed-schedule.js';
+import { armedSchedules } from '../util/armed-schedule.js';
+import { cronArmingRefused } from '../util/cron-arming.js';
 import { resolveSyncCron } from './schedule.js';
 import { runSyncForNetwork } from './engine.js';
 
@@ -63,7 +64,7 @@ export function stopSyncScheduler(): void {
  * manual sync only, and clearing a schedule stops the running task rather than waiting for a restart.
  */
 export function scheduleSyncForNetwork(networkId: string, schedule?: string): void {
-  // Once arming has closed the process is ending: a task armed now would hold it open (`util/armed-schedule.ts`).
+  // Once arming has closed the process is ending: a task armed now would hold it open (`util/cron-arming.ts`).
   if (cronArmingRefused('the sync scheduler')) return;
   const cronExpr = schedule ? resolveSyncCron(schedule) : null;
 

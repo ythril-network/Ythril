@@ -323,8 +323,11 @@ async function main(): Promise<void> {
     // Before any stop below: the config watcher stops, a reload in flight is waited for, and cron arming closes, so nothing
     // re-arms a scheduler this handler stops (a reload during the drain used to re-arm three of them; `Q-570`). The direct
     // stops stay, one per module, because `every-started-job-is-stopped-at-shutdown` holds each module's stop to this handler.
-    // Bounded well inside the drain budget: a reload stuck in a space's init must not spend the orchestrator's grace.
+    // The wait for a reload in flight comes OUT of the HTTP drain's budget, not on top of it: ready grace + drain is sized to the
+    // orchestrator's stop grace (Docker's 10 s), and a wait added beside it would push the end past the SIGKILL.
+    const settleStarted = Date.now();
     await closeScheduling({ withinMs: Math.min(2_000, DRAIN_MS) });
+    const httpDrainMs = Math.max(0, DRAIN_MS - (Date.now() - settleStarted));
     stopSyncScheduler();
     stopBackupScheduler();
     stopDupeScanner();
@@ -381,10 +384,10 @@ async function main(): Promise<void> {
 
     await new Promise<void>(resolve => {
       const forced = setTimeout(() => {
-        log.warn(`Shutdown: connections still open after ${DRAIN_MS}ms — closing them`);
+        log.warn(`Shutdown: connections still open after ${httpDrainMs}ms — closing them`);
         server.closeAllConnections();
         resolve();
-      }, DRAIN_MS);
+      }, httpDrainMs);
       forced.unref();
       server.close(() => { clearTimeout(forced); log.debug('HTTP server closed'); resolve(); });
     });

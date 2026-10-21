@@ -26,7 +26,8 @@ import { dumpDatabase, type DumpManifest } from './dump.js';
 import { copyBackupOffsite, copyFilesOffsite, pruneBackups } from './offsite.js';
 import { loadBackupConfig } from './backup-config.js';
 import { log, outsideRequest } from '../util/log.js';
-import { armedSchedules, cronArmingRefused } from '../util/armed-schedule.js';
+import { armedSchedules } from '../util/armed-schedule.js';
+import { cronArmingRefused } from '../util/cron-arming.js';
 import { runExclusive } from '../util/single-flight.js';
 import { backupsRoot } from './backup-location.js';
 import { instanceWideActStanding, backupsNamedByActs } from '../spaces/space-act-runner.js';
@@ -150,7 +151,7 @@ export async function runBackupNow({ underAct }: { underAct?: SpaceActKind } = {
  * Call this from index.ts after MongoDB is connected.
  */
 export function startBackupScheduler(): void {
-  if (cronArmingRefused('the backup scheduler')) return;   // the process is ending (`util/armed-schedule.ts`)
+  if (cronArmingRefused('the backup scheduler')) return;   // the process is ending (`util/cron-arming.ts`)
   if (!isBackupFeatureEnabled()) return;
 
   const cfg = loadBackupConfig();

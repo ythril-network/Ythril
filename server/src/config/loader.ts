@@ -655,6 +655,8 @@ let _lastKnown: ConfigFileSignature | null = null;
 /** The reloads, one at a time in the order they were asked for: a reload never starts over one still running. One key, because there is one file. */
 const _reloadLock = keyedLock();
 const RELOAD_KEY = 'config.json reload';
+/** The watcher could not read the file it was told changed: said once until it reads again. */
+const unreadableSaid = warnOnce<string>({ max: 1 });
 
 /** The file as it is now, or `null` when it cannot be read (removed, mid-rename, a bind mount that blinked). Never throws. */
 function configFileNow(): ConfigFileSignature | null {
@@ -753,8 +755,16 @@ export function startConfigWatcher(
     // Judged on the file as it is now, not on the stat this poll delivered: see `configChangeVerdict`.
     const now = configFileNow();
     const verdict = configChangeVerdict(now, _lastKnown, _writeGeneration > _flushedGeneration);
+    if (verdict === 'unknown' && !now) {
+      // Not retried on its own: the poll fires only when the file changes again. An operator's edit that landed in this blink
+      // is out of effect until then, so it is said where an operator looks, once until the file reads again.
+      unreadableSaid(CONFIG_PATH, () => log.warn('config.json changed but could not be read just now; an edit made at this moment '
+        + 'takes effect at the next change to the file, a POST /api/admin/reload-config, or a restart'));
+      return;
+    }
+    unreadableSaid.forget(CONFIG_PATH);
     if (verdict !== 'foreign') {
-      if (verdict === 'unknown') log.debug('config.json changed, but it could not be read or a write of ours is in flight; judged on the next change');
+      if (verdict === 'unknown') log.debug('config.json changed while a write of ours is in flight; judged on the next change');
       return;
     }
     // Claim this version before reloading. If the reload throws — an operator
