@@ -5,6 +5,9 @@ import type {
   AboutInfo, HealthSummary, AuditLogParams, AuditLogResponse, BackupConfigData,
   WebhookSubscription, WebhookUpsert, WebhookDelivery,
 } from './api.types';
+import type {
+  MaintenanceState, MigrateReportAnswer, MigrateStarted, RestoreAbandoned, RestoreReportAnswer, RestoreStarted,
+} from './admin-data.types';
 
 /** Instance administration — about/logs, audit log, and data/backup/migration/maintenance. */
 @Injectable({ providedIn: 'root' })
@@ -83,12 +86,14 @@ export class AdminApi {
     return this.http.post<{ ok: boolean; error?: string }>('/api/admin/data/config/test', { uri });
   }
 
-  getMaintenanceStatus(): Observable<{ active: boolean }> {
-    return this.http.get<{ active: boolean }>('/api/admin/data/maintenance');
+  /** Maintenance and its two halves: the manual toggle, and the instance-wide set (a restore, a migrate) that holds it. */
+  getMaintenanceStatus(): Observable<MaintenanceState> {
+    return this.http.get<MaintenanceState>('/api/admin/data/maintenance');
   }
 
-  setMaintenance(active: boolean): Observable<{ active: boolean }> {
-    return this.http.post<{ active: boolean }>('/api/admin/data/maintenance', { active });
+  /** Moves the MANUAL half only: a standing set keeps maintenance on whatever this sets, and the answer says so. */
+  setMaintenance(active: boolean): Observable<MaintenanceState> {
+    return this.http.post<MaintenanceState>('/api/admin/data/maintenance', { active });
   }
 
   triggerBackup(): Observable<{ backup: { id: string; dir: string; manifest: unknown } }> {
@@ -99,12 +104,33 @@ export class AdminApi {
     return this.http.get<{ backups: Array<{ id: string; createdAt: string; collections: unknown[] }> }>('/api/admin/data/backups');
   }
 
-  restoreBackup(backupId: string): Observable<{ ok: boolean }> {
-    return this.http.post<{ ok: boolean }>('/api/admin/data/restore', { backupId });
+  /**
+   * Start a restore: 202 with the set registered, which runs one act per space after the answer (`getRestoreReport` follows it). A
+   * success is ACCEPTED, never completed. `leaveOut` names spaces the backup holds that this instance no longer serves, after the server
+   * refused with `backup_names_unserved_spaces`.
+   */
+  restoreBackup(backupId: string, leaveOut?: readonly string[]): Observable<RestoreStarted> {
+    return this.http.post<RestoreStarted>('/api/admin/data/restore', { backupId, ...(leaveOut?.length ? { leaveOut } : {}) });
   }
 
-  startMigration(uri: string): Observable<{ ok: boolean; backupDir: string; manifest: unknown }> {
-    return this.http.post<{ ok: boolean; backupDir: string; manifest: unknown }>('/api/admin/data/migrate', { uri });
+  /** The restore standing, or the last one, per space; `{ restore: null }` when none ever ran here. */
+  getRestoreReport(): Observable<RestoreReportAnswer> {
+    return this.http.get<RestoreReportAnswer>('/api/admin/data/restore');
+  }
+
+  /** Release the standing restore's spaces whose acts have not completed: they keep whatever their acts reached. */
+  abandonRestore(): Observable<RestoreAbandoned> {
+    return this.http.post<RestoreAbandoned>('/api/admin/data/restore/abandon', {});
+  }
+
+  /** Start a migrate: 202 with the set registered. The copy runs online; the process exits when it completes. */
+  startMigration(uri: string): Observable<MigrateStarted> {
+    return this.http.post<MigrateStarted>('/api/admin/data/migrate', { uri });
+  }
+
+  /** The migrate standing, or the last one (slice I4a; its shape is guessed from the restore report's, see `MigrateReport`). */
+  getMigrateReport(): Observable<MigrateReportAnswer> {
+    return this.http.get<MigrateReportAnswer>('/api/admin/data/migrate');
   }
 
   getBackupConfig(): Observable<{ config: BackupConfigData | null; backupsPath?: string }> {

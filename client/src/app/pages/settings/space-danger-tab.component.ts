@@ -26,7 +26,7 @@ import { LiveAnnouncement } from '../../core/live-announcement';
 import { pollUntil, type PollHandle } from '../../core/poll-until';
 import type { ActEntryView, SpaceActOutcome } from '../../core/space-act-outcome';
 import { StatusPillComponent } from '../../shared/status-pill.component';
-import { actKindKey, actStateKey, actStateVariant, actWhenText } from '../../core/space-act-view';
+import { actKindKey, actRepeatHintKey, actStateKey, actStateVariant, actWhenText } from '../../core/space-act-view';
 
 /** How often a standing delete or wipe is asked after, while this tab is open. */
 const ACT_POLL_MS = 5000;
@@ -155,7 +155,7 @@ type ActNotice =
       <label>{{ 'spaces.dangerZone.newId' | transloco }}</label>
       <input type="text" [(ngModel)]="state.dangerRenameId" name="state.dangerRenameId" pattern="[a-z0-9-]+" maxlength="40" [placeholder]="state.settingsSpace()!.id" />
     </div>
-    <button class="btn btn-secondary" type="submit" [disabled]="state.dangerRenaming()||!state.dangerRenameId.trim()||state.dangerRenameId.trim()===state.settingsSpace()!.id">
+    <button class="btn btn-secondary" type="submit" [disabled]="state.dangerRenaming()||renameBlockedByAct()||!state.dangerRenameId.trim()||state.dangerRenameId.trim()===state.settingsSpace()!.id">
       @if (state.dangerRenaming()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.renameButton' | transloco }}
     </button>
   </form>
@@ -183,7 +183,9 @@ type ActNotice =
         <span>{{ 'spaces.dangerZone.act.standing' | transloco: { kind: (actKindKey(s.kind) | transloco), since: sinceText(s.since), when: whenText(s.nextRetryAt) } }}</span>
       </div>
       <div class="dz-hint" style="margin-top:6px;">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: s.attempts } }}</div>
-      @if (s.kind === 'delete' || s.kind === 'wipe') { <div class="dz-hint">{{ 'spaces.dangerZone.act.repeatHint' | transloco }}</div> }
+      @if (s.lastError) { <div class="dz-hint">{{ 'spaces.dangerZone.act.lastError' | transloco }} {{ s.lastError }}</div> }
+      @if (s.needsAbandon) { <div class="dz-hint">{{ 'spaces.dangerZone.act.needsAbandon' | transloco }}</div> }
+      <div class="dz-hint">{{ repeatHintKey(s.kind) | transloco }}</div>
     </div>
   } @else if (notice(); as n) {
     <div class="alert" [class.alert-success]="n.kind === 'wiped' || n.kind === 'ended'" [class.alert-warning]="n.kind !== 'wiped' && n.kind !== 'ended'" style="margin-bottom:16px;font-size:13px;">
@@ -280,12 +282,16 @@ export class SpaceDangerTabComponent {
   /** Which act the last request or the standing entry was, for what to do when the poll sees it end. */
   private actKind: string | null = null;
 
-  /** A delete or wipe stands, so a rename would be refused (409): the hint says why before it is tried. */
-  readonly renameBlockedByAct = computed(() => { const k = this.standing()?.kind; return k === 'delete' || k === 'wipe'; });
+  /**
+   * An act stands for the space - ANY act, whatever its kind - so a rename would be refused (409): the button waits and the hint says
+   * why before it is tried. It read only delete and wipe, so during a restore the form stayed open onto a refusal (bundle-157).
+   */
+  readonly renameBlockedByAct = computed(() => this.standing() !== null);
 
   protected readonly actStateVariant = actStateVariant;
   protected readonly actStateKey = actStateKey;
   protected readonly actKindKey = actKindKey;
+  repeatHintKey(kind: string): string { return actRepeatHintKey(this.transloco, kind); }
   sinceText(since: string): string { return this.dates.format(since, 'datetime'); }
   whenText(retryAt: string | undefined): string { return actWhenText(this.transloco, this.dates, retryAt, this.now()); }
 
