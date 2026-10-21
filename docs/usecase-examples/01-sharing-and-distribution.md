@@ -217,7 +217,7 @@ graph LR
 
 **Additional benefits:**
 
-- Space-scoped tokens can limit engineering's access to code-relevant findings and ops' access to infrastructure-relevant findings via proxy spaces.
+- Space-scoped tokens can limit engineering's access to code-relevant findings and ops' access to infrastructure-relevant findings. Each side can keep a personal view over the spaces its own token reads; a view reads only what its owner's token can read, so it never widens access.
 
 ---
 

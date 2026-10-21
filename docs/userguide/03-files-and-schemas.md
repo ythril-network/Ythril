@@ -247,7 +247,7 @@ Every conflict ends in one of these four. There is no dismiss: a conflict closes
 has the name you chose (in the other space, for Move to space), the answer is that something already stands there: nothing is moved,
 the conflict stays open, and you can choose another name or space and try again. A new name that goes through a file
 (`notes.txt/old.txt`) or leaves the space is refused too. Moving into another space needs permission to write files in that space, not only to
-resolve conflicts, and the space must be a real one, not a proxy. When the incoming copy is already gone (an earlier attempt placed it
+resolve conflicts, and the target must be a real space, not a personal view (a view never writes). When the incoming copy is already gone (an earlier attempt placed it
 and could not close the conflict), or the new name is the copy's own, there is nothing to place: the conflict closes and the page says that nothing
 was moved.
 

@@ -359,6 +359,38 @@ Available in MCP-connected clients, and answered by the same planner as the admi
 
 ---
 
+### Personal views: orphans, claims, retired ids and the migration report
+
+Four doors exist for the 6.0 upgrade, which turned every pre-6.0 grouping of spaces into personal views ([Upgrading](02b-upgrading.md)).
+Each needs an **instance admin** token, has an MCP twin with the same parameters, and answers refusals as
+`{ "error", "code" }`. The views a token owns and its own doors (`/api/views`) are in
+[Personal views](06d-personal-views.md); a view id given to a wipe, a delete or any other space door above answers as a
+missing space (`404`).
+
+| Door | MCP tool | Answer |
+|---|---|---|
+| `GET /api/admin/views/orphans` | `view_orphans` | `{ "orphans": [{ "ownerKind": "token", "count": 3 }], "unclaimed": [{ "name": "team", "members": ["qa", "research"] }] }` |
+| `POST /api/admin/views/claim` `{ "name": "team" }` | `view_claim` | `201 { "view": {…} }` — a view owned by the calling admin with the definition's members; `404` `view_claim_unknown` for a name that is not unclaimed |
+| `POST /api/admin/views/retired/:id/purge` `{ "confirmOidcClaims"?: true }` | `view_purge_retired` | `{ "released": "<id>" }` |
+| `GET /api/admin/views/migration` | `view_migration` | `{ "migrated": ["team"], "networksLostIds": [{ "networkId", "label", "spaceIds" }], "unclaimed": […], "retiredSpaceIds": ["team"] }` |
+
+- **Orphans** counts the views whose owner holds no token, per owner kind (`token`, `oauth`), naming neither a view nor an
+  owner. `unclaimed` lists the migrated definitions that no live admin token could own when they were converted.
+- **Claim** consumes the definition: it takes it for the calling admin only, and another admin who wants the same view
+  asks the first to copy it (`POST /api/views/:id/copy`), so a second claim of the name is `404`. A name the admin already
+  holds becomes `<name>-2`, and an admin at the cap of 50 views is refused `409` `view_limit_reached`.
+- **Purge** drops everything a retired space id still holds (its collections, vector indexes, files directory and
+  activity rows) and releases the id so a space can be created under it again. It is `404` `retired_id_unknown` for an id
+  that is not retired, `409` `retired_purge_unconfirmed` while OIDC maps spaces from a claim and `confirmOidcClaims` is not
+  `true`, and it is safe to repeat: when a step fails the id stays reserved and the next call resumes.
+- **Migration** reports what the upgrade did, so it can be read after the boot log is gone: the proxy ids converted, the
+  networks that lost one (the peers see this member as having left that network space), the definitions still unclaimed
+  and the ids still reserved.
+- **Audit:** a claim is `view.claim` and a purge is `space.retired_id.purge`, each with the owner key and a member count
+  and no name ([Audit Log](13-audit-log-api.md)).
+
+---
+
 ## Data Management API
 
 Base path: `/api/admin/data` — **requires admin token** on all endpoints. Most mutating endpoints additionally require a TOTP code (`X-TOTP-Code` header) when MFA is enabled on the instance.

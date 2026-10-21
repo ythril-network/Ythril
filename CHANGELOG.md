@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Store failures, sync and background jobs are hardened: a failing database answers a retryable `503`, a failing space is skipped, sync decides alike on push and pull, embedding runs in a supervised child; schemas gain rules and one refusal body.**
+**Proxy spaces become personal views (breaking); a failing database answers a retryable `503`, a failing space is skipped, sync decides alike on push and pull, embedding runs in a supervised child; schemas gain rules.**
 
 | Changes on upgrade | Action |
 |---|---|
+| **Breaking:** a proxy space is now a personal view of one token, id `@<name>`; the upgrade makes one for each live instance-admin token, or keeps an unclaimed definition when none is live | Claim unclaimed views; recreate each integrator proxy as its own view (board 2db08eaf, 9741522f) |
+| The old proxy id leaves `spaces`, every network (peers see this member leave that network space) and every token's rights, and answers `410` `space_retired` on every door; creating, renaming or joining under it is `409` | An instance admin purges it (`POST /api/admin/views/retired/:id/purge`) |
+| The upgrade writes `config.json.pre-6.0` before converting; 5.x does not read views, and views live in `config.json`, not in database backups | Roll back by restoring `config.json.pre-6.0`; back up `config.json` |
+| A webhook subscription that named only retired ids is disabled, not emptied | Subscribe to the member spaces |
+| `targetSpace` is refused by name on every write door (both REST spellings, MCP) and `proxyFor` on `POST /api/spaces` and `save_space` is refused by name | Send `space`; make a view with `POST /api/views` or `view_create` |
+| New REST and MCP doors: `/api/views` (list, read, create, rename, delete, copy) and `view_list`, `view_get`, `view_create`, `view_update`, `view_delete`, `view_copy` | A view id in a URL is percent-encoded (`%40team`) |
+| New admin doors `/api/admin/views/orphans`, `/claim`, `/retired/:id/purge`, `/migration` and `view_orphans`, `view_claim`, `view_purge_retired`, `view_migration`; `GET /api/spaces` lists `retiredSpaceIds` to admins | Read the migration report after upgrading |
+| A read door takes your view as `space`, reads each member you can read at that moment and names them in `viewMembers`; a view never writes; 50 views per owner, 1 000 members | Name a member space to write |
+| A write or configuration door given a view id answers `404 Space '@x' not found` (the owner is told it is a view); `graph_merge`, entity merge, `reindex` and `reembed` do too, before any work | Name a member space |
+| The `reindex` refusal that listed every member of a proxy is gone; a view id answers as a missing space | Reindex each member space |
+| Revoking a token deletes its owner's views at once; a connector rotation keeps them; a sweep ends the views of an owner with no live token for 30 days (OIDC owners' views are kept) | Copy a view first (`view_copy`) to keep it |
+| A read through a view is one audit row with `spaceId: null` and `spaces`; `view.create`, `view.update`, `view.delete`, `view.copy`, `view.claim` and `space.retired_id.purge` rows carry the owner key and member count, never a name | Query by `operation`, not `spaceId` |
+| New metrics `ythril_views_total`, `ythril_views_deleted_total{reason}` and `ythril_retired_space_ids` | Alert on `ythril_retired_space_ids > 0` until each id is purged |
 | A store failure (timed-out write, exhausted or closed pool, paused store, about forty REST routes, sync POSTs, space rename or create, links) answers `503` with `Retry-After` and `retryable: true`, was `500`/`400`/`404`/`409`/`422` | Branch on `retryable`; retry on `503` |
 | An unmeetable write concern answers `500` with `retryable: false`, was `503`; other non-store failures answer `{"error":"Internal server error"}` | Do not retry on `retryable: false`; update body matchers |
 | Options in `MONGO_URI` win; `connectTimeoutMS` and `serverSelectionTimeoutMS` default to 10 s and `heartbeatFrequencyMS` to 5 s  | Check the options your string carries |
@@ -56,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | `POST /api/brain/similar` answers in the `similar` tool's shape: hits `{score, spaceId, type, record}`, `source` `{type, id, summary}`; `topK` above 100 is `400` | Read `hit.record.<field>` and `source.id` |
 | `recall` or `similar` without `space` (or `similar` with `crossSpace: true`) search only spaces where the token holds the tool's area; a `files: read` token no longer ranks records | Grant the area on the spaces to search |
 | `POST /api/brain/spaces/:spaceId/traverse` answers `400` for what it clamped (`maxDepth` outside 1-10, `limit` outside 1-1000, a bad `direction`, `edgeLabels` or blank `startId`); a bulk array over 500 items is `400` (was `207`) | Send values in range |
-| `400` past: `tags`, `deleteFields`, `edgeLabels`, `folders` 100; `linkEntities`/`linkFacts`/`linkChronos`, id lists (`spaces`, `proxyFor`, `ids`) 1 000; inline `edges` 500; bulk-resolve `ids` 2 000; notify `data` 8 KiB; `types`/`kinds`/`events` beyond their set | Stay within them (REST and MCP) |
+| `400` past: `tags`, `deleteFields`, `edgeLabels`, `folders` 100; `linkEntities`/`linkFacts`/`linkChronos`, id lists (`spaces`, view `members`, `ids`) 1 000; inline `edges` 500; bulk-resolve `ids` 2 000; notify `data` 8 KiB; `types`/`kinds`/`events` beyond their set | Stay within them |
 | An `ingest` conversation over 1 000 sessions or 20 000 turns, an upload whose JSON `tags` is not an array, `network_sync_history` `limit` outside 1-100 and an embed-queue `limit` over 200 answer `400` | Send values in range |
 | A fifth concurrent `ingest` run answers `429`; each live-event stream kind admits 200 connections (then `503` with `Retry-After`) and drops a reader 256 KiB behind | Retry later; read events promptly |
 | `POST /api/<tool>` carries the answer once: `data` holds it and `text` is one fixed sentence (still the answer when a tool has no structured result) | Parse `data`, not `text` |
@@ -89,11 +102,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | New per-space, per-instance setting `unknownWriteFields` (`warn` or `refuse`; `PATCH /api/spaces/:id`, `update_space`, Schema tab "This instance"); never shared with a network; read back as `refuse` only | Set `refuse` only on the instances that want it |
 | Under Refuse, an option a route does not read (`ttlDays` on a link) or a server-written key sent back gets `400` | Send only what you change |
 | A refused brain write names its unknown fields in `warnings`, without values; so does a stored record whose connections failed | Read `warnings` on a refusal |
-| A non-string `targetSpace` answers `400` `targetSpace must be a string` on every write door; a merge into a proxy space is refused before a malformed path id | Send one space id |
+| A non-string `targetSpace` answers `400` `targetSpace must be a string` on every write door; a merge into a proxy space is refused before a malformed path id; superseded by 6.0 personal views | Send one space id |
 | Chrono `PATCH {superseded: true}` is accepted (was `400`); an empty PATCH names the accepted fields; a link field a record cannot hold (`linkFiles` anywhere) is an unknown field: Warn stores without it (a bulk item's was refused) | Read `warnings` |
 | `bulk.write` `errorCount` counts unknown-field warning rows | Do not alarm on `errorCount` alone |
 | Sync votes, members and change-notes answer `403` to a user token, an unlisted or other-network peer, or for a network not held (was `404`) | Read votes at `/api/networks/:id/votes` |
-| A write through a proxy into a space the token cannot reach or write is refused (`400` not found, `403` without the rung) | Grant the write rung on the member space |
+| A write through a proxy into a space the token cannot reach or write is refused (`400` not found, `403` without the rung); superseded by 6.0 personal views | Grant the write rung on the member space |
 | Add-space's `202` carries `round` as the vote list shows it (no `pendingMeta`); other opening doors gain `round` | Read proposals on the space |
 | `DELETE /api/spaces/:id` and the admin wipe answer `200` (was `202`) when this instance's own yes passes the round and the change ran | Branch on `status`, not `202` |
 | `202` `status: "passed"`, `queued: true` while the change runs; `500` `space_act_failed` (`503` for a store outage) if it failed in the call | Do not retry a passed `500` or `503` |
@@ -153,7 +166,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Search:** Every answer the size budget cuts carries `budgetBoundBy` (`maxChars`, `maxTokens`, `maxBytes`, or two), on both doors, for every list, search, traversal and spill read; absent when not cut.
 - **Search:** `filter`'s `limit` stays uncapped: a single-space read stops at twice the answer budget and answers `truncated` with `nextSkip`. `recall` and `similar` with `traverse > 0` walk up to 16 result rows together.
 - **Search:** Text rank is per record type: a fact no longer outranks an entity for being longer; fused results carry `vectorRank` and `lexicalRank` beside `fusedScore`.
-- **MCP:** `list_embed_jobs` takes `skip`, reads and sums a proxy space's members, and on both doors returns `transientFailures`.
+- **MCP:** `list_embed_jobs` takes `skip`, reads and sums a proxy space's members (superseded by 6.0 personal views), and on both doors returns `transientFailures`.
 - **MCP:** `recall`, `similar`, `filter` and `read_spill` take their size parameters from one schema: MCP accepts any `maxBytes` and raises a `maxChars` under 1000 to 1000, as REST did.
 - **MCP:** Tool calls cache one validator per token reach (64 kept), counted in `ythril_tool_validator_cache_total{result="hit|miss|evict"}`.
 - **MCP:** The delete tools and `move_file` say who a deletion reaches: peers holding a copy this instance wrote, and everything below it on a pub/sub network or a tree.
@@ -170,7 +183,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** A delete removes the links this instance wrote from the file and its derived ids, tombstoned; others' links stay.
 - **Files:** `read_file` and the extract hold only their window in memory. An unrecognised extension is marked `skipped`; a twin with a `pending`/`processing` job is left alone.
 <!-- file-act-codes -->
-- **Files:** Every refused or failed file act carries one `code`: `path_blocked`, `destination_exists`, `destination_held_after_move`, `confirm_required`, `space_root_refused`, `move_still_owed`, `act_not_recorded`, `file_system_fault`.
+- **Files:** Every refused or failed file act carries one `code`: `path_blocked`, `destination_exists`, `destination_held_after_move`, `confirm_required`, `space_root_refused`, `move_still_owed`, `act_not_recorded`, `file_system_fault`, `space_retired`.
 - **Import/Export:** The admin export streams every replicated family, links included, omitting this instance's own state. The import keeps the export's retention stamps as dates and a file's sync base, never the replaced copy's.
 - **Import/Export:** The import drops file chunks, face records, byte-describing file keys and a restored file's old `embedding`, keeps the highest seq of a repeated id, and names records restored over a local deletion in `restoredOverTombstone`.
 - **UI:** **Settings → Preferences** has a **Date and time** card (**Automatic**, **ISO 8601** or **Day.month.year, 24-hour**; **local time** or **UTC**), kept in this browser.
@@ -244,7 +257,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Server:** Log lines are single lines and each value in them is cut (4096 characters, 100 per list) and escaped: a peer cannot forge a line or flood the log; redaction no longer takes quadratic time (5.6.x is affected too).
 - **Server:** Values quoted back in answers are bounded and escaped: a reference refusal names its first five (256 characters each, then `…(+N more)`), `Unknown field(s)` / `unrecognized_keys` the first 10 keys.
 - **Server:** Stored error text (an embed job's `lastError`, a reindex run's `error`, a media job's and a webhook delivery's `error`) and a chat model server's error text (cut at 200 characters) are bounded and escaped.
-- **Spaces:** A write through a proxy space lands only in a member where the token holds the write rung; a member it does not reach answers as a missing space. Edge and link deletes and media retries through a proxy touch only reached members. 5.6.x is affected too.
+- **Spaces:** A write through a proxy space lands only in a member where the token holds the write rung; a member it does not reach answers as a missing space. Edge and link deletes and media retries through a proxy touch only reached members. 5.6.x is affected too. Superseded by personal views.
 - **Sync:** A peer's tombstone applies only to the space its sync admitted, not the one it names: before, a peer could delete its records in any space, and under a `spaceMap` an honest peer's deletions missed. Planted ones stay.
 - **Sync:** A tombstone is authorised before it is stored: one not delivered by its issuer, or for a record another instance wrote (unless from its upstream), is refused and blocks no author. Author-less records stay deletable by their peer.
 - **Sync:** One deletion rule decides every record and file tombstone: the issuer's own, or the direct upstream's on a pub/sub network or a tree, for what it delivered.

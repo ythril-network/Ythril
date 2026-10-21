@@ -335,7 +335,7 @@ that is stored data, and [`POST /api/spaces/:id/validate-schema`](06-spaces-api.
 
 **`suggestedFn`:** When `propertySchemas` includes a `mergeFn` for a conflicting property, it appears as `suggestedFn` in the conflict. The agent may accept or override it.
 
-**Proxy spaces:** Not supported — target member spaces directly.
+**Personal views:** Not supported. A merge writes, so a view id (`@team`) answers as a missing space (`404`) on both doors, before any record is read; name the member space that holds the entities.
 
 ---
 
@@ -743,8 +743,8 @@ every number a real count of records **as of the last committed write**: the sto
 and replaced by the first read after any write to the space, and the declared half is read fresh each time, so
 a schema edit shows at once. A read is therefore cheap however large the space is.
 
-> **It arrives as `actualSchema` on the space meta**, beside the DECLARED schema. *Changed in 5.0:* the `er-model` route and the `er_model` tool are gone — read `actualSchema` instead. Both halves answer "what is this space like before I write to it", and having them together is what lets a type the space really holds be promoted into its declared schema. Same proxy rule (members reported separately),
-> and available to every token including read-only ones. It answers what a space *contains*, where
+> **It arrives as `actualSchema` on the space meta**, beside the DECLARED schema. *Changed in 5.0:* the `er-model` route and the `er_model` tool are gone — read `actualSchema` instead. Both halves answer "what is this space like before I write to it", and having them together is what lets a type the space really holds be promoted into its declared schema. `space_meta` reads the schema area, so a personal view id answers as a missing space there:
+> read one member at a time. It is available to every token including read-only ones. It answers what a space *contains*, where
 > `space_meta` answers what its schema *permits*; an agent deciding how to write into an unfamiliar
 > space usually wants both.
 
@@ -796,6 +796,6 @@ Notes:
 - **An entity with no `type` is bucketed as `(untyped)`** rather than dropped, so the per-type counts add up.
 - **`properties` lists what the schema declares**, not what records happen to carry. An undeclared type
   reports `[]` — the model does not infer a schema from data it has not been asked to validate.
-- **On a proxy space the members are reported separately**, as `{ spaceId, members: [ …model per member… ] }`.
-  They are not merged: two spaces can use one type name for different things, and an edge cannot cross a
+- **The model is of one space.** A personal view id is refused here as a missing space, and the model is never merged
+  across spaces: two spaces can use one type name for different things, and an edge cannot cross a
   space, so a merged model would show relationships that can never be joined.

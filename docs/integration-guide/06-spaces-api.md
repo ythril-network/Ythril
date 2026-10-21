@@ -15,7 +15,9 @@ GET /api/spaces?counts=true
 
 Returns spaces accessible to the requesting token. Tokens with a `spaces`
 scope restriction only receive spaces in their allowlist; full-access tokens
-receive all spaces. A space set to refuse unknown write fields carries `"unknownWriteFields": "refuse"` ([below](#unknown-top-level-fields-on-a-brain-write-unknownwritefields)).
+receive all spaces. **A personal view is not listed here, because it is not a space** — `GET /api/views` lists yours
+([Personal views](06d-personal-views.md)). Instance administrators also receive `retiredSpaceIds`, the ids the 6.0 upgrade
+reserved ([Upgrading](02b-upgrading.md)); no one else sees the field. A space set to refuse unknown write fields carries `"unknownWriteFields": "refuse"` ([below](#unknown-top-level-fields-on-a-brain-write-unknownwritefields)).
 
 Add `?counts=true` to include per-space document counts (facts, entities,
 edges, chrono). Useful for agents deciding which spaces are populated and
@@ -138,7 +140,7 @@ most current open models emit 512.
 { "space": { "id": "research", "label": "Research Notes", "indexStatus": "building" } }
 ```
 
-> **Async vector-index build:** creating a real space returns immediately with `indexStatus: "building"`. The space is writable straight away, but semantic `recall` returns no results until the Atlas vector indexes finish building and `indexStatus` flips to `"ready"` (this can take up to a few minutes; `"failed"` means a build that really failed or timed out, never a search service that was merely late). While the database's search service is not answering, the space stays `"building"` and `GET /api/spaces` adds `indexWaiting: true` (and `indexWaitingSince`, an ISO time) to it: it is waiting, not failing, and its indexes are built by themselves when the service returns. Both fields are derived when the list is read, never stored and never replicated, and only a `building` space carries them. Poll the space via `GET /api/spaces` if you need to gate recall on readiness. Proxy spaces and spaces created before this behaviour have no `indexStatus` and should be treated as ready.
+> **Async vector-index build:** creating a real space returns immediately with `indexStatus: "building"`. The space is writable straight away, but semantic `recall` returns no results until the Atlas vector indexes finish building and `indexStatus` flips to `"ready"` (this can take up to a few minutes; `"failed"` means a build that really failed or timed out, never a search service that was merely late). While the database's search service is not answering, the space stays `"building"` and `GET /api/spaces` adds `indexWaiting: true` (and `indexWaitingSince`, an ISO time) to it: it is waiting, not failing, and its indexes are built by themselves when the service returns. Both fields are derived when the list is read, never stored and never replicated, and only a `building` space carries them. Poll the space via `GET /api/spaces` if you need to gate recall on readiness. Spaces created before this behaviour have no `indexStatus` and should be treated as ready.
 >
 > **A collection has a search index only while it holds a record.** A new space starts with none and reads `ready`
 > as soon as the check runs; a collection's vector index (and, on `files`, the face gallery) is built when its first
@@ -151,50 +153,32 @@ and never the `409` or `404` of the driver's message that the same failure was o
 
 ---
 
-### Create a Proxy Space
+### Group spaces under one id: a personal view
 
-A proxy space is a virtual space that groups multiple real spaces into a single endpoint. Reads aggregate across all member spaces; writes require a `targetSpace` parameter to specify the destination.
+A **personal view** is a named list of spaces that one token reads through as a single id, `@<name>`. It is not a space:
+it has no records, files or index, it reads and never writes, and it belongs to the token that made it. Any token may
+make one over spaces it reads, a read-only token included — **no space-creation right is needed, because creating a view
+creates no space.**
 
 ```http
-POST /api/spaces
+POST /api/views
 ```
 
 ```json
-{
-  "id": "all-research",
-  "label": "All Research",
-  "description": "Aggregated view of biology and physics research spaces.",
-  "proxyFor": ["bio-research", "physics-research"]
-}
+{ "name": "all-research", "members": ["bio-research", "physics-research"] }
 ```
 
-**Rules:**
+`members` is a list of space ids, or `["*"]` for every space the caller reads. The same capability is `view_create` over
+MCP. A recall, a query, a file listing or any other read door takes `@all-research` where it takes a space, and reads each
+member the caller can read at that moment; the answer names them in `viewMembers`. **Every write and configuration door
+answers a view id as a missing space** — `404 Space '@all-research' not found`, with `'@all-research' is a view; write to
+one of its member spaces` added for the owner only — so a write names the member space it means. The whole reference —
+the doors, copying a view to another token, the caps, the refusal codes and the audit rows — is
+[Personal views](06d-personal-views.md).
 
-- All `proxyFor` members must be existing real spaces (not proxies — nesting is not allowed).
-- Proxy spaces are virtual: no DB collections or file directories are created — not at creation, and not at a
-  later boot either (until the release after 5.6.0 every boot created a proxy's collections, which deleting the
-  proxy then left behind).
-- An **empty** member list is not a proxy. The API refuses `"proxyFor": []`; a `config.json` edited by hand to hold
-  one is read as a real space — the key is removed on load and on reload, with a warning naming the space — so it
-  is embedded, scanned, pruned and, when deleted, dropped like any other real space.
-- Creating the proxy is admin-gated (like any space creation); the create call validates only that each member exists and is not itself a proxy — it does **not** separately check the caller's space allowlist. (Per-space access is enforced at read/write time on the proxy's member spaces.)
-- The single-element wildcard `"proxyFor": ["*"]` creates an **all-spaces** proxy: it reads across every real space the token reaches and writes into one it can write (resolved per call), skipping per-member validation. The wildcard cannot be mixed with explicit member IDs.
-
-**Read operations** (GET facts, entities, edges, files, recall, query) aggregate results across all member spaces transparently.
-
-**Write operations** (POST facts, write_file, upsert_entity, etc.) require a `targetSpace` query parameter:
-
-```http
-POST /api/brain/spaces/all-research/facts?targetSpace=bio-research
-```
-
-```json
-{ "fact": "CRISPR efficiency improved by 40% with new guide RNA design." }
-```
-
-The `targetSpace` must be a member of the proxy (any real space for `["*"]`) that the token reaches. A member the token does not reach answers exactly as a space that does not exist (`400`, `Target space '<id>' not found`); one it reaches without the write rung answers `403`. Omitting it answers `400` and lists only the members the token reaches. Deleting an edge or a link through a proxy finds it only in members the token reaches.
-
-**MCP**: When connected via MCP to a proxy space, read tools (`recall`, `query`, `read_file`, `list_dir`) aggregate automatically. Write tools (`save_fact`, `save_entity`, `write_file`, etc.) accept an optional `targetSpace` argument — required when the MCP endpoint is a proxy space, with the same rule and answers as REST.
+**`POST /api/spaces` and `save_space` refuse a body that carries the pre-6.0 grouping field**, by name, pointing at
+`POST /api/views` / `view_create`; a pre-6.0 grouping an instance already held was converted by the upgrade
+([Upgrading](02b-upgrading.md)).
 
 ---
 
@@ -260,6 +244,9 @@ Authorization: Bearer <token with knowledge:admin on the space>
 procedure. The tool arrived at 5.0: the capability had existed on REST since 4.4 and was invisible to the
 parity check because the capability map paired this route with `space_reindex`, which does the opposite
 thing. If you are choosing between them, read the next paragraph but one.
+
+**A personal view id is not a space and answers as a missing space (`404`) here and on `reindex`, on REST and on MCP,
+before any work is queued** — a view holds no records and no index; backfill or reindex each member by its own id.
 
 Queues an embedding job for every record in the space that **has no vector**. This is the way back from
 `suppressEmbeddings`: suppression leaves records unembedded, and nothing revisits them on its own, so recall stays
@@ -373,8 +360,8 @@ manual network sync routes do. The MCP tool is hidden from `tools/list` for any 
 
 **Cost.** It shares the five-a-minute heavy-call budget with `delete_space_data` and ingest starts, one count per token
 across the three doors; the sixth call in a minute is a `429` whose sentence names the report. While a report for a
-space is running, another call for that space is a `409` on every door. A space that does not exist is `404`; a proxy
-space holds no rows and is `400`.
+space is running, another call for that space is a `409` on every door. A space that does not exist is `404`, and so is a personal
+view id: a view holds no rows, and this report is not a read a view takes.
 
 **Body — all fields optional.**
 
@@ -585,7 +572,7 @@ than discovering later that a setting never took effect — which is what a miss
 it created a space at the default descriptor width and reported `201`.
 
 **Round-tripping still works.** The fields a listing emits that a `PATCH` does not accept — `id`, `builtIn`,
-`folders`, `usageGiB`, `indexStatus`, `proxyFor`, `networks` — are stripped before validation, the same way
+`folders`, `usageGiB`, `indexStatus`, `networks` — are stripped before validation, the same way
 `version` / `updatedAt` / `previousVersions` / `needsReindex` already were inside `meta`. So taking a space
 out of the list, editing one field and writing the whole object back is still the supported pattern:
 
@@ -804,8 +791,9 @@ answer beside `stats`, not of the stored meta, and `space_meta` answers it too.
 
 `needsReindex` is `true` when the space holds embeddings from a different model than the one configured, and
 recall in the space refuses while it is. A reindex clears it when it has rebuilt every record — not when it starts.
-On a **proxy space** it is `true` when **any** member needs one, matching
-[`GET /reindex-status`](04d-brain-ops-api.md#check-reindex-status).
+[`GET /reindex-status`](04d-brain-ops-api.md#check-reindex-status), which a personal view takes, answers `true`
+when **any** member the view read needs one; `/meta` itself reads the schema area, so a view id there answers as a
+missing space.
 
 `reindexRun` is a running reindex's progress: `running` while one is going, `remaining` records still to rebuild,
 `failed` records whose rebuild gave up. It is here because `space_reindex` returns as soon as the run *starts*:
@@ -896,4 +884,4 @@ a number nobody can act on, so every point lost belongs to a named check with a 
 | `meta-purpose-missing` | `meta.purpose` is unset, so MCP clients get no directive at handshake. |
 | `schemas-declared-but-unenforced` | `typeSchemas` is non-empty while `validationMode` is `off`. |
 
-For a proxy space, the checks aggregate across every member space, the same as `/meta`'s counts.
+The checks are those of one space: this route reads the schema area, so a personal view id answers as a missing space (`404`); ask each member.

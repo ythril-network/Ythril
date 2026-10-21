@@ -104,4 +104,4 @@ exemption is an argument of the extractor's writer, not a parameter of this rout
 **Transcripts are files**, so they are written only when the token also holds `files: write` in the space. Without
 it the records are still written, and the run's `transcripts` field says what was left out.
 
-**Proxy spaces:** add `?targetSpace=<member>` (MCP: `targetSpace`) on both the start and the read.
+**Personal views:** starting a run writes, so a view id as the `space` of a start answers as a missing space (`404`); name the member space that should hold the records. The status read (`GET .../ingest/:runId`, MCP `ingest_status`) takes the owner's view and reads the runs of the members it read.

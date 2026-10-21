@@ -26,7 +26,7 @@ were all accepted with a `201` and thrown away, so a token minted with one of th
 access while appearing scoped**. If you have tokens minted with a field other than `spaces`, re-check them:
 they are not scoped.
 
-> **The token must travel in the header.** A `?token=…` query parameter is ignored on every route → `401`, with **no exception**. Query strings end up in access logs, proxy logs, browser history, and `Referer` headers, so a long-lived token must never ride in a URL. The last exception was `GET /mcp`, the MCP SSE transport, whose clients might not have been able to set a header — 4.0 removed that transport and the fallback with it. The **browser** SSE streams — `GET /api/brain/spaces/:id/events` and `GET /api/about/logs/stream` — use a **single-use ticket**: `POST` the paired `…/ticket` endpoint with the normal `Authorization` header to get a short-lived opaque ticket, then open the stream with `?ticket=<ticket>` (see the live-events section below).
+> **The token must travel in the header.** A `?token=…` query parameter is ignored on every route → `401`, with **no exception**. Query strings end up in access logs, reverse-proxy logs, browser history, and `Referer` headers, so a long-lived token must never ride in a URL. The last exception was `GET /mcp`, the MCP SSE transport, whose clients might not have been able to set a header — 4.0 removed that transport and the fallback with it. The **browser** SSE streams — `GET /api/brain/spaces/:id/events` and `GET /api/about/logs/stream` — use a **single-use ticket**: `POST` the paired `…/ticket` endpoint with the normal `Authorization` header to get a short-lived opaque ticket, then open the stream with `?ticket=<ticket>` (see the live-events section below).
 
 ### Token Scoping
 
@@ -38,6 +38,11 @@ they are not scoped.
 | Admin | Full-access + admin-only routes (networks, tokens, config) |
 
 > A token **cannot** be both `admin` and `readOnly`.
+
+**A space id is `^[a-z0-9-]+$`; an id with a leading `@` is a personal view, never a space.** A view is read through
+by a read door and answered as a missing space by every write and configuration door
+([Personal views](06d-personal-views.md)). A view id in a URL is percent-encoded, `%40team` for `@team`
+(`/api/brain/spaces/%40team/query`); in a JSON body or an MCP argument it is written as it is, `@team`.
 
 ### Auth Middleware Levels
 
@@ -195,6 +200,7 @@ to correct. The information is identical; only the envelope differs.
 | 403 | Token lacks access to this resource. **On a search naming spaces, one space you cannot read refuses the whole call** and the message names which — a partial answer would be indistinguishable from a small one. Omit `space` instead and the search silently covers only what you can read. |
 | 404 | Resource not found |
 | 409 | Conflict (duplicate ID). A stored-data schema check of a space that is already running one; a schema-library entry that would change kind while a space references it as another. On a file act, a destination the tree refuses: `code: "path_blocked"` (a regular file where a directory must be, or a directory moved into itself), or `code: "destination_exists"`: a file, a folder or a file's record already stands at a move's destination, and **a move never replaces anything**, so delete what stands there first (that deletes it on every instance it is replicated to) or choose another name. `code: "destination_held_after_move"` is a move whose bytes moved but whose records could not follow because the records of another file hold an id they need; delete that file and the move finishes. It is about the receiver's tree and can change, so a sync sender keeps retrying; see [Files](05-files-api.md#move--rename). A write into a space that is being deleted, wiped or renamed answers `409` with `code` `space_being_deleted`, `space_being_wiped` or `space_being_renamed`: the space takes no writes from the moment the change is decided until it completes, on every writer. A wipe of some types refuses writes of those types only. Retry once it completes (`GET /api/networks/:id` shows `owedSpaceActs`; the space's `actPending` shows it on the space). A peer's exchange gets `423` instead. |
+| 410 | `code: "space_retired"`: the id belonged to a shared grouping of spaces that the 6.0 upgrade turned into personal views. It answers this on every door until an instance admin purges it ([Upgrading](02b-upgrading.md), [Personal views](06d-personal-views.md)) |
 | 413 | Payload too large (Express body limit: 10 MB for JSON) |
 | 422 | On a file act, `code: "confirm_required"`: deleting a directory needs `confirm: true`, and nothing was deleted. Other `422`s are about the request body, so retrying the same request fails identically; see [Files](05-files-api.md#delete-a-file). On a record update, a `schema_violation` the `strict` space refuses; on a merge, `merge_too_large` |
 | 429 | Rate limited — check `Retry-After` header. A stored-data schema check (`POST /api/spaces/:id/validate-schema`, `schema_validate`) is also held to five runs a minute per token, counted across both doors |
@@ -247,7 +253,8 @@ naming the field and the bound**, never served smaller. The wording is the same 
 | `edges` written inline with a record | 500 | every create and update that takes `edges` |
 | `deleteFields` | 100 paths | every update |
 | `edgeLabels` on a traversal | 100 | `graph_traverse`, and `traverse` on `recall` / `similar` |
-| a list of space ids | 1 000 | a network's `spaces`, a proxy's `proxyFor`, a webhook's `spaces`, a space reorder, the invite bundle's `spaces` / `networkSpaces` |
+| a list of space ids | 1 000 | a network's `spaces`, a personal view's `members` (`["*"]` counts one), a webhook's `spaces`, a space reorder, the invite bundle's `spaces` / `networkSpaces` |
+| personal views one owner holds | 50 | `POST /api/views`, `view_create`, and a copy to the owner (a copy counts against the receiver's 50) — [Personal views](06d-personal-views.md) |
 | an array of a fixed set (`types`, `kinds`, webhook `events`) | the size of the set | a value may not repeat past it |
 | `folders` on a space create | 100 | `POST /api/spaces`, `save_space` |
 | `ids` in a conflict bulk-resolve | 2 000 — the most the conflict list shows | `POST /api/conflicts/bulk-resolve` |

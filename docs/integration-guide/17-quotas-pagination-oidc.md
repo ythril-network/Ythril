@@ -64,8 +64,8 @@ Content-Type: application/json
 { "space": "general", "collection": "facts", "limit": 100, "skip": 200 }
 ```
 
-`limit` defaults to 200 and has no maximum; what bounds an answer is the byte budget, `maxTimeMS`, and a
-proxy space's merge ceiling — all three of which say so in the response. The body is strictly allowlisted,
+`limit` defaults to 200 and has no maximum; what bounds an answer is the byte budget, `maxTimeMS`, and the
+merge ceiling of a read through a personal view — all three of which say so in the response. The body is strictly allowlisted,
 so `offset`, `page`, `per_page`, `pageSize`, `sortBy`, `orderBy`, `order` and `direction` are a `400`
 naming the parameter to use instead of being accepted and ignored.
 
@@ -346,6 +346,7 @@ Any IdP configuration change is picked up automatically within about two seconds
 - **Silent token refresh.**  The SPA automatically schedules a background token refresh 60 seconds before the access token expires.  A hidden iframe is created with `prompt=none`; if the IdP session is still valid the user stays logged in with no interruption.  If the IdP session has also expired (or the IdP does not support `prompt=none`) the next API call returns 401 and the browser is redirected to the login page.  Configure your IdP's access token lifetime to balance UX vs security (5–15 minutes is a reasonable default).  This mechanism requires `Content-Security-Policy: frame-ancestors 'self'` (included in the default `frame-ancestors 'self'; object-src 'none'; base-uri 'self'; font-src 'self'` policy set by the server).
 - **`admin` and `readOnly` cannot both match.**  If both claim rules match the same JWT, `admin: true` takes precedence and `readOnly` is ignored.  Design your IdP roles to be mutually exclusive.
 - **Spaces claim controls visibility (fail-closed).**  When a `spaces` mapping is configured, the OIDC session can only see and modify the spaces named in that claim.  If the mapping is configured but the claim is missing or is not a string array, the allow-list is **empty (deny all)** — not "all spaces".  Users who cannot see expected spaces should check with their administrator that the IdP is emitting the correct claim values.
+- **An OIDC session can own personal views.**  Its views belong to `oidc:<issuer>#<sub>`, so they are the same across that user's sessions and are never ended by the grace sweep. A session whose token carries no `sub` has no owner and cannot own or copy a view (`view_owner_unknown`). A view reads only the members the session's `spaces` claim lets it read ([Personal views](06d-personal-views.md)).
 - **Config validation.**  When `oidc.enabled` is `true`, `issuerUrl` and `clientId` are required.  The server validates the OIDC config block at startup and on `reload-config` — a malformed block will prevent the server from starting.
 - **Config reload.**  A change to the `oidc` block is picked up **automatically within about two seconds** — the server watches `config.json`, and the reload flushes the cached OIDC discovery document and JWKS key set. Call `POST /api/admin/reload-config` when you want the reload to be synchronous (a deploy script that must not race the next login), or restart the container. Neither is required.
 - **Enforcing OIDC for browser sessions.**  Set `enforceForBrowser: true` to prevent users who have a cached PAT in their browser from bypassing the IdP.  When this flag is set the SPA clears any PAT-based localStorage session on startup and forces a fresh OIDC login.  Programmatic callers (API, MCP) that supply an `Authorization: ****** header are not affected.

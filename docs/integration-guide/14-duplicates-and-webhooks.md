@@ -450,7 +450,7 @@ Content-Type: application/json
 |-------|----------|-------------|
 | `url` | ✅ | HTTPS endpoint to receive POST requests |
 | `secret` | ✅ | Shared secret for HMAC-SHA256 signature (min 8 chars) |
-| `spaces` | — | Space ID filter; omit or empty = all spaces |
+| `spaces` | — | Space ID filter; omit or empty = all spaces. A personal view id is not a space and names none. A subscription that named only ids the 6.0 upgrade retired is disabled, never emptied ([Upgrading](02b-upgrading.md)) |
 | `events` | — | Event type filter; omit or empty = all events |
 | `enabled` | — | Default `true`; set `false` to pause without deleting |
 

@@ -29,6 +29,27 @@ If the stored embeddings were made by a different model than the one configured 
 >
 > **A late search service heals by itself.** If the search service starts after Ythril, the space's Overview shows the index as *Waiting for search service* and semantic search returns nothing for it in the meantime. You do not need to reindex or rebuild: Ythril keeps asking, builds the missing indexes when the service answers, and the state changes without a reload. The Graph tab names the same wait when it is slow to load. Only if the state never clears, use **Rebuild search indexes** on the space's **Danger** tab.
 
+### Personal views
+
+A **personal view** reads several spaces together, as you. It is how you ask one question of many spaces — a recall, a filter, a graph, a file list — without merging any data and without asking each space in turn. In the web app it is a *personal view*; in German a *persönliche Sicht*, in Polish a *widok osobisty*.
+
+**What you can rely on**
+
+- **It is yours alone.** Only the token that made it sees it. Another token that asks for your view's id is told there is no such space, exactly as for an id that never existed.
+- **It reads what you can read, at the moment you ask.** Each time you use it, every space it lists is read with your own rights. A space you can no longer read is left out of the answer, and the answer says so. Nothing is copied into the view and nothing is stored in it.
+- **It says what it read.** The page shows a **Reads from:** line naming the spaces that answered and, in words, any that were left out. Over the API and the MCP tools every answer carries the names it read as `viewMembers`.
+- **It never writes.** A personal view has no records of its own. To add or change something, open the space that holds it, or write to that space by its own id.
+- **It ends with its owner.** Revoking a token deletes that token's views at once. A connector sign-in that expires keeps its views for 30 days. Deleting a view deletes the view only; no space and no record is touched.
+- **Limits.** Up to 50 views per token and up to 1 000 spaces in one view. A view cannot list another view.
+
+**Making one.** On the **Brain** page, just below the space chips, the **My personal views** list has **New personal view**. Give it a name — lower-case letters, digits and hyphens, up to 40 characters, unique among your own views — and choose either **Only the spaces I choose** (a list of the spaces you can read, with a checkbox each) or **Every space I can read, including ones added later**. The view is opened as `@name`. Each view in the list carries the words *personal view* beside its name, so you can tell it from a space, and has a pencil to rename it and a bin to delete it; deleting asks for confirmation and says it removes the view only.
+
+**Using one.** Click it, or open the Brain, Graph or Files page with `?space=@name` in the address. You get the read side of those pages: **Overview** (which says what a view is and which panels need a single space), **Query**, **Graph**, the **Entities**, **Edges**, **Facts** and **Chrono** tabs, and **Files**. Everything that would change data is absent, and so is the **Review** tab. The space-settings cog is greyed out, and the panels that describe one space — index status, completeness, schema, schema layers, activity and token access — say *Not available for a personal view*; open one of the spaces it reads to see them. A link to a view that is not yours, or that has been deleted, shows the space you were on instead and says so.
+
+**Over the API.** The same views are made with `POST /api/views` (`{ "name": "research", "members": ["notes", "papers"] }`, or `["*"]` as members for every space you can read) and the MCP tool `view_create`, and read by passing `"@research"` as the `space` of any read. See the Integration Guide for the full list of calls.
+
+**Copying a view to another token** is done from **Settings → Tokens** (see [Settings](04-settings.md#copying-your-personal-views-to-another-token)). **After the 6.0 upgrade**, spaces that used to read others on everyone's behalf became personal views of the instance administrators; see [Settings](04-settings.md#after-the-60-upgrade-what-became-of-the-read-across-spaces).
+
 ### Facts
 
 Facts are the core knowledge unit — plain-language statements you want to remember.
@@ -249,8 +270,8 @@ before the lists are removed, so nothing stored is lost. Attaching a record in t
 
 **A space whose conversion failed says so** rather than answering that it has no connections, and names
 itself in the message. That is the one case where you have to do something, and the server log says what
-went wrong. A proxy space is never among them: it holds no records of its own, so there is nothing in it to
-convert, and its connections are its members'.
+went wrong. A personal view is never among them: it holds no records of its own, so there is nothing in it to
+convert, and the connections it shows are those of the spaces it reads.
 
 ---
 
@@ -318,9 +339,9 @@ means something different: the search did not finish, so it found nothing becaus
 themselves (so a part number, form id or clause name is found even though such a string carries almost no
 meaning for a language model). A record that scores on both ranks highest. If your administrator has
 configured a reranking model, the top candidates are then re-scored by a model that reads your question
-and each passage together. **Searching a proxy space ranks its members together:** the results of every member
-are combined into one ranking, so the best matches come first whichever space they live in — a member whose
-records matched your exact words is not pushed below one that only matched their meaning.
+and each passage together. **Searching a personal view ranks the spaces it reads together:** the results of every
+space are combined into one ranking, so the best matches come first whichever space they live in — a space whose
+records matched your exact words is not pushed below one that only matched their meaning. See *Personal views* below.
 
 None of that needs setting up, and none of it can make a search fail — a stage that is unavailable is
 simply skipped.
@@ -728,8 +749,8 @@ when you click it. See the integration guide's graph page, *Bodies in one call*.
 > whose rebuild fails are counted as *failed* and listed with the space's embedding jobs; if the embedding
 > service is unreachable, the reindex simply waits for it and strips nothing.
 >
-> **A proxy space has no Reindex button at all.** It holds no records of its own — its members do — so it has
-> no index to rebuild, and the panel says to reindex the member spaces instead.
+> **A personal view has no Reindex button at all.** It holds no records of its own — the spaces it reads do — so it has
+> no index to rebuild. Open one of those spaces to reindex it.
 
 The **Review** tab inside a space's Brain is that space's record-QA queue, split into sub-tabs:
 **Duplicates**, **Contradictions** and **Suggestions**. (Contradictions needs an NLI model configured

@@ -102,8 +102,14 @@ would understate what you hold.
 
 `none` reaches nothing, and no route is ever listed with `needs: "none"`.
 
-**Through a proxy space** a token reads the members it reaches and writes only into a member where it holds the
-rung the write needs; a member it does not reach is answered as one that does not exist.
+**Through a personal view** a token reads, at call time, the members it reaches where it holds the read rung the door's
+area needs; a member it does not read drops out of that call. A view never writes, so no write rung is judged against
+one, and **no rights row can name a view**: rights name spaces, and the view's members are judged against them each
+time. A view of another token answers as an id that never existed ([Personal views](06d-personal-views.md)).
+
+**Token management and views.** Revoking a token deletes the views its owner holds at once, and a token that is bound to
+a peer instance cannot own one. A token manager may copy a view to a token it manages
+(`POST /api/views/:id/copy`, with the same second factor token management asks).
 
 #### `implications` — a rung one area gives another
 
@@ -219,7 +225,7 @@ may not is refused whole.
 | `meta.suppressEmbeddings` | `knowledge` **admin** — recall silently stops finding anything written afterwards |
 | `recordTtlDays` | `knowledge` **admin** — it deletes records on a clock |
 | `unknownWriteFields` (top level) | `schema` **admin** — it makes writes that succeeded start failing; the instance administrator and the space administrator may always set it |
-| `completeLinkage` | **nobody**, an instance administrator included. It is set by the link conversion and by space creation — except on a proxy made before 5.0, which the conversion never walks because it holds no records, so it never carries the marker and needs none; with the 4.x link arrays gone there is no other shape for a space to be read through, so turning it off would leave it unable to answer about connections at all |
+| `completeLinkage` | **nobody**, an instance administrator included. It is set by the link conversion and by space creation; with the 4.x link arrays gone there is no other shape for a space to be read through, so turning it off would leave it unable to answer about connections at all |
 | `dupeRules`, `dupeMergeSurvivor` | `dataQuality` write |
 | `dupeRulesOnInsert` | `dataQuality` **admin** — merges then happen ON WRITE, without anyone looking |
 
