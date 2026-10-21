@@ -53,6 +53,8 @@ export interface WebhookSubscription {
   status: 'active' | 'failing' | 'disabled';
   /** Number of consecutive delivery failures. */
   consecutiveFailures: number;
+  /** The retired proxy ids the 6.0 upgrade disabled this subscription for, so a later boot does not disable it again after an admin re-enabled it. */
+  retiredIdsDisabledFor?: string[];
 }
 
 // ── Delivery log entry ──────────────────────────────────────────────────────
