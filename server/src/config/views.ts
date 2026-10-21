@@ -33,7 +33,7 @@ import { reachesSpace } from '../auth/space-reach.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { viewsDeletedTotal } from '../metrics/registry.js';
 import { log } from '../util/log.js';
-import { VIEW_OWNER_KINDS, WILDCARD_MEMBER, liveOwnerKeys, viewOwnerKind, viewOwnerOf } from './view-shape.js';
+import { VIEW_OWNER_KINDS, WILDCARD_MEMBER, liveOwnerKeys, viewIdOf, viewOwnerKind, viewOwnerOf } from './view-shape.js';
 
 export {
   VIEW_NAME_PATTERN, VIEW_NAME_MAX, MAX_VIEWS_PER_OWNER, MAX_VIEW_MEMBERS, WILDCARD_MEMBER, isViewId, isValidViewName, freeViewName,
@@ -135,6 +135,22 @@ export function deleteView(config: Config, ownerKey: string, id: string, reason:
   const deleted = before - config.views.length;
   if (deleted > 0) viewsDeletedTotal.inc({ reason }, deleted);
   return deleted > 0;
+}
+
+/** What a copy names its source by (`ViewRecord.copiedFrom`): the source's owner key and its id NOW. */
+export const copySourceKey = (view: Pick<ViewRecord, 'ownerId' | 'id'>): string => `${view.ownerId}|${view.id}`;
+
+/**
+ * Rename a view inside the caller's config write: its name, its id, and the key every copy of it names it by. A copy is idempotent by
+ * (receiver, source view) and names its source by id, which a rename changes; without the third step a copy made after a rename was a
+ * second copy beside the first instead of a refresh of it.
+ */
+export function renameView(config: Config, view: ViewRecord, name: string): void {
+  const before = copySourceKey(view);
+  view.name = name;
+  view.id = viewIdOf(name);
+  const after = copySourceKey(view);
+  for (const v of config.views ?? []) if (v.copiedFrom === before) v.copiedFrom = after;
 }
 
 /** Remember when the last token of an owner went without its views being deleted (a cap eviction), so the sweep's grace counts from there. */

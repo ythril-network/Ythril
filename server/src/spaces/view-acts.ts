@@ -21,7 +21,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { getConfig, mutateConfig } from '../config/loader.js';
 import {
   MAX_VIEWS_PER_OWNER, MAX_VIEW_MEMBERS, VIEW_NAME_MAX, VIEW_NAME_PATTERN, WILDCARD_MEMBER, ViewRefusal,
-  deleteView, freeViewName, isValidViewName, isViewId, memberAdmissible, viewIdOf, resolveOwnView, viewOwnerKind, viewOwnerOf, viewReadMembers, viewsOfOwner,
+  copySourceKey, deleteView, freeViewName, isValidViewName, isViewId, memberAdmissible, renameView, viewIdOf, resolveOwnView, viewOwnerKind, viewOwnerOf, viewReadMembers, viewsOfOwner,
   type ViewOwnerSource,
 } from '../config/views.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
@@ -144,8 +144,7 @@ export function updateView(actor: ViewActor, id: string, input: { name?: unknown
     if (input.name !== undefined && input.name !== view.name) {
       const name = checkedName(input.name);
       if (viewsOfOwner(owner, cfg).some(v => v.name === name)) throw new ViewRefusal('nameTaken', `You already have a view named '${name}'`);
-      view.name = name;
-      view.id = viewIdOf(name);
+      renameView(cfg, view, name);
     }
     if (input.members !== undefined) {
       view.members = checkedMembers(input.members, ViewUpdateInput.safeParse({ members: input.members }).success, admissibleFor(actor.rights, peerBoundTo(actor.record), cfg));
@@ -219,7 +218,7 @@ export function copyViewTo(actor: ViewActor, id: string, toTokenId: unknown, fro
   const receiverOwner = viewOwnerOf(receiver);
   if (!receiverOwner) throw new ViewRefusal('noOwner', 'That token cannot own a personal view');
   if (peerBoundTo(receiver)) throw new ViewRefusal('peerBound', 'A token bound to a peer instance cannot own a personal view');
-  const key = `${source.ownerId}|${source.id}`;
+  const key = copySourceKey(source);
   let result!: { view: ViewRecord; created: boolean };
   mutateConfig(cfg => {
     const from = (cfg.views ?? []).find(v => v.ownerId === source.ownerId && v.id === source.id);
