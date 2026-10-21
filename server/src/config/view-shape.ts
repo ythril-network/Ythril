@@ -14,6 +14,7 @@
  * a read recurse, and an owner key of a kind nothing issues can never be matched by a live token or swept.
  */
 import type { ViewRecord } from './types.js';
+import { tokenIsLive } from '../auth/token-liveness.js';
 
 /** A view's name: what follows the `@` in its id. */
 export const VIEW_NAME_PATTERN = /^[a-z0-9-]+$/;
@@ -89,6 +90,21 @@ export function viewOwnerOf(token: ViewOwnerSource): string | null {
   if (token.oidcIssuer !== undefined) return token.oidcSubject ? `oidc:${token.oidcIssuer}#${token.oidcSubject}` : null;
   if (token.oauthClientId) return `oauth:${token.oauthClientId}`;
   return `token:${token.id}`;
+}
+
+/**
+ * The view owners that hold a live token at `now` (`tokenIsLive`: live AT the expiry instant), each once, as {@link viewOwnerOf} keys. The
+ * one answer to "which owners still hold a token" - the revoke cascade (an owner whose other token is live keeps its views), the grace
+ * sweep, and the upgrade's owners (handed only the instance-admin tokens). Spelled per caller, a token one of them counts as live could be
+ * dead to another, and views would be deleted or kept by which path asked.
+ */
+export function liveOwnerKeys(tokens: readonly (ViewOwnerSource & { expiresAt: string | null })[], now: number): Set<string> {
+  const live = new Set<string>();
+  for (const t of tokens) {
+    const owner = viewOwnerOf(t);
+    if (owner && tokenIsLive(t, now)) live.add(owner);
+  }
+  return live;
 }
 
 /** The lowest free `<name>-N` (N from 2) beside `taken`, the base trimmed so the whole stays within the name limit. */

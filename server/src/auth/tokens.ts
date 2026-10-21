@@ -9,7 +9,7 @@ import { withInstanceAdminGrants } from './instance-admin-grants.js';
 import { resolveLimitFor } from '../rate-limit/per-token.js';
 import { joinRoundOf } from '../networks/round-state.js';
 import { tokenIsLive } from './token-liveness.js';
-import { viewOwnerOf, deleteViewsOf, noteViewOwnerLeft } from '../config/views.js';
+import { viewOwnerOf, deleteViewsOf, noteViewOwnerLeft, liveOwnerKeys } from '../config/views.js';
 
 const BCRYPT_ROUNDS = 12;
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -513,7 +513,7 @@ export function removeTokensFromConfig(config: Config, shouldRemove: (t: TokenRe
   const gone = new Set(removed.map(t => t.id));
   for (const [key, val] of _tokenCache) if (gone.has(val.tokenId)) _tokenCache.delete(key);
   const now = Date.now();
-  const stillHeld = new Set(config.tokens.filter(t => tokenIsLive(t, now)).map(t => viewOwnerOf(t)));
+  const stillHeld = liveOwnerKeys(config.tokens, now);
   for (const owner of new Set(removed.map(t => viewOwnerOf(t)))) {
     if (!owner || stillHeld.has(owner)) continue;
     if (why === 'revoke') deleteViewsOf(config, owner, 'revoke');
