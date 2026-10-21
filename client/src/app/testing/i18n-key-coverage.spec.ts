@@ -19,6 +19,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { stripComments } from './strip-comments';
+import { callArguments } from './call-arguments';
 
 const SRC = resolve(__dirname, '..');
 const I18N = resolve(__dirname, '../../../public/assets/i18n');
@@ -62,6 +64,76 @@ function usedKeys(): Map<string, string[]> {
   }
   return found;
 }
+
+/**
+ * The bases `pluralText(transloco, lang, '<base>', count)` is called with (Q-549, Q-472).
+ *
+ * `pluralText` looks up `<base>.<category>` and falls back to `<base>.other`, and `translatedOrEmpty` answers '' for a key it
+ * cannot find - so a base that is misspelled, or whose `.one` / `.other` was never written, renders an EMPTY sentence with no raw
+ * key, no error and every test green. The static-key scan above cannot see it: the call never spells a full key.
+ *
+ * Derived from the source: every `pluralText(` call's third argument. A literal is a base. An identifier is resolved to the literals
+ * its function (a method or an arrow with that parameter) is called with in the same file; one that resolves to none is a failure to
+ * say so rather than a site silently skipped (`UNCHECKED_BASES` names a site with the reason, none today).
+ */
+const UNCHECKED_BASES: Readonly<Record<string, string>> = {};
+
+/** Every plural base the client calls `pluralText` with, with where; unresolved identifiers are returned under `unresolved`. */
+function pluralBases(): { bases: Map<string, string[]>; unresolved: string[] } {
+  const bases = new Map<string, string[]>();
+  const unresolved: string[] = [];
+  const add = (base: string, where: string): void => { bases.set(base, [...(bases.get(base) ?? []), where]); };
+  for (const file of walk(SRC)) {
+    if (file.endsWith('plural-text.ts')) continue;
+    const src = stripComments(readFileSync(file, 'utf8'));
+    for (const m of src.matchAll(/\bpluralText\(/g)) {
+      const where = `${file.slice(SRC.length + 1)}:${src.slice(0, m.index!).split('\n').length}`;
+      const base = callArguments(src, m.index! + m[0].length - 1)[2] ?? '';
+      const literal = /^'([^']+)'$/.exec(base);
+      if (literal) { add(literal[1]!, where); continue; }
+      if (!/^[A-Za-z_]\w*$/.test(base)) { unresolved.push(`${where}: base \`${base}\` is neither a literal nor a parameter`); continue; }
+      const head = src.slice(0, m.index!);
+      const decl = [...head.matchAll(new RegExp(`(?:\\b(\\w+)\\s*=\\s*(?:async\\s*)?|\\b(\\w+))\\([^()]*\\b${base}\\s*:`, 'g'))].pop();
+      const fn = decl?.[1] ?? decl?.[2];
+      const callers = fn ? [...src.matchAll(new RegExp(`\\b${fn}\\(\\s*'([^']+)'`, 'g'))].map(c => c[1]!) : [];
+      if (!callers.length) { unresolved.push(`${where}: base \`${base}\` resolves to no literal handed to ${fn ?? 'its function'} in this file`); continue; }
+      for (const c of callers) add(c, `${where} via ${fn}`);
+    }
+  }
+  return { bases, unresolved };
+}
+
+describe('every pluralText base has its forms in every locale (Q-549, Q-472)', () => {
+  const { bases, unresolved } = pluralBases();
+  const CATEGORY = /^(?:zero|one|two|few|many|other)$/;
+  const formsOf = (dict: Record<string, string>, base: string): string[] =>
+    Object.keys(dict).filter(k => k.startsWith(`${base}.`) && CATEGORY.test(k.slice(base.length + 1))).map(k => k.slice(base.length + 1));
+
+  it('finds the bases (a floor, so a changed call shape cannot pass by finding none)', () => {
+    expect(bases.size).toBeGreaterThanOrEqual(8);
+  });
+
+  it('every call hands pluralText a literal base, or a parameter that resolves to literals in the same file', () => {
+    const open = unresolved.filter(u => !Object.keys(UNCHECKED_BASES).some(site => u.startsWith(site)));
+    expect(open, 'pluralText bases that cannot be checked:\n  ' + open.join('\n  ')).toEqual([]);
+  });
+
+  it('en has <base>.one and <base>.other, and de and pl carry every form en has', () => {
+    const en = load('en');
+    const wrong: string[] = [];
+    for (const [base, sites] of bases) {
+      const enForms = formsOf(en, base);
+      for (const need of ['one', 'other']) {
+        if (!enForms.includes(need)) wrong.push(`en: ${base}.${need} is missing (called at ${sites.join(', ')})`);
+      }
+      for (const loc of ['de', 'pl']) {
+        const have = formsOf(load(loc), base);
+        for (const form of enForms) if (!have.includes(form)) wrong.push(`${loc}: ${base}.${form} is missing (en has it)`);
+      }
+    }
+    expect(wrong, `plural bases whose forms are missing - the sentence renders empty:\n  ${wrong.join('\n  ')}`).toEqual([]);
+  });
+});
 
 describe('i18n key coverage', () => {
   const en = load('en');

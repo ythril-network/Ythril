@@ -44,6 +44,39 @@ const ACTIONS: Record<string, { de: RegExp; pl: RegExp }> = {
     de: /(schließen)/i,
     pl: /(zamknij)/i,
   },
+  // Q-549: the glossary of the verbs every dialog and toolbar repeats. Polish read "Ratować" (to rescue) for Save, "Anulować" and
+  // "Tworzyć" (dictionary infinitives) for Cancel and Create, "Usunąć" for Delete and "Wgrywać" for Upload - each a real word of the
+  // right language and not the command a button gives. The regexes are the imperative (or, in German, the infinitive a label uses).
+  save: {
+    de: /(speicher)/i, // speichern, and the du-imperative "Speichere ..."
+    pl: /(zapisz)/i,
+  },
+  cancel: {
+    de: /(abbrechen)/i,
+    pl: /(anuluj)/i,
+  },
+  create: {
+    // Widened for correct sentences: "Erstellt eine ..." / "Tworzy ..." (a description in the third person), the separable
+    // "Legen Sie ... an", and "Stwórz" (the other Polish verb for the same act). The bare infinitive "Tworzyć" stays wrong.
+    de: /(erstellen|erstellt|anlegen|hinzufügen|\blege?n?\b[^.]*\ban\b)/i,
+    pl: /(utwórz|dodaj|tworzy(?!ć)|stwórz)/i,
+  },
+  delete: {
+    de: /(löschen|entfernen)/i,
+    // Widened for correct Polish: the infinitive IS the right form of a confirmation QUESTION ("Usunąć webhook?"), so it counts
+    // only before a question mark; "Usuwaj" (imperative), and the noun "Usunięcie" of a label that names the act. A bare
+    // "Usunąć" on a button, and "Usuwać?", stay wrong.
+    pl: /(usuń|usuwaj|usunięci|usunąć[^?]*\?)/i,
+  },
+  remove: {
+    de: /(entfernen|löschen)/i,
+    pl: /(usuń|usuwaj|usunięci|usunąć[^?]*\?)/i,
+  },
+  upload: {
+    // "Laden Sie Dateien hoch": the separable verb is correct.
+    de: /(hochladen|\blade?n?\b[^.]*\bhoch\b)/i,
+    pl: /(prześlij|wgraj)/i,
+  },
 };
 
 describe('action labels are verbs in every locale (Q-115)', () => {
