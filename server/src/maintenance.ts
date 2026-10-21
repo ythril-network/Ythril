@@ -56,11 +56,13 @@ function refuse(res: Response): void {
 /**
  * Is this request a load of the web client itself: a `GET` or `HEAD` outside `/api` and `/mcp`. Every data route the
  * server mounts is under one of the two (the probes and `/metrics` are answered above), so what is left is the static
- * bundle, `index.html` and the SPA fallback, none of which holds any data.
+ * bundle, `index.html` and the SPA fallback, none of which holds any data. Compared lower-cased because Express routes
+ * case-insensitively: `/API/spaces` reaches the API router, so it must not pass here as a page load.
  */
 function isWebClientLoad(method: string, p: string): boolean {
   if (method !== 'GET' && method !== 'HEAD') return false;
-  const under = (root: string) => p === root || p.startsWith(`${root}/`);
+  const path = p.toLowerCase();
+  const under = (root: string) => path === root || path.startsWith(`${root}/`);
   return !under('/api') && !under('/mcp');
 }
 
