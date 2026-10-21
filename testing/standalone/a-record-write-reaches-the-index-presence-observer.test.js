@@ -163,7 +163,7 @@ describe('4. there is one door onto the database', () => {
     'server/src/db/mongo.ts': 'IS the door: connectMongo builds the client and getDb wraps it.',
     'server/src/db/conn-test.ts': 'A connection test: it pings admin and writes nothing.',
     'server/src/db/dump.ts': 'A backup: it reads every collection and writes nothing.',
-    'server/src/db/restore.ts': 'WRITES, and is the one door the lifecycle cannot see — held below to a forced reconcile of every space after it.',
+    'server/src/db/restore.ts': 'WRITES through `restoreDatabase` only, a whole-database copy on a client of its own (the migration\'s target), which the boot after it reconciles space by space (`initSpace`). The online restore loads through `getDb` (`db/restore-act.ts`), held below to a forced reconcile of each space it replaced.',
     'server/src/ready.ts': 'A readiness probe: admin ping and listSearchIndexes, both reads.',
     'server/src/api/about.ts': 'serverInfo for the About page — a read of the admin database.',
     'server/src/db/store-answers.ts': 'storeAnswers: a ping of the admin database, writes nothing, and goes around getDb() on purpose: it carries its own timeoutMS, and a housekeeping scope\'s bound laid over a ping about the bound would be a bound about itself.',
@@ -194,12 +194,16 @@ describe('4. there is one door onto the database', () => {
     assert.match(body, /observeRecordWrites\(\s*client\.db\(/, 'getDb no longer hands out the observed database');
   });
 
-  it('the restore — the one door that writes — is followed by a forced reconcile of every space', () => {
-    const data = sources.find(s => s.file === 'server/src/api/data.ts').code;
-    // From the restore to the response that reports it: the rebuild has to happen before the operator is told.
-    const afterRestore = between(data, 'await restoreDatabase(', 'res.json({ ok: true, vectorIndexes', 'the restore route');
-    assert.match(afterRestore, /reconcileSpaceSearchIndexes\([^)]*force:\s*true/,
-      'records restored through their own client would sit in collections with no search index');
+  it('the online restore loads through getDb and reconciles the space it replaced, forced, before its act completes', () => {
+    // A restore is a set of space acts (bundle-157): each act's body replaces one space. The rebuild has to happen in the body, before
+    // the completion lifts the hold and the report says the space is done.
+    const act = sources.find(s => s.file === 'server/src/db/restore-act.ts').code;
+    const body = between(act, 'async function restoreSpace(', 'defineSpaceActBody(', 'the restore act\'s body');
+    assert.match(body, /getDb\(\)/, 'the restore act no longer loads through the observed database');
+    assert.ok(body.includes('await load('), 'the restore act\'s load moved; re-anchor this gate');
+    const afterLoad = body.slice(body.indexOf('await load('));
+    assert.match(afterLoad, /reconcileSpaceSearchIndexes\([^)]*force:\s*true/,
+      'restored records would sit in collections with no search index');
   });
 });
 

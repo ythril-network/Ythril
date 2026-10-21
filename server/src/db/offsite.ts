@@ -117,9 +117,12 @@ export function copyFilesOffsite(
  * When a DB backup is pruned, the corresponding -files copy is also removed if
  * present, so the two always stay in sync.
  *
+ * `keep` names backups that are never pruned, whatever the count (a backup a standing restore act names); they do not count
+ * towards `keepCount`. The caller decides what is kept, so this stays a function of the directory alone.
+ *
  * Returns the number of backup sets deleted.
  */
-export function pruneBackups(dir: string, keepCount: number): number {
+export function pruneBackups(dir: string, keepCount: number, keep: ReadonlySet<string> = new Set()): number {
   if (!fs.existsSync(dir)) return 0;
 
   const entries: string[] = [];
@@ -127,6 +130,7 @@ export function pruneBackups(dir: string, keepCount: number): number {
     try {
       const fullPath = path.join(dir, name);
       if (
+        !keep.has(name) &&
         fs.statSync(fullPath).isDirectory() &&
         fs.existsSync(path.join(fullPath, 'manifest.json'))
       ) {

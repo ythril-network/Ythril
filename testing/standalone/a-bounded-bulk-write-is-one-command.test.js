@@ -411,7 +411,9 @@ const SITES = [
   // The conversion's commit moved into the one writer of a file's derived rows (bundle-89, Q-418), which reads the
   // parent before it writes; the bound did not change — it is still the caller's session, in chunks of the caller's cap.
   { file: 'server/src/files/derived-fields.ts', sites: 1, kind: 'session', reason: 'inside the caller\'s transaction: the session is the bound, in chunks of the caller\'s cap' },
-  { file: 'server/src/db/restore.ts', sites: 2, kind: 'own-client', reason: 'an operator restore on its own MongoClient, in 500-row batches, outside every hold' },
+  // Since bundle-157 a restore ACT loads through the loader on `getDb()`, inside the runner's per-operation bound and the space's hold; the
+  // whole-database copy (`restoreDatabase`) keeps a client of its own. Both send a backup's records 500 at a time (`INSERT_BATCH_SIZE`).
+  { file: 'server/src/db/restore.ts', sites: 2, kind: 'own-client', reason: 'a backup\'s records, 500 at a time, into a collection emptied for them: on its own MongoClient for the whole-database copy, and under the held space\'s act for a restore act' },
   { file: 'server/src/brain/write-plan/commit.ts', sites: 2, kind: 'request-capped', reason: 'one write plan: the items of one request (BULK_MAX_PER_TYPE per array, a 10 MiB body)' },
   { file: 'server/src/brain/read-spill-store.ts', sites: 1, kind: 'request-capped', reason: 'the pages of one spilled answer, which is cut at a stated size before it is stored' },
   { file: 'server/src/sync/linkage-check.ts', sites: 1, kind: 'request-capped', reason: 'one row of about 300 bytes per dangling end of ONE accepted page, a page being counted' },

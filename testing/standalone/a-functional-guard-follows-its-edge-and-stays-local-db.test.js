@@ -579,7 +579,7 @@ describe('the functional guard marker follows its edge and stays on this instanc
 
   // ── 5. The online restore leaves the indexes behind it ─────────────────────────────────────────────────────────────
 
-  describe('an online restore (POST /api/admin/data/restore, which never runs initSpace)', () => {
+  describe('an online restore (POST /api/admin/data/restore, a set of space acts; the indexes stand when its acts complete)', () => {
     let indexKeys;
     let indexes;
     before(async () => {
@@ -588,7 +588,10 @@ describe('the functional guard marker follows its edge and stays on this instanc
       const backup = await rest('POST', '/api/admin/data/backup');
       assert.ok(backup.ok, `fixture: the backup answered ${backup.status}: ${backup.text.slice(0, 300)}`);
       const restored = await rest('POST', '/api/admin/data/restore', { backupId: backup.body.backup.id });
-      assert.ok(restored.ok, `fixture: the restore answered ${restored.status}: ${restored.text.slice(0, 300)}`);
+      assert.equal(restored.status, 202, `fixture: the restore answered ${restored.status}: ${restored.text.slice(0, 300)}`);
+      // A restore is a set of space acts (bundle-157): the indexes are judged once the report says every act has completed.
+      await waitFor(async () => (await rest('GET', '/api/admin/data/restore')).body?.state === 'completed', 60_000, 100,
+        async () => `the restore report: ${(await rest('GET', '/api/admin/data/restore')).text.slice(0, 600)}`, { what: 'the restore completing' });
       indexes = await edgesOf(STRICT).listIndexes().toArray();
       indexKeys = indexes.map(ix => Object.keys(ix.key).join(','));
     });

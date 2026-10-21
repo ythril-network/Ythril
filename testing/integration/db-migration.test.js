@@ -23,6 +23,7 @@ import { fileURLToPath } from 'url';
 import { INSTANCES, get, post, del, reqJson, readRecord } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { sleep } from '../_shared/sleep.mjs';
+import { waitForReading } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -244,11 +245,20 @@ describe('Maintenance Mode', () => {
     assert.equal(r.body.active, true, JSON.stringify(r.body));
   });
 
-  it('non-admin API requests return 503 with maintenance:true during maintenance', async () => {
-    // GET /api/about requires auth but is not an admin endpoint
-    const r = await reqJson(BASE, adminToken, '/api/about');
-    assert.equal(r.status, 503, JSON.stringify(r.body));
-    assert.equal(r.body.maintenance, true, JSON.stringify(r.body));
+  it('non-admin API requests return 503 with maintenance:true during maintenance; an instance admin passes on every path', async () => {
+    // Since bundle-157 (R5.3) maintenance stops every caller EXCEPT an instance-admin token, on any path, so the operator's own
+    // surfaces keep working during a restore. GET /api/about requires auth but is not an admin endpoint.
+    const createR = await adminPost('/api/tokens', { name: `maintenance-nonAdmin-${RUN_ID}` });
+    assert.equal(createR.status, 201, `fixture: a non-admin token was not created during maintenance: ${JSON.stringify(createR.body)}`);
+    try {
+      const r = await reqJson(BASE, createR.body.plaintext, '/api/about');
+      assert.equal(r.status, 503, JSON.stringify(r.body));
+      assert.equal(r.body.maintenance, true, JSON.stringify(r.body));
+      const admin = await reqJson(BASE, adminToken, '/api/about');
+      assert.equal(admin.status, 200, `an instance admin was stopped by maintenance: ${JSON.stringify(admin.body)}`);
+    } finally {
+      await adminDel(`/api/tokens/${createR.body.token.id}`).catch(() => {});
+    }
   });
 
   it('/health is not blocked during maintenance', async () => {
@@ -407,10 +417,15 @@ describe('Backup + Restore — round-trip', () => {
     const goneR = await readRecord(BASE, adminToken, 'general', 'facts', memId);
     assert.equal(goneR.status, 404, 'memory should be gone after delete');
 
-    // 5. Restore from the backup (auto-manages maintenance)
+    // 5. Restore from the backup: a set of space acts since bundle-157, answered 202, its end read from GET /restore (maintenance
+    //    holds until then)
     const restoreR = await adminPost('/api/admin/data/restore', { backupId });
-    assert.equal(restoreR.status, 200, `restore: ${JSON.stringify(restoreR.body)}`);
-    assert.equal(restoreR.body.ok, true, JSON.stringify(restoreR.body));
+    assert.equal(restoreR.status, 202, `restore: ${JSON.stringify(restoreR.body)}`);
+    const report = await waitForReading(
+      () => adminGet('/api/admin/data/restore'),
+      (r) => r.status === 200 && r.body?.restoreId === restoreR.body.restoreId && r.body?.state !== 'running',
+      300_000, 1_000, { what: 'the restore to end' });
+    assert.equal(report.body.state, 'completed', `the restore did not complete: ${JSON.stringify(report.body)}`);
 
     // 6. Verify memory is back
     const backR = await readRecord(BASE, adminToken, 'general', 'facts', memId);

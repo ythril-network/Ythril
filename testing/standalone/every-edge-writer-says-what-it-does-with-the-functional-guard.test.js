@@ -70,7 +70,7 @@ const WRITERS = {
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': { marker: 'none-by-design', why: 'chrono entries; the collection name is computed' },
   'server/src/db/drop-link-arrays.ts:dropLinkArrays': { marker: 'none-by-design', why: 'boot migration of the retired link arrays' },
   'server/src/db/rekey-memory-kind-to-fact.ts:rekeyMemoryKindToFact': { marker: 'none-by-design', why: 'boot migration of the memory kind' },
-  'server/src/db/restore.ts:restoreDatabase': { marker: 'none-by-design', why: 'a whole-database dump restored verbatim: every marker comes back with the from and label it was written with, and the index is rebuilt after' },
+  'server/src/db/restore.ts:backupLoader': { marker: 'none-by-design', why: 'a dump restored verbatim into a collection emptied for it: every marker comes back with the from and label it was written with, and a restore act builds the guard index before it loads, so a duplicate marker in the backup fails the act' },
   'server/src/spaces/_shared.ts:repairStaleSpaceIds': { marker: 'none-by-design', why: 'rewrites a stale spaceId field in every collection' },
 };
 

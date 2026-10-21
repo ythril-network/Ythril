@@ -147,4 +147,45 @@ export interface SpaceActEntry {
   retryAt?: string;
   /** Our sentence for the last failure, never a driver's text. */
   lastError?: string;
+  /**
+   * The last failure was the act's INPUT (a backup that is not whole, a unique index the backup's own records refuse): another attempt
+   * meets the same input, so nothing retries it, and the space stays held until an operator abandons the act (bundle-157, R5.5).
+   */
+  needsAbandon?: true;
+  /** The act set this entry is one member of (`spaceActSets`), for a kind that stands on every space at once. */
+  setId?: string;
+  /** A restore's backup, by id under the backups root; never a path, which is resolved again (and checked) when the body runs. */
+  backupId?: string;
+}
+
+/** Where one member of an act set stands: its entry still stands, its act completed, or the set was abandoned before it did. */
+export type SpaceActSetMemberState = 'standing' | 'done' | 'abandoned';
+
+/** One space of an act set, as the set's record keeps it after the member's entry is gone. */
+export interface SpaceActSetMember {
+  state: SpaceActSetMemberState;
+  completedAt?: string;
+  /** What the member's body reported (a restore's index results), kept for the report. */
+  report?: Record<string, unknown>;
+}
+
+/**
+ * An act set: ONE act of a kind that stands on every space at once (a restore), registered as one entry per space in one config write
+ * (bundle-157, R5.1). The entries hold and run each space; this record is what is true of the whole - which spaces it covers, which are
+ * done, how it ended - so a report, maintenance and the end-of-set work read one record rather than counting entries that are removed as
+ * they complete. One record per kind is kept: the standing set, or the last one that ended, until the next set of its kind replaces it.
+ */
+export interface SpaceActSet {
+  id: string;
+  kind: SpaceActKind;
+  startedAt: string;
+  /** Set when the last member ended (completed or abandoned). */
+  endedAt?: string;
+  outcome?: 'completed' | 'abandoned';
+  backupId?: string;
+  members: Record<string, SpaceActSetMember>;
+  /** A restore: the served spaces the backup does not hold, emptied by their acts. */
+  emptied?: string[];
+  /** A restore: the spaces the backup holds that this instance does not serve, left out at the operator's word (`leaveOut`). */
+  leftOut?: string[];
 }

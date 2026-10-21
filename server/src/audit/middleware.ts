@@ -278,7 +278,11 @@ export const ROUTE_RULES: RouteRule[] = [
 
   // ── Data management ──────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/admin\/data\/backup$/,                     operation: 'data.backup' },
-  { method: 'POST',   pattern: /^\/api\/admin\/data\/restore$/,                    operation: 'data.restore' },
+  // The REQUEST of a restore: its acts run after the 202, and what they came to is one more row when the set ends
+  // (`data.restore.completed` / `data.restore.abandoned`, `audit/restore-operations.ts`).
+  { method: 'POST',   pattern: /^\/api\/admin\/data\/restore$/,                    operation: 'data.restore.requested' },
+  { method: 'GET',    pattern: /^\/api\/admin\/data\/restore$/,                    operation: 'data.restore.report', read: true },
+  { method: 'POST',   pattern: /^\/api\/admin\/data\/restore\/abandon$/,           operation: 'data.restore.abandon' },
   { method: 'POST',   pattern: /^\/api\/admin\/data\/migrate$/,                    operation: 'data.migrate' },
   { method: 'POST',   pattern: /^\/api\/admin\/data\/maintenance$/,                operation: 'data.maintenance.toggle' },
   { method: 'PUT',    pattern: /^\/api\/admin\/data\/backup-config$/,              operation: 'data.backup_config.update' },
@@ -527,6 +531,9 @@ export const SPACE_ALIAS_HEAL_OPERATION = 'network.space_alias.heal';
 export {
   ROUND_ADDITION_RETIRED_OPERATION, ROUND_SPACE_ACT_OPERATION, ROUND_MEMBER_ADMITTED_OPERATION, ROUND_EXPIRED_OPERATION, SPACE_ACT_COMPLETED_OPERATION,
 } from '../networks/round-audit.js';
+
+/** What a restore came to when its act set ended (bundle-157, R4.3): declared beside nothing that imports the restore, re-exported here. */
+export { RESTORE_COMPLETED_OPERATION, RESTORE_ABANDONED_OPERATION } from './restore-operations.js';
 
 /**
  * A token given admin of the space it just created (`Q-134`, `auth/creator-grant.ts`). It widens a token's rights with

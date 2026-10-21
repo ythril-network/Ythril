@@ -7,8 +7,9 @@
  * The repair scans a space's derived rows by `_id` and wraps no sooner than a day; where it has got to, and when it last finished, is
  * kept in the space's config entry (local: not replicated, not exported, not restored). A restore DROPS every collection and loads
  * the backup's, and an import writes records the export carried, so a scan that had finished before either would sit out its day over
- * rows it never read — the backup's, which can hold exactly the leaks the repair exists for. So each resets the space's cursor BEFORE
- * it answers, and does not run the scan inline (the next sweep does, at the ordinary pace).
+ * rows it never read — the backup's, which can hold exactly the leaks the repair exists for. So each resets the space's cursor before it
+ * is done - the import before it answers, the restore (a set of space acts since bundle-157, answered 202) when its last act ends - and
+ * neither runs the scan inline (the next sweep does, at the ordinary pace).
  *
  * ## The rule, held for both doors by one table
  *
@@ -18,7 +19,7 @@
  *     removed nothing (no inline run: the row is still there when it answers).
  *
  * The restore is driven through the data router's own `POST /restore` handler on a dump of the harness database made by the server's
- * own `dumpDatabase`; the import through `importDocuments`, the function behind the admin import route.
+ * own `dumpDatabase`, and its acts are run to their end; the import through `importDocuments`, the function behind the admin import route.
  *
  * Run: node --test testing/standalone/a-restore-and-an-import-restart-the-leaked-row-scan-db.test.js
  * (requires a prior `npm run build:server`, and the test MongoDB)
@@ -31,6 +32,7 @@ import { mongoSkipReason, testMongoUri } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { runPass, hoursAfter, derivedRow, spaceEntry, addedKeys } from './_leaked-rows-repair.mjs';
+import { restoreModules, restoreAsActs, settleRestoreActs } from './_restore-act.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -44,16 +46,12 @@ const cursorOf = async () => {
   return JSON.stringify(Object.fromEntries(addedKeys(entry, knownKeys).map(k => [k, entry[k]])));
 };
 
-/** `POST /api/admin/data/restore` through the router's own handler, as an admin past the middleware. */
+/** `POST /api/admin/data/restore` through the router's own handler, as an admin past the middleware, and its acts run to their end. */
 async function restore(backupId) {
-  const layer = dataRouter.stack.find(l => l.route?.path === '/restore' && l.route.methods['post']);
-  assert.ok(layer, 'no POST /restore on the data router — re-anchor this test');
-  const req = { method: 'POST', params: {}, query: {}, body: { backupId }, headers: {}, ip: '127.0.0.1', authToken: { name: 'test' }, get: () => undefined };
-  const res = { code: 200, body: undefined, headers: {}, headersSent: false,
-    status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
-    json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };
-  await layer.route.stack.at(-1).handle(req, res);
-  assert.equal(res.code, 200, `the restore was refused or failed: ${JSON.stringify(res.body)}`);
+  const answer = await restoreAsActs(await restoreModules(), { backupId });
+  assert.equal(answer.status, 202, `the restore was refused or failed: ${JSON.stringify(answer.body)}`);
+  const { runner, loader } = await restoreModules();
+  for (const r of await settleRestoreActs(runner, loader)) assert.equal(r.ok, true, `a restore act did not complete: ${JSON.stringify(r)}`);
 }
 
 /** Every door that replaces a space's records: how it is driven, after the leaked row it will find is already stored. */

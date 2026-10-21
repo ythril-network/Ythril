@@ -170,9 +170,6 @@ const EXEMPT = {
     'space creation reached from membership gossip repairs a stale `spaceId` on records already stored: one field, no property',
   'server/src/sync/delivered-by-backfill.ts:stampCollection':
     'the one-time stamp of who delivered rows stored before `deliveredBy` existed: a local-only field on rows already held',
-  'server/src/db/restore.ts:restoreDatabase':
-    'a restore of a backup replaces the database with what the backup holds; it is not a write of a caller\'s record and the '
-    + 'operator who restores it chose the whole of it (a restore, like an import, keeps what it was given)',
   'server/src/brain/chrono-redaction.ts:redactLapsedChronoContent':
     'the retention sweep REMOVES the content of a chrono entry whose window passed and stamps the redaction marks: no caller-chosen '
     + 'property is written (it is reached from the boot walk, which a setup route starts)',
