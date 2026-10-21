@@ -24,6 +24,8 @@ import { renameSpaceInViews } from '../config/views.js';
 import { builtInRefusal } from './built-in-space.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 import { refusalText } from '../brain/store-failure.js';
+import { SPACE_ACT_KINDS, isInstanceWide } from '../config/types-space-acts.js';
+import { SpaceNotWritableError, spaceWriteClosedAnswer, type SpaceWriteClosedCode } from './space-write-gate.js';
 import { isMissingPath } from '../files/stored-bytes.js';
 
 /**
@@ -346,9 +348,10 @@ export async function renameSpace(oldId: string, newId: string): Promise<SpaceCo
  * A rename meets a deletion or wipe of its space that is owed or running. Refused, never queued behind it: the act would delete what
  * the rename moved, or the rename would move what the act half-deleted.
  *
- * Only those two kinds refuse it. A restore or a migrate standing on every space (`SPACE_ACT_KINDS`, `instanceWide`) does not: the
- * rename registers behind it, runs after the act on its space completes (one space's acts keep their registration order), and its
- * request waits that long. The sentence below names the two kinds it is said for.
+ * This class is for those two kinds. A restore or a migrate standing on every space (`SPACE_ACT_KINDS`, `instanceWide`) refuses the rename
+ * as well, but with the write gate's own `SpaceNotWritableError` and the kind's code (`409 space_being_restored` / `space_being_migrated`):
+ * the rename is a write to the space, and a request held for the length of a restore is the answer no caller can act on (Q-559). The
+ * sentence below names the two kinds it is said for.
  */
 export class RenameBlockedError extends Error {
   override readonly name = 'RenameBlockedError';
@@ -372,6 +375,12 @@ function renameRefusal(cfg: Config, oldId: string, newId: string, except?: strin
   if (inUse) return new SpaceNameInUseError(inUse);
   const stands = spaceActStands(cfg, oldId, { except });
   if (stands && (stands.kind === 'delete' || stands.kind === 'wipe')) return new RenameBlockedError(oldId);
+  // A restore or a migration standing on every space closes this space's identity as it closes its writes: the write gate's own error
+  // and code (`SPACE_ACT_KINDS`), refused before anything registers, never a rename queued behind the act with its request held open (Q-559).
+  if (stands && isInstanceWide(stands.kind)) {
+    const spec = SPACE_ACT_KINDS[stands.kind];
+    return new SpaceNotWritableError(oldId, spec.writeRefusalWhy(stands), spec.writeRefusalCode);
+  }
   return null;
 }
 
@@ -405,7 +414,7 @@ defineSpaceActBody('rename', renameSpaceUnqueued);
 /** A rename's answer as both doors give it: the renamed space, or the status and sentence of the refusal. */
 export type RenameSpaceResult =
   | { status: 200; space: SpaceConfig }
-  | { status: 400 | 404 | 409 | 500; error: string; code?: NetworkRefusalCode };
+  | { status: 400 | 404 | 409 | 500; error: string; code?: NetworkRefusalCode | SpaceWriteClosedCode };
 
 /**
  * Rename a space from a request body — the ONE mapping from what `renameSpace` throws to what a caller is told
@@ -421,6 +430,9 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
     // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
     if (err instanceof SpaceNameInUseError) return { status: 409, error: err.message, code: err.code };
     if (err instanceof RenameBlockedError) return { status: 409, error: err.message };
+    // A restore or migration standing: the write gate's answer, the same function REST and MCP writes use (Q-559).
+    const closed = spaceWriteClosedAnswer(err);
+    if (closed) return { status: closed.status, error: closed.body.error, code: closed.body.code };
     if (err instanceof ReservedSpaceIdError) return { status: 409, error: err.message };
     if (err instanceof RenameIncompleteError) return { status: 500, error: err.message };
     // The store's failure is not a refusal: `refusalText` rethrows it, so each door answers it as every door does

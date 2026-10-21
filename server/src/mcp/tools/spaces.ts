@@ -234,7 +234,8 @@ export const space_renameTool: ToolHandler = {
     + 'the space move with it, and each network that carries it keeps syncing it under the name the network knows. '
     + 'Needs instance-admin rights OR administering the space named in `space`. Same answer and refusals as '
     + '`PATCH /api/spaces/:id/rename`: 409 when `newId` exists, or (with `code: space_name_in_use`) when another space '
-    + 'already syncs under that name in one of this instance\'s networks; 400 for a built-in space or an invalid id; '
+    + 'already syncs under that name in one of this instance\'s networks, or (with `code: space_being_restored` or '
+    + '`space_being_migrated`, at once, nothing registered) while a restore or migration of the instance stands; 400 for a built-in space or an invalid id; '
     + '404 for an unknown space. A connection opened before the rename still lists the old id until it reconnects.',
   mutating: true,
   spaceAdmin: true,

@@ -177,6 +177,7 @@ the space takes no writes (`409` with the kind's own code: `space_being_deleted`
 **A client treats a kind, or a `space_being_*` code, it does not know as "this space is busy"**: a newer server adds kinds,
 and an older client must still show the space as closed rather than fail on the word.
 
-**A rename during a restore or migrate is not refused:** it is registered behind the standing act (acts on one space run in
-the order they were registered) and runs once the act on that space has completed; the rename request answers when it has run.
-A rename meeting a deletion or wipe of its space is refused (`409`).
+**A rename during a restore or migrate is refused at once**, on `PATCH /api/spaces/:id/rename` and on MCP `space_rename` alike: `409`
+with the standing act's own write-refusal code (`space_being_restored` or `space_being_migrated`), the sentence the space's writes are
+refused with, and nothing registered. It is never queued behind the act with its request held open for the act's length; send it again
+once the act has completed. A rename meeting a deletion or wipe of its space is refused too (`409`, no code).
