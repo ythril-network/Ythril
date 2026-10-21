@@ -59,7 +59,6 @@ the same idea is now a **personal view**, a named list of spaces that one token 
 5.x left it. Views live in `config.json`, not in the database, so a Mongo backup does not carry them: back up the config
 with the data. A config reload that finds a file without the views the process holds keeps them and logs a line.
 
-
 **Upgrading past 5.6.x changes what `MONGO_URI` does and the answers an integrator can branch on.**
 
 - **Options in `MONGO_URI` win, and three defaults now apply.** `connectTimeoutMS`, `heartbeatFrequencyMS` and `serverSelectionTimeoutMS` default to figures that notice a database that stopped answering (see the `MONGO_URI` row in [Hosting](02-hosting.md)); a string that names one keeps its own. A `serverSelectionTimeoutMS` your string already carried was silently overridden before and is **honoured now**, so a very long one makes an outage last that long. A changed string takes a restart. The boot retry also covers more "not up yet" failures (a node that is not yet primary, a pool with no free connection) and still fails at once on bad credentials or a malformed string.

@@ -48,8 +48,16 @@ const note = m => problems.push(m);
 
 // ── 1 · what the STATIC extractor sees (the matrix's own method) ─────────────
 const APP = strip(read('server/src/app.ts'));
+/**
+ * Every name one import brings in. Both import scans read ONE name per statement until `app.ts` imported two routers from one
+ * module (`import { viewsRouter, adminViewsRouter } from './api/views.js'`, Q-531): the runtime half then saw neither router and
+ * reported their ten routes as "claimed by the matrix and served by nothing". A router is a router however its import is written.
+ */
+const importedNames = list => list.split(',').map(s => s.trim()).filter(s => /^\w+$/.test(s));
 const routerFile = new Map();
-for (const m of APP.matchAll(/import \{ (\w+) \} from '\.\/(api\/[^']+)\.js'/g)) routerFile.set(m[1], `server/src/${m[2]}.ts`);
+for (const m of APP.matchAll(/import \{ ([\w\s,]+) \} from '\.\/(api\/[^']+)\.js'/g)) {
+  for (const name of importedNames(m[1])) routerFile.set(name, `server/src/${m[2]}.ts`);
+}
 const mounts = [];
 for (const m of APP.matchAll(/app\.use\('(\/[^']*)',\s*(\w+)\)/g)) {
   const file = routerFile.get(m[2]);
@@ -154,8 +162,8 @@ const unattributed = [];
  * The directory was never the question. Whether `app.use()` mounts it is, and the loop below asks that.
  */
 const routerExport = new Map();
-for (const m of APP.matchAll(/import \{ (\w+) \} from '\.\/([^']+)\.js'/g)) {
-  routerExport.set(m[1], `server/dist/${m[2]}.js`);
+for (const m of APP.matchAll(/import \{ ([\w\s,]+) \} from '\.\/([^']+)\.js'/g)) {
+  for (const name of importedNames(m[1])) routerExport.set(name, `server/dist/${m[2]}.js`);
 }
 
 /**

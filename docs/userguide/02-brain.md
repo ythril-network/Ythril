@@ -33,7 +33,7 @@ If the stored embeddings were made by a different model than the one configured 
 
 A **personal view** reads several spaces together, as you. It is how you ask one question of many spaces — a recall, a filter, a graph, a file list — without merging any data and without asking each space in turn. In the web app it is a *personal view*; in German a *persönliche Sicht*, in Polish a *widok osobisty*.
 
-**What you can rely on**
+#### What you can rely on
 
 - **It is yours alone.** Only the token that made it sees it. Another token that asks for your view's id is told there is no such space, exactly as for an id that never existed.
 - **It reads what you can read, at the moment you ask.** Each time you use it, every space it lists is read with your own rights. A space you can no longer read is left out of the answer, and the answer says so. Nothing is copied into the view and nothing is stored in it.

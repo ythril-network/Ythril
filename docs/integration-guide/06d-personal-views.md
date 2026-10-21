@@ -8,7 +8,7 @@ A **personal view** is a named list of spaces that one token reads through as a 
 name (`@team`); you pass it where a read door takes a `space`, and the door reads each of the view's members the
 caller can read at that moment and merges the answer.
 
-**What you can rely on**
+### What you can rely on
 
 - **A view is never a space.** It has no records, no files, no index and no network. No network, sync, export or
   token-rights row can name it, and a space id is still `^[a-z0-9-]+$`.
