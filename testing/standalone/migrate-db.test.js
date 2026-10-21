@@ -41,6 +41,7 @@ import assert from 'node:assert/strict';
 import dns from 'node:dns';
 import fs from 'node:fs';
 import path from 'node:path';
+import { emptyTarget } from './_migrate-target.mjs';
 import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest, netFixture, untilRunnerIdle } from './_space-act-harness.mjs';
@@ -118,7 +119,7 @@ describe('migrate copies before it saves the URI, refuses what would lose data a
       await door.coll(s, 'facts').deleteMany({});
       await door.coll(s, 'facts').insertMany([1, 2, 3].map(i => ({ _id: `${s}-f${i}`, spaceId: s, fact: `fact ${i}`, tags: [], seq: i })));
     }
-    await target.db(TARGET_DB).dropDatabase();
+    await emptyTarget(target, TARGET_DB);
   });
   afterEach(() => { try { clearActEntries(loader); maintenance.setMaintenanceActive(false); resetRunnerForTest(runner); } catch { /* best effort */ } });
 

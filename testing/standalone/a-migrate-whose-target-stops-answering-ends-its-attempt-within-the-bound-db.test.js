@@ -44,6 +44,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import dns from 'node:dns';
+import { emptyTarget } from './_migrate-target.mjs';
 import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST, TEST_MONGO_PORT } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { startTcpRelay } from './_tcp-relay.mjs';
@@ -119,7 +120,7 @@ describe('a migrate whose target stops answering mid-copy ends its attempt withi
     targetUri = viaRelay.replace(`@${TEST_MONGO_HOST}:`, `@${TARGET_HOST}:`).replace(`//${TEST_MONGO_HOST}:`, `//${TARGET_HOST}:`);
     const { MongoClient } = await import('mongodb');
     const direct = new MongoClient(testMongoUri(TARGET_DB));
-    await direct.connect(); await direct.db(TARGET_DB).dropDatabase(); await direct.close();
+    await direct.connect(); await emptyTarget(direct, TARGET_DB); await direct.close();
   });
   after(async () => {
     dns.lookup = realLookup;
