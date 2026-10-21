@@ -40,6 +40,7 @@ import { ruleEngineStats, onRuleEvaluated } from '../spaces/schema-rules.js';
 import { spaceActsRunning, waitingSpaceActs, owedSpaceActCount, oldestOwedSpaceActSeconds } from '../spaces/space-act-runner.js';
 import { allSpaceTransfersRunning } from '../sync/space-transfer-fence.js';
 import { heldExchangePairs } from '../sync/space-exchange-set.js';
+import { tokenIsLive } from '../auth/token-liveness.js';
 
 export const register = new Registry();
 
@@ -1267,12 +1268,9 @@ export const tokensActive = new Gauge({
   registers: [register],
   collect() {
     try {
-      const cfg = getConfig();
-      const now = new Date();
-      const active = cfg.tokens.filter(
-        t => !t.expiresAt || new Date(t.expiresAt) > now,
-      ).length;
-      this.set(active);
+      // The one liveness predicate (live AT the expiry instant), as authentication and the view sweep read it.
+      const now = Date.now();
+      this.set(getConfig().tokens.filter(t => tokenIsLive(t, now)).length);
     } catch { /* ignore */ }
   },
 });
