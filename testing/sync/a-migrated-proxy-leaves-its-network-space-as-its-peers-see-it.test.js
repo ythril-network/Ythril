@@ -89,9 +89,10 @@ describe('a migrated proxy leaves its network space, and its peer sees it as lef
     const onA = await networkOn(INSTANCES.a, tokenA);
     assert.ok(!onA.spaces.includes(PX), `A's network still carries the migrated proxy: ${JSON.stringify(onA.spaces)}`);
     assert.ok(onA.spaces.includes(SPACE), 'the migration took the other space out of the network too');
-    const cfgA = readContainerConfig('ythril-a');
-    assert.ok(!cfgA.spaces.some(s => s.id === PX), 'PX is still a space on A');
-    assert.ok((cfgA.retiredSpaceIds ?? []).includes(PX), 'PX is not reserved on A');
+    // A reload converts in memory and saves nothing (its contract), so A is asked, not its config.json.
+    const listed = await get(INSTANCES.a, tokenA, '/api/spaces');
+    assert.ok(!listed.body.spaces.some(s => s.id === PX), 'PX is still a space on A');
+    assert.ok((listed.body.retiredSpaceIds ?? []).includes(PX), 'PX is not reserved on A');
   });
 
   it('B, syncing with A, records that A left PX, and stops treating it as a failure', async () => {

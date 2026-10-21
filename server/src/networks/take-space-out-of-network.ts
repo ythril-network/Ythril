@@ -39,10 +39,13 @@ export function forgetPendingOffer(net: NetworkConfig, networkSpaceId: string): 
 
 /**
  * Take `localId` out of `net`, in place.
- * @returns whether the network carried the space, and whether it held a schema layer for it (the effective schema is rebuilt then).
+ * @returns whether the network carried the space, whether it held a schema layer for it (the effective schema is rebuilt then), and the
+ * network's id for it (`null` when it was not carried).
  */
-export function takeSpaceOutOfNetwork(net: NetworkConfig, localId: string): { carried: boolean; hadLayer: boolean } {
-  if (!net.spaces.includes(localId)) return { carried: false, hadLayer: false };
+export function takeSpaceOutOfNetwork(
+  net: NetworkConfig, localId: string,
+): { carried: boolean; hadLayer: boolean; networkSpaceId: string | null } {
+  if (!net.spaces.includes(localId)) return { carried: false, hadLayer: false, networkSpaceId: null };
   net.spaces = net.spaces.filter(s => s !== localId);
   // The network's id for it, read before its alias is forgotten: the offer of it is forgotten by that id.
   const networkSpaceId = localToRemote(net, localId);
@@ -53,5 +56,5 @@ export function takeSpaceOutOfNetwork(net: NetworkConfig, localId: string): { ca
   if (net.spaceOrigins) delete net.spaceOrigins[localId];
   forgetReceiveMarks(net, localId);
   forgetPendingOffer(net, networkSpaceId);
-  return { carried: true, hadLayer };
+  return { carried: true, hadLayer, networkSpaceId };
 }

@@ -88,7 +88,13 @@ function convertProxies(cfg: Config, now: number): ProxyMigrationResult {
       }
       cfg.spaces = cfg.spaces.filter(s => s !== proxy);
       for (const net of cfg.networks) {
-        if (takeSpaceOutOfNetwork(net, proxy.id).carried) {
+        const left = takeSpaceOutOfNetwork(net, proxy.id);
+        if (left.carried) {
+          // Left, not lost: a peer asking for it is answered `423 space_declined` (`refusePeerSpace`), which it records and stops
+          // asking for, rather than a 403 it counts as a failed member every cycle.
+          if (left.networkSpaceId && !(net.dismissedSpaces ?? []).includes(left.networkSpaceId)) {
+            net.dismissedSpaces = [...(net.dismissedSpaces ?? []), left.networkSpaceId];
+          }
           const row = result.networksLeft.find(r => r.networkId === net.id);
           if (row) row.spaceIds.push(proxy.id); else result.networksLeft.push({ networkId: net.id, spaceIds: [proxy.id] });
         }
