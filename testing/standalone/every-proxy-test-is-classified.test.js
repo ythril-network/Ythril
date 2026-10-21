@@ -4,8 +4,11 @@
  * ## The rule
  *
  * Q-531 makes a proxy a personal view, outside `config.spaces`; the symbols that encoded the old rule (`proxyFor`, `isProxy`,
- * `concreteSpaces`, `memberSpaces*`, `targetSpace`, `resolveWriteTarget`) are retired or deleted. The tests that name them are
- * DERIVED here, never listed, and each must carry a row in `testing/_shared/proxy-test-classification.mjs`:
+ * `concreteSpaces`, `memberSpaces*`, `targetSpace`, `resolveWriteTarget`) are retired or deleted. The symbols are the plan's stems AND
+ * every name a proxy module exported at `CLASSIFIED_AT` that no server source exports today (`retiredProxyExports`, b100 row G: the
+ * stems alone missed `resolveMemberSpaces`, so `space-guard-reads-rights` and `area-rung-is-staged` escaped; seen red as `unclassified`
+ * and `row dropped` for them and `column-filters`). The tests that name them are DERIVED here, never listed, and each must carry a row
+ * in `testing/_shared/proxy-test-classification.mjs`:
  *
  * 1. every tracked file under `testing/` and every client spec that names a proxy symbol has a row (a new one is classified before it lands);
  * 2. a `delete` row's file no longer exists;
@@ -41,7 +44,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { trackedSources, REPO_ROOT, isTestFile } from './_sources.mjs';
 import { requireInput } from '../_shared/absent-input.mjs';
-import { PROXY_TEST_CLASSIFICATION, proxySymbolPattern, FLIP_SET_ROOTS, CLASSIFIED_AT } from '../_shared/proxy-test-classification.mjs';
+import { PROXY_TEST_CLASSIFICATION, proxySymbolPattern, proxySymbolStems, FLIP_SET_ROOTS, CLASSIFIED_AT } from '../_shared/proxy-test-classification.mjs';
 
 /** The list and this gate define the symbols; they are not subjects of it. */
 const DEFINERS = new Set(['testing/_shared/proxy-test-classification.mjs', 'testing/standalone/every-proxy-test-is-classified.test.js']);
@@ -74,7 +77,7 @@ const refPresent = (ref) => { try { git('cat-file', '-e', `${ref}^{commit}`); re
 export function flipSetAt(ref) {
   const listed = git('ls-tree', '-r', '--name-only', ref, '--', ...FLIP_SET_ROOTS).split('\n').filter(Boolean).filter(isScanned);
   if (listed.length < SCAN_FLOOR) throw new Error(`only ${listed.length} subject(s) listed at ${ref}; the historical scan is broken`);
-  const stems = ['proxyFor', 'isProxy', 'concreteSpace', 'memberSpaces', 'targetSpace', 'resolveWriteTarget'];
+  const stems = proxySymbolStems();
   let hits = '';
   try { hits = git('grep', '-l', '-F', ...stems.flatMap(s => ['-e', s]), ref, '--', ...FLIP_SET_ROOTS); } catch (e) { if (e.status !== 1) throw e; }
   const candidates = new Set(hits.split('\n').filter(Boolean).map(l => l.slice(ref.length + 1)));
@@ -126,7 +129,10 @@ describe('every proxy test is classified, and each classification has happened (
     assert.deepEqual(findings, [], `the floor does not hold:\n  ${findings.join('\n  ')}`);
   });
 
-  it('every file naming a proxy symbol has a row, every delete is done and every rewrite has changed its file', () => {
+  it('every file naming a proxy symbol has a row, every delete is done and every rewrite has changed its file', (t) => {
+    // The proxy-era symbols are derived from the proxy modules as they were at the classification commit (b100 row G), so this needs it too.
+    if (!requireInput(t, refPresent(CLASSIFIED_AT), `the classification commit ${CLASSIFIED_AT} is not in this checkout`,
+      'Check out with full history (fetch-depth: 0): the proxy-era symbols are read from it.')) return;
     const findings = classificationFindings(PROXY_TEST_CLASSIFICATION, flipSet());
     assert.deepEqual(findings, [], `the flip set owes ${findings.length} hand edit(s):\n  ${findings.join('\n  ')}`);
   });
