@@ -118,17 +118,16 @@ describe('every pluralText base has its forms in every locale (Q-549, Q-472)', (
     expect(open, 'pluralText bases that cannot be checked:\n  ' + open.join('\n  ')).toEqual([]);
   });
 
-  it('en has <base>.one and <base>.other, and de and pl carry every form en has', () => {
-    const en = load('en');
+  // The forms a language needs are the categories its own plural rules use (Polish: one, few, many, other), not the ones English
+  // happens to carry: a Polish base with only one/other falls back to `other` for 2-4 and renders the wrong case, and nothing fails.
+  it('every language carries a form for every plural category its own rules use', () => {
     const wrong: string[] = [];
-    for (const [base, sites] of bases) {
-      const enForms = formsOf(en, base);
-      for (const need of ['one', 'other']) {
-        if (!enForms.includes(need)) wrong.push(`en: ${base}.${need} is missing (called at ${sites.join(', ')})`);
-      }
-      for (const loc of ['de', 'pl']) {
-        const have = formsOf(load(loc), base);
-        for (const form of enForms) if (!have.includes(form)) wrong.push(`${loc}: ${base}.${form} is missing (en has it)`);
+    for (const loc of ['en', 'de', 'pl']) {
+      const needed = new Intl.PluralRules(loc).resolvedOptions().pluralCategories;
+      const dict = load(loc);
+      for (const [base, sites] of bases) {
+        const have = formsOf(dict, base);
+        for (const need of needed) if (!have.includes(need)) wrong.push(`${loc}: ${base}.${need} is missing (called at ${sites.join(', ')})`);
       }
     }
     expect(wrong, `plural bases whose forms are missing - the sentence renders empty:\n  ${wrong.join('\n  ')}`).toEqual([]);
