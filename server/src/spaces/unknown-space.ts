@@ -73,6 +73,24 @@ export function retiredIdNamedIn(space: unknown, config: Config = getConfig()): 
 }
 
 
+/**
+ * The answer for the caller's OWN view named in a call's `space` (one name or a list) on a door that takes no view, or `null`: the existence rule,
+ * asked BEFORE the door's rights. A token with no write rung anywhere writing to its own view was told "holds no write rung" by the tool door and
+ * "'@x' is a view; write to one of its member spaces" by the REST path routes, which ask existence first; a rights verdict on an id that is not a
+ * space tells the owner nothing it can act on. Only the caller's own view is asked here - another token's view and an id that never existed fall
+ * through to the door's ordinary answers, which are the same words for both.
+ */
+export function ownViewNamedIn(ownerKey: string | null, space: unknown, config: Config = getConfig()): SpaceAnswer | null {
+  const names = typeof space === 'string' ? [space] : Array.isArray(space) ? space : [];
+  for (const raw of names) {
+    const id = typeof raw === 'string' ? raw.trim() : '';
+    if (!id || !isViewId(id) || !resolveOwnView(ownerKey, id, config)) continue;
+    const answer = unknownSpaceAnswer(ownerKey, id, false, config);
+    if (answer) return answer;
+  }
+  return null;
+}
+
 /** `Space '<id>' not found`, the words every door uses, the id rendered as caller text. */
 export const unknownSpaceSentence = (id: string): string => `Space '${peerText(id, { max: NAME_QUOTED })}' not found`;
 
