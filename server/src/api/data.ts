@@ -9,8 +9,10 @@
  *   POST   /api/admin/data/maintenance      — toggle maintenance mode
  *   POST   /api/admin/data/backup           — trigger a manual backup (dump + optional offsite copy)
  *   GET    /api/admin/data/backups          — list existing backups
- *   POST   /api/admin/data/restore          — restore from a named backup
- *   POST   /api/admin/data/migrate          — full DB migration (dump → marker → exit)
+ *   POST   /api/admin/data/restore          — restore from a named backup: one restore act per space, answered 202
+ *   GET    /api/admin/data/restore          — the restore standing or the last one, per space
+ *   POST   /api/admin/data/restore/abandon  — lift the holds of a standing restore's acts that have not completed
+ *   POST   /api/admin/data/migrate         — full DB migration (dump → marker → exit)
  *   GET    /api/admin/data/backup-config    — read backup.json (scheduled/offsite config)
  *                                             requires YTHRIL_DB_MIGRATION_ENABLED=true
  *   GET    /api/admin/data/browse-dirs      — list child directories at a given path (UI file picker)
@@ -22,39 +24,28 @@ import { z } from 'zod';
 import { getConfig, getMongoUri, saveConfig, getDataRoot } from '../config/loader.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { isMaintenanceActive, setMaintenanceActive } from '../maintenance.js';
-import { runBackupNow } from '../db/backup-scheduler.js';
+import { isMaintenanceActive, maintenanceState, setMaintenanceActive } from '../maintenance.js';
+import { runBackupNow, BackupRefusedDuringRestore } from '../db/backup-scheduler.js';
 import { loadBackupConfig, BACKUP_CONFIG_PATH, BackupConfigSchema } from '../db/backup-config.js';
 import { startBackupScheduler } from '../db/backup-scheduler.js';
 import { dumpDatabase } from '../db/dump.js';
-import { restoreDatabase } from '../db/restore.js';
-import { reportDatabaseReplaced } from '../db/mongo.js';
-import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
-import { configuredSpaces } from '../spaces/space-lookup.js';
-import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
-import { ensureEdgeIdentityIndex } from '../spaces/lifecycle.js';
-import { ensureEdgeGuardIndex, edgeIndexFailure } from '../spaces/edge-guard-index.js';
+import { BackupNotWhole } from '../db/restore.js';
+import { backupsRoot, backupDirOf, isBackupId } from '../db/backup-location.js';
+import { planRestore, startRestore, restoreReport, abandonRestore, restoreStandingRefusal } from '../db/restore-act.js';
+import { instanceWideActStanding, spaceActClosedAnswer } from '../spaces/space-act-runner.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { log, refusalOfParse } from '../util/log.js';
-import { mapLimit } from '../util/map-limit.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { isMissingPath } from '../files/stored-bytes.js';
 
 export const dataRouter = Router();
-
-/** How many spaces a restore rebuilds vector indexes for at once; see the restore route. */
-const RESTORE_INDEX_CONCURRENCY = 6;
 
 // ── Shared middleware ─────────────────────────────────────────────────────────
 
 dataRouter.use(globalRateLimit, requireAdmin);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function backupsRoot(): string {
-  return path.join(getDataRoot(), 'backups');
-}
 
 function migrationBackupRoot(): string {
   return path.join(getDataRoot(), 'migration-backup');
@@ -179,7 +170,7 @@ dataRouter.post('/config/test', requireAdminMfa, async (req, res) => {
 // ── GET /maintenance ──────────────────────────────────────────────────────────
 
 dataRouter.get('/maintenance', (_req, res) => {
-  res.json({ active: isMaintenanceActive() });
+  res.json(maintenanceState());
 });
 
 // ── POST /maintenance ─────────────────────────────────────────────────────────
@@ -194,8 +185,9 @@ dataRouter.post('/maintenance', requireAdminMfa, (req, res) => {
   // should record nothing rather than look like a state change.
   req.auditSnapshots = { before: { active: isMaintenanceActive() }, after: { active: parsed.data.active } };
 
+  // The toggle moves the MANUAL half only: a standing restore holds maintenance until its last act ends, and the answer says so.
   setMaintenanceActive(parsed.data.active);
-  res.json({ active: parsed.data.active });
+  res.json(maintenanceState());
 });
 
 // ── POST /backup ──────────────────────────────────────────────────────────────
@@ -216,6 +208,7 @@ dataRouter.post('/backup', requireAdminMfa, async (_req, res) => {
       ...(result.offsite ? { offsite: result.offsite } : {}),
     });
   } catch (err) {
+    if (err instanceof BackupRefusedDuringRestore) { res.status(409).json({ error: err.message, code: err.code }); return; }
     sendCaughtFailure(res, `POST /api/admin/data/backup`, err, { error: err instanceof Error ? err.message : String(err) });
   }
 });
@@ -366,89 +359,89 @@ dataRouter.put('/backup-config', requireAdminMfa, (req, res) => {
 });
 
 // ── POST /restore ─────────────────────────────────────────────────────────────
+//
+// A restore is a set of space acts (bundle-157, `db/restore-act.ts`): the backup is checked whole and the space set decided before
+// anything is registered, then one `restore` act per served space is registered in one config write and the answer is 202. Every space
+// is held and the instance is in maintenance from that write until the last act ends; GET /restore reports the progress and the outcome.
 
 dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
-  const parsed = z.object({ backupId: z.string().min(1) }).safeParse(req.body);
+  const parsed = z.object({ backupId: z.string().min(1), leaveOut: z.array(z.string().min(1)).max(1000).optional() }).safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Body must be { backupId: string }' });
+    res.status(400).json({ error: 'Body must be { backupId: string, leaveOut?: string[] }' });
     return;
   }
 
   // Prevent path traversal: backupId must be a bare directory name, no slashes
-  const { backupId } = parsed.data;
-  if (backupId.includes('/') || backupId.includes('\\') || backupId.includes('..')) {
+  const { backupId, leaveOut = [] } = parsed.data;
+  if (!isBackupId(backupId)) {
     res.status(400).json({ error: 'Invalid backupId' });
     return;
   }
 
-  const backupDir = path.join(backupsRoot(), backupId);
-  if (!fs.existsSync(backupDir) || !fs.existsSync(path.join(backupDir, 'manifest.json'))) {
+  const backupDir = backupDirOf(backupId);
+  if (!backupDir) {
     res.status(404).json({ error: `Backup '${backupId}' not found` });
     return;
   }
 
-  // Auto-manage maintenance: activate → restore → deactivate
-  const wasMaintenance = isMaintenanceActive();
-  setMaintenanceActive(true);
-  try {
-    // The leaked-rows scan of every space starts again once the rows are in, and also when the restore stopped part-way: either way the
-    // rows now there were never read, and a scan that had completed would sit out its day over them. Nothing is scanned here.
-    try { await restoreDatabase(getMongoUri(), backupDir); }
-    finally { restartLeakedRowScans(configuredSpaces().map(s => s.id)); }
-    // The restore wrote through its own client, which the record-write observer never sees: tell every listener
-    // the database was replaced, so nothing keeps answering from the data as it was before (`Q-95`).
-    reportDatabaseReplaced();
+  const standing = instanceWideActStanding();
+  if (standing) {
+    res.status(409).json(restoreStandingRefusal(standing));
+    return;
+  }
 
-    // Restoring DROPS every collection before reloading it, and dropping a collection destroys its
-    // vector search index along with it. Without rebuilding here, semantic recall returns empty
-    // FOREVER after a restore — silently: an empty result set is indistinguishable from "no matches",
-    // and `/ready` still reports `vectorSearch: ok` because that probes the capability, not whether a
-    // space's index exists. Disaster recovery would appear to succeed and quietly leave the instance
-    // without its core feature.
-    //
-    // Not awaiting READY (`waitForReady: false`): index builds take minutes on a large restore, and
-    // holding the HTTP response open that long would time out. The build is reported so the operator
-    // knows recall is still warming up rather than broken.
-    //
-    // Several spaces at a time, never one after another. Each space's rebuild drops and recreates its
-    // indexes, seconds apiece, so a sequential loop grew this request by several seconds per space and
-    // timed out on an instance with a few dozen of them — reporting a failed restore that had succeeded.
-    // Bounded rather than all at once, so a large instance does not hand mongod every index build together.
-    const spaces = configuredSpaces();   // a proxy owns no collections, so it has no indexes to rebuild
-    const outcomes = await mapLimit(spaces, RESTORE_INDEX_CONCURRENCY, async (space) => {
-      /*
-       * The edges' unique indexes (`Q-439`, `Q-445`): the identity index and the write guard's. The restore dropped every
-       * collection, and a collection reloaded by `insertMany` has no index but `_id`, so until the next boot two edges of one
-       * identity could be stored and a functional label raced. Rebuilt here, inside the maintenance window, and every failure
-       * is NAMED in the answer: a restore that reports `ok` over an unguarded edges collection is the failure this prevents.
-       * A failure to build one never stops the other, nor the vector rebuild below.
-       */
-      const edgeIndexFailures: string[] = [];
-      try { await ensureEdgeIdentityIndex(space.id); }
-      catch (err) { edgeIndexFailures.push(edgeIndexFailure(space.id, 'identity index', err, 'next boot')); }
-      try { await ensureEdgeGuardIndex(space.id); }
-      catch (err) { edgeIndexFailures.push(edgeIndexFailure(space.id, 'guard index', err, 'next index pass')); }
-      try {
-        // The restore wrote through its own client, which the index lifecycle does not observe — so this forced
-        // reconcile is what gives each restored collection that holds a record its indexes (Q-165).
-        await reconcileSpaceSearchIndexes(space.id, { waitForReady: false, force: true });
-        return { id: space.id, ok: true as const, edgeIndexFailures };
-      } catch (err) {
-        log.error(`restore: failed to rebuild vector indexes for space '${space.id}': ${err}`);
-        return { id: space.id, ok: false as const, edgeIndexFailures };
-      }
-    });
-    const rebuilt = outcomes.filter(o => o.ok).map(o => o.id);
-    const failed = outcomes.filter(o => !o.ok).map(o => o.id);
-    if (failed.length > 0) {
-      log.warn(`restore: ${failed.length} space(s) have no vector index — semantic recall will return empty for them until rebuilt`);
+  try {
+    const plan = await planRestore(backupId, backupDir, leaveOut);
+    if (!plan.ok) {
+      res.status(400).json({
+        error: `The backup holds space(s) this instance does not serve: ${plan.unserved.map(s => `'${s}'`).join(', ')}. They were renamed or `
+          + 'deleted after the backup, so their data has no space to be restored into. Name them in leaveOut to restore without them.',
+        code: 'backup_names_unserved_spaces', spaces: plan.unserved,
+      });
+      return;
     }
-    const edgeIndexesFailed = outcomes.filter(o => o.edgeIndexFailures.length > 0).map(o => ({ id: o.id, failures: o.edgeIndexFailures }));
-    res.json({ ok: true, vectorIndexes: { rebuilding: rebuilt, failed }, edgeIndexes: { failed: edgeIndexesFailed } });
+    const started = startRestore(plan);
+    if (!started) {
+      res.status(409).json(restoreStandingRefusal(instanceWideActStanding() ?? 'restore'));
+      return;
+    }
+    res.status(202).json(started);
   } catch (err) {
+    if (err instanceof BackupNotWhole) {
+      res.status(400).json({ error: `Backup '${backupId}' cannot be restored: ${err.message}.`, code: 'backup_not_whole' });
+      return;
+    }
+    const closedAnswer = spaceActClosedAnswer(err);
+    if (closedAnswer) { res.status(closedAnswer.status).json(closedAnswer.body); return; }
     sendCaughtFailure(res, `POST /api/admin/data/restore`, err, { error: err instanceof Error ? err.message : String(err) });
-  } finally {
-    setMaintenanceActive(wasMaintenance);
+  }
+});
+
+// ── GET /restore ──────────────────────────────────────────────────────────────
+//
+// The restore standing, or the last one: per space its state (owed, running, done, restore_abandoned), attempts, our sentence for its
+// last failure and its index results. `{ restore: null }` when no restore ever ran on this instance.
+
+dataRouter.get('/restore', requireAdminMfa, (_req, res) => {
+  res.json(restoreReport() ?? { restore: null });
+});
+
+// ── POST /restore/abandon ─────────────────────────────────────────────────────
+//
+// Lift the holds of the standing restore's acts that have not completed. Those spaces keep whatever their acts reached: they may be
+// half restored, and the answer names them. Refused while a space's restore is running (an abandon never cuts a body).
+
+dataRouter.post('/restore/abandon', requireAdminMfa, async (_req, res) => {
+  try {
+    const r = await abandonRestore();
+    if (r.abandoned) { res.json(r); return; }
+    if (r.reason === 'none_standing') { res.status(404).json({ error: 'No restore is standing.', code: 'no_restore_standing' }); return; }
+    res.status(409).json({
+      error: `A restore act is running for ${(r.running ?? []).map(s => `'${s}'`).join(', ')}; abandon once it has ended.`,
+      code: 'restore_act_running',
+    });
+  } catch (err) {
+    sendCaughtFailure(res, 'POST /api/admin/data/restore/abandon', err, { error: err instanceof Error ? err.message : String(err) });
   }
 });
 

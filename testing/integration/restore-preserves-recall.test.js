@@ -74,16 +74,21 @@ describe('restore preserves semantic recall', () => {
     assert.ok(latest?.id, `no backup listed: ${JSON.stringify(list.body)}`);
 
     // 3. Restore it. This is the step that used to destroy every vector index.
+    // Since bundle-157 a restore is a set of space acts: answered 202 when they are registered, its outcome read from GET /restore.
     const restored = await post(INSTANCES.a, tokenA, '/api/admin/data/restore', { backupId: latest.id });
-    assert.equal(restored.status, 200, `restore failed: ${JSON.stringify(restored.body)}`);
+    assert.equal(restored.status, 202, `restore failed: ${JSON.stringify(restored.body)}`);
+    const report = await waitForReading(
+      () => get(INSTANCES.a, tokenA, '/api/admin/data/restore'),
+      (r) => r.status === 200 && r.body?.restoreId === restored.body.restoreId && r.body?.state !== 'running',
+      300_000, 2_000, { what: 'the restore to end' });
+    assert.equal(report.body.state, 'completed', `the restore did not complete: ${JSON.stringify(report.body)}`);
 
-    // The response should say what it rebuilt — an operator needs to know recall is warming up
+    // The report should say what it rebuilt — an operator needs to know recall is warming up
     // rather than broken.
-    assert.ok(
-      Array.isArray(restored.body?.vectorIndexes?.rebuilding),
-      `restore response must report rebuilt vector indexes, got: ${JSON.stringify(restored.body)}`,
-    );
-    assert.deepEqual(restored.body.vectorIndexes.failed, [], 'no space may fail to rebuild its indexes');
+    const spaces = report.body.spaces ?? [];
+    assert.ok(spaces.length > 0 && spaces.every(s => s.vectorIndexes !== undefined),
+      `the restore report must give each space's vector index result, got: ${JSON.stringify(report.body)}`);
+    assert.deepEqual(spaces.filter(s => s.vectorIndexes === 'failed').map(s => s.id), [], 'no space may fail to rebuild its indexes');
 
     // 4. The invariant: recall works again. Generous budget — a rebuild plus indexing is slow, and
     //    the point is that it RECOVERS, not that it is instant.

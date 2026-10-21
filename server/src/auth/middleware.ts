@@ -263,6 +263,20 @@ async function resolveAuthOrFail(
 }
 
 
+/**
+ * Does `req` carry an instance-admin credential: the token a guard already attached, else its bearer resolved here. Answers and never
+ * refuses - no `401`, no failure counted - for a gate that runs before the routers' own guards (maintenance) and must let an instance
+ * administrator through on any path. A request it answers `false` for meets the route's own guard afterwards as it always did.
+ */
+export async function requestIsInstanceAdmin(req: Request): Promise<boolean> {
+  const attached = req.authToken as { admin?: boolean; rights?: TokenRights | null } | undefined;
+  if (attached) return isInstanceAdmin(attached);
+  const bearer = extractBearer(req);
+  if (!bearer) return false;
+  const record = await resolveBearer(bearer);
+  return record !== null && isInstanceAdmin(record);
+}
+
 /** Enforce instance-admin; writes 403 and returns false when the token is not one. */
 function enforceAdmin(res: Response, record: Omit<TokenRecord, 'hash'> | OidcTokenRecord): boolean {
   if (!isInstanceAdmin(record)) {

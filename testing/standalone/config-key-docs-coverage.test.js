@@ -64,6 +64,7 @@ const TYPES = join(ROOT, 'server', 'src', 'config', 'types.ts');
 const MACHINE_MANAGED = new Map([
   ['oauthClients', 'RFC 7591 dynamic client registrations, written by the MCP OAuth flow'],
   ['pendingSpaceOp', 'write-ahead marker for a multi-step space operation, cleared on commit'],
+  ['spaceActSets', 'the record of an act over every space (a restore): written by the space-act runner, read through GET /api/admin/data/restore'],
 ]);
 
 /**

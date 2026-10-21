@@ -234,6 +234,18 @@ export async function currentSeq(spaceId: string): Promise<number> {
 }
 
 /**
+ * The lowest value the space's counter may hold without handing out a seq again: the counter doc, the highest seq stored, and the
+ * highest this process has seen allocated or bumped (`maxSeen`), whichever is highest. Three sources because each can be the one ahead:
+ * a counter doc a restore left below its records, records a peer pushed past the counter before `Q-198`, and a seq this process handed
+ * out to a write whose record has since gone. A replace of the space's data (a restore act) takes it after its drain and writes the
+ * counter to at least it (bundle-157, Q-554), so the next write never takes a seq a reader was already handed.
+ */
+export async function seqFloor(spaceId: string): Promise<number> {
+  const [counter, stored] = await Promise.all([currentSeq(spaceId), highestStoredSeq(spaceId)]);
+  return Math.max(counter, stored, stateOf(spaceId).maxSeen ?? 0);
+}
+
+/**
  * The protocol sequence ceiling — the one definition: the `Incoming*` schemas in `api/sync/_shared.ts`
  * validate against this constant (`<= 2^50`), and it had a second copy there until `Q-107`. A document at or
  * above this cannot be represented, so it is never a legitimate value on the wire. Kept within safe-integer

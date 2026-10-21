@@ -28,6 +28,9 @@ import { loadBackupConfig } from './backup-config.js';
 import { log, outsideRequest } from '../util/log.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { runExclusive } from '../util/single-flight.js';
+import { backupsRoot } from './backup-location.js';
+import { instanceWideActStanding, backupsNamedByActs } from '../spaces/space-act-runner.js';
+import type { SpaceActKind } from '../config/types.js';
 
 const DEFAULT_KEEP_OFFSITE = 14;
 
@@ -41,6 +44,15 @@ function isBackupFeatureEnabled(): boolean {
 }
 
 // ── Core backup logic ─────────────────────────────────────────────────────────
+
+/** A backup was asked for while an act that stands on every space (a restore) stands; answered `409` by the door. */
+export class BackupRefusedDuringRestore extends Error {
+  override readonly name = 'BackupRefusedDuringRestore';
+  readonly code = 'backup_refused_during_restore';
+  constructor(kind: SpaceActKind) {
+    super(`No backup is taken while a ${kind} stands: it would dump a database that is part old and part restored. Retry once it has ended.`);
+  }
+}
 
 export interface BackupResult {
   id: string;
@@ -61,10 +73,13 @@ export interface BackupResult {
  * Returns metadata about what was done, including the dump manifest.
  */
 export async function runBackupNow(): Promise<BackupResult> {
+  // Never while a restore stands: the dump would be half old and half restored, and become the newest backup (bundle-157, R4.1, R5.4).
+  const standing = instanceWideActStanding();
+  if (standing) throw new BackupRefusedDuringRestore(standing);
   const cfg = loadBackupConfig();
   const dataRoot = getDataRoot();
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const destDir = path.join(dataRoot, 'backups', ts);
+  const destDir = path.join(backupsRoot(), ts);
 
   log.info(`Backup starting → ${destDir}`);
   // The one setting, reaching the one choke point. The offsite copy below copies whatever this wrote, so it
@@ -80,7 +95,8 @@ export async function runBackupNow(): Promise<BackupResult> {
 
   // Local retention
   if (cfg?.retention?.keepLocal) {
-    const pruned = pruneBackups(path.join(dataRoot, 'backups'), cfg.retention.keepLocal);
+    // A backup a standing act names (a restore's) is kept whatever the count: its acts resolve it when they run.
+    const pruned = pruneBackups(backupsRoot(), cfg.retention.keepLocal, backupsNamedByActs());
     if (pruned > 0) {
       log.info(`Pruned ${pruned} local backup(s) (keepLocal=${cfg.retention.keepLocal})`);
       result.localPruned = pruned;

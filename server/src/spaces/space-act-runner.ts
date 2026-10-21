@@ -48,7 +48,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { getConfig, mutateConfig, isConfigLoaded } from '../config/loader.js';
-import type { Config, SpaceActEntry, SpaceActKind, SpaceActRound, SpaceActState, SpaceConfig } from '../config/types.js';
+import type { Config, SpaceActEntry, SpaceActKind, SpaceActRound, SpaceActSet, SpaceActState, SpaceConfig } from '../config/types.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
 import { canonicalRoundWipeTypes } from '../networks/round-shape.js';
 import { getDb } from '../db/mongo.js';
@@ -58,7 +58,7 @@ import { isStoreSide } from '../brain/store-failure.js';
 import { PEER_TRANSFER_TIMEOUT_MS } from '../sync/peer-fetch.js';
 import { abortTransfersOf, awaitSpaceTransfersDrained, resetSpaceTransfersForTest } from '../sync/space-transfer-fence.js';
 import { forgetEveryMark, forgetWhatWasReceived } from '../sync/receive-marks.js';
-import { SPACE_ACT_KINDS, perSpaceActKind, type SpaceActKeyField, type SpaceActLane } from '../config/types-space-acts.js';
+import { SPACE_ACT_KINDS, isInstanceWide, perSpaceActKind, type SpaceActKeyField, type SpaceActLane } from '../config/types-space-acts.js';
 import type * as SpaceRounds from './apply-wipe-round.js';
 import { keyedLimiter, type KeyedLimiter } from '../util/keyed-limiter.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -100,6 +100,19 @@ export interface SpaceActRequest {
   newId?: string;
   /** The round the act carries out, appended to the entry's rounds. */
   round?: SpaceActRound;
+  /** The act set the entry is a member of (`registerSpaceActSet`); never part of its key. */
+  setId?: string;
+  /** A restore's backup id; never part of its key (a second restore while one stands is refused by its door). */
+  backupId?: string;
+}
+
+/**
+ * A body found that its INPUT cannot be acted on - a backup that is not whole, records a unique index refuses - so another attempt meets
+ * the same input. The runner records it as owed and `needsAbandon`, retries it never, and keeps the space held until an operator abandons
+ * the act (`abandonSpaceActSet`). The message is ours and is shown to the operator; a cause carrying a driver's text stays in the log.
+ */
+export class SpaceActInputFailure extends Error {
+  override readonly name = 'SpaceActInputFailure';
 }
 
 /** What one run of an act came to. Never thrown: a run answers. */
@@ -216,6 +229,20 @@ export interface SpaceActBodyOutcome {
   renamed?: SpaceConfig;
   /** The act was refused before it changed anything; the entry is removed and nothing is retried. */
   refusal?: Error;
+  /** What a member of an act set reports about its space (a restore's index results); kept on the set's record for its report. */
+  report?: Record<string, unknown>;
+}
+
+/** What a kind that runs as an act set does once, when the last member of a set ends: after the write that ends it, never inside it. */
+export interface SpaceActSetHooks {
+  onSetEnd(set: Readonly<SpaceActSet>): void;
+}
+
+const setHooks = new Map<SpaceActKind, SpaceActSetHooks>();
+
+/** A kind's module hands over what its set does when it ends, as it hands over its body. */
+export function defineSpaceActSetHooks(kind: SpaceActKind, h: SpaceActSetHooks): void {
+  setHooks.set(kind, h);
 }
 
 export type SpaceActBody = (ctx: SpaceActBodyContext) => Promise<SpaceActBodyOutcome>;
@@ -347,7 +374,15 @@ export function spaceActsOfNetwork(cfg: Pick<Config, 'pendingSpaceActs'>, networ
 }
 
 /** What an operator reads of one act entry: what it is, since when, how often it has failed, when it is retried, and where it stands. */
-export interface ActEntryView { kind: string; since: string; attempts: number; nextRetryAt?: string; state: string }
+export interface ActEntryView {
+  kind: string; since: string; attempts: number; nextRetryAt?: string; state: string;
+  /** Our sentence for the last failure (never a driver's text), so an operator can see why an act is owed. */
+  lastError?: string;
+  /** Another attempt meets the same input: only an abandon ends it. */
+  needsAbandon?: true;
+  /** A restore's backup. */
+  backupId?: string;
+}
 
 /**
  * An act entry as the operator's surfaces show it — the space's `actPending` and the network's `owedSpaceActs` both start from this, and add
@@ -359,6 +394,9 @@ export function actEntryView(e: SpaceActEntry): ActEntryView {
   return {
     kind: e.kind, since: e.registeredAt, attempts: e.attempts,
     ...(e.retryAt ? { nextRetryAt: e.retryAt } : {}), state: e.state,
+    ...(e.lastError ? { lastError: e.lastError } : {}),
+    ...(e.needsAbandon ? { needsAbandon: true as const } : {}),
+    ...(e.backupId ? { backupId: e.backupId } : {}),
   };
 }
 
@@ -395,6 +433,8 @@ export function registerSpaceAct(cfg: Config, req: SpaceActRequest, now: number)
     rounds: req.round ? [{ ...req.round }] : [],
     postSteps: step !== null && forget.length > 0 ? { [step]: forget } : {},
     registeredAt: new Date(now).toISOString(), state: 'registered', attempts: 0,
+    ...(req.setId ? { setId: req.setId } : {}),
+    ...(req.backupId ? { backupId: req.backupId } : {}),
   };
   list.push(entry);
   abortTransfersOf(req.localId);
@@ -411,6 +451,131 @@ export function registerOwnSpaceAct(req: SpaceActRequest): string {
   let id = '';
   mutateConfig(cfg => { id = registerSpaceAct(cfg, req, Date.now()).entry.id; });
   return id;
+}
+
+// ── act sets ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** What a door asks for when it registers an act on every space at once. */
+export interface SpaceActSetRequest {
+  kind: SpaceActKind;
+  /** The spaces it stands on, one entry each. */
+  localIds: readonly string[];
+  backupId?: string;
+  emptied?: readonly string[];
+  leftOut?: readonly string[];
+}
+
+/** Does an act of a kind that stands on every space stand now, and which kind: THE answer for maintenance, the backup refusal and a door. */
+export function instanceWideActStanding(cfg: Pick<Config, 'pendingSpaceActs'> | null = isConfigLoaded() ? getConfig() : null): SpaceActKind | null {
+  return (cfg?.pendingSpaceActs ?? []).find(e => isInstanceWide(e.kind))?.kind ?? null;
+}
+
+/** The backups a standing act names: what a backup's retention keeps whatever its count. */
+export function backupsNamedByActs(): ReadonlySet<string> {
+  return new Set(standingEntries().flatMap(e => (e.backupId ? [e.backupId] : [])));
+}
+
+/** The act set of `kind`: the one standing, or the last that ended; undefined when none ever ran. A copy, never the live record. */
+export function spaceActSetOf(kind: SpaceActKind): SpaceActSet | undefined {
+  const set = (isConfigLoaded() ? getConfig().spaceActSets ?? [] : []).find(s => s.kind === kind);
+  return set ? structuredClone(set) : undefined;
+}
+
+/** The entries of set `setId` standing now, for its report. Copies. */
+export function entriesOfSet(setId: string): SpaceActEntry[] {
+  return standingEntries().filter(e => e.setId === setId).map(e => structuredClone(e));
+}
+
+/**
+ * Register an act of `req.kind` on every space of `req.localIds` and its set record, in ONE config write, and return the set. The set
+ * record of the same kind that stood before is replaced: one record per kind, the last one kept for its report. THROWS
+ * {@link SpaceActsClosedError} once shutdown closed the runner. Whether another instance-wide act stands is the door's question
+ * ({@link instanceWideActStanding}), asked before this.
+ */
+export function registerSpaceActSet(req: SpaceActSetRequest): { set: SpaceActSet; entryIds: string[] } {
+  if (closed) throw new SpaceActsClosedError();
+  const now = Date.now();
+  const set: SpaceActSet = {
+    id: randomUUID(), kind: req.kind, startedAt: new Date(now).toISOString(),
+    ...(req.backupId ? { backupId: req.backupId } : {}),
+    members: Object.fromEntries(req.localIds.map(id => [id, { state: 'standing' as const }])),
+    ...(req.emptied ? { emptied: [...req.emptied] } : {}),
+    ...(req.leftOut ? { leftOut: [...req.leftOut] } : {}),
+  };
+  const entryIds: string[] = [];
+  mutateConfig(cfg => {
+    cfg.spaceActSets = [...(cfg.spaceActSets ?? []).filter(s => s.kind !== req.kind), set];
+    for (const localId of req.localIds) {
+      entryIds.push(registerSpaceAct(cfg, { kind: req.kind, localId, setId: set.id, ...(req.backupId ? { backupId: req.backupId } : {}) }, now).entry.id);
+    }
+    // A set with no member ends as it begins.
+    if (req.localIds.length === 0) { set.endedAt = set.startedAt; set.outcome = 'completed'; }
+  });
+  if (set.endedAt) setEnded(set);
+  return { set: structuredClone(set), entryIds };
+}
+
+/** What an abandon came to: refused while a member's body runs, else the spaces it left as they were. */
+export type SpaceActSetAbandon =
+  | { abandoned: true; set: SpaceActSet; left: string[] }
+  | { abandoned: false; reason: 'none_standing' | 'running'; running?: string[] };
+
+/**
+ * Abandon the standing set of `kind`: remove every entry of it not yet done, in ONE write that lifts their holds, and mark those members
+ * `abandoned` on the set's record. Refused while a member's body is in its lane - an abandon never cuts a body. The spaces left are in
+ * whatever state their acts reached; the caller says so.
+ *
+ * The removal is a removal like the completion's: in the same write, the marks the entries' post-steps name are forgotten (a space left
+ * part restored is read again from its peers, never trusted at a mark its data no longer stands at) and every round they carry is
+ * settled `not-carried`, so no entry leaves the list without them (`every-act-entry-is-cleared-with-its-post-steps`).
+ */
+export async function abandonSpaceActSet(kind: SpaceActKind): Promise<SpaceActSetAbandon> {
+  await countersLoaded();
+  const standing = (getConfig().spaceActSets ?? []).find(s => s.kind === kind && !s.endedAt);
+  if (!standing) return { abandoned: false, reason: 'none_standing' };
+  const running = standingEntries().filter(e => e.setId === standing.id && (e.state === 'running' || spaceActRunning(e.localId)))
+    .map(e => e.localId);
+  if (running.length > 0) return { abandoned: false, reason: 'running', running };
+  const left: string[] = [];
+  const removed: string[] = [];
+  let ended: SpaceActSet | undefined;
+  mutateConfig(cfg => {
+    const set = cfg.spaceActSets?.find(s => s.id === standing.id);
+    const mine = (cfg.pendingSpaceActs ?? []).filter(e => e.setId === standing.id);
+    for (const e of mine) { left.push(e.localId); removed.push(e.id); }
+    cfg.pendingSpaceActs = (cfg.pendingSpaceActs ?? []).filter(e => e.setId !== standing.id);
+    if (cfg.pendingSpaceActs.length === 0) delete cfg.pendingSpaceActs;
+    for (const e of mine) {
+      for (const step of e.postSteps.forgetReceiveMarks ?? []) {
+        const net = cfg.networks.find(n => n.id === step.networkId);
+        if (net) forgetEveryMark(net, step.localSpaceId);
+      }
+      for (const step of e.postSteps.forgetReceived ?? []) {
+        const net = cfg.networks.find(n => n.id === step.networkId);
+        if (net) forgetWhatWasReceived(net, step.localSpaceId);
+      }
+      for (const r of e.rounds) {
+        const net = cfg.networks.find(n => n.id === r.networkId);
+        const round = net?.pendingRounds.find(x => x.roundId === r.roundId);
+        if (net && round) spaceRounds!.settleSpaceAct(net, round, 'not-carried');
+      }
+    }
+    if (!set) return;
+    for (const id of left) set.members[id] = { state: 'abandoned' };
+    for (const m of Object.values(set.members)) if (m.state === 'standing') m.state = 'abandoned';
+    set.endedAt = new Date().toISOString();
+    set.outcome = 'abandoned';
+    ended = structuredClone(set);
+  });
+  for (const id of removed) { failureSaid.forget(id); waitingSaid.forget(id); }
+  if (ended) setEnded(ended);
+  return { abandoned: true, set: ended ?? structuredClone(standing), left: left.sort() };
+}
+
+/** Run the ended set's hook once, after the write that ended it; a hook that throws is said and never undoes the end. */
+function setEnded(set: SpaceActSet): void {
+  try { setHooks.get(set.kind)?.onSetEnd(set); }
+  catch (err) { log.error(`the end of the ${set.kind} set ${peerText(set.id)} could not run its follow-up: ${peerText(err)}`); }
 }
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -559,6 +724,7 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
   const refused = outcome.refusal !== undefined;
   const spaceGone = entry.kind === 'delete' && !getConfig().spaces.some(s => s.id === entry.localId);
   let covered: SpaceActRound[] = entry.rounds;
+  let setDone: SpaceActSet | undefined;
   mutateConfig(cfg => {
     if (!cfg.pendingSpaceActs) return;
     const self = cfg.pendingSpaceActs.find(e => e.id === id) ?? entry;
@@ -568,6 +734,17 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
     cfg.pendingSpaceActs = cfg.pendingSpaceActs.filter(e => !leavingIds.has(e.id));
     if (cfg.pendingSpaceActs.length === 0) delete cfg.pendingSpaceActs;
     if (refused) return;
+    // A member of an act set: its space is done, with what its body reported; the last member to end ends the set in this same write.
+    const set = self.setId ? cfg.spaceActSets?.find(s => s.id === self.setId && !s.endedAt) : undefined;
+    if (set) {
+      const at = new Date().toISOString();
+      set.members[self.localId] = { state: 'done', completedAt: at, ...(outcome.report ? { report: outcome.report } : {}) };
+      if (!(cfg.pendingSpaceActs ?? []).some(e => e.setId === set.id)) {
+        set.endedAt = at;
+        set.outcome = 'completed';
+        setDone = structuredClone(set);
+      }
+    }
     // `forgetReceiveMarks` keeps its 5.x key and meaning (every mark); `forgetReceived` is a restore's (what was received only).
     for (const step of self.postSteps.forgetReceiveMarks ?? []) {
       const net = cfg.networks.find(n => n.id === step.networkId);
@@ -591,6 +768,7 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
   counters?.spaceActsTotal.inc({ kind: entry.kind, via, outcome: 'completed' });
   failureSaid.forget(id);
   waitingSaid.forget(id);
+  if (setDone) setEnded(setDone);
   if (!waiters.has(id) && covered.length === 0) {
     // Nobody is told of this completion — the door answered `queued`, or the act was resumed — so it is said in the audit log.
     logInternalAudit({ method: 'DELETE', path: `internal:space-act:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId });
@@ -620,12 +798,18 @@ function failed(id: string, entry: SpaceActEntry, err: unknown, via: string): Sp
   }
   try { hooks.afterBodyFailed?.(entry, err); } catch { /* a test hook does not change the failure */ }
   const attempts = (readEntry(id)?.attempts ?? entry.attempts) + 1;
-  const retryAt = new Date(Date.now() + backoffDelayMs(attempts - 1, 60_000, 3_600_000)).toISOString();
-  const sentence = `The ${entry.kind} of space '${entry.localId}' did not complete; it is retried automatically at ${retryAt}.`;
+  // An input failure is never retried (another attempt meets the same input): no `retryAt`, and the sentence says what ends it.
+  const input = err instanceof SpaceActInputFailure;
+  const retryAt = input ? undefined : new Date(Date.now() + backoffDelayMs(attempts - 1, 60_000, 3_600_000)).toISOString();
+  const sentence = input
+    ? `The ${entry.kind} of space '${entry.localId}' cannot complete: ${err.message} It is not retried; abandon it to lift the hold.`
+    : `The ${entry.kind} of space '${entry.localId}' did not complete; it is retried automatically at ${retryAt}.`;
   try {
     mutateConfig(cfg => {
       const e = cfg.pendingSpaceActs?.find(x => x.id === id);
-      if (e) { e.attempts = attempts; e.retryAt = retryAt; e.state = 'owed'; e.lastError = sentence; }
+      if (!e) return;
+      e.attempts = attempts; e.state = 'owed'; e.lastError = sentence;
+      if (retryAt) { e.retryAt = retryAt; delete e.needsAbandon; } else { delete e.retryAt; e.needsAbandon = true; }
     });
   } catch (writeErr) {
     log.error(`the failed ${entry.kind} of '${peerText(entry.localId)}' could not be recorded as owed: ${peerText(writeErr)}`);
@@ -634,7 +818,7 @@ function failed(id: string, entry: SpaceActEntry, err: unknown, via: string): Sp
   counters?.spaceActRetriesTotal.inc({ kind: entry.kind });
   // A failure on the store's side is said once, with its text, by the door or walk that answers it; this line names only the act then.
   failureSaid(id, () => log.error(isStoreSide(err) ? `${peerText(sentence)} The store failed it.` : `${peerText(sentence)} Cause: ${peerText(err)}`));
-  return result(entry, id, { ok: false, error: sentence, cause: err, retryAt });
+  return result(entry, id, { ok: false, error: sentence, cause: err, ...(retryAt ? { retryAt } : {}) });
 }
 
 function contextFor(entry: SpaceActEntry): SpaceActBodyContext {
@@ -684,8 +868,8 @@ function contextFor(entry: SpaceActEntry): SpaceActBodyContext {
  * start now" for the runner's resume and tick, the apply step, a door's repeat and a proposer's second click — written four times it
  * let a door start an act the tick was holding back, or hold back one the tick would have run.
  */
-export const spaceActDueAt = (e: Pick<SpaceActEntry, 'state' | 'retryAt'>, now: number): boolean =>
-  e.state !== 'owed' || e.retryAt === undefined || Date.parse(e.retryAt) <= now;
+export const spaceActDueAt = (e: Pick<SpaceActEntry, 'state' | 'retryAt' | 'needsAbandon'>, now: number): boolean =>
+  e.state !== 'owed' || (!e.needsAbandon && (e.retryAt === undefined || Date.parse(e.retryAt) <= now));
 
 /**
  * Run every entry on disk that is due, after listen, one walk over their spaces: each space isolated (a failure in one never stops the

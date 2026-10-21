@@ -2,8 +2,8 @@ import type { TokenRights } from './rights-shape.js';
 import type { ModelSlot, ModelSlotsConfig } from './model-slots.js';
 import type { AssistModelExtras } from './assist-backend.js';
 import type { MachineMadeSource } from '../files/derived-fields.js';
-import type { SpaceActEntry } from './types-space-acts.js';
-export type { SpaceActEntry, SpaceActKind, SpaceActState, SpaceActRound, SpaceActPostSteps } from './types-space-acts.js';
+import type { SpaceActEntry, SpaceActSet } from './types-space-acts.js';
+export type { SpaceActEntry, SpaceActKind, SpaceActState, SpaceActRound, SpaceActPostSteps, SpaceActSet, SpaceActSetMember } from './types-space-acts.js';
 export interface TokenRecord {
   id: string;
   name: string;
@@ -1403,6 +1403,8 @@ export interface Config {
   pendingSpaceOp?: PendingSpaceOp;
   /** Deletions, wipes and renames registered and not yet completed, one entry per act. Only the runner reads them. */
   pendingSpaceActs?: SpaceActEntry[];
+  /** Act sets (a restore over every space): the standing one, or the last that ended, per kind. Only the runner writes them. Not hand-edited. */
+  spaceActSets?: SpaceActSet[];
   // `removeSpaces` (S-10) is declared beside its only reader, in `reload-space-diff.ts`.
   /**
    * Personal views (Q-531, 6.0): a view belongs to ONE owner (a token's stable principal, `viewOwnerOf`), reads per member what the owner

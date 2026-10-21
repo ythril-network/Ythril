@@ -3,7 +3,7 @@
  *
  * ## The failure
  *
- * `POST /api/admin/data/restore` rebuilds every space's vector indexes before it answers, and it did so ONE
+ * `POST /api/admin/data/restore` rebuilt every space's vector indexes before it answered, and it did so ONE
  * SPACE AT A TIME. Each index is dropped and recreated, about two seconds apiece, several per space — so the
  * request grew by several seconds per space. CI's instance held enough test spaces when
  * `restore-preserves-recall` ran that the request passed 300 s, the client gave up, and every later suite
@@ -14,7 +14,10 @@
  *
  * - The shared bounded-concurrency helper (`util/map-limit.ts`) really bounds, keeps order, and runs every
  *   item concurrently up to its limit.
- * - The restore route rebuilds through it, rather than awaiting each space in a loop.
+ * - Since bundle-157 the restore is a set of space acts: the route checks the backup, registers one act per
+ *   space and answers `202`, and each space's data and indexes are replaced by its act's body in the restore
+ *   lane. So the request does no per-space work at all - no load, no index build - and its time does not grow
+ *   with the spaces. The progress and the index results are in `GET /restore`.
  *
  * Run: node --test testing/standalone/a-restore-rebuilds-indexes-concurrently.test.js (after `npm run build` in server/)
  */
@@ -54,16 +57,17 @@ describe('mapLimit, the one bounded-concurrency helper', () => {
 
 describe('the restore route', () => {
   const src = blankComments(readFileSync('server/src/api/data.ts', 'utf8'));
-  const at = src.indexOf('await restoreDatabase(');
-  const body = src.slice(at, src.indexOf('res.json({ ok: true, vectorIndexes', at));
+  const at = src.indexOf('dataRouter.post(\'/restore\'');
+  const body = src.slice(at, src.indexOf('dataRouter.', at + 1));
 
-  it('found the rebuild block', () => {
-    assert.ok(at > 0 && body.includes('reconcileSpaceSearchIndexes'), 'the restore rebuild block moved; re-point this gate');
+  it('found the restore handler', () => {
+    assert.ok(at > 0 && body.includes('startRestore('), 'the restore handler moved or no longer registers its acts; re-point this gate');
   });
 
-  it('rebuilds the spaces through mapLimit, not one awaited space at a time', () => {
-    assert.match(body, /mapLimit\(/, 'the restore rebuild no longer goes through the shared bounded helper');
-    assert.doesNotMatch(body, /for\s*\([^)]*\)\s*\{[^}]*await\s+reconcileSpaceSearchIndexes/s,
-      'a space-by-space awaited loop is back: the request grows with every space');
+  it('answers 202 once the acts are registered, and does no per-space data or index work in the request', () => {
+    assert.match(body, /status\(202\)/, 'the restore route no longer answers 202 at registration: the request waits for the work again');
+    for (const work of ['restoreDatabase(', 'reconcileSpaceSearchIndexes(', 'ensureEdgeIdentityIndex(', 'ensureEdgeGuardIndex(', 'initSpace(']) {
+      assert.ok(!body.includes(work), `the restore request does ${work.slice(0, -1)} itself: its time grows with every space again`);
+    }
   });
 });
