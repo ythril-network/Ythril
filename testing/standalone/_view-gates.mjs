@@ -115,13 +115,22 @@ export const creationSitesWithoutTheCheck = (sites) => sites.filter(s => !re(Str
 // ── 4. every place a space leaves config drops it from every view ───────────────────────────────────────────────────
 
 export const DROP_FROM_VIEWS = 'dropSpaceFromViews';
-/** A filter that takes an entry out of config.spaces, or the reload's consumption of `removeSpaces`. */
-const LEAVE = String.raw`\b(?:getConfig\(\)|cfg|config|fresh)\.spaces\s*=\s*(?:getConfig\(\)|cfg|config|fresh)\.spaces\.filter\(|\.removeSpaces\b(?!\s*\?\?)`;
+/** The one removal (b100 row 13): takes a space out of `config.spaces` AND drops it from every view, inside the caller's write. */
+export const THE_REMOVAL = 'removeSpaceFromConfig';
+const RAW_FILTER = String.raw`\b(?:getConfig\(\)|cfg|config|fresh)\.spaces\s*=\s*(?:getConfig\(\)|cfg|config|fresh)\.spaces\.filter\(`;
+/** A filter that takes an entry out of config.spaces, the reload's consumption of `removeSpaces`, or a call of the one removal. */
+const LEAVE = String.raw`${RAW_FILTER}|\.removeSpaces\b(?!\s*\?\?)|\b${THE_REMOVAL}\s*\(`;
 
 export function leaveSites(sources) {
   return byFunction(sitesOf(sources, LEAVE, { files: f => f.startsWith('server/src/') && !VIEW_HOMES.includes(f) }));
 }
-export const leaveSitesWithoutTheDrop = (sites) => sites.filter(s => !re(String.raw`\b${DROP_FROM_VIEWS}\s*\(`).test(s.fnText)).map(s => `${s.file}:${s.line} ${s.fn}`);
+/**
+ * The leave sites that do not go through the one removal: the removal itself must drop the space from every view, and every other site
+ * must call it and filter `config.spaces` by no hand of its own - a hand-written filter beside a drop was the copy row 13 merged.
+ */
+export const leaveSitesWithoutTheDrop = (sites) => sites.filter(s => (s.fn === THE_REMOVAL
+  ? !re(String.raw`\b${DROP_FROM_VIEWS}\s*\(`).test(s.fnText)
+  : !re(String.raw`\b${THE_REMOVAL}\s*\(`).test(s.fnText) || re(RAW_FILTER).test(s.fnText))).map(s => `${s.file}:${s.line} ${s.fn}`);
 
 // ── 5. one function removes tokens ──────────────────────────────────────────────────────────────────────────────────
 

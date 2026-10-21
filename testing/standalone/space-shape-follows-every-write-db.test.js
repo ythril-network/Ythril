@@ -35,6 +35,8 @@ const skip = await mongoSkipReason();
 const SPACE = 'shapecache';
 /** A space deleted by the last case, so its kept shape is shown to go with it. */
 const GONE = 'shapegone';
+/** A space whose deletion is RESUMED from its marker (b100 row 13), so the resumed path is shown to forget what the direct one does. */
+const GONE_RESUMED = 'shapegone-resumed';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-shape-cache-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
@@ -49,7 +51,8 @@ describe('the space meta is cached and never behind a write', { skip }, () => {
       instanceId: 'shape-cache', instanceLabel: 'test', tokens: [], networks: [],
       spaces: [{ id: SPACE, label: 'Shape cache', builtIn: true, folders: [], completeLinkage: true,
         meta: { typeSchemas: { entity: { service: {} } } } },
-      { id: GONE, label: 'Shape gone', folders: [], meta: {} }],
+      { id: GONE, label: 'Shape gone', folders: [], meta: {} },
+      { id: GONE_RESUMED, label: 'Shape gone, resumed', folders: [], meta: {} }],
     }, null, 2), { mode: 0o600 });
     loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
@@ -147,5 +150,17 @@ describe('the space meta is cached and never behind a write', { skip }, () => {
     const { removeSpace } = await import('../../server/dist/spaces/lifecycle.js');
     assert.equal(await removeSpace(GONE), true, 'fixture: the space was not removed');
     assert.equal(shape._shapeCached(GONE), false, 'a deleted space\'s shape outlived it, taking a slot of the bounded cache');
+  });
+
+  it('a deletion resumed from its marker forgets what the direct one forgets (b100 row 13)', async () => {
+    // Seen red at 743562a5: the resumed commit removed the space from config and views and forgot nothing - its shape, Merkle leaves and
+    // search waiters outlived it.
+    await answer.spaceMetaAnswer({ spaceId: GONE_RESUMED, memberIds: [GONE_RESUMED], resolveRefs: false });
+    assert.equal(shape._shapeCached(GONE_RESUMED), true, 'fixture: the shape was never kept, so its removal proves nothing');
+    loader.mutateConfig(cfg => { cfg.pendingSpaceOp = { type: 'delete', spaceId: GONE_RESUMED, startedAt: new Date().toISOString() }; });
+    const { reconcilePendingSpaceOp } = await import('../../server/dist/spaces/lifecycle.js');
+    await reconcilePendingSpaceOp();
+    assert.equal(loader.getConfig().spaces.some(s => s.id === GONE_RESUMED), false, 'fixture: the resumed deletion did not complete');
+    assert.equal(shape._shapeCached(GONE_RESUMED), false, 'a space whose deletion was resumed kept its shape, as the direct deletion does not');
   });
 });
