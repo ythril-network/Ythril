@@ -1,5 +1,5 @@
 import type { HttpClient } from '@angular/common/http';
-import { map, of, type Observable } from 'rxjs';
+import { forkJoin, map, of, switchMap, type Observable } from 'rxjs';
 import { filterCall } from './filter-call';
 
 /**
@@ -43,6 +43,52 @@ const FIELD_FOR: Record<string, keyof RecordLinks> = {
 interface LinkRow { from: string; to: string; toKind: string }
 
 /**
+ * The most link rows ONE read asks for, which is the deepest window a personal view will give (`PROXY_PAGE_CEILING`
+ * on the server: a view reads a window from every member and refuses `skip + limit` past it).
+ *
+ * It was 2000, which a space allows and EVERY view refuses, so the Facts tab of a view failed whole (Q-531 verify).
+ * One question lives here: "read every link row for these ids". A caller cannot drop the two things a hand-written
+ * read forgets - the TOTAL is compared with what came back, so a page the door cut short is read on instead of
+ * being taken for the whole answer, and a refusal is passed on in the door's own words, never swallowed into a
+ * shorter list.
+ */
+const LINK_READ_LIMIT = 1000;
+
+/**
+ * Every link row whose `from` (or `to`) is one of `ids`. A read that does not hold them all is split by ids, so each
+ * half fits a window; a single id with more links than one window is paged by `skip`, which a view refuses past its
+ * ceiling in its own sentence.
+ */
+function readLinkRows(
+  http: HttpClient,
+  spaceId: string,
+  idsKey: 'from' | 'to',
+  fromKind: LinkFromKind,
+  ids: string[],
+  skip = 0,
+): Observable<LinkRow[]> {
+  return filterCall<{ results: LinkRow[]; total?: number }>(http, {
+    space: spaceId,
+    collection: 'links',
+    filter: { [idsKey]: { $in: ids }, fromKind },
+    limit: LINK_READ_LIMIT,
+    ...(skip > 0 ? { skip } : {}),
+  }).pipe(switchMap(r => {
+    const rows = r.results ?? [];
+    const total = r.total ?? rows.length;
+    if (rows.length === 0 || skip + rows.length >= total) return of(rows);
+    if (ids.length > 1) {
+      const half = Math.ceil(ids.length / 2);
+      return forkJoin([
+        readLinkRows(http, spaceId, idsKey, fromKind, ids.slice(0, half)),
+        readLinkRows(http, spaceId, idsKey, fromKind, ids.slice(half)),
+      ]).pipe(map(([a, b]) => [...a, ...b]));
+    }
+    return readLinkRows(http, spaceId, idsKey, fromKind, ids, skip + rows.length).pipe(map(rest => [...rows, ...rest]));
+  }));
+}
+
+/**
  * Fill each row's link fields from the links collection.
  *
  * Returns the rows unchanged when there are none to ask about, so a caller can pipe this unconditionally
@@ -57,15 +103,9 @@ export function hydrateLinks<T extends { _id: string }>(
   const ids = rows.map(r => r._id);
   if (ids.length === 0) return of(rows as (T & RecordLinks)[]);
 
-  return filterCall<{ results: LinkRow[] }>(http, {
-    space: spaceId,
-    collection: 'links',
-    filter: { from: { $in: ids }, fromKind },
-    // One per row per class is the ceiling that matters; a page is 200 rows and a record's links are few.
-    limit: 2000,
-  }).pipe(map(r => {
+  return readLinkRows(http, spaceId, 'from', fromKind, ids).pipe(map(linkRows => {
     const byFrom = new Map<string, RecordLinks>();
-    for (const row of r.results ?? []) {
+    for (const row of linkRows) {
       const field = FIELD_FOR[row.toKind];
       if (!field) continue;
       const bucket = byFrom.get(row.from) ?? {};
@@ -93,10 +133,5 @@ export function recordsLinkingTo(
   toIds: string[],
 ): Observable<string[]> {
   if (toIds.length === 0) return of([]);
-  return filterCall<{ results: LinkRow[] }>(http, {
-    space: spaceId,
-    collection: 'links',
-    filter: { to: { $in: toIds }, fromKind },
-    limit: 2000,
-  }).pipe(map(r => [...new Set((r.results ?? []).map(l => l.from))]));
+  return readLinkRows(http, spaceId, 'to', fromKind, toIds).pipe(map(linkRows => [...new Set(linkRows.map(l => l.from))]));
 }
