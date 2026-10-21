@@ -38,7 +38,7 @@ import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { TOOL_RIGHTS, toolTakesAView } from '../auth/space-rights.js';
 import { isViewId, resolveOwnView, viewOwnerOf, viewReadMembers, viewsOfOwner } from '../config/views.js';
-import { retiredIdNamedIn, unknownSpaceAnswer } from '../spaces/unknown-space.js';
+import { ownViewNamedIn, retiredIdNamedIn, unknownSpaceAnswer } from '../spaces/unknown-space.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { admitPeerToolCall } from '../sync/peer-space-admission.js';
@@ -191,6 +191,11 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
   const namedRetired = retiredIdNamedIn(a['space'], cfg);
   const gone = namedRetired === null ? null : unknownSpaceAnswer(null, namedRetired, false, cfg);
   if (gone) return refuse(gone.status, gone.body.error, '', { ...gone.body });
+
+  // The caller's OWN view named on a tool that does not take one (every write) is answered as what it is, with the owner-only hint, BEFORE the
+  // rights below are judged - the REST path routes ask the existence rule first, so the order is one on every door (`ownViewNamedIn`).
+  const notASpace = tool && !toolTakesAView(name) ? ownViewNamedIn(ownerKey, a['space'], cfg) : null;
+  if (notASpace) return refuse(notASpace.status, `Error: ${notASpace.body.error}`);
 
   /*
    * A refusal of a WRITE tool is a row in the trail, whichever way it is refused (R6-13): the REST middleware records every response
