@@ -32,6 +32,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openViewDoors } from './_view-doors.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
 const QA = 'vr-qa';
@@ -115,6 +116,16 @@ describe('a retired proxy id answers 410 space_retired on every door (Q-531)', {
     assert.ok(thrown, 'a path under a retired id resolved');
     assert.deepEqual(fileActAnswerOf(thrown), { status: 410, body: { error: SENTENCE, code: 'space_retired' } });
     assert.doesNotThrow(() => resolveSafePath(QA, 'notes/a.md'), 'a live space still resolves');
+  });
+
+  it('a space a reload added under an id reserved before it is said, not passed over (b100 row 4)', async () => {
+    // Seen red at 743562a5: the check asked the live config, where the reload's migration had already lifted the reservation (a live space
+    // wins), so it could never fire.
+    const lifecycle = await import('../../server/dist/spaces/lifecycle.js');
+    const run = (reservedBefore) => logLinesDuring(() => lifecycle.initAddedSpaces({ added: [QA], reservedBefore, audit: () => {}, rearm: async () => {} }));
+    const said = (lines) => lines.some(l => l.includes(QA) && l.includes('a retired proxy reserved'));
+    assert.ok(said((await run([QA])).lines), 'a space added under an id reserved before the reload was passed over in silence');
+    assert.ok(!said((await run([])).lines), 'a space added under a free id was reported as reserved');
   });
 
   it('MCP for every tool: an error carrying the sentence', async () => {

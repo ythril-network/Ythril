@@ -340,6 +340,11 @@ export function markSpacesOwedInit(ids: readonly string[]): void {
 export interface AddedSpacesInit {
   /** The spaces the reload added; those owed from earlier reloads are initialised with them. */
   added: readonly string[];
+  /**
+   * The retired proxy ids reserved BEFORE the reload. The reload's migration lifts a reservation a live space now holds (a live space wins,
+   * plan rev 3.2 int 7), so by the time the added spaces are initialised the config no longer says which of them took a reserved id.
+   */
+  reservedBefore: readonly string[];
   /** Write the per-space audit entry (`CONFIG_RELOAD_OPERATIONS.added`) with the status the init really had. */
   audit: (spaceId: string, status: number) => void;
   /** Re-arm the cron-captured schedulers; never throws. Runs whether or not every space initialised. */
@@ -437,12 +442,18 @@ async function initOwedSpaces(): Promise<OwedInitPass> {
  * reload. The message holds ids and our words only; the driver's text is in the log and in the members.
  *
  */
-export async function initAddedSpaces({ added, audit, rearm }: AddedSpacesInit): Promise<void> {
+export async function initAddedSpaces({ added, audit, rearm, reservedBefore }: AddedSpacesInit): Promise<void> {
   markSpacesOwedInit(added);
-  // A hand-edited added space under a retired proxy id: the reload's migration lifts a reservation that a live space shadows, so this is
-  // the guard against a creation path that skipped it. Said, never silent; the space is initialised as the operator wrote it.
-  const reserved = added.filter(id => { try { assertNotRetiredSpaceId(id); return false; } catch { return true; } });
-  if (reserved.length > 0) log.warn(`Added space(s) ${peerList(reserved, ', ')} use an id reserved by a retired proxy; an instance admin purges a reserved id before it is reused`);
+  // A hand-edited added space under a retired proxy id, judged against the reservations as they stood BEFORE the reload: by now the
+  // migration has lifted them (a live space wins, plan rev 3.2 int 7), so asked against the live config this could never fire. The space
+  // is initialised as the operator wrote it, and the lifted reservation is said, never silent - rows synced or imported under the old id
+  // may still sit in its collections.
+  const before = { spaces: [], retiredSpaceIds: reservedBefore };
+  const reserved = added.filter(id => { try { assertNotRetiredSpaceId(id, before); return false; } catch { return true; } });
+  if (reserved.length > 0) {
+    log.warn(`Added space(s) ${peerList(reserved, ', ')} took an id a retired proxy reserved; the reservation is lifted (a live space wins), and rows `
+      + 'synced or imported under the old id may still be in its collections');
+  }
   const { toInit, landed, failures, walk } = await initOwedSpaces();
   for (const id of toInit) {
     if (landed.has(id)) audit(id, 200);
