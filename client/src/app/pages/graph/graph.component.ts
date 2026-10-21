@@ -828,7 +828,8 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
    * properties untouched, which is exactly what the forked drawer used to do for every space.
    */
   private loadSpaceMeta(spaceId: string): void {
-    if (!spaceId) { this.store.spaceMeta.set(null); return; }
+    // A personal view has no meta of its own (its config reads answer as an unknown space), so it asks none, as the Brain page does not.
+    if (!spaceId || this.views.isView(spaceId)) { this.store.spaceMeta.set(null); return; }
     this.spacesApi.getSpaceMeta(spaceId).subscribe({
       next: (meta) => this.store.spaceMeta.set(meta),
       error: () => this.store.spaceMeta.set(null),
