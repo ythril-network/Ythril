@@ -153,6 +153,7 @@ describe('and nothing builds one by hand any more', () => {
     ['files_faceEmbedding', 'the face gallery vector index'],
     ['_swap', "the stand-in NAME a vector index definition is swapped in under (spaces/vector-index.ts `swapNameFor`), appended to an index name, not a collection"],
     ['GIB', 'the tail of a STORAGE_<area>_<tier>_GIB env var name, built the same way and not a collection'],
+    ['abandoned', "the state an act-set report gives a space whose act was abandoned (`${kind}_abandoned` in spaces/act-set-report.ts): the prefix is an act KIND, restore or migrate, never a space id, and the result names no collection"],
     ['filemeta', "the stray collection a 4.0-5.6.1 pull wrote file metadata to; nothing routes it, and only sync/stray-filemeta-drain.ts reads it, to merge it into the space's files and drop it (Q-219)"],
   ]);
 

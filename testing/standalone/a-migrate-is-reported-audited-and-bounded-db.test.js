@@ -45,6 +45,7 @@ import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST } from './_mongo-harness
 import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest } from './_space-act-harness.mjs';
 import { driverWriteFailures, failWrites, holdDocumentLock } from './_write-faults.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -73,15 +74,8 @@ function patchDns() {
   };
 }
 
-/** Bounded by turns of the event loop and a wall clock; THROWS naming `what` when `holds` never answers true. */
-async function until(holds, what, ms = 30_000) {
-  const end = Date.now() + ms;
-  for (let i = 0; Date.now() < end; i++) {
-    if (await holds()) return;
-    await new Promise(resolve => (i % 50 === 49 ? setTimeout(resolve, 15) : setImmediate(resolve)));
-  }
-  throw new Error(`never: ${what}`);
-}
+/** The one wait (`waitFor`), asked every 15 ms: THROWS naming `what` when `holds` never answers true within `ms`. */
+const until = (holds, what, ms = 30_000) => waitFor(holds, ms, 15, undefined, { what });
 
 describe('a migrate is reported, audited and bounded like a restore', { skip }, () => {
   let door, loader, runner, dataRouter, maintenance, audit, fixture, target, postMigrate, faults, lock;
