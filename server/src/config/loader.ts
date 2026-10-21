@@ -343,8 +343,9 @@ function normaliseLoadedConfig(parsed: Config): void {
 }
 
 /**
- * The boot half of the proxy-to-view migration, before it runs: take a copy of the file beside it before the first conversion (the way
- * back to 5.x is that copy). A failure is a NAMED boot error and leaves `config.json` exactly as it was.
+ * The step before every proxy-to-view conversion, at boot (`loadConfig`) and at a reload of a restored 5.x file (`reloadConfig`): take a
+ * copy of the file beside it before the first conversion (the way back to 5.x is that copy). A failure is a NAMED error and leaves
+ * `config.json` exactly as it was; without the step at a reload, the next config write replaced the restored 5.x file with no copy left.
  */
 function backUpBeforeProxyMigration(config: Config): void {
   if (holdsLegacyProxies(config)) {
@@ -512,8 +513,10 @@ export function reloadConfig(): Config {
   normaliseLoadedConfig(parsed);
   validateViews(parsed.views);
   validateOidcBlock(parsed);
-  // A restored 5.x config brings its proxies back as writable spaces unless it is converted here too. Nothing is saved (this function's
-  // contract): the next write, or the next boot, persists the result, and a repeat run is idempotent by origin.
+  // A restored 5.x config brings its proxies back as writable spaces unless it is converted here too. The config is not saved (this
+  // function's contract): the next write, or the next boot, persists the result, so the file is copied aside first, by the step the boot
+  // uses - a throw there refuses the reload and keeps the current config.
+  backUpBeforeProxyMigration(parsed);
   migrateProxiesToViews(parsed);
   // Refresh the EXISTING object in place rather than swapping in a new one.
   //
