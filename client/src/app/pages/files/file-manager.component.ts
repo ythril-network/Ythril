@@ -7,7 +7,7 @@ import { FilePreviewComponent } from './file-preview.component';
 import { UploadQueueComponent, type UploadItem } from './upload-queue.component';
 import type { FileMetaModel } from './file-meta-editor.component';
 import { FileListingComponent, type FileRow } from './file-listing.component';
-import { sortFileEntries } from './file-sort';
+import { sortFileEntries, type FileSortField } from './file-sort';
 import { ViewsStore, injectIsView } from '../../core/views.store';
 import { openSpaceFromLink } from '../../core/space-param';
 import { UnknownSpaceNoticeComponent } from '../../shared/unknown-space-notice.component';
@@ -464,12 +464,12 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   // response (no limit/skip), so this reorders the complete set. The paginated record tabs must sort
   // server-side for exactly the opposite reason — there, a client sort would reorder one page and lie
   // about the rest.
-  sortField = signal<'' | 'name' | 'status' | 'size' | 'modified'>('');
+  sortField = signal<FileSortField>('');
   sortDir = signal<'asc' | 'desc'>('asc');
 
   /** desc -> asc -> unsorted, matching the record tabs' shared header primitive. */
   setSort(field: string): void {
-    const f = field as '' | 'name' | 'status' | 'size' | 'modified';
+    const f = field as FileSortField;
     if (this.sortField() !== f) { this.sortField.set(f); this.sortDir.set('asc'); return; }
     if (this.sortDir() === 'asc') { this.sortDir.set('desc'); return; }
     this.sortField.set('');            // third click clears back to the server's own order
