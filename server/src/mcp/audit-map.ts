@@ -182,6 +182,22 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // already the record of what happened, so an audit entry for reading it would only say that someone looked at a log.
   // The RETRY beside it IS audited, because that one changes the queue.
   list_embed_jobs: null,
+  // Personal views (Q-531). `null` here does NOT mean "not audited" for the acts: `view_create`, `view_update`, `view_delete`,
+  // `view_copy`, `view_claim` and `view_purge_retired` record `VIEW_OPERATIONS` themselves through the shared `auditViewAct`, on
+  // the REST door and this one alike, because the row must carry the owner key and the member COUNT and never the view's name or
+  // members — a shape the generic recorder cannot give. Mapped here, each call would be recorded twice. The four reads
+  // (`view_list`, `view_get`, `view_orphans`, `view_migration`) read the caller's own views or an admin count, and their REST
+  // routes have no audit rule either.
+  view_create: null,
+  view_update: null,
+  view_delete: null,
+  view_copy: null,
+  view_claim: null,
+  view_purge_retired: null,
+  view_list: null,
+  view_get: null,
+  view_orphans: null,
+  view_migration: null,
 };
 
 /**

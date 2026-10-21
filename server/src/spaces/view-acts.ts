@@ -32,6 +32,16 @@ import { VIEW_OPERATIONS } from '../audit/middleware.js';
 import { unknownSpaceSentence } from './unknown-space.js';
 import { dropSpaceData } from './lifecycle.js';
 import { NAME_QUOTED, peerText } from '../util/log.js';
+import { z } from 'zod';
+
+/**
+ * The bounds a view's `members` are held to, on every door: both doors' acts parse with these (a create must send members, an update
+ * may leave them out), and the tools state the same numbers (`view_create`, `view_update`), which `a-tool-and-its-route-agree-on-bounds`
+ * compares. The count is of the list as SENT, as the tool's `maxItems` counts it, so one list is refused or accepted alike whichever
+ * door it came through. Which refusal a list outside them gets is `checkedMembers`'s.
+ */
+export const ViewCreateInput = z.object({ members: z.array(z.string()).min(1).max(MAX_VIEW_MEMBERS) });
+export const ViewUpdateInput = ViewCreateInput.partial();
 
 /** Who is acting: the record that identifies them, and the rights the call is judged by. */
 export interface ViewActor {
@@ -73,15 +83,16 @@ const notFound = (id: string): ViewRefusal => new ViewRefusal('notFound', `View 
  * The members of a new or changed view, checked against what the CALLER may read: a list of distinct space ids, or `['*']`.
  * @throws ViewRefusal for an empty list, a view, an over-long list, a space that does not exist or that the caller cannot read.
  */
-function checkedMembers(raw: unknown, readable: (id: string) => boolean, config: Config): string[] {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.some(m => typeof m !== 'string')) {
+function checkedMembers(raw: unknown, withinBounds: boolean, readable: (id: string) => boolean, config: Config): string[] {
+  if (!withinBounds || !Array.isArray(raw)) {
+    // Over the cap is its own refusal (it says the cap); anything else that is not a non-empty list of strings is a missing list.
+    if (Array.isArray(raw) && raw.length > MAX_VIEW_MEMBERS) {
+      throw new ViewRefusal('tooManyMembers', `A personal view may list at most ${MAX_VIEW_MEMBERS.toLocaleString('en-US').replace(',', ' ')} members; this one lists ${raw.length}. Use ["*"] for every space you can read`, { limit: MAX_VIEW_MEMBERS });
+    }
     throw new ViewRefusal('membersMissing', 'A personal view needs `members`: a list of space ids, or ["*"] for every space you can read');
   }
   const members = [...new Set((raw as string[]).map(m => m.trim()))];
   if (members.some(m => m.length === 0)) throw new ViewRefusal('membersMissing', 'A personal view needs `members`: a list of space ids, or ["*"] for every space you can read');
-  if (members.length > MAX_VIEW_MEMBERS) {
-    throw new ViewRefusal('tooManyMembers', `A personal view may list at most ${MAX_VIEW_MEMBERS.toLocaleString('en-US').replace(',', ' ')} members; this one lists ${members.length}. Use ["*"] for every space you can read`, { limit: MAX_VIEW_MEMBERS });
-  }
   if (members.includes(WILDCARD_MEMBER)) return [WILDCARD_MEMBER];
   for (const m of members) {
     if (isViewId(m)) {
@@ -112,7 +123,7 @@ export function createView(actor: ViewActor, input: { name: unknown; members: un
   let made!: ViewRecord;
   mutateConfig(cfg => {
     const mine = viewsOfOwner(owner, cfg);
-    const members = checkedMembers(input.members, id => reaches(actor.rights, id), cfg);
+    const members = checkedMembers(input.members, ViewCreateInput.safeParse({ members: input.members }).success, id => reaches(actor.rights, id), cfg);
     if (mine.some(v => v.name === name)) throw new ViewRefusal('nameTaken', `You already have a view named '${name}'`);
     if (mine.length >= MAX_VIEWS_PER_OWNER) throw tooManyViews();
     made = { id: `@${name}`, name, ownerId: owner, members, createdAt: new Date().toISOString() };
@@ -135,7 +146,9 @@ export function updateView(actor: ViewActor, id: string, input: { name?: unknown
       view.name = name;
       view.id = `@${name}`;
     }
-    if (input.members !== undefined) view.members = checkedMembers(input.members, m => reaches(actor.rights, m), cfg);
+    if (input.members !== undefined) {
+      view.members = checkedMembers(input.members, ViewUpdateInput.safeParse({ members: input.members }).success, m => reaches(actor.rights, m), cfg);
+    }
     updated = view;
   });
   return { view: viewAnswer(actor, updated), ownerKey: owner, memberCount: updated.members.length };

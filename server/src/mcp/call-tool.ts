@@ -114,6 +114,16 @@ function isSpaceActFailure(result: { structuredContent?: Record<string, unknown>
 }
 
 /**
+ * A result of a read through a personal view, carrying the members it read in `structuredContent`, where both doors read it (every
+ * successful tool answer carries one: `a-tool-answer-reaches-both-halves`). A SUCCESS decoration, not an error classification, so it
+ * stands above the dispatch and outside the catch that `mcp-structured-errors` holds to "no key without a classification".
+ */
+function announceViewMembers(result: ToolResult, spaces: readonly string[] | undefined): ToolResult {
+  if (!spaces) return result;
+  return { ...result, structuredContent: { ...(result.structuredContent ?? {}), viewMembers: [...spaces] } };
+}
+
+/**
  * A refusal, with the status the REST door should use. Prose is identical on both doors, by construction. `structuredContent` is the
  * body a refusal carries beside its prose — the judge's `{ error, issues, warnings }` — so a client that reads that half and not the
  * text sees the same refusal.
@@ -588,15 +598,6 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     }
     return withUnknownFieldRows(answer, rows);
   }
-}
-
-/**
- * A result of a read through a personal view, carrying the members it read in `structuredContent`, where both doors read it (every
- * successful tool answer carries one: `a-tool-answer-reaches-both-halves`).
- */
-function announceViewMembers(result: ToolResult, spaces: readonly string[] | undefined): ToolResult {
-  if (!spaces) return result;
-  return { ...result, structuredContent: { ...(result.structuredContent ?? {}), viewMembers: [...spaces] } };
 }
 
 /**

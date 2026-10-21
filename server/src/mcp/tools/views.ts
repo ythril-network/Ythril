@@ -20,7 +20,7 @@ import { isMfaEnabled } from '../../auth/totp.js';
 import { ToolRefusal } from '../../util/errors.js';
 
 const json = (data: Record<string, unknown>, text?: string): ToolResult => ({
-  content: [{ type: 'text' as const, text: text ?? JSON.stringify(data, null, 2) }],
+  content: [{ type: 'text' as const, text: text ?? JSON.stringify(data) }],
   structuredContent: data,
 });
 
@@ -63,10 +63,10 @@ export const view_listTool: ToolHandler = {
   ownerScoped: true,
   description: 'List YOUR personal views: each with the spaces it lists (`members`) and the ones you can read now (`readable`). A personal view is a '
     + 'named read lens over spaces you read, owned by your token alone; pass its id ("@name") as `space` to a read tool to read through it. It never writes.',
-  inputSchema: () => ({ type: 'object', properties: {}, additionalProperties: false }),
+  inputSchema: () => ({ type: 'object', properties: {}, required: [], additionalProperties: false }),
   handle: async (ctx) => answering(async () => {
     const views = listOwnViews(actorOf(ctx));
-    return json({ views }, `${views.length} personal view(s).\n${JSON.stringify(views, null, 2)}`);
+    return json({ views }, `${views.length} personal view(s).\n${JSON.stringify(views)}`);
   }),
 };
 
@@ -88,7 +88,7 @@ export const view_createTool: ToolHandler = {
   handle: async (ctx) => answering(async () => {
     const made = createView(actorOf(ctx), { name: ctx.args['name'], members: ctx.args['members'] });
     await auditViewAct(doorOf(ctx), VIEW_OPERATIONS.created, made);
-    return json({ view: made.view }, `Created personal view ${made.view.id}.\n${JSON.stringify(made.view, null, 2)}`);
+    return json({ view: made.view }, `Created personal view ${made.view.id}.\n${JSON.stringify(made.view)}`);
   }),
 };
 
@@ -109,7 +109,7 @@ export const view_updateTool: ToolHandler = {
   handle: async (ctx) => answering(async () => {
     const changed = updateView(actorOf(ctx), String(ctx.args['view'] ?? ''), { name: ctx.args['name'], members: ctx.args['members'] });
     await auditViewAct(doorOf(ctx), VIEW_OPERATIONS.updated, changed);
-    return json({ view: changed.view }, `Updated personal view ${changed.view.id}.\n${JSON.stringify(changed.view, null, 2)}`);
+    return json({ view: changed.view }, `Updated personal view ${changed.view.id}.\n${JSON.stringify(changed.view)}`);
   }),
 };
 
@@ -161,7 +161,7 @@ export const view_orphansTool: ToolHandler = {
   name: 'view_orphans',
   admin: true,
   description: 'Instance admin: count the personal views whose owner holds no token, per owner kind (`token`, `oauth`). Names no view and no owner.',
-  inputSchema: () => ({ type: 'object', properties: {}, additionalProperties: false }),
+  inputSchema: () => ({ type: 'object', properties: {}, required: [], additionalProperties: false }),
   handle: async () => answering(() => {
     return json({ ...orphanAnswer() });
   }),
@@ -171,7 +171,7 @@ export const view_claimTool: ToolHandler = {
   name: 'view_claim',
   admin: true,
   description: 'Instance admin: copy an unclaimed view (a migrated definition no admin token could own at the upgrade) to YOUR token, with the members the definition had.',
-  inputSchema: () => ({ type: 'object', properties: { name: { type: 'string', description: 'The unclaimed view\'s name.' } }, required: ['name'], additionalProperties: false }),
+  inputSchema: () => ({ type: 'object', properties: { name: { type: 'string', description: 'The name of a migrated view no owner has claimed yet, as `view_orphans` lists it; you become its owner.' } }, required: ['name'], additionalProperties: false }),
   handle: async (ctx) => answering(async () => {
     const claimed = claimUnclaimedView(actorOf(ctx), ctx.args['name']);
     await auditViewAct(doorOf(ctx), VIEW_OPERATIONS.claimed, claimed);
@@ -205,7 +205,7 @@ export const view_migrationTool: ToolHandler = {
   name: 'view_migration',
   admin: true,
   description: 'Instance admin: what the 6.0 upgrade did to the old shared groupings of spaces: the report, the unclaimed view definitions and the retired space ids still reserved.',
-  inputSchema: () => ({ type: 'object', properties: {}, additionalProperties: false }),
+  inputSchema: () => ({ type: 'object', properties: {}, required: [], additionalProperties: false }),
   handle: async () => answering(() => json(viewsMigrationReport())),
 };
 
@@ -216,6 +216,6 @@ export const view_getTool: ToolHandler = {
   inputSchema: () => ({ type: 'object', properties: { view: viewProp }, required: ['view'], additionalProperties: false }),
   handle: async (ctx) => answering(async () => {
     const view = getOwnView(actorOf(ctx), String(ctx.args['view'] ?? ''));
-    return json({ view }, JSON.stringify(view, null, 2));
+    return json({ view }, JSON.stringify(view));
   }),
 };

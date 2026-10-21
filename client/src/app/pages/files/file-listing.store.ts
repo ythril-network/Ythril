@@ -36,6 +36,8 @@ const CONFIRM_REQUIRED = 'confirm_required';
  */
 export const FILE_REFUSALS_WITH_REMEDY: ReadonlySet<string> = new Set([
   'path_blocked', 'destination_exists', DESTINATION_HELD, CONFIRM_REQUIRED, 'act_not_recorded', 'file_system_fault',
+  // Q-531: the space id is a retired proxy id (410); the sentence tells the operator to ask the instance admin, so it stays.
+  'space_retired',
 ]);
 
 /**
