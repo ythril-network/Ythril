@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { bulkWrite, bulkWriteTotal, bulkSizeRefusal, bulkBodyRefusal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
+import { bulkWrite, bulkWriteTotal, bulkBatchRefusal, bulkBodyRefusal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
 import { getConfig } from '../../config/loader.js';
 import { resolveWriteTarget } from '../../spaces/proxy.js';
 import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
@@ -52,8 +52,8 @@ bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, deny
   const refusal = bulkBodyRefusal(body, new Set(BULK_BODY_KEYS));
   if (refusal) { res.status(400).json(refusal); return; }
 
-  const tooLarge = bulkSizeRefusal(body);
-  if (tooLarge) { res.status(400).json({ error: tooLarge }); return; }
+  const batchRefused = bulkBatchRefusal(body);
+  if (batchRefused) { res.status(400).json({ error: batchRefused }); return; }
 
   const result = await bulkWrite(targetSpace, {
     ...(body as BulkInput),

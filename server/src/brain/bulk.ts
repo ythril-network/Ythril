@@ -45,6 +45,7 @@ import { REF_KINDS, isRefKind } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { MAX_FACT_LENGTH } from '../util/request-bounds.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
+import { RequestRefusal } from '../util/errors.js';
 import { unknownBodyFields } from './query.js';
 // TYPES ONLY, on purpose: the judge (`bulk-unknown-fields.ts`) is loaded inside `bulkWrite`, and nothing here may import
 // `contract/write-accepts.ts` at module load — see the comment at that `import()`.
@@ -208,6 +209,35 @@ export function bulkSizeRefusal(input: Record<string, unknown>): string | null {
 }
 
 /**
+ * Why an ITEM of this batch is not an item, or `null`: every element of a record array is a JSON object.
+ *
+ * ## What it prevents
+ *
+ * `save_bulk` skips schema validation so it can report per-item errors, which left the SHAPE of an item to the writer. A `null` item
+ * threw a `TypeError` inside `prepareItems` (`item['fact']`), a server fault the caller had caused: answered `400` while every thrown
+ * failure was a refusal, `500` now that a `TypeError` is a fault. A number, a string or an array did not throw and was answered as a
+ * batch that wrote nothing, with no row naming the item. Refused whole and before the first write, as an oversized array is, so there is
+ * no half-applied batch.
+ */
+export function bulkItemsRefusal(input: Record<string, unknown>): string | null {
+  for (const key of BULK_BODY_KEYS) {
+    const items = input[key];
+    if (!Array.isArray(items)) continue;
+    const at = items.findIndex(item => typeof item !== 'object' || item === null || Array.isArray(item));
+    if (at >= 0) return `\`${key}[${at}]\` is not an object; every item of a bulk write is a JSON object`;
+  }
+  return null;
+}
+
+/**
+ * Why this BATCH is refused before anything is read or written, or `null`: its size (`bulkSizeRefusal`) and the shape of its items
+ * (`bulkItemsRefusal`). The one question the REST route and the writer both ask, so neither can drop one half.
+ */
+export function bulkBatchRefusal(input: Record<string, unknown>): string | null {
+  return bulkSizeRefusal(input) ?? bulkItemsRefusal(input);
+}
+
+/**
  * Why this ITEM's own `link*` and `edges` fields cannot be honoured, or `null` (`Q-44`).
  *
  * Everything but the first line is `connectionInputError`, the one module every single-record door already
@@ -268,8 +298,8 @@ export async function bulkWrite(
   /** Which door asked — only the label the unknown-field count carries (`REST` unless a tool says otherwise). */
   door: WriteDoor = 'rest',
 ): Promise<BulkResult> {
-  const tooLarge = bulkSizeRefusal(input as unknown as Record<string, unknown>);
-  if (tooLarge) throw new Error(tooLarge);
+  const refused = bulkBatchRefusal(input as unknown as Record<string, unknown>);
+  if (refused) throw new RequestRefusal(refused);
   const metaRaw = getConfig().spaces.find(s => s.id === spaceId)?.meta;
   const meta = metaRaw ? resolveMetaRefs(metaRaw) : undefined;
   const strict = isStrictLinkage(spaceId);

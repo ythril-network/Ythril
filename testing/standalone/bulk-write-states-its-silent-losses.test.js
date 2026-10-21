@@ -64,7 +64,9 @@ describe('the 500 cap is described as the refusal it is', () => {
     assert.match(CORE, /export const BULK_MAX_PER_TYPE = 500/, 'the cap');
     const sig = 'export async function bulkWrite(';
     const writer = CORE.slice(CORE.indexOf(sig) + sig.length);
-    const check = writer.indexOf('bulkSizeRefusal(');
+    // The writer asks `bulkBatchRefusal` (the size cap and the item shape in one question); it must still hold the cap.
+    assert.match(CORE.slice(CORE.indexOf('export function bulkBatchRefusal(')), /^[^}]*bulkSizeRefusal\(/, 'bulkBatchRefusal no longer asks the size cap');
+    const check = writer.indexOf('bulkBatchRefusal(');
     const firstWrite = writer.search(/insertOne|insertMany|upsert|bulkWrite\(/);
     assert.ok(check > 0 && (firstWrite < 0 || check < firstWrite), 'bulkWrite no longer refuses before it writes');
     assert.doesNotMatch(CORE, /\.slice\(0, BULK_MAX_PER_TYPE\)/, 'the silent slice is back');
