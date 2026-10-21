@@ -1,6 +1,6 @@
 /**
- * Every reader that pages local records by seq builds its position through ONE module, `util/seq-keyset.ts`
- * (bundle-52, Q-277).
+ * Every place server code orders or ranges by `seq` builds its position through ONE module, `util/seq-keyset.ts`
+ * (bundle-52, Q-277), or is named here with the reason it is not a position reader (Q-435, bundle-157).
  *
  * ## The rule, and the defect it ends
  *
@@ -14,20 +14,38 @@
  * `SEQ_KEYSET_SORT`, the indexes are `SEQ_KEYSET_INDEXES`, and the horizon (`settledSeqRange`) is applied inside the
  * module and nowhere else.
  *
- * ## How the set of readers is found (and why it does not ask module A)
+ * ## How the set is found (and why it is not a list of shapes)
  *
- * A gate that asked "who imports the module" would never see the reader that did not. So the readers are found by the
- * SHAPES a seq-ordered read has always had, read out of every tracked source: a `.sort({ ... seq ...})`, a `seq: { $gt|$gte }`, a use
- * of `settledSeqRange`. (`$lt|$lte` on seq are not detectors: they are write guards and keyed lookups — `upsert-plan.ts`,
- * `push-reads.ts` — and a delete below an acknowledged floor, `tombstone-prune.ts`; none of them pages.) Those are the detectors; the import of the module is only the thing each found reader is then
- * asked to have. The union with the importers keeps the floor honest after the change, when the old shapes are gone and
- * the importers are what is left.
+ * This gate's title said "every" and its body read four regular expressions. It missed a ternary
+ * (`brain/edges.ts`: `.sort(sort ? toMongoSort(sort) : { seq: -1, ... })`) and a constant that reaches `.sort` through a default
+ * parameter (`DEFAULT_QUERY_SORT`, declared in `brain/query.ts`, defaulted into `queryBrain`, imported by `mcp/tools/filter.ts`
+ * and passed on) — both seq orderings, neither a shape. Bundle 81 moves paging from seq to a holder position, and a gate that
+ * cannot see a reader cannot hold it to the move (CLAUDE.md, "A gate concludes about MORE than it checks").
+ *
+ * So the set is read from the TYPE-CHECKED program (`_seq-orderings.mjs`, over `_shared/server-program.mjs`): every SLOT a value
+ * is ordered by (a `.sort` argument on a non-array, a `sort` / `$sort` / `sortBy` property, a parameter declared `sort`, its default
+ * and the argument at each call it is bound at), each resolved back to the literal it came from; plus every range on seq.
+ * What it cannot resolve it reports as `unresolved`, and an unresolved slot FAILS unless it is named below. Nothing is dropped.
+ *
+ * ## What is allowed, by ORIGIN and not by file
+ *
+ * An ordering or range is allowed when its literal is DECLARED in `util/seq-keyset.ts` (the checker's resolution of the value says
+ * where it was written, not which file imports the module: `tombstone-store.ts` imports the module for `isoKeysetSort`, and that must
+ * not excuse a hand-written seq sort beside it). Anything else is a named exemption below, keyed by file and enclosing function,
+ * each with a reason and, where the reason is checkable, a check that holds the code to it.
  *
  * ## Exemptions, each with its reason
  *
- * - a newest-first sort capped by a limit: `highestStoredSeq`'s `sort({ seq: -1 }).limit(1)` and the fresh-writes window
- *   (`$sort: { seq: -1 }, $limit`, `brain/fresh-writes.ts`). A maximum or a window, not a position: there is no next page.
- * - a sort whose LAST key is `_id`, in a file that does not import the module: a total order is not a position reader.
+ * - `highestStoredSeq`: `sort({ seq: -1 }).limit(1)`, the MAXIMUM. The check asks for the `limit(1)` on the chain itself, not for
+ *   "a limit somewhere in the statement" (which a hand-written position read also has).
+ * - `matchFreshWrites`: `$sort { seq: -1 }` followed by `$limit`, a newest window. The check asks for the `$limit` stage after it.
+ * - the listings (`listEdges`, `queryBrain`, the query tool's `handle`, `compareQueryOrder`): the default order is a TOTAL order that
+ *   ends in `_id` and is paged by `skip`, so no page is a position and a tie cannot lose a row. The check asks that the literal ends
+ *   in `_id`, and that a read's chain has the `skip`.
+ * - `toMongoSort`: the sort key is the caller's field, a computed key. It is safe while `SORTABLE_FIELDS` has no `seq`, which a
+ *   sibling test asserts, so the key can never be one.
+ * - ranges that are not pages: the write guard (`seqGuard`) and three deletes below a bound (`deleteSupersededTombstones`,
+ *   `applyPeerTombstones`, `pruneTombstonesToFloor`). The check asks that the three are arguments of a `deleteMany`.
  *
  * Run: node --test testing/standalone/every-seq-paged-reader-goes-through-the-keyset.test.js
  */
@@ -35,89 +53,157 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { statementAround } from './_structural-window.mjs';
+import { KEYSET_FILE, seqOrderings } from './_seq-orderings.mjs';
+import { serverProgram } from '../_shared/server-program.mjs';
+import { ts, walkEveryNode } from '../_shared/syntax-tree.mjs';
 
-const KEYSET = 'server/src/util/seq-keyset.ts';
+const KEYSET = KEYSET_FILE;
 const SEQ_UTIL = 'server/src/util/seq.ts';
-/** A file the KEYSET module is imported by, however it spells the path. */
-const IMPORTS_KEYSET = /\bfrom\s+['"][^'"]*\bseq-keyset\.js['"]/;
-
-/**
- * The shapes of a seq-ordered read. Each is checked against a sample below, so a detector that rots into matching
- * nothing fails its own rule and not silently every rule that uses it.
- */
-const DETECTORS = [
-  { name: 'a sort that names seq', re: /\.sort\(\s*(\{[^}]*\bseq\s*:[^}]*\})/g, sample: 'x.find(f).sort({ seq: 1 }).limit(5)' },
-  { name: 'a sort option that names seq', re: /\bsort\s*:\s*(\{[^}]*\bseq\s*:[^}]*\})/g, sample: 'find(f, { sort: { seq: 1, _id: 1 } })' },
-  { name: 'a hand-built seq range', re: /\bseq\s*:\s*\{\s*\$(?:gt|gte)\b/g, sample: 'find({ seq: { $gt: n } })' },
-  { name: 'the settled-seq horizon', re: /\bsettledSeqRange\b/g, sample: 'seq: await settledSeqRange(spaceId, since)' },
-];
 
 const sources = readTrackedSources('server/src', { specs: false }).map(s => ({ file: s.file, text: stripComments(s.text) }));
 const byFile = new Map(sources.map(s => [s.file, s]));
 
-/** Every site: where it is, which detector found it, and the object a sort names. */
-function sitesOf({ file, text }) {
-  const out = [];
-  for (const d of DETECTORS) {
-    for (const m of text.matchAll(d.re)) out.push({ file, detector: d.name, index: m.index, object: m[1] });
-  }
-  return out;
+const { entries, slotCount } = seqOrderings();
+const byKind = (kind) => entries.filter(e => e.kind === kind);
+
+/** A literal that ends in `_id` orders totally: no two rows tie, so a page by `skip` cannot lose or repeat one. */
+const endsInId = (e) => (e.keys.at(-1) === '_id' ? null : `its literal (${e.literalAt}) ends in \`${e.keys.at(-1)}\`, not \`_id\`: the order is not total`);
+const pagedBySkip = (e) => (e.slot === '.sort(argument)' && !e.after.some(a => a.startsWith('skip(')) ? 'the read it sorts is not paged by `skip`' : null);
+/** The ordering is the one named constant, so a second, hand-written ordering in the same function is not excused by it. */
+const viaConstant = (name) => (e) => (e.via.includes(name) ? null : `the ordering is not ${name} (it is the literal at ${e.literalAt}): the exemption is for that one value`);
+const exactly = (...keys) => (e) => (e.keys.join(',') === keys.join(',') ? null : `the literal at ${e.literalAt} is [${e.keys.join(', ')}], not [${keys.join(', ')}]: the exemption is for that one order`);
+const allOf = (...checks) => (e) => checks.reduce((failure, c) => failure ?? c(e), null);
+const inDelete = (e) => (e.inCalls.includes('deleteMany') ? null : `the range is not an argument of a \`deleteMany\` (inside ${e.inCalls.join(', ') || 'nothing'})`);
+
+/**
+ * Orderings, ranges and unresolved slots that are not the keyset module's, each with why it is not a position reader.
+ *
+ * `by: 'slot'` keys on where the value is ORDERED by, `by: 'origin'` on where the literal or the unresolvable thing is written (one
+ * `toMongoSort` is the origin of six slots, and naming it once is the honest count). `holds` returns a failure sentence, or `null`.
+ */
+const EXEMPT = [
+  {
+    file: SEQ_UTIL, fn: 'highestStoredSeq', kind: 'ordering', by: 'slot',
+    why: 'the maximum stored seq: a newest-first sort capped at one row, so there is no next page and a tie cannot lose a record a later page would serve',
+    holds: (e) => (e.after.includes('limit(1)') ? null : `the chain after the sort is [${e.after.join(', ')}], with no limit(1): it is a read, not a maximum`),
+  },
+  {
+    file: 'server/src/brain/fresh-writes.ts', fn: 'matchFreshWrites', kind: 'ordering', by: 'slot',
+    why: 'the newest-writes window: `$sort { seq: -1 }` then `$limit`, a bounded window, not a position, so there is no next page',
+    holds: (e) => (e.after.includes('$limit') ? null : `the stages after the $sort are [${e.after.join(', ')}], with no $limit`),
+  },
+  {
+    file: 'server/src/brain/edges.ts', fn: 'listEdges', kind: 'ordering', by: 'slot',
+    why: 'the edges listing\'s default order: a total order (ends in `_id`) paged by `skip`, for a user listing, not a position',
+    holds: allOf(exactly('seq', 'createdAt', '_id'), endsInId, pagedBySkip),
+  },
+  {
+    file: 'server/src/brain/query.ts', fn: 'queryBrain', kind: 'ordering', by: 'slot',
+    why: 'the structured query\'s default order, DEFAULT_QUERY_SORT: a total order (ends in `_id`) paged by `skip`, for a user listing, not a position',
+    holds: allOf(viaConstant('DEFAULT_QUERY_SORT'), endsInId, pagedBySkip),
+  },
+  {
+    file: 'server/src/brain/query.ts', fn: '<module>', kind: 'ordering', by: 'slot',
+    why: 'compareQueryOrder: the same default order as an in-memory comparator for merging a proxy space\'s members; a total order, not a read',
+    holds: allOf(viaConstant('DEFAULT_QUERY_SORT'), endsInId),
+  },
+  {
+    file: 'server/src/mcp/tools/filter.ts', fn: 'handle', kind: 'ordering', by: 'slot',
+    why: 'the query tool hands DEFAULT_QUERY_SORT to queryBrain and to the merge comparator: the same total order, paged by `skip`',
+    holds: allOf(viaConstant('DEFAULT_QUERY_SORT'), endsInId),
+  },
+  {
+    file: 'server/src/brain/list-sort.ts', fn: 'toMongoSort', kind: 'unresolved', by: 'origin',
+    why: 'the key is the caller\'s `sort.field`, validated by `parseSortParam` against `SORTABLE_FIELDS`, which names no `seq` (asserted below), and `_id` is appended so the order is total',
+    holds: (e) => (e.keys.at(-1) === '_id' ? null : 'toMongoSort no longer ends its sort in `_id`'),
+  },
+  {
+    file: 'server/src/sync/upsert-plan.ts', fn: 'seqGuard', kind: 'range', by: 'slot',
+    why: 'the write guard: a stored copy BELOW the arriving seq may be replaced. A condition on a write, not a read that pages',
+  },
+  {
+    file: 'server/src/sync/push-reads.ts', fn: 'deleteSupersededTombstones', kind: 'range', by: 'slot',
+    why: 'a delete of the tombstones a record has superseded, each below its own seq: no read is paged by it',
+    holds: inDelete,
+  },
+  {
+    file: 'server/src/sync/tombstone-apply.ts', fn: 'applyPeerTombstones', kind: 'range', by: 'slot',
+    why: 'a delete of rows at or below the seq the peer tombstone carries, row by row: no read is paged by it',
+    holds: inDelete,
+  },
+  {
+    file: 'server/src/brain/tombstone-prune.ts', fn: 'pruneTombstonesToFloor', kind: 'range', by: 'slot',
+    why: 'the prune: delete every tombstone at or below the floor every peer has acknowledged. A delete by bound, not a read',
+    holds: inDelete,
+  },
+];
+
+const exemptionFor = (e) => EXEMPT.find(x => x.kind === e.kind
+  && (x.by === 'slot' ? x.file === e.file && x.fn === e.function : x.file === e.origin && x.fn === e.originFunction));
+
+/** The verdict on one entry: `{ ok: true, why }`, or `{ ok: false, problem }`. */
+function verdict(e) {
+  if (e.kind !== 'unresolved' && e.origin === KEYSET) return { ok: true, why: 'declared in the keyset module' };
+  const x = exemptionFor(e);
+  if (!x) return { ok: false, problem: `${e.kind} at ${e.file}:${e.line} in ${e.function} (${e.slot ?? e.why}); the literal is at ${e.literalAt}${e.via.length ? ` via ${e.via.join(' > ')}` : ''}${e.kind === 'unresolved' ? ` — ${e.why}` : ''}` };
+  const failure = x.holds?.(e) ?? null;
+  return failure ? { ok: false, problem: `${e.file}:${e.line} in ${e.function} is exempt as "${x.why}", and ${failure}` } : { ok: true, why: x.why };
 }
 
-/** The reason a site is exempt, or `null`. The statements it asks about are bounded structurally (`_structural-window.mjs`). */
-function exemption(site, importsKeyset) {
-  const text = byFile.get(site.file).text;
-  // Newest first and capped: `highestStoredSeq` (`.sort({ seq: -1 }).limit(1)`) and the fresh-writes window
-  // (`$sort: { seq: -1 }, $limit`). There is no next page, so a tie at the cut cannot lose what a later page would serve.
-  if (/\bseq\s*:\s*-1\b/.test(site.object)
-    && /\$?\blimit\b/.test(statementAround(text, site.index, `${site.file} newest-first read`))) {
-    return 'a newest-first read capped by a limit (highestStoredSeq, the fresh-writes window): a maximum, not a position, so a tie cannot lose a record a later page would serve';
-  }
-  if (site.file === SEQ_UTIL && site.detector === 'the settled-seq horizon' && /function\s+$/.test(text.slice(0, site.index))) {
-    return 'the definition of the horizon; the keyset module is its only caller';
-  }
-  if (site.detector.startsWith('a sort') && !importsKeyset) {
-    const keys = site.object.replace(/[{}]/g, '').split(',').map(k => k.trim()).filter(Boolean);
-    if (keys.length > 1 && /^_id\b/.test(keys[keys.length - 1])) return 'a sort that ends in _id is a total order, not a position reader';
-  }
-  return null;
-}
-
-const readers = sources
-  .filter(s => s.file !== KEYSET)
-  .map(s => ({ ...s, importsKeyset: IMPORTS_KEYSET.test(s.text) }))
-  .map(s => ({ ...s, sites: sitesOf(s).map(site => ({ ...site, exempt: exemption(site, s.importsKeyset) })) }))
-  .filter(s => s.importsKeyset || s.sites.length > 0);
-
-/** Files that are a reader at all: some site that is not exempt, or an importer of the module. */
-const readerFiles = readers.filter(s => s.importsKeyset || s.sites.some(x => x.exempt === null));
-const locate = (file, index) => {
-  const text = byFile.get(file).text;
-  return `${file}:${text.slice(0, index).split('\n').length}`;
-};
-
-describe('the readers are derived from the code, and the derivation sees what it claims to', () => {
-  it('every detector matches its own sample, so a rotted pattern fails here and not as a silent pass everywhere', () => {
-    for (const d of DETECTORS) {
-      d.re.lastIndex = 0;
-      assert.ok(d.re.test(d.sample), `the detector for ${d.name} matches nothing it was written for`);
-      d.re.lastIndex = 0;
-    }
-    assert.ok(!/\bseq\s*:\s*\{\s*\$(?:gt|gte)\b/.test('originalSeq: { $gt: 1 }'), 'originalSeq is not seq');
+describe('the orderings are derived from the type-checked program, and the derivation sees what it claims to', () => {
+  it('finds slots, orderings and ranges above a floor, so a broken checker cannot pass by finding none', () => {
+    // Today: 62 slots, 10 orderings, 6 ranges (and 6 unresolved, all `toMongoSort`). The floors sit under them with room for a cleanup.
+    assert.ok(slotCount >= 40, `only ${slotCount} ordering slots found: the slot walk has stopped matching`);
+    assert.ok(byKind('ordering').length >= 8, `only ${byKind('ordering').length} seq orderings resolved: a resolver step broke`);
+    assert.ok(byKind('range').length >= 5, `only ${byKind('range').length} seq ranges found: the range walk broke`);
+    assert.ok(byKind('ordering').some(e => e.origin === KEYSET), 'no ordering resolves to a literal in the keyset module (SEQ_KEYSET_SORT is one)');
   });
 
-  it('finds at least five reader files (floor), and the tracked listing is a real one', () => {
-    assert.ok(sources.length >= 100, `only ${sources.length} sources listed`);
-    assert.ok(DETECTORS.length >= 4);
-    assert.ok(readerFiles.length >= 5,
-      `only ${readerFiles.length} seq-ordered reader file(s) found: ${readerFiles.map(r => r.file).join(', ')}. `
-      + 'The record routes, the push, the tombstone read and the two scanners are all readers; fewer means the derivation broke.');
+  it('sees the three spellings the regex gate missed: the edges ternary, DEFAULT_QUERY_SORT through the default parameter, and its use in the query tool', () => {
+    const ternary = entries.find(e => e.kind === 'ordering' && e.file === 'server/src/brain/edges.ts' && e.function === 'listEdges');
+    assert.ok(ternary, 'the `sort ? toMongoSort(sort) : { seq: -1, ... }` ternary in listEdges is not found');
+    const viaDefault = entries.filter(e => e.kind === 'ordering' && e.file === 'server/src/brain/query.ts' && e.function === 'queryBrain' && e.via.includes('DEFAULT_QUERY_SORT'));
+    assert.ok(viaDefault.some(e => e.slot.startsWith('the default of parameter')), 'DEFAULT_QUERY_SORT as the default of queryBrain\'s `sort` parameter is not found');
+    assert.ok(viaDefault.some(e => e.slot === '.sort(argument)'), 'the `.sort(sort)` in queryBrain is not traced back to DEFAULT_QUERY_SORT through the default parameter');
+    const imported = entries.filter(e => e.kind === 'ordering' && e.file === 'server/src/mcp/tools/filter.ts' && e.via.includes('DEFAULT_QUERY_SORT'));
+    assert.ok(imported.length >= 1, 'the query tool\'s use of the imported DEFAULT_QUERY_SORT is not found');
+    assert.ok(imported.every(e => e.origin === 'server/src/brain/query.ts'), 'the imported constant is not resolved to its declaration in brain/query.ts');
   });
 
-  it('every exemption that was taken still names a real site (a stale exemption exempts nothing and says so)', () => {
-    const used = readers.flatMap(r => r.sites).filter(s => s.exempt !== null);
-    assert.ok(used.length >= 1, 'highestStoredSeq is an exempt site today; none found means the exemption or the code moved');
+  it('resolves a computed key to `unresolved` rather than dropping it (toMongoSort is the one today)', () => {
+    const unresolved = byKind('unresolved');
+    assert.ok(unresolved.length >= 1, 'no unresolved slot: toMongoSort\'s computed `[sort.field]` key is no longer reported, so the fail-closed path is not exercised');
+    assert.ok(unresolved.every(e => e.origin === 'server/src/brain/list-sort.ts' && e.originFunction === 'toMongoSort'),
+      `an unresolved slot that is not toMongoSort: ${unresolved.filter(e => e.originFunction !== 'toMongoSort').map(e => `${e.file}:${e.line}`).join(', ')}`);
+  });
+});
+
+describe('every ordering and range on seq is the keyset module\'s, or named with its reason', () => {
+  it('each one resolves to a literal declared in util/seq-keyset.ts, or to a named exemption whose check holds', () => {
+    const problems = entries.map(verdict).filter(v => !v.ok).map(v => v.problem);
+    assert.deepEqual(problems, [],
+      'these order or range by seq without the keyset module. A position is the pair (seq, _id) built by `seqKeysetFilters` and `SEQ_KEYSET_SORT`; '
+      + 'a sort on seq alone orders a tie by whatever the storage engine likes, so the next page cannot continue it. If it is a maximum, a window, '
+      + 'a total order paged by skip, or a delete by bound, name it in EXEMPT with the reason and the check that holds the code to it:');
+  });
+
+  it('every exemption still names a real site (a stale exemption exempts nothing and says so)', () => {
+    const stale = EXEMPT.filter(x => !entries.some(e => exemptionFor(e) === x)).map(x => `${x.file}:${x.fn} (${x.kind})`);
+    assert.deepEqual(stale, [], 'these exemptions match no ordering, range or unresolved slot any more: delete them, or the code moved');
+  });
+
+  it('toMongoSort\'s computed key can never be seq: SORTABLE_FIELDS names no `seq`', () => {
+    const sf = serverProgram().sourceOf.get('server/src/brain/list-sort.ts');
+    assert.ok(sf, 'brain/list-sort.ts is not in the server program');
+    const names = [];
+    walkEveryNode(sf, (n) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'SORTABLE_FIELDS' && n.initializer) {
+        walkEveryNode(n.initializer, (m) => { if (ts.isStringLiteralLike(m)) names.push(m.text); });
+      }
+    });
+    assert.ok(names.length >= 15, `only ${names.length} sortable field names read from SORTABLE_FIELDS: the declaration moved or changed shape`);
+    assert.ok(names.includes('createdAt'), 'SORTABLE_FIELDS does not name createdAt: the read found something else');
+    assert.ok(!names.includes('seq'), 'SORTABLE_FIELDS names `seq`: toMongoSort would then order a user listing by seq alone, and its exemption is gone');
   });
 });
 
@@ -144,54 +230,37 @@ describe('module A is the one place a seq position is built', () => {
       assert.ok(helper, 'db/and-predicates.ts is not tracked: the keyset module delegates the intersection to it');
       assert.match(helper.text, /\{\s*\$and\s*:/, 'andPredicates no longer builds an $and, so the keyset filters are no longer an intersection');
     }
-    for (const r of readers) {
-      const spread = r.text.match(/seqKeysetFilters\s*\([^;]*\.\.\./);
-      assert.equal(spread, null, `${r.file} spreads into a seqKeysetFilters call`);
+    for (const s of sources) {
+      const spread = s.text.match(/seqKeysetFilters\s*\([^;]*\.\.\./);
+      assert.equal(spread, null, `${s.file} spreads into a seqKeysetFilters call`);
     }
   });
 });
 
-describe('every seq-ordered reader goes through it', () => {
-  it('each reader file imports the keyset module', () => {
-    assert.ok(readerFiles.length >= 5, 'floor: see above');
-    const without = readerFiles.filter(r => !r.importsKeyset)
-      .map(r => `${r.file} (${[...new Set(r.sites.filter(s => s.exempt === null).map(s => s.detector))].join(', ')})`);
-    assert.deepEqual(without, [], 'these read local records in seq order and build their own position:');
-  });
-
-  it('no reader builds a forward seq range by hand: not `seq: { $gt|$gte }`, anywhere in server/src (green at base: the shape arrives only by regression)', () => {
-    const hand = readers.flatMap(r => r.sites)
-      .filter(s => s.detector === 'a hand-built seq range' && s.exempt === null)
-      .map(s => locate(s.file, s.index));
-    assert.deepEqual(hand, [], 'a position written by hand is the defect: it is `>` where a tie needs the pair');
-  });
-
+describe('the horizon and the filters have one caller', () => {
   it('`settledSeqRange` has no caller outside the keyset module: the horizon is applied in one place', () => {
-    const callers = readers.flatMap(r => r.sites)
-      .filter(s => s.detector === 'the settled-seq horizon' && s.exempt === null)
-      .map(s => locate(s.file, s.index));
-    assert.deepEqual(callers, []);
-  });
-
-  it('no reader sorts by seq on its own: the sort is SEQ_KEYSET_SORT, which ends in _id', () => {
-    const own = readers.flatMap(r => r.sites)
-      .filter(s => s.detector.startsWith('a sort') && s.exempt === null)
-      .map(s => `${locate(s.file, s.index)}  ${s.object.replace(/\s+/g, ' ')}`);
-    assert.deepEqual(own, [], 'a sort on seq alone orders a tie by whatever the storage engine likes, so the next page cannot continue it');
+    const callers = [];
+    for (const s of sources.filter(x => x.file !== KEYSET)) {
+      for (const m of s.text.matchAll(/\bsettledSeqRange\b/g)) {
+        const definition = s.file === SEQ_UTIL && /function\s+$/.test(s.text.slice(0, m.index));
+        if (!definition) callers.push(`${s.file}:${s.text.slice(0, m.index).split('\n').length}`);
+      }
+    }
+    assert.deepEqual(callers, [], 'the definition in util/seq.ts is the only mention outside the keyset module');
   });
 
   it('every file that asks the module for a filter also sorts with SEQ_KEYSET_SORT; one that asks for the READ gets the sort inside it', () => {
     // `readAfterSeq` is the module's read: both finds, the horizon, the readiness fallback and the sort live inside it, so a caller
     // of it cannot drop the sort. A file that builds its own finds from `seqKeysetFilters` has to bring the sort itself.
-    const askers = readers.filter(r => /\b(?:seqKeysetFilters|readAfterSeq)\b/.test(r.text));
-    assert.ok(askers.length >= 1, 'no reader calls seqKeysetFilters or readAfterSeq yet');
+    const askers = sources.filter(s => s.file !== KEYSET && /\b(?:seqKeysetFilters|readAfterSeq)\b/.test(s.text));
+    assert.ok(askers.length >= 1, 'no file calls seqKeysetFilters or readAfterSeq yet');
     for (const r of askers.filter(a => /\bseqKeysetFilters\b/.test(a.text))) {
       assert.match(r.text, /\bSEQ_KEYSET_SORT\b/, `${r.file} asks for the keyset filter and does not use its sort`);
     }
   });
 
   it('at least five files import the keyset module (floor), so the rules above are over something', () => {
-    const importers = sources.filter(s => s.file !== KEYSET && IMPORTS_KEYSET.test(s.text)).map(s => s.file);
+    const importers = sources.filter(s => s.file !== KEYSET && /\bfrom\s+['"][^'"]*\bseq-keyset\.js['"]/.test(s.text)).map(s => s.file);
     assert.ok(importers.length >= 5, `${importers.length} importer(s): ${importers.join(', ')}`);
   });
 });
@@ -199,6 +268,7 @@ describe('every seq-ordered reader goes through it', () => {
 describe('the keyset indexes have one declaration', () => {
   /** An index declaration on seq alone, or on type and seq, by either spelling this repo uses. */
   const BARE = /(?:\bcreateIndex\(\s*|\bkeys\s*:\s*)\{\s*(?:type\s*:\s*1\s*,\s*)?seq\s*:\s*1\s*\}/g;
+  const locate = (file, index) => `${file}:${byFile.get(file).text.slice(0, index).split('\n').length}`;
 
   it('the scan sees index declarations at all (floor)', () => {
     const declarations = sources.reduce((n, s) => n + (s.text.match(/\bcreateIndex\(|\bkeys\s*:\s*\{/g) ?? []).length, 0);
