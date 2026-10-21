@@ -20,7 +20,7 @@
  *   disk), the counter floor is taken after the drain, the space's collections are dropped and created again with every index (on empty
  *   collections, so the unique indexes refuse a duplicate the backup holds at the insert), the backup's records are loaded, the counter is
  *   written to at least the floor, and the vector indexes are reconciled. A broken backup or a duplicate is an INPUT failure: not retried,
- *   the space stays held until an operator abandons ({@link abandonRestore}). A store outage is retried.
+ *   the space stays held until an operator abandons (`POST /api/admin/data/restore/abandon`, `spaces/act-set-abandon.ts`). A store outage is retried.
  * - **The completion** is the runner's write: it removes the entry, forgets the RECEIVE marks the registration named (`forgetReceived`),
  *   marks the space done on the set with its index results, and - for the last one - ends the set, after which {@link onRestoreEnd} tells
  *   every cache the database was replaced, restarts the leaked-row scans and writes the outcome's audit row.
@@ -42,7 +42,7 @@ import { ensureEdgeGuardIndex } from '../spaces/edge-guard-index.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 import {
-  defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, abandonSpaceActSet, instanceWideActStanding,
+  defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, instanceWideActStanding,
   SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from '../spaces/space-act-runner.js';
 import type { SpaceActKind, SpaceActSet } from '../config/types.js';
@@ -102,24 +102,9 @@ export function startRestore(plan: Extract<RestorePlan, { ok: true }>): RestoreS
 }
 
 
-// ── the abandon ────────────────────────────────────────────────────────────────────────────────────────────────
-// (The report of a restore is the act-set report, `spaces/act-set-report.ts`, which a migrate's shares.)
-
-/** What an abandon answered. */
-export type RestoreAbandon =
-  | { abandoned: true; restoreId: string; backupId?: string; halfRestored: string[]; completed: string[] }
-  | { abandoned: false; reason: 'none_standing' | 'running'; running?: string[] };
-
-/**
- * Abandon the standing restore: every space whose act has not completed is released in one write and keeps whatever its act reached - a
- * space may be half restored, and the answer names those spaces in those words. Refused while a space's body runs.
- */
-export async function abandonRestore(): Promise<RestoreAbandon> {
-  const r = await abandonSpaceActSet(KIND);
-  if (!r.abandoned) return r;
-  const completed = Object.entries(r.set.members).filter(([, m]) => m.state === 'done').map(([id]) => id).sort();
-  return { abandoned: true, restoreId: r.set.id, ...(r.set.backupId ? { backupId: r.set.backupId } : {}), halfRestored: r.left, completed };
-}
+// ── the end ────────────────────────────────────────────────────────────────────────────────────────────────────
+// (The report of a restore is the act-set report, `spaces/act-set-report.ts`, and its abandon the act-set abandon,
+// `spaces/act-set-abandon.ts`; a migrate shares both.)
 
 /**
  * When the set ends, once: every cache is told the database was replaced (`Q-95`), the leaked-row scan of every space starts again (the

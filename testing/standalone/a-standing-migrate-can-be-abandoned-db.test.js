@@ -21,8 +21,9 @@
  * ## How it is driven
  *
  * As `migrate-db.test.js` drives a migrate (in-process, `NODE_ENV=test`, the target a hostname resolved to the harness Mongo, the source
- * URI in the config). The body is parked in `afterDrain` (a latch; no sleep) for the running row, then released into a `beforeComplete`
- * that throws: the set is owed, as a target that keeps timing out leaves it.
+ * URI in the config). The body's run is parked in `beforeComplete` (a latch; no sleep) for the running row - inside the
+ * run, since `afterDrain` is before the body starts - then released to throw there: the set is owed, as a target that keeps timing out
+ * leaves it.
  *
  * ## Seen red
  *
@@ -110,9 +111,14 @@ describe('a standing migrate can be abandoned (real MongoDB)', { skip }, () => {
     const park = deferred();
     let parked = false;
     runner.setSpaceActHooksForTest({
-      afterDrain: async (e) => { if (e.kind === 'migrate' && !parked) { parked = true; park.arrive(); await park.promise; } },
-      // A target that keeps timing out leaves the set owed; a throw at the completion is that, without waiting for a real timeout.
-      beforeComplete: (e) => { if (e.kind === 'migrate') throw new Error('the target did not answer in time'); },
+      // Parked INSIDE the body's run (after the copy, before the completion): `afterDrain` is before the body starts, where an abandon is
+      // allowed and the body then finds no entry to run. Released, it throws: a target that keeps timing out leaves the set owed, and a
+      // throw at the completion is that, without waiting for a real timeout.
+      beforeComplete: async (e) => {
+        if (e.kind !== 'migrate') return;
+        if (!parked) { parked = true; park.arrive(); await park.promise; }
+        throw new Error('the target did not answer in time');
+      },
     });
     const started = await door.request(door.routeHandler(dataRouter, 'post', '/migrate'), { body: { uri: TARGET_URI } });
     assert.ok(started.status >= 200 && started.status < 300, `the migrate was refused: ${started.status} ${JSON.stringify(started.body)}`);

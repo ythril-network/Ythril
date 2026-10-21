@@ -14,6 +14,7 @@
  *   POST   /api/admin/data/restore/abandon  — lift the holds of a standing restore's acts that have not completed
  *   POST   /api/admin/data/migrate         — copy the database into a new URI online under migrate acts, save it, exit (202)
  *   GET    /api/admin/data/migrate         — the migrate standing or the last one, in the restore report's shape
+ *   POST   /api/admin/data/migrate/abandon  — end a standing migrate that cannot finish; nothing is saved, the old database stays
  *   GET    /api/admin/data/backup-config    — read backup.json (scheduled/offsite config)
  *                                             requires YTHRIL_DB_MIGRATION_ENABLED=true
  *   GET    /api/admin/data/browse-dirs      — list child directories at a given path (UI file picker)
@@ -31,8 +32,9 @@ import { loadBackupConfig, BACKUP_CONFIG_PATH, BackupConfigSchema } from '../db/
 import { startBackupScheduler } from '../db/backup-scheduler.js';
 import { BackupNotWhole } from '../db/restore.js';
 import { backupsRoot, backupDirOf, isBackupId } from '../db/backup-location.js';
-import { planRestore, startRestore, abandonRestore } from '../db/restore-act.js';
+import { planRestore, startRestore } from '../db/restore-act.js';
 import { actSetReport, type ReportedActSetKind } from '../spaces/act-set-report.js';
+import { abandonActSet } from '../spaces/act-set-abandon.js';
 import { targetHoldsData, startMigrate } from '../db/migrate-act.js';
 import { instanceWideActStanding, instanceWideActRefusal, spaceActClosedAnswer } from '../spaces/space-act-runner.js';
 import { effectiveMongoUri, redactUri } from '../config/mongo-uri.js';
@@ -408,24 +410,23 @@ const sendActSetReport = (kind: ReportedActSetKind): RequestHandler => (_req, re
 dataRouter.get('/restore', requireAdminMfa, sendActSetReport('restore'));
 dataRouter.get('/migrate', requireAdminMfa, sendActSetReport('migrate'));
 
-// ── POST /restore/abandon ─────────────────────────────────────────────────────
+// ── POST /restore/abandon, POST /migrate/abandon ──────────────────────────────
 //
-// Lift the holds of the standing restore's acts that have not completed. Those spaces keep whatever their acts reached: they may be
-// half restored, and the answer names them. Refused while a space's restore is running (an abandon never cuts a body).
+// End the standing set of that kind: the holds of its acts that have not completed lift in one write (and the maintenance it holds).
+// A restore's released spaces keep whatever their acts reached and may be half restored; a migrate saves nothing, so the old database
+// stays in use, and the new one may hold part of the copy (Q-564). One answer for both (`spaces/act-set-abandon.ts`): 200 with the
+// released spaces, 404 `no_<kind>_standing`, 409 `<kind>_act_running` while a body runs (an abandon never cuts a body).
 
-dataRouter.post('/restore/abandon', requireAdminMfa, async (_req, res) => {
+const sendActSetAbandon = (kind: ReportedActSetKind): RequestHandler => async (_req, res) => {
   try {
-    const r = await abandonRestore();
-    if (r.abandoned) { res.json(r); return; }
-    if (r.reason === 'none_standing') { res.status(404).json({ error: 'No restore is standing.', code: 'no_restore_standing' }); return; }
-    res.status(409).json({
-      error: `A restore act is running for ${(r.running ?? []).map(s => `'${s}'`).join(', ')}; abandon once it has ended.`,
-      code: 'restore_act_running',
-    });
+    const a = await abandonActSet(kind);
+    res.status(a.status).json(a.body);
   } catch (err) {
-    sendCaughtFailure(res, 'POST /api/admin/data/restore/abandon', err, { error: err instanceof Error ? err.message : String(err) });
+    sendCaughtFailure(res, `POST /api/admin/data/${kind}/abandon`, err, { error: err instanceof Error ? err.message : String(err) });
   }
-});
+};
+dataRouter.post('/restore/abandon', requireAdminMfa, sendActSetAbandon('restore'));
+dataRouter.post('/migrate/abandon', requireAdminMfa, sendActSetAbandon('migrate'));
 
 // ── POST /migrate ─────────────────────────────────────────────────────────────
 //

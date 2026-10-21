@@ -10,10 +10,21 @@ import type { StatusVariant } from '../shared/status-pill.component';
 import type { DateFormatService } from './date-format.service';
 import { translatedOrEmpty, type KeyTranslator } from './translated-text';
 
-/** An owed act is a warning (it will not finish by itself until its time); every other state is work in progress. */
+const ABANDONED = '_abandoned';
+
+/**
+ * Did the act end by an abandon: the server's `<kind>_abandoned` (`restore_abandoned`, `migrate_abandoned`, and the state of any kind a
+ * newer server can abandon). ONE rule, read by the colour and by "ended" alike (Q-564): each used to name the literals it knew, and an
+ * abandoned migrate read as pending work in one place and as ended in the other.
+ */
+export function isAbandonedState(state: string): boolean {
+  return state.length > ABANDONED.length && state.endsWith(ABANDONED);
+}
+
+/** An owed act, and one that ended by an abandon, is a warning (neither finishes by itself); every other state is work in progress. */
 export function actStateVariant(state: string): StatusVariant {
   if (state === 'done') return 'ok';
-  return state === 'owed' || state === 'restore_abandoned' ? 'warn' : 'pending';
+  return state === 'owed' || isAbandonedState(state) ? 'warn' : 'pending';
 }
 
 export const actStateKey = (state: string): string => `spaces.dangerZone.act.state.${state}`;
@@ -39,11 +50,12 @@ export interface ActRowView { stateKey: string; variant: StatusVariant; showsAtt
  *   `registered` is the same case: a pending space of a migrate reads Waiting in the pill, so its sentence says no next try either);
  * - owed, tried before: a real retry, with its tries and its next try;
  * - the process has exited (`stopped`): an act that had not finished is Stopped, never Running, with no tries and no next try.
- * Any other state keeps its own word; an act that ended (`done`, `restore_abandoned`) names no tries and no next try.
+ * Any other state keeps its own word; an act that ended (`done`, or `<kind>_abandoned` by {@link isAbandonedState}) names no tries and no
+ * next try.
  */
 export function actRowView(row: ActRowFacts): ActRowView {
   const owed = row.state === 'owed';
-  const ended = row.state === 'done' || row.state === 'restore_abandoned' || row.state === 'migrate_abandoned';
+  const ended = row.state === 'done' || isAbandonedState(row.state);
   if (row.stopped && !ended) return { stateKey: actStateKey('stopped'), variant: 'warn', showsAttempts: false, showsNextTry: false };
   if (owed && row.needsAbandon) return { stateKey: actStateKey('abandonOnly'), variant: 'warn', showsAttempts: true, showsNextTry: false };
   if ((owed || row.state === 'registered') && row.attempts === 0) {

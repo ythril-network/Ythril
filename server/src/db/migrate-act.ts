@@ -18,8 +18,13 @@
  *   root (listed, pruned by retention, encrypted by the one backup setting), restores that backup into the target through the same
  *   replace code a restore uses (`restoreDatabase`: every collection dropped and reloaded), and builds every index of the source on the
  *   target. Re-run after a crash, it replaces what it copied, so a partly filled target is overwritten; the not-empty check is the door's.
- * - **The completion** is the runner's one write: every migrate entry leaves, and {@link saveTargetUri} saves the URI in that same write.
- *   Then {@link onMigrateEnd} puts this process in maintenance and ends it, so the next start connects to the new database.
+ * - **The completion** is the runner's one write: every migrate entry leaves, and {@link saveTargetUri} saves the URI in that same write
+ *   and closes every write of this process until it exits (`closeEveryWriteUntilExit`: `409 space_being_migrated` on every door, an
+ *   admin's included; Q-564). Then {@link onMigrateEnd} puts this process in maintenance and ends it, so the next start connects to the
+ *   new database.
+ * - **An abandon** (`POST /api/admin/data/migrate/abandon`, `spaces/act-set-abandon.ts`) ends a set whose copy cannot finish - a target
+ *   that keeps timing out is retried, never input-failed - without saving anything: the old URI stays and the end is audited as
+ *   `data.migrate.failed` by {@link onMigrateEnd}.
  * - **A failure** of the copy is an input failure of the whole set: it ends the set, the old URI stays, every hold lifts, the sentence
  *   names the backup, and `data.migrate.failed` is audited in this (kept) database. A store outage or a timeout - of this database or of
  *   the target - is retried, and so is a crash before the completion write: every client the copy opens carries the runner's
@@ -44,7 +49,7 @@ import { resolveMasterSecret, isEnvelope, encryptEnvelope, decryptEnvelope } fro
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import {
   defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, instanceWideActStanding, spaceActSetTarget,
-  noteSpaceActSetBackup, SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
+  noteSpaceActSetBackup, closeEveryWriteUntilExit, SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from '../spaces/space-act-runner.js';
 import { setMaintenanceActive } from '../maintenance.js';
 import { isStoreSide } from '../brain/store-failure.js';
@@ -185,10 +190,16 @@ async function migrateInstance(ctx: SpaceActBodyContext): Promise<SpaceActBodyOu
 
 // ── the completion and the end ────────────────────────────────────────────────────────────────────────────────
 
-/** In the completion write that removes every migrate entry: the new URI becomes the configured one. */
+/**
+ * In the completion write that removes every migrate entry: the new URI becomes the configured one, and every write of this process is
+ * closed until it exits (Q-564 F4). The removal alone would lift every space's gate while this process still writes to the OLD
+ * database; closing here, in the same synchronous step, leaves no turn in which an admin's write, an exchange in flight, an embed job
+ * or a housekeeping pass is admitted and lands where the instance is leaving.
+ */
 function saveTargetUri(cfg: Config, set: Readonly<SpaceActSet>): void {
   if (!set.target) throw new SpaceActInputFailure('the migrate names no target database.');
   cfg.mongo = { ...cfg.mongo, uri: unsealTarget(set.target) };
+  closeEveryWriteUntilExit(KIND);
 }
 
 /**

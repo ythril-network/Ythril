@@ -620,7 +620,9 @@ their acts reached and may be half restored**: the answer names them, and the re
 restore whose backup cannot be read (`needsAbandon`). Admin and MFA; audited as `data.restore.abandon`, and the set's end as
 `data.restore.abandoned`.
 
-**Response `200`:** `{ "abandoned": true, "restoreId": "8f0c…", "backupId": "2026-04-23T10-00-00-000Z", "halfRestored": ["notes"], "completed": ["general"] }`
+**Response `200`:** `{ "abandoned": true, "restoreId": "8f0c…", "backupId": "2026-04-23T10-00-00-000Z", "released": ["notes"], "halfRestored": ["notes"], "completed": ["general"] }`
+(`released` is the field every abandon answers with, [a migrate's](#post-apiadmindatamigrateabandon) too; `halfRestored` names the
+same spaces in the restore's words.)
 
 | Status | `code` | Meaning |
 |---|---|---|
@@ -843,13 +845,18 @@ Copies the entire database into a new MongoDB database **online**, then moves th
    by retention and encrypted by the one backup setting), that backup is loaded into the target, collection by collection,
    replacing whatever a crashed earlier attempt left there, and every index of this database is built on the target. Every
    operation of the copy is bounded (`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS`), on this database and on the target.
-4. **Completed:** the new URI is saved to `config.json` in the same write that lifts the holds. The process then stays in
-   maintenance and **exits**, and the next start connects to the new database; under Docker or Kubernetes that is the restart
-   policy. Nothing is read from the old database afterwards, and **it still holds every record** until you remove it.
+4. **Completed:** the new URI is saved to `config.json` in the same write that removes the migrate acts. **From that write
+   until the process exits, every write is refused** - `409` with `code: "space_being_migrated"` on REST and MCP, an
+   instance-admin token's included, and an exchange, an embedding job or a housekeeping pass already under way is refused the
+   same way - because this process is still connected to the old database, and a write there would be missing from the new
+   one. Reads still answer. The process then stays in maintenance and **exits**, and the next start connects to the new
+   database; under Docker or Kubernetes that is the restart policy. Nothing is read from the old database afterwards, and
+   **it still holds every record** until you remove it.
 
 The receive marks are kept: the data is the same data, so peers do not send anything again. A store outage or a timeout, on
 either side, is retried, and so is a crash before the completion: the next start resumes the act on the old URI and copies
-again. A failure of the copy itself (the target refuses a record) ends the set: the old URI stays, every hold lifts, and the
+again. A target that never answers is therefore retried for ever: [abandon](#post-apiadmindatamigrateabandon) the migrate to
+end it. A failure of the copy itself (the target refuses a record) ends the set: the old URI stays, every hold lifts, and the
 report's `lastError` names the backup. The target may then hold part of the copy and must be emptied before another migrate.
 
 ```http
@@ -882,6 +889,21 @@ The migrate standing, or the last one; `{ "migrate": null }` when none ever ran.
 [`GET /api/admin/data/restore`](#get-apiadmindatarestore), under `migrateId`, with `spaces[].state` `migrate_abandoned` for a
 set a failure ended (`state: "abandoned"`, the reason in `lastError`), and `backupId` the backup the copy went through (also on
 each completed space). Admin and MFA; audited as `data.migrate.report`.
+
+### POST /api/admin/data/migrate/abandon
+
+End a standing migrate that cannot finish - a target that keeps timing out is retried, never given up on by itself. The
+migrate's acts are removed in one write, so every hold and the maintenance lift; **nothing is saved**: the instance keeps
+using its old database, and the new one may hold part of the copy and must be emptied before another migrate. The report
+marks the spaces `migrate_abandoned`. Admin and MFA; audited as `data.migrate.abandon`, and the set's end as
+`data.migrate.failed`. The same abandon as [the restore's](#post-apiadmindatarestoreabandon), with the same answers.
+
+**Response `200`:** `{ "abandoned": true, "migrateId": "3b7e…", "backupId": "2026-04-23T10-00-00-000Z", "released": ["general", "notes"], "completed": [] }`
+
+| Status | `code` | Meaning |
+|---|---|---|
+| `404` | `no_migrate_standing` | No migrate stands |
+| `409` | `migrate_act_running` | The copy is running now; abandon once this attempt has ended (an abandon never cuts an act short) |
 
 #### Enabling migration on a deployment
 

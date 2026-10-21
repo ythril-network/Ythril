@@ -6,7 +6,7 @@ import type {
   WebhookSubscription, WebhookUpsert, WebhookDelivery,
 } from './api.types';
 import type {
-  MaintenanceState, MigrateReportAnswer, MigrateStarted, RestoreAbandoned, RestoreReportAnswer, RestoreStarted,
+  MaintenanceState, MigrateAbandoned, MigrateReportAnswer, MigrateStarted, RestoreAbandoned, RestoreReportAnswer, RestoreStarted,
 } from './admin-data.types';
 
 /** Instance administration — about/logs, audit log, and data/backup/migration/maintenance. */
@@ -121,6 +121,11 @@ export class AdminApi {
   /** Release the standing restore's spaces whose acts have not completed: they keep whatever their acts reached. */
   abandonRestore(): Observable<RestoreAbandoned> {
     return this.http.post<RestoreAbandoned>('/api/admin/data/restore/abandon', {});
+  }
+
+  /** End the standing migrate that cannot finish: its holds lift, nothing is saved, and the old database stays in use (Q-564). */
+  abandonMigrate(): Observable<MigrateAbandoned> {
+    return this.http.post<MigrateAbandoned>('/api/admin/data/migrate/abandon', {});
   }
 
   /** Start a migrate: 202 with the set registered. The copy runs online; the process exits when it completes. */

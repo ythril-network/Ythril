@@ -14,8 +14,8 @@ type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
 
 /**
  * A restore or a migrate as it runs, on the Data page (bundle-157, R5.3): k of n spaces as a progress bar (role=progressbar), and one row
- * per space with its state, tries, our sentence for its last failure and when it is tried next. For a restore with an owed space, the
- * abandon button: the page confirms and calls the door; this card only offers it.
+ * per space with its state, tries, our sentence for its last failure and when it is tried next. For a running set (a restore or a
+ * migrate) with an owed space, the abandon button: the page confirms and calls the kind's door; this card only offers it.
  *
  * The rows are the Networks page's owed-acts rows (`network-owed-acts`), with the same words from `space-act-view`, so one owed act is
  * never described in two vocabularies. The poll that feeds it lives with the page, which knows when it is open.
@@ -57,9 +57,9 @@ type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
   @if (canAbandon()) {
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn btn-danger btn-sm" type="button" [disabled]="abandoning()" [attr.aria-busy]="abandoning()" (click)="abandon.emit()">
-        @if (abandoning()) { <span class="spinner spinner-sm"></span> }{{ 'data.progress.abandon' | transloco }}
+        @if (abandoning()) { <span class="spinner spinner-sm"></span> }{{ abandonKey() | transloco }}
       </button>
-      <span style="color:var(--text-muted);font-size:12.5px;">{{ 'data.progress.abandonHint' | transloco }}</span>
+      <span style="color:var(--text-muted);font-size:12.5px;">{{ (abandonKey() + 'Hint') | transloco }}</span>
     </div>
   }
 </app-settings-card>
@@ -86,9 +86,12 @@ export class ActSetProgressComponent {
   /** k of n as the shared bar draws it: one stage, the spaces done of the spaces in the set. */
   readonly progress = computed<StepProgress>(() => ({ step: this.kind(), steps: [this.kind()], done: this.report().done, total: this.report().total }));
 
-  /** Abandon is offered for a running restore with an owed space: the one case the server accepts it for and that needs it. */
+  /**
+   * Abandon is offered for a running set with an owed space, of either kind (a migrate whose target keeps timing out is owed for ever
+   * without it, Q-564): the case the server accepts it for and that needs it. Not for a halted migrate: its process has exited.
+   */
   readonly canAbandon = computed(() =>
-    this.kind() === 'restore' && this.report().state === 'running' && this.report().spaces.some(s => s.state === 'owed'));
+    !this.halted() && this.report().state === 'running' && this.report().spaces.some(s => s.state === 'owed'));
 
   /** Where the set stands for the reader: the report's state, except that a halted migrate is Stopped. */
   private setState(): string { return this.halted() ? 'stopped' : this.report().state; }
@@ -99,6 +102,9 @@ export class ActSetProgressComponent {
   }
 
   setStateKey(): string { return `data.progress.state.${this.setState()}`; }
+
+  /** The abandon button's words, and with `Hint` its line: a migrate's abandon is not a restore's ("Abandon migration", the old database stays). */
+  abandonKey(): string { return this.kind() === 'migrate' ? 'data.progress.abandonMigrate' : 'data.progress.abandon'; }
 
   /** The bar's stage label once the set has ended or stopped: it names that (Completed, Abandoned, Stopped), where it said "Working" for ever. */
   endedStageKey(): string | null { return this.setState() === 'running' ? null : this.setStateKey(); }

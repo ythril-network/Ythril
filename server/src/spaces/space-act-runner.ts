@@ -317,6 +317,21 @@ function shapeOf(req: SpaceActRequest): SpaceActShape {
   };
 }
 
+/** The act whose completion is moving this process off its database (a migrate), once its completion write ran; null otherwise. */
+let leavingFor: SpaceActKind | null = null;
+
+/**
+ * Close every write of every space, on every door and for every caller (an instance admin, an exchange already in flight, an embed job, a
+ * housekeeping pass), from now until this process ends - asked IN the completion write of an act that moves the instance to another
+ * database (`saveTargetUri`, Q-564 F4). That write removes the act's entries, which alone would lift the gate; this process is still
+ * connected to the OLD database until it exits, so a write admitted in between would land where the instance is leaving and be missing
+ * from the new one. Called inside the same synchronous step as the removal, so no turn of the event loop sees the entries gone and the
+ * gate open. The refusal is the act's own kind (`space_being_migrated`); there is no reopening it short of a restart.
+ */
+export function closeEveryWriteUntilExit(kind: SpaceActKind): void {
+  leavingFor = kind;
+}
+
 /**
  * Does a deletion, wipe or rename stand for `localId` — THE answer, asked by the write gate, the hold, the fence, rename and the runner,
  * and spelled nowhere else. Two predicates over two sets is what let a write land that the act then deleted.
@@ -325,11 +340,13 @@ function shapeOf(req: SpaceActRequest): SpaceActShape {
  * family. `except`: an entry that does not count (an act asking about its own space).
  *
  * It reads only what THIS instance wrote — its act entries and the body's own `pendingSpaceOp` write-ahead, which closes the space
- * between a boot's resume of the marker and the entry's own resume — so it cannot throw on anything a peer sent.
+ * between a boot's resume of the marker and the entry's own resume — so it cannot throw on anything a peer sent — and the process-level
+ * closure {@link closeEveryWriteUntilExit}, which stands for EVERY space, before any entry, until the process ends.
  */
 export function spaceActStands(
   cfg: Config, localId: string, opts: { types?: readonly BrainCollection[]; except?: string } = {},
 ): SpaceActStanding | null {
+  if (leavingFor) return { entryId: '', kind: leavingFor, types: 'all', state: 'running' };
   const list = cfg.pendingSpaceActs ?? [];
   // An act asking about its own space (`except`) is not closed by the acts of that space registered AFTER it: they wait for it in
   // the space's queue and cannot run before it ends, so the act ahead of them still does its own writes.
@@ -1064,6 +1081,7 @@ export function setSpaceActHooksForTest(h: Partial<SpaceActHooks> | null): void 
 /** An in-process boot keeps module state: reopen the runner, empty its queues, counts and the fence's counts. */
 export function reopenSpaceActsForTest(): void {
   closed = false;
+  leavingFor = null;
   spaceOrder.close();
   lanes.close();
   spaceOrder = limiterOf();

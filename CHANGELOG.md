@@ -105,8 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | `202` `status: "passed"`, `queued: true` while the change runs; `500` `space_act_failed` (`503` for a store outage) if it failed in the call ; a networked delete and any admin wipe need `{ "confirm": true }` (else `400`) | Send `confirm`; do not retry a passed `500` or `503` |
 | A write into a space being deleted, wiped, renamed, restored or migrated is `409` `space_being_<that>`; after a networked wipe each member re-reads the space once | Read an unknown `space_being_*` as busy |
 | A restore answers `202` and restores each space after it; `GET /api/admin/data/restore` reports it and its index results, `POST …/restore/abandon` releases it | Poll until `state` is not `running` |
-| A restore empties spaces the backup lacks; it refuses a backup not whole or naming a space not served here (unless in `leaveOut`); audit log, queues, file bytes stay | Name gone spaces in `leaveOut` |
-| A migrate copies online, answers `202` (`GET /api/admin/data/migrate` reports), then exits; `409` `INFRA_MANAGED` if a non-empty `MONGO_URI` is set, `target_not_empty`; an empty `MONGO_URI` is unset | Drop the old database once checked |
+| A restore empties spaces the backup lacks; refuses a backup not whole or naming an unserved space (unless in `leaveOut`); audit log, queues, file bytes stay | Name gone spaces in `leaveOut` |
+| A migrate copies online, answers `202` (`GET …/migrate` reports), refuses writes once done, then exits; `…/abandon` ends a stuck one; `409` `INFRA_MANAGED`, `target_not_empty` | Drop the old database once checked |
 | While either stands the instance is in maintenance (an instance admin passes on every path; the web client loads for anyone; `{ active, manual, heldBy }`) and a backup is `409` | Read `heldBy` |
 | Audit `data.restore` and `data.migrate` are now `….requested`; a set's end is a row of its own | Update audit queries |
 | A 5.x build never finishes a `restore` or `migrate` act | Let them end before rolling back |
