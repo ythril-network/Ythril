@@ -33,7 +33,7 @@ The **Database** card shows which MongoDB server this instance is connected to. 
 |---|---|
 | **default** | Using the bundled `ythril-mongo` container. No custom connection has been configured. |
 | **config file** | Connection string is stored in `config.json`, either saved here via migration or set manually. |
-| **env var** | Connection is managed by the infrastructure via the `MONGO_URI` environment variable. The variable always takes precedence over `config.json`. |
+| **env var** | Connection is managed by the infrastructure via the `MONGO_URI` environment variable. The variable always takes precedence over `config.json`; set to an empty string it counts as unset. |
 
 **Timeouts you put in the connection string win.** Three settings decide how quickly Ythril notices that the database has stopped answering: `connectTimeoutMS` (how long a new connection may take, **10 seconds** unless you say otherwise), `heartbeatFrequencyMS` (how often the server is asked whether it is alive, **5 seconds**) and `serverSelectionTimeoutMS` (how long an operation waits to find a server, **10 seconds**). If the connection string names one of them, that figure is used, whichever of the three sources above supplied the string; Ythril's own figure applies only to the ones the string does not name. Earlier versions silently ignored a `serverSelectionTimeoutMS` written in the string. The connection is opened once when Ythril starts, so **a change takes effect at the next restart**. The Server Log shows what was used, in one line at start, `MongoDB client options: …`, saying for each figure whether it came from `MONGO_URI` or is the default. Do not set `socketTimeoutMS` or `timeoutMS` lower than your slowest legitimate read: they end any operation that takes longer, a search or an export included.
 
@@ -51,9 +51,14 @@ the MCP tools, with the `code` and `codeName` in the tool's structured result.
 
 ### Maintenance mode
 
-Maintenance mode suspends all write operations across the entire instance. All write requests return `503 Service Unavailable` while active. Read operations continue normally.
+Maintenance mode answers every request with `503 Service Unavailable`, reads included, **except an instance administrator's**:
+you keep working, and so do the health and metrics endpoints. Every other token, and every person signed in without
+administrator rights, waits until it ends.
 
-Use it before a restore or any manual database operation where you want to prevent concurrent writes.
+Use it before a manual database operation where you want nobody else writing. A restore and a migration do not need it: each
+puts the instance in maintenance by itself, from the moment you confirm until the last space is done, and takes it out again.
+That half cannot be switched off with the toggle (the page says what is holding it), and a restart that resumes the restore
+resumes maintenance with it.
 
 Toggle the **Maintenance mode** button to enable or disable it. A banner appears across the top of the UI on all pages while maintenance is active.
 
@@ -120,8 +125,9 @@ Three things to know before enabling it:
 2. **Encrypted backups are larger** — roughly 1.4× on large records, and measured at **3×** on a database of many
    very small ones, because each record carries a fixed envelope header. Check your disk headroom.
 3. **Restoring needs no setting.** An encrypted backup is detected per record, so you never have to remember how
-   one was written — and a backup still restores if its `manifest.json` is lost. If the secret is missing, the
-   restore refuses with a message naming the environment variables to set, rather than importing ciphertext.
+   one was written. A backup whose `manifest.json` is lost or unreadable is refused before anything is replaced, as is
+   one whose files do not match it. If the secret is missing, the restore refuses with a message naming the
+   environment variables to set, rather than importing ciphertext.
 
 Enabling it without a master secret configured fails the backup **before writing anything**, rather than leaving a
 half-plaintext directory that looks like a valid backup.
@@ -153,6 +159,9 @@ file bytes) — and the import puts them back. What to expect from a restore:
   for older than a restored record by a peer. Running the same import again is safe — it replaces — and moves the
   counter.
 - File previews and passages are rebuilt from the file itself, so they are not part of the export.
+- **It keeps this instance's sync positions, unlike a whole [restore](#restore).** Peers do not send again what they had
+  already sent, so a record the import put back to an older copy than a peer holds stays older here until it changes again
+  on that peer. A record the export does not hold is left as it is, not removed.
 
 ### Uploaded files are encrypted at rest
 
@@ -261,44 +270,70 @@ Ythril runs directly on your OS. Set **Backup location** to any absolute path yo
 
 ### Restore
 
-To restore a backup, click **Restore** on any backup row. The instance will:
+To restore a backup, click **Restore** on any backup row. A restore makes **every space equal to the backup**, and it
+checks the backup before anything is replaced: a backup with a missing or unreadable file, or one encrypted with a secret
+this instance does not have, is refused and nothing changes. A space the backup holds that this instance no longer serves
+(renamed or deleted since) is refused by name unless you leave it out; a space created after the backup is emptied.
 
-1. Enter maintenance mode automatically.
-2. Replace all data in MongoDB with the backup snapshot.
-3. Rebuild each space's indexes: the search indexes, and the ones that stop the same edge, or two edges under a
-   one-per-subject label, being stored twice by writers working at the same moment.
-4. Exit maintenance mode.
+Once you confirm, the request is accepted at once and the work runs in the background, one space at a time:
+
+1. The instance enters maintenance mode, and every space stops taking writes. You, as an administrator, keep working;
+   everyone else waits. The page shows how many spaces are done, and why any is waiting.
+2. Each space's data is replaced with the backup's, its indexes are built again (the search indexes, and the ones that
+   stop the same edge, or two edges under a one-per-subject label, being stored twice by writers working at the same
+   moment), and its sequence counter is kept above every number this instance already handed out.
+3. Each space asks its peers again for what reached this instance after the backup was taken: the peers send it back.
+4. When the last space is done, maintenance ends. A restart in the middle resumes where it stopped.
+
+**What a restore does not bring back:** the audit log, which keeps recording what happened (the restore included); the
+queues and webhook subscriptions; and the files' bytes on disk. A file's details come back as the backup has them while
+its bytes stay as they are now, so after a restore a file can be listed without its bytes, or bytes can be on disk that no
+file names.
+
+**What it does bring back, and you may not expect:** records erased after the backup, erasure requests included. The audit
+log still records the erasure, so erase them again. A record deleted here after the backup that the peers have since
+forgotten deleting comes back here and stays here.
 
 Restore is irreversible — all data written after the backup timestamp will be lost. You will be asked to confirm before the operation begins.
 
-If an index cannot be rebuilt, the restore still finishes and its answer names the space and the reason
-(`edgeIndexes.failed` for the edge indexes, `vectorIndexes.failed` for search). The server log carries an
-`Edge indexes failed for space '<id>' …` line, and the index is tried again at the next start. Until then, in that
-space, the store itself does not stop a duplicate edge or two simultaneous writes under a one-per-subject label; a
-second edge written after the first is still refused by the label's rule.
+**If a space cannot be restored** because the database is down or slow, it is tried again by itself. If the backup is the
+problem (a file that became unreadable, records one of the space's indexes refuses), retrying cannot help: the page says so,
+and you can **abandon** the restore. The spaces that were not done are released as they are, and may be half restored; the
+page names them. A backup is never taken while a restore runs.
+
+If a search index cannot be rebuilt, the space is still restored and the page says its search is not ready; the index is
+tried again at the next start.
 
 ### Database migration
 
 > **This feature must be explicitly enabled by your infrastructure administrator** (`YTHRIL_DB_MIGRATION_ENABLED=true`). It is disabled by default on all instances.
 >
-> **Infrastructure-managed connections are locked.** When `MONGO_URI` comes from the environment, the UI shows an informational note that the connection is externally managed. The *hard* server-side block on changing database settings, however, is the separate `YTHRIL_MONGO_INFRA_MANAGED=true` environment variable: with it set, the **Migrate Database** card is disabled entirely. To change the database in a managed deployment, update your deployment configuration (the `MONGO_URI` your orchestrator injects) and restart.
+> **Infrastructure-managed connections are locked.** When a non-empty `MONGO_URI` comes from the environment it decides the database, so a migration is refused: the URI it would save could never take effect. Change your deployment configuration (the `MONGO_URI` your orchestrator injects) and restart instead. An empty `MONGO_URI` counts as unset. `YTHRIL_MONGO_INFRA_MANAGED=true` refuses migration whatever the URI's source.
 
 Database migration moves the entire database to a different MongoDB server — for example, from the bundled container to Atlas, or between clusters.
 
-Enter the target MongoDB URI and click **Test Connection** to verify reachability before committing. Once you click **Migrate**:
+Enter the target MongoDB URI and click **Test Connection** to verify reachability before committing. The target must be an
+**empty** database: one that already holds anything is refused, and nothing is copied. Once you click **Migrate**, the
+request is accepted at once and the copy runs in the background:
 
-1. Maintenance mode is activated.
-2. The current database is dumped to `<data-root>/migration-backup/`.
-3. A migration marker is written and the new URI is saved to `config.json`.
-4. The server process exits. When Docker or Kubernetes restarts the container, the server detects the marker and restores the dump into the new MongoDB before starting normally.
+1. The instance enters maintenance mode and every space stops taking writes; you, as an administrator, keep working.
+2. The current database is backed up like any other backup (it appears in the **Backups** table), and that backup is copied
+   into the new database with every index.
+3. The new URI is saved to `config.json`, and the server process exits. When Docker or Kubernetes restarts the
+   container, the server connects to the new database. Without a restart policy, start it again yourself.
 
-Migration is a one-way operation. Keep your old database available until you have confirmed the migrated instance is healthy.
+If the copy fails, the instance stays on the old database, maintenance ends and the reason names the backup; the new database
+may hold part of the copy and must be emptied before you try again. A database that is slow or briefly unreachable is
+retried by itself. Peers notice nothing: the data is the same, so nothing is sent again.
+
+**The old database still holds every record afterwards.** Nothing reads it any more; keep it until you have confirmed the
+migrated instance is healthy, then remove it yourself.
 
 ---
 
 ## Settings — Audit Log
 
-**Settings → Logs** (admin only) shows a searchable log of every API operation on this instance. A deletion or wipe a passed vote applied here is recorded as `network.round.space_act`, a passed space addition that a later deletion of the same space retired, so it was never applied, as `network.round.addition_retired`, and a deletion, wipe or rename a request queued and then finished as `space.act_completed`; a concluded vote round is `network.round.expired`. The page has two sub-tabs, toggled at the top: **Audit Log** (the operation table below) and **Server Log** (the live server log described at the end).
+**Settings → Logs** (admin only) shows a searchable log of every API operation on this instance. A deletion or wipe a passed vote applied here is recorded as `network.round.space_act`, a passed space addition that a later deletion of the same space retired, so it was never applied, as `network.round.addition_retired`, and a deletion, wipe or rename a request queued and then finished as `space.act_completed` (so is each space's share of a restore); a concluded vote round is `network.round.expired`. A restore is recorded when you ask for it (`data.restore.requested`) and once more when it ends (`data.restore.completed`, or `data.restore.abandoned` naming the backup); a migration likewise (`data.migrate.requested`, then `data.migrate.failed` here or `data.migrate.completed` in the new database's log). The page has two sub-tabs, toggled at the top: **Audit Log** (the operation table below) and **Server Log** (the live server log described at the end).
 
 **Filtering:** Filter by date range, operation type, space, HTTP status, or client IP.
 
