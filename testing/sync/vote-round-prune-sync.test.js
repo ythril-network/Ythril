@@ -38,6 +38,12 @@ function roundIds(c, netId) {
   return new Set((net?.pendingRounds ?? []).map(r => r.roundId));
 }
 
+/** The network's record of how each pruned round ended, by round id. */
+function outcomesOf(c, netId) {
+  const net = readConfig(c).networks.find(n => n.id === netId);
+  return Object.fromEntries((net?.roundOutcomes ?? []).map(e => [e.roundId, e]));
+}
+
 describe('Expired vote rounds are pruned during sync', () => {
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
@@ -82,10 +88,14 @@ describe('Expired vote rounds are pruned during sync', () => {
       `n.pendingRounds.push(${JSON.stringify(mk('keep-open-expired', false, pastDeadline))});`);
     await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
 
-    const before = roundIds('ythril-a', networkId);
-    assert.ok(before.has('drop-concluded-expired'), 'setup: expired round is present before sync');
-    assert.ok(before.has('keep-concluded-future'));
-    assert.ok(before.has('keep-open-expired'));
+    // Each injected round landed: it is still held, or it is already in the record of how rounds ended. An EXPIRED round may be
+    // pruned before this read by a cycle the test did not run - A's own scheduled sync, or the expiry job's tick a minute (Q-484);
+    // a record is written only when a held round is pruned, so it proves the round landed as well as presence would. The
+    // concluded-future round cannot be pruned yet, so it must be held.
+    const landed = (id) => roundIds('ythril-a', networkId).has(id) || outcomesOf('ythril-a', networkId)[id] !== undefined;
+    assert.ok(landed('drop-concluded-expired'), 'setup: the concluded+expired round never landed in A\'s config');
+    assert.ok(roundIds('ythril-a', networkId).has('keep-concluded-future'), 'setup: the concluded-future round is not held');
+    assert.ok(landed('keep-open-expired'), 'setup: the open+expired round never landed in A\'s config');
 
     // Trigger sync cycles on A until both expired rounds are gone from its on-disk config. The first is pruned by the sync
     // cycle; the second is open on paper, so the expiry job (a tick a minute) has to conclude it before anything can prune it.
@@ -102,7 +112,7 @@ describe('Expired vote rounds are pruned during sync', () => {
     // Concluded by the job (not left open until a cast or a peer touches it), recorded, and then pruned like any other.
     assert.ok(!after.has('keep-open-expired'), 'an open round past its deadline is concluded by the expiry job and pruned, not kept as live governance');
 
-    const log = Object.fromEntries((readConfig('ythril-a').networks.find(n => n.id === networkId)?.roundOutcomes ?? []).map(e => [e.roundId, e]));
+    const log = outcomesOf('ythril-a', networkId);
     assert.equal(log['keep-open-expired']?.outcome, 'expired', 'the round the job ended is recorded as expired — pruning must not lose how it ended');
     assert.ok(log['keep-open-expired']?.concludedAt, 'and dated');
     assert.equal(log['drop-concluded-expired']?.outcome, 'ended', 'a round concluded before the outcome was recorded is kept as ended, reason not recorded');
