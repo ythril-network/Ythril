@@ -47,6 +47,7 @@ import { GraphLinkedRecordsComponent } from './graph-linked-records.component';
 import { GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent } from './graph-record-card.component';
 import { GraphPanelHeaderComponent } from './graph-panel-header.component';
 import { GraphToolbarComponent } from './graph-toolbar.component';
+import { readinessText, type ReadinessReason } from './graph-readiness';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 // The record drawer and its state are shared with the Brain page rather than forked here: this page
 // used to carry a copy that had drifted behind (no schema-driven properties, no confidence field, no
@@ -137,7 +138,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
             @if (waiting()) {
               <div class="loading-waiting" role="status">
                 <p class="loading-waiting-title">{{ 'graph.waiting.title' | transloco }}</p>
-                @for (r of waitReasons(); track r.key) { <p class="loading-reason">{{ r.key | transloco: (r.params ?? {}) }}</p> }
+                @for (r of waitReasons(); track r.key) { <p class="loading-reason">{{ reasonText(r) }}</p> }
               </div>
             }
           </div>
@@ -148,7 +149,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
             <app-error-state [message]="'graph.error.load' | transloco" [reason]="loadError() ?? ''" (retry)="retryTraverse()" />
             @if (waitReasons().length) {
               <div class="wait-reasons">
-                @for (r of waitReasons(); track r.key) { <p class="loading-reason">{{ r.key | transloco: (r.params ?? {}) }}</p> }
+                @for (r of waitReasons(); track r.key) { <p class="loading-reason">{{ reasonText(r) }}</p> }
               </div>
             }
           </div>
@@ -385,6 +386,11 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   loadError = signal<string | null>(null);
   private lastTraverse: { startId: string; maxDepth: number; direction: 'outbound' | 'inbound' | 'both' } | null = null;
   private transloco = inject(TranslocoService);
+
+  /** One reason the graph is slow to answer, in words (the embedding backlog in its plural form). */
+  protected reasonText(reason: ReadinessReason): string {
+    return readinessText(this.transloco, this.transloco.getActiveLang(), reason);
+  }
   /** Q-155: a long load says it is still waiting, and why — see `graph-load-watch.ts`. */
   private loadWatch = new GraphLoadWatch(this.spacesApi, this.transloco);
   loading = this.loadWatch.loading;

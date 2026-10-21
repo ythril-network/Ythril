@@ -23,7 +23,10 @@ function conflict(id: string) {
 describe('ConflictsComponent', () => {
   function create(resp: { conflicts: ReturnType<typeof conflict>[]; truncated?: boolean }) {
     TestBed.configureTestingModule({
-      imports: [ConflictsComponent, getTranslocoModule()],
+      // The note is a plural base said through `pluralText`, which says nothing for a key the harness only echoes.
+      imports: [ConflictsComponent, getTranslocoModule({ translation: { en: {
+        'conflicts.truncated.one': 'conflicts.truncated', 'conflicts.truncated.other': 'conflicts.truncated',
+      } } })],
       providers: [
         provideRouter([]),
         { provide: FilesApi, useValue: { listConflicts: () => of(resp) } },

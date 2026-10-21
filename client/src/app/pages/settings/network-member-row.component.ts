@@ -22,9 +22,10 @@
  * content and the row stops being a row. Setting `display` on the host is what keeps the layout identical
  * to the markup it replaces.
  */
-import { Component, ChangeDetectionStrategy, input, output } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, input, output } from '@angular/core';
 import { InstantComponent } from '../../shared/instant.component';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import type { NetworkMember } from '../../core/api.types';
 
@@ -49,7 +50,7 @@ import type { NetworkMember } from '../../core/api.types';
     <!-- Sync health at a glance: a failing badge when a run streak is failing. -->
     @if (member().consecutiveFailures) {
       <span class="member-failing"
-        [attr.title]="'networks.member.failingTitle' | transloco: { count: member().consecutiveFailures }">
+        [attr.title]="failingTitle()">
         <ph-icon name="warning" [size]="11"/>
         {{ 'networks.member.failing' | transloco: { count: member().consecutiveFailures } }}
       </span>
@@ -112,7 +113,13 @@ import type { NetworkMember } from '../../core/api.types';
   `],
 })
 export class NetworkMemberRowComponent {
+  private transloco = inject(TranslocoService);
+
   readonly member = input.required<NetworkMember>();
+  /** "N consecutive failed sync attempts since the last success", in the plural form the reader's language uses for N. */
+  protected failingTitle(): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'networks.member.failingTitle', this.member().consecutiveFailures ?? 0);
+  }
   /** Disables the remove button while the parent's request is in flight. */
   readonly removing = input(false);
   /** Whether this instance may remove this member at all — a pub/sub subscriber may not remove its publisher (F-38.1). */

@@ -19,6 +19,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SchemaTypeNameComponent } from './schema-type-name.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
@@ -141,7 +142,7 @@ import { refusalText } from '../../core/refusal-text';
       <!-- A sample reads nothing stored, so there is no count to give: the readout is the stored-data walk's. -->
       @if (validateMode() === 'stored') {
         <div class="val-result" data-testid="validate-progress" [attr.data-checked]="validateChecked().checked" [attr.data-total]="validateChecked().total">
-          {{ validateProgressKey() | transloco: { checked: validateChecked().checked, total: validateChecked().total } }}
+          {{ validateProgressText() }}
           @if (!validateDone()) { <span class="sch-hint">{{ 'validate.incomplete' | transloco }}</span> }
         </div>
       }
@@ -680,9 +681,12 @@ export class SpaceSchemaTabComponent implements OnInit {
    * The sentence the readout is said in. "Checked N of M" says the check has covered M, so a check that is not done never says it when N has
    * reached M (the space grew while paging): it says how many it has read so far, and no total to contradict "not finished" (Q-488).
    */
-  readonly validateProgressKey = computed(() => {
+  readonly validateProgressText = computed(() => {
     const { checked, total } = this.validateChecked();
-    return !this.validateDone() && checked >= total ? 'validate.progressOpen' : 'validate.progress';
+    const lang = this.transloco.getActiveLang();
+    return !this.validateDone() && checked >= total
+      ? pluralText(this.transloco, lang, 'validate.progressOpen', checked)
+      : pluralText(this.transloco, lang, 'validate.progress', total, { checked });
   });
 
   /** "All good" is said only when the whole space was read (or the sample judged) and nothing was found. */
@@ -991,7 +995,7 @@ export class SpaceSchemaTabComponent implements OnInit {
         this.state.schTypeSchemas = merged;
         this.schImportError.set('');
         // Import only STAGES the schemas — they aren't persisted until Save is pressed.
-        this.schImportInfo.set(this.transloco.translate('spaces.schema.import.staged', { count: imported }));
+        this.schImportInfo.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'spaces.schema.import.staged', imported));
       } catch {
         this.schImportError.set(this.transloco.translate('spaces.schema.import.parseFailed'));
       } finally {

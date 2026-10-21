@@ -65,7 +65,11 @@ describe('NetworksComponent (characterization)', () => {
     toastError = vi.fn();
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
-      imports: [NetworksComponent, getTranslocoModule()],
+      // The role counts are plural bases said through `pluralText`, which says nothing for a key the harness only echoes; each form is its
+      // own name, so a case can see which noun and which form the card chose.
+      imports: [NetworksComponent, getTranslocoModule({ translation: { en: Object.fromEntries(
+        ['subscribers', 'peers', 'below'].flatMap(noun => ['one', 'other'].map(form => [`networks.role.count.${noun}.${form}`, `${noun}-${form}`])),
+      ) } })],
       providers: [
         { provide: NetworksApi, useValue: api },
         { provide: SpacesApi, useValue: { listSpaces: () => of({ spaces: [] }) } },
@@ -362,22 +366,22 @@ describe('NetworksComponent (characterization)', () => {
       const n = net({ type: 'pubsub', members: [m('s1'), m('s2')], myRole: { role: 'publisher', members: ['s1', 's2'] } } as Partial<Network>);
       expect(titles(c.memberGroups(n))).toEqual(['networks.network.members.subscribers']);
       expect(ids(c.memberGroups(n))).toEqual([['s1', 's2']]);
-      expect(c.roleCountKey(n.myRole!)).toBe('networks.role.count.subscribers');
+      expect(c.roleCountText(n.myRole!)).toBe('subscribers-other');
     });
     it('a subscriber shows only its publisher and no count', () => {
       const c = make();
       const n = net({ type: 'pubsub', members: [m('pub')], myRole: { role: 'subscriber', members: [], publisher: 'pub' } } as Partial<Network>);
       expect(titles(c.memberGroups(n))).toEqual(['networks.network.members.publisher']);
       expect(ids(c.memberGroups(n))).toEqual([['pub']]);
-      expect(c.roleCountKey(n.myRole!)).toBeNull();
+      expect(c.roleCountText(n.myRole!)).toBeNull();
     });
     it('a club organiser sees its peers', () => {
       const c = make();
       const n = net({ type: 'club', members: [m('a')], myRole: { role: 'organiser', members: ['a'] } } as Partial<Network>);
       expect(titles(c.memberGroups(n))).toEqual(['networks.network.members.peers']);
       // Q-54: one member is counted in the singular, two in the plural.
-      expect(c.roleCountKey(n.myRole!)).toBe('networks.role.count.peersOne');
-      expect(c.roleCountKey({ role: 'organiser', members: ['a', 'b'] })).toBe('networks.role.count.peers');
+      expect(c.roleCountText(n.myRole!)).toBe('peers-one');
+      expect(c.roleCountText({ role: 'organiser', members: ['a', 'b'] })).toBe('peers-other');
     });
     it('a tree node sees the path to the root and what is below it', () => {
       const c = make();

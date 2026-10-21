@@ -22,6 +22,7 @@ import { SchemaApi } from '../../core/schema-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { ToastService } from '../../core/toast.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { PropSchemaTableComponent } from '../../shared/prop-schema-table.component';
@@ -605,7 +606,7 @@ export function entriesFromTypeSchemas(
             <div style="text-align:center;padding:16px 0;"><span class="spinner"></span></div>
           } @else {
             @if (dd.usages.length > 0) {
-              <p style="margin:0;font-size:13px;color:var(--text-muted);">{{ 'schemaLib.delete.usagesWarning' | transloco: { count: dd.usages.length } }}</p>
+              <p style="margin:0;font-size:13px;color:var(--text-muted);">{{ usagesWarningText(dd.usages.length) }}</p>
               <ul style="margin:0;padding-left:20px;font-size:12px;color:var(--text-muted);">
                 @for (u of dd.usages; track u.spaceId + u.knowledgeType + u.typeName) {
                   <li><strong>{{ u.spaceLabel }}</strong> — {{ u.knowledgeType }}: <code>{{ u.typeName }}</code></li>
@@ -644,6 +645,11 @@ export class SchemaLibraryComponent implements OnInit {
   private schemaApi = inject(SchemaApi);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
+
+  /** "This entry is linked in N space types ...", in the plural form the reader's language uses for N. */
+  protected usagesWarningText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'schemaLib.delete.usagesWarning', count);
+  }
   private toast = inject(ToastService);
 
   entries         = signal<SchemaLibraryEntry[]>([]);
@@ -1159,8 +1165,10 @@ export class SchemaLibraryComponent implements OnInit {
         if (imported === 0) {
           this.toast.info(this.transloco.translate('schemaLib.import.noneImported'));
         } else if (group !== undefined) {
-          const key = skipped > 0 ? 'schemaLib.import.spaceGroupedSkipped' : 'schemaLib.import.spaceGrouped';
-          this.toast.success(this.transloco.translate(key, { count: imported, group, skipped }));
+          const lang = this.transloco.getActiveLang();
+          this.toast.success(skipped > 0
+            ? pluralText(this.transloco, lang, 'schemaLib.import.spaceGroupedSkipped', imported, { group, skipped })
+            : pluralText(this.transloco, lang, 'schemaLib.import.spaceGrouped', imported, { group }));
         }
       } catch {
         this.toast.error(this.transloco.translate('schemaLib.import.parseFailed'));
@@ -1236,7 +1244,7 @@ export class SchemaLibraryComponent implements OnInit {
       finalize(() => this.applyGroupDialog.update(s => s ? { ...s, saving: false } : s)),
     ).subscribe({
       next: ({ count }) => {
-        const msg = this.transloco.translate('schemaLib.applyGroup.success', { count });
+        const msg = pluralText(this.transloco, this.transloco.getActiveLang(), 'schemaLib.applyGroup.success', count);
         this.applyGroupDialog.update(s => s ? { ...s, result: msg } : s);
       },
       error: (err) => {

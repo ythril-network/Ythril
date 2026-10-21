@@ -40,7 +40,8 @@ const WORDS: Record<string, string> = {
   'data.restore.leftOut.other': 'LEFT-OUT {{count}}: {{spaces}}',
   'data.migrate.accepted.one': 'MIGRATING {{count}}',
   'data.migrate.accepted.other': 'MIGRATING {{count}}',
-  'data.maintenance.restoring': 'RESTORING {{done}} of {{total}}',
+  'data.maintenance.restoring.one': 'RESTORING {{done}} of {{count}}',
+  'data.maintenance.restoring.other': 'RESTORING {{done}} of {{count}}',
   // A code's sentence must resolve to text for refusalText to take it (an echoed key reads as "no words", and the server's English
   // would be shown instead); each carries its own key so a case can see which one was chosen.
   ...Object.fromEntries([

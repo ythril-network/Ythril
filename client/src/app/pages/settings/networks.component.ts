@@ -3,7 +3,8 @@ import { CommonModule } from '@angular/common';
 import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.types';
-import { roleCountKey, remoteOf, memberGroups } from './network-role-view';
+import { roleCountText, remoteOf, memberGroups } from './network-role-view';
+import type { NetworkRole } from '../../core/network-role.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { NetworkInvitePanelComponent } from './network-invite-panel.component';
 import { NetworkAddSpaceComponent } from './network-add-space.component';
@@ -172,8 +173,8 @@ import { refusalText } from '../../core/refusal-text';
             <span class="badge" [ngClass]="typeBadge(net.type)">{{ net.type }}</span>
             @if (net.myRole; as r) {
               <span class="badge badge-role" [attr.aria-label]="'networks.role.ariaLabel' | transloco">{{ ('networks.role.' + r.role) | transloco }}</span>
-              @if (roleCountKey(r); as key) {
-                <span class="badge badge-gray">{{ key | transloco: { count: r.members.length } }}</span>
+              @if (roleCountText(r); as text) {
+                <span class="badge badge-gray">{{ text }}</span>
               }
             } @else {
               <span class="badge badge-gray">{{ net.members.length }} {{ net.members.length === 1 ? ('networks.memberBadge.singular' | transloco) : ('networks.memberBadge.plural' | transloco) }}</span>
@@ -676,7 +677,9 @@ export class NetworksComponent implements OnInit {
   }
 
   // The role's presentation (F-38.1) lives in network-role-view.ts; the template calls it through these.
-  readonly roleCountKey = roleCountKey;
+  roleCountText(r: NetworkRole): string | null {
+    return roleCountText(this.transloco, this.transloco.getActiveLang(), r);
+  }
   readonly remoteOf = remoteOf;
   readonly memberGroups = memberGroups;
 

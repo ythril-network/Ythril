@@ -26,6 +26,7 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import { AuthenticatedDownload } from '../../core/authenticated-download';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
@@ -800,10 +801,9 @@ export class FileManagerComponent implements OnInit, OnDestroy {
     if (clashes.length > 0) {
       const ok = await this.confirmDialog.confirm({
         title: this.transloco.translate('files.confirm.overwriteTitle'),
-        message: this.transloco.translate(
-          clashes.length === 1 ? 'files.confirm.overwriteOne' : 'files.confirm.overwriteMany',
-          { name: clashes[0], count: clashes.length, names: clashes.slice(0, 5).join(', ') },
-        ),
+        message: clashes.length === 1
+          ? this.transloco.translate('files.confirm.overwriteOne', { name: clashes[0] })
+          : pluralText(this.transloco, this.transloco.getActiveLang(), 'files.confirm.overwriteMany', clashes.length, { names: clashes.slice(0, 5).join(', ') }),
         confirmLabel: this.transloco.translate('files.confirm.overwriteConfirm'),
         danger: true,
       });

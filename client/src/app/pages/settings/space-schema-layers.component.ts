@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input, signal, untracked } from '@angular/core';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
 import { refusalText } from '../../core/refusal-text';
@@ -76,7 +77,7 @@ export function proposalFor(c: Clash, targetLayer: Record<string, unknown>): Rec
             </div>
           }
           @if (v.clashes.length) {
-            <div class="section-title" style="margin-top:10px;">{{ 'spaces.schema.layers.clashes' | transloco: { count: v.clashes.length } }}</div>
+            <div class="section-title" style="margin-top:10px;">{{ clashesText(v.clashes.length) }}</div>
             @for (c of v.clashes; track $index) {
               <div style="font-size:12px; padding:3px 0;">
                 <code>{{ where(c) }}</code>
@@ -102,6 +103,11 @@ export class SpaceSchemaLayersComponent {
   private api = inject(SchemaApi);
   private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
+
+  /** "N clashes", in the plural form the reader's language uses for N. */
+  protected clashesText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'spaces.schema.layers.clashes', count);
+  }
 
   /** Inside the settings dialog the view is the dialog's ONE copy (the Schema tab marks properties from it); on its own it is local. */
   private shared = inject(SpaceSettingsState, { optional: true });

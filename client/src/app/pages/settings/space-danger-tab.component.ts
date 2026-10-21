@@ -20,6 +20,7 @@ import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { refusalText, RefusalSource } from '../../core/refusal-text';
 import { DateFormatService } from '../../core/date-format.service';
 import { LiveAnnouncement } from '../../core/live-announcement';
@@ -140,9 +141,9 @@ type ActNotice =
   }
   @if (backfillResult(); as r) {
     <div class="alert alert-success" style="margin-top:10px;font-size:12px;">
-      {{ 'spaces.dangerZone.embeddingsBackfillDone' | transloco: { enqueued: r.enqueued } }}
+      {{ backfillDoneText(r.enqueued) }}
       @if (r.truncated) { <br/>{{ 'spaces.dangerZone.embeddingsBackfillMore' | transloco: { remaining: r.remaining } }} }
-      @if (r.skippedSuppressed > 0) { <br/>{{ 'spaces.dangerZone.embeddingsBackfillSkipped' | transloco: { skipped: r.skippedSuppressed } }} }
+      @if (r.skippedSuppressed > 0) { <br/>{{ backfillSkippedText(r.skippedSuppressed) }} }
     </div>
   }
 </div>
@@ -269,6 +270,14 @@ export class SpaceDangerTabComponent {
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+
+  /** The embeddings backfill's two counted sentences, each in the plural form the reader's language uses for its count. */
+  protected backfillDoneText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'spaces.dangerZone.embeddingsBackfillDone', count);
+  }
+  protected backfillSkippedText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'spaces.dangerZone.embeddingsBackfillSkipped', count);
+  }
   private dates = inject(DateFormatService);
   protected readonly live = new LiveAnnouncement();
 

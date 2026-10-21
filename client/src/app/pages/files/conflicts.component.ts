@@ -7,6 +7,7 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import { RouterLink } from '@angular/router';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
@@ -76,7 +77,7 @@ const STATUS_KEYS: Partial<Record<ResolveAction, string>> = {
       </div>
       @if (truncated()) {
         <div class="alert alert-info" style="margin-bottom:16px;">
-          {{ 'conflicts.truncated' | transloco: { count: conflicts().length } }}
+          {{ truncatedText(conflicts().length) }}
         </div>
       }
 
@@ -173,6 +174,11 @@ export class ConflictsComponent implements OnInit {
   private filesApi = inject(FilesApi);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
+
+  /** "Showing the first N conflicts ...", in the plural form the reader's language uses for N. */
+  protected truncatedText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'conflicts.truncated', count);
+  }
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -340,12 +346,13 @@ export class ConflictsComponent implements OnInit {
     const ids = this.selectedIds();
     if (ids.length === 0) return;
     const label = this.transloco.translate(ACTION_LABEL_KEYS[this.bulkAction]);
-    const params = { count: ids.length, action: label };
+    const lang = this.transloco.getActiveLang();
+    const params = { action: label };
     const ok = this.bulkAction === 'keep-incoming'
-      ? await this.askBeforeReplacing(this.transloco.translate('conflicts.confirm.bulkResolveIrreversible', params))
+      ? await this.askBeforeReplacing(pluralText(this.transloco, lang, 'conflicts.confirm.bulkResolveIrreversible', ids.length, params))
       : await this.confirmDialog.confirm({
         title: this.transloco.translate('conflicts.confirm.bulkResolveTitle'),
-        message: this.transloco.translate('conflicts.confirm.bulkResolve', params),
+        message: pluralText(this.transloco, lang, 'conflicts.confirm.bulkResolve', ids.length, params),
       });
     if (!ok) return;
     this.bulkResolving.set(true);
@@ -363,7 +370,7 @@ export class ConflictsComponent implements OnInit {
         this.selectedIds.update(sel => sel.filter(x => !resolvedSet.has(x)));
         this.bulkResolving.set(false);
         this.focusAfterResolve(firstGone);
-        if (r.resolved > 0) this.announcement.say(this.transloco.translate('conflicts.status.bulkResolved', { count: r.resolved, action: label }));
+        if (r.resolved > 0) this.announcement.say(pluralText(this.transloco, this.transloco.getActiveLang(), 'conflicts.status.bulkResolved', r.resolved, { action: label }));
         if (r.failed.length > 0) {
           const summary = this.transloco.translate('conflicts.error.bulkResolveFailedSummary', {
             resolved: r.resolved,

@@ -415,7 +415,7 @@ describe('after a resolve the focus moves on, and the outcome is announced (A3)'
       await m.c.bulkResolve();
       await vi.waitFor(() => {
         m.fixture.detectChanges();
-        expect(statusText(m.el), lang).toContain(fixedWords(words['conflicts.status.bulkResolved']!));
+        expect(statusText(m.el), lang).toContain(fixedWords(words[`conflicts.status.bulkResolved.${new Intl.PluralRules(lang).select(2)}`]!));
       }, { timeout: 1500 });
       expect(statusText(m.el)).toContain('2');
     });

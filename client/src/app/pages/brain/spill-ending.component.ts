@@ -31,7 +31,7 @@ import { DateFormatService } from '../../core/date-format.service';
   template: `
     @if (link(); as l) {
       <div class="spill-line">
-        <button type="button" class="btn btn-secondary btn-sm" [disabled]="busy()" (click)="download(l)">{{ labelKey() | transloco: labelParams() }}</button>
+        <button type="button" class="btn btn-secondary btn-sm" [disabled]="busy()" (click)="download(l)">{{ labelText() }}</button>
         <span>{{ 'brain.query.remainder.expires' | transloco: { date: expiresLabel(l.expiresAt) } }}</span>
         @if (extraKey(); as x) { <span>{{ x | transloco }}</span> }
       </div>
@@ -51,9 +51,8 @@ export class SpillEndingComponent {
   link = input<SpillLink | null>(null);
   /** Why nothing was kept, as the server said it; only read when there is no link. */
   refused = input<string | null>(null);
-  /** The download button's label and its parameters (how many matches or nodes it holds). */
-  labelKey = input.required<string>();
-  labelParams = input<Record<string, unknown>>({});
+  /** The download button's label, already in words: it names how many matches or nodes the spill holds, in the plural form of the reader's language. */
+  labelText = input.required<string>();
   /** A remark after the expiry, such as the graph's ceiling. */
   extraKey = input<string | null>(null);
   /** The notice's own last line when nothing was kept and nothing was refused. */

@@ -38,7 +38,8 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, output, signal,
   viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { pluralText } from '../../core/plural-text';
 import { SkeletonLinesComponent } from '../../shared/skeleton-lines.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { BrainApi } from '../../core/brain-api.service';
@@ -197,7 +198,7 @@ import { layoutErModel } from './er-layout';
           <div class="note warn">{{ 'brain.overview.er.truncated' | transloco: { scan: tr.scan, limit: tr.limit } }}</div>
         }
         @if (m.danglingEdges > 0) {
-          <div class="note warn">{{ 'brain.overview.er.dangling' | transloco: { n: m.danglingEdges } }}</div>
+          <div class="note warn">{{ danglingText(m.danglingEdges) }}</div>
         }
       }
     }
@@ -205,6 +206,12 @@ import { layoutErModel } from './er-layout';
 })
 export class ErModelPanelComponent {
   private readonly api = inject(BrainApi);
+  private readonly transloco = inject(TranslocoService);
+
+  /** "N edges point at an entity that no longer exists.", in the plural form the reader's language uses for N. */
+  protected danglingText(count: number): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.er.dangling', count);
+  }
 
   readonly spaceId = input.required<string>();
   /** Admin-only: the pen appears when the caller says this token may change the schema. */

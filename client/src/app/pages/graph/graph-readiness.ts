@@ -9,6 +9,7 @@
  * the honest answer when nothing it knows about explains the wait, and the caller then says only that it is waiting.
  */
 import type { Space } from '../../core/api.types';
+import { pluralText, type PluralTranslator } from '../../core/plural-text';
 
 export interface ReadinessReason {
   key: string;
@@ -34,4 +35,15 @@ export function readinessReasons(
   const waiting = (queue?.pending ?? 0) + (queue?.processing ?? 0);
   if (waiting > 0) out.push({ key: 'graph.waiting.embedding', params: { count: waiting } });
   return out;
+}
+
+/**
+ * The words of one reason. The embedding backlog is a counted sentence, so it is said in the plural form the reader's language uses
+ * for the count (its key is the plural BASE, `graph.waiting.embedding.one|few|many|other`); every other reason is one sentence under
+ * its own key. The one place that knows which is which, so a page that lists reasons cannot print the base as if it were a sentence.
+ */
+export function readinessText(transloco: PluralTranslator, language: string, reason: ReadinessReason): string {
+  return reason.key === 'graph.waiting.embedding'
+    ? pluralText(transloco, language, 'graph.waiting.embedding', reason.params?.['count'] ?? 0)
+    : transloco.translate(reason.key, reason.params);
 }

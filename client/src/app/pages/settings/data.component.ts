@@ -544,7 +544,10 @@ export class DataComponent implements OnInit {
     const held = this.maintenanceHeldBy();
     const r = held === 'restore' ? this.restoreReport() : held === 'migrate' ? this.migrateReport() : null;
     if (r && r.state === 'running') {
-      return t(held === 'restore' ? 'data.maintenance.restoring' : 'data.maintenance.migrating', { done: r.done, total: r.total });
+      const lang = this.transloco.getActiveLang();
+      return held === 'restore'
+        ? pluralText(this.transloco, lang, 'data.maintenance.restoring', r.total, { done: r.done })
+        : pluralText(this.transloco, lang, 'data.maintenance.migrating', r.total, { done: r.done });
     }
     return t(this.maintenanceActive() ? 'data.maintenance.active' : 'data.maintenance.inactive');
   }
