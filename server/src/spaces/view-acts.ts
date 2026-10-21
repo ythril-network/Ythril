@@ -224,9 +224,12 @@ export function copyViewTo(actor: ViewActor, id: string, toTokenId: unknown, fro
     const from = (cfg.views ?? []).find(v => v.ownerId === source.ownerId && v.id === source.id);
     if (!from) throw notFound(id);
     const held = cfg.tokens.find(t => t.id === toTokenId) as TokenRecord | undefined;
-    const kept = from.members.includes(WILDCARD_MEMBER)
-      ? [WILDCARD_MEMBER]
-      : from.members.filter(admissibleFor(held?.rights, held ? peerBoundTo(held) : undefined, cfg));
+    const admissible = admissibleFor(held?.rights, held ? peerBoundTo(held) : undefined, cfg);
+    // A wildcard is judged by what it stands for (every space), so a receiver that reads none of them is refused as for a listed one.
+    const wildcard = from.members.includes(WILDCARD_MEMBER);
+    const kept = wildcard
+      ? (cfg.spaces.some(s => admissible(s.id)) ? [WILDCARD_MEMBER] : [])
+      : from.members.filter(admissible);
     if (kept.length === 0) {
       throw new ViewRefusal('copyNothingReadable', 'That token reads none of the spaces this view lists, so a copy would read nothing');
     }
