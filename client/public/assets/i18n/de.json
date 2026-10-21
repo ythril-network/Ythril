@@ -712,6 +712,7 @@
   "files.closePreviewAriaLabel": "Vorschau schließen",
   "files.emptyFolder.title": "Leerer Ordner",
   "files.emptyFolder.body": "Laden Sie Dateien hoch oder erstellen Sie einen Ordner.",
+  "files.emptyFolder.viewBody": "Hier ist noch nichts. Eine persönliche Ansicht zeigt Dateien an und kann sie nicht ändern.",
   "files.tree.loadFailed": "Ordnerbaum konnte nicht geladen werden",
   "files.tree.expandFailed": "Ordner konnte nicht geöffnet werden",
   "files.tree.loading": "Laden…",

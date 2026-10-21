@@ -170,7 +170,7 @@ export interface FileRow {
               <div class="empty-state" style="padding:32px">
                 <div class="empty-state-icon"><ph-icon name="folder-open" [size]="48"/></div>
                 <h3 #emptyTitle tabindex="-1">{{ 'files.emptyFolder.title' | transloco }}</h3>
-                <p>{{ 'files.emptyFolder.body' | transloco }}</p>
+                <p>{{ (isView() ? 'files.emptyFolder.viewBody' : 'files.emptyFolder.body') | transloco }}</p>
               </div>
               }
             </td></tr>
