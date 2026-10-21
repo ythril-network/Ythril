@@ -44,6 +44,14 @@ describe('what a reload does to the space list', () => {
     }
   });
 
+  it('a space the reload\'s proxy migration retired is not kept against it (Q-531)', () => {
+    // The 6.0 migration runs inside the reload and takes a 5.x proxy out of `spaces`, reserving its id. Putting it back as "missing
+    // from the file" made the proxy a plain writable space again. Seen in the sync suite (Full run 39571993393).
+    const d = reloadSpaceDiff([sp('general'), sp('team')], { spaces: [sp('general')], retiredSpaceIds: ['team'] });
+    assert.deepEqual(d.kept, [], 'a retired id is the migration\'s removal, not a lost space');
+    assert.deepEqual(d.removed, ['team']);
+  });
+
   it('a space the file adds is named as added', () => {
     const d = reloadSpaceDiff([sp('general')], { spaces: [sp('general'), sp('fresh')] });
     assert.deepEqual(d.added, ['fresh']);

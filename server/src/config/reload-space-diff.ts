@@ -35,12 +35,17 @@ export interface ReloadSpaceDiff {
 
 export function reloadSpaceDiff(
   before: readonly SpaceConfig[],
-  after: { spaces: readonly SpaceConfig[]; removeSpaces?: readonly string[]; pendingSpaceOp?: PendingSpaceOp },
+  after: {
+    spaces: readonly SpaceConfig[]; removeSpaces?: readonly string[]; pendingSpaceOp?: PendingSpaceOp; retiredSpaceIds?: readonly string[];
+  },
 ): ReloadSpaceDiff {
   const afterIds = new Set(after.spaces.map(s => s.id));
   const beforeIds = new Set(before.map(s => s.id));
   const explicit = new Set(after.removeSpaces ?? []);
   if (after.pendingSpaceOp) explicit.add(after.pendingSpaceOp.spaceId);
+  // A reserved id is the 6.0 proxy migration's own removal (it runs inside the reload): keeping it would make the proxy a writable space
+  // again (Q-531).
+  for (const id of after.retiredSpaceIds ?? []) explicit.add(id);
   const missing = before.filter(s => !afterIds.has(s.id));
   return {
     added: after.spaces.map(s => s.id).filter(id => !beforeIds.has(id)),
