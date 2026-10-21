@@ -32,6 +32,8 @@ export interface WarnOnce<K> {
   (key: K, report: () => void, version?: unknown): boolean;
   /** Forget `key`: the next sighting is news. For a condition that cleared. */
   forget(key: K): void;
+  /** Forget every key: every next sighting is news. For a test whose cases each start a new window. */
+  forgetAll(): void;
   /** How many keys are currently remembered — a count of live conditions, when each is forgotten as it clears. */
   readonly size: number;
 }
@@ -60,6 +62,7 @@ export function warnOnce<K>({ max = 1_000, every, now = Date.now }: WarnOnceOpti
     return true;
   }) as WarnOnce<K>;
   fn.forget = (key: K) => { seen.delete(key); };
+  fn.forgetAll = () => { seen.clear(); };
   Object.defineProperty(fn, 'size', { get: () => seen.size });
   return fn;
 }

@@ -136,6 +136,10 @@ describe('a delivered tombstone moves the counter, and a counter that could not 
   }
 
   it('push: a failed bump is logged, never thrown over an apply error', async () => {
+    // 'the bump runs even when the apply failed' met this apply error (same door, space and cause) moments ago, and a repeated fault is
+    // said once per window (`reportServerFailureOncePerWindow`): this case reads the line the first meeting leaves, so it starts a new window.
+    const { forgetFaultReports } = await import('../../server/dist/util/report-failure.js');
+    forgetFaultReports();
     const { result: res, lines } = await door.logsDuring(() => withCounterCeiling(F, 100, () =>
       withFactsAView(F, [build.entity(F, 'both', 3, author(ISSUER.push))],
         () => deliver('push', F, [tomb(F, 'both', 400, ISSUER.push)]))));

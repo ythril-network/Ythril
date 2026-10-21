@@ -27,7 +27,7 @@
  *
  * Every fault body says `retryable: false` ITSELF: `statesRetryability` stamps `true` on a `5xx` body that does not say, and a fault is not
  * a condition that clears. Every fault is reported (the cause and stack to the operator) once per operation and class per window, however
- * often a caller repeats it, and the class is the metric's label (`CAUGHT_KINDS`, a fixed vocabulary).
+ * often a caller repeats it (a different failure at the same door is its own line), and the class is the metric's label (`CAUGHT_KINDS`, a fixed vocabulary).
  *
  * ## The question it answers
  *
@@ -43,9 +43,7 @@ import { StoredFileUnreadable } from '../files/stored-bytes.js';
 import { FileSystemFault } from '../files/act-answers.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { isFileSystemError } from './fs-failure-words.js';
-import { log, peerText } from './log.js';
-import { warnOnce } from './warn-once.js';
-import { FAULT_REPORT_WINDOW } from './report-failure.js';
+import { reportServerFailureOncePerWindow } from './report-failure.js';
 
 /** The classes a caught failure is answered as: the metric's `class` label, so a fixed set and never a message. */
 export const CAUGHT_KINDS = ['unreadable_file', 'upstream', 'file_system', 'driver_refusal', 'internal', 'refusal'] as const;
@@ -65,11 +63,13 @@ const UPSTREAM_TEXT = 'an upstream service did not answer';
 /** Socket-shaped codes: the connection to something else failed, which is not a file act and not the caller's request. */
 const SOCKET_CODE = /^(ECONN[A-Z]*|EPIPE|ETIMEDOUT|ENOTFOUND|EAI_[A-Z_]+)$/;
 
-const saidFault = warnOnce<string>(FAULT_REPORT_WINDOW);
-
-/** Report a fault's cause to the operator once per operation and class per window; the answer is given every time. */
+/**
+ * Report a fault's cause to the operator once per operation, class and failure per window; the answer is given every time. Through the
+ * one reporter a file act's fault uses, so the line reads `<where> failed with a 5xx (<class>):` (what an operator and `a-5xx-never-discards-its-cause`
+ * search for) and a different failure at the same door is not swallowed by the window of the first.
+ */
 function reportCaught(where: string, kind: CaughtKind, err: unknown): void {
-  saidFault(`${where}|${kind}`, () => log.error(`${peerText(where)} failed (${kind}):`, err));
+  reportServerFailureOncePerWindow(where, kind, err);
 }
 
 /**

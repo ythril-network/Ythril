@@ -48,7 +48,7 @@ process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const S = 'fileoutage';
 const T0 = '2026-09-01T00:00:00.000Z';
 
-let door, files, tombstones, F, handlers, callTool, ADMIN, faults, tool, answerOf;
+let door, files, tombstones, F, handlers, callTool, ADMIN, faults, tool, answerOf, forgetFaultReports;
 
 const root = () => path.join(process.env['DATA_ROOT'], 'files', S);
 const onDisk = (p) => fs.existsSync(path.join(root(), p));
@@ -119,6 +119,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
     F = await driverWriteFailures('ythril_harness_fileoutage');
     files = await import('../../server/dist/files/files.js');
     tombstones = await import('../../server/dist/files/tombstones.js');
+    ({ forgetFaultReports } = await import('../../server/dist/util/report-failure.js'));
     ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
@@ -315,6 +316,9 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
     it(`${via}: a move still owed leaves the failure that stopped it in the log, whichever door met it`, async () => {
       await seedEverything('from.txt');
       for (const m of INSERTS) fail(m, 'files', F.storeGone.single);
+      // The cases above met this very failure (same door, move and cause) seconds ago, and a repeated fault is said once per window
+      // (`reportServerFailureOncePerWindow`): this case asks what the FIRST meeting leaves in the log, so it starts a new window.
+      forgetFaultReports();
       const { emitted, result: a } = await logLinesDuring(() => move('from.txt', 'to.txt'));
       assertMoveStillOwed(via, a, 'to.txt');
       assert.ok(emitted.some(l => /\[ERROR\].*failed with a 5xx.*caused by: MongoServerSelectionError/.test(l)),
