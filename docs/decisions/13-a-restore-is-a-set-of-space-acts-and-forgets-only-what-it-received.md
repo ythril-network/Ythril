@@ -63,7 +63,7 @@ back on every member.
 
 ## Where the detail lives
 
-- The routes, the report, abandon and what is not restored: `docs/integration-guide/12-admin-api.md`.
+- The routes, the report, abandon and what is not restored: `docs/integration-guide/12a-data-management-api.md`.
 - The marks and what a restore does to each: `docs/sync-protocol.md` (The per-space marks, and what a restore does to them).
 - The upgrade and rollback notes: `docs/integration-guide/02b-upgrading.md`.
 - The code: `server/src/db/restore-act.ts` and `server/src/db/migrate-act.ts`; the one list of act kinds in

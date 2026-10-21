@@ -21,7 +21,7 @@ export interface RestoreStarted {
 /** One space of a set's report. */
 export interface ActSetSpaceReport {
   id: string;
-  /** `owed`, `running`, `done` or `restore_abandoned` today; read as the server's string. */
+  /** `owed`, `running`, `done` or `<kind>_abandoned` (`restore_abandoned`, `migrate_abandoned`); read as the server's string. */
   state: string;
   attempts: number;
   /** Our sentence for the last failure (never a driver's text). */

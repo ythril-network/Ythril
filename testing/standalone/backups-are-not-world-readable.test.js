@@ -142,7 +142,7 @@ describe('nothing that holds user data is written with default permissions', () 
 
 describe('the docs admit what encryption at rest does not cover', () => {
   it('the admin API says a dump is unencrypted and not covered by the flag', () => {
-    const doc = read('docs/integration-guide/12-admin-api.md');
+    const doc = read('docs/integration-guide/12a-data-management-api.md');
     assert.match(doc, /unencrypted copy of everything/i,
       'the backup endpoint must say the dump is unencrypted');
     // ADJACENCY CLAIM, not a window: `.` does not match a newline, so this asserts the flag and the disclaimer

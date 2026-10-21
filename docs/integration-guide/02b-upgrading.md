@@ -288,7 +288,7 @@ release adds is named on `space_schema_layers` (`unknownFields`) instead of refu
 **Upgrading past 5.6.x answers an unknown top-level field on a brain write by a per-space setting, and an MCP write no longer refuses one by default.** The setting, `unknownWriteFields`, is `warn` unless a space is set to `refuse` (`PATCH /api/spaces/:id`, or `update_space`). Under `warn` the write is stored and each unknown field is named in `warnings`, where an MCP call used to be refused. Under `refuse` the write is refused, and so is a uniform option a route does not read (`checkDuplicates` on an update, `ttlDays` on a link) and a GET-then-PATCH that sends server-written keys back. The setting is per instance and is never replicated, so members of a network may answer differently. Read `warnings` on the writes an integration sends, and set `refuse` only where you want refusal.
 
 **Upgrading past 5.6.x makes a restore and a migrate acts that run after their answer, and changes what they answer.**
-See [Admin API](12-admin-api.md#post-apiadmindatarestore) for the whole contract.
+See [Admin API](12a-data-management-api.md#post-apiadmindatarestore) for the whole contract.
 
 - **`POST /api/admin/data/restore` answers `202`** `{ restoreId, backupId, spaces, emptied, leftOut }` (it answered `200` with
   the index results once the restore had run). Poll the new `GET /api/admin/data/restore` until `state` is not `running`; the
