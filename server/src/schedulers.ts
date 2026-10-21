@@ -31,7 +31,7 @@
  * The distinction is exactly "is the schedule captured at start, or read per run" — not "is it a scheduler".
  */
 import { log } from './util/log.js';
-import { closeCronArming } from './util/armed-schedule.js';
+import { closeCronArming } from './util/cron-arming.js';
 import { configReloadsSettled, stopConfigWatcher } from './config/loader.js';
 
 /**
@@ -75,7 +75,9 @@ export async function rearmCronSchedulers(): Promise<void> {
  * End every cron schedule for the rest of this process, so nothing can arm one again (`Q-474`, `Q-570`).
  *
  * The shutdown handler calls it before the drain, and so does a test's in-process app teardown
- * (`testing/_shared/in-process-app.mjs`): the one list of what "stop scheduling" means. In order, because each step closes a
+ * (`testing/_shared/in-process-app.mjs`), so a test ends scheduling as a shutdown does. (The shutdown handler also calls each
+ * scheduler's own stop after this, by name, because `every-started-job-is-stopped-at-shutdown` holds every module's stop to
+ * the handler; after this they find nothing to stop.) In order, because each step closes a
  * door the next relies on: the config watcher stops (no new reload starts), a reload already running is waited for within
  * `withinMs` (it re-arms the schedulers as its last step), arming closes (a reload that outlived the bound, a network's
  * settings or the backup route can no longer arm), and then every cron scheduler stops. A cron task left armed holds the

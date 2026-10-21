@@ -10,7 +10,7 @@
  * timers hold the process: in CI a test file closed its database and then sat in "Starting sync cycle ... MongoDB not
  * connected" until the job's 30-minute limit cancelled it (PR #1511, PR #1523).
  *
- * So arming has one switch, `closeCronArming()` in `util/armed-schedule.ts`, and once it is closed every start of every cron
+ * So arming has one switch, `closeCronArming()` in `util/cron-arming.ts`, and once it is closed every start of every cron
  * scheduler arms nothing. A plain stop is NOT that switch: a process that is not ending may stop and start a scheduler
  * again (`sync-engine-lock.test.js` does), which the second case holds.
  *
@@ -41,7 +41,10 @@ before(async () => {
   config.networks = [{ id: 'net-a', syncSchedule: CRON }];
   config.dupeScanner = { enabled: true, schedule: CRON };
   config.contradictionScanner = { enabled: true, schedule: CRON };
-  armed = await import('../../server/dist/util/armed-schedule.js');
+  armed = {
+    ...await import('../../server/dist/util/armed-schedule.js'),
+    ...await import('../../server/dist/util/cron-arming.js'),
+  };
   sync = await import('../../server/dist/sync/scheduler.js');
   dupe = await import('../../server/dist/brain/dupe-scanner.js');
   contradiction = await import('../../server/dist/brain/contradiction-scanner.js');
@@ -70,7 +73,7 @@ function stopEvery() {
 describe('cron arming', () => {
   it('reports what is armed, and has a switch to close', () => {
     assert.equal(typeof armed.armedCronKeys, 'function', 'util/armed-schedule exports no armedCronKeys: nothing can say what is armed');
-    assert.equal(typeof armed.closeCronArming, 'function', 'util/armed-schedule exports no closeCronArming: there is no switch to close');
+    assert.equal(typeof armed.closeCronArming, 'function', 'util/cron-arming exports no closeCronArming: there is no switch to close');
   });
 
   it('a stop is not the switch: stop then start arms again', () => {

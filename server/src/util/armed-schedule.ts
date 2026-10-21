@@ -27,9 +27,6 @@
  * module's, and the two docblocks say where the other begins.
  */
 
-import { log } from './log.js';
-import { warnOnce } from './warn-once.js';
-
 /** One scheduler's fact of what it armed. Keyed, so a per-network scheduler uses one instance for all of them. */
 export interface ArmedSchedules {
   /** True when `key` is already armed on exactly `cron` — the caller should return without touching the task. */
@@ -73,33 +70,3 @@ export function armedCronKeys(): string[] {
   return [..._all].flatMap(([owner, armed]) => [...armed.keys()].map(key => `${owner}: ${key}`));
 }
 
-/*
- * ## The switch that ends arming, and why a stop is not it
- *
- * A cron task armed after the process (or a test's teardown) stopped the schedulers keeps that process alive: node-cron's
- * timers are ref'd. The late arms are ordinary - a config reload re-arms three schedulers, a network's settings re-arm sync,
- * the backup route re-arms backups - and in CI one held a test file until the job's 30-minute limit cancelled it (`Q-474`,
- * `Q-570`). So once arming closes, every cron scheduler refuses to arm, for the rest of the process.
- *
- * A plain stop does NOT close it: a process that is not ending stops and starts its schedulers (a schedule cleared and set
- * again, a test that restarts one). Closing is the one-way step the shutdown takes (`closeScheduling` in `schedulers.ts`),
- * and every function that registers a cron task asks {@link cronArmingRefused} before it does
- * (`every-cron-scheduler-asks-whether-arming-is-closed.test.js` derives them).
- */
-let _armingClosed = false;
-const refusalSaid = warnOnce<string>({ max: 16 });
-
-/** Close cron arming for the rest of this process. Idempotent. */
-export function closeCronArming(): void {
-  _armingClosed = true;
-}
-
-/**
- * True once arming is closed, and then the caller arms nothing. Said once per scheduler at info: a reload during a drain
- * that answers `{ ok: true }` without re-arming is correct, and would otherwise be invisible.
- */
-export function cronArmingRefused(what: string): boolean {
-  if (!_armingClosed) return false;
-  refusalSaid(what, () => log.info(`${what} not armed: the process is stopping its schedulers`));
-  return true;
-}
