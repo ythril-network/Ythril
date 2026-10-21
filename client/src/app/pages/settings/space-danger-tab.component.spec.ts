@@ -630,6 +630,14 @@ describe('any standing act blocks the rename and gets its own repeat hint (bundl
       expect(said(h)).not.toContain('Attempts so far');
     });
 
+    it('a PENDING space (registered, attempt 0: a migrate\'s waiting space) takes both the pill and the sentence from the row rule', () => {
+      const h = withEn({ kind: 'migrate', since: '2026-10-18T11:50:00.000Z', attempts: 0, state: 'registered' });
+      expect(said(h)).toContain('Waiting');
+      expect(said(h)).toContain('copy of the whole instance to another database');
+      expect(said(h)).not.toContain('Next try');
+      expect(said(h)).not.toContain('Attempts so far');
+    });
+
     it('a real retry keeps "Retry owed", its tries and its next try', () => {
       const h = withEn(actPending({ kind: 'delete', state: 'owed', attempts: 2, nextRetryAt: RETRY_AHEAD }));
       expect(said(h)).toContain('Retry owed');
