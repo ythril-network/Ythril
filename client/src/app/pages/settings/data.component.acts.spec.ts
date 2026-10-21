@@ -9,6 +9,8 @@
  * that lands after the page closed starts no poll; the outcome is HEARD (the live region is in the DOM before its text changes, and the
  * text is in it after the announcement's gap); nothing is said about progress before the report it depends on has loaded.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { provideHttpClient } from '@angular/common/http';
@@ -54,7 +56,12 @@ interface Page {
   confirm: ReturnType<typeof vi.fn>;
 }
 
+/** The real en.json, for the cases that pin the sentence an operator reads rather than a key (Q-561). */
+const EN: Record<string, string> = JSON.parse(readFileSync(resolve(__dirname, '../../../../public/assets/i18n/en.json'), 'utf8'));
+
 interface Boot {
+  /** The English dictionary the page renders with: the harness's `WORDS` unless a case wants the real en.json. */
+  words?: Record<string, string>;
   migrationEnabled?: boolean;
   maintenance?: Record<string, unknown>;
   /** The restore report the page loads on open; `'pending'` leaves the request unanswered. */
@@ -66,7 +73,7 @@ function open(boot: Boot = {}): Page {
   const confirm = vi.fn((_data: unknown) => Promise.resolve(true));
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
-    imports: [DataComponent, getTranslocoModule({ translation: { en: WORDS } })],
+    imports: [DataComponent, getTranslocoModule({ translation: { en: boot.words ?? WORDS } })],
     providers: [AdminApi, provideHttpClient(), provideHttpClientTesting(), { provide: ConfirmDialogService, useValue: { confirm } }],
   });
   const fixture = TestBed.createComponent(DataComponent);
@@ -372,5 +379,98 @@ describe('while a set stands, maintenance says so and the toggle and migrate wai
     const p = open({ maintenance: MAINTENANCE.manual });
     expect(buttonWith(p, 'data.maintenance.deactivate')?.disabled).toBe(false);
     expect(pageText(p)).not.toContain('data.maintenance.heldHint');
+  });
+});
+
+/*
+ * bundle-157 (Q-561, finding 5), with the REAL en.json: after a restore ends the visible notice is the end sentence (it said "Restore
+ * accepted: 54 spaces are being restored" for ever, and the completion sentence was only in the sr-only live region); and a migrate, which
+ * ends by exiting the process, says the instance has stopped when its report poll stops answering instead of freezing at "0 of n / Running".
+ */
+describe('the end of a restore is shown, and a migrate that stops the instance says so (Q-561)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  /** What a sighted operator reads in the live region's alerts: the sr-only span is not it. */
+  const visibleNotice = (p: Page) =>
+    Array.from(el(p).querySelectorAll('[role="status"] .alert')).map(e => (e.textContent ?? '').replace(/\s+/g, ' ').trim()).join(' | ');
+  const cardText = (p: Page, kind: string) => (el(p).querySelector(`app-act-set-progress[kind="${kind}"]`)?.textContent ?? '').replace(/\s+/g, ' ');
+
+  /** A restore this page started, followed to the report that ends it. */
+  async function restoreEnded(ended: Record<string, unknown>): Promise<Page> {
+    const p = open({ words: EN });
+    await restoreAnswered(p, RESTORE_ANSWERS.accepted);
+    expect(visibleNotice(p), 'accepted is said while it runs').toContain('Restore accepted: 3 spaces are being restored');
+    reportPolls(p).forEach(r => r.flush(restoreReport()));
+    vi.advanceTimersByTime(TEN_MINUTES);
+    reportPolls(p)[0]!.flush(restoreReport(ended));
+    p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/maintenance').forEach(r => r.flush(MAINTENANCE.off));
+    vi.advanceTimersByTime(1_000);
+    p.fixture.detectChanges();
+    return p;
+  }
+
+  it('a completed restore replaces the accepted notice with the completion sentence, visibly', async () => {
+    const p = await restoreEnded({
+      state: 'completed', endedAt: '2026-10-18T12:01:00.000Z',
+      spaces: [restoreSpace('general', 'done'), restoreSpace('notes', 'done'), restoreSpace('proj', 'done')],
+    });
+    expect(visibleNotice(p)).toContain(EN['data.restore.completed']);
+    expect(visibleNotice(p)).not.toContain('Restore accepted');
+    expect(visibleNotice(p)).not.toContain('being restored');
+  });
+
+  it('an abandoned restore replaces it with the abandoned sentence naming the spaces left half restored', async () => {
+    const p = await restoreEnded({
+      state: 'abandoned', endedAt: '2026-10-18T12:01:00.000Z',
+      spaces: [restoreSpace('general', 'done'), restoreSpace('notes', 'restore_abandoned'), restoreSpace('proj', 'restore_abandoned')],
+    });
+    expect(visibleNotice(p)).toContain('The restore was abandoned. These spaces may be half restored: notes, proj');
+    expect(visibleNotice(p)).not.toContain('Restore accepted');
+  });
+
+  it('a restore this page found already running ends in the same visible sentence', () => {
+    const p = open({ words: EN, restore: restoreReport() });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    reportPolls(p)[0]!.flush(restoreReport({
+      state: 'completed', endedAt: '2026-10-18T12:01:00.000Z',
+      spaces: [restoreSpace('general', 'done'), restoreSpace('notes', 'done'), restoreSpace('proj', 'done')],
+    }));
+    vi.advanceTimersByTime(1_000);
+    p.fixture.detectChanges();
+    expect(visibleNotice(p)).toContain(EN['data.restore.completed']);
+  });
+
+  it('a migrate whose report poll is refused at the connection says the instance has stopped and must be started again', () => {
+    const p = open({ words: EN, migrate: migrateReport() });
+    expect(cardText(p, 'migrate')).not.toMatch(/has stopped/i);
+    vi.advanceTimersByTime(TEN_MINUTES);
+    const polls = p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/migrate');
+    expect(polls.length, 'the migrate report is polled while it stands').toBeGreaterThan(0);
+    polls[0]!.error(new ProgressEvent('error'));
+    p.fixture.detectChanges();
+    expect(cardText(p, 'migrate')).toMatch(/instance has stopped/i);
+    expect(cardText(p, 'migrate')).toMatch(/started again/i);
+    expect(cardText(p, 'migrate')).toContain('connects to the new database');
+  });
+
+  it('an answer from the server (a 503) is not "the instance has stopped"', () => {
+    const p = open({ words: EN, migrate: migrateReport() });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/migrate')[0]!
+      .flush({ error: 'unavailable' }, { status: 503, statusText: 'Service Unavailable' });
+    p.fixture.detectChanges();
+    expect(cardText(p, 'migrate')).not.toMatch(/has stopped/i);
+  });
+
+  it('a restore poll that cannot connect says nothing about a stopped instance (a restore does not exit the process)', () => {
+    const p = open({ words: EN, restore: restoreReport() });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    reportPolls(p)[0]!.error(new ProgressEvent('error'));
+    p.fixture.detectChanges();
+    expect(cardText(p, 'restore')).not.toMatch(/has stopped/i);
   });
 });

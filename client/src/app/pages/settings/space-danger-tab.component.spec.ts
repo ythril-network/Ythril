@@ -17,7 +17,9 @@ import { LiveAnnouncement } from '../../core/live-announcement';
 import {
   ACT_TEXT_KEYS, DELETE_ANSWERS as D, WIPE_ANSWERS as W, NOW, RETRY_AHEAD, SERVER_SENTENCES, actPending, type WireAnswer,
 } from '../../testing/space-act-bodies';
-import { getTranslocoModule } from '../../testing/transloco-testing';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { getTranslocoModule, type SpecTranslocoOptions } from '../../testing/transloco-testing';
 import { SpaceDangerTabComponent } from './space-danger-tab.component';
 import { SpaceSettingsState } from './space-settings-state.service';
 import { SpacesApi } from '../../core/spaces-api.service';
@@ -215,11 +217,15 @@ interface Wired {
  * The tab with the real SpacesApi; `space` is merged into the open space (e.g. `{ actPending }`), `nets` is what networksForSpace gives,
  * and `networksLoaded: false` is a networks list that never arrived (its request failed).
  */
-function wired(opts: { space?: Record<string, unknown>; nets?: Record<string, unknown>[]; networksLoaded?: boolean; words?: Record<string, string> } = {}): Wired {
+function wired(opts: {
+  space?: Record<string, unknown>; nets?: Record<string, unknown>[]; networksLoaded?: boolean; words?: Record<string, string>;
+  /** The real language files, one of them active, for a case that pins the sentence read in that language (Q-561). */
+  i18n?: SpecTranslocoOptions;
+} = {}): Wired {
   const confirm = vi.fn((_data: unknown) => Promise.resolve(true));
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
-    imports: [SpaceDangerTabComponent, getTranslocoModule({ translation: { en: {
+    imports: [SpaceDangerTabComponent, getTranslocoModule(opts.i18n ?? { translation: { en: {
       // A parametrised key echoes its own name AND its parameter, so a spec can see both the line and what filled it.
       [K.queued]: `${K.queued} {{when}}`,
       ...opts.words,
@@ -594,6 +600,40 @@ describe('any standing act blocks the rename and gets its own repeat hint (bundl
     const h = wired({ space: { actPending: actPending({ kind: 'a-kind-this-client-has-never-seen' }) }, words: HINT_WORDS });
     expect(statusText(h)).toContain('HINT-other');
     expect(statusText(h)).not.toContain('HINT-delete');
+  });
+
+  /*
+   * Q-561, finding 6: a rename refused because a restore or migrate stands answers `409 { error, code }` with the server's English. The
+   * tab showed that sentence in de and pl. The code is the contract: each language has the sentence for it (the same words the Data
+   * page says for the same code, `data.refusal.<code>`), and the server's English is never what is read.
+   */
+  describe('a rename refused for a standing restore or migrate is read in the UI language (Q-561)', () => {
+    const I18N = resolve(__dirname, '../../../../public/assets/i18n');
+    const locale = (lang: string): Record<string, string> => JSON.parse(readFileSync(resolve(I18N, `${lang}.json`), 'utf8'));
+    const SERVER_ENGLISH: Record<string, string> = {
+      space_being_restored: 'Space \'proj\' takes no writes while the instance is being restored from a backup; retry once the restore completes.',
+      space_being_migrated: 'Space \'proj\' takes no writes while the instance is being copied to another database; retry once the migration completes.',
+    };
+
+    for (const lang of ['en', 'de', 'pl']) {
+      for (const code of ['space_being_restored', 'space_being_migrated']) {
+        it(`${lang}: ${code} reads as the ${lang} sentence for the code, never the server's English`, async () => {
+          const dict = locale(lang);
+          const words = dict[`data.refusal.${code}`];
+          expect(words, `the ${lang} sentence for ${code}`).toBeTruthy();
+          const h = wired({ i18n: {
+            langs: { [lang]: dict }, translocoConfig: { availableLangs: [lang], defaultLang: lang },
+          } as SpecTranslocoOptions });
+          h.state.dangerRenameId = 'proj-2';
+          await h.c.submitDangerRename();
+          h.http.expectOne(r => r.method === 'PATCH' && r.url === '/api/spaces/proj/rename').flush(
+            { error: SERVER_ENGLISH[code], code }, { status: 409, statusText: 'Conflict' });
+          h.fixture.detectChanges();
+          expect(alertText(h)).toContain(words);
+          expect(pageText(h)).not.toContain('takes no writes');
+        });
+      }
+    }
   });
 
   it('an owed act shows our sentence for its last failure, and that only an abandon ends it when it needs one', () => {
