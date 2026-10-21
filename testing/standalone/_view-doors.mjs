@@ -13,9 +13,8 @@
  * A reader of an answer takes either placement on purpose: the plan fixes WHAT is answered, not the envelope, and a test that
  * pinned an envelope the plan never chose would go red for the wrong reason after a correct implementation.
  */
-import http from 'node:http';
 import { openPushDoor } from './_push-door.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 
 for (const k of ['SKIP_GLOBAL_RATE_LIMIT', 'SKIP_AUTH_RATE_LIMIT', 'SKIP_SYNC_RATE_LIMIT']) process.env[k] = 'true';
 process.env['YTHRIL_RATE_LIMIT_PER_MINUTE'] ??= '1000000';
@@ -38,8 +37,7 @@ export async function openViewDoors({ suite, spaces }) {
   const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
   const { col } = await import('../../server/dist/db/mongo.js');
   const { spaceCollection } = await import('../../server/dist/db/space-collection.js');
-  const { createApp } = await import('../../server/dist/app.js');
-  const server = await listenOnLoopback(http.createServer(createApp()));
+  const server = await listenApp();
 
   async function rest(key, method, url, body, headers = {}) {
     const init = { method, headers: { Authorization: `Bearer ${key}`, ...headers }, signal: AbortSignal.timeout(60_000) };

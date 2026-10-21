@@ -37,12 +37,11 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import dns from 'node:dns';
-import http from 'node:http';
 import { emptyTarget } from './_migrate-target.mjs';
 import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest } from './_space-act-harness.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -88,8 +87,7 @@ describe('no write lands after a migrate completes, on any door (real MongoDB)',
     wantCode = SPACE_ACT_KINDS?.migrate?.writeRefusalCode;
     const tokens = await import('../../server/dist/auth/tokens.js');
     adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
     const { MongoClient } = await import('mongodb');
     fixture = new MongoClient(SOURCE_URI);
     target = new MongoClient(testMongoUri(TARGET_DB));

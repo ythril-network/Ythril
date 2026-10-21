@@ -28,8 +28,7 @@
  * **Tokens that are fresh.** The heavy-call rail counts per token; a case that reused one would be judged on the
  * previous case's slots. Every `token(kind)` mints another.
  */
-import http from 'node:http';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 
 // The instance's limiters answer 429 to a caller past its quota before the rail is reached; they are not what these
 // tests ask about (`a-store-failure-answers-alike-on-every-door-db` sets the same three).
@@ -45,8 +44,7 @@ export async function openStampDoors(space) {
   const tokens = await import('../../server/dist/auth/tokens.js');
   const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
   const { callTool } = await import('../../server/dist/mcp/call-tool.js');
-  const { createApp } = await import('../../server/dist/app.js');
-  const server = await listenOnLoopback(http.createServer(createApp()));
+  const server = await listenApp();
   let serial = 0;
 
   /** Every area at `rung`, as a matrix row. */

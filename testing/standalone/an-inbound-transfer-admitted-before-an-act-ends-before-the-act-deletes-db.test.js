@@ -48,7 +48,7 @@ import { openStoreCommandLog } from './_store-command-log.mjs';
 import { resetRunnerForTest, entriesOf, metricSample } from './_space-act-harness.mjs';
 import { loadRunnerIfBuilt, loadFenceIfBuilt, requireRunner, requireFence, settleActs } from './_space-act-modules.mjs';
 import { rowRules } from './_row-rules.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -129,8 +129,7 @@ describe('an inbound transfer admitted before an act ends before the act deletes
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
     const area = Object.fromEntries(SPACE_AREAS.map(a => [a, 'write']));
     peerKey = (await tokens.createToken({ name: 'peer', peerInstanceId: PEER, rights: { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [S]: area, [FREE]: area } } })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
     parks = parkWrites(Object.getPrototypeOf(door.mongo.col('probe')));
     cmd = openStoreCommandLog(door.mongo);
   });

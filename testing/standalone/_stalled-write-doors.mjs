@@ -25,8 +25,7 @@
  * the count. It holds no lock of its own across calls — `lock()` hands back `holdDocumentLock`'s handle, and the
  * caller releases it.
  */
-import http from 'node:http';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { holdDocumentLock } from './_write-faults.mjs';
 
@@ -80,8 +79,7 @@ export async function openStalledWriteDoors({ suite, spaces, mongoPort, mongoQue
     const ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
     const tokens = await import('../../server/dist/auth/tokens.js');
     const adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
     const base = server.url;
     return {
       env: { door, fixture: door.fixture, plan, callTool, ADMIN, adminKey, base },

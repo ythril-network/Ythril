@@ -26,6 +26,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { appRouter } from '../_shared/in-process-app.mjs';
 import { tempInstanceDir, removeInstanceDir, bootInstance, callRoute } from './_vote-round-instance.mjs';
 import { DOORS, DRIVERS, NOT_FOR_AN_OPERATOR_FLOOR } from './_round-answer-doors.mjs';
 import { stripComments } from './_strip-comments.mjs';
@@ -131,7 +132,13 @@ describe('every door that opens a round answers the round the list shows', () =>
     loader = await bootInstance(dir, { instanceId: SELF, networks: [], extra: { instanceLabel: 'self' } });
     ({ listOpenVotesAct: listOpenVotes } = await import('../../server/dist/networks/vote-acts.js'));
   });
-  after(() => removeInstanceDir(dir));
+  // Every `appRouter()` this file opened: each is closed before the instance directory goes, so the config watcher and the cron
+  // schedulers it started are stopped while the file they watch still exists.
+  const appClosers = [];
+  after(async () => {
+    for (const close of appClosers) await close();
+    removeInstanceDir(dir);
+  });
 
   const listed = (roundId) => listOpenVotes(NET).body.rounds.find(r => r.roundId === roundId);
   const results = [];
@@ -165,8 +172,9 @@ describe('every door that opens a round answers the round the list shows', () =>
     'wipe': async () => [
       ['POST /api/admin/spaces/:spaceId/wipe', async () => {
         // Registered on the app itself, so the app's own router is the one handed to `callRoute`: the handler that runs is production's.
-        const { createApp } = await import('../../server/dist/app.js');
-        const router = createApp().router ?? createApp()._router;
+        const { router: app, close } = await appRouter();
+        appClosers.push(close);
+        const router = app.router ?? app._router;
         const r = await callRoute(router, 'post', '/api/admin/spaces/:spaceId/wipe', { params: { spaceId: 'notes' }, body: { confirm: true }, authToken: ADMIN });
         return [r.code, r.body];
       }],

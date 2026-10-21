@@ -11,6 +11,7 @@ import { resolveMasterSecret, isEnvelope, encryptEnvelope, decryptEnvelope } fro
 import { envIntOpt } from './env-num.js';
 import { migrateTokenRightsOnBoot } from '../auth/backfill-token-rights.js';
 import { keyedLock } from '../util/keyed-lock.js';
+import { settledWithin } from '../util/time-bound.js';
 import { migrateProxiesToViews, holdsLegacyProxies } from './migrate-proxies-to-views.js';
 import { validateViews } from './view-shape.js';
 import { effectiveMongoUri, readConfiguredMongoUriFrom } from './mongo-uri.js';
@@ -708,13 +709,7 @@ export function runConfigReload<T>(reload: () => Promise<T>): Promise<T> {
  * space's init must not hold a shutdown or a test teardown for ever.
  */
 export async function configReloadsSettled({ withinMs }: { withinMs: number }): Promise<boolean> {
-  let timer: NodeJS.Timeout | undefined;
-  const bound = new Promise<false>(r => { timer = setTimeout(() => r(false), withinMs); timer.unref?.(); });
-  try {
-    return await Promise.race([_reloadLock.idle(RELOAD_KEY).then(() => true as const), bound]);
-  } finally {
-    clearTimeout(timer);
-  }
+  return (await settledWithin(_reloadLock.idle(RELOAD_KEY), withinMs)).finished;
 }
 
 /** Stop watching config.json: removes exactly the listener `startConfigWatcher` registered. Idempotent. */

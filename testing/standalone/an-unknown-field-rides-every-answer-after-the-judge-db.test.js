@@ -33,12 +33,11 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -91,8 +90,7 @@ describe('an unknown field is named on every answer after the judge', { skip }, 
     });
     const tokens = await import('../../server/dist/auth/tokens.js');
     key = (await tokens.createToken({ name: 'b128-ride-admin', admin: true })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
     base = server.url;
     Server.prototype.command = async function storeFaulting(...args) {
       const op = args[0];

@@ -26,11 +26,10 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import { generate } from 'otplib';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { removeInstanceDir } from './_vote-round-instance.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 import { M1, tempInstance, networkOf, boot, seedFacts, factCount, databaseTakesCollections, warmSpaceCreation } from './_round-open-fixtures.mjs';
 
 const dir = tempInstance('ythril-d41-mfa-');
@@ -46,8 +45,7 @@ describe('D-41: the admin wipe route asks MFA only when the admin enabled it', {
     await warmSpaceCreation();
     totp = await import('../../server/dist/auth/totp.js');
     tokens = await import('../../server/dist/auth/tokens.js');
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
   });
   after(async () => { await server?.close(); await closeTestMongo(); removeInstanceDir(dir); });
 

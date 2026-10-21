@@ -23,8 +23,7 @@
  * It decides no rule and reads no source. A door file builds its own request for its own door and asks `reading()` what came
  * back; `stored()` reads the store, so "nothing stored" is an identity check and not a count.
  */
-import http from 'node:http';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp } from '../_shared/in-process-app.mjs';
 import { openPushDoor } from './_push-door.mjs';
 
 /** The three modes, and the one space each lives in. */
@@ -89,8 +88,7 @@ export async function openUndeclaredKeyDoors({ suite, extraSpaces = [] }) {
     const ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
     const tokens = await import('../../server/dist/auth/tokens.js');
     const adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
-    const { createApp } = await import('../../server/dist/app.js');
-    server = await listenOnLoopback(http.createServer(createApp()));
+    server = await listenApp();
     const base = server.url;
 
     async function rest(method, path, body) {
