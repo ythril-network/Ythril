@@ -15,6 +15,7 @@
  * is applied per component instead.
  */
 import { Component, ChangeDetectionStrategy, Injector, inject, signal, ElementRef, ViewChild, OnInit, computed } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SchemaTypeNameComponent } from './schema-type-name.component';
@@ -424,6 +425,8 @@ export class SpaceSchemaTabComponent implements OnInit {
   private schemaApi = inject(SchemaApi);
   private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
+  /** The active language as a signal, so a computed() sentence follows a language switch. */
+  private readonly lang = toSignal(this.transloco.langChanges$, { initialValue: this.transloco.getActiveLang() });
   private spacesApi = inject(SpacesApi);
   private injector = inject(Injector);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -683,7 +686,7 @@ export class SpaceSchemaTabComponent implements OnInit {
    */
   readonly validateProgressText = computed(() => {
     const { checked, total } = this.validateChecked();
-    const lang = this.transloco.getActiveLang();
+    const lang = this.lang();
     return !this.validateDone() && checked >= total
       ? pluralText(this.transloco, lang, 'validate.progressOpen', checked)
       : pluralText(this.transloco, lang, 'validate.progress', total, { checked });

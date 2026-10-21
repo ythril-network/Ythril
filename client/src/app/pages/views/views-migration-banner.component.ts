@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { pluralText } from '../../core/plural-text';
@@ -45,6 +46,8 @@ export class ViewsMigrationBannerComponent {
 
   private readonly api = inject(ViewsApi);
   private readonly transloco = inject(TranslocoService);
+  /** The active language as a signal, so the banner's sentences follow a language switch. */
+  private readonly lang = toSignal(this.transloco.langChanges$, { initialValue: this.transloco.getActiveLang() });
   private readonly report = signal<ViewsMigrationReport | null>(null);
 
   protected readonly ids = computed(() => [...(this.retired() ?? [])].sort());
@@ -56,7 +59,7 @@ export class ViewsMigrationBannerComponent {
   protected readonly visible = computed(() => (this.ids().length > 0 || this.unclaimedNames().length > 0) && this.dismissedKey() !== this.owedKey());
 
   protected readonly lines = computed(() => {
-    const lang = this.transloco.getActiveLang();
+    const lang = this.lang();
     const say = (base: string, names: readonly string[]) =>
       names.length > 0 ? [pluralText(this.transloco, lang, base, names.length, { names: names.join(', ') })] : [];
     const migrated = [...(this.report()?.migrated ?? [])].sort();
