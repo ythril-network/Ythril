@@ -21,7 +21,7 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { ToastService } from '../../core/toast.service';
 import { ViewsAdminPanelComponent } from './views-admin-panel.component';
 
-const REPORT = { migrated: 2, networksLostIds: [{ networkId: 'n1', label: 'Fleet', spaceIds: ['oldteam'] }], unclaimed: [] };
+const REPORT = { migrated: ['oldteam', 'oldlab'], networksLostIds: [{ networkId: 'n1', label: 'Fleet', spaceIds: ['oldteam'] }], unclaimed: [] };
 const ORPHANS = { orphans: [{ ownerKind: 'token', count: 3 }], unclaimed: [{ name: 'crafts', members: ['qa'] }] };
 
 function mount(retired: string[] | null, answer = true) {
