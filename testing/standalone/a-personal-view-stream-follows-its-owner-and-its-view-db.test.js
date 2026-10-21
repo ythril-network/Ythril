@@ -156,6 +156,24 @@ describe('the change stream on a personal view (Q-531)', { skip }, () => {
     } finally { s.close(); }
   });
 
+  // b100 lens S1: expiry is not a config write, so a guard that re-judged only on a write kept an expired owner's stream delivering.
+  it('the owner\'s token expiring ends the stream at the next change, with no config write in between', async () => {
+    const t = await d.mint(`vs-expiring-${Math.random().toString(36).slice(2, 8)}`, { [QA]: d.row({ knowledge: 'read' }) },
+      { expiresAt: new Date(Date.now() + 4_000).toISOString() });
+    await mustCreate(t.key, 'expiring', [QA]);
+    const s = await openStream(t.key, '%40expiring');
+    try {
+      change(QA, 'vs-before-expiry');
+      assert.ok(await s.until(b => b.includes('vs-before-expiry')), 'control: the stream delivered nothing before the expiry');
+      const expiresAt = Date.parse(d.loader.getConfig().tokens.find(x => x.id === t.id).expiresAt);
+      await new Promise(res => setTimeout(res, Math.max(0, expiresAt - Date.now()) + 250));
+      change(QA, 'vs-after-expiry');
+      await s.until(() => false, 2_000);
+      assert.ok(!s.text.includes('vs-after-expiry'), 'an expired owner\'s stream delivered a change after the expiry');
+      assert.ok(s.ended, 'the stream of an expired owner stayed open');
+    } finally { s.close(); }
+  });
+
   it('changing the view ends its stream at the next change (the client reconnects and recomputes)', async () => {
     const t = await reader();
     await mustCreate(t.key, 'changed', [QA, OPS]);

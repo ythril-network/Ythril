@@ -163,6 +163,18 @@ describe('pre-6.0 proxies migrate to personal views (Q-531)', () => {
     assert.deepEqual([all.enabled, all.spaces], [true, []], 'an every-space subscription is not about the retired id');
   });
 
+  // b100 lens D4: the boot step runs on every boot, so a subscription an admin re-enabled after the upgrade was disabled again each time.
+  it('a subscription disabled for its retired ids and re-enabled by an admin stays enabled on the next boot\'s pass', async () => {
+    const { subscriptionAfterRetiredIds } = await load();
+    const disabled = subscriptionAfterRetiredIds({ id: 'w4', url: 'https://h', secret: 's', spaces: ['team'], events: [], enabled: true }, ['team']);
+    assert.equal(disabled.enabled, false, 'control: the first pass disables it');
+    const reEnabled = { ...disabled, enabled: true };
+    const nextBoot = subscriptionAfterRetiredIds(reEnabled, ['team']);
+    assert.deepEqual([nextBoot.enabled, nextBoot.spaces], [true, ['team']], 'the next boot disabled a subscription an admin re-enabled');
+    const newlyRetired = subscriptionAfterRetiredIds({ ...reEnabled, spaces: ['team', 'crew'] }, ['team', 'crew']);
+    assert.equal(newlyRetired.enabled, false, 'an id retired after the first pass is a new reason to disable it');
+  });
+
   it('loadConfig and reloadConfig call the transform by name; it never reads or saves the live config; reload saves nothing', () => {
     const loader = stripComments(readFileSync(join(REPO_ROOT, 'server/src/config/loader.ts'), 'utf8'));
     const load_ = bodyOf(loader, 'loadConfig');

@@ -179,6 +179,15 @@ describe('the orphan, claim and purge doors (Q-531)', { skip }, () => {
         assert.ok((await collectionsOf(id)).length > 0 && d.loader.getConfig().retiredSpaceIds.includes(id), 'a refused purge dropped data or released the id');
         assert.ok(!(d.loader.getConfig().views ?? []).some(v => v.ownerId === `token:${manager.id}`), 'a refused claim gave the caller a view');
       });
+
+      // b100 lens S3: REST escaped `released` for a log line while MCP answered it as stored, so one purge answered two ids.
+      it('purge answers `released` as the id it released, character for character', async () => {
+        const id = `${RETIRED}-sep ${doorName}`;
+        d.loader.mutateConfig(cfg => { cfg.retiredSpaceIds = [id]; });
+        const a = await door.purge(admin.key, id);
+        assert.ok(door.ok(a), `purge: ${fmt(a)}`);
+        assert.equal(door.payload(a)?.released, id, `released: ${JSON.stringify(door.payload(a))}`);
+      });
     });
   }
 
