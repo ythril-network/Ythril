@@ -3,7 +3,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import type { ActSetReport, ActSetSpaceReport } from '../../core/admin-data.types';
 import { DateFormatService } from '../../core/date-format.service';
 import { pluralText } from '../../core/plural-text';
-import { actRowView, actWhenText } from '../../core/space-act-view';
+import { actRowView, actWhenText, type ActRowView } from '../../core/space-act-view';
 import { SettingsCardComponent } from '../../shared/settings-card.component';
 import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
 import { StepProgressBarComponent } from '../../shared/step-progress-bar.component';
@@ -31,7 +31,7 @@ type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
   <app-status-pill pill [variant]="setVariant()" [dot]="true">{{ setStateKey() | transloco }}</app-status-pill>
   <div style="margin:4px 0 10px;"><app-step-progress-bar [progress]="progress()" [stageLabelKey]="endedStageKey()"/></div>
   <p style="margin:0 0 8px;font-size:13px;">{{ doneText() }}</p>
-  @if (stopped() && kind() === 'migrate') {
+  @if (halted()) {
     <p class="alert alert-warning" role="alert" style="margin:0 0 8px;font-size:13px;">{{ 'data.progress.migrateStopped' | transloco }}</p>
   }
   @if (report().lastError; as e) { <p style="color:var(--text-secondary);margin:0 0 8px;font-size:13px;">{{ 'spaces.dangerZone.act.lastError' | transloco }} {{ e }}</p> }
@@ -76,7 +76,12 @@ export class ActSetProgressComponent {
 
   private readonly transloco = inject(TranslocoService);
   private readonly dates = inject(DateFormatService);
-  protected readonly rowView = actRowView;
+
+  /** The process that runs a migrate has exited while the report still says running: nothing here is running any more. */
+  readonly halted = computed(() => this.stopped() && this.kind() === 'migrate' && this.report().state === 'running');
+
+  /** One row, by the one rule (`actRowView`); a halted set shows no unfinished space as running. */
+  rowView(s: ActSetSpaceReport): ActRowView { return actRowView({ ...s, stopped: this.halted() }); }
 
   /** k of n as the shared bar draws it: one stage, the spaces done of the spaces in the set. */
   readonly progress = computed<StepProgress>(() => ({ step: this.kind(), steps: [this.kind()], done: this.report().done, total: this.report().total }));
@@ -85,15 +90,18 @@ export class ActSetProgressComponent {
   readonly canAbandon = computed(() =>
     this.kind() === 'restore' && this.report().state === 'running' && this.report().spaces.some(s => s.state === 'owed'));
 
+  /** Where the set stands for the reader: the report's state, except that a halted migrate is Stopped. */
+  private setState(): string { return this.halted() ? 'stopped' : this.report().state; }
+
   setVariant(): StatusVariant {
-    const s = this.report().state;
-    return s === 'completed' ? 'ok' : s === 'abandoned' ? 'warn' : 'pending';
+    const s = this.setState();
+    return s === 'completed' ? 'ok' : s === 'abandoned' || s === 'stopped' ? 'warn' : 'pending';
   }
 
-  setStateKey(): string { return `data.progress.state.${this.report().state}`; }
+  setStateKey(): string { return `data.progress.state.${this.setState()}`; }
 
-  /** The bar's stage label once the set has ended: it names the end (Completed, Abandoned), where it said "Working" for ever. */
-  endedStageKey(): string | null { return this.report().state === 'running' ? null : this.setStateKey(); }
+  /** The bar's stage label once the set has ended or stopped: it names that (Completed, Abandoned, Stopped), where it said "Working" for ever. */
+  endedStageKey(): string | null { return this.setState() === 'running' ? null : this.setStateKey(); }
 
   // Methods, not computeds: they translate, and a computed would keep the words of a language file that had not loaded yet.
   doneText(): string {

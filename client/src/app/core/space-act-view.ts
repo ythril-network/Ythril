@@ -19,7 +19,11 @@ export function actStateVariant(state: string): StatusVariant {
 export const actStateKey = (state: string): string => `spaces.dangerZone.act.state.${state}`;
 
 /** What a row's words depend on: the server's state, the tries so far, and whether only an abandon ends it. */
-export interface ActRowFacts { state: string; attempts: number; needsAbandon?: boolean }
+export interface ActRowFacts {
+  state: string; attempts: number; needsAbandon?: boolean;
+  /** The process that runs the act has exited (a migrate that completed): an act that had not finished is not running any more. */
+  stopped?: boolean;
+}
 
 /** How one row reads: its state word and colour, and whether its tries and its next try are said. */
 export interface ActRowView { stateKey: string; variant: StatusVariant; showsAttempts: boolean; showsNextTry: boolean }
@@ -31,18 +35,24 @@ export interface ActRowView { stateKey: string; variant: StatusVariant; showsAtt
  * acts that had not started, and of acts no retry will ever run (`needsAbandon`), where it contradicted the sentence beside it. Said
  * once here, so no list keeps the old wording:
  * - owed, only an abandon ends it: no retry, so no "retry owed" and no next try;
- * - owed, no try yet: it has not started, so it is WAITING (the word the danger tab uses), with no tries and no next try to name;
- * - owed, tried before: a real retry, with its tries and its next try.
+ * - owed or registered, no try yet: it has not started, so it is WAITING, with no tries and no next try to name (the server's
+ *   `registered` is the same case: a pending space of a migrate reads Waiting in the pill, so its sentence says no next try either);
+ * - owed, tried before: a real retry, with its tries and its next try;
+ * - the process has exited (`stopped`): an act that had not finished is Stopped, never Running, with no tries and no next try.
  * Any other state keeps its own word; an act that ended (`done`, `restore_abandoned`) names no tries and no next try.
  */
 export function actRowView(row: ActRowFacts): ActRowView {
   const owed = row.state === 'owed';
-  if (owed && row.needsAbandon) return { stateKey: actStateKey('abandonOnly'), variant: 'warn', showsAttempts: true, showsNextTry: false };
-  if (owed && row.attempts === 0) return { stateKey: actStateKey('registered'), variant: 'pending', showsAttempts: false, showsNextTry: false };
   const ended = row.state === 'done' || row.state === 'restore_abandoned' || row.state === 'migrate_abandoned';
+  if (row.stopped && !ended) return { stateKey: actStateKey('stopped'), variant: 'warn', showsAttempts: false, showsNextTry: false };
+  if (owed && row.needsAbandon) return { stateKey: actStateKey('abandonOnly'), variant: 'warn', showsAttempts: true, showsNextTry: false };
+  if ((owed || row.state === 'registered') && row.attempts === 0) {
+    return { stateKey: actStateKey('registered'), variant: 'pending', showsAttempts: false, showsNextTry: false };
+  }
   const retryable = owed || row.state === 'registered' || row.state === 'draining';
   return { stateKey: actStateKey(row.state), variant: actStateVariant(row.state), showsAttempts: !ended, showsNextTry: retryable };
 }
+
 export const actKindKey = (kind: string): string => `spaces.dangerZone.act.kind.${kind}`;
 
 /**

@@ -1257,6 +1257,8 @@
   "spaces.dangerZone.act.ended": "Die ausstehende Änderung an diesem Raum ist beendet.",
   "spaces.dangerZone.act.state.registered": "Wartet",
   "spaces.dangerZone.act.state.abandonOnly": "Nur durch Abbruch zu beenden",
+  "spaces.dangerZone.act.state.stopped": "Gestoppt",
+  "data.progress.state.stopped": "Gestoppt",
   "spaces.dangerZone.act.state.draining": "Wartet auf Übertragungen",
   "spaces.dangerZone.act.state.running": "Läuft",
   "spaces.dangerZone.act.state.owed": "Wiederholung offen",
