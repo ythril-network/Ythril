@@ -85,7 +85,11 @@ describe('a restore holds its space until its act completes (real MongoDB)', { s
     await untilRunnerIdle(mods.runner, mods.loader);
     assert.deepEqual(await factIds(), backedUp, 'after the restore the space is not the backup: a write during it, or a half-restore, is left');
 
-    // After completion both proceed.
+    // After completion both proceed. The fake peer keeps its storage in this database as a served space of its own, so the restore
+    // rolled the PEER back too (its act may run before or after the record was seeded): the record it holds is written again, as a real
+    // peer's would still be - the re-receive test does the same.
+    await door.mongo.col(`${door.peerSide(S)}_facts`).deleteMany({ _id: 'peer-during' });
+    await door.seedPeerRecords(S, 'facts', [build.fact(S, 'peer-during', 10, { author: PEER_AUTHOR })]);
     const saved = await writers.fact.saveFact(S, 'after the restore', [], [], undefined, undefined, 'note');
     assert.ok(saved, 'a local write was refused after the restore completed');
     await door.sync();
