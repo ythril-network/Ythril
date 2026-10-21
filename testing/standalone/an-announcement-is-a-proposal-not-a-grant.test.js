@@ -110,7 +110,11 @@ describe('the adoption path goes through the decision', () => {
   it('adding a space clears its pending entry, and dismissing records the answer', () => {
     const at = src.indexOf('export async function addSpacesToNetwork(');
     const body = src.slice(at, src.indexOf('\nexport ', at + 10));
-    assert.match(body, /pendingSpaces = net\.pendingSpaces\.filter/, 'an adopted space must not stay offered as pending');
+    // The clearing itself lives in the leaf the proxy migration shares (`clearSettledProposals`, networks/take-space-out-of-network.ts),
+    // which addSpacesToNetwork calls: the rule is asserted where it is written, and the call here.
+    assert.match(body, /clearSettledProposals\(net,/, 'an adopted space must not stay offered as pending');
+    const leaf = stripComments(readFileSync('server/src/networks/take-space-out-of-network.ts', 'utf8'));
+    assert.match(leaf, /pendingSpaces = net\.pendingSpaces\.filter/, 'an adopted space must not stay offered as pending');
     const acts = stripComments(readFileSync('server/src/networks/network-acts.ts', 'utf8'));
     assert.match(acts, /dismissedSpaces = \[\.\.\.\(net\.dismissedSpaces \?\? \[\]\), spaceId\]/, 'a dismissal must be remembered');
   });

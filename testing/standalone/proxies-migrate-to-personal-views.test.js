@@ -180,9 +180,9 @@ describe('pre-6.0 proxies migrate to personal views (Q-531)', () => {
     try { mod = stripComments(readFileSync(join(REPO_ROOT, MODULE), 'utf8')); } catch { assert.fail(`${MODULE} does not exist`); }
     const spaces = stripComments(readFileSync(join(REPO_ROOT, 'server/src/networks/network-spaces.ts'), 'utf8'));
     const remove = bodyOf(spaces, 'removeSpaceFromNetwork');
-    const imported = [...mod.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*networks\/network-spaces\.js'/g)].flatMap(m => m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0]).filter(Boolean));
+    const imported = [...mod.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*networks\/(?:network-spaces|take-space-out-of-network)\.js'/g)].flatMap(m => m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0]).filter(Boolean));
     const shared = imported.filter(name => new RegExp(String.raw`\b${name}\s*\(`).test(remove));
-    assert.ok(shared.length > 0, `the migration imports [${imported.join(', ')}] from networks/network-spaces.js and removeSpaceFromNetwork calls none of them: the network cleanup has two copies`);
+    assert.ok(shared.length > 0, `the migration imports [${imported.join(', ')}] from networks/ (network-spaces.js or its leaf take-space-out-of-network.js) and removeSpaceFromNetwork calls none of them: the network cleanup has two copies`);
     assert.doesNotMatch(mod, /\bforgetSpaceAliases\s*\(|schemaLayers\b/, 'the migration edits a network by hand instead of through the shared transform');
   });
 });

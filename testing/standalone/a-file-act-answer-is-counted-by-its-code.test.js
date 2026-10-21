@@ -102,6 +102,10 @@ const CASES = [
     name: 'FileSystemFault', status: 500, code: 'file_system_fault', path: undefined,
     make: () => new answers.FileSystemFault(Object.assign(new Error('EACCES: permission denied, open /data/x'), { code: 'EACCES' })),
   },
+  {
+    name: 'SpaceRetired', status: 410, code: 'space_retired', path: undefined, says: [/was a shared proxy and is now personal views/],
+    make: () => new answers.SpaceRetired("'team' was a shared proxy and is now personal views; ask the instance admin"),
+  },
 ];
 
 describe('a series exists for every code before the first answer', () => {

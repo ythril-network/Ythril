@@ -82,7 +82,10 @@ describe('a personal view has one home in the source (Q-531)', () => {
       const all = sources.find(s => s.file === 'server/src/auth/tokens.ts');
       const at = all.text.search(new RegExp(String.raw`(?:function|const)\s+${fn}\b`));
       assert.ok(at >= 0, `${fn} is not in auth/tokens.ts; re-anchor this rule`);
-      return all.text.slice(at, all.text.indexOf('\n}', at));
+      // To the NEXT top-level declaration, not to the first `}` at column 0: a signature whose parameter type is written over several lines
+      // also closes with a `}` at column 0 (`}): Promise<...> {`), and cutting there never reaches the body (createOAuthToken's).
+      const next = all.text.slice(at + 1).search(/^(?:export\s+)?(?:async\s+)?(?:function|const)\s/m);
+      return all.text.slice(at, next < 0 ? all.text.length : at + 1 + next);
     };
     for (const fn of ['revokeToken', 'createOAuthToken']) {
       assert.match(caller(fn), new RegExp(String.raw`\b${remover}\s*\(`), `${fn} removes tokens without going through ${remover}`);

@@ -59,7 +59,9 @@ async function openStream(key, mintSpelling, openSpelling = mintSpelling) {
   assert.ok(typeof t.body?.ticket === 'string', `no ticket in ${fmt(t)}`);
   const ac = new AbortController();
   const r = await fetch(`${d.server.url}/api/brain/spaces/${openSpelling}/events?ticket=${encodeURIComponent(t.body.ticket)}`, { signal: ac.signal });
-  assert.equal(r.status, 200, `the stream at ${openSpelling} with a ticket minted at ${mintSpelling}: ${r.status} ${await r.text().catch(() => '')}`);
+  // The refusal body is read only when there IS a refusal: a template literal handed to `assert.equal` is evaluated before the call, so
+  // reading it unconditionally waited for the end of a stream that is open by design (a 200 never ends).
+  if (r.status !== 200) assert.fail(`the stream at ${openSpelling} with a ticket minted at ${mintSpelling}: ${r.status} ${await r.text().catch(() => '')}`);
   const reader = r.body.getReader();
   const dec = new TextDecoder();
   let buf = '';

@@ -64,6 +64,11 @@ const EXEMPT = new Map([
   ['/api/sample', 'the generic tool door (`POST /api/:tool`) — audited by `callTool` from '
     + '`mcpAuditOperation`, one entry per tool call on both doors. Proved by mcp-audit-coverage.test.js, '
     + 'not by a rule here.'],
+  // Personal views (Q-531). The shared acts (`spaces/view-acts.ts`) write the audit row for REST and MCP alike, so a row cannot leave one door with
+  // the view's name in it: the request path would carry the name, which is why the generic path-matching rule is the wrong writer here. The
+  // row names the owner key and the member count (`view.create|update|delete|copy|claim`, `space.retired_id.purge`).
+  ['/api/views', 'a personal view\'s lifecycle is audited by `auditViewAct` from the shared act, with the owner key and member count and never the view\'s name'],
+  ['/api/admin/views', 'the orphan, claim and purge doors are audited by `auditViewAct` from the shared act (claim, purge); orphans and migration are reads'],
   // Machine-to-machine sync: peers write constantly and are authenticated as peers, not
   // users. Auditing every sync push would swamp the log and tell you nothing about a human.
   ['/api/sync', 'peer-to-peer sync traffic — not a user action'],

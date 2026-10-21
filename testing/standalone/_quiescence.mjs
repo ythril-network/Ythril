@@ -145,6 +145,7 @@ export const UNAWAITED_BACKGROUND = {
   'server/src/api/invite-sessions.ts :: Invite session purge': 'drops expired in-memory invite sessions; sends and writes no network state',
   'server/src/audit/change-retention.ts :: Audit change retention': 'redacts aged audit `changes`; touches no round, act, notice or cycle',
   'server/src/brain/candidate-prune.ts :: Candidate prune': 'prunes link candidates inside a space; no network state',
+  'server/src/config/views-sweep-job.ts :: Personal view sweep': 'deletes personal views whose owner has had no live token for 30 days; config-only, no network state',
   'server/src/brain/embed-worker.ts :: Brain embedding stall sweep': 'requeues stalled embedding jobs; local derived data only',
   'server/src/brain/embed-worker.ts :: Brain embedding heartbeat': 'a liveness stamp for the embedding worker; no network state',
   'server/src/brain/reindex.ts :: Reindex watcher': 'advances this instance\'s own index builds; no network state',

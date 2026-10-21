@@ -38,7 +38,7 @@ function writeConfig(spaces) {
 describe('reference format validation (canonical helpers)', () => {
   before(async () => {
     refs = await import('../../server/dist/brain/entity-refs.js');
-    proxy = await import('../../server/dist/spaces/proxy.js');
+    proxy = await import('../../server/dist/spaces/space-lookup.js');
     loader = await import('../../server/dist/config/loader.js');
   });
 
@@ -85,7 +85,7 @@ describe('reference format validation (canonical helpers)', () => {
 describe('isStrictLinkage — the real function, and its default', () => {
   before(async () => {
     refs = await import('../../server/dist/brain/entity-refs.js');
-    proxy = await import('../../server/dist/spaces/proxy.js');
+    proxy = await import('../../server/dist/spaces/space-lookup.js');
     loader = await import('../../server/dist/config/loader.js');
   });
 

@@ -92,6 +92,11 @@ const DURABLE = [
   { call: 'migrateNetworkSpaceKeys', persists: true,
     why: 'deleting it leaves a network\'s schema layer and membership origin under a renamed space\'s old id, so the '
        + 'space loses that network\'s schema and a joining token can no longer be told apart as its establisher' },
+  // Q-531. The boot takes a copy of the file first (`backUpBeforeProxyMigration`), converts, then persists once; a throw in the conversion
+  // is named by the transform and aborts the boot with the file untouched.
+  { call: 'migrateProxiesToViews', persists: true,
+    why: 'deleting it leaves a pre-6.0 proxy in `spaces` as a writable space again, shared by everyone who reaches it, and the personal '
+       + 'views that replaced it are never made' },
 ];
 
 describe('the gate reads the boot path', () => {

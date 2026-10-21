@@ -171,6 +171,9 @@ describe('every rewrite an upgrade performs is documented as one-way', () => {
       // Q-133: MOVES a network's schema layer / membership origin from a renamed space's old name to its current
       // one. Nothing is deleted; an older build looks under the old key again and finds the layer gone there.
       migrateNetworkSpaceKeys: 'schema layer or membership origin',
+      // Q-531 (6.0): turns every proxy space into personal views and takes the space out of `spaces`, every network and every token row. 5.x
+      // does not read `views` or `retiredSpaceIds`, so the proxies are GONE after a rollback unless the pre-upgrade copy is restored.
+      migrateProxiesToViews: 'proxyFor',
     };
     const section = rollbackSection();
     const undocumented = [];
