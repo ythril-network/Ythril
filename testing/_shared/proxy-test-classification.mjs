@@ -143,4 +143,6 @@ export const PROXY_TEST_CLASSIFICATION = Object.freeze([
     why: 'Q-531\'s own test: sends targetSpace and proxyFor to see them refused by name' },
   { file: 'testing/standalone/proxies-migrate-to-personal-views.test.js', verdict: 'unaffected',
     why: 'Q-531\'s own test: feeds proxyFor configs to the migration that retires them' },
+  { file: 'testing/sync/a-migrated-proxy-leaves-its-network-space-as-its-peers-see-it.test.js', verdict: 'unaffected',
+    why: 'Q-531\'s own test: hand-edits a 5.x proxyFor into a config so the migration takes it out of its network' },
 ]);
