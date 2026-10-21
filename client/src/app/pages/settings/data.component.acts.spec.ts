@@ -38,6 +38,12 @@ const WORDS: Record<string, string> = {
   'data.migrate.accepted.one': 'MIGRATING {{count}}',
   'data.migrate.accepted.other': 'MIGRATING {{count}}',
   'data.maintenance.restoring': 'RESTORING {{done}} of {{total}}',
+  // A code's sentence must resolve to text for refusalText to take it (an echoed key reads as "no words", and the server's English
+  // would be shown instead); each carries its own key so a case can see which one was chosen.
+  ...Object.fromEntries([
+    'backup_names_unserved_spaces', 'backup_not_whole', 'space_being_restored', 'space_being_migrated', 'restore_act_running',
+    'no_restore_standing',
+  ].map(code => [`data.refusal.${code}`, `data.refusal.${code} (words)`])),
 };
 
 interface Page {
@@ -293,7 +299,7 @@ describe('the migrate card maps its refusals to keys and says what a migrate doe
   it('a migrate refused because a restore stands says so in our words', async () => {
     const p = open({ migrationEnabled: true });
     await migrateAnswered(p, MIGRATE_ANSWERS.duringRestore);
-    expect(p.c.migrateError()).toBe('data.refusal.space_being_restored');
+    expect(p.c.migrateError()).toContain('data.refusal.space_being_restored');
   });
 
   it('a 202 says the migrate was accepted, counted through pluralText, and its progress is asked for', async () => {

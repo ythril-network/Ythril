@@ -45,6 +45,12 @@ export interface ActEntryView {
   attempts: number;
   nextRetryAt?: string;
   state: string;
+  /** Our sentence for the last failure (never a driver's text), so an operator can see why an act is owed. */
+  lastError?: string;
+  /** Another attempt meets the same input: only an abandon ends it (a restore's, on Settings -> Data). */
+  needsAbandon?: true;
+  /** A restore's backup. */
+  backupId?: string;
 }
 
 /** One entry of a network's `owedSpaceActs` (admins only): a standing act and the space and rounds it belongs to. */

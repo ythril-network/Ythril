@@ -78,7 +78,10 @@ describe('every restore, migrate and backup refusal code has its sentence (bundl
 describe('counts on the Data page go through pluralText, with every form a locale uses (bundle-157, A2)', () => {
   /** The plural bases the restore and migrate surfaces count with. */
   const BASES = ['data.restore.accepted', 'data.progress.spacesDone', 'data.restore.emptied', 'data.restore.leftOut', 'data.migrate.accepted'];
-  const FORMS: Record<(typeof LOCALES)[number], string[]> = { en: ['one', 'other'], de: ['one', 'other'], pl: ['one', 'few', 'many', 'other'] };
+  // Every locale carries all four forms, as the existing plural families do: English and German use two of them, Polish all four, and
+  // `i18n-key-coverage.spec.ts` holds the three files to one key set.
+  const ALL = ['one', 'few', 'many', 'other'];
+  const FORMS: Record<(typeof LOCALES)[number], string[]> = { en: ALL, de: ALL, pl: ALL };
 
   for (const loc of LOCALES) {
     it(`${loc}: every base has ${FORMS[loc].join(', ')}, each with {{count}}`, () => {

@@ -26,15 +26,19 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 function makeAdmin(over: Partial<Record<string, unknown>> = {}) {
   return {
     getDataConfig:       () => of({ source: 'config', mongoUriRedacted: 'mongodb://***@db/ythril', migrationEnabled: false }),
-    getMaintenanceStatus:() => of({ active: false }),
+    getMaintenanceStatus:() => of({ active: false, manual: false, heldBy: null }),
     getBackupConfig:     () => of({ config: null, backupsPath: '' }),
     listBackups:         () => of({ backups: [] }),
     triggerBackup:       () => of({ backup: { id: 'b1', dir: '/x', manifest: {} } }),
-    restoreBackup:       () => of({ ok: true }),
+    // bundle-157: a restore and a migrate answer 202 with the set they registered (`testing/data-act-bodies.ts` has the real bodies).
+    restoreBackup:       () => of({ restoreId: 's1', backupId: 'bkp-9', spaces: ['general'], emptied: [], leftOut: [] }),
+    getRestoreReport:    () => of({ restore: null }),
+    getMigrateReport:    () => of({ migrate: null }),
+    abandonRestore:      () => of({ restoreId: 's1', halfRestored: [], completed: [] }),
     saveBackupConfig:    (config: unknown) => of({ ok: true, config }),
     testMongoConnection: () => of({ ok: true }),
-    setMaintenance:      (active: boolean) => of({ active }),
-    startMigration:      () => of({ ok: true, backupDir: '/x', manifest: {} }),
+    setMaintenance:      (active: boolean) => of({ active, manual: active, heldBy: null }),
+    startMigration:      () => of({ migrateId: 'm1', spaces: ['general'] }),
     ...over,
   } as unknown as AdminApi;
 }
@@ -219,12 +223,13 @@ describe('DataComponent — API flows and error fallbacks', () => {
   });
 
   it('confirmRestore requires typing the backup id, then restores on confirm', async () => {
-    const restoreBackup = vi.fn().mockReturnValue(of({ ok: true }));
+    const restoreBackup = vi.fn().mockReturnValue(of({ restoreId: 's1', backupId: 'bkp-9', spaces: ['general'], emptied: [], leftOut: [] }));
     const { c, confirm } = make(makeAdmin({ restoreBackup }), true);
     await c.confirmRestore('bkp-9');
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true, requireText: 'bkp-9' }));
-    expect(restoreBackup).toHaveBeenCalledWith('bkp-9');
-    expect(c.restoreSuccess()).toBe(true);
+    expect(restoreBackup).toHaveBeenCalledWith('bkp-9', undefined);
+    // bundle-157: a 202 is ACCEPTED, never "completed" (`data.component.acts.spec.ts` holds the words).
+    expect(c.restoreError()).toBeNull();
   });
 
   it('saveSchedule / saveDest post buildConfig() and surface a "Save failed" fallback on error', () => {

@@ -8,15 +8,26 @@
  */
 import type { StatusVariant } from '../shared/status-pill.component';
 import type { DateFormatService } from './date-format.service';
-import type { KeyTranslator } from './translated-text';
+import { translatedOrEmpty, type KeyTranslator } from './translated-text';
 
 /** An owed act is a warning (it will not finish by itself until its time); every other state is work in progress. */
 export function actStateVariant(state: string): StatusVariant {
-  return state === 'owed' ? 'warn' : 'pending';
+  if (state === 'done') return 'ok';
+  return state === 'owed' || state === 'restore_abandoned' ? 'warn' : 'pending';
 }
 
 export const actStateKey = (state: string): string => `spaces.dangerZone.act.state.${state}`;
 export const actKindKey = (kind: string): string => `spaces.dangerZone.act.kind.${kind}`;
+
+/**
+ * The hint for pressing again while an act stands, in the words for ITS kind (`spaces.dangerZone.act.repeatHint.<kind>`): a repeated
+ * delete or wipe joins the act, while a rename, a restore or a migrate is not joined by any button on the tab. A kind this client has no
+ * words for gets the generic `.other` sentence, never the delete-or-wipe one - the kind stays the server's string, with no closed set here.
+ */
+export function actRepeatHintKey(transloco: KeyTranslator, kind: string): string {
+  const key = `spaces.dangerZone.act.repeatHint.${kind}`;
+  return translatedOrEmpty(transloco, key) ? key : 'spaces.dangerZone.act.repeatHint.other';
+}
 
 /** When the next try is, in words: a time ahead (relative and exact), "now" for a past one, "shortly" when the server gave none. */
 export function actWhenText(transloco: KeyTranslator, dates: Pick<DateFormatService, 'relative' | 'format'>, retryAt: string | undefined, nowMs: number): string {

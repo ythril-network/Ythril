@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, OnInit } from '@angular/core';
+import { Component, DestroyRef, inject, signal, computed, OnInit } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter } from 'rxjs/operators';
 import { CommonModule } from '@angular/common';
@@ -13,8 +13,26 @@ import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { refusalText } from '../../core/refusal-text';
+import { LiveAnnouncement } from '../../core/live-announcement';
+import { pluralText } from '../../core/plural-text';
+import { pollUntil, type PollHandle } from '../../core/poll-until';
+import { reportOf, type MaintenanceState, type MigrateReport, type RestoreReport } from '../../core/admin-data.types';
+import { ActSetProgressComponent } from './act-set-progress.component';
 
 type UriSource = 'env' | 'config' | 'default';
+
+/** How often a running restore or migrate is asked after, while this page is open. */
+const SET_POLL_MS = 5000;
+
+/** The family the data doors' refusal codes are worded in (`data.refusal.<code>`). */
+const DATA_REFUSALS = 'data.refusal';
+
+/** The migrate refusals the card words itself: INFRA_MANAGED covers the infra flag and a URI from the environment alike. */
+const MIGRATE_REFUSAL_KEYS: Record<string, string> = {
+  FEATURE_DISABLED: 'data.migrate.errorFeatureDisabled',
+  INFRA_MANAGED: 'data.migrate.errorInfraManaged',
+  target_not_empty: 'data.migrate.errorTargetNotEmpty',
+};
 type Frequency = 'never' | 'hourly' | 'daily' | 'weekly' | 'monthly';
 
 interface BackupConfig {
@@ -32,7 +50,8 @@ interface BackupConfig {
   standalone: true,
   imports: [
     CommonModule, FormsModule, TranslocoPipe,
-    SettingsCardComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, PhIconComponent, HscrollTopDirective],
+    SettingsCardComponent, StatusPillComponent, SummaryStripComponent, RelativeTimeComponent, PhIconComponent, HscrollTopDirective,
+    ActSetProgressComponent],
   styles: [`
     .data-page { display: flex; flex-direction: column; gap: 16px; max-width: 860px; }
     .freq-opt, .day-opt { display: flex; align-items: center; gap: 6px; cursor: pointer; border-radius: var(--radius-sm);
@@ -81,8 +100,23 @@ interface BackupConfig {
 
         @if (backupTaken())    { <div class="alert alert-success" style="margin-bottom:12px;">{{ 'data.backup.success' | transloco }}</div> }
         @if (backupError())    { <div class="alert alert-error"   style="margin-bottom:12px;">{{ backupError() }}</div> }
-        @if (restoreSuccess()) { <div class="alert alert-success" style="margin-bottom:12px;">{{ 'data.backup.restoreSuccess' | transloco }}</div> }
-        @if (restoreError())   { <div class="alert alert-error"   style="margin-bottom:12px;">{{ restoreError() }}</div> }
+        <!-- What a restore came to, in ONE polite live region that is always in the DOM (a region that appears with its text is not
+             announced): the accepted line, a refusal and its leaveOut retry, and - in the sr-only span - the end of a followed set. -->
+        <div role="status" aria-live="polite">
+          <span class="sr-only">{{ live.text() }}</span>
+          @if (restoreNotice(); as n) { <div class="alert alert-success" style="margin-bottom:12px;">{{ n }}</div> }
+          @if (restoreError()) {
+            <div class="alert alert-error" style="margin-bottom:12px;">
+              {{ restoreError() }}
+              @if (leaveOutOffer(); as o) {
+                <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                  <code class="mono">{{ o.spaces.join(', ') }}</code>
+                  <button class="btn btn-secondary btn-sm" type="button" [disabled]="!!restoringId()" (click)="retryLeavingOut()">{{ 'data.restore.leaveOutRetry' | transloco }}</button>
+                </div>
+              }
+            </div>
+          }
+        </div>
 
         @if (loadingBackups()) {
           <span class="spinner spinner-sm"></span>
@@ -105,7 +139,7 @@ interface BackupConfig {
                   </td>
                   <td class="mono">{{ b.collections.length }}</td>
                   <td style="text-align:right;">
-                    <button class="btn btn-sm btn-danger" [disabled]="!!restoringId()" (click)="confirmRestore(b.id)">
+                    <button class="btn btn-sm btn-danger" [disabled]="!!restoringId() || setStanding()" [attr.aria-busy]="restoringId() === b.id" (click)="confirmRestore(b.id)">
                       @if (restoringId() === b.id) { <span class="spinner spinner-sm"></span> }{{ 'data.backup.restoreButton' | transloco }}
                     </button>
                   </td>
@@ -116,6 +150,14 @@ interface BackupConfig {
           </div>
         }
       </app-settings-card>
+
+      <!-- ── A restore or migrate as it runs (bundle-157): shown once its report has loaded, never forecast from nothing ── -->
+      @if (shownRestore(); as r) {
+        <app-act-set-progress kind="restore" [report]="r" [abandoning]="abandoning()" (abandon)="confirmAbandon()"/>
+      }
+      @if (shownMigrate(); as m) {
+        <app-act-set-progress kind="migrate" [report]="m"/>
+      }
 
       <!-- ── Backup Destination ───────────────────────────────── -->
       <app-settings-card icon="database" [heading]="'data.dest.title' | transloco" [purpose]="migrationEnabled() ? ('data.dest.description' | transloco) : ''">
@@ -258,12 +300,13 @@ interface BackupConfig {
         <div class="dz-block">
           <h4>{{ 'data.maintenance.title' | transloco }}
             @if (maintenanceActive() !== null) {
-              <app-status-pill [variant]="maintenanceActive() ? 'warn' : 'ok'" [dot]="true" style="margin-left:8px;">{{ maintenanceActive() ? ('data.maintenance.active' | transloco) : ('data.maintenance.inactive' | transloco) }}</app-status-pill>
+              <app-status-pill [variant]="maintenanceActive() ? 'warn' : 'ok'" [dot]="true" style="margin-left:8px;">{{ maintenancePillText() }}</app-status-pill>
             }
           </h4>
-          <button class="btn btn-sm" [class]="maintenanceActive() ? 'btn-primary' : 'btn-danger'" [disabled]="togglingMaintenance()" (click)="toggleMaintenance()">
+          <button class="btn btn-sm" [class]="maintenanceActive() ? 'btn-primary' : 'btn-danger'" [disabled]="togglingMaintenance() || maintenanceHeldBy() !== null" [attr.aria-busy]="togglingMaintenance()" (click)="toggleMaintenance()">
             @if (togglingMaintenance()) { <span class="spinner spinner-sm"></span> }{{ maintenanceActive() ? ('data.maintenance.deactivate' | transloco) : ('data.maintenance.activate' | transloco) }}
           </button>
+          @if (maintenanceHeldBy() !== null) { <p class="sub" style="margin:8px 0 0;">{{ 'data.maintenance.heldHint' | transloco }}</p> }
           @if (maintenanceError()) { <div class="alert alert-error" style="margin-top:10px;">{{ maintenanceError() }}</div> }
         </div>
 
@@ -285,13 +328,16 @@ interface BackupConfig {
                 {{ testResult()!.ok ? ('data.migrate.testOk' | transloco) : (('data.migrate.testFail' | transloco) + ': ' + testResult()!.error) }}
               </div>
             }
-            @if (migrateSuccess()) { <div class="alert alert-success" style="margin-bottom:12px;">{{ 'data.migrate.success' | transloco }}</div> }
-            @if (migrateError())   { <div class="alert alert-error"   style="margin-bottom:12px;">{{ migrateError() }}</div> }
+            <div role="status" aria-live="polite">
+              @if (migrateNotice(); as n) { <div class="alert alert-success" style="margin-bottom:12px;">{{ n }} {{ 'data.migrate.success' | transloco }}</div> }
+              @if (migrateError())   { <div class="alert alert-error"   style="margin-bottom:12px;">{{ migrateError() }}</div> }
+            </div>
+            @if (setStanding()) { <p class="sub">{{ 'data.migrate.blockedBySet' | transloco }}</p> }
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <button class="btn btn-secondary btn-sm" [disabled]="testing() || !migrateUri.trim()" (click)="testMigrateConnection()">
                 @if (testing()) { <span class="spinner spinner-sm"></span> }{{ 'data.migrate.testButton' | transloco }}
               </button>
-              <button class="btn btn-danger btn-sm" [disabled]="migrating() || !testResult()?.ok" (click)="confirmMigrate()">
+              <button class="btn btn-danger btn-sm" [disabled]="migrating() || !testResult()?.ok || setStanding()" [attr.aria-busy]="migrating()" (click)="confirmMigrate()">
                 @if (migrating()) { <span class="spinner spinner-sm"></span> }{{ 'data.migrate.migrateButton' | transloco }}
               </button>
             </div>
@@ -316,8 +362,41 @@ export class DataComponent implements OnInit {
   backupTaken = signal(false);
   backupError = signal<string | null>(null);
   restoringId = signal<string | null>(null);
-  restoreSuccess = signal(false);
   restoreError = signal<string | null>(null);
+
+  // ─ A restore or migrate as an act set (bundle-157) ─────────────────────────────────
+  //
+  // The restore answers 202 and runs one act per space after the answer, so a success is ACCEPTED: the page says so, then follows the
+  // set's report while it is open. It said "Restore completed" on any success, for a restore that had not started.
+
+  /** What the polite live region announces that is not otherwise on screen: the end of a followed set. */
+  protected readonly live = new LiveAnnouncement();
+  /** The accepted line, or what an abandon released; shown in the live region. */
+  readonly restoreNotice = signal<string | null>(null);
+  /** The backup and spaces a `backup_names_unserved_spaces` refusal named: the restore can be retried leaving them out. */
+  readonly leaveOutOffer = signal<{ backupId: string; spaces: string[] } | null>(null);
+  /** The restore standing or the last one; null until loaded, and null when none ever ran. */
+  readonly restoreReport = signal<RestoreReport | null>(null);
+  readonly migrateReport = signal<MigrateReport | null>(null);
+  /** A set this page has seen running: its card stays after it ends, so its outcome stays on screen. */
+  private readonly followedRestore = signal(false);
+  private readonly followedMigrate = signal(false);
+  readonly abandoning = signal(false);
+  readonly migrateNotice = signal<string | null>(null);
+  /** The kind of the instance-wide set holding maintenance, or null (`maintenanceState().heldBy`). */
+  readonly maintenanceHeldBy = signal<string | null>(null);
+
+  /** A restore's card: while it runs, or once this page followed it to its end. Never before its report loaded. */
+  readonly shownRestore = computed(() => { const r = this.restoreReport(); return r && (r.state === 'running' || this.followedRestore()) ? r : null; });
+  readonly shownMigrate = computed(() => { const m = this.migrateReport(); return m && (m.state === 'running' || this.followedMigrate()) ? m : null; });
+
+  /** An instance-wide set stands: what the server says holds maintenance, or a report that still runs. */
+  readonly setStanding = computed(() =>
+    this.maintenanceHeldBy() !== null || this.restoreReport()?.state === 'running' || this.migrateReport()?.state === 'running');
+
+  private restorePoll: PollHandle | null = null;
+  private migratePoll: PollHandle | null = null;
+  private destroyed = false;
   backupConfig = signal<BackupConfig | null>(null);
 
   /** The most-recent backup id, for the "Latest" marker (backups come newest-first from the API). */
@@ -433,13 +512,100 @@ export class DataComponent implements OnInit {
   testing = signal(false);
   testResult = signal<{ ok: boolean; error?: string } | null>(null);
   migrating = signal(false);
-  migrateSuccess = signal(false);
   migrateError = signal<string | null>(null);
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroyed = true;
+      this.restorePoll?.stop();
+      this.migratePoll?.stop();
+    });
+  }
 
   ngOnInit(): void {
     this.loadConfig();
     this.loadMaintenance();
     this.refreshBackups();
+    this.refreshRestore();
+    this.refreshMigrate();
+  }
+
+  /** The pill's words: "restoring k of n" once the report it counts from has loaded, else whether maintenance is on. */
+  maintenancePillText(): string {
+    const t = (k: string, p?: Record<string, unknown>) => this.transloco.translate(k, p);
+    const held = this.maintenanceHeldBy();
+    const r = held === 'restore' ? this.restoreReport() : held === 'migrate' ? this.migrateReport() : null;
+    if (r && r.state === 'running') {
+      return t(held === 'restore' ? 'data.maintenance.restoring' : 'data.maintenance.migrating', { done: r.done, total: r.total });
+    }
+    return t(this.maintenanceActive() ? 'data.maintenance.active' : 'data.maintenance.inactive');
+  }
+
+  // ─ Following a set ─────────────────────────────────────────────────────────────────
+
+  /** Ask for the restore report now; a running set is then polled while the page is open. */
+  private refreshRestore(): void {
+    if (this.destroyed) return;
+    this.adminApi.getRestoreReport().subscribe({
+      next: a => { if (!this.destroyed && this.takeRestore(reportOf<RestoreReport>(a))) this.startRestorePoll(); },
+      error: () => {},
+    });
+  }
+
+  private refreshMigrate(): void {
+    if (this.destroyed) return;
+    this.adminApi.getMigrateReport().subscribe({
+      next: a => { if (!this.destroyed && this.takeMigrate(reportOf<MigrateReport>(a))) this.startMigratePoll(); },
+      error: () => {},
+    });
+  }
+
+  /** Take a restore report; true while the set runs. The end of a set this page saw running is announced, once. */
+  private takeRestore(r: RestoreReport | null): boolean {
+    const was = this.restoreReport();
+    this.restoreReport.set(r);
+    const running = r?.state === 'running';
+    if (running) this.followedRestore.set(true);
+    if (was?.state === 'running' && r && !running) {
+      const left = r.spaces.filter(s => s.state === 'restore_abandoned').map(s => s.id);
+      this.live.say(r.state === 'abandoned'
+        ? this.transloco.translate('data.restore.abandonedOutcome', { spaces: left.join(', ') })
+        : this.transloco.translate('data.restore.completed'));
+      this.loadMaintenance();
+    }
+    return running;
+  }
+
+  private takeMigrate(m: MigrateReport | null): boolean {
+    const was = this.migrateReport();
+    this.migrateReport.set(m);
+    const running = m?.state === 'running';
+    if (running) this.followedMigrate.set(true);
+    if (was?.state === 'running' && m && !running) {
+      this.live.say(this.transloco.translate(m.state === 'abandoned' ? 'data.migrate.abandonedOutcome' : 'data.migrate.completed'));
+      this.loadMaintenance();
+    }
+    return running;
+  }
+
+  /** Poll the restore report until the set ends; stops with the page. An answer that lands after the page closed starts nothing. */
+  private startRestorePoll(): void {
+    if (this.destroyed || this.restorePoll?.active) return;
+    this.restorePoll = pollUntil({
+      delayMs: () => SET_POLL_MS,
+      request: () => this.adminApi.getRestoreReport(),
+      onAnswer: a => this.takeRestore(reportOf<RestoreReport>(a)),
+    });
+  }
+
+  /** The migrate's poll; a failed request (the process exits when the copy completes) schedules the next, so it resumes after the restart. */
+  private startMigratePoll(): void {
+    if (this.destroyed || this.migratePoll?.active) return;
+    this.migratePoll = pollUntil({
+      delayMs: () => SET_POLL_MS,
+      request: () => this.adminApi.getMigrateReport(),
+      onAnswer: a => this.takeMigrate(reportOf<MigrateReport>(a)),
+    });
   }
 
   /** StatusPill variant for the DB-source pill (env is flagged — it can't be changed from the UI). */
@@ -464,9 +630,14 @@ export class DataComponent implements OnInit {
 
   private loadMaintenance(): void {
     this.adminApi.getMaintenanceStatus().subscribe({
-      next: ({ active }) => this.maintenanceActive.set(active),
+      next: s => this.takeMaintenance(s),
       error: () => {},
     });
+  }
+
+  private takeMaintenance(s: MaintenanceState): void {
+    this.maintenanceActive.set(s.active);
+    this.maintenanceHeldBy.set(s.heldBy ?? null);
   }
 
   private loadBackupConfig(): void {
@@ -511,34 +682,96 @@ export class DataComponent implements OnInit {
       },
       error: err => {
         this.backingUp.set(false);
-        this.backupError.set(refusalText(this.transloco, err, 'data.backup.error'));
+        this.backupError.set(refusalText(this.transloco, err, 'data.backup.error', DATA_REFUSALS));
       },
     });
   }
 
   async confirmRestore(backupId: string): Promise<void> {
-    // Irreversible: replaces ALL data. Require typing the backup id to proceed.
+    // Irreversible: replaces every space's data. Require typing the backup id, and say what is replaced, what is not, what the peers do
+    // and that erased records come back (R4.5, R5.7) - "replace all current data" was not the whole truth.
+    const t = (k: string) => this.transloco.translate(k);
     const ok = await this.confirmDialog.confirm({
-      title: this.transloco.translate('data.restore.confirmTitle'),
-      message: this.transloco.translate('data.restore.confirmMessage'),
-      confirmLabel: this.transloco.translate('data.restore.confirmButton'),
+      title: t('data.restore.confirmTitle'),
+      message: ['data.restore.confirmMessage', 'data.restore.confirmNotReplaced', 'data.restore.confirmPeers', 'data.restore.confirmErasures']
+        .map(t).join(' '),
+      confirmLabel: t('data.restore.confirmButton'),
       danger: true,
       requireText: backupId,
       requireTextLabel: this.transloco.translate('data.restore.typeIdToConfirm', { id: backupId }),
     });
     if (!ok) return;
+    this.runRestore(backupId);
+  }
+
+  /** Restore again leaving out the spaces the refusal named, after the operator confirms that they are not restored. */
+  async retryLeavingOut(): Promise<void> {
+    const offer = this.leaveOutOffer();
+    if (!offer) return;
+    const ok = await this.confirmDialog.confirm({
+      title: this.transloco.translate('data.restore.confirmTitle'),
+      message: this.transloco.translate('data.restore.leaveOutConfirm', { spaces: offer.spaces.join(', ') }),
+      confirmLabel: this.transloco.translate('data.restore.leaveOutRetry'),
+      danger: true,
+    });
+    if (!ok) return;
+    this.runRestore(offer.backupId, offer.spaces);
+  }
+
+  private runRestore(backupId: string, leaveOut?: string[]): void {
     this.restoringId.set(backupId);
-    this.restoreSuccess.set(false);
+    this.restoreNotice.set(null);
     this.restoreError.set(null);
-    this.adminApi.restoreBackup(backupId).subscribe({
-      next: () => {
+    this.leaveOutOffer.set(null);
+    this.adminApi.restoreBackup(backupId, leaveOut).subscribe({
+      next: started => {
         this.restoringId.set(null);
-        this.restoreSuccess.set(true);
-        this.refreshBackups();
+        // The page may have closed while the request was out: nothing to say, and no poll to start that nothing would stop.
+        if (this.destroyed) return;
+        this.restoreNotice.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'data.restore.accepted', started.spaces.length));
+        this.loadMaintenance();
+        this.refreshRestore();
       },
       error: err => {
         this.restoringId.set(null);
-        this.restoreError.set(refusalText(this.transloco, err, 'data.backup.restoreError'));
+        if (this.destroyed) return;
+        const body = (err as { error?: { code?: unknown; spaces?: unknown } } | null)?.error;
+        if (body?.code === 'backup_names_unserved_spaces' && Array.isArray(body.spaces)) {
+          this.leaveOutOffer.set({ backupId, spaces: body.spaces.filter((s): s is string => typeof s === 'string') });
+        }
+        this.restoreError.set(refusalText(this.transloco, err, 'data.backup.restoreError', DATA_REFUSALS));
+      },
+    });
+  }
+
+  /** Abandon the standing restore, once confirmed: its unfinished spaces are released and may be half restored. */
+  async confirmAbandon(): Promise<void> {
+    const r = this.restoreReport();
+    const unfinished = r?.spaces.filter(s => s.state !== 'done').map(s => s.id) ?? [];
+    const ok = await this.confirmDialog.confirm({
+      title: this.transloco.translate('data.progress.abandonTitle'),
+      message: this.transloco.translate('data.progress.abandonConfirm', { spaces: unfinished.join(', ') }),
+      confirmLabel: this.transloco.translate('data.progress.abandon'),
+      danger: true,
+    });
+    if (!ok) return;
+    this.abandoning.set(true);
+    this.restoreError.set(null);
+    this.adminApi.abandonRestore().subscribe({
+      next: a => {
+        this.abandoning.set(false);
+        if (this.destroyed) return;
+        this.restoreNotice.set(this.transloco.translate('data.progress.abandoned', { spaces: a.halfRestored.join(', ') }));
+        // Said here, in the region; the poll that sees the set end must not say it a second time.
+        this.restoreReport.update(cur => (cur ? { ...cur, state: 'abandoned' } : cur));
+        this.restorePoll?.stop();
+        this.loadMaintenance();
+        this.refreshRestore();
+      },
+      error: err => {
+        this.abandoning.set(false);
+        if (this.destroyed) return;
+        this.restoreError.set(refusalText(this.transloco, err, 'data.progress.abandonFailed', DATA_REFUSALS));
       },
     });
   }
@@ -708,8 +941,8 @@ export class DataComponent implements OnInit {
     this.togglingMaintenance.set(true);
     this.maintenanceError.set(null);
     this.adminApi.setMaintenance(next).subscribe({
-      next: ({ active }) => {
-        this.maintenanceActive.set(active);
+      next: s => {
+        this.takeMaintenance(s);
         this.togglingMaintenance.set(false);
       },
       error: err => {
@@ -722,7 +955,7 @@ export class DataComponent implements OnInit {
   async confirmMigrate(): Promise<void> {
     const uri = this.migrateUri.trim();
     if (!uri) return;
-    // Irreversible: dumps, switches DB, and restarts. Require the MIGRATE ritual.
+    // Irreversible: copies every space into the new database online and the process exits when the copy completes. The MIGRATE ritual.
     const ok = await this.confirmDialog.confirm({
       title: this.transloco.translate('data.migrate.confirmTitle'),
       message: this.transloco.translate('data.migrate.confirmMessage'),
@@ -733,24 +966,23 @@ export class DataComponent implements OnInit {
     });
     if (!ok) return;
     this.migrating.set(true);
-    this.migrateSuccess.set(false);
+    this.migrateNotice.set(null);
     this.migrateError.set(null);
     this.testResult.set(null);
     this.adminApi.startMigration(uri).subscribe({
-      next: () => {
+      next: started => {
         this.migrating.set(false);
-        this.migrateSuccess.set(true);
+        if (this.destroyed) return;
+        this.migrateNotice.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'data.migrate.accepted', started.spaces.length));
+        this.loadMaintenance();
+        this.refreshMigrate();
       },
       error: err => {
         this.migrating.set(false);
-        const code = err?.error?.code;
-        if (code === 'FEATURE_DISABLED') {
-          this.migrateError.set(this.transloco.translate('data.migrate.errorFeatureDisabled'));
-        } else if (code === 'INFRA_MANAGED') {
-          this.migrateError.set(this.transloco.translate('data.migrate.errorInfraManaged'));
-        } else {
-          this.migrateError.set(refusalText(this.transloco, err, 'data.migrate.error'));
-        }
+        if (this.destroyed) return;
+        // INFRA_MANAGED is one situation with two causes (the infra flag, a URI the environment supplies) and one sentence for both.
+        const key = MIGRATE_REFUSAL_KEYS[String(err?.error?.code ?? '')];
+        this.migrateError.set(key ? this.transloco.translate(key) : refusalText(this.transloco, err, 'data.migrate.error', DATA_REFUSALS));
       },
     });
   }
