@@ -693,7 +693,11 @@ export class DataComponent implements OnInit {
     const t = (k: string) => this.transloco.translate(k);
     const ok = await this.confirmDialog.confirm({
       title: t('data.restore.confirmTitle'),
-      message: ['data.restore.confirmMessage', 'data.restore.confirmNotReplaced', 'data.restore.confirmPeers', 'data.restore.confirmErasures']
+      message: [
+        'data.restore.confirmMessage', 'data.restore.confirmNotReplaced', 'data.restore.confirmPeers', 'data.restore.confirmErasures',
+        // What a restore cannot repair on its own (Q-556, decided with D-48).
+        'data.restore.confirmLimits',
+      ]
         .map(t).join(' '),
       confirmLabel: t('data.restore.confirmButton'),
       danger: true,
@@ -729,6 +733,8 @@ export class DataComponent implements OnInit {
         // The page may have closed while the request was out: nothing to say, and no poll to start that nothing would stop.
         if (this.destroyed) return;
         this.restoreNotice.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'data.restore.accepted', started.spaces.length));
+        // This page started it, so its outcome is shown even when the first report already says it ended.
+        this.followedRestore.set(true);
         this.loadMaintenance();
         this.refreshRestore();
       },
@@ -974,6 +980,8 @@ export class DataComponent implements OnInit {
         this.migrating.set(false);
         if (this.destroyed) return;
         this.migrateNotice.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'data.migrate.accepted', started.spaces.length));
+        // This page started it, so its outcome is shown even when the first report already says it ended (a copy refused at once).
+        this.followedMigrate.set(true);
         this.loadMaintenance();
         this.refreshMigrate();
       },

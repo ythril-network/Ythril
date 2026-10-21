@@ -1770,6 +1770,7 @@
   "data.restore.confirmNotReplaced": "Nicht ersetzt werden das Audit-Log, die Auftragswarteschlangen und die gespeicherten Dateiinhalte; ein Dateieintrag und seine Inhalte passen danach womöglich nicht mehr zusammen.",
   "data.restore.confirmPeers": "Peers senden erneut, was diese Instanz seit dem Backup von ihnen empfangen hat.",
   "data.restore.confirmErasures": "Nach dem Backup gelöschte Einträge kehren zurück, auch solche, die auf einen Löschantrag hin entfernt wurden; das Audit-Log verzeichnet die Löschung weiterhin.",
+  "data.restore.confirmLimits": "Eine Wiederherstellung holt nicht zurück, was nur Peers halten, die dieser Instanz nie etwas senden, und nach einer Wiederherstellung in eine leere Datenbank können Peers ihre nächsten Schreibvorgänge überspringen, bis das Netzwerk aufgeholt hat.",
   "data.restore.leaveOutRetry": "Ohne sie wiederherstellen",
   "data.restore.leaveOutConfirm": "Das Backup ohne {{spaces}} wiederherstellen? Deren Daten im Backup werden nirgends wiederhergestellt.",
   "data.restore.completed": "Die Wiederherstellung ist abgeschlossen: Jeder Raum enthält jetzt das Backup.",

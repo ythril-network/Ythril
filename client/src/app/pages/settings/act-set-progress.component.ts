@@ -31,6 +31,7 @@ type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
   <app-status-pill pill [variant]="setVariant()" [dot]="true">{{ setStateKey() | transloco }}</app-status-pill>
   <div style="margin:4px 0 10px;"><app-step-progress-bar [progress]="progress()"/></div>
   <p style="margin:0 0 8px;font-size:13px;">{{ doneText() }}</p>
+  @if (report().lastError; as e) { <p style="color:var(--text-secondary);margin:0 0 8px;font-size:13px;">{{ 'spaces.dangerZone.act.lastError' | transloco }} {{ e }}</p> }
   @if (emptiedText(); as t) { <p style="color:var(--text-muted);margin:0 0 6px;font-size:12.5px;">{{ t }}</p> }
   @if (leftOutText(); as t) { <p style="color:var(--text-muted);margin:0 0 6px;font-size:12.5px;">{{ t }}</p> }
   <ul style="list-style:none;margin:0;padding:0;">
