@@ -21,12 +21,28 @@ import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { ViewMembersInput, WILDCARD_MEMBER } from '../../../../server/src/config/view-shape';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { getTranslocoModule } from '../testing/transloco-testing';
+import { CLIENT_ROOT } from '../testing/tracked-sources';
 import { ViewCreateDialogComponent } from '../pages/brain/view-create-dialog.component';
 import { ViewReadsFromComponent } from '../pages/brain/view-reads-from.component';
 
 const SPACES = [{ id: 'qa', label: 'Quality' }, { id: 'ops', label: 'Operations' }];
+
+// The server module is READ, not imported: the client compiles only its own tree (tsconfig rootDir), as the other specs that hold the client
+// to server source do. Both facts are taken from that module's own text, with a floor so a renamed export fails here instead of passing.
+const VIEW_SHAPE = readFileSync(resolve(CLIENT_ROOT, '../server/src/config/view-shape.ts'), 'utf8');
+const WILDCARD_MEMBER = /export const WILDCARD_MEMBER = '([^']+)'/.exec(VIEW_SHAPE)?.[1];
+const MEMBERS_ARE_A_LIST = /export const ViewMembersInput = z\.array\(z\.string\(\)\)\.min\(1\)/.test(VIEW_SHAPE);
+const ViewMembersInput = {
+  safeParse: (v: unknown) => ({ success: Array.isArray(v) && v.length >= 1 && v.every(m => typeof m === 'string') }),
+};
+
+it('the server module still states the wildcard and a list-of-strings members schema', () => {
+  expect(WILDCARD_MEMBER, 'WILDCARD_MEMBER not found in server/src/config/view-shape.ts').toBeTruthy();
+  expect(MEMBERS_ARE_A_LIST, 'ViewMembersInput is no longer z.array(z.string()).min(1)').toBe(true);
+});
 
 describe('a view\'s members travel in the server\'s shape (Q-531)', () => {
   beforeEach(() => TestBed.resetTestingModule());
