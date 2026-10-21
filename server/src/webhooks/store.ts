@@ -36,7 +36,8 @@ export async function initWebhookDeliveryIndexes(): Promise<void> {
 /**
  * The DB phase of the 6.0 proxy-to-view upgrade, for webhooks (Q-531): a subscription that named ONLY retired proxy ids is DISABLED and
  * keeps its list (emptying it would subscribe it to every space: an empty list means all); one that named others loses only the retired ids.
- * Subscriptions live in the database, not in `config.json`, so the config migration cannot reach them. Idempotent: a repeat finds nothing to do.
+ * Subscriptions live in the database, not in `config.json`, so the config migration cannot reach them. Idempotent: a repeat finds nothing to do,
+ * and a subscription an admin re-enabled after it was disabled stays enabled (the rule records the ids it disabled for).
  * @returns how many subscriptions it changed.
  */
 export async function retireWebhookSpaceIds(retiredIds: readonly string[]): Promise<number> {
@@ -47,7 +48,10 @@ export async function retireWebhookSpaceIds(retiredIds: readonly string[]): Prom
     if (after === sub || (after.enabled === sub.enabled && after.spaces.length === sub.spaces.length)) continue;
     await col<WebhookSubscription>(COLLECTION).updateOne(
       { id: sub.id } as Filter<WebhookSubscription>,
-      { $set: { spaces: after.spaces, enabled: after.enabled, status: after.enabled ? sub.status : 'disabled', updatedAt: new Date().toISOString() } } as UpdateFilter<WebhookSubscription>,
+      { $set: {
+        spaces: after.spaces, enabled: after.enabled, status: after.enabled ? sub.status : 'disabled', updatedAt: new Date().toISOString(),
+        ...(after.retiredIdsDisabledFor ? { retiredIdsDisabledFor: after.retiredIdsDisabledFor } : {}),
+      } } as UpdateFilter<WebhookSubscription>,
     );
     changed++;
   }

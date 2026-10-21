@@ -130,12 +130,22 @@ function convertProxies(cfg: Config, now: number): ProxyMigrationResult {
  * What a webhook subscription becomes when `retiredIds` are reserved: one that named ONLY retired ids is DISABLED and keeps its list
  * (emptying it would subscribe it to every space); one that named others loses only the retired ones; one that names no space (every
  * space) is not about a retired id and is untouched. Pure; the DB-phase boot step stores what it returns.
+ *
+ * The disable happens ONCE per set of ids: it records the ids it disabled for (`retiredIdsDisabledFor`), and a subscription whose
+ * every id is among them is left as it is. The step runs on every boot, so without the record a subscription an admin re-enabled after
+ * the upgrade was disabled again at each restart; an id retired later is a new reason, and disables it again.
  */
-export function subscriptionAfterRetiredIds<T extends { spaces: string[]; enabled: boolean }>(subscription: T, retiredIds: readonly string[]): T {
+export function subscriptionAfterRetiredIds<T extends { spaces: string[]; enabled: boolean; retiredIdsDisabledFor?: string[] | undefined }>(
+  subscription: T, retiredIds: readonly string[],
+): T {
   if (subscription.spaces.length === 0) return subscription;
   const retired = new Set(retiredIds);
   const remaining = subscription.spaces.filter(id => !retired.has(id));
   if (remaining.length === subscription.spaces.length) return subscription;
-  if (remaining.length === 0) return { ...subscription, enabled: false };
+  if (remaining.length === 0) {
+    const handled = new Set(subscription.retiredIdsDisabledFor ?? []);
+    if (subscription.spaces.every(id => handled.has(id))) return subscription;
+    return { ...subscription, enabled: false, retiredIdsDisabledFor: [...subscription.spaces] };
+  }
   return { ...subscription, spaces: remaining };
 }
