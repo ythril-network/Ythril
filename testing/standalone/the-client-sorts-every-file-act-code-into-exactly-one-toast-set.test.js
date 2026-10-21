@@ -13,7 +13,10 @@
  *
  * ## What it holds
  *
- * The server's codes are DERIVED from `files/act-answers.ts` (its `code: '<x>'` literals, comments removed). The client's two
+ * The server's codes are DERIVED from `files/act-answers.ts` (its `code: '<x>'` literals, comments removed), and from the
+ * space-act table in `config/types-space-acts.ts` (each kind's `writeRefusalCode`): a file write refused while its space is
+ * being deleted, wiped, renamed, restored or migrated is answered by the space write gate, not by the file act's own answers,
+ * and it reaches the same toast. Reading only the first source called those codes "not answered by the server". The client's two
  * sets are read from the source of `file-listing.store.ts` BY PATH (the client cannot be imported into a standalone test, and
  * a standalone test cannot import what the client imports): `FILE_REFUSALS_WITH_REMEDY` and `FILE_REFUSALS_THAT_STATE_A_FACT`,
  * each a `new Set([...])` of string literals or of module constants that hold one. Then, over the whole set of server codes:
@@ -33,12 +36,16 @@ import { stripComments } from './_strip-comments.mjs';
 import { between } from './_structural-window.mjs';
 
 const ANSWERS = 'server/src/files/act-answers.ts';
+const SPACE_ACT_KINDS = 'server/src/config/types-space-acts.ts';
 const STORE = 'client/src/app/pages/files/file-listing.store.ts';
 const REMEDY = 'FILE_REFUSALS_WITH_REMEDY';
 const FACT = 'FILE_REFUSALS_THAT_STATE_A_FACT';
 
 /** The codes a module spells in its answers. */
 const serverCodes = (src) => [...new Set([...stripComments(src).matchAll(/code: '([a-z_]+)'/g)].map(m => m[1]))].sort();
+
+/** The codes the space write gate refuses a write with while a space act holds the space, one per act kind. */
+const writeClosedCodes = (src) => [...new Set([...stripComments(src).matchAll(/writeRefusalCode:\s*'([a-z_]+)'/g)].map(m => m[1]))].sort();
 
 /**
  * The members of `export const <name>: ReadonlySet<string> = new Set([ ... ])`, each a string literal or a module `const` that
@@ -68,11 +75,14 @@ function problems(server, remedy, fact) {
 }
 
 describe('the client sorts every file act code into exactly one toast set', () => {
-  const server = serverCodes(readFileSync(ANSWERS, 'utf8'));
+  const answered = serverCodes(readFileSync(ANSWERS, 'utf8'));
+  const writeClosed = writeClosedCodes(readFileSync(SPACE_ACT_KINDS, 'utf8'));
+  const server = [...new Set([...answered, ...writeClosed])].sort();
   const store = readFileSync(STORE, 'utf8');
 
   it('finds the server codes and the remedy set (the reads themselves still work)', () => {
-    assert.ok(server.length >= 8, `only ${server.length} codes read from ${ANSWERS}`);
+    assert.ok(answered.length >= 8, `only ${answered.length} codes read from ${ANSWERS}`);
+    assert.ok(writeClosed.length >= 3, `only ${writeClosed.length} write-refusal codes read from ${SPACE_ACT_KINDS}`);
     assert.ok(setMembers(store, REMEDY).length >= 4, `${REMEDY} was read as nearly empty`);
   });
 
