@@ -162,16 +162,25 @@ export class FileSystemFault extends Error {
   }
 }
 
+/**
+ * A file act addressed to a RETIRED proxy id (Q-531): the id a pre-6.0 proxy used, reserved until an instance admin purges it. The same
+ * answer every door gives for that id (`410`, `space_retired`, one sentence): the file doors name a space in their path like every other
+ * door, so the answer reaches them as a file act's own refusal as well.
+ */
+export class SpaceRetired extends Error {
+  override readonly name = 'SpaceRetired';
+}
+
 /** How long a caller is told to wait before retrying an owed move, in seconds. */
 const OWED_MOVE_RETRY_AFTER_S = 5;
 
 export interface FileActAnswer {
-  status: 400 | 409 | 422 | 500 | 503;
+  status: 400 | 409 | 410 | 422 | 500 | 503;
   /** The REST body, and the MCP `structuredContent` — the same object on both doors. */
   body: {
     error: string;
     code: 'path_blocked' | 'destination_exists' | 'destination_held_after_move' | 'confirm_required' | 'space_root_refused'
-      | 'move_still_owed' | 'act_not_recorded' | 'file_system_fault';
+      | 'move_still_owed' | 'act_not_recorded' | 'file_system_fault' | 'space_retired';
     path?: string;
     /** The foreign file whose records hold an id a finished move needs: `destination_held_after_move` only. */
     heldBy?: string;
@@ -207,6 +216,7 @@ const answered: Record<FileActAnswer['body']['code'], number> = {
   move_still_owed: 0,
   act_not_recorded: 0,
   file_system_fault: 0,
+  space_retired: 0,
 };
 
 /** A snapshot of the tally {@link fileActAnswer} keeps: how many answers each code has been given. */
@@ -220,6 +230,9 @@ export function fileActAnswerCounts(): Readonly<Record<FileActAnswer['body']['co
  * answer no door gave.
  */
 export function fileActAnswerOf(err: unknown): FileActAnswer | undefined {
+  if (err instanceof SpaceRetired) {
+    return { status: 410, body: { error: err.message, code: 'space_retired' } };
+  }
   if (err instanceof PathBlocked) {
     return { status: 409, body: { error: err.message, code: 'path_blocked', path: err.path } };
   }

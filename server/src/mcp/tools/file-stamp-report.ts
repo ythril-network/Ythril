@@ -31,7 +31,7 @@ export const file_stamp_reportTool: ToolHandler = {
     + 'was not reached before the deadline is a `cannot-tell` row and never a missing one. The answer states the rules '
     + 'that decide which rows are examined, and carries the counts (`candidates`, `checked`, `likely`, `cannotTell`).\n\n'
     + `AT MOST ${HEAVY_CALLS_PER_WINDOW} RUNS A MINUTE PER TOKEN, counted with the REST route. ONE RUN AT A TIME PER SPACE: `
-    + 'a second call while one runs is a 409. A proxy space holds no files and is refused: report on its members.\n\n'
+    + 'a second call while one runs is a 409. A personal view is not a space: naming one is answered as an unknown space.\n\n'
     + 'PAGING: `limit` rows per call, from the row after `after`. When `truncated` is true, pass `nextAfter` as `after` '
     + 'for the next page.',
   admin: true,

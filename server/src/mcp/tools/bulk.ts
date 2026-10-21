@@ -8,10 +8,8 @@
  */
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema } from './shared.js';
 import { bulkWrite, bulkWriteTotal, bulkBodyRefusal, BULK_BODY_KEYS, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
-import { resolveWriteTarget } from '../../spaces/proxy.js';
-import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
 import { writeDoorOfTransport } from '../../contract/judged-write-operations.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
@@ -22,7 +20,7 @@ import { UNDECLARED_KEY_RULE } from '../schema-warnings.js';
 import { MAX_TAGS, MAX_FACT_LENGTH } from '../../util/request-bounds.js';
 
 /** What this door accepts at the top level: the arrays, plus the space it is addressed to. */
-const MCP_BULK_KEYS: ReadonlySet<string> = new Set([...BULK_BODY_KEYS, 'space', 'targetSpace']);
+const MCP_BULK_KEYS: ReadonlySet<string> = new Set([...BULK_BODY_KEYS, 'space']);
 
 export const save_bulkTool: ToolHandler = {
   name: 'save_bulk',
@@ -64,10 +62,10 @@ export const save_bulkTool: ToolHandler = {
     + 'PARAMETERS: each collection takes the same fields as its single-record tool — `facts` as `saveFact`, '
     + '`entities` as `save_entity`, `edges` as `save_edge`, `chrono` as `save_chrono` — including '
     + '`ttlDays` per item.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'A KEY AN ITEM\'S COLLECTION DOES NOT TAKE is answered by how this instance is set for the space, item by item: by '
     + 'default the item is written and its `errors` row names the key; a space set to refuse rejects that item alone and '
-    + 'the rest of the batch proceeds. The call\'s own top level takes only the collections, `space` and `targetSpace`, and '
+    + 'the rest of the batch proceeds. The call\'s own top level takes only the collections and `space`, and '
     + 'anything else refuses the whole batch in every mode. A retired name is refused everywhere.\n\n'
     + 'A RETRY CONVERGES: a fact, entity or chrono item carrying the `id` of an existing record converges onto '
     + 'it (tags union, properties merge) instead of duplicating, so resending a batch after a timeout is safe '
@@ -285,7 +283,6 @@ export const save_bulkTool: ToolHandler = {
                 required: ['title', 'type', 'startsAt'],
               },
             },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
           },
           required: ['space'],
           additionalProperties: false,
@@ -296,9 +293,7 @@ export const save_bulkTool: ToolHandler = {
     // validation so it can report per-item errors, which left a retired or unknown key accepted and ignored.
     const refusal = bulkBodyRefusal(a, MCP_BULK_KEYS);
     if (refusal) throw new Error(refusal.error);
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
-    const ts = wt.target;
+    const ts = callSpace;
 
     const result = await bulkWrite(ts, {
       facts: a['facts'], entities: a['entities'], edges: a['edges'], chrono: a['chrono'],

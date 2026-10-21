@@ -11,7 +11,8 @@ import { beginIngest, ingestStatus } from '../../extractor/ingest-door.js';
 import { INGEST_KINDS } from '../../extractor/ingest.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { MAX_INGEST_SESSIONS } from '../../util/request-bounds.js';
-import { TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { readSpacesOfCall } from '../../spaces/read-scope.js';
+import { retiredWriteFieldError } from '../../brain/retired-write-fields.js';
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text' as const, text: t }], isError });
 
@@ -30,8 +31,7 @@ export const ingestTool: ToolHandler = {
     + '`conversation` Schema Library group (add it with the group apply — ingest never changes a space\'s schema), '
     + 'or, for `sessions`, no decision model, no assist model, or no doc-nlp sidecar.\n\n'
     + 'Every record goes through the same validation as `save_bulk`. Transcripts are FILES, so they are written only '
-    + 'when the token also holds `files: write`; otherwise the run records that it skipped them.\n\n'
-    + TARGET_SPACE_BULLET,
+    + 'when the token also holds `files: write`; otherwise the run records that it skipped them.',
   mutating: true,
   spaceRequired: true,
   // Not `heavy`: the rail is inside `beginIngest`, which both doors call (S-8). Declared here as well, the dispatcher
@@ -41,7 +41,6 @@ export const ingestTool: ToolHandler = {
     type: 'object',
     properties: {
       space: s.requiredSpace,
-      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
       kind: { type: 'string', enum: [...INGEST_KINDS], description: 'What the source is. `conversation` is the one kind there is.' },
       conversationId: {
         type: 'string',
@@ -61,8 +60,11 @@ export const ingestTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { space: _space, targetSpace, ...body } = ctx.args;
-    const r = await beginIngest(ctx.callSpace, targetSpace as string | undefined, body, ctx.rights, ctx.rateKey);
+    // This tool validates no schema up front (a run's body is judged by the run), so the retired `targetSpace` is refused by name here.
+    const retired = retiredWriteFieldError(ctx.args);
+    if (retired) return text(retired, true);
+    const { space: _space, ...body } = ctx.args;
+    const r = await beginIngest(ctx.callSpace, body, ctx.rights, ctx.rateKey);
     if (r.status !== 202) return text(r.error, true);
     return {
       ...text(`ingest started — runId: ${r.run.runId}, conversationId: ${r.run.conversationId}. Read it with ingest_status.`),
@@ -83,14 +85,13 @@ export const ingest_statusTool: ToolHandler = {
     type: 'object',
     properties: {
       space: s.requiredSpace,
-      targetSpace: { type: 'string', description: 'For a proxy space: the member the run wrote into.' },
       runId: { type: 'string', description: 'The run id the start call answered with. Only valid in the space it was started in.' },
     },
     required: ['space', 'runId'],
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const run = ingestStatus(ctx.callSpace, ctx.args['targetSpace'] as string | undefined, String(ctx.args['runId'] ?? ''), ctx.rights);
+    const run = ingestStatus(readSpacesOfCall(ctx, ctx.callSpace), String(ctx.args['runId'] ?? ''));
     if (!run) return text(`No ingest run '${ctx.args['runId']}' in this space. Runs are held in memory, so a restart forgets them — not the records a finished run wrote.`, true);
     return { ...text(`ingest ${run.runId}: ${run.phase}${run.error ? ` — ${run.error}` : ''}`), structuredContent: { ...run } };
   },

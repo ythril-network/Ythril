@@ -544,6 +544,14 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
     why: 'Display order of the space list in the UI. Instance-level presentation state that names no space '
        + 'in its path and reads none of their data.',
   },
+  // Personal views (Q-531): owned by the calling token, not a view of any space's data.
+  { route: '/api/views', why: 'owner-scoped, not a space: lists or creates the own personal views of the calling token. A view belongs to the token that made it, so there is no space area to rate; any token may hold views of what it reads, and the members it may list are judged against its own reach' },
+  { route: '/api/views/:id', why: 'owner-scoped, not a space: reads, renames or deletes one own personal view of the calling token. A view of another token answers as an unknown id' },
+  { route: '/api/views/:id/copy', why: 'owner-scoped, not a space: gives a token the caller may manage a COPY of one own view of the caller, guarded by the same check that lets the caller manage that token, with the MFA step-up token management has' },
+  { route: '/api/admin/views/orphans', why: 'instance-admin: counts personal views whose owner holds no token, per owner kind, naming none' },
+  { route: '/api/admin/views/claim', why: 'instance-admin: copies a migrated, ownerless view to the calling admin' },
+  { route: '/api/admin/views/retired/:id/purge', why: 'instance-admin: drops what a retired proxy id still holds and releases the id; names a retired id, never a live space' },
+  { route: '/api/admin/views/migration', why: 'instance-admin: reports what the 6.0 proxy-to-view upgrade did' },
   {
     route: '/api/brain/spills/:id',
     why: 'A read spill (Q-92) is found by its id and names no space, so a path scope would resolve to none '
@@ -560,3 +568,15 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
  * exists because one list had two readers who disagreed.
  */
 export const NOT_AREA_SCOPED_PATHS: ReadonlySet<string> = new Set(NOT_AREA_SCOPED.map(r => r.route));
+
+/**
+ * Whether a door takes a personal view in place of a space: it READS data, and its area is not the schema (Q-531).
+ *
+ * A view is a lens over data the caller reads, resolved to members PER AREA at call time, so a door that writes, that administers, or that
+ * reads configuration (the schema area) has no members to give it and answers a view as an unknown space. DERIVED from the same rows the
+ * guards enforce - never a list of doors - so a read door added tomorrow takes a view and a write door never does.
+ */
+export const takesAView = (right: { needs: Rung; area: SpaceArea }): boolean => right.needs === 'read' && right.area !== 'schema';
+
+/** Whether an MCP tool takes a view: its `TOOL_RIGHTS` row is a data read (`read_spill` names no space, so it has none to give). */
+export const toolTakesAView = (tool: string): boolean => tool !== 'read_spill' && TOOL_RIGHTS.some(r => r.tool === tool && takesAView(r));

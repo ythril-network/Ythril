@@ -13,7 +13,6 @@ import { assertDestinationReachable, assertNothingStandsAt, fsRefusalOf } from '
 import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { mkdirPrivate } from '../util/fs-modes.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
-import { isProxySpace } from '../spaces/proxy.js';
 import { storeFailureAnswer } from '../brain/store-failure.js';
 import { toDocId } from '../util/paths.js';
 import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
@@ -172,7 +171,6 @@ function saveTargetRefusal(
   if (!holdsRungOnEvery(rights, [targetSpaceId], 'files', 'write')) {
     return { status: 403, error: 'Token does not have write access to files in the target space' };
   }
-  if (isProxySpace(targetSpaceId)) return { status: 400, error: `'${targetSpaceId}' is a proxy space and holds no files of its own: choose one of its member spaces` };
   return null;
 }
 

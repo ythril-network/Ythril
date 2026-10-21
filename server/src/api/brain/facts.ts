@@ -13,11 +13,10 @@ import { answerUnknownWriteFields, atLeastOneFieldRefusal, carriesAnyAcceptedFie
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { listFacts, deleteFact, saveFact, updateFact } from '../../brain/fact.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
-import { getConfig } from '../../config/loader.js';
-import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
+import { } from '../../config/loader.js';
+import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { checkQuota, QuotaError } from '../../quota/quota.js';
-import { resolveMemberSpaces, resolveWriteTarget } from '../../spaces/proxy.js';
-import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
+import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import {
   UUID_V4_RE,
   webhookToken,
@@ -39,15 +38,10 @@ export const memoriesRouter = Router();
 // What a body may carry is `acceptedWriteKeys('fact.create')`: the paired tool's own schema, not a list kept beside this route.
 memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
   // Proxy space: resolve target space for write
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
-  if (answerWriteTarget(res, wt)) return;
-  const targetSpace = wt.target;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
+  const targetSpace = spaceId;
   // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
   if (applyJudgment(res, answerUnknownWriteFields(req.body, 'fact.create', targetSpace, 'rest'))) return;
   const { fact, tags = [], description, properties, type: memoryType } = req.body ?? {};
@@ -191,7 +185,7 @@ memoriesRouter.delete('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpac
    *
    * `409` and not `404`: the record IS there, and the caller needs to know which references to clear.
    */
-  for (const mid of memberSpacesForRequest(req, spaceId)) {
+  for (const mid of readSpacesOfRequest(req, spaceId)) {
     const block = await entityDeleteBlockers(mid, id, 'fact');
     if (block) {
       res.status(409).json({ error: block.message, backlinks: block.blocking, references: block.backlinks });
@@ -208,17 +202,12 @@ memoriesRouter.delete('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpac
 memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
-  if (answerWriteTarget(res, wt)) return;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
   // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
-  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'fact.update', wt.target, 'rest'))) return;
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'fact.update', spaceId, 'rest'))) return;
   const { fact, tags, description, properties, deleteFields, type: memoryType } = req.body ?? {};
   // Validate deleteFields
   const dfResult = validateDeleteFields(deleteFields);
@@ -272,7 +261,7 @@ memoriesRouter.patch('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpace
   // PRESENCE of any field the write takes (a connection field, `ttlDays: null` and `deleteFields` included), from the one accepted set —
   // the sentence names that same set, so it cannot omit a field the write takes.
   if (!carriesAnyAcceptedField(req.body, 'fact.update')) { res.status(400).json({ error: atLeastOneFieldRefusal('fact.update') }); return; }
-  const memberIds = resolveMemberSpaces(wt.target);
+  const memberIds = [spaceId];
   for (const mid of memberIds) {
     // Validate the record AS IT WILL BE, on every patch — not only when `deleteFields` is present.
     //

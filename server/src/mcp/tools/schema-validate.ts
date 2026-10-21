@@ -15,7 +15,7 @@
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { beginSchemaValidate, SCHEMA_VALIDATE_MAX_LIMIT, SCHEMA_VALIDATE_CURSOR_MAX, SCHEMA_VALIDATE_SCAN_BOUND } from '../../spaces/schema-validate-door.js';
-import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
+import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { ToolRefusal } from '../../util/errors.js';
@@ -98,7 +98,7 @@ export const schema_validateTool: ToolHandler = {
     const { space: _space, ...body } = ctx.args;
     const r = await beginSchemaValidate({
       spaceId: ctx.callSpace,
-      memberIds: memberSpacesWithin(ctx.callSpace, ctx.accessibleSpaceIds),
+      memberIds: readSpacesOfCall(ctx, ctx.callSpace),
       body,
       rights: ctx.rights,
       callerKey: ctx.rateKey,

@@ -39,7 +39,7 @@ import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { outsideWriteBound, withinWriteBound } from '../db/write-bound.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../brain/entity-refs.js';
-import { isStrictLinkage } from '../spaces/proxy.js';
+import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import { log, peerText } from '../util/log.js';
 import { DetachedWork } from '../util/detached-work.js';

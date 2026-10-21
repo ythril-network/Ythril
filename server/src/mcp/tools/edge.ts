@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, TARGET_SPACE_BULLET, TARGET_SPACE_DESCRIPTION } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge } from '../../brain/edges.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -8,9 +8,9 @@ import { readEditAudit } from '../../brain/edit-audit.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
 import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { getConfig } from '../../config/loader.js';
-import { isStrictLinkage, resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { toolWriteGrant, assertWriteTarget } from '../tool-rights-guard.js';
-import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
+import { isStrictLinkage } from '../../spaces/space-lookup.js';
+import { findFirstAcrossMembers } from '../../spaces/across-members.js';
+import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import { edgeEndpointKind, edgeEndpointKindSchema, isWellFormedRef } from '../../brain/entity-refs.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
@@ -72,7 +72,6 @@ export const save_edgeTool: ToolHandler = {
               description: 'Optional structured key-value metadata for this edge. ' + UNDECLARED_KEY_RULE,
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             waitForEmbedding: waitForEmbeddingSchema('edge', false),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
@@ -96,8 +95,6 @@ export const save_edgeTool: ToolHandler = {
     const edgeProps = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
       ? (a['properties'] as Record<string, string | number | boolean>)
       : undefined;
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -105,7 +102,7 @@ export const save_edgeTool: ToolHandler = {
     if (shapeErr) throw new Error(shapeErr);
     const fromKind = edgeEndpointKind(a['fromKind'] as RefKind | undefined);
     const toKind = edgeEndpointKind(a['toKind'] as RefKind | undefined);
-    if (isStrictLinkage(wt.target)) {
+    if (isStrictLinkage(callSpace)) {
       // The shape a valid endpoint has depends on its kind: a UUID v4 for three of the four, and a
       // space-relative path for a file. Testing both ends against `UUID_V4_RE` regardless — which is what
       // this did — refuses every legitimate file endpoint with a message about entity IDs.
@@ -121,7 +118,7 @@ export const save_edgeTool: ToolHandler = {
     // Schema validation of the record this upsert will PRODUCE. An edge's identity is (from, to, label)
     // with no id in the call at all, so EVERY repeat upsert merges into the stored edge — and nothing in
     // the payload hints at it. Validating the payload alone made a one-property patch look incomplete.
-    const edgeMetaRaw = getConfig().spaces.find(s => s.id === wt.target)?.meta;
+    const edgeMetaRaw = getConfig().spaces.find(s => s.id === callSpace)?.meta;
     const edgeMeta = edgeMetaRaw ? resolveMetaRefs(edgeMetaRaw) : undefined;
     /*
      * The schema check lives in `upsertEdge` now, not here — see the note at its definition. It sat at this
@@ -139,7 +136,7 @@ export const save_edgeTool: ToolHandler = {
     if (!susCreate.ok) throw new Error(susCreate.error);
     // A refusal (`EdgeSchemaViolation`, a `SchemaViolationError`) is answered by `callTool` — the structured 422 every
     // refused record write gets, `violations` as data and not as a tail on the sentence.
-    const edge = await upsertEdge(wt.target, from, to, label, weight, edgeType, description, edgeProps, edgeTags, ctx.actor, edgeTtlDays,
+    const edge = await upsertEdge(callSpace, from, to, label, weight, edgeType, description, edgeProps, edgeTags, ctx.actor, edgeTtlDays,
       {
         ...(a['waitForEmbedding'] === true ? { waitForEmbedding: true } : {}),
         ...(supCreate.value !== undefined ? { suppressEmbeddings: supCreate.value } : {}),
@@ -196,7 +193,7 @@ export const update_edgeTool: ToolHandler = {
     + 'ranking, never from traversal.\n'
     + '- `ttlDays` — this edge\'s own expiry, the MOST specific of three tiers: it beats the type\'s retention '
     + 'window, which beats the space-wide one.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'RESPONSE: one line with the edge\'s id and its new `seq` — the sync sequence number, which increments on '
     + 'every write and is how a peer knows this version is newer. An id that does not exist is an error, not a '
     + 'silent no-op.\n\n'
@@ -248,7 +245,6 @@ export const update_edgeTool: ToolHandler = {
             toKind: edgeEndpointKindSchema('to'),
             suppressEmbeddings: SUPPRESS_EMBEDDINGS_SCHEMA,
             superseded: SUPERSEDED_SCHEMA,
-            targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
             deleteFields: { type: 'array', maxItems: MAX_DELETE_FIELDS, items: { type: 'string' }, description: 'Dot-notation paths to delete from the edge (e.g. ["properties.oldKey", "description"]). System fields (id, name, type, spaceId, createdAt, updatedAt) cannot be deleted. Deletions are permanent.' },
             ttlDays: TTL_DAYS_SCHEMA,
           },
@@ -259,8 +255,6 @@ export const update_edgeTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
     // `W-14`..`W-22`: the same table the REST door reads, so the two cannot disagree about a value. The
     // dispatcher has already run this tool's own schema; what reaches here is what the schema does not
     // declare.
@@ -307,9 +301,9 @@ export const update_edgeTool: ToolHandler = {
      */
 
     // Q-50: the before, read ahead of the write, so the audit entry carries the change list its REST twin's does.
-    const audit = await readEditAudit(wt.target, mid => getEdgeById(mid, id), id, a, 'edge');
+    const audit = await readEditAudit(callSpace, mid => getEdgeById(mid, id), id, a, 'edge');
     let updCheck: UpdateValidation | undefined;
-    const updatedEdge = await findFirstAcrossMembers(wt.target, mid => updateEdgeById(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
+    const updatedEdge = await findFirstAcrossMembers([callSpace], mid => updateEdgeById(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updatedEdge) { const s = audit.snapshots(updatedEdge); ctx.recordChanges?.(s.before, s.after); }
     if (!updatedEdge) throw new NotFoundError(`Edge '${id}' not found`);
     const schemaWarnings = schemaWarningAnswer(getSpaceMeta(updatedEdge.spaceId), updCheck);
@@ -364,7 +358,7 @@ export const graph_traverseTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { args: a, callSpace , accessibleSpaceIds } = ctx;
+    const { args: a, callSpace  } = ctx;
     const startId = String(a['startId'] ?? '').trim();
     if (!startId) throw new Error('startId must not be empty');
     const directionRaw = typeof a['direction'] === 'string' ? a['direction'] : 'outbound';
@@ -378,7 +372,7 @@ export const graph_traverseTool: ToolHandler = {
     const maxDepth = typeof a['maxDepth'] === 'number' ? Math.min(Math.max(1, a['maxDepth']), 10) : 3;
     const limit = typeof a['limit'] === 'number' ? Math.min(Math.max(1, a['limit']), 1000) : 100;
 
-    const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
+    const memberIds = readSpacesOfCall(ctx, callSpace);
     // Same default and same opt-out as REST — a rule that reaches one door and not the other is the defect
     // four brain-API fixes were about.
     const result = await traverseGraph(memberIds, startId, direction, edgeLabels, maxDepth, limit,
@@ -434,7 +428,7 @@ export const delete_edgeTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the edge\'s `_id`, as `graph_traverse`, `filter` and recall\'s `_graph` report it. Required. An id '
     + 'that does not exist is an ERROR, not a silent success.\n'
-    + TARGET_SPACE_BULLET + '\n\n'
+    + '\n'
     + 'RESPONSE: one line confirming the id that was deleted.',
   mutating: true,
   spaceRequired: true,
@@ -448,7 +442,6 @@ export const delete_edgeTool: ToolHandler = {
           + 'Deleting an edge NEVER touches the two entities it joined — it removes the relationship only. A '
           + 'tombstone is written, so re-creating it with the same id does not undo this.',
       },
-      targetSpace: { type: 'string', description: TARGET_SPACE_DESCRIPTION },
     },
     required: ['space', 'id'],
     additionalProperties: false,
@@ -458,10 +451,8 @@ export const delete_edgeTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-    const wt = resolveWriteTarget(callSpace, a['targetSpace'] as string | undefined, toolWriteGrant(ctx));
-    assertWriteTarget(wt);
 
-    const deleted = await findFirstAcrossMembers(wt.target, mid => deleteEdge(mid, id, ctx.actor));
+    const deleted = await findFirstAcrossMembers([callSpace], mid => deleteEdge(mid, id, ctx.actor));
     if (!deleted) throw new NotFoundError(`Edge '${id}' not found`);
     return { content: [{ type: 'text' as const, text: `Edge deleted (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true } };

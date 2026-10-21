@@ -20,6 +20,7 @@ import { network_getTool, network_createTool, network_updateTool, network_leaveT
 import { file_stamp_reportTool } from './file-stamp-report.js';
 import { schema_validateTool } from './schema-validate.js';
 import { helpTool } from './help.js';
+import { view_listTool, view_getTool, view_createTool, view_updateTool, view_deleteTool, view_copyTool, view_orphansTool, view_claimTool, view_purge_retiredTool, view_migrationTool } from './views.js';
 import { list_embed_jobsTool, retry_embed_recordTool, retry_embed_mediaTool, space_reindexTool, space_reembedTool } from './embed.js';
 
 export type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
@@ -110,6 +111,17 @@ export const ALL_TOOLS: ToolHandler[] = [
   list_embed_jobsTool,
   retry_embed_recordTool,
   retry_embed_mediaTool,
+  // Personal views (Q-531): the caller's own, and the instance admin's three doors beside them.
+  view_listTool,
+  view_getTool,
+  view_createTool,
+  view_updateTool,
+  view_deleteTool,
+  view_copyTool,
+  view_orphansTool,
+  view_claimTool,
+  view_purge_retiredTool,
+  view_migrationTool,
 ];
 
 export const TOOLS_BY_NAME: ReadonlyMap<string, ToolHandler> =

@@ -98,6 +98,12 @@ export interface AuditEntryInput {
   status: number;
   entryId?: string | null;
   durationMs: number;
+  /**
+   * The spaces a read through a personal view actually read (Q-531): such a row has `spaceId: null` and names the MEMBERS, never the view.
+   */
+  spaces?: string[];
+  /** A personal view's lifecycle: who owned it and how many members it had, never its name or its members. */
+  view?: { ownerKey: string; memberCount: number };
   /** Allowlisted field changes — see `audit-changes.ts`. Omitted when the operation has no allowlist. */
   changes?: AuditChange[];
   /**
@@ -123,8 +129,12 @@ export function auditWritesPending(): number {
   return pendingWrites;
 }
 
-/** Insert an audit log entry. Fire-and-forget — never throws. */
-export function logAuditEntry(input: AuditEntryInput): void {
+/**
+ * Insert an audit log entry. Fire-and-forget — never throws, and the promise it returns never rejects: most callers drop it; the one that
+ * must not answer its request before its row is durable (a personal view's lifecycle, whose row an operator reads straight after the act)
+ * awaits it.
+ */
+export function logAuditEntry(input: AuditEntryInput): Promise<void> {
   let retentionDays = DEFAULT_RETENTION_DAYS;
   try { retentionDays = getConfig().audit?.retentionDays ?? DEFAULT_RETENTION_DAYS; } catch { /* pre-setup */ }
 
@@ -152,6 +162,8 @@ export function logAuditEntry(input: AuditEntryInput): void {
      * writer did, after `logInternalAudit` had fixed the others).
      */
     requestId: input.requestId || currentRequestId() || `internal-${uuidv4()}`,
+    ...(input.spaces ? { spaces: input.spaces } : {}),
+    ...(input.view ? { view: input.view } : {}),
     // Omitted entirely when there is nothing allowlisted to say, so an entry never carries an empty array
     // that reads as "we looked and nothing changed" when in fact we never looked.
     ...(input.changes && input.changes.length > 0 ? { changes: input.changes } : {}),
@@ -159,8 +171,8 @@ export function logAuditEntry(input: AuditEntryInput): void {
 
   const write = col().insertOne(entry as any);
   pendingWrites++;
-  write
-    .catch((err: unknown) => { log.warn(`Audit log write failed: ${peerText(err)}`); })
+  return write
+    .then(() => undefined, (err: unknown) => { log.warn(`Audit log write failed: ${peerText(err)}`); })
     .finally(() => { pendingWrites--; });
 }
 

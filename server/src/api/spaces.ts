@@ -6,7 +6,7 @@ import { registerActivityResetRoute } from './spaces-activity.js';
 import { registerFileStampReportRoute } from './spaces-file-stamp-report.js';
 import {
   requireAuth, requireSpaceAuthScoped, requireSpaceAuthMfaScoped, requireAdminMfa, requireAdminMfaScoped,
-  requireAdminOrSpaceAdminMfaScoped, denyReadOnly, requireCreateSpacesMfa,
+  requireAdminOrSpaceAdminMfaScoped, denyReadOnly, requireCreateSpacesMfa, isInstanceAdmin,
 } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { editorScopeFor } from '../auth/editor-scope.js';
@@ -25,8 +25,7 @@ import { gatherCompletenessFacts, scoreCompleteness } from '../spaces/completene
 import { measureUsage, usageIsComplete } from '../quota/quota.js';
 import { measureSpaceUsage } from '../spaces/space-usage.js';
 import { col } from '../db/mongo.js';
-import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
-import { isProxy } from '../spaces/proxy.js';
+import { readSpacesOfRequest } from '../spaces/read-scope.js';
 import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../spaces/space-meta-answer.js';
 import { isNetworkSyncing } from '../sync/engine.js';
 import { spaceNetworkInfo } from '../spaces/network-status.js';
@@ -50,6 +49,7 @@ import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { sendCaughtFailure, sendStoreFailure } from './send-failure.js';
+import { answeredUnknownSpace } from './write-target-answer.js';
 
 export const spacesRouter = Router();
 
@@ -69,10 +69,7 @@ export const spacesRouter = Router();
 // the repair silently do nothing.
 spacesRouter.post('/:id/rebuild-indexes', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req, res) => {
   const spaceId = req.params['id'] as string;
-  if (!getConfig().spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
   try {
     // Not awaiting READY: a rebuild over a large space takes minutes and would time out the request.
     // Recall returns empty until the build completes — that gap is why this lives in the danger zone.
@@ -121,7 +118,6 @@ spacesRouter.post('/reorder', globalRateLimit, requireAdminMfa, (req, res) => {
   res.json({ spaces: reordered.map(space => ({
     id: space.id, label: space.label, builtIn: space.builtIn, folders: space.folders,
     maxGiB: space.maxGiB, flex: space.flex,
-    ...(isProxy(space) ? { proxyFor: space.proxyFor } : {}),
   })) });
 });
 
@@ -163,7 +159,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   if (includeCounts) {
     const countResults = await Promise.allSettled(
       visibleSpaces.map(async s => {
-        const memberIds = memberSpacesForRequest(req, s.id);
+        const memberIds = readSpacesOfRequest(req, s.id);
         const perMember = await Promise.all(memberIds.map(async mid => ({
           facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
           entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
@@ -192,7 +188,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   const search = searchReadinessSnapshot();
   const searchDown = isSearchDown(search);
   const spaces = visibleSpaces.map((space) => {
-    const { id, label, builtIn, folders, maxGiB, flex, proxyFor, meta, dupeRules, dupeMergeSurvivor, dupeRulesOnInsert, recordTtlDays, documentExtraction, imageAnalysis, audioAnalysis, videoAnalysis, textAnalysis, indexStatus } = space;
+    const { id, label, builtIn, folders, maxGiB, flex, meta, dupeRules, dupeMergeSurvivor, dupeRulesOnInsert, recordTtlDays, documentExtraction, imageAnalysis, audioAnalysis, videoAnalysis, textAnalysis, indexStatus } = space;
     // Q-320: THIS instance's answer to an unknown write field, read back like the neighbouring settings — `'refuse'`, absent when warn.
     const unknownWriteFields = unknownWriteFieldsToReport(space);
     const actPending = spaceActPendingField(cfg, id, req.authToken as Parameters<typeof spaceActPendingField>[2]);
@@ -211,7 +207,6 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     ...(searchDown && indexStatus === 'building'
       ? { indexWaiting: true, ...(search.since !== null ? { indexWaitingSince: new Date(search.since).toISOString() } : {}) }
       : {}),
-    ...(isProxy(space) ? { proxyFor } : {}),
     // Network membership + status for the Brain space-chip indicator (F8).
     ...(spaceNetworkInfo(cfg.networks, id, isNetworkSyncing, cfg.instanceId) ?? {}),
     ...(meta ? { meta: { ...meta, previousVersions: undefined } } : {}),
@@ -269,7 +264,9 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     video: mediaLevels.video ?? 'auto',
     text: mediaLevels.text ?? 'auto',
   };
-  res.json({ spaces, docExtractionCeiling, mediaCeilings, ...(storage ? { storage } : {}) });
+  // The ids a pre-6.0 proxy reserved: told to an instance admin only (a create or join dialog checks a chosen id against them before it submits).
+  const retiredSpaceIds = isInstanceAdmin(req.authToken ?? {}) ? [...(cfg.retiredSpaceIds ?? [])] : undefined;
+  res.json({ spaces, docExtractionCeiling, mediaCeilings, ...(storage ? { storage } : {}), ...(retiredSpaceIds ? { retiredSpaceIds } : {}) });
 });
 
 // POST /api/spaces
@@ -463,7 +460,7 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
   // stored form alone. The one answer, for both doors, is `spaceMetaAnswer` (`Q-95`).
   const q = req.query['resolve'];
   const resolveRefs = q === undefined ? META_RESOLVE_DEFAULT : (q === '1' || q === 'true');
-  res.json(await spaceMetaAnswer({ spaceId: id, space, memberIds: memberSpacesForRequest(req, id), resolveRefs }));
+  res.json(await spaceMetaAnswer({ spaceId: id, space, memberIds: readSpacesOfRequest(req, id), resolveRefs }));
 });
 
 // GET /api/spaces/:id/completeness — how much of what this space declared it would hold, it holds.
@@ -478,7 +475,7 @@ spacesRouter.get('/:id/completeness', globalRateLimit, requireSpaceAuthScoped('i
     res.status(404).json({ error: `Space '${id}' not found` });
     return;
   }
-  const facts = await gatherCompletenessFacts(memberSpacesForRequest(req, id));
+  const facts = await gatherCompletenessFacts(readSpacesOfRequest(req, id));
   res.json(scoreCompleteness(id, space.meta ?? {}, facts));
 });
 
@@ -691,7 +688,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
   const rights = (req.authToken as { rights?: TokenRights } | undefined)?.rights;
   const outcome = await beginSchemaValidate({
     spaceId: id,
-    memberIds: memberSpacesForRequest(req, id),
+    memberIds: readSpacesOfRequest(req, id),
     body: req.body ?? {},
     rights,
     callerKey: (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? 'unknown',

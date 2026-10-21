@@ -29,7 +29,6 @@
  */
 import { WIPE_COLLECTION_TYPES, wipeResultOf, type WipeCollectionType } from './lifecycle.js';
 import { decidedBy, wipeSpaceAsRequested, wipeTypesOf, type WipeOutcome } from './wipe-vote.js';
-import { isProxySpace } from './proxy.js';
 import { getConfig } from '../config/loader.js';
 import { queuedActBody, spaceActFailureAnswer } from './space-act-failure.js';
 import type { ToolResult } from '../mcp/tools/types.js';
@@ -58,12 +57,6 @@ export async function deleteSpaceData(args: DeleteSpaceDataArgs): Promise<Delete
 
   if (!getConfig().spaces.some(s => s.id === space)) {
     return { ok: false, status: 404, error: `Space '${space}' not found` };
-  }
-  if (isProxySpace(space)) {
-    return {
-      ok: false, status: 400,
-      error: 'Bulk wipe not supported on proxy spaces — target member spaces individually',
-    };
   }
   if (args.confirm !== true) {
     return { ok: false, status: 400, error: '`confirm: true` required' };

@@ -17,7 +17,7 @@ import { parseRecurrence } from './chrono.js';
 import { getConfig } from '../config/loader.js';
 import { resolveMetaRefs, getAllowedChronoTypes, type InstanceWrittenKeys } from '../spaces/schema-validation.js';
 import type { SpaceMeta } from '../config/types.js';
-import { isStrictLinkage } from '../spaces/proxy.js';
+import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { BatchRefs, resolveRef, refKeyDeclared, refKeyUsed, isRefUse, type ResolvedRef } from './batch-refs.js';
 import { connectionInputError, connectionsOf, connectionSubject, mintedSubject, refuseEachEdge, edgeInputsFrom, inlineEdgeWarnings } from './write-connections.js';
 import { CHRONO_STATUSES } from '../config/types.js';

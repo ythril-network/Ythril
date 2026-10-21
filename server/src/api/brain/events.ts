@@ -10,13 +10,17 @@
  * Auth: space-scoped, read-only tokens allowed (watching is a read). EventSource cannot set an
  * Authorization header, so the token is passed as `?token=` — this path is added to the auth layer's
  * query-token allowlist. Modeled on the admin log-stream SSE in api/about.ts.
+ *
+ * The caller's own personal view is a space this stream accepts (Q-531): ONE listener holds the member set, and the stream ENDS at the next
+ * change once its owner or its view is not what it was when it opened - the client reconnects and recomputes.
  */
 import { Router } from 'express';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { requireSpaceAuth } from '../../auth/middleware.js';
 import { mintSseTicket } from '../../auth/sse-ticket.js';
-import { getConfig } from '../../config/loader.js';
-import { subscribeBrainChanges } from '../../brain/brain-events.js';
+import { answeredUnknownSpace } from '../write-target-answer.js';
+import { subscribeBrainChanges, subscribeBrainChangesAcross, type BrainChangeEvent } from '../../brain/brain-events.js';
+import { viewStreamGuard, type ViewStreamSnapshot } from '../../spaces/view-stream.js';
 import { openEventStream } from '../../util/sse-stream.js';
 
 export const brainEventsRouter = Router();
@@ -29,10 +33,7 @@ export const brainEventsRouter = Router();
  */
 brainEventsRouter.post('/spaces/:spaceId/events/ticket', globalRateLimit, requireSpaceAuth, (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  if (!getConfig().spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
   const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
   if (!bearer) {
     res.status(400).json({ error: 'Ticket minting requires an Authorization: Bearer header' });
@@ -43,19 +44,25 @@ brainEventsRouter.post('/spaces/:spaceId/events/ticket', globalRateLimit, requir
 
 brainEventsRouter.get('/spaces/:spaceId/events', globalRateLimit, requireSpaceAuth, (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  if (!getConfig().spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
+  if (answeredUnknownSpace(req, res, spaceId)) return;
 
   // Bounded in count and in what a slow reader may queue — see util/sse-stream.ts (`Q-108`).
   const stream = openEventStream(req, res, { pool: 'brain-events' });
   if (!stream) return;
 
-  const unsubscribe = subscribeBrainChanges(spaceId, (ev) => {
+  const deliver = (ev: BrainChangeEvent): void => {
     const id = (ev.entry as { _id?: unknown })?._id;
     // Minimal payload — the client uses `event` (e.g. "fact.created") to refresh the right tab/badges.
     stream.send(`data: ${JSON.stringify({ event: ev.event, id: typeof id === 'string' ? id : undefined })}\n\n`);
-  });
-  stream.onClose(unsubscribe);
+  };
+
+  if (req.viewRead && req.viewRead.id === spaceId) {
+    const guard = viewStreamGuard({ token: req.authToken as ViewStreamSnapshot['token'], viewId: spaceId, spaces: req.viewRead.spaces });
+    stream.onClose(subscribeBrainChangesAcross(req.viewRead.spaces, (ev) => {
+      if (!guard.holds()) { stream.end(); return; }
+      deliver(ev);
+    }));
+    return;
+  }
+  stream.onClose(subscribeBrainChanges(spaceId, deliver));
 });

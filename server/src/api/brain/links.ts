@@ -31,10 +31,11 @@ import { addLink, removeLink, LINK_PAIRS, linkLabel } from '../../brain/links.js
 import { assertRefsResolve } from '../../brain/entity-refs.js';
 import { REF_KINDS, isRefKind } from '../../config/types-knowledge.js';
 import type { RefKind } from '../../config/types-knowledge.js';
-import { getConfig } from '../../config/loader.js';
-import { resolveWriteTarget, isStrictLinkage, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
-import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
+import { } from '../../config/loader.js';
+import { isStrictLinkage } from '../../spaces/space-lookup.js';
+import { findFirstAcrossMembers } from '../../spaces/across-members.js';
+import { readSpacesOfRequest } from '../../spaces/read-scope.js';
+import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import { applyJudgment } from './_judged-write.js';
 import { answerUnknownWriteFields } from '../../contract/write-accepts.js';
 import { webhookToken } from './_shared.js';
@@ -60,15 +61,10 @@ function kindError(name: string, v: unknown): string | null {
 // POST /api/brain/spaces/:spaceId/links — create one link (upsert; the id is derived from the connection)
 linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
-  if (answerWriteTarget(res, wt)) return;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
   // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
-  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'link.create', wt.target, 'rest'))) return;
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'link.create', spaceId, 'rest'))) return;
 
   const { from, fromKind, to, toKind } = req.body ?? {};
   if (!from || typeof from !== 'string') { res.status(400).json({ error: '`from` string required' }); return; }
@@ -89,10 +85,10 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
     return;
   }
 
-  if (isStrictLinkage(wt.target)) {
+  if (isStrictLinkage(spaceId)) {
     try {
-      await assertRefsResolve(wt.target, 'from', fromKind as RefKind, [from]);
-      await assertRefsResolve(wt.target, 'to', toKind as RefKind, [to]);
+      await assertRefsResolve(spaceId, 'from', fromKind as RefKind, [from]);
+      await assertRefsResolve(spaceId, 'to', toKind as RefKind, [to]);
     } catch (err) {
       // A missing reference is the caller's 400; a store failure under the lookup is the store's (bundle-30 I12).
       sendReadFailure(res, 'brain POST /spaces/:spaceId/links (reference check)', err);
@@ -102,7 +98,7 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
 
   let link;
   try {
-    link = await addLink(wt.target, from, fromKind as RefKind, to, toKind as RefKind, webhookToken(req));
+    link = await addLink(spaceId, from, fromKind as RefKind, to, toKind as RefKind, webhookToken(req));
   } catch (err) {
     // The only failure `addLink` raises that is the caller's fault: the record the link would hang off is
     // not there. A missing `from` is a 404 about the record, not a 400 about the body.
@@ -122,7 +118,7 @@ linksRouter.delete('/spaces/:spaceId/links/:id', globalRateLimit, requireSpaceAu
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
   // The members THIS token reaches (`Q-440`), as the other record deletes walk; see `DELETE …/edges/:id`.
-  const removed = await findFirstAcrossMembers(memberSpacesForRequest(req, spaceId), mid => removeLink(mid, id, webhookToken(req)));
+  const removed = await findFirstAcrossMembers(readSpacesOfRequest(req, spaceId), mid => removeLink(mid, id, webhookToken(req)));
   if (removed) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Link not found' });
 });

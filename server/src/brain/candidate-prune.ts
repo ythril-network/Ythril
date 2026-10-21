@@ -47,7 +47,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { eachSpace, eachUnit, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { intervalJob } from '../util/interval-job.js';
@@ -169,7 +169,7 @@ export async function pruneSpaceCandidates(spaceId: string, into: PruneResult = 
 /** Prune every real (non-proxy) space. Returns what it removed and what the walk concluded (who failed, a stop). */
 export async function pruneAllSpaces(): Promise<PruneResult & { walk: WalkResult<void> }> {
   const total: PruneResult = { merged: 0, orphaned: 0 };
-  const walk = await eachSpace(STEP, concreteSpaces(), space => pruneSpaceCandidates(space.id, total));
+  const walk = await eachSpace(STEP, configuredSpaces(), space => pruneSpaceCandidates(space.id, total));
   if (total.merged + total.orphaned > 0) {
     log.info(`Candidate prune: removed ${total.orphaned} finding(s) whose records are gone and ${total.merged} merged pair(s)`);
   }

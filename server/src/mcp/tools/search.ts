@@ -30,8 +30,8 @@ import { type FilterExpression } from '../../brain/filter.js';
 import { resolveRecallFilter, type RawMongoFilter } from '../../brain/recall-filter.js';
 import { observeRecallPath } from '../../brain/recall.js';
 import { type RecallKnowledgeType, type RecallResult, findSimilar, recallGlobal, effectiveBudgetFor, RECALL_BUDGET_MS } from '../../brain/recall.js';
-import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
-import { NotFoundError } from '../../util/errors.js';
+import { readSpacesOfCall, readSpacesOfCallAcross } from '../../spaces/read-scope.js';
+import { NotFoundError, NotEmbeddedYetError } from '../../util/errors.js';
 // The SAME resolver the nine per-collection list routes use — not a second name lookup with its own cap
 // and its own idea of what 'contains' means. Two spellings of one join is how the doors start
 // disagreeing about which records a name matches.
@@ -85,7 +85,8 @@ export function resolveFindSimilarScope(
     // search only the base. Widening it to a one-element list here would look equivalent and is not: the
     // cross-space path probes every base for the source, so a caller who named one space and mistyped the
     // id would get "not found" from a different space than the one they asked about.
-    if (callSpaces.length === 1) return { candidateBases: [members[0] ?? callSpaces[0] as string], searchIds: undefined };
+    // A view of several members (or none) is searched as the list it stands for: its first member alone is not "the space named".
+    if (callSpaces.length === 1 && members.length === 1) return { candidateBases: [members[0] as string], searchIds: undefined };
 
     return { candidateBases: members, searchIds: members };
   }
@@ -363,7 +364,7 @@ export const recallTool: ToolHandler = {
       //
       // EVERY named space, deduplicated: a caller may name a proxy and one of its members, and reading a
       // space twice doubles every match it contributes to the merged ranking.
-      const memberIds = [...new Set(ctx.callSpaces.flatMap(sp => memberSpacesWithin(sp, accessibleSpaceIds)))];
+      const memberIds = readSpacesOfCallAcross(ctx, ctx.callSpaces);
       /*
        * THE SAME MERGE as the no-space branch, not a copy of it (`Q-81`). This was a hand-written fan-out —
        * `recall` per member, then a sort and a slice here — which skipped the ONE query embedding and the ONE
@@ -550,20 +551,26 @@ export const find_similarTool: ToolHandler = {
     // signature change was needed, which is the opposite of what the plan for this site predicted.
     const { candidateBases, searchIds } = resolveFindSimilarScope(
       ctx.callSpaces.length > 0 ? ctx.callSpaces : undefined, crossSpace, accessibleSpaceIds,
-      sp => memberSpacesWithin(sp, accessibleSpaceIds));
+      sp => readSpacesOfCall(ctx, sp));
     let result: Awaited<ReturnType<typeof findSimilar>> | undefined;
     let usedBase: string | undefined;
+    // The refusal that LOCATED the seed (it exists in a space, but is not embedded): kept across the probe of the other bases, so a seed
+    // found in one member of a view is not reported as found nowhere because the members after it do not hold it.
+    let located: NotEmbeddedYetError | undefined;
     for (const base of candidateBases) {
       try {
         result = await findSimilar(base, entryId, entryType as RecallKnowledgeType, topK, targetTypes, minScore, searchIds);
         usedBase = base;
         break;
       } catch (e) {
-        if (e instanceof NotFoundError && candidateBases.length > 1) continue;
+        if (e instanceof NotFoundError && candidateBases.length > 1) {
+          if (e instanceof NotEmbeddedYetError) located ??= e;
+          continue;
+        }
         throw e;
       }
     }
-    if (!result || !usedBase) throw new NotFoundError(`Entry '${entryId}' not found in any accessible space (type: ${entryType}).`);
+    if (!result || !usedBase) throw located ?? new NotFoundError(`Entry '${entryId}' not found in any accessible space (type: ${entryType}).`);
 
     const includeFileContent = a['includeFileContent'] !== false;
     const includeDiagnostics = a['includeDiagnostics'] === true;

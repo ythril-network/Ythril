@@ -63,6 +63,14 @@ export interface ToolContext {
    * way out; nothing should read them for a new decision.
    */
   rights?: TokenRights;
+  /** The calling token's record, for the tools whose subject is the caller itself (personal views). */
+  callerRecord?: ToolCallerRecord;
+  /**
+   * The caller's own personal views this call NAMED in `space`, each with the spaces it reads for this tool (its area and rung, resolved
+   * at call time by `viewReadMembers`). A view may be empty: it then reads nothing, and a handler must not treat an empty list as "all".
+   * Only a tool that takes a view (`toolTakesAView`) is ever handed one; use `readSpacesOf` rather than reading this by hand.
+   */
+  viewReads: ReadonlyMap<string, readonly string[]>;
   /**
    * Who a rate limit counts against: the calling token's id, or the IP when there is none — the key `callTool` uses
    * for `heavy` tools, handed on so a shared module that holds its own rail (`beginIngest`) counts the same caller.
@@ -77,6 +85,20 @@ export interface ToolContext {
    * left a thinner entry on MCP. Called once, after a successful write. `callTool` supplies it on every call.
    */
   recordChanges?: (before: Record<string, unknown>, after: Record<string, unknown>) => void;
+}
+
+/**
+ * Who is calling, as far as an owner-scoped tool needs: the record that identifies the caller (a personal view's owner key is made of it)
+ * and the settings its second-factor and peer-binding rules read. Built by the door at its own edge, from the authenticated token.
+ */
+export interface ToolCallerRecord {
+  id: string;
+  oauthClientId?: string | undefined;
+  oidcIssuer?: string | undefined;
+  oidcSubject?: string | null | undefined;
+  peerInstanceId?: string | undefined;
+  mfa?: 'inherit' | 'exempt' | 'required' | undefined;
+  rights?: TokenRights | null | undefined;
 }
 
 export type ToolResult = {
@@ -142,6 +164,12 @@ export interface ToolHandler {
    * alongside it: two flags for one decision is how the weaker one ends up deciding.
    */
   spaceAdmin?: boolean;
+  /**
+   * About the CALLER's own personal views, not about a space (Q-531): visible to every token that has a rights matrix, read-only ones
+   * included (a view writes no space), and refused to none for want of a rung. Set INSTEAD of `mutating`, never alongside it: a view's
+   * lifecycle is a config write, but a read-only token may hold views of what it reads, and `toolIsVisible` hides a `mutating` tool from it.
+   */
+  ownerScoped?: boolean;
   /** Requires a non-empty `space` argument. */
   spaceRequired?: boolean;
   /**

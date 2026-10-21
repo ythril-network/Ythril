@@ -8,8 +8,9 @@ import { validateOidcJwt, getOidcConfig } from './oidc.js';
 import type { TokenRecord } from '../config/types.js';
 import { isSpaceAdminFor, administersAnySpace } from './editor-scope.js';
 import type { OidcTokenRecord } from './oidc.js';
-import { resolveMemberSpaces } from '../spaces/proxy.js';
 import { reachesSpace, reachableSpaceIds } from './space-reach.js';
+import { isRetiredSpaceId, unknownSpaceAnswer } from '../spaces/unknown-space.js';
+import { isViewId, resolveOwnView, viewOwnerOf, viewReadMembers } from '../config/views.js';
 import { spacesForBodyScopedRequest } from './body-scoped-space.js';
 import type { SpaceArea } from '../config/rights-shape.js';
 import type { Rung } from './space-rights.js';
@@ -36,6 +37,11 @@ declare global {
     interface Request {
       authToken?: Omit<TokenRecord, 'hash'> | OidcTokenRecord;
       resolvedSpaceId?: string;
+      /**
+       * The personal view a path-scoped READ door accepted for this caller, and the spaces it reads (`viewReadMembers`, in the route's area, at
+       * request time). Set by the space guards; a handler reads its member loop from here and never from the view record.
+       */
+      viewRead?: { id: string; spaces: string[] };
       /**
        * The spaces a body-scoped route was AUTHORISED for, resolved once by `requireBodyScopedSpace`.
        *
@@ -301,24 +307,9 @@ function enforceAdminOrSpaceAdmin(
   return false;
 }
 
-/**
- * Does this token need a second factor on an MFA-gated route?
- *
- * Pure, exported, and separate from the middleware so the policy can be enumerated without an HTTP request —
- * it is three lines and each one is a security decision.
- *
- * The token's own setting wins over the instance switch in BOTH directions, because the instance switch is
- * all-or-nothing and that is the reported defect: turning MFA on made it mutually exclusive with automation.
- * An absent setting is `inherit`, so every token that exists today keeps exactly its current behaviour.
- */
-export function mfaRequiredFor(
-  record: Pick<TokenRecord, 'mfa'> | { mfa?: undefined },
-  instanceEnabled: boolean,
-): boolean {
-  if (record.mfa === 'exempt') return false;
-  if (record.mfa === 'required') return true;
-  return instanceEnabled;
-}
+// `mfaRequiredFor` lives in `./mfa-policy.ts` (the personal-view copy tool asks it too); re-exported so the guards here and every importer keep one name.
+export { mfaRequiredFor } from './mfa-policy.js';
+import { mfaRequiredFor } from './mfa-policy.js';
 
 /**
  * Enforce a current TOTP code for PAT sessions when this token needs one. Writes the
@@ -367,52 +358,6 @@ function enforceMfa(
  * would 403 real traffic on any route whose key I reconstructed wrongly, and I have no runtime evidence yet
  * that I did not.
  */
-/** The spaces a request actually touches: a proxy's members, or the space itself. Shared so the reach check
- *  and the area check can never disagree about WHAT they are checking. */
-/**
- * The members of `spaceId` this token may actually see — the proxy NARROWED, not the proxy expanded.
- *
- * ## The defect this closes
- *
- * A proxy space became grantable to a scoped token in 2.6.0, and the ask it answered was explicit about the
- * shape: *"expand it through the token's own scope rather than through its full member list. A token holding
- * ['qa','team'] would recall across qa and nothing else."*
- *
- * It shipped grantable and never narrowing. This function returned the FULL member list, and
- * `enforceAreaRung` then walked it refusing on the first member the token lacked — so a token scoped to 22
- * spaces, with the commons deliberately absent, got `403 Token needs 'read' on knowledge in space 'general'`
- * for the whole proxy. A token holding `['qa','team']` recalled across **nothing**.
- *
- * The reporter located it precisely: a proxy over the same members MINUS the commons read 200 and returned
- * results. So proxy-to-a-scoped-token worked; only the narrowing did not, and the difference between the two
- * cases was a member the token cannot see.
- *
- * ## Why here rather than in the area guard
- *
- * The reach check already computed this subset and threw it away. Two callers then asked the un-narrowed
- * question, which is the same "one rule, two answers" shape that produced the ER lane bug the same day. So the
- * narrowing lives in the one place both the reach check and the area check read from, and a member the token
- * cannot reach is DROPPED from the expansion — never converted into a refusal for the whole proxy.
- *
- * A caller that may see NO member still gets a 403, from the reach check: narrowing to nothing is not access.
- */
-function spaceTargets(spaceId: string | undefined, record?: Omit<TokenRecord, 'hash'> | OidcTokenRecord): string[] {
-  if (!spaceId) return [];
-  const memberIds = resolveMemberSpaces(spaceId);
-  const all = memberIds.length > 0 ? memberIds : [spaceId];
-  if (!record) return all;
-
-  const rights = (record as { rights?: Parameters<typeof reachesSpace>[0] }).rights;
-  // No matrix reaches NOTHING. It used to fall through to the legacy `spaces` allowlist, where an absent one
-  // meant unrestricted — so a record carrying neither reached every member. The refusal is not lost by
-  // failing closed here: the line below hands the original back, and the reach guard owns the 403.
-  const reachable = rights ? all.filter(sid => reachesSpace(rights, sid)) : [];
-
-  // Narrowing a real (non-proxy) space to nothing must not silently become "check no space at all": the reach
-  // guard owns that refusal, and handing back the original keeps its 403 the one a caller sees.
-  return reachable.length > 0 ? reachable : all;
-}
-
 function enforceAreaRung(
   res: Response,
   record: Omit<TokenRecord, 'hash'> | OidcTokenRecord,
@@ -455,7 +400,7 @@ function enforceAreaRung(
    *
    * Owner, 2026-09-05: *"no matrix = refuse - no fallback no backwards compatibility anymore."* That swept
    * `tokenReachesSpace` and `editorScopeFor`; this was the fourth copy and `toolRightsRefusal` the third.
-   * `spaceTargets`, forty lines above, was swept then and says so in its own comment — so this file held
+   * `enforceSpaceScope`, below, was swept then and says so in its own comment — so this file held
    * both answers to one question, adjacent.
    */
   if (!rights) {
@@ -482,47 +427,70 @@ function enforceSpaceScope(
   spaceId: string | undefined,
 ): boolean {
   if (!spaceId) return true;
-
-  // A proxy is a LENS over what the caller may already see: it is usable when the token reaches AT LEAST ONE
-  // member, and the read paths then serve only the members it reaches.
-  //
-  // This used to require ALL members, which meant a proxy could not be granted to a scoped token at all — listing it
-  // in `spaces` did nothing and every call 403'd. The fleet integrator proved it was not specific to one proxy by building their
-  // own over 15 spaces and getting the same refusal (Q-6).
-  //
-  // **This is the ONLY behaviour change in Q-6**, and it is safe now because all 29 read fan-outs were narrowed
-  // first — `proxy-fanout-inventory.test.js` asserts `PENDING` is empty. Flipping this beforehand would have handed
-  // a token records from every member of the proxy, well-formed and with nothing to notice.
-  //
-  // For a NON-PROXY space nothing changes, and that deserves precision rather than trust: a real space resolves to
-  // `[spaceId]`, so "reaches at least one of one" is the same predicate as "reaches all of one".
-  //
-  // A space missing from the config resolves to `[]`, and the fallback to `[spaceId]` keeps the answer a 403 for a
-  // token that cannot reach it, rather than a 404 that would confirm the space does not exist.
-  const memberIds = resolveMemberSpaces(spaceId);
-  const targets = memberIds.length > 0 ? memberIds : [spaceId];
-
   /*
-   * A record with no matrix reaches NOTHING, and this is where the old reason for the opposite lived.
+   * A record with no matrix reaches NOTHING. It used to fall back to the pre-3.0 allowlist, where an absent one meant unrestricted, so a
+   * record carrying neither piece of scope information reached every space. Failing closed here is this function's own 403.
    *
-   * The comment here used to read: *"the legacy branch survives for records that carry no rights: OIDC-derived
-   * tokens are built per request rather than read from config, so the backfill never sees them... removing it
-   * would refuse every OIDC caller instead."* That stopped being true when the OIDC path started deriving a
-   * matrix per request through the same `migrateToken` the migration uses — the fix that closed a hole where
-   * OIDC connections were governed by the old booleans while PATs were enforced per space and per area.
-   *
-   * So the branch was kept alive by a reason that had expired, and what it did in the meantime was fail
-   * OPEN: an absent legacy allowlist meant unrestricted, so a record carrying neither piece of scope
-   * information reached every target. Failing closed here turns that into this function's own 403.
+   * A space missing from the config is answered the same way for a token that cannot reach it (403), never a 404 that would confirm the
+   * space does not exist; a token that reaches by its floor passes and the route's existence check answers 404.
    */
   const rights = (record as { rights?: Parameters<typeof reachesSpace>[0] }).rights;
-  const reachable = rights ? targets.filter(sid => reachesSpace(rights, sid)) : [];
-
-  if (reachable.length === 0) {
+  if (!rights || !reachesSpace(rights, spaceId)) {
     res.status(403).json({ error: `Token does not have access to space '${spaceId}'` });
     return false;
   }
   return true;
+}
+
+/**
+ * Judge the space id a PATH names before any rights question, for every guard that reads one (Q-531).
+ *
+ * - a RETIRED proxy id answers `410 space_retired` to every caller, before reach (a row-scoped token would otherwise get a 403 that
+ *   says nothing of what happened to the id);
+ * - the caller's OWN view on a door that reads data (a `ROUTE_RIGHTS` path row that needs `read` outside the schema area) is accepted: the
+ *   members it reads for THIS caller in the route's area are computed once here (`viewReadMembers`) and handed to the handler as
+ *   `req.viewRead`, the answer carries `viewMembers`, and a caller who reads none of them gets an empty answer, not a refusal;
+ * - the caller's own view on ANY other door (a write, a config read, a route with no area: a view resolves to members per area, so a door
+ *   that names no area has none to give) is refused as an unknown space, with the owner-only hint, before any body is read;
+ * - anything else (a space, another token's view, an unknown id) goes on to the ordinary reach and rung checks, which answer another
+ *   token's view exactly as they answer an id that never existed.
+ */
+function judgeSpaceParam(
+  req: Request,
+  res: Response,
+  record: Omit<TokenRecord, 'hash'> | OidcTokenRecord,
+  spaceId: string | undefined,
+): 'refused' | 'view' | 'space' {
+  if (!spaceId) return 'space';
+  const cfg = getConfig();
+  if (isRetiredSpaceId(spaceId, cfg)) {
+    const a = unknownSpaceAnswer(null, spaceId, false, cfg);
+    if (a) res.status(a.status).json(a.body);
+    return 'refused';
+  }
+  if (!isViewId(spaceId)) return 'space';
+  const owner = viewOwnerOf(record);
+  const view = resolveOwnView(owner, spaceId, cfg);
+  if (!view) return 'space';
+  const routePath = `${req.baseUrl ?? ''}${(req.route as { path?: string } | undefined)?.path ?? ''}`;
+  const verdict = rungFor(req.method, routePath);
+  const readsData = verdict.kind === 'requires' && verdict.scope === 'path' && verdict.needs === 'read' && verdict.area !== 'schema';
+  const rights = (record as { rights?: TokenRights }).rights;
+  if (!readsData || verdict.kind !== 'requires' || !rights) {
+    const a = unknownSpaceAnswer(owner, spaceId, false, cfg);
+    if (a) res.status(a.status).json(a.body);
+    return 'refused';
+  }
+  const spaces = viewReadMembers({ rights, view, area: verdict.area, needs: verdict.needs, peerId: peerBoundTo(record as { peerInstanceId?: unknown }) });
+  req.viewRead = { id: spaceId, spaces };
+  announceViewMembers(res, spaces);
+  return 'view';
+}
+
+/** The spaces a view read actually read ride on every JSON answer, so a narrowed answer is never silent. */
+function announceViewMembers(res: Response, spaces: readonly string[]): void {
+  const send = res.json.bind(res);
+  res.json = (body: unknown): Response => send(body !== null && typeof body === 'object' && !Array.isArray(body) ? { ...body, viewMembers: [...spaces] } : body);
 }
 
 /**
@@ -651,10 +619,14 @@ export function requireSpaceAuthScoped(paramName: string) {
     const { record, bearer } = auth;
 
     const spaceId = req.params[paramName] as string | undefined;
-    if (!enforceSpaceScope(res, record, spaceId)) return;
-    if (!enforceAreaRung(res, record, req, spaceTargets(spaceId, record))) return;
-    // After the rung: a token without the rung gets its 403 and never learns a space is held.
-    if (refuseHeldPeer(res, spaceId, record)) return;
+    const judged = judgeSpaceParam(req, res, record, spaceId);
+    if (judged === 'refused') return;
+    if (judged === 'space') {
+      if (!enforceSpaceScope(res, record, spaceId)) return;
+      if (!enforceAreaRung(res, record, req, spaceId ? [spaceId] : [])) return;
+      // After the rung: a token without the rung gets its 403 and never learns a space is held.
+      if (refuseHeldPeer(res, spaceId, record)) return;
+    }
 
     authAttemptsTotal.inc({ result: 'success' });
     req.resolvedSpaceId = spaceId;
@@ -703,23 +675,43 @@ export function requireBodyScopedSpace(area: SpaceArea, needs: Exclude<Rung, 'no
      * one question with two answers depending on which door the caller picked.
      */
     const namedList = typeof named === 'string' ? [named] : Array.isArray(named) ? named : [];
+    const rights = (record as { rights?: TokenRights }).rights;
+    const owner = viewOwnerOf(record);
+    const peerId = peerBoundTo(record as { peerInstanceId?: unknown });
+    // The caller's own views among the names, each with the spaces it reads in THIS route's area (Q-531). A retired proxy id answers 410
+    // to every caller; another token's view is an unknown id, exactly.
+    const ownViews = new Map<string, string[]>();
     for (const raw of namedList) {
       if (typeof raw !== 'string') continue;   // shape is the resolver's refusal to make, with its wording
       const sid = raw.trim();
-      if (sid && !cfg.spaces.some((sp: { id: string }) => sp.id === sid)) {
-        res.status(404).json({ error: `Space '${sid}' not found` });
+      if (!sid) continue;
+      const view = isViewId(sid) ? resolveOwnView(owner, sid, cfg) : null;
+      if (view) {
+        ownViews.set(sid, viewReadMembers({ rights, view, area, needs, peerId }));
+        continue;
+      }
+      const unknown = unknownSpaceAnswer(owner, sid, false, cfg);
+      if (unknown) {
+        res.status(unknown.status).json(unknown.body);
         return;
       }
     }
 
-    const rights = (record as { rights?: TokenRights }).rights;
-    const verdict = spacesForBodyScopedRequest({
-      named,
-      accessible: reachableSpaceIds(rights, cfg.spaces.map((sp: { id: string }) => sp.id)),
-      rights,
-      area,
-      needs,
-    });
+    // The names that are spaces go to the one judge of reach and rung; a call that named ONLY views has nothing for it to judge, and
+    // handing it "no names" would read as "every space".
+    const plainNamed: unknown = Array.isArray(named)
+      ? named.filter(v => typeof v !== 'string' || !ownViews.has(v.trim()))
+      : (typeof named === 'string' && ownViews.has(named.trim()) ? undefined : named);
+    const onlyViews = ownViews.size > 0 && (plainNamed === undefined || (Array.isArray(plainNamed) && plainNamed.length === 0));
+    const verdict = onlyViews
+      ? { spaces: [] as string[], refusal: null as string | null }
+      : spacesForBodyScopedRequest({
+        named: plainNamed,
+        accessible: reachableSpaceIds(rights, cfg.spaces.map((sp: { id: string }) => sp.id)),
+        rights,
+        area,
+        needs,
+      });
     if (verdict.refusal) {
       res.status(verdict.refusal.startsWith('The \'space\'') ? 400 : 403).json({ error: verdict.refusal });
       return;
@@ -728,13 +720,23 @@ export function requireBodyScopedSpace(area: SpaceArea, needs: Exclude<Rung, 'no
     // A peer token: a held space it NAMED is refused 423; one it did not name is left out of the set it searches.
     const namedIds = new Set(namedList.filter((s): s is string => typeof s === 'string').map(s => s.trim()));
     for (const sid of verdict.spaces) if (namedIds.has(sid) && refuseHeldPeer(res, sid, record)) return;
-    verdict.spaces = withoutHeldFor(verdict.spaces, peerBoundTo(record as { peerInstanceId?: unknown }));
+    verdict.spaces = withoutHeldFor(verdict.spaces, peerId);
+    // A view stands for its members in the place the caller wrote it; a member also named on its own is read once.
+    if (ownViews.size > 0) {
+      const seen = new Set<string>();
+      for (const raw of namedList) {
+        const sid = typeof raw === 'string' ? raw.trim() : '';
+        for (const s of ownViews.get(sid) ?? (verdict.spaces.includes(sid) ? [sid] : [])) seen.add(s);
+      }
+      verdict.spaces = [...seen];
+      announceViewMembers(res, [...new Set([...ownViews.values()].flat())]);
+    }
 
     authAttemptsTotal.inc({ result: 'success' });
     req.authorisedSpaces = verdict.spaces;
     // Set only when the caller named one, so a handler that still reads it cannot silently act on the first
     // space of a fan-out and call that "the space".
-    if (verdict.spaces.length === 1 && typeof named === 'string') req.resolvedSpaceId = verdict.spaces[0];
+    if (verdict.spaces.length === 1 && typeof named === 'string' && ownViews.size === 0) req.resolvedSpaceId = verdict.spaces[0];
     attachToken(req, res, next, record, bearer);
   };
 }
@@ -784,9 +786,10 @@ export function requireSpaceAuthMfaScoped(paramName: string) {
     const { record, bearer } = auth;
 
     const spaceId = req.params[paramName] as string | undefined;
+    if (judgeSpaceParam(req, res, record, spaceId) === 'refused') return;
     if (!enforceSpaceScope(res, record, spaceId)) return;
     if (!enforceMfa(req, res, bearer, record)) return;
-    if (!enforceAreaRung(res, record, req, spaceTargets(spaceId, record))) return;
+    if (!enforceAreaRung(res, record, req, spaceId ? [spaceId] : [])) return;
 
     authAttemptsTotal.inc({ result: 'success' });
     req.resolvedSpaceId = spaceId;
@@ -806,8 +809,9 @@ export function requireAdminMfaScoped(paramName: string) {
     // Space-scope enforcement for space-restricted admin tokens.
     // Tokens without a spaces allowlist (unrestricted admin) are always allowed.
     const spaceId = req.params[paramName] as string | undefined;
+    if (judgeSpaceParam(req, res, record, spaceId) === 'refused') return;
     if (!enforceSpaceScope(res, record, spaceId)) return;
-  if (!enforceAreaRung(res, record, req, spaceTargets(spaceId, record))) return;
+    if (!enforceAreaRung(res, record, req, spaceId ? [spaceId] : [])) return;
 
     attachToken(req, res, next, record, bearer);
   };
@@ -861,8 +865,9 @@ export function requireAdminOrSpaceAdminMfaScoped(paramName: string) {
     // Only meaningful on the instance-admin path: a space administrator was admitted by the space id itself,
     // so the reach check has nothing left to narrow. Run unconditionally anyway — a guard that is skipped
     // for one class of caller is the shape of every "one rule, two implementations" defect in this repo.
+    if (judgeSpaceParam(req, res, record, spaceId) === 'refused') return;
     if (!enforceSpaceScope(res, record, spaceId)) return;
-    if (!enforceAreaRung(res, record, req, spaceTargets(spaceId, record))) return;
+    if (!enforceAreaRung(res, record, req, spaceId ? [spaceId] : [])) return;
 
     attachToken(req, res, next, record, bearer);
   };

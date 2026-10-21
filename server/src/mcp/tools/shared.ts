@@ -79,23 +79,6 @@ export const DELETION_REACH =
   'it reaches every peer that holds a copy THIS instance wrote and, on a pub/sub or tree network, everything '
   + 'downstream of this instance; a delete of a copy another instance wrote stays local on a mesh peer.';
 
-/**
- * The `targetSpace` parameter's description, written once for every write tool that takes one.
- *
- * It states the GUARANTEE a caller relies on and not the lookup behind it: the member must be one this token can write, and
- * a member it cannot reach is answered exactly as a space that does not exist, so a refusal never says which spaces exist.
- * Twenty-four hand-written copies said only "the member space to write to", which left a caller guessing what a refusal meant.
- */
-export const TARGET_SPACE_DESCRIPTION =
-  'Required when `space` is a proxy: the member space to write to. It must be a member this token can write; '
-  + 'a member it cannot reach is answered as a space that does not exist.';
-
-/**
- * The `targetSpace` bullet of a tool's PARAMETERS list: the same sentence as the parameter's own description, built from it,
- * so the text a caller reads in the tool description and in the schema cannot say two things.
- */
-export const TARGET_SPACE_BULLET = '- `targetSpace` — ' + TARGET_SPACE_DESCRIPTION;
-
 export const SUPPRESS_EMBEDDINGS_SCHEMA = {
   type: 'boolean',
   description:

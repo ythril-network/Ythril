@@ -29,7 +29,7 @@ export function registerMkdirRoute(mkdirRouter: Router): void {
     async (req, res) => {
       const request = requireWritePath(req, res);
       if (request === null) return;
-      const { targetSpace, path: dirPath } = request;
+      const { spaceId: targetSpace, path: dirPath } = request;
 
       try {
         await assertDestinationReachable(targetSpace, dirPath);

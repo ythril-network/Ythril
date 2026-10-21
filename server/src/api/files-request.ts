@@ -14,8 +14,8 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { getConfig } from '../config/loader.js';
-import { resolveWriteTarget } from '../spaces/proxy.js';
-import { restWriteGrant, answerWriteTarget } from './write-target-answer.js';
+import { answerUnknownSpace } from '../spaces/unknown-space.js';
+import { retiredAddressingQueryError } from '../brain/retired-write-fields.js';
 
 /** Extract token identification from the request for webhook payloads. */
 export function webhookToken(req: Request): { tokenId?: string; tokenLabel?: string } {
@@ -50,35 +50,34 @@ export function requireQueryPath(req: Request, res: Response): string | null {
 }
 
 /**
- * The space a file route names, or `null` after answering `404` — the one place that answer is built, so a route cannot name a
- * space the instance does not have and reach the filesystem with it.
+ * The space a file route names, or `null` after answering: the one place the existence answer is built (`answerUnknownSpace`), so a route
+ * cannot name a space the instance does not have - or a personal view, which holds no files of its own - and reach the filesystem with it.
  */
 export function requireKnownSpace(req: Request, res: Response): string | null {
   const spaceId = req.params['spaceId'] as string;
-  if (!getConfig().spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
+  const unknown = answerUnknownSpace(req, spaceId);
+  if (unknown) {
+    res.status(unknown.status).json(unknown.body);
     return null;
   }
   return spaceId;
 }
 
-/** The space a write route names, and the space it writes to. */
-export interface WriteTarget { spaceId: string; targetSpace: string }
+/** The space a write route names, which is the space it writes to. */
+export interface WriteTarget { spaceId: string }
 /** A {@link WriteTarget} and the path the route acts on. */
 export interface WritePath extends WriteTarget { path: string }
 
 /**
- * The space a file WRITE route names and the space it writes to (`?targetSpace=`, which a proxy space narrows), or `null` after
- * answering: `404` for an unknown space, `400` for a target the caller does not reach or the space does not hold, `403` for one it
- * reaches without the rung the route needs (`Q-440`). `requireKnownSpace` then `resolveWriteTarget`, asked together so no write route
- * can ask the second without the first.
+ * The space a file WRITE route names, or `null` after answering: the retired `?targetSpace=` is refused by name (`400`), and an id that
+ * is not a configured space is answered as such (`requireKnownSpace`). The route's guard has judged reach and the rung on the space the
+ * path names; a write lands in that space and in no other, since a view never writes.
  */
 export function requireWriteTarget(req: Request, res: Response): WriteTarget | null {
+  const retired = retiredAddressingQueryError(req.query);
+  if (retired) { res.status(400).json({ error: retired }); return null; }
   const spaceId = requireKnownSpace(req, res);
-  if (spaceId === null) return null;
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'] as string | undefined, restWriteGrant(req, 'files', 'write'));
-  if (answerWriteTarget(res, wt)) return null;
-  return { spaceId, targetSpace: wt.target };
+  return spaceId === null ? null : { spaceId };
 }
 
 /**

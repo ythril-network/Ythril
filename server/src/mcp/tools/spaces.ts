@@ -5,8 +5,7 @@ import { getConfig } from '../../config/loader.js';
 import { col } from '../../db/mongo.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
-import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
-import { isProxy } from '../../spaces/proxy.js';
+import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../../spaces/space-meta-answer.js';
 import { deleteSpaceData, wipeToolResult } from '../../spaces/delete-space-data.js';
 import { spacePurpose, unknownWriteFieldsToReport, spaceActPendingField } from '../../spaces/spaces.js';
@@ -17,19 +16,19 @@ import { LIVE_FILE_ROW } from '../../files/live-file-row.js';
 import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
-import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
+import { } from '../../util/request-bounds.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
 
 export const list_spacesTool: ToolHandler = {
   name: 'list_spaces',
   description: 'List every space this token can reach, with ids, labels, purposes and entry counts. CALL THIS FIRST in an unfamiliar instance: every other tool takes a space id, and the ids are not guessable from the labels.\n\n'
     + 'READ THE `purpose`. It is the space owner telling you what belongs there and how to behave in it — conventions, what to write, what not to. A space with a purpose has one because somebody needed you to follow it.\n\n'
-    + 'The counts are what make this a planning tool rather than a directory: an empty space is not worth a recall, and a space with 40 000 records needs a filter rather than a broad query. A PROXY space reports its members\' totals combined and is marked as a proxy — writes to one need `targetSpace`.\n\n'
+    + 'The counts are what make this a planning tool rather than a directory: an empty space is not worth a recall, and a space with 40 000 records needs a filter rather than a broad query. Your personal views are listed by `view_list`, not here: a view is not a space.\n\n'
     + 'STORAGE: `maxGiB` is the space\'s quota and `usageGiB` what its files occupy, the same figures `GET /api/spaces` reports and from the same measurement. `usageGiB` is a FLOOR whenever `usageIncomplete` is present — a directory the instance could not read contributes nothing, and an unreadable space would otherwise be indistinguishable from an empty one. A space with no `maxGiB` has no quota rather than a quota of zero.\n\n'
     + 'Accessibility is per TOKEN. A space absent here is not a space that does not exist; it is one this token holds no rung in.',
   inputSchema: (_s: ToolSchemas) => ({ type: 'object', properties: {}, required: [], additionalProperties: false }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { accessibleSpaces , accessibleSpaceIds } = ctx;
+    const { accessibleSpaces  } = ctx;
     /*
      * Storage, through the SAME measurement REST uses.
      *
@@ -41,7 +40,7 @@ export const list_spacesTool: ToolHandler = {
     const usageBySpaceId = await measureSpaceUsage(accessibleSpaces.map(sp => sp.id));
     const spaceCountResults = await Promise.allSettled(
       accessibleSpaces.map(async s => {
-        const memberIds = memberSpacesWithin(s.id, accessibleSpaceIds);
+        const memberIds = readSpacesOfCall(ctx, s.id);
         const perMember = await Promise.all(memberIds.map(async mid => ({
           facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
           entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
@@ -103,7 +102,7 @@ export const space_statsTool: ToolHandler = {
   description: 'Return counts of facts, entities, edges, chrono entries and files for one space — the cheapest call there is, and the right way to check whether a space holds anything before spending a recall on it.\n\n'
     + 'These are TOTALS, not search coverage. A record retired from semantic ranking is counted here and cannot be reached by `recall`, and a record written seconds ago is counted before its embedding exists. So a count that exceeds what a search returns is normal and is not evidence of a broken index — `list_embed_jobs` is what answers "is anything still queued or failed".\n\n'
     + 'THE FILES NUMBER IS THE SPACE\'S FILES: not the passages a document was split into, and not the record a deleted file leaves behind where the operator keeps one. The REST stats route and a space\'s own shape answer that same number, so a count never depends on which door you asked.\n\n'
-    + 'On a PROXY space the numbers are the members\' totals combined, so a per-member breakdown means asking each member by id.',
+    + 'Through a personal view (`space: "@name"`) the numbers are the members\' totals combined, so a per-member breakdown means asking each member by id.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
           type: 'object',
@@ -114,8 +113,8 @@ export const space_statsTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { callSpace , accessibleSpaceIds } = ctx;
-    const memberIds = memberSpacesWithin(callSpace, accessibleSpaceIds);
+    const { callSpace  } = ctx;
+    const memberIds = readSpacesOfCall(ctx, callSpace);
     const counts = await Promise.all(memberIds.map(async mid => ({
       facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
       entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
@@ -204,12 +203,12 @@ export const space_metaTool: ToolHandler = {
           additionalProperties: false,
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { callSpace , accessibleSpaceIds, args } = ctx;
+    const { callSpace , args } = ctx;
     const space = getConfig().spaces.find(s => s.id === callSpace);
     // The default both doors share (`Q-168`); the answer, from the one function (`Q-95`).
     const resolveRefs = typeof args['resolve'] === 'boolean' ? args['resolve'] : META_RESOLVE_DEFAULT;
     const metaResult = await spaceMetaAnswer({
-      spaceId: callSpace, space, memberIds: memberSpacesWithin(callSpace, accessibleSpaceIds), resolveRefs,
+      spaceId: callSpace, space, memberIds: readSpacesOfCall(ctx, callSpace), resolveRefs,
     });
     return {
       content: [{
@@ -625,9 +624,9 @@ export const schema_updateTool: ToolHandler = {
  * ## Why it is not a wrapper over `createSpace()`
  *
  * `createSpace()` has existed all along, which is exactly what made this dangerous rather than easy. The REST route
- * wraps it in checks a direct call skips: proxy member existence, proxy nesting, the schema-library `$ref`, and the
+ * wraps it in checks a direct call skips: the retired-field refusal, the schema-library `$ref`, and the
  * strict-posture seeding. A tool calling it directly would let a token holding `createSpaces` produce spaces that a
- * REST caller could not — an un-seeded space with no validation, or a proxy pointing at a space that does not exist.
+ * REST caller could not — an un-seeded space with no validation.
  * That is the *two surfaces, one rule, one weaker* defect this batch closes, so the chain was extracted first
  * (`spaces/space-create.ts`, pinned by `space-create-contract.test.js`) and this calls it.
  *
@@ -648,7 +647,7 @@ export const save_spaceTool: ToolHandler = {
     + 'becomes its administrator. The id is derived from the label when omitted. '
     + 'A new space is seeded with a fully strict schema posture (validationMode: strict, strictLinkage: true) '
     + 'unless you pass meta saying otherwise — with no typeSchemas defined yet that accepts every type, so it does '
-    + 'not block an empty space. A proxy space (proxyFor) holds no data of its own and is left un-seeded. '
+    + 'not block an empty space. A personal view is not made here: use `view_create`. '
     + 'Set `faceDescriptorDims` HERE if you are bringing your own recogniser: it can be changed later with `update_space`, but ONLY while the space has never held a face descriptor, so getting it right at creation is the reliable path. Refusals match POST /api/spaces exactly, including 422 for a $ref to a schema-library entry that '
     + 'does not exist and 409 when the id is taken.',
   mutating: true,
@@ -672,12 +671,6 @@ export const save_spaceTool: ToolHandler = {
         description: `The space-level directive injected into MCP instructions at handshake (max ${SPACE_PURPOSE_MAX} chars).`,
       },
       maxGiB: { type: 'number', exclusiveMinimum: 0, description: 'Storage quota in GiB. Omit for unlimited.' },
-      proxyFor: {
-        type: 'array', items: { type: 'string', minLength: 1, maxLength: 40 }, minItems: 1, maxItems: MAX_SPACE_IDS,
-        description: 'Make this a PROXY space that reads across the listed member spaces, or ["*"] for all of them. '
-          + 'Members must exist and must not themselves be proxies — nesting is refused. A proxy holds no data of '
-          + 'its own.',
-      },
       faceDescriptorDims: {
         type: 'integer', minimum: 64, maximum: 4096,
         description: 'Face-descriptor width for this space: 128 for MobileFaceNet-class models, 512 for '
@@ -750,7 +743,6 @@ export const save_spaceTool: ToolHandler = {
     return {
       content: [{ type: 'text' as const, text:
         `Created space '${s.id}' (${s.label})`
-        + `${isProxy(s) ? ` as a proxy over ${s.proxyFor!.join(', ')}` : ''}`
         + `${s.meta?.validationMode ? `, validationMode: ${s.meta.validationMode}` : ''}.` }],
       structuredContent: { outcome: 'created', id: s.id, label: s.label },
     };
@@ -791,8 +783,7 @@ export const delete_space_dataTool: ToolHandler = {
     + `- \`types\` — a subset of ${BRAIN_COLLECTIONS.map(t => `\`${t}\``).join(', ')}. OMIT IT TO WIPE THEM ALL; `
     + 'an omitted `types` is not a safe default. A partial wipe clears only the tombstones and review findings '
     + 'belonging to the types you named.\n'
-    + '- `space` — the space to empty. On a proxy this is the proxy\'s own id and there is no `targetSpace` '
-    + 'here, so do not reach for this tool to empty one member.\n\n'
+    + '- `space` — the space to empty.\n\n'
     + 'RESPONSE: `status`, `types`, `rounds` when the space is networked, and when it was wiped here the '
     + 'per-collection counts, both flat and in `deleted`. Zeroes mean the space was already empty, not that '
     + 'anything refused. A failure after a passed vote is an error with `code: space_act_failed` and '

@@ -16,7 +16,7 @@ import { spacesWhereTokenMay, holdsRung } from '../auth/reachable-spaces.js';
 import { findWhereTokenMay } from '../auth/find-where-token-may.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { getConfig } from '../config/loader.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { scanSpace, pairContentHash, SCAN_STEP } from '../brain/dupe-scanner.js';
 import { scanSpacesInRequest } from '../brain/scan-spaces-in-request.js';
 import { mergeEntities, mergeRefusal } from '../brain/merge.js';
@@ -320,7 +320,7 @@ duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, as
     // not be able to trigger destructive rules (automerge/notify) on spaces it
     // cannot access.
     const allowed = new Set(spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write'));
-    const targets = concreteSpaces()
+    const targets = configuredSpaces()
       .filter(s => allowed.has(s.id) && (!spaceFilter || s.id === spaceFilter))
       .map(s => s.id);
     if (spaceFilter && targets.length === 0) { res.status(404).json({ error: `Space '${spaceFilter}' not found or not accessible` }); return; }

@@ -39,7 +39,7 @@ import type { FileMetaDoc } from '../config/types.js';
 import { NotFoundError, RequestRefusal } from '../util/errors.js';
 import { moveFileCascade } from '../files/move-cascade.js';
 import { deletePath } from '../files/delete-cascade.js';
-import { memberSpacesForRequest } from '../spaces/proxy-scoped.js';
+import { readSpacesOfRequest } from '../spaces/read-scope.js';
 import { contentTypeForDownload } from '../files/mime.js';
 import { contentDispositionOf } from '../util/content-disposition.js';
 import { hideDerivedTrees } from '../files/derived-trees.js';
@@ -235,7 +235,7 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
   const normalised = typeof filePath === 'string' && filePath.trim() ? filePath : '.';
   // A spill's deprecated `path` (Q-92): answered from the spill store for its issuer alone, never as a file here.
   if (await answerSpillPath(req, res, normalised)) return;
-  const memberIds = memberSpacesForRequest(req, spaceId);
+  const memberIds = readSpacesOfRequest(req, spaceId);
 
   // Directory listing — aggregate across all member spaces
   // Try to find the first member where the path resolves successfully
@@ -364,7 +364,7 @@ fileStoreRouter.post(
   async (req, res) => {
     const target = requireWriteTarget(req, res);
     if (target === null) return;
-    const { targetSpace } = target;
+    const { spaceId: targetSpace } = target;
 
     const filePath = req.query['path'];
     if (typeof filePath !== 'string' || !filePath.trim()) {
@@ -414,7 +414,7 @@ fileStoreRouter.post(
 fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const request = requireWritePath(req, res);
   if (request === null) return;
-  const { targetSpace, path: filePath } = request;
+  const { spaceId: targetSpace, path: filePath } = request;
 
   try {
     // Blob, tombstone, metadata, job, artifacts, usage and (for a file) the webhook, in the order `files/delete-cascade.ts`
@@ -441,7 +441,7 @@ fileStoreRouter.delete('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadO
 fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const request = requireWritePath(req, res);
   if (request === null) return;
-  const { targetSpace, path: srcPath } = request;
+  const { spaceId: targetSpace, path: srcPath } = request;
 
   const destination = req.body?.destination;
   if (typeof destination !== 'string' || !destination.trim()) {

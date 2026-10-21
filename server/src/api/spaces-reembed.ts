@@ -17,9 +17,10 @@ import { z } from 'zod';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { requireSpaceAuthMfaScoped, denyReadOnly } from '../auth/middleware.js';
 
-import { getConfig } from '../config/loader.js';
+import { } from '../config/loader.js';
 import { reembedSpace, REEMBED_MAX_LIMIT } from '../brain/reembed.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { answeredUnknownSpace } from './write-target-answer.js';
 
 /**
  * Body for the re-embed backfill. Every field optional — `POST` with no body sweeps everything at the default
@@ -42,10 +43,7 @@ export function registerReembedRoute(spacesRouter: Router): void {
   // body is the wrong place for a rule the write path also has to agree with.
   spacesRouter.post('/:id/reembed', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req, res) => {
     const spaceId = req.params['id'] as string;
-    if (!getConfig().spaces.some(s => s.id === spaceId)) {
-      res.status(404).json({ error: `Space '${spaceId}' not found` });
-      return;
-    }
+    if (answeredUnknownSpace(req, res, spaceId)) return;
     const parsed = ReembedBody.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json(refusalOfParse(parsed.error));

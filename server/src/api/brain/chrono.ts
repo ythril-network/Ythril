@@ -10,11 +10,11 @@ import { applyJudgment } from './_judged-write.js';
 import { answerUnknownWriteFields, atLeastOneFieldRefusal, carriesAnyAcceptedField } from '../../contract/write-accepts.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { createChrono, updateChrono, getChronoById, deleteChrono, parseRecurrence } from '../../brain/chrono.js';
-import { getConfig } from '../../config/loader.js';
-import { memberSpacesForRequest } from '../../spaces/proxy-scoped.js';
+import { } from '../../config/loader.js';
+import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
-import { resolveWriteTarget, findFirstAcrossMembers } from '../../spaces/proxy.js';
-import { restWriteGrant, answerWriteTarget } from '../write-target-answer.js';
+import { findFirstAcrossMembers } from '../../spaces/across-members.js';
+import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import { getAllowedChronoTypes, type SchemaViolation } from '../../spaces/schema-validation.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
@@ -39,15 +39,10 @@ const CHRONO_STATUS_SET = new Set<ChronoStatus>(CHRONO_STATUSES);
 // What a body may carry is `acceptedWriteKeys('chrono.create')`: the paired tool's own schema, not a list kept beside this route.
 chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
-  if (answerWriteTarget(res, wt)) return;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
   // The unknown-field judge: after the target is resolved and before any other check (see `_judged-write.ts`).
-  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'chrono.create', wt.target, 'rest'))) return;
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'chrono.create', spaceId, 'rest'))) return;
 
   const { title, type, startsAt, endsAt, status, confidence, tags, description, properties, recurrence } = req.body ?? {};
   // `recurrence` was previously persisted straight from the request body with NO shape
@@ -59,7 +54,7 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   if (!title || typeof title !== 'string') {
     res.status(400).json({ error: '`title` string required' }); return;
   }
-  const meta = getSpaceMeta(wt.target);
+  const meta = getSpaceMeta(spaceId);
   const allowedChronoTypes = getAllowedChronoTypes(meta);
   if (!type || !allowedChronoTypes.has(type)) {
     res.status(400).json({ error: `\`type\` must be one of: ${[...allowedChronoTypes].join(', ')}` }); return;
@@ -141,8 +136,8 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
     // And the half a shape check cannot answer: a class this kind cannot hold, and — under strict linkage — an id
     // that names nothing, and every inline edge the space's schema refuses. BEFORE the record is written, or a refusal
     // leaves a row; inside this `try`, so it is answered as the record's own refusal is.
-    await assertConnections(wt.target, 'chrono', await connectionSubject(wt.target, 'chrono', req.body, { id: safeId }), req.body);
-    entry = await createChrono(wt.target, {
+    await assertConnections(spaceId, 'chrono', await connectionSubject(spaceId, 'chrono', req.body, { id: safeId }), req.body);
+    entry = await createChrono(spaceId, {
       title: title.trim(), type, startsAt, endsAt, status, confidence,
       tags, description, properties: safeProps, recurrence: safeRecurrence,
       id: safeId,
@@ -154,7 +149,7 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
      * Links REPLACE per class and edges UPSERT — both semantics live in `applyConnections`, so no door has to
      * restate them and no two doors can disagree about them.
      */
-    connectionWarnings = (await applyConnections(wt.target, entry._id, 'chrono', req.body, entry.author, webhookToken(req))).warnings;
+    connectionWarnings = (await applyConnections(spaceId, entry._id, 'chrono', req.body, entry.author, webhookToken(req))).warnings;
   } catch (err) {
     const refused = connectionRefusalAnswer(err, 'create');
     if (refused) { res.status(refused.status).json(refused.body); return; }
@@ -174,17 +169,12 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
 chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const id = req.params['id'] as string;
-  const cfg = getConfig();
-  if (!cfg.spaces.some(s => s.id === spaceId)) {
-    res.status(404).json({ error: `Space '${spaceId}' not found` });
-    return;
-  }
-  const wt = resolveWriteTarget(spaceId, req.query['targetSpace'], restWriteGrant(req, 'knowledge', 'write'));
-  if (answerWriteTarget(res, wt)) return;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  if (writeSpaceOf(req, res, spaceId) === null) return;
   // `If-Match` is a transport precondition (MCP has no headers), so it is answered ahead of the judge; nothing that reads the BODY is.
   const ifMatch = ifMatchFromRequest(req);
   if (!ifMatch.ok) { res.status(400).json({ error: ifMatch.error }); return; }
-  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'chrono.update', wt.target, 'rest'))) return;
+  if (applyJudgment(res, answerUnknownWriteFields(req.body, 'chrono.update', spaceId, 'rest'))) return;
 
   const { title, type, startsAt, endsAt, status, confidence, tags, description, properties, recurrence, deleteFields } = req.body ?? {};
   // `recurrence` was previously persisted straight from the request body with NO shape
@@ -197,7 +187,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
     res.status(400).json({ error: '`status` must be one of: upcoming, active, completed, overdue, cancelled' }); return;
   }
   if (type !== undefined) {
-    const allowedChronoTypes = getAllowedChronoTypes(getSpaceMeta(wt.target));
+    const allowedChronoTypes = getAllowedChronoTypes(getSpaceMeta(spaceId));
     if (!allowedChronoTypes.has(type)) {
       res.status(400).json({ error: `\`type\` must be one of: ${[...allowedChronoTypes].join(', ')}` }); return;
     }
@@ -262,7 +252,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   // The member space holding this entry, captured while looking for it: the link sets below are read per
   // space, and an id belongs to the space that owns it.
   // The before and the link sets, from whichever member holds the entry — one read shared with the MCP tool (Q-50).
-  const editAudit = await readEditAudit(wt.target, mid => getChronoById(mid, id), id, req.body, 'chrono');
+  const editAudit = await readEditAudit(spaceId, mid => getChronoById(mid, id), id, req.body, 'chrono');
   const prior = editAudit.prior;
 
   // Validate the entry AS IT WILL BE. This path had NO property validation at all — the `type` allowlist
@@ -287,7 +277,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
       await assertConnections(editAudit.home!, 'chrono',
         await connectionSubject(editAudit.home!, 'chrono', req.body, { stored: prior }), req.body);
     }
-    updated = await findFirstAcrossMembers(wt.target, mid => updateChrono(mid, id, {
+    updated = await findFirstAcrossMembers([spaceId], mid => updateChrono(mid, id, {
       title, type, startsAt, endsAt, status, confidence,
       tags, description, properties: safeProps, recurrence: safeRecurrence,
       suppressEmbeddings, superseded,
@@ -325,7 +315,7 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   // is still 404. Same rule as the other three routes, expressed against this one's `findFirstAcrossMembers`
   // shape rather than a loop.
   if (ifMatch.seq !== undefined && prior) {
-    const current = await findFirstAcrossMembers(wt.target, mid => getChronoById(mid, id));
+    const current = await findFirstAcrossMembers([spaceId], mid => getChronoById(mid, id));
     res.status(412).json(preconditionFailedBody('chrono entry', current?.seq));
     return;
   }
@@ -347,7 +337,7 @@ chronoRouter.delete('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpace
    *
    * ONE guard for both doors, and the same one entities use. `409` and not `404`: the record IS there.
    */
-  for (const mid of memberSpacesForRequest(req, spaceId)) {
+  for (const mid of readSpacesOfRequest(req, spaceId)) {
     const block = await entityDeleteBlockers(mid, id, 'chrono');
     if (block) {
       res.status(409).json({ error: block.message, backlinks: block.blocking, references: block.backlinks });

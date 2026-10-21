@@ -24,7 +24,7 @@ import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { getSpaceMeta, applyPropertyDefaults, validationRefuses, type ResolvedEdgeEnds } from '../../spaces/schema-validation.js';
 import { functionalSubjectKey } from '../functional-subject.js';
 import { FUNCTIONAL_GUARD } from '../../sync/local-only-fields.js';
-import { isStrictLinkage } from '../../spaces/proxy.js';
+import { isStrictLinkage } from '../../spaces/space-lookup.js';
 import {
   classifyEdgeUpsertAgainst, danglingReferenceCheck, EdgeSchemaViolation, type UpdateValidation,
 } from '../write-validation.js';

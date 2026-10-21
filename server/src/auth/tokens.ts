@@ -8,6 +8,8 @@ import { migrateToken } from './rights-migration.js';
 import { withInstanceAdminGrants } from './instance-admin-grants.js';
 import { resolveLimitFor } from '../rate-limit/per-token.js';
 import { joinRoundOf } from '../networks/round-state.js';
+import { tokenIsLive } from './token-liveness.js';
+import { viewOwnerOf, deleteViewsOf, noteViewOwnerLeft } from '../config/views.js';
 
 const BCRYPT_ROUNDS = 12;
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -81,7 +83,7 @@ export async function findMatchingToken(
   if (cached && Date.now() < cached.expiresAt) {
     const record = config.tokens.find(t => t.id === cached.tokenId);
     if (record) {
-      if (record.expiresAt && new Date(record.expiresAt) < new Date()) {
+      if (!tokenIsLive(record)) {
         _tokenCache.delete(plaintext);
         return null;
       }
@@ -101,7 +103,7 @@ export async function findMatchingToken(
   for (const record of candidates) {
     const ok = await verifyToken(plaintext, record.hash);
     if (!ok) continue;
-    if (record.expiresAt && new Date(record.expiresAt) < new Date()) continue;
+    if (!tokenIsLive(record)) continue;
     healPrefix(record, prefix);
     _tokenCache.set(plaintext, { tokenId: record.id, expiresAt: Date.now() + CACHE_TTL_MS });
     return record;
@@ -117,7 +119,7 @@ export async function findMatchingToken(
   for (const record of legacy) {
     const ok = await verifyToken(plaintext, record.hash);
     if (!ok) continue;
-    if (record.expiresAt && new Date(record.expiresAt) < new Date()) continue;
+    if (!tokenIsLive(record)) continue;
     healPrefix(record, prefix);
     _tokenCache.set(plaintext, { tokenId: record.id, expiresAt: Date.now() + CACHE_TTL_MS });
     return record;
@@ -287,31 +289,18 @@ export async function createOAuthToken(opts: {
   };
   record.rights = withInstanceAdminGrants(record.rights);
   const config = getConfig();
-  const removedIds: string[] = [];
-  // Rotate: drop any prior token for this client.
-  config.tokens = config.tokens.filter(t => {
-    if (t.oauthClientId === opts.clientId) { removedIds.push(t.id); return false; }
-    return true;
-  });
+  // Rotate: drop any prior token for this client. Its views stay: the new token is the same owner (same client id).
+  removeTokensFromConfig(config, t => t.oauthClientId === opts.clientId, 'rotation');
   config.tokens.push(record);
-  // Cap: keep only the newest `maxTokens` connector tokens overall.
+  // Cap: keep only the newest `maxTokens` connector tokens overall. An eviction does NOT delete the evicted client's views: any
+  // low-privilege caller can register clients and force evictions, so they fall to the 30-day grace sweep instead.
   const oauthTokens = config.tokens.filter(t => t.oauthClientId);
   if (oauthTokens.length > opts.maxTokens) {
     const byAge = [...oauthTokens].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const evict = new Set(byAge.slice(0, oauthTokens.length - opts.maxTokens).map(t => t.id));
-    config.tokens = config.tokens.filter(t => {
-      if (evict.has(t.id)) { removedIds.push(t.id); return false; }
-      return true;
-    });
+    removeTokensFromConfig(config, t => evict.has(t.id), 'eviction');
   }
   saveConfig(config);
-  // Evict any cached entries for revoked tokens so bcrypt compare is never skipped.
-  if (removedIds.length) {
-    const gone = new Set(removedIds);
-    for (const [key, val] of _tokenCache) {
-      if (gone.has(val.tokenId)) _tokenCache.delete(key);
-    }
-  }
   return { record, plaintext };
 }
 
@@ -490,15 +479,47 @@ function peerNeedsItsCredential(config: Pick<Config, 'networks'>, instanceId: st
 
 export async function revokeToken(id: string): Promise<boolean> {
   const config = getConfig();
-  const before = config.tokens.length;
-  config.tokens = config.tokens.filter(t => t.id !== id);
-  if (config.tokens.length === before) return false;
+  if (removeTokensFromConfig(config, t => t.id === id, 'revoke').length === 0) return false;
   saveConfig(config);
-  // Evict any cached entry for this token so bcrypt compare is never skipped
-  for (const [key, val] of _tokenCache) {
-    if (val.tokenId === id) _tokenCache.delete(key);
-  }
   return true;
+}
+
+/** Why tokens are leaving `config.tokens`: an explicit revoke, a connector's rotation (its owner stays), or a cap eviction. */
+export type TokenRemoval = 'revoke' | 'rotation' | 'eviction';
+
+/**
+ * THE one place a token leaves `config.tokens`, inside the caller's single config write (the caller saves once).
+ *
+ * ## Why one function
+ *
+ * Tokens left in three writers (revoke, a connector's rotation, a connector cap's eviction), and each had to remember two things a
+ * hand-written filter forgets: evict the verification cache (or a removed token authenticates for five more minutes), and say what
+ * becomes of the personal views the token owned (Q-531). A revoke deletes the owner's views at once - unless another live token of the
+ * SAME owner remains (a connector holds one owner key across tokens). A rotation keeps them (same client id). An eviction keeps them and
+ * stamps when the owner's last token went, so the grace sweep counts from there: any low-privilege caller can register clients and
+ * force evictions, so an eviction that deleted views would be a way to delete another connector's. `a-personal-view-has-one-home-in-the-source`
+ * holds the writers of `config.tokens` to this function.
+ *
+ * @returns the records removed (none when nothing matched).
+ */
+export function removeTokensFromConfig(config: Config, shouldRemove: (t: TokenRecord) => boolean, why: TokenRemoval): TokenRecord[] {
+  const removed: TokenRecord[] = [];
+  config.tokens = config.tokens.filter(t => {
+    if (shouldRemove(t)) { removed.push(t); return false; }
+    return true;
+  });
+  if (removed.length === 0) return removed;
+  // Evict any cached entry for a removed token so bcrypt compare is never skipped.
+  const gone = new Set(removed.map(t => t.id));
+  for (const [key, val] of _tokenCache) if (gone.has(val.tokenId)) _tokenCache.delete(key);
+  const now = Date.now();
+  const stillHeld = new Set(config.tokens.filter(t => tokenIsLive(t, now)).map(t => viewOwnerOf(t)));
+  for (const owner of new Set(removed.map(t => viewOwnerOf(t)))) {
+    if (!owner || stillHeld.has(owner)) continue;
+    if (why === 'revoke') deleteViewsOf(config, owner, 'revoke');
+    else if (why === 'eviction') noteViewOwnerLeft(config, owner, new Date(now).toISOString());
+  }
+  return removed;
 }
 
 /**

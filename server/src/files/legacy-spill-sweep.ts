@@ -40,7 +40,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { deleteStoredIfPresent, isMissingPath } from './stored-bytes.js';
 import { forgetFileHashes } from './manifest.js';
 import { SPILL_DIR, spillIdFromPath } from '../brain/spill-path.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { LEGACY_SPILL_SWEEP_OPERATION } from '../audit/middleware.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
@@ -105,7 +105,7 @@ async function sweepSpace(spaceId: string): Promise<number> {
 
 export async function sweepLegacySpills(): Promise<LegacySpillSweep> {
   const out: LegacySpillSweep = { removed: 0, failed: [] };
-  const walk = await eachSpace(STEP, concreteSpaces(), async (space) => { out.removed += await sweepSpace(space.id); });
+  const walk = await eachSpace(STEP, configuredSpaces(), async (space) => { out.removed += await sweepSpace(space.id); });
   for (const f of walk.failed) out.failed.push({ spaceId: f.spaceId, path: f.unit ?? SPILL_DIR, error: f.reason });
   return out;
 }

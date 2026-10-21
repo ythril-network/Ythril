@@ -89,8 +89,10 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     const { initAuditCollection } = await import('./audit/audit.js');
     await initAuditCollection();
 
-    const { initWebhookDeliveryIndexes } = await import('./webhooks/store.js');
+    const { initWebhookDeliveryIndexes, retireWebhookSpaceIds } = await import('./webhooks/store.js');
     await initWebhookDeliveryIndexes();
+    // 6.0: a subscription that named only retired proxy ids is disabled, never emptied (an empty list means every space).
+    await retireWebhookSpaceIds((await import('./config/loader.js')).getConfig().retiredSpaceIds ?? []);
     const { initRetryQueueIndexes } = await import('./webhooks/dispatcher.js');
     await initRetryQueueIndexes();
 
@@ -153,6 +155,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   // that never enabled them.
   const { startCandidatePrune } = await import('./brain/candidate-prune.js');
   startCandidatePrune();
+  // Ends the personal views of an owner that has had no live token for 30 days (Q-531); nothing else notices an owner is gone.
+  const { startViewSweep } = await import('./config/views-sweep-job.js');
+  startViewSweep();
   // Drops tombstones every peer has confirmed applying. Deliberately NOT hung off the sync engine: a space
   // with no peers never syncs, and that is precisely the space whose whole tombstone collection is droppable.
   const { startTombstonePrune } = await import('./brain/tombstone-prune.js');

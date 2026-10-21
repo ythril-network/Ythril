@@ -50,7 +50,7 @@ import {
 } from './entity-refs.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { isStrictLinkage } from '../spaces/proxy.js';
+import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { resultingEntityType, EdgeSchemaViolation, type UpdateValidation } from './write-validation.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { ReadSet, mergeWants } from './write-plan/read-set.js';

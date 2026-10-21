@@ -58,7 +58,7 @@ import { inChunks } from '../util/chunks.js';
 import { UNSET_VECTOR } from '../sync/local-only-fields.js';
 import { retireEmbedJobs } from './embed-queue.js';
 import { rowsDerivedFrom } from '../files/derived-rows.js';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -326,7 +326,7 @@ async function sweepForTheWalk(id: string, meta: SpaceMeta | undefined): Promise
  * timed out is quarantined, a store that does not answer stops the walk, and K spaces timing out in a row stop it.
  */
 export async function sweepEverySpaceAtBoot(): Promise<void> {
-  await eachSpace(STEP, concreteSpaces(), async (space) => {
+  await eachSpace(STEP, configuredSpaces(), async (space) => {
     await sweepForTheWalk(space.id, space.meta);
   }, { when: 'with the next meta write' });
 }

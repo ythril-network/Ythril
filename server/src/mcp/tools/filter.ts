@@ -29,7 +29,7 @@ import { CONVENIENCE_SCHEMA } from '../../brain/list-conveniences.js';
 import { FILE_PATH_SCHEMA } from '../../brain/file-path-arg.js';
 import { decorateMemberRows, decoratePage, resolvePredicate, PAGE_DECORATION_SCHEMA } from '../../brain/list-decorations.js';
 import { withoutListDiagnostics } from '../../brain/read-projection.js';
-import { memberSpacesWithin } from '../../spaces/proxy-scoped.js';
+import { readSpacesOfCallAcross } from '../../spaces/read-scope.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { resolveEntityIdsByName } from '../../brain/entities.js';
 import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
@@ -89,8 +89,8 @@ export const queryTool: ToolHandler = {
              * serves: a 400 on one door and an answer on the other, which `CLAUDE.md` names in those
              * words as worse than either alone.
              */
-            limit: { type: 'number', minimum: 1, default: DEFAULT_QUERY_LIMIT, description: `Max documents in this page. Default ${DEFAULT_QUERY_LIMIT}, and NOT capped — it was silently clamped to 100 until 5.0, so a caller asking for 200 got 100 with \`truncated\` making it read as a correct short page. What bounds an answer instead: the byte budget (\`maxChars\`/\`maxBytes\`) trims it and hands you \`nextSkip\`, \`maxTimeMS\` bounds the query's duration, and on a PROXY space \`skip + limit\` past the merge ceiling is an explicit 400 naming the limit. Compare \`count\` against \`total\` to know whether more rows satisfy the filter — a full page is not evidence that it is the last one.` },
-            skip: { type: 'number', minimum: 0, description: 'Rows to discard before the page, for paging. The result order is total (`_id` breaks every tie), so no row can be seen twice or missed between pages. On a proxy space the page is computed over the MERGED set, not per member.' },
+            limit: { type: 'number', minimum: 1, default: DEFAULT_QUERY_LIMIT, description: `Max documents in this page. Default ${DEFAULT_QUERY_LIMIT}, and NOT capped — it was silently clamped to 100 until 5.0, so a caller asking for 200 got 100 with \`truncated\` making it read as a correct short page. What bounds an answer instead: the byte budget (\`maxChars\`/\`maxBytes\`) trims it and hands you \`nextSkip\`, \`maxTimeMS\` bounds the query's duration, and through a personal view \`skip + limit\` past the merge ceiling is an explicit 400 naming the limit. Compare \`count\` against \`total\` to know whether more rows satisfy the filter — a full page is not evidence that it is the last one.` },
+            skip: { type: 'number', minimum: 0, description: 'Rows to discard before the page, for paging. The result order is total (`_id` breaks every tie), so no row can be seen twice or missed between pages. Through a personal view the page is computed over the MERGED set, not per member.' },
             sort: { type: 'string', description: 'Field to order by. Allowed values depend on the collection (entities: createdAt, name, type; edges: createdAt, label, from, to, type, weight; facts: createdAt, type; chrono: createdAt, title, startsAt, endsAt, status, type; files: createdAt, updatedAt, path). An unknown field is refused and names the allowed ones. Omit for newest-first.' },
             dir: { type: 'string', enum: ['asc', 'desc'], description: "Sort direction, default desc. Only meaningful with `sort`." },
             entityName: {
@@ -98,7 +98,7 @@ export const queryTool: ToolHandler = {
               description: 'Only records attached to an entity whose name CONTAINS this, case-insensitively. '
                 + 'For `facts` and `chrono` only — they carry entity ids, and this resolves the name to those '
                 + 'ids first. It is a join rather than a predicate, which is why `filter` cannot express it: '
-                + 'ids belong to the space that owns them, so on a proxy the resolution runs per member. A '
+                + 'ids belong to the space that owns them, so through a personal view the resolution runs per member. A '
                 + 'name that matches nothing returns NOTHING rather than everything.',
             },
             fromName: {
@@ -175,12 +175,12 @@ export const queryTool: ToolHandler = {
         : undefined;
 
     // The SAME function the REST route pages with, not the same shape written twice.
-    // A NAMED space resolves its proxy members; an OMITTED one is every space this connection can reach.
-    // `memberSpacesWithin('')` would answer nothing, which is how an optional parameter turns into a read
-    // that silently returns empty rather than the cross-space read it advertises.
+    // A NAMED space resolves to itself or, for the caller's own view, to the members the dispatcher resolved for this call; an OMITTED one
+    // is every space this connection can reach. A view that reads nothing is an EMPTY list here and reads nothing: only an omitted `space`
+    // is the cross-space read, so an empty list is never widened.
     const reachable = ctx.accessibleSpaces.map(sp => sp.id);
     const members = ctx.callSpaces.length > 0
-      ? [...new Set(ctx.callSpaces.flatMap(sp => memberSpacesWithin(sp, reachable)))]
+      ? readSpacesOfCallAcross(ctx, ctx.callSpaces)
       : reachable;
     const coll = collName as BrainCollection;
 
@@ -246,7 +246,7 @@ export const queryTool: ToolHandler = {
     const queryBudget = resolveBudget(a as BudgetRequest, defaultBudgetChars(ctx.transport), carriagesFor(ctx.transport));
     if (!queryBudget.ok) throw new Error(queryBudget.error);
     // One member only: the database applies skip and limit there, so a read stopped early is simply a shorter page.
-    // A proxy merge reads a window from every member and is bounded by PROXY_PAGE_CEILING instead.
+    // A merge across a personal view's members reads a window from every member and is bounded by PROXY_PAGE_CEILING instead.
     let readCut = false;
     const read = members.length === 1
       ? { bound: { chars: queryBudget.chars, bytes: queryBudget.bytes }, onCut: () => { readCut = true; } }
@@ -267,7 +267,7 @@ export const queryTool: ToolHandler = {
      * the per-collection list routes and on neither door of `filter`, which is a capability the browser
      * had and an agent did not — and a decoration is not a parameter, so nothing compared them.
      *
-     * A NAMED space resolves its proxy members; an omitted one is every space this connection can reach,
+     * A NAMED space resolves to itself or to a personal view's members; an omitted one is every space this connection can reach,
      * which is the same list the page was read from.
      */
     const decorated = await decoratePage(coll, ctx.callSpaces[0] ?? members[0] ?? '', page.rows,

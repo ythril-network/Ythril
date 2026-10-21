@@ -25,7 +25,7 @@
  */
 
 import { Router } from 'express';
-import { concreteSpaces } from '../spaces/proxy.js';
+import { configuredSpaces } from '../spaces/space-lookup.js';
 import { getConfig, isConfigLoaded, getMediaEmbeddingConfig, getEmbeddingConfig, getEmbeddingApiKey, getDocumentProcessingConfig, getDocAssistApiKey, getDocAssistFallbackApiKey, getFaceRecognitionConfig, getRerankApiKey, getNliApiKey } from '../config/loader.js';
 import { requireAdmin } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
@@ -510,7 +510,7 @@ async function indexStatus(): Promise<{ spaces: SpaceIndexStatus[]; unavailable?
   if (!isConfigLoaded()) return { spaces: [], unavailable: 'configuration is not loaded' };
   // Proxy spaces aggregate other spaces' reads and own no collections, so they have no indexes to
   // be missing. Listing them would pin a permanent red dot on a space that is working correctly.
-  const spaces = concreteSpaces();
+  const spaces = configuredSpaces();
 
   // Face recognition is gated per space by the image ladder (its `recognition` rung) under the instance
   // ceiling, with `enabled` surviving only as the infra pin — so whether a space should HAVE a face index

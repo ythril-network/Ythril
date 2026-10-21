@@ -19,7 +19,8 @@ import {
   type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from './space-act-runner.js';
 import { RenameSpaceBody } from './body-schemas.js';
-import { isProxy } from './proxy.js';
+import { assertNotRetiredSpaceId, ReservedSpaceIdError } from './unknown-space.js';
+import { renameSpaceInViews } from '../config/views.js';
 import { builtInRefusal } from './built-in-space.js';
 import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 import { refusalText } from '../brain/store-failure.js';
@@ -212,8 +213,10 @@ export async function moveSpaceData(
 
 /** Apply the logical config changes of a rename: point the space entry at `newId`
  *  and rewrite every reference (networks, spaceMap, member watermarks, token scopes,
- *  proxy targets). Pure/synchronous — the caller persists with a single saveConfig. */
+ *  the members of personal views). Pure/synchronous — the caller persists with a single saveConfig. */
 export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId: string, newId: string): void {
+  // A retired proxy id is not free (the rename's own refusal said so first; this is the guard on the resume path, which skips it).
+  assertNotRetiredSpaceId(newId, cfg);
   // Update the space config entry
   space.id = newId;
 
@@ -316,13 +319,8 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
     }
   }
 
-  // Update proxy space references
-  for (const s of cfg.spaces) {
-    if (isProxy(s)) {
-      const idx = s.proxyFor!.indexOf(oldId);
-      if (idx !== -1) s.proxyFor![idx] = newId;
-    }
-  }
+  // A personal view that listed the space lists it under its new id.
+  renameSpaceInViews(cfg, oldId, newId);
 }
 
 /** Rename a space: renames all MongoDB collections, moves the file directory, and
@@ -361,6 +359,8 @@ function renameRefusal(cfg: Config, oldId: string, newId: string, except?: strin
   const builtIn = builtInRefusal(space, 'rename');
   if (builtIn) return builtIn;
   if (cfg.spaces.some(s => s.id === newId)) return new Error(`Space '${newId}' already exists`);
+  // A retired proxy id stays reserved until an instance admin purges what it still holds.
+  try { assertNotRetiredSpaceId(newId, cfg); } catch (err) { return err as Error; }
   // A network may still call ANOTHER space by `newId` — its name before a rename (Q-133). Taking it would make this
   // space indistinguishable from that one to every peer. Checked before anything moves.
   const inUse = spaceNameInUseRefusal(cfg.networks.filter(n => n.spaces.includes(oldId)), newId);
@@ -416,6 +416,7 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
     // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
     if (err instanceof SpaceNameInUseError) return { status: 409, error: err.message, code: err.code };
     if (err instanceof RenameBlockedError) return { status: 409, error: err.message };
+    if (err instanceof ReservedSpaceIdError) return { status: 409, error: err.message };
     if (err instanceof RenameIncompleteError) return { status: 500, error: err.message };
     // The store's failure is not a refusal: `refusalText` rethrows it, so each door answers it as every door does
     // (bundle-30 I12), and only then are the words read (bundle-53 G7, Q-335). A driver refusal comes back in our words.

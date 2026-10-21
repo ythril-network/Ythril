@@ -41,13 +41,28 @@ function sweep(now: number): void {
 }
 
 /**
+ * The ONE spelling of a stream path a ticket is minted and redeemed under: each segment percent-decoded, so `%40mine` and `@mine` (a
+ * browser sends either) are the same stream. `null` for a path whose escape is malformed - such a path has no ticket and opens nothing, and
+ * never a 500.
+ */
+export function canonicalStreamPath(path: string): string | null {
+  try {
+    return path.split('/').map(seg => decodeURIComponent(seg)).join('/');
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Mint a single-use ticket that aliases `bearer` for the stream at `path`. The caller must already be
  * authenticated for that path (the mint route runs the normal auth middleware first).
  */
 export function mintSseTicket(bearer: string, path: string, now: number = Date.now()): { ticket: string; expiresInMs: number } {
   sweep(now);
+  const canonical = canonicalStreamPath(path);
+  if (canonical === null) throw new Error('a stream path with a malformed escape has no ticket');
   const ticket = randomBytes(32).toString('base64url');
-  tickets.set(ticket, { bearer, path, exp: now + TTL_MS });
+  tickets.set(ticket, { bearer, path: canonical, exp: now + TTL_MS });
   return { ticket, expiresInMs: TTL_MS };
 }
 
@@ -60,7 +75,7 @@ export function consumeSseTicket(ticket: string, path: string, now: number = Dat
   const entry = tickets.get(ticket);
   if (!entry) return null;
   tickets.delete(ticket); // single-use — remove on any match, valid or not
-  if (entry.exp <= now || entry.path !== path) return null;
+  if (entry.exp <= now || entry.path !== canonicalStreamPath(path)) return null;
   return entry.bearer;
 }
 

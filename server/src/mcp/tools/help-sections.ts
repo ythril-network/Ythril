@@ -57,8 +57,9 @@ exactly one space. There are five knowledge types:
 - **chrono** — time-anchored entries (event/deadline/plan/milestone) with a status lifecycle.
 - **files** — file metadata and embedded content chunks, linked to the space's file tree.
 
-All five types are embedded for semantic search. A **proxy space** aggregates reads
-across (and routes writes to) its member spaces. Instances connect to each other in
+All five types are embedded for semantic search. A **personal view** (\`@name\`, made with
+\`view_create\`) is a read-only lens over spaces you can read: read tools accept it as
+\`space\`, and it never writes. Instances connect to each other in
 **networks**; records sync between peers with per-space scoping.`;
 
 const RETRIEVAL_GUIDE = `Three retrieval modes exist and they are easy to confuse:
@@ -134,7 +135,7 @@ minScore filters on score ALONE -- so on an
 instance with a reranker configured, the number that decided a result's position
 is rerankScore and the number you can threshold on is a different one. Read the
 highest of the three that is present to know why something placed where it did.
-ACROSS SPACES (a list, a proxy, or no space) the merged candidates are fused
+ACROSS SPACES (a list, a personal view, or no space) the merged candidates are fused
 ONCE, so every result carries a fusedScore from the same fusion and spaces
 interleave by relevance. Two separate recalls cannot be merged by their scores:
 ask for both spaces in one recall.

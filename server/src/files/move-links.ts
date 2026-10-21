@@ -31,7 +31,7 @@ import { reconcileLinkRows } from '../brain/write-plan/commit.js';
 import { linkClassesFrom, linksStartingFrom, type LinkEnd } from '../brain/link-adjacency.js';
 import { removeLinksFromMany } from '../brain/links.js';
 import { missingRefs } from '../brain/entity-refs.js';
-import { isStrictLinkage } from '../spaces/proxy.js';
+import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { inChunks } from '../util/chunks.js';

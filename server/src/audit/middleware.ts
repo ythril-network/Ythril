@@ -339,6 +339,15 @@ export function resolveOperation(method: string, path: string): { operation: str
   return null;
 }
 
+/** `fullPath` with the view's id (in either spelling a client sends) replaced by `@view`. */
+function pathWithoutView(fullPath: string, viewId: string): string {
+  return fullPath.split('/').map(seg => {
+    let decoded = seg;
+    try { decoded = decodeURIComponent(seg); } catch { /* malformed: left as sent */ }
+    return decoded === viewId ? '@view' : seg;
+  }).join('/');
+}
+
 export function isOidc(token: unknown): token is OidcTokenRecord {
   return !!token && typeof token === 'object' && 'source' in token && (token as OidcTokenRecord).source === 'oidc';
 }
@@ -400,7 +409,13 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
     // that is merely asked a lot.
     if (matched.spaceId) {
       const cls = classifyOperation(matched.operation);
-      if (cls) {
+      if (cls && req.viewRead) {
+        // A read through a personal view counts one call in each member it READ and nothing under the view's id (which is its owner's
+        // text and no space). The duration is shared out, not attributed whole to each member, and the recall outcome belongs to the
+        // view's answer as a whole, so no member is credited with it.
+        const members = req.viewRead.spaces;
+        for (const member of members) recordSpaceCall(member, cls, { ms: durationMsForActivity / Math.max(1, members.length) });
+      } else if (cls) {
         recordSpaceCall(matched.spaceId, cls, {
           ms: durationMsForActivity,
           answered: req.recallOutcome?.answered,
@@ -429,7 +444,9 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       oidcSubject: isOidc(token) ? token.id.replace(/^oidc:/, '') : null,
       ip: req.ip ?? req.socket.remoteAddress ?? 'unknown',
       method: req.method,
-      path: fullPath,
+      // A read through a personal view: the view's id is its owner's own text, so the recorded path names `@view` and the row names the
+      // MEMBERS read (`spaces`), never the view.
+      path: req.viewRead ? pathWithoutView(fullPath, req.viewRead.id) : fullPath,
       /*
        * The path first, then the space the GUARD authorised.
        *
@@ -447,6 +464,8 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
        * three spaces, which is the fact an auditor is looking for.
        */
       spaceId: matched.spaceId ?? (req.authorisedSpaces?.length ? req.authorisedSpaces.join(',') : null),
+      // Said last, so it wins: a read through a view names its members and never the view.
+      ...(req.viewRead ? { spaceId: null, spaces: [...req.viewRead.spaces] } : {}),
       operation: matched.operation,
       status: res.statusCode,
       entryId: req.auditEntryId ?? matched.entryId,
@@ -544,6 +563,20 @@ export const FILE_MOVE_FINISH_OPERATION = 'file.move.finish';
  * the other work no request named.
  */
 export const LEAKED_ROWS_REPAIR_OPERATION = 'file.leaked_rows.repair';
+
+/**
+ * What a personal view's own lifecycle does (Q-531), written by the shared view acts for REST and MCP alike (`spaces/view-acts.ts`), outside the
+ * route rules, so named here for the same reason as the operations above. A row records the owner key and the member COUNT and never the view's
+ * name or member ids: the audit log is read by an admin, and a view is its owner's.
+ */
+export const VIEW_OPERATIONS = {
+  created: 'view.create',
+  updated: 'view.update',
+  deleted: 'view.delete',
+  copied: 'view.copy',
+  claimed: 'view.claim',
+  purgedRetiredId: 'space.retired_id.purge',
+} as const;
 
 /** Log a failed auth attempt — called explicitly from auth middleware when needed. */
 export function logAuthFailure(req: Request): void {
