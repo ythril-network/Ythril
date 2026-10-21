@@ -69,6 +69,31 @@ describe('the record drawer', () => {
       expect(m.host.querySelector('fieldset')?.disabled, 'editable fields on a view').toBe(true);
     });
 
+    it(`${editor.kind}: no control inside the form can be typed into or clicked on a view, whatever it is called`, async () => {
+      const m = open('@lens');
+      await settle(m.fixture);
+      const controls = [...m.host.querySelectorAll('.drawer form input, .drawer form textarea, .drawer form select, .drawer form button')];
+      expect(controls.length, 'the drawer form holds controls to check').toBeGreaterThan(0);
+      const live = controls.filter(c => !c.matches(':disabled') && (c as HTMLInputElement).readOnly !== true)
+        .map(c => `${c.tagName.toLowerCase()}[name=${c.getAttribute('name') ?? ''}] ${(c.textContent ?? '').trim()}`);
+      expect(live, 'controls a view can still use').toEqual([]);
+    });
+
+    /*
+     * The fieldset disables every control under it - `:disabled` matches them, and the test above holds that - but a disabled text field
+     * looks like an editable one in this theme, and the verify drive read the `disabled` property (which ignores a fieldset) and found
+     * them "enabled". The drawer says it out loud, so neither a user nor a probe has to guess.
+     */
+    it(`${editor.kind}: says in words that the record is read-only on a view, and not on a space`, async () => {
+      const onView = open('@lens');
+      await settle(onView.fixture);
+      expect(onView.host.querySelector('.drawer')?.textContent).toContain('brain.drawer.viewNotice');
+      TestBed.resetTestingModule();
+      const onSpace = open('work');
+      await settle(onSpace.fixture);
+      expect(onSpace.host.querySelector('.drawer')?.textContent).not.toContain('brain.drawer.viewNotice');
+    });
+
     it(`${editor.kind}: Save and editable fields on a space (control)`, async () => {
       const m = open('work');
       await settle(m.fixture);
