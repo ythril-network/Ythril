@@ -16,6 +16,7 @@ import { LIVE_FILE_ROW } from '../../files/live-file-row.js';
 import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
+import { lostSpaceAnswer } from '../../spaces/unknown-space.js';
 import { } from '../../util/request-bounds.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
 
@@ -412,7 +413,8 @@ async function runSpaceMetaUpdate(
   recordChanges?.(decision.plan.audit.before, decision.plan.audit.after);
   const result = await applySpaceMetaUpdate(decision.plan);
   if (result.outcome === 'not_found') {
-    return { content: [{ type: 'text' as const, text: `Space '${spaceId}' not found` }], isError: true };
+    const lost = lostSpaceAnswer(null, spaceId);
+    return { content: [{ type: 'text' as const, text: `Error (${lost.status}): ${lost.body.error}` }], isError: true };
   }
   const notice = noticeOf(result);
   if (result.outcome === 'vote_pending') {

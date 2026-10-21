@@ -25,7 +25,7 @@ import {
 } from './space-act-runner.js';
 import { moveSpaceData, applySpaceRenameToConfig } from './rename.js';
 import { configuredSpaceIds } from './space-lookup.js';
-import { assertNotRetiredSpaceId } from './unknown-space.js';
+import { assertNotRetiredSpaceId, unknownSpaceSentence } from './unknown-space.js';
 import { dropSpaceFromViews } from '../config/views.js';
 import { removeTree } from '../files/remove-tree.js';
 import { unlabelAllFaces } from '../brain/entities.js';
@@ -961,7 +961,7 @@ export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): 
 
 /** This instance's own wipe of `spaceId`, refused before anything is registered when the space is not here or its id is unsafe. */
 function soloWipe(spaceId: string, types?: WipeCollectionType[]): SpaceActRequest {
-  if (!getConfig().spaces.some(s => s.id === spaceId)) throw new Error(`Space '${spaceId}' not found`);
+  if (!getConfig().spaces.some(s => s.id === spaceId)) throw new Error(unknownSpaceSentence(spaceId));
   // The id is embedded in a filesystem path, so it must match the pattern every id is created with (as for removeSpace).
   if (!/^[a-z0-9-]+$/.test(spaceId)) throw new Error(`Invalid spaceId '${spaceId}'`);
   return { kind: 'wipe', localId: spaceId, ...(types && types.length > 0 ? { types } : {}) };

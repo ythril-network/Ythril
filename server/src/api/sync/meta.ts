@@ -14,6 +14,7 @@ import { metaForNetwork, replicatedMetaOf } from '../../sync/replicated-meta.js'
 import { refusePeerReach } from './_shared.js';
 import { inlineResolvableRefs } from '../../spaces/schema-validation.js';
 import { sendCaughtFailure } from '../send-failure.js';
+import { sendLostSpace } from '../write-target-answer.js';
 
 export const syncMetaRouter = Router();
 
@@ -24,7 +25,7 @@ syncMetaRouter.get('/meta', syncRateLimit, requireAuth, (req, res) => {
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (refusePeerReach(res, spaceId, networkId, req.authToken)) return;
     const space = getConfig().spaces.find(s => s.id === spaceId);
-    if (!space) { res.status(404).json({ error: 'Space not found' }); return; }
+    if (!space) { sendLostSpace(req, res, spaceId); return; }
     // Own definitions plus THIS network's layer only — never another network's, never the effective mix (F-39.2).
     const layer = getConfig().networks.find(n => n.id === networkId)?.schemaLayers?.[spaceId];
     const own = space.ownMeta ?? space.meta;

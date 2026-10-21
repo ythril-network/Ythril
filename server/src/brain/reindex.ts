@@ -69,11 +69,12 @@ import { eachSpace, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { intervalJob } from '../util/interval-job.js';
 import type { SpaceConfig, BrainEmbedRecordType } from '../config/types.js';
+import { lostSpaceAnswer } from '../spaces/unknown-space.js';
 
 /** A refusal, carrying the status the contract suite pins. */
 export type ReindexRefusal = {
-  status: 400 | 404 | 409;
-  body: { error: string };
+  status: 400 | 404 | 409 | 410;
+  body: { error: string; code?: string };
 };
 
 export type ReindexPlan = {
@@ -181,9 +182,7 @@ export async function planReindex(input: {
   const { spaceId, space } = input;
   const memberIds = [spaceId];
 
-  if (!space) {
-    return { ok: false, refusal: { status: 404, body: { error: `Space '${spaceId}' not found` } } };
-  }
+  if (!space) return { ok: false, refusal: lostSpaceAnswer(null, spaceId) };
 
   for (const mid of memberIds) {
     if (await activeRun(mid)) {

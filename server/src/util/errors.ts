@@ -25,7 +25,7 @@ export class NotEmbeddedYetError extends NotFoundError {}
  */
 export class ToolRefusal extends Error {
   override readonly name = 'ToolRefusal';
-  constructor(readonly status: 400 | 403 | 404 | 409 | 429, message: string, readonly body?: Readonly<Record<string, unknown>>) {
+  constructor(readonly status: 400 | 403 | 404 | 409 | 410 | 429, message: string, readonly body?: Readonly<Record<string, unknown>>) {
     super(message);
   }
 }

@@ -46,7 +46,8 @@ import { hideDerivedTrees } from '../files/derived-trees.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { registerUploadRoute } from './files-upload.js';
 import { registerMkdirRoute } from './files-mkdir.js';
-import { webhookToken, requireKnownSpace, requireWritePath, requireWriteTarget } from './files-request.js';
+import { webhookToken, requireWritePath, requireWriteTarget } from './files-request.js';
+import { answeredUnknownSpace } from './write-target-answer.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { answerSpillPath } from './brain/spills.js';
 import { sendCaughtFailure } from './send-failure.js';
@@ -228,8 +229,8 @@ async function enrichEntries(memberIds: string[], dirPath: string, entries: File
 // ── GET /api/files/:spaceId ───────────────────────────────────────────────────
 // Stat the path: directory → JSON list, file → stream bytes.
 fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = requireKnownSpace(req, res);
-  if (spaceId === null) return;
+  const spaceId = req.params['spaceId'] as string;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
 
   const filePath = req.query['path'];
   const normalised = typeof filePath === 'string' && filePath.trim() ? filePath : '.';
@@ -339,8 +340,8 @@ registerMkdirRoute(fileStoreRouter);
 // ── GET /api/files/:spaceId/upload-status ─────────────────────────────────────
 // Returns bytes received for an in-progress chunked upload.
 fileStoreRouter.get('/:spaceId/upload-status', globalRateLimit, requireSpaceAuth, async (req, res) => {
-  const spaceId = requireKnownSpace(req, res);
-  if (spaceId === null) return;
+  const spaceId = req.params['spaceId'] as string;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
   const filePath = req.query['path'];
   const total = parseInt(req.query['total'] as string, 10);
   if (typeof filePath !== 'string' || !filePath.trim() || isNaN(total) || total <= 0) {

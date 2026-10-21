@@ -75,6 +75,7 @@ import {
 import { spaceCollection } from './db/space-collection.js';
 import { NOT_CARRIED_BY_BACKUP } from './sync/local-only-fields.js';
 import { REPLICATED_FAMILIES } from './sync/replicated-families.js';
+import { answeredUnknownSpace, sendLostSpace } from './api/write-target-answer.js';
 
 // Server version — one reader, in `util/server-version.ts`. This file and `api/about.ts` each resolved
 // their own path to the same manifest; a third reader (the embed-job revive) is what made the duplication
@@ -382,11 +383,7 @@ export function createApp() {
   // Requires an admin-scoped token and respects TOTP if MFA is enabled.
   app.post('/api/admin/spaces/:spaceId/wipe', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
     const spaceId = req.params['spaceId'] as string;
-    const cfg = getConfig();
-    if (!cfg.spaces.some(s => s.id === spaceId)) {
-      res.status(404).json({ error: `Space '${spaceId}' not found` });
-      return;
-    }
+    if (answeredUnknownSpace(req, res, spaceId)) return;
     // The same `confirm` the tool demands (R4): on a club, a pub/sub this instance publishes, or a network where it is the
     // only member, this instance's yes passes the round and the data goes in this request.
     if (req.body?.confirm !== true) {
@@ -433,7 +430,7 @@ export function createApp() {
     const cfg = getConfig();
     const space = cfg.spaces.find(s => s.id === spaceId);
     if (!space) {
-      res.status(404).json({ error: `Space '${spaceId}' not found` });
+      sendLostSpace(req, res, spaceId);
       return;
     }
 
@@ -500,11 +497,7 @@ export function createApp() {
   // and every document it did not store, by id and reason.
   app.post('/api/admin/spaces/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
     const spaceId = req.params['spaceId'] as string;
-    const cfg = getConfig();
-    if (!cfg.spaces.some(s => s.id === spaceId)) {
-      res.status(404).json({ error: `Space '${spaceId}' not found` });
-      return;
-    }
+    if (answeredUnknownSpace(req, res, spaceId)) return;
 
     /*
      * The body of this route lives in `api/admin-import.ts` now.

@@ -13,21 +13,28 @@
  * space to write to, or `null` after answering.
  */
 import type { Request, Response } from 'express';
-import { answerUnknownSpace } from '../spaces/unknown-space.js';
+import { answerLostSpace, answerUnknownSpace } from '../spaces/unknown-space.js';
 import { retiredAddressingQueryError } from '../brain/retired-write-fields.js';
 
 export function writeSpaceOf(req: Request, res: Response, spaceId: string): string | null {
   const retired = retiredAddressingQueryError(req.query);
   if (retired) { res.status(400).json({ error: retired }); return null; }
-  const unknown = answerUnknownSpace(req, spaceId);
-  if (unknown) { res.status(unknown.status).json(unknown.body); return null; }
-  return spaceId;
+  return answeredUnknownSpace(req, res, spaceId) ? null : spaceId;
 }
 
-/** The existence rule alone, for a door that has no `targetSpace` spelling (a delete, a read, a file route): `true` after answering. */
+/**
+ * The existence rule alone, for a door that has no `targetSpace` spelling (a delete, a read, a file route, a config route): `true` after
+ * answering. The ONE REST wrapper of `answerUnknownSpace` - a route that names a space asks this and nothing else.
+ */
 export function answeredUnknownSpace(req: Request, res: Response, spaceId: string): boolean {
   const unknown = answerUnknownSpace(req, spaceId);
   if (!unknown) return false;
   res.status(unknown.status).json(unknown.body);
   return true;
+}
+
+/** Answer a space the route has already found missing (looked up itself, or lost between a plan and its write): never silent. */
+export function sendLostSpace(req: Request, res: Response, spaceId: string): void {
+  const lost = answerLostSpace(req, spaceId);
+  res.status(lost.status).json(lost.body);
 }

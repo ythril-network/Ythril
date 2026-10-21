@@ -86,6 +86,26 @@ describe('a retired proxy id answers 410 space_retired on every door (Q-531)', {
     assert.deepEqual(wrong, [], 'body doors that do not answer 410 space_retired with the sentence');
   });
 
+  it('the admin routes that name a space in their BODY judge it as a path route does (b100 row 1)', async () => {
+    // Seen red at 743562a5: export-space and apply answered `404 Space 'vr-team' not found`, network create, add-space and fork
+    // `400 Unknown space(s): vr-team`.
+    const net = await d.rest(callers.admin.key, 'POST', '/api/networks', { label: 'vr-net', type: 'closed', spaces: [QA], votingDeadlineHours: 1 });
+    const netId = net.body?.id ?? net.body?.network?.id;
+    assert.ok(netId, `a network to add to and fork: ${fmt(net)}`);
+    const wrong = [];
+    for (const [method, url, body] of [
+      ['POST', '/api/schema-library/export-space', { spaceId: RETIRED, groupName: 'vr-group' }],
+      ['POST', '/api/schema-library/groups/vr-group/apply', { spaceId: RETIRED }],
+      ['POST', '/api/networks', { label: 'vr-net-2', type: 'closed', spaces: [RETIRED], votingDeadlineHours: 1 }],
+      ['POST', `/api/networks/${netId}/spaces`, { spaceId: RETIRED }],
+      ['POST', `/api/networks/${netId}/fork`, { label: 'vr-fork', spaces: [RETIRED] }],
+    ]) {
+      const a = await d.rest(callers.admin.key, method, url, body);
+      if (!gone(a)) wrong.push(`${method} ${url}: ${fmt(a)}`);
+    }
+    assert.deepEqual(wrong, [], 'body-named routes that do not answer 410 space_retired with the sentence');
+  });
+
   it('MCP for every tool: an error carrying the sentence', async () => {
     const tools = TOOL_RIGHTS.filter(r => r.tool !== 'read_spill' && r.needs !== 'admin');
     const wrong = [];

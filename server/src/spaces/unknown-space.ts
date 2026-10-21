@@ -97,6 +97,25 @@ export interface SpaceAsker {
  * `res.status(a.status).json(a.body)`.
  */
 export function answerUnknownSpace(req: SpaceAsker, id: string): SpaceAnswer | null {
-  const caller = req.authToken as ViewOwnerSource | undefined;
-  return unknownSpaceAnswer(caller ? viewOwnerOf(caller) : null, id, req.viewRead?.id === id);
+  return unknownSpaceAnswer(askerOwnerKey(req.authToken), id, req.viewRead?.id === id);
+}
+
+/**
+ * The answer for a space a door has already found missing: {@link unknownSpaceAnswer}, and the plain `404` sentence when the id is back by the
+ * time it is asked (a config reload between the door's read and this one). For the site that looked the space up itself, or lost it between
+ * a plan and its write: it never answers `null`, so a door cannot fall through on a space it did not find, and it never spells the words
+ * itself, so a retired id still answers 410 and the owner of a view still gets the hint.
+ */
+export function lostSpaceAnswer(ownerKey: string | null, id: string, config: Config = getConfig()): SpaceAnswer {
+  return unknownSpaceAnswer(ownerKey, id, false, config) ?? { status: 404, body: { error: unknownSpaceSentence(id) } };
+}
+
+/** {@link lostSpaceAnswer} for a REST route: the answer for a space the route has already found missing. */
+export function answerLostSpace(req: SpaceAsker, id: string): SpaceAnswer {
+  return lostSpaceAnswer(askerOwnerKey(req.authToken), id);
+}
+
+/** The view-owner key of a caller an act was handed (a token record, an OIDC record, or none), for {@link unknownSpaceAnswer}. */
+export function askerOwnerKey(caller: unknown): string | null {
+  return caller ? viewOwnerOf(caller as ViewOwnerSource) : null;
 }

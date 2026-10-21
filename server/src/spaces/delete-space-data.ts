@@ -29,9 +29,9 @@
  */
 import { WIPE_COLLECTION_TYPES, wipeResultOf, type WipeCollectionType } from './lifecycle.js';
 import { decidedBy, wipeSpaceAsRequested, wipeTypesOf, type WipeOutcome } from './wipe-vote.js';
-import { getConfig } from '../config/loader.js';
 import { queuedActBody, spaceActFailureAnswer } from './space-act-failure.js';
 import type { ToolResult } from '../mcp/tools/types.js';
+import { unknownSpaceAnswer } from './unknown-space.js';
 
 export interface DeleteSpaceDataArgs {
   space: string;
@@ -41,7 +41,7 @@ export interface DeleteSpaceDataArgs {
 
 export type DeleteSpaceDataResult =
   /** The caller got it wrong. `status` is the HTTP code the REST door answers; MCP renders the message. */
-  | { ok: false; status: 400 | 404; error: string }
+  | { ok: false; status: 400 | 404 | 410; error: string }
   /** What the wipe came to (`wipeSpaceAsRequested`), and the canonical types it covered (`null` = all). */
   | { ok: true; outcome: WipeOutcome; types: WipeCollectionType[] | null };
 
@@ -55,9 +55,8 @@ export type DeleteSpaceDataResult =
 export async function deleteSpaceData(args: DeleteSpaceDataArgs): Promise<DeleteSpaceDataResult> {
   const { space } = args;
 
-  if (!getConfig().spaces.some(s => s.id === space)) {
-    return { ok: false, status: 404, error: `Space '${space}' not found` };
-  }
+  const unknown = unknownSpaceAnswer(null, space);
+  if (unknown) return { ok: false, status: unknown.status, error: unknown.body.error };
   if (args.confirm !== true) {
     return { ok: false, status: 400, error: '`confirm: true` required' };
   }

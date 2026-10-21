@@ -24,6 +24,7 @@ import { ingestRuns, INGEST_BUSY, type IngestRun } from './ingest-runs.js';
 import { holdsRung, rungRefusal } from '../auth/reachable-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { consumeHeavyToolCall, HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
+import { unknownSpaceAnswer } from '../spaces/unknown-space.js';
 
 /** The refusal a caller over the rail gets, the same words on both doors. */
 export const INGEST_RATE_LIMITED = `ingest is rate limited — at most ${HEAVY_CALLS_PER_WINDOW} runs a minute per token; try again shortly`;
@@ -48,7 +49,7 @@ function productionDeps(spaceId: string): IngestDeps {
 
 export type BeginIngest =
   | { status: 202; run: IngestRun }
-  | { status: 400 | 403 | 404 | 429; error: string }
+  | { status: 400 | 403 | 404 | 410 | 429; error: string }
   | { status: 409; error: string; refusals: string[] };
 
 export async function beginIngest(
@@ -56,7 +57,8 @@ export async function beginIngest(
   /** Who the rail counts against: the calling token's id, or its IP when it has none. */
   callerKey: string,
 ): Promise<BeginIngest> {
-  if (!getConfig().spaces.some(s => s.id === spaceId)) return { status: 404, error: `Space '${spaceId}' not found` };
+  const unknown = unknownSpaceAnswer(null, spaceId);
+  if (unknown) return { status: unknown.status, error: unknown.body.error };
   // A run lands in the space the door named (a view never writes: the doors answer one as an unknown space). The grant of a START - write
   // on knowledge there - was judged by the door's guard; a missing matrix holds no rung, so it is refused here as well.
   if (!rights || !holdsRung(rights, spaceId, 'knowledge', 'write')) return { status: 403, error: rungRefusal('write', 'knowledge', spaceId) };

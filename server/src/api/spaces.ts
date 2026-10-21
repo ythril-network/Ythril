@@ -49,7 +49,7 @@ import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { sendCaughtFailure, sendStoreFailure } from './send-failure.js';
-import { answeredUnknownSpace } from './write-target-answer.js';
+import { answeredUnknownSpace, sendLostSpace } from './write-target-answer.js';
 
 export const spacesRouter = Router();
 
@@ -352,7 +352,7 @@ spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), den
   const result = await applySpaceMetaUpdate(decision.plan);
   if (result.outcome === 'not_found') {
     // Only reachable if the space was deleted between the plan and the write.
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
   if (result.outcome === 'vote_pending') {
@@ -371,7 +371,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === id);
   if (!space) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
 
@@ -432,7 +432,7 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
   // meta is rebuilt from network layers keeps the edit.
   const updated = commitOwnMetaEdit(id, base => withTypeSchemas(base, parsed.data.typeSchemas));
   if (!updated) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
   // Full-replace: `previousTypeSchemas` was read before the write, so this is a true before/after. The
@@ -451,7 +451,7 @@ spacesRouter.get('/:id/meta', globalRateLimit, requireSpaceAuthScoped('id'), asy
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === id);
   if (!space) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
 
@@ -472,7 +472,7 @@ spacesRouter.get('/:id/completeness', globalRateLimit, requireSpaceAuthScoped('i
   const id = req.params['id'] as string;
   const space = getConfig().spaces.find(s => s.id === id);
   if (!space) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
   const facts = await gatherCompletenessFacts(readSpacesOfRequest(req, id));
@@ -507,7 +507,7 @@ spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === id);
   if (!space) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
 
@@ -556,7 +556,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === id);
   if (!space) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
 
@@ -586,7 +586,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   // Merge the new type definition in, through the own definitions (F-39.2) so a layered space keeps the edit.
   const updated = commitOwnMetaEdit(id, base => withType(base, kt, typeName, parsed.schema));
   if (!updated) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
 
@@ -613,7 +613,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === id);
   if (!space) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
 
@@ -640,7 +640,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
   // replicated schema is additive, so only the network can take its own type away.
   const updated = commitOwnMetaEdit(id, base => withoutType(base, kt, typeName));
   if (!updated) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
 
@@ -713,7 +713,7 @@ spacesRouter.delete('/:id', globalRateLimit, requireAdminMfaScoped('id'), async 
 
   const space = cfg.spaces.find(s => s.id === id);
   if (!space) {
-    res.status(404).json({ error: `Space '${id}' not found` });
+    sendLostSpace(req, res, id);
     return;
   }
 
