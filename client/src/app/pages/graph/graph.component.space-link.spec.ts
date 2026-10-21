@@ -37,11 +37,11 @@ import { GraphComponent } from './graph.component';
 
 const EN: Record<string, string> = JSON.parse(readFileSync(resolve(CLIENT_ROOT, 'public/assets/i18n/en.json'), 'utf8'));
 
-function open(space: string) {
+function open(space: string, metaAsked: string[] = []) {
   const api = {
     getMe: () => of({ readOnly: false }),
     listSpaces: () => of({ spaces: [{ id: 'qa', label: 'qa' }, { id: 'ops', label: 'ops' }] }),
-    getSpaceMeta: () => of({ typeSchemas: {} }),
+    getSpaceMeta: (id: string) => { metaAsked.push(id); return of({ typeSchemas: {} }); },
   } as any;
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
@@ -85,5 +85,20 @@ describe('the standalone Graph page and ?space= (Q-531)', () => {
     fixture.detectChanges();
     expect(c.activeSpaceId()).toBe('@lens');
     expect(notice(el)).toBe('');
+  });
+
+  // Found by the Q-531 verify probe (2026-10-21): the Graph tab on a view asked GET /api/spaces/@team/meta and got 404 - a view has no meta of
+  // its own (plan "Client": config reads are not available for a personal view), so the page must not ask, as the Brain page already does not.
+  it('a view asks for no space meta, a space does', () => {
+    const asked: string[] = [];
+    const { fixture } = open('@lens', asked);
+    TestBed.inject(ViewsStore).load();
+    flushViews(TestBed.inject(HttpTestingController), [VIEW_LENS]);
+    TestBed.tick();
+    fixture.detectChanges();
+    expect(asked, `the Graph page asked a view's meta: ${JSON.stringify(asked)}`).not.toContain('@lens');
+    const control: string[] = [];
+    open('ops', control).fixture.detectChanges();
+    expect(control, 'a space still loads its meta').toContain('ops');
   });
 });
