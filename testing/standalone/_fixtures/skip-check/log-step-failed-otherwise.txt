@@ -1,0 +1,4 @@
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.1000000Z ##[group]Run node scripts/unexpected-skips.mjs --results test-results
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.1000001Z node scripts/unexpected-skips.mjs --results test-results
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.1000002Z ##[endgroup]
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.5000000Z ##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.

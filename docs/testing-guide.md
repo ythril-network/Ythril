@@ -47,7 +47,7 @@ narrowed like that is recorded as a subset, never as the whole suite.
   does. Runs a few files at a time, because every one of them shares one database and the full width ran it out of memory.
   The kind is derived from the imports, never from the file's name. Importing the harness also keeps the local
   embedding model offline with an empty cache, so no database test downloads a model inside its timeout; a test that
-  needs ranking uses the stub embedder (`EMBEDDING_URL`), and no test sets the model variables itself.
+  needs ranking uses the stub embedder (`EMBEDDING_URL`), and no database test sets the model variables itself.
 - **instance**: declares `@needs-instance` in its header comment and drives a running Ythril. Runs one file at a time.
 
 You do not choose the kind: write the file and the split reads it. `npm run test:standalone` refuses to start when

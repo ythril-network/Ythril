@@ -10,7 +10,8 @@
  *   regions are the wrong ones and a database batch runs against a machine with no database.
  * - **It skips a gate.** The flag is written as an `if` around "the slow part", a step is added below it later, and the
  *   static run quietly leaves out one of the checks it exists to run.
- * - **It says PASSED.** `~/.claude/hooks/preflight-mark.js` copies the full run's verdict line; a static run that prints
+ * - **It says PASSED.** `~/.claude/hooks/preflight-mark.js` records a pass on exit 0 and refuses one whose output says
+ *   "not a push pass", which is what the static verdict says; a static run that prints
  *   `Preflight PASSED` is a push pass nobody earned. An unknown argument (`--statc`) that falls through to the FULL run is
  *   the mirror image: the person asked for a minute and got three, or asked for a subset and the mark records a full one.
  *
@@ -509,6 +510,12 @@ describe('scripts/preflight.mjs under --static (the real file, read as text)', (
   it('every other step runs under --static: a step added later is static unless a guard says it is a suite', () => regionHolds(REAL, 'steps'));
 
   it('the static verdict is not the full run\'s "Preflight PASSED", and that string is never printed under --static', () => regionHolds(REAL, 'verdict'));
+
+  it('the static verdict says "not a push pass", the words ~/.claude/hooks/preflight-mark.js refuses to record on exit 0', () => {
+    // The mark records on exit 0, and a static run that passes exits 0: these words in the code (not a comment) are what
+    // keep it from being recorded, whatever command the project's preflight slot names.
+    assert.match(stripComments(REAL), /not a push pass/i, 'the static verdict no longer says "not a push pass", so preflight-mark would record it as the pass');
+  });
 
   it("the static run labels its timing scope 'static', not 'subset'", () => regionHolds(REAL, 'scope'));
 

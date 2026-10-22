@@ -403,7 +403,8 @@ try {
 }
 
 console.log('\n' + '='.repeat(76));
-// A static run is never a push pass: its verdict never says PASSED, which is the line preflight-mark.js records.
+// A static run is never a push pass: its verdict never says PASSED, and it says "not a push pass", which
+// ~/.claude/hooks/preflight-mark.js refuses to record even though the run exits 0.
 if (failures.length === 0) {
   console.log(STATIC
     ? 'Preflight STATIC passed - not a push pass. The database half, the client unit tests and the production build did not run.'

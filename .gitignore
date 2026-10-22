@@ -74,6 +74,8 @@ npm-debug.log*
 *.txt
 # ...but never ignore dependency manifests (e.g. Python sidecars' requirements.txt) — they're source.
 !**/requirements.txt
+# ...nor a test fixture written as text (the skip-check logs): a fixture a clone lacks fails CI on ENOENT.
+!testing/**/_fixtures/**/*.txt
 
 # TypeScript build info
 *.tsbuildinfo

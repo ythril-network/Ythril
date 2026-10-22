@@ -401,7 +401,9 @@ export function summariseSuite({ texts, root }) {
   const complete = logs.length > 0 && logs.every(l => l.complete) && malformed === 0;
   const outcome = c.failed ? 'failed' : c.cancelled ? 'cancelled' : complete ? 'passed' : 'incomplete';
   const scopes = logs.map(l => l.end?.scope);
-  const scope = scopes.length && scopes.every(s => s === 'full') ? 'full' : scopes.includes('files') ? 'files' : 'subset';
+  // A static preflight's batches all say 'static'; a mix of scopes is a subset.
+  const scope = scopes.length && scopes.every(s => s === 'full') ? 'full'
+    : scopes.length && scopes.every(s => s === 'static') ? 'static' : scopes.includes('files') ? 'files' : 'subset';
   const starts = logs.map(l => isoOrNull(l.end?.startedAt)).filter(Boolean).sort();
   const ends = logs.map(l => isoOrNull(l.end?.endedAt)).filter(Boolean).sort();
 
