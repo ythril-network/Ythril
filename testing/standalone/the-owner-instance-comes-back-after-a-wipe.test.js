@@ -216,7 +216,8 @@ const gitCall = (r, text) => r.calls.findIndex((c) => c.startsWith('git') && c.i
 
 // Parenthesised: it is passed as a command argument, where a bare hashtable literal does not parse.
 const RECORD_PS = `([pscustomobject]@{ schema = 1; project = 'ythril'; workingDir = '${REPO}'; configFiles = @('${FILES[0]}', '${FILES[1]}'); commit = '${HEAD}'; services = [pscustomobject]@{ ythril = [pscustomobject]@{ image = 'ythril-local'; build = $null; binds = @() }; 'ythril-mongo' = [pscustomobject]@{ image = '${MONGO_IMAGE}'; build = $null; binds = @() } } })`;
-const STATE = 'state\\owner-instance.json';
+// Built with the host's separator: the cases also run under pwsh on Linux (CI), where a backslash is part of a file name.
+const STATE = join('state', 'owner-instance.json');
 
 // ── the cases: files to lay down, PowerShell that sets $V, and what must hold ───────────────────────────────────────
 
@@ -450,7 +451,8 @@ const CASES = [
     } },
   { name: 'a failed command\'s error text shows a build argument as NAME=*** and never its value',
     // The value reaches stderr through the environment, so the scriptblock's own text does not carry it.
-    body: `$env:B64_TEST_VALUE = '${BUILD_SECRET}'; $V = try { Invoke-Native -Command { cmd /c 'echo %B64_TEST_VALUE% 1>&2 & exit 3' } -ArgumentList @('build', '--build-arg', 'NPM_TOKEN=${BUILD_SECRET}', '--build-arg=OTHER=${BUILD_SECRET}2', '-t', 'img') } catch { $_.Exception.Message }`,
+    // The child is the PowerShell running these cases (powershell.exe here, pwsh on CI), never cmd, which Linux has not got.
+    body: `$env:B64_TEST_VALUE = '${BUILD_SECRET}'; $self = (Get-Process -Id $PID).Path; $V = try { Invoke-Native -Command { & $self -NoProfile -Command '[Console]::Error.WriteLine($env:B64_TEST_VALUE); exit 3' } -ArgumentList @('build', '--build-arg', 'NPM_TOKEN=${BUILD_SECRET}', '--build-arg=OTHER=${BUILD_SECRET}2', '-t', 'img') } catch { $_.Exception.Message }`,
     expect: (r) => {
       assert.equal(r.error, null, `the case failed: ${r.error}`);
       assert.match(r.value, /exited 3/, `the command did not fail as expected: ${r.value}`);
@@ -461,18 +463,18 @@ const CASES = [
 
   // U4b: a probe is bounded per call
   { name: 'Invoke-Native -FilePath returns stdout lines and throws a non-zero exit naming its stderr',
-    body: `$ok = Invoke-Native -FilePath 'cmd.exe' -ArgumentList @('/c', 'echo hello') -TimeoutSeconds 30; try { Invoke-Native -FilePath 'cmd.exe' -ArgumentList @('/c', 'echo boom 1>&2 & exit 4') -TimeoutSeconds 30 | Out-Null; $msg = $null } catch { $msg = $_.Exception.Message }; $V = @{ ok = @($ok); msg = $msg }`,
+    body: `$self = (Get-Process -Id $PID).Path; $ok = Invoke-Native -FilePath $self -ArgumentList @('-NoProfile', '-Command', 'Write-Output hello') -TimeoutSeconds 30; try { Invoke-Native -FilePath $self -ArgumentList @('-NoProfile', '-Command', '[Console]::Error.WriteLine(''boom''); exit 4') -TimeoutSeconds 30 | Out-Null; $msg = $null } catch { $msg = $_.Exception.Message }; $V = @{ ok = @($ok); msg = $msg }`,
     expect: (r) => {
       assert.equal(r.error, null, `the case failed: ${r.error}`);
       assert.deepEqual(r.value.ok.map((s) => s.trim()), ['hello']);
       assert.ok(r.value.msg && /exited 4/.test(r.value.msg) && r.value.msg.includes('boom'), `the failure is not reported: ${r.value.msg}`);
     } },
   { name: 'Invoke-Native -TimeoutSeconds ends a command that does not finish, naming the command and the bound',
-    body: `${MUST_EXIST('Invoke-Native')} $sw = [Diagnostics.Stopwatch]::StartNew(); try { Invoke-Native -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 60') -TimeoutSeconds 2 | Out-Null; $msg = $null } catch { $msg = $_.Exception.Message }; $V = @{ msg = $msg; ms = $sw.ElapsedMilliseconds }`,
+    body: `${MUST_EXIST('Invoke-Native')} $self = (Get-Process -Id $PID).Path; $sw = [Diagnostics.Stopwatch]::StartNew(); try { Invoke-Native -FilePath $self -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 60') -TimeoutSeconds 2 | Out-Null; $msg = $null } catch { $msg = $_.Exception.Message }; $V = @{ msg = $msg; ms = $sw.ElapsedMilliseconds; self = $self }`,
     expect: (r) => {
       assert.equal(r.error, null, `the case failed: ${r.error}`);
       assert.ok(r.value.msg, 'a command that outlived its bound was waited for');
-      assert.ok(r.value.msg.includes('powershell.exe') && /\b2 s\b/.test(r.value.msg), `the throw does not name the command and the bound: ${r.value.msg}`);
+      assert.ok(r.value.msg.includes(r.value.self) && /\b2 s\b/.test(r.value.msg), `the throw does not name the command and the bound: ${r.value.msg}`);
       assert.ok(r.value.ms < 30000, `the bound did not end the wait: ${r.value.ms} ms`);
     } },
 
@@ -486,18 +488,20 @@ const CASES = [
   restoreCase('Restore builds each built service tagged as recorded, with GIT_REVISION, from the worktree', {
     expect: (r) => {
       assert.equal(r.value.msg, null, `Restore threw: ${r.value.msg}`);
-      const wt = r.value.wt;
-      const web = buildCall(r, 'ythril-local');
-      const render = buildCall(r, 'ythril-doc-render:0.1.0');
+      // Separators compared as one spelling: Join-Path writes the host's, and the cases also run under pwsh on Linux.
+      const slash = (s) => s.replaceAll('\\', '/');
+      const wt = slash(r.value.wt);
+      const web = slash(buildCall(r, 'ythril-local') ?? '');
+      const render = slash(buildCall(r, 'ythril-doc-render:0.1.0') ?? '');
       assert.ok(web, `ythril was not built among ${JSON.stringify(r.calls)}`);
       assert.ok(render, `doc-render was not built among ${JSON.stringify(r.calls)}`);
-      for (const [call, ctx] of [[web, wt], [render, `${wt}\\sidecars\\doc-render`]]) {
+      for (const [call, ctx] of [[web, wt], [render, `${wt}/sidecars/doc-render`]]) {
         assert.ok(call.includes(`--build-arg GIT_REVISION=${OLD}`), `no GIT_REVISION=<recorded commit>: ${call}`);
         assert.ok(call.endsWith(` ${ctx}`), `not built from the worktree (${ctx}): ${call}`);
-        assert.ok(!call.includes(REPO), `a path of the live checkout is in the build: ${call}`);
+        assert.ok(!call.includes(slash(REPO)), `a path of the live checkout is in the build: ${call}`);
       }
       assert.ok(web.includes('--build-arg NODE_VERSION=22'), `the recorded argument's value was not read from the config: ${web}`);
-      assert.ok(web.includes(`-f ${wt}\\Dockerfile`), `the dockerfile is not the worktree's: ${web}`);
+      assert.ok(web.includes(`-f ${wt}/Dockerfile`), `the dockerfile is not the worktree's: ${web}`);
     } }),
   restoreCase('Restore runs up --no-build --wait after the builds and marks the record restored', {
     expect: (r) => {
