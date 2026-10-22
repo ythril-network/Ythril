@@ -22,7 +22,8 @@
  *  - a function (or an inline route handler, `_routes.mjs`) is a reader of the files collection when it NAMES that collection
  *    — `spaceCollection(x, 'files')`, a `${id}_files` template, or a name computed at run time (`spaceCollection(x, kind)`,
  *    `${id}_${suffix}`), which MAY be the files collection and is held to the rule rather than guessed away — and READS
- *    (`find`, `findOne`, `aggregate`, `countDocuments`, `distinct`, or a read helper: by id, or `distinctStringsOf`), or hands the collection out;
+ *    (`find`, `findOne`, `aggregate`, `countDocuments`, `distinct`, or a read helper: by id, `distinctStringsOf`, or the `_id` pager
+ *    `idKeysetPage` / `eachIdPage`), or hands the collection out;
  *  - it CARRIES a predicate when its body names one of the predicates `live-file-row.ts` exports (the exports are read from
  *    the module, so a predicate added there joins the rule and a renamed one cannot hide behind a stale name).
  *
@@ -63,6 +64,8 @@ const EXEMPT = {
   'server/src/api/sync/docs.ts:oneById': 'the narrowing is the family\'s own `pushFilter`, which for file metadata IS `LIVE_FILE_ROW` (sync/replicated-families.ts), so a read by id serves exactly what a page would; naming it here would be a second copy and the other five families must not take it',
   'server/src/sync/arrival-recording.ts:watchArrivals': 'reads the stored copy a recorded arrival replaces, only for a family with a type schema (`schemaKindOf` answers undefined for files and links before any read), so the collection it computes is never the files one',
   'server/src/brain/edge-endpoint-names.ts:resolveEndpointName':'returns the id before its one read when the kind is `file` (a file endpoint\'s display name IS its path), so the collection it computes is never the files one',
+  'server/src/brain/edge-endpoint-names.ts:withEndpointNames': 'skips every `file` endpoint before it groups the ids (a file endpoint\'s display name IS its path) and reads only the entity, fact and chrono kinds its map is typed to, so the collection it computes is never the files one',
+  'server/src/brain/recall.ts:introduceLexicalOnly': 'its `eligibility` argument IS the recall\'s own predicate for this type, `recallPredicate(tags, filter, type)` at its one call, carrying the any-tier clause for a file recall (brain/recall-filter.ts); a copy here would let the introduced records and the vector path disagree about what is eligible',
   'server/src/brain/lexical-search.ts:lexicalSearch': 'its `eligibility` argument IS the recall\'s own predicate for this type, built by `recallPredicate` (brain/recall-filter.ts) and carrying the any-tier clause for a file recall; a copy here would let this channel and the vector path disagree about what is eligible, which is the thing that one builder exists to stop',
   'server/src/brain/recall.ts:recallByType': 'its eligibility predicate is `recallPredicate(tags, filter, knowledgeType)`, which carries the any-tier clause for a file recall (brain/recall-filter.ts) — the one place the vector path, the predicate path, the fresh-write scan and the lexical channel all read it from',
   // ── it handles the collection, not the files in it
@@ -99,6 +102,8 @@ const EXEMPT = {
   'server/src/sync/arrivals.ts:writeArrivals': 'the arrival writer reads the stored copy and its `deletedAt` to refuse an arrival onto a row this instance flagged (arrivals.ts, "Except onto a row this instance FLAGGED"): a predicate would hide the very row it decides on',
   'server/src/files/tombstones.ts:shadowedAgainst': 'decides whether a held file tombstone shadows an arriving copy; it reads the stored row, flagged included, because the flag is what keeps a stale peer copy from resurrecting a deleted file',
   'server/src/files/tombstones.ts:shadowedByParent': 'the same shadow decision for a child path: reads the stored parent row, flagged included',
+  'server/src/files/tombstones.ts:readFileRows': 'reads what a pending tombstone records of the version it erases (`rowSeq`, `contentHash`) at each path an act removes; a flagged row is the last version this instance held at that path, so it is what the tombstone erases, and a predicate would leave the tombstone bare, which shadows less',
+  'server/src/sync/file-meta-write.ts:authoredKeysRestoreRemoves': 'counts the authored keys a restore takes off the rows it replaces; the restore replaces every stored row by id, flagged ones included (it is unguarded and brings the backup\'s flag back), so a predicate would leave a flagged row\'s removed keys uncounted while the write still removes them',
   'server/src/files/peer-tombstone-apply.ts:applyPeerFileTombstones': 'applies a peer\'s file tombstone to the rows held; a row already flagged must be seen so it is not flagged a second time (markFileMetaDeleted)',
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones': 'applies a peer\'s record tombstones; reads the stored rows it is about to remove',
   'server/src/files/file-meta.ts:upsertFileMeta': 'a re-upload of a path whose row is flagged REVIVES it, so the upload door has to read the flagged row to write over it',
@@ -121,6 +126,9 @@ const EXEMPT = {
   'server/src/brain/merge.ts:relinkAndAbsorb': 'by parent: re-points face chunk rows from the absorbed entity to the survivor; children never carry the flag',
   'server/src/brain/entities.ts:findEntityReferences': 'by parent: finds the face chunk rows that name an entity, and its edges; children never carry the flag',
   'server/src/spaces/face-width-change.ts:storedFaceDescriptorCount': 'by parent: counts stored face descriptors (`faceEmbedding`), which only child rows hold',
+  // ── it must SEE the flagged row, through the `_id` pager (Q-481)
+  'server/src/files/leaked-rows-repair.ts:derivedRowsPage': 'the leaked-rows repair reads every row by `_id`, any kind and flagged ones included, and decides each itself: a derived row whose parent is gone is removed, a flagged one is kept by its own `deletedAt` check; a predicate on the read would make the cursor skip the rows it decides on and could wedge a page on a run of rows it excluded',
+  'server/src/spaces/schema-validate-door.ts:walkStored': 'the stored-data schema validation walks every record of each member collection by `_id`, files included, because a flagged row is stored data the schema still governs; its `progress.total` counts the whole collection, and a predicate here would make the walk answer for fewer rows than it says it checked',
 };
 
 const INDEX = moduleIndex('server/src');
@@ -133,10 +141,17 @@ const NAMES = [
   ['computed key', /spaceCollection\s*\(\s*[^,()]+,\s*[^'"\s)][^)]*\)/],
   ['computed suffix', /`[^`]*\$\{[^}]*\}_\$\{[^}]*\}`/],
 ];
-/** A read of a collection: a driver call, or a read helper (by id, or the distinct values of a field). A global regex is built fresh per use. */
+/**
+ * A read of a collection: a driver call, or a read helper (by id, the distinct values of a field, or the `_id` pager). A global regex
+ * is built fresh per use. A type argument may nest one level (`.find<Record<string, X>>(`,
+ * `idKeysetPage<{ _id: string } & Record<string, unknown>>(`), on every call: a matcher that took only a flat one did not see
+ * seven readers of the files collection, which this table had never judged (Q-481).
+ */
+const TYPE_ARGS = '(?:<(?:[^<>()]|<[^<>()]*>)*>)?';
 const readCalls = (body) => [...body.matchAll(new RegExp(
-  '\\.\\s*(?:find|findOne|aggregate|countDocuments|distinct)\\s*(?:<[^>(]*>)?\\s*\\('
-  + '|\\b(?:readStoredById|readRowsById|readRecordsById|distinctStringsOf)\\s*(?:<[^>(]*>)?\\s*\\(', 'g'))]
+  `\\.\\s*(?:find|findOne|aggregate|countDocuments|distinct)\\s*${TYPE_ARGS}\\s*\\(`
+  + `|\\b(?:readStoredById|readRowsById|readRecordsById|distinctStringsOf)\\s*${TYPE_ARGS}\\s*\\(`
+  + `|\\b(?:idKeysetPage|eachIdPage)\\s*${TYPE_ARGS}\\s*\\(`, 'g'))]
   // `.find(` of an ARRAY takes a callback: `x => …` or `(x) => …`. A cursor's takes a filter.
   .filter(m => !(m[0].includes('find') && /^\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(body.slice(m.index + m[0].length))));
 /** Hands the collection out for a caller to read. */
@@ -196,6 +211,14 @@ describe('the derivation reads what a reader is, on literal shapes', () => {
     assert.equal(run('const docs = await readRowsById<IdDoc>(spaceCollection(space, collectionForRefKind(kind)), ids, \'all\');').length, 1);
     assert.equal(run('const doc = await col(`${spaceId}_${COLLECTION[recordType]}`).findOne(asFilter({ _id: id }));').length, 1);
   });
+  it('a read through the _id pager, page by page or the whole walk, with a nested type argument', () => {
+    const page = run("const { rows } = await idKeysetPage<{ _id: string } & Record<string, unknown>>({ collection: spaceCollection(spaceId, 'files'), filter: {}, projection: { _id: 1 }, size: 10 }, after);");
+    assert.equal(page.length, 1, 'idKeysetPage is not a read helper of the derivation: a reader that pages by _id is invisible to it');
+    assert.equal(page[0].carries, false);
+    const walk = run("await eachIdPage<{ _id: string }>({ collection: spaceCollection(spaceId, 'files'), filter: { ...LIVE_FILE_ROW }, projection: { _id: 1 }, size: 10 }, async rows => {});");
+    assert.equal(walk.length, 1, 'eachIdPage is not a read helper of the derivation');
+    assert.equal(walk[0].carries, true);
+  });
   it('a helper that hands the collection out', () => {
     assert.equal(run("return col<FileMetaDoc>(spaceCollection(spaceId, 'files'));").length, 1);
   });
@@ -212,7 +235,9 @@ describe('the derivation finds the readers at all, so the rule cannot pass by fi
     const keys = new Set(READERS.map(r => r.key.replace('server/src/', '')));
     for (const k of ['brain/entity-refs.ts:missingRefs', 'brain/edge-endpoint-names.ts:resolveEndpointName',
       'brain/traverse-bodies.ts:withTraverseBodies', 'files/dispatch.ts:readPriorProcessing', 'files/disk-against-rows.ts:heldRowsFor',
-      'brain/space-shape.ts:build', 'mcp/tools/spaces.ts:space_statsTool.handle', 'brain/embed-record.ts:embedStoredRecord']) {
+      'brain/space-shape.ts:build', 'mcp/tools/spaces.ts:space_statsTool.handle', 'brain/embed-record.ts:embedStoredRecord',
+      // Read through the `_id` pager once Q-481 converts them: a reader whose read is `idKeysetPage` must still be found.
+      'files/file-stamp-report.ts:readCandidates', 'brain/links-conversion.ts:convertSpaceInWalk']) {
       assert.ok(keys.has(k), `${k} reads the files collection and the derivation did not find it — it is blind to that shape`);
     }
     assert.ok([...keys].some(k => k.startsWith('api/brain/search.ts:GET ')),

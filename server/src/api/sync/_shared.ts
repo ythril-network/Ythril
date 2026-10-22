@@ -591,7 +591,7 @@ export function withSchemaViolations<T extends Record<string, unknown>>(
  * derived itself. Both ends go through this one function, and the key list is read from the schema, so a key added to
  * the schema travels and a key added to the document does not.
  */
-const FILE_META_WIRE_KEYS = Object.keys(IncomingFileMetaDoc.shape);
+export const FILE_META_WIRE_KEYS: readonly string[] = Object.keys(IncomingFileMetaDoc.shape);
 export function fileMetaForWire(doc: object): Record<string, unknown> {
   const src = doc as Record<string, unknown>;
   return Object.fromEntries(FILE_META_WIRE_KEYS.filter(k => src[k] !== undefined).map(k => [k, src[k]]));

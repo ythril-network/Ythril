@@ -32,7 +32,8 @@ import { col, asFilter } from '../db/mongo.js';
 import { withSeq } from '../util/seq.js';
 import { getConfig } from '../config/loader.js';
 import { updateSpace } from '../spaces/spaces.js';
-import { reconcileLinksForDocument, LINK_BEARING_COLLECTIONS } from './links.js';
+import { reconcileLinksForDocument, documentLinkProjection, LINK_BEARING_COLLECTIONS } from './links.js';
+import { idKeysetPage } from '../db/id-keyset-page.js';
 import { LINK_CLASSES, legacyField } from './link-adjacency.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -222,28 +223,25 @@ async function convertSpaceInWalk(spaceId: string): Promise<ConversionReport> {
   for (const [suffix, fromKind] of Object.entries(LINK_BEARING_COLLECTIONS)) {
     if (!fromKind) continue;
     report.scanned[suffix] = 0;
-    let after: string | undefined;
-
-    for (;;) {
-      // A link record replicates, so converting a deleted file's legacy array would push a link whose source the peer
-      // holds a tombstone for. The preview above carries the same narrowing, so the two cannot disagree.
-      const filter: Record<string, unknown> = {
-        ...(suffix === 'files' ? LIVE_FILE_ROW : {}),
-        ...(after === undefined ? {} : { _id: { $gt: after } }),
-      };
-      const docs = await col<{ _id: string }>(`${spaceId}_${suffix}`)
-        .find(asFilter<{ _id: string }>(filter))
-        .sort({ _id: 1 })
-        .limit(PAGE)
-        .toArray() as Array<Record<string, unknown> & { _id: string }>;
-      if (docs.length === 0) break;
-
+    // A link record replicates, so converting a deleted file's legacy array would push a link whose source the peer
+    // holds a tombstone for. The preview above carries the same narrowing, so the two cannot disagree. The page reads what
+    // `reconcileLinksForDocument` builds links from and nothing else: a whole row would carry a vector each.
+    const spec = {
+      collection: `${spaceId}_${suffix}`,
+      filter: suffix === 'files' ? LIVE_FILE_ROW : {},
+      projection: documentLinkProjection(),
+      size: PAGE,
+    };
+    // A plain loop and not a closure handed to `eachIdPage`: `no-boot-migration-on-synced-data` follows a call, not a
+    // block-body closure, so what a page's conversion reaches would be invisible to it.
+    for (let after: string | undefined, end = false; !end;) {
+      const page = await idKeysetPage<Record<string, unknown> & { _id: string }>(spec, after);
       // One bad document must not stop the walk. It is reported by name and counted, and the count is what withholds the
       // marker — a conversion that skipped a record and then claimed completeness is the failure this whole design exists
       // to avoid.
-      const { failed } = await eachUnit(docs, doc => convertDocument(report, suffix, fromKind, doc), doc => `${suffix}/${doc._id}`);
+      const { failed } = await eachUnit(page.rows, doc => convertDocument(report, suffix, fromKind, doc), doc => `${suffix}/${doc._id}`);
       report.failed += failed.length;
-      after = docs[docs.length - 1]?._id;
+      ({ last: after, end } = page);
     }
   }
 

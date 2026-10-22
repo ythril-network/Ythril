@@ -769,8 +769,10 @@ export async function checkDuplicates(
       // Only now fetch the records themselves, and only the ones that actually cleared the threshold —
       // usually none. The scan deliberately returns ids and scores so it never carries record bodies.
       const { commonProject, typeProject } = recallProjection(type);
+      // A near-duplicate is a result the writer is shown: a deleted file's audit row is not one (`notFlaggedIfFile`, nothing
+      // for any other type), as the index half's `recallByType` already holds.
       const docs = await readRowsById<Record<string, unknown>>(
-        collName, unseen.map(f => f._id), { ...commonProject, ...typeProject });
+        collName, unseen.map(f => f._id), { ...commonProject, ...typeProject }, { filter: notFlaggedIfFile(type) });
       const scoreById = new Map(unseen.map(f => [f._id, f.score]));
       for (const doc of docs) {
         doc['score'] = scoreById.get(doc['_id'] as string);
@@ -1046,8 +1048,10 @@ async function hydrateFreshHits(
     const { commonProject, typeProject } = recallProjection(type);
     const collName = `${spaceId}_${KNOWLEDGE_COLLECTION[type]}`;
     try {
+      // Each hydrated row is a recall result, so a file's row flagged since the scan found it is not one (`notFlaggedIfFile`,
+      // the any-tier guard: a file recall ranks chunk, caption and face rows too; nothing for any other type).
       const docs = await readRowsById<Record<string, unknown>>(
-        collName, entries.map(e => e.id), { ...commonProject, ...typeProject });
+        collName, entries.map(e => e.id), { ...commonProject, ...typeProject }, { filter: notFlaggedIfFile(type) });
       const scoreOf = new Map(entries.map(e => [e.id, e.score]));
       for (const d of docs) {
         out.push(mapToRecallResult({ ...d, score: scoreOf.get(d['_id'] as string) }, type));

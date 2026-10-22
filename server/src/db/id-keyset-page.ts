@@ -23,7 +23,8 @@
  *   empty page.
  * - **The bound is the caller's scope, not an option**: the reads go through `col()`, so inside a housekeeping scope each carries
  *   its figure (`a-housekeeping-op-carries-its-bound`). A page that is acted on is acted on by the caller's own writes, which carry
- *   theirs; nothing here writes.
+ *   theirs; nothing here writes. A read OUTSIDE any scope may name a per-page server deadline ({@link IdPageSpec.maxTimeMS}); inside
+ *   one that option is refused, so a page is never bounded by the server alone.
  *
  * It answers one question: which rows are next, by `_id`. A read by a seq position, by another key, or of a list of ids is not this
  * question (`util/seq-keyset.ts`, `db/read-by-id.ts`).
@@ -31,6 +32,7 @@
 import type { Document } from 'mongodb';
 import { col, asFilter } from './mongo.js';
 import { andPredicates } from './and-predicates.js';
+import { boundOperationMs } from './write-bound.js';
 
 /** One page: its rows in `_id` order, the id to resume after, and whether it was the last. */
 export interface IdPage<T> {
@@ -52,6 +54,26 @@ export interface IdPageSpec {
   size: number;
   /** Force the index the cursor walks, where the planner left to choose could read every row of the filter to sort one page. */
   hint?: Readonly<Record<string, 1>>;
+  /**
+   * A server deadline PER PAGE, not per walk, for a read outside any bound scope (a request's own read): a positive integer, sent
+   * on every page's `find`. Refused inside a scope (housekeeping or hold), where a caller's own `maxTimeMS` keeps the lower figure
+   * and takes no driver `timeoutMS`, so a read against a store that stopped answering would be bounded by the server alone; there
+   * the scope bounds the page.
+   */
+  maxTimeMS?: number;
+}
+
+/** Refuse a `maxTimeMS` the pager cannot honour as a per-page server deadline, before any read is sent. */
+function checkedMaxTimeMS(maxTimeMS: unknown): number | undefined {
+  if (maxTimeMS === undefined) return undefined;
+  if (typeof maxTimeMS !== 'number' || !Number.isInteger(maxTimeMS) || maxTimeMS < 1) {
+    throw new Error(`idKeysetPage: maxTimeMS must be a positive integer, got ${String(maxTimeMS)}`);
+  }
+  if (boundOperationMs() !== undefined) {
+    throw new Error('idKeysetPage: maxTimeMS is refused inside a bound scope - the scope bounds each page, and a caller maxTimeMS '
+      + 'there would take no driver timeoutMS');
+  }
+  return maxTimeMS;
 }
 
 /**
@@ -60,10 +82,12 @@ export interface IdPageSpec {
 export async function idKeysetPage<T extends { _id: string }>(spec: IdPageSpec, after: string | undefined): Promise<IdPage<T>> {
   const { collection, filter, projection, size, hint } = spec;
   if (!Number.isInteger(size) || size < 1) throw new Error(`idKeysetPage: size must be a positive integer, got ${size}`);
+  const maxTimeMS = checkedMaxTimeMS(spec.maxTimeMS);
   const cursor = after === undefined ? undefined : { _id: { $gt: after } };
   const rows = await col<Document>(collection)
     .find(asFilter<Document>(andPredicates(filter, cursor) ?? {}), {
       projection, sort: { _id: 1 }, limit: size, ...(hint === undefined ? {} : { hint }),
+      ...(maxTimeMS === undefined ? {} : { maxTimeMS }),
     })
     .toArray() as unknown as T[];
   const last = rows.length > 0 ? String(rows[rows.length - 1]!._id) : undefined;
