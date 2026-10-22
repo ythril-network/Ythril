@@ -51,7 +51,6 @@ import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
 import { withCounterCeiling, withCollectionAsView } from './_write-faults.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 /** Records land here; its counter is refused above CEILING. */
 const S = 'ctrbehind';

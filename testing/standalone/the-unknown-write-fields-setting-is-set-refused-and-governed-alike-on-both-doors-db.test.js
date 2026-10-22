@@ -35,7 +35,6 @@ import { openPushDoor } from './_push-door.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 for (const k of ['SKIP_GLOBAL_RATE_LIMIT', 'SKIP_AUTH_RATE_LIMIT', 'SKIP_SYNC_RATE_LIMIT']) process.env[k] = 'true';
 process.env['YTHRIL_RATE_LIMIT_PER_MINUTE'] ??= '1000000';
 

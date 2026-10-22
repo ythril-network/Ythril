@@ -38,7 +38,6 @@ import { seedActEntry, clearActEntries, deferred, resetRunnerForTest, auditRowsO
 import { restoreModules, takeBackup, restoreAsActs, callDataDoor, restoreEntries, startRestoreActs } from './_restore-act.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const SUITE = 'restorereport';
 const T = { timeout: 90_000 };

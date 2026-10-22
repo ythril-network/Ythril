@@ -42,7 +42,6 @@ import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'softdel';
 /** The second space on the door: the receiver whose copy a flagged row is compared with. */

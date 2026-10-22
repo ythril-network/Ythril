@@ -63,8 +63,6 @@ export const holdForkLock = (mongo, plan, space, factId) => holdDocumentLock(mon
  * @returns {Promise<{ env: object, close: () => Promise<void> }>}
  */
 export async function openStalledWriteDoors({ suite, spaces, mongoPort, mongoQuery, fixtureClient }) {
-  // A merge embeds its survivor inline unless the space suppresses it; never let a test fetch a model.
-  process.env['YTHRIL_MODELS_OFFLINE'] = '1';
   const door = await openPushDoor({
     mongoPort, mongoQuery, fixtureClient,
     // `completeLinkage`: a space's links are converted, as every space's are after its first boot — a holder case that cascades

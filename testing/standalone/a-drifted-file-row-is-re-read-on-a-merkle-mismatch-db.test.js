@@ -33,7 +33,6 @@ import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 /** Not `reread`: the cap's assertions count lines matching /re-?read/ that name the space, and every MERKLE_DIVERGENCE
  *  warning names it — a space called that would make each one count as the re-read speaking. */

@@ -47,7 +47,6 @@ const skip = await mongoSkipReason();
 describe('a queued act is audited when it completes, an awaited one is not', { skip }, () => {
   let mongo;
   before(async () => {
-    process.env['YTHRIL_MODELS_OFFLINE'] = '1';
     mongo = await openTestMongo('act_audit');
     await databaseTakesCollections(mongo);
     await boot(dir, { networks: [] });

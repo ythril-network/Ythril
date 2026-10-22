@@ -38,7 +38,6 @@ const SINCE = '2026-10-16T00:00:00.000Z';
 describe('owed acts are shown to instance administrators only, on both doors', { skip }, () => {
   let mongo; let callTool; let reader; let adminRights;
   before(async () => {
-    process.env['YTHRIL_MODELS_OFFLINE'] = '1';
     mongo = await openTestMongo('owed_view');
     await databaseTakesCollections(mongo);
     ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));

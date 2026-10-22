@@ -40,10 +40,6 @@ const SPACE = 'general';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-query-sort-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
-const EMPTY_CACHE = path.join(tmpDir, 'empty-model-cache');
-fs.mkdirSync(EMPTY_CACHE, { recursive: true });
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-process.env['MODEL_CACHE_DIR'] = EMPTY_CACHE;
 
 let mongo, query, entities;
 const NAMES = ['delta', 'alpha', 'charlie', 'echo', 'bravo'];

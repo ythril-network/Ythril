@@ -37,7 +37,6 @@ import { waitForLiveWrite } from './_active-operations.mjs';
 import { holdForkLock, seedDoorSpace, DOOR_FACT_ID as F, DIVERGENT } from './_stalled-write-doors.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'wipelive';
 /** How long `wipe` is given to (wrongly) return while the write is alive. */

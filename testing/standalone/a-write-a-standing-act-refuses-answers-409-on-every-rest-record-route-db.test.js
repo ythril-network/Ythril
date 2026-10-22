@@ -43,7 +43,6 @@ import { seedActEntry, clearActEntries } from './_space-act-harness.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'actheld409';
 const PREFIX = '/api/brain/spaces/:spaceId/';

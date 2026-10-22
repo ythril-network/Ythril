@@ -35,7 +35,6 @@ import { holdDocumentLock, settleWithin, setWriteBoundForTest } from './_write-f
 const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-planned-timeout-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'plannedtimeout';
 const F = 'bbbbbbbb-0000-4000-8000-0000000000f1';

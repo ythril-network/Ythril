@@ -40,7 +40,6 @@ import { clearActEntries, resetRunnerForTest, untilRunnerIdle } from './_space-a
 import { restoreModules, takeBackup, restoreToTheEnd, restoreAsActs, startRestoreActs } from './_restore-act.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const SUITE = 'restoreindexes';
 const T = { timeout: 90_000 };

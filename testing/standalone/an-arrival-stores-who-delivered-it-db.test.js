@@ -46,7 +46,6 @@ import { openByteDoor } from './_byte-door.mjs';
 import { UPLOAD_DOORS } from './_byte-door-uploads.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'tsdeliv';
 const DELIVERER = 'an-instance-that-pushes';

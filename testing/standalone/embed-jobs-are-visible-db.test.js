@@ -44,12 +44,8 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-embed-jobs-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
-// Unreachable, not merely absent — the same precondition as embed-queue-db.test.js, so a machine that happens to hold
-// the weights cannot turn this suite into a measurement of its own model cache.
-const EMPTY_CACHE = path.join(tmpDir, 'empty-model-cache');
-fs.mkdirSync(EMPTY_CACHE, { recursive: true });
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-process.env['MODEL_CACHE_DIR'] = EMPTY_CACHE;
+// The model is unreachable, not merely absent: the harness sets offline and a cache path that never exists, so a machine
+// that happens to hold the weights cannot turn this suite into a measurement of its own model cache.
 
 let mongo, memory, queue, worker;
 

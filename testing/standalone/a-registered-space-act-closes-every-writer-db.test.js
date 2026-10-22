@@ -43,7 +43,6 @@ import fsp from 'node:fs/promises';
 import { seedActEntry, clearActEntries, deferred } from './_space-act-harness.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const VICTIM = 'closingspace';
 const OTHER = 'openspace';

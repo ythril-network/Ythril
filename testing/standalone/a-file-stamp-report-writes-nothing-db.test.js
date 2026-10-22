@@ -50,7 +50,6 @@ import { waitFor } from '../_shared/wait-for.mjs';
 import { openStampDoor, PEER, PEER_AUTHOR, PEER_CREATED, sha256Of, bytesOf } from './_file-stamp-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'stampwn';
 const AUDIT_OPERATION = 'file.stamps.reported';

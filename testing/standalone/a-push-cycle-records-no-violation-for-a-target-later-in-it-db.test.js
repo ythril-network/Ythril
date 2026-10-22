@@ -32,7 +32,6 @@ import { build } from './_push-door.mjs';
 import { openPullDoor } from './_pull-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'pushwait';
 let door, linkage, writeBound;

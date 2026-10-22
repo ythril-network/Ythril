@@ -15,7 +15,8 @@
  *
  * ## What this stack cannot show, stated
  *
- * The test Mongo here answers every semantic search with "`$vectorSearch` is not supported", so "the held space is absent from a `recall` result list" has no list to read: a recall
+ * A door recall embeds its query first, and the harness keeps the local model offline with no model cached, so a recall here gets no vector and
+ * "the held space is absent from a `recall` result list" has no list to read (the test Mongo has no search service either): a recall
  * that omits `space` is covered through the seed lookup of `similar`, which is resolved before any vector is asked for. The result-list half needs the stack with the search service.
  *
  * ## How it is driven

@@ -32,7 +32,6 @@ import { build } from './_push-door.mjs';
 import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'restoreremoved';
 const T_OLD = '2026-09-01T00:00:00.000Z';

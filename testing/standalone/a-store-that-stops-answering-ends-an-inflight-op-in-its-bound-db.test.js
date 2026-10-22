@@ -47,7 +47,6 @@ import { elapse } from '../_shared/sleep.mjs';
 const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-inflight-bound-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({ instanceId: 'inflight-bound-test', instanceLabel: 'test', tokens: [], networks: [], spaces: [] }), { mode: 0o600 });
 
 const DB = 'ythril_harness_g6inflight';

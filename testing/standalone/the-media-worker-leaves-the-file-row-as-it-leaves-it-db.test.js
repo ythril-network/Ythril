@@ -46,8 +46,6 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-
 const skip = await mongoSkipReason();
 
 const SPACE = 'worker';

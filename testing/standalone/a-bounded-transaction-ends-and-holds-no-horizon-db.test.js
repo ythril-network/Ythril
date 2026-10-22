@@ -70,7 +70,6 @@ import { startDelayedWriteRelay, lsidHex } from './_delayed-write-relay.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-bounded-txn-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 

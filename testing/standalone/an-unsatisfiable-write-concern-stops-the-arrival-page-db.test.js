@@ -38,7 +38,6 @@ import { openPushDoor, build } from './_push-door.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'wcarrival';
 const STANDALONE_TEXT = "cannot use 'w' > 1 when a host is not replicated";

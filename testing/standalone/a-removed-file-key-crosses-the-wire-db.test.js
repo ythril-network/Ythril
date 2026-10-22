@@ -52,7 +52,6 @@ import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { IncomingFileMetaDocV569 } from './_fixtures/incoming-file-meta-doc-v5.6.9.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 /** B, the instance under test as a receiver and a relay; C, the instance behind it (a second space on the one door). */
 const S = 'rmkey';

@@ -55,7 +55,6 @@ import { resetRunnerForTest } from './_space-act-harness.mjs';
 import { loadRunnerIfBuilt, requireFence, settleActs } from './_space-act-modules.mjs';
 import { rowRules } from './_row-rules.mjs';
 
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const S = 'midexch';

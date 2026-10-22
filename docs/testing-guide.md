@@ -12,7 +12,8 @@ Two rules run through everything below, because both were learned the expensive 
 ## Running the suites
 
 Run `npm run preflight` first, always. It runs every structural check that needs no Docker, in one command, and
-`scripts/preflight.mjs` is the list. Then run the suites your change reaches. A maintainer's bundle then has its one full run on
+`scripts/preflight.mjs` is the list (`npm run preflight:static` runs the part that needs no test database and no suite of its
+own, about a minute, and is never a push pass). Then run the suites your change reaches. A maintainer's bundle then has its one full run on
 CI, before its pull request (see [The CI job graph](#the-ci-job-graph)), and a commit made after that run reruns locally only
 the test files its diff reaches.
 
@@ -44,7 +45,9 @@ narrowed like that is recorded as a subset, never as the whole suite.
   makes one, and a local run without one skips that case (`npm run build:client` makes it). Runs at node's default width.
 - **database**: opens the test MongoDB through `testing/standalone/_mongo-harness.mjs`, directly or through a helper that
   does. Runs a few files at a time, because every one of them shares one database and the full width ran it out of memory.
-  The kind is derived from the imports, never from the file's name.
+  The kind is derived from the imports, never from the file's name. Importing the harness also keeps the local
+  embedding model offline with an empty cache, so no database test downloads a model inside its timeout; a test that
+  needs ranking uses the stub embedder (`EMBEDDING_URL`), and no test sets the model variables itself.
 - **instance**: declares `@needs-instance` in its header comment and drives a running Ythril. Runs one file at a time.
 
 You do not choose the kind: write the file and the split reads it. `npm run test:standalone` refuses to start when
@@ -292,6 +295,8 @@ can fix there, and refused in CI unless it is expected.**
   client's Vitest report (`client.json`, written by the client job). A skipped test fails the run unless its reason starts
   `expected-in-ci:` AND its file is on the list; the client suite has no expected skips at all, so anything it does not
   pass or fail is named. It exits 2, not 0, when the results cannot answer (a missing or cut-off file).
+  `node scripts/skip-check.mjs <run id>` reads that step's verdict for one finished run, with the same exit codes; a
+  partial re-run whose gate job did not reach the step answers 2.
 - **Locally**, Windows-only skips and the like stay skips; the refusal is CI's.
 
 A test that needs a precondition (a session, a prior test's output) throws once in its `before` hook or in one assert

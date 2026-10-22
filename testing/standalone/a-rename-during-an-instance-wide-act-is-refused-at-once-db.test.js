@@ -35,7 +35,6 @@ import { openToolDoor } from './_tool-door.mjs';
 import { seedActEntry, clearActEntries, entriesOf, resetRunnerForTest } from './_space-act-harness.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const T = { timeout: 45_000 };
 const FLOOR = 2;
 /** How long a refusal may take. A rename held behind an act waits for the act, which these rows never complete. */

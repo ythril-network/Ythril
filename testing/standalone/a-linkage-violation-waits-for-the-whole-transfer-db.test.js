@@ -27,7 +27,6 @@ import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'linkwait';
 let door;

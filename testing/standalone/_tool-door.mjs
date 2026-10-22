@@ -27,7 +27,6 @@ import { openPushDoor } from './_push-door.mjs';
  * @param {object[]} o.spaces  config `spaces` entries
  */
 export async function openToolDoor({ suite, spaces }) {
-  process.env['YTHRIL_MODELS_OFFLINE'] = '1';
   const door = await openPushDoor({ suite, spaces });
   const { callTool } = await import('../../server/dist/mcp/call-tool.js');
   const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');

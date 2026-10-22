@@ -32,7 +32,6 @@ import { openPushDoor } from './_push-door.mjs';
 import { failWrites } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'tombfirst';
 const T0 = '2026-09-01T00:00:00.000Z';

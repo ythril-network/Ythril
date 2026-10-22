@@ -46,8 +46,6 @@ import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
 import { openByteDoor } from './_byte-door.mjs';
 import { UPLOAD_DOORS } from './_byte-door-uploads.mjs';
 
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const S = 'orphanbytes';

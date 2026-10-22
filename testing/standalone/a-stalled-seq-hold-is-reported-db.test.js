@@ -40,7 +40,6 @@ import { holdDocumentLock, settleWithin, eventually, setWriteBoundForTest } from
 import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const P = 'holdreport';
 const F = 'bbbbbbbb-0000-4000-8000-0000000000f2';

@@ -44,13 +44,9 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-embed-queue-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
-// The model is made UNREACHABLE, not merely absent: offline plus an empty cache directory. This is the
-// condition the queue exists for, and asserting it here is what stops the suite from quietly measuring
-// a machine that happens to hold 274 MB of weights.
-const EMPTY_CACHE = path.join(tmpDir, 'empty-model-cache');
-fs.mkdirSync(EMPTY_CACHE, { recursive: true });
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-process.env['MODEL_CACHE_DIR'] = EMPTY_CACHE;
+// The model is UNREACHABLE, not merely absent: the harness sets offline and a cache path that never exists. This is the
+// condition the queue exists for, and it is what stops the suite from quietly measuring a machine that happens to hold
+// 274 MB of weights.
 
 let mongo, memory, queue, worker;
 

@@ -39,7 +39,6 @@ import { openPullDoor } from './_pull-door.mjs';
 import { replicatedFixtureFamilies, tieRun, missingAndRepeated } from './_seq-tie-families.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'tiepush';
 /** The sender's batch size (`PUSH_BATCH_SIZE` in `sync/engine.ts`): the fixtures put a run across it. */
