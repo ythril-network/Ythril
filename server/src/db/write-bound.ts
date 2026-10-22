@@ -410,8 +410,11 @@ export interface ServerOperations {
   command(command: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
-/** What ending a server operation came to. `unable`: the call carried no `ServerOperations`; `unconfirmed`: it was still there or could not be asked. */
-interface EndedOperation {
+/**
+ * What ending a server operation came to. `unable`: the call carried no `ServerOperations`; `unconfirmed`: it was still there or
+ * could not be asked. A plain write ends by `endServerOperation` here; a transaction ends by its seal (`db/bounded-transaction.ts`).
+ */
+export interface EndedOperation {
   readonly outcome: 'gone' | 'unconfirmed' | 'unable';
   readonly killed: number;
   readonly why?: string;
@@ -436,7 +439,8 @@ function within<T>(p: Promise<T>, ms: number): Promise<T> {
  *
  * The residual, stated and not closed: a command that has not reached the server when the second look is made arrives after it
  * and runs alone. The driver abort drops the connection it was on, which drops most of them. A hard fence needs the write itself
- * to carry a token the hold can invalidate, which a plain write cannot.
+ * to carry a token the hold can invalidate, which a plain write cannot. A transaction's statements do carry one, their session's
+ * transaction number, so a transaction is not ended here but sealed (`db/bounded-transaction.ts`), which closes what this leaves.
  */
 async function endServerOperation(ops: ServerOperations | undefined, comment: string): Promise<EndedOperation> {
   if (!ops) return { outcome: 'unable', killed: 0 };

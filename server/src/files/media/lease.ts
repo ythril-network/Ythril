@@ -178,7 +178,10 @@ const leasedWriteBoundMs = (): number => LEASED_WRITE_BOUND_FACTOR * writeTimeou
  * ## What it guarantees
  *
  * No fenced write holds a job document longer than `leasedWriteBoundMs()` (twice the write bound); a revocation or a heartbeat waits no
- * longer than that, and is not ended sooner by an enclosing request's tighter scope. A store at its bound costs a media job that figure
+ * longer than that, and is not ended sooner by an enclosing request's tighter scope. That includes a statement of the write that reaches
+ * the server after the bound ended it: the transaction is sealed (`db/bounded-transaction.ts`), so it cannot open a transaction nobody
+ * owns. The one exception is a seal that is never answered, which is logged as an ERROR; until a later seal or kill, a late statement
+ * may then hold the job document. A store at its bound costs a media job that figure
  * per derived row it writes, and ends the run with `StoreTimeout`, which the worker retries with backoff.
  *
  * `outsideWriteBound` is required: `withinWriteBoundOf` cannot raise an enclosing scope's lower deadline (`db/write-bound.ts`), and a

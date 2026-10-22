@@ -20,6 +20,8 @@
  *    it returns, so its seq must not reach a reader until the session has.
  *  - **The read-back sits INSIDE the hold**, because the transaction does: a commit that fails may have landed, and
  *    `landed` is asked before the hold is released, so a late commit can never land below a reader's cursor.
+ *  - **So does the seal** of a transaction the store stopped answering (`SEAL_MS`): it comes before the read-back, and at
+ *    worst adds two seals and a kill to that exit while every reader waits.
  *
  * Nothing that is not the driver is awaited inside: every await holds every reader of the space.
  *
