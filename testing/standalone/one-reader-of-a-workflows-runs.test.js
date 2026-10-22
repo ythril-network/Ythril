@@ -176,6 +176,21 @@ describe('runAttemptsJobs: every attempt\'s jobs, through the attempts endpoint'
       assert.equal(gh.calls.length, 0, `gh was called for the refused id ${JSON.stringify(bad)}`);
     }
   });
+
+  it('calls `beforeAttempt(n)` before every attempt\'s gh call, and a throw from it stops the reading before that call (a caller\'s deadline between attempts)', async () => {
+    const { runAttemptsJobs } = await reader();
+    const order = [];
+    const gh = fakeGh(() => { order.push('gh'); return {}; });
+    await runAttemptsJobs('38605272758', 2, { gh, beforeAttempt: (n) => order.push(`before-${n}`) });
+    assert.deepEqual(order, ['before-1', 'gh', 'before-2', 'gh']);
+
+    const stopped = fakeGh();
+    await assert.rejects(
+      async () => runAttemptsJobs('38605272758', 3, { gh: stopped, beforeAttempt: (n) => { if (n === 2) throw new Error('deadline'); } }),
+      /deadline/,
+    );
+    assert.equal(stopped.calls.length, 1, 'attempt 2 was never asked for');
+  });
 });
 
 describe('ghJson: an argument array, a bound, and a named error for a gh that is missing or logged out', () => {

@@ -304,8 +304,13 @@ can fix there, and refused in CI unless it is expected.**
   conclusion of its database step in every attempt. It reports CI minutes saved (the database step of each Full run, a proxy
   for the local time skipped), CI minutes the failures cost (the repeats they caused), and the calendar time from a failing step
   to the next green one on its own line, apart from the CI minutes. Runs from before the change are the baseline, reported
-  separately; pull request runs of `ci.yml` are outside it. It exits 2 when `gh` is missing or logged out, or when the listing
-  fills its limit.
+  separately; pull request runs of `ci.yml` are outside it. A cancelled database step is excluded as superseded only when a
+  newer run of the same ref was created no later than the cancel (`full-run.yml` cancels per ref); otherwise it is a timeout
+  and counts as a failure. A run the report leaves out is named with its kind (`superseded`, `never-started`, `not-a-bundle`,
+  `unread-budget`, `unplaced`, `missing-field`). It exits 2 on a bad argument (refused before any `gh` call), when `gh` is
+  missing or logged out, when any read fails, and when the listing fills its limit. A ten-minute budget ends the reading: it
+  is checked before every attempt's `gh` call and every `git` placement, so a call in flight can run past it by its own 60
+  seconds, and the runs it did not reach are named `unread-budget`.
 - **Locally**, Windows-only skips and the like stay skips; the refusal is CI's.
 
 A test that needs a precondition (a session, a prior test's output) throws once in its `before` hook or in one assert
