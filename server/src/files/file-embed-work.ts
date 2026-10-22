@@ -30,6 +30,7 @@ import { embedJobId, enqueueEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from '.
 import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
 import { movedId, movedRoot, sidecarsOwnedBy, type PathKind } from './moved-paths.js';
 import { warnOnce } from '../util/warn-once.js';
+import { withinWriteBound } from '../db/write-bound.js';
 import { log, peerText } from '../util/log.js';
 import { NOT_A_FLAGGED_ROW } from './live-file-row.js';
 import type { RemoveBy } from './path-keyed-cache.js';
@@ -54,31 +55,37 @@ const requeueFailed = warnOnce<string>({ every: 10 * 60_000 });
 export async function requeueEmbedWorkOfMovedRows(
   spaceId: string, move: { src: string; dst: string; kind: PathKind; unplaced?: readonly string[] },
 ): Promise<void> {
-  const { src, dst, kind } = move;
-  try {
-    const from = movedRoot(src);
-    const to = movedRoot(dst);
-    if (!from || !to) return;
-    const files = spaceCollection(spaceId, 'files');
-    const unplacedThere = new Set((move.unplaced ?? []).map(p => movedId(p, from, to)).filter((p): p is string => p !== null));
-    const owned = (await sidecarsOwnedBy(spaceId, to, kind)).filter(s => !unplacedThere.has(s.path));
-    const { ids } = await rowsOfFiles(spaceId, kind === 'file' ? [to] : await rootsOfDirectory(spaceId, to), owned);
-    // A flagged row (a soft delete's audit record) has no embed work: it is neither queued nor counted as moved.
-    const rows = [...(await readStoredById<{ _id: string; parentFileId?: string }>(files, [...ids], { parentFileId: 1 }, { filter: NOT_A_FLAGGED_ROW })).values()];
-    if (rows.length === 0) return;
-    const topLevel = new Set(rows.filter(r => r.parentFileId === undefined).map(r => r._id));
-    const oldIdOf = new Map(rows.flatMap((r): Array<[string, string]> => { const old = movedId(r._id, to, from, topLevel); return old === null ? [] : [[r._id, old]]; }));
-
-    const hadJob = await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'embedJobs'),
-      [...oldIdOf.values()].map(id => embedJobId('file', id)), { _id: 1 });
-    const queue = rows.map(r => r._id).filter(id => topLevel.has(id) || (oldIdOf.has(id) && hadJob.has(embedJobId('file', oldIdOf.get(id)!))));
-    await enqueueEmbedJobs(spaceId, 'file', queue, { priority: EMBED_PRIORITY.background });
-
-    // An old id a file holds again (a re-upload at the source since the bytes moved) keeps its job: it is that file's.
-    const heldAgain = await readStoredById<{ _id: string }>(files, [...oldIdOf.values()], { _id: 1 }, { filter: NOT_A_FLAGGED_ROW });
-    await retireEmbedJobs(spaceId, 'file', [...oldIdOf.values()].filter(id => !heldAgain.has(id)));
-  } catch (err) {
+  const { src, dst } = move;
+  // Bounded here, not by the caller: on the request path nothing else bounds it, and a store that stopped answering would otherwise hold
+  // the answer of a move that is already finished. Inside a walk's or a hold's scope the lower figure wins.
+  try { await withinWriteBound(() => requeue(spaceId, move)); } catch (err) {
     requeueFailed(spaceId, () => log.warn(`embed queue: the move ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)} finished, but its files were not `
       + `re-queued for embedding (${peerText(err)}). They keep the vectors of their old paths until the space is reindexed (POST /api/spaces/:id/reindex).`));
   }
+}
+
+/** The work of {@link requeueEmbedWorkOfMovedRows}, inside its bound; it throws, and the wrapper says the failure. */
+async function requeue(spaceId: string, move: { src: string; dst: string; kind: PathKind; unplaced?: readonly string[] }): Promise<void> {
+  const { src, dst, kind } = move;
+  const from = movedRoot(src);
+  const to = movedRoot(dst);
+  if (!from || !to) return;
+  const files = spaceCollection(spaceId, 'files');
+  const unplacedThere = new Set((move.unplaced ?? []).map(p => movedId(p, from, to)).filter((p): p is string => p !== null));
+  const owned = (await sidecarsOwnedBy(spaceId, to, kind)).filter(s => !unplacedThere.has(s.path));
+  const { ids } = await rowsOfFiles(spaceId, kind === 'file' ? [to] : await rootsOfDirectory(spaceId, to), owned);
+  // A flagged row (a soft delete's audit record) has no embed work: it is neither queued nor counted as moved.
+  const rows = [...(await readStoredById<{ _id: string; parentFileId?: string }>(files, [...ids], { parentFileId: 1 }, { filter: NOT_A_FLAGGED_ROW })).values()];
+  if (rows.length === 0) return;
+  const topLevel = new Set(rows.filter(r => r.parentFileId === undefined).map(r => r._id));
+  const oldIdOf = new Map(rows.flatMap((r): Array<[string, string]> => { const old = movedId(r._id, to, from, topLevel); return old === null ? [] : [[r._id, old]]; }));
+
+  const hadJob = await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'embedJobs'),
+    [...oldIdOf.values()].map(id => embedJobId('file', id)), { _id: 1 });
+  const queue = rows.map(r => r._id).filter(id => topLevel.has(id) || (oldIdOf.has(id) && hadJob.has(embedJobId('file', oldIdOf.get(id)!))));
+  await enqueueEmbedJobs(spaceId, 'file', queue, { priority: EMBED_PRIORITY.background });
+
+  // An old id a file holds again (a re-upload at the source since the bytes moved) keeps its job: it is that file's.
+  const heldAgain = await readStoredById<{ _id: string }>(files, [...oldIdOf.values()], { _id: 1 }, { filter: NOT_A_FLAGGED_ROW });
+  await retireEmbedJobs(spaceId, 'file', [...oldIdOf.values()].filter(id => !heldAgain.has(id)));
 }

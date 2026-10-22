@@ -2,7 +2,7 @@
  * bundle-111 (Q-557; design rev 3 step 11, V-S10): what the restore progress card SAYS about the files a restored space no longer matches.
  *
  * `GET /api/admin/data/restore` gives a space's row `files: { checked, classes: { <class>: { count, paths } } }` (or
- * `{ checked: false, reason }`), and the card is the only place an operator reads it. The card is SHARED with the migrate, whose rows carry no
+ * `{ checked: false, reasonCode, limitMs?, reason }`), and the card is the only place an operator reads it. The card is SHARED with the migrate, whose rows carry no
  * such field. These specs use the real en, de and pl files: the thing pinned is the sentence read, in the three languages the page ships.
  *
  * What the design holds, and each case below pins one:
@@ -10,7 +10,8 @@
  * - a space with mismatches is a warn variant AND says so in words (colour is never the only signal), and a clean space stays Done;
  * - the paths sit in a keyboard-reachable disclosure that wraps, not in a line that overflows the card;
  * - a count is a plural in each language (one/few/many/other in pl), with no raw key and no unfilled `{{...}}` showing;
- * - an unknown class (a newer server) renders its raw name rather than nothing; a space that was not checked shows the server's reason.
+ * - an unknown class (a newer server) renders its raw name rather than nothing; a space that was not checked says why in the page's language
+ *   from the server's `reasonCode`, and shows the server's English `reason` only for a code this client does not know.
  *
  * The shape of `files` is this bundle's reading of rev 3 step 8; the server tests (`a-restore-reports-which-files-no-longer-match-their-
  * records-db.test.js`) hold the other end of it. On 3a117862 the card renders nothing of `files`, so every case that reads it is red there;
@@ -83,10 +84,31 @@ describe('a restored space\'s mismatching files on the restore card (Q-557)', ()
     expect(row.querySelector('details, button[aria-expanded]'), 'a disclosure with nothing in it').toBeNull();
   });
 
-  it('a space that was not checked shows the server\'s reason, and is not Done-and-clean', () => {
-    const f = card('restore', restoreOf({ checked: false, reason: 'the file system did not answer within 120 s' }));
+  it('a space that was not checked for a reason this client has no code for shows the server\'s reason, and is not Done-and-clean', () => {
+    const f = card('restore', restoreOf({ checked: false, reasonCode: 'a_newer_code', reason: 'the file system did not answer within 120 s' }));
     expect(rowText(f, 'notes')).toContain('the file system did not answer within 120 s');
     expect(rowEl(f, 'notes')?.querySelector('.pill.ok'), 'an unchecked space reads as checked and clean').toBeNull();
+  });
+
+  it('every code the server can give for "not checked" is worded in each language, never by the server\'s English sentence', () => {
+    // The codes are read out of the server's own declaration, so a code added there and not here fails this case.
+    const source = readFileSync(resolve(__dirname, '../../../../../server/src/db/restore-act.ts'), 'utf8');
+    const declared = /FILES_NOT_CHECKED_CODES\s*=\s*\[([^\]]*)\]/.exec(source)?.[1] ?? '';
+    const codes = [...declared.matchAll(/'([a-z_]+)'/g)].map(m => m[1]);
+    expect(codes.length, 'no not-checked code was found in the server source').toBeGreaterThanOrEqual(2);
+    const english = 'SERVER ENGLISH SENTENCE';
+    for (const code of codes) {
+      const texts = (['en', 'de', 'pl'] as const).map(lang => {
+        const f = card('restore', restoreOf({ checked: false, reasonCode: code, limitMs: 120_000, reason: english }), lang);
+        const text = rowText(f, 'notes');
+        expect(text, `${lang}/${code}: the server's English shows instead of words of this language`).not.toContain(english);
+        expect(text, `${lang}/${code}: a translation key shows`).not.toMatch(/\bdata\.[a-z]+\.[A-Za-z.]+/);
+        expect(text, `${lang}/${code}: a placeholder shows unfilled`).not.toMatch(/\{\{/);
+        if (code === 'timeout') expect(text, `${lang}: the bound that ended the check is not said`).toContain('120');
+        return text;
+      });
+      expect(new Set(texts).size, `${code}: two languages read alike`).toBe(3);
+    }
   });
 
   it('an unknown class (a newer server) renders its raw name and its count rather than nothing', () => {

@@ -340,7 +340,7 @@ restore itself.
 | `spaces[].needsAbandon` | `true`: the failure is the backup's, so retrying cannot help; [abandon](#post-apiadmindatarestoreabandon) |
 | `spaces[].vectorIndexes` | `rebuilding` (the builds started and are warming up) or `failed` (they could not start; the space was still restored) |
 | `spaces[].edgeIndexes` | `{ "failed": [] }`: the edge identity and guard indexes stand. One that cannot be built fails the act instead |
-| `spaces[].files` | What the restore found of the space's files against its restored records: `{ "checked": true, "classes": { <class>: { "count", "paths" } } }`, a class with no file absent, or `{ "checked": false, "reason" }` when the check could not run. Present on a `done` space of a restore only (a migrate's rows carry none) |
+| `spaces[].files` | What the restore found of the space's files against its restored records: `{ "checked": true, "classes": { <class>: { "count", "paths" } } }`, a class with no file absent, or `{ "checked": false, "reasonCode", "limitMs", "reason" }` when the check could not run. Present on a `done` space of a restore only (a migrate's rows carry none) |
 
 **`files` in detail.** The classes: `missing_row` (bytes on disk no live record names), `stale_row` (a live record whose `sha256`
 is not the bytes'), `unprocessed` (a live record of a kind that is converted or analysed, with no processing state),
@@ -350,7 +350,9 @@ when the whole restore's cap on named paths (200, shared equally between its spa
 characters, escapes written out), and a path is in the record's normalised (NFC) spelling, so a name stored decomposed counts
 once. A client that meets a class it does not know shows the raw name. Never compared: a conversion's sidecars, conflict copies,
 schema snapshots, legacy read spills, chunk rows, and a record that holds no `sha256` (an import's). `checked: false` carries a
-`reason` of ours, never the driver's text: the check ran past the file-system bound (120 s per space) or failed; the space is
+`reasonCode` for a client to word in its own language - `timeout` (the check ran past the file-system bound, 120 s per space,
+given in `limitMs`) or `failed` (the server log names the cause) - and a `reason` of ours in English, never the driver's text,
+which says that restoring the backup again repeats the check; the space is
 restored either way, and the set stays `completed`. The check runs inside the space's hold, last, reads the cache without
 writing it, and the report is kept on the set (in `config.json`) until the next restore, so it can name a file deleted since.
 On the log, `restore of backup … completed` carries the total files out of step with their per-class counts, and one warning

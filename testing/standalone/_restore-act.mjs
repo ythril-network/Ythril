@@ -120,7 +120,7 @@ export const REPORT_PATHS_PER_CLASS = 10;
 /**
  * The shape this suite reads, one place: a space's row of `GET /api/admin/data/restore` carries
  * `files: { checked: true, classes: { <class>: { count, paths } } }` (a class with nothing to say may be absent) or
- * `files: { checked: false, reason }` when the check could not run. `count` is every file of that class; `paths` is at most
+ * `files: { checked: false, reasonCode, limitMs?, reason }` when the check could not run (`reasonCode` is `timeout` or `failed`). `count` is every file of that class; `paths` is at most
  * {@link REPORT_PATHS_PER_CLASS} of them, peerText-bounded.
  */
 export const classOf = (files, cls) => files?.classes?.[cls] ?? { count: 0, paths: [] };

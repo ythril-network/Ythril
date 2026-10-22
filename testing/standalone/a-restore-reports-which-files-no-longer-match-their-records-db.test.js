@@ -299,7 +299,7 @@ describe('a restore reports which files no longer match their records (real Mong
       assert.equal(classOf(q, 'row_without_bytes').paths.length, 2);
       for (const p of classOf(q, 'row_without_bytes').paths) {
         assert.ok(p.length <= 256 + 40, `a path is quoted ${p.length} characters long: not peerText-bounded`);
-        assert.doesNotMatch(p, /[ -]/, 'a path carries a raw control character: it can start a line of its own');
+        assert.doesNotMatch(p, /[\u0000-\u001f]/, 'a path carries a raw control character: it can start a line of its own');
       }
       assert.ok(classOf(q, 'row_without_bytes').paths.some(p => p.startsWith('ddd') && p.length < long.length), 'the 363-character name was quoted whole');
     });
@@ -344,6 +344,8 @@ describe('a restore reports which files no longer match their records (real Mong
       assert.equal(a.checked, false, JSON.stringify(a));
       assert.ok(typeof a.reason === 'string' && a.reason.length > 0, 'a space that was not checked says no reason');
       assert.doesNotMatch(a.reason, /hunter2|mongodb:\/\//, `the reason carries credentials: ${a.reason}`);
+      assert.equal(a.reasonCode, 'failed', 'a client cannot word the reason in its own language without its code');
+      assert.match(a.reason, /restoring the backup again/i, `the reason does not say what to do: ${a.reason}`);
       const b = filesOf(out.rows, 'rf-b');
       assert.equal(b.checked, true, 'one space\'s failure stopped the check of the next');
       assert.deepEqual(classOf(b, 'stale_row').paths, ['stale.json']);
@@ -355,13 +357,16 @@ describe('a restore reports which files no longer match their records (real Mong
       try {
         out = await scenario(atBackup, afterBackup, {
           hooks: { atFileTree: (id) => (id === 'rf-a' ? park.promise : undefined) },
-          knobs: { SPACE_ACT_FS_MS: 150 },
+          // The parked hook is what outlasts the bound; at the floor, rf-b's real walk finishes well inside it.
+          knobs: { SPACE_ACT_FS_MS: 1000 },
         });
       } finally { park.release(); }
       assert.equal(out.rows['rf-a'].state, 'done', JSON.stringify(out.rows['rf-a']));
       const a = filesOf(out.rows, 'rf-a');
       assert.equal(a.checked, false, JSON.stringify(a));
       assert.match(a.reason ?? '', /took longer than/i, `the reason does not say the bound ended it: ${a.reason}`);
+      assert.equal(a.reasonCode, 'timeout', JSON.stringify(a));
+      assert.equal(a.limitMs, 1000, 'the bound the client words is not the one that ended the check');
       assert.equal(filesOf(out.rows, 'rf-b').checked, true);
     });
 
