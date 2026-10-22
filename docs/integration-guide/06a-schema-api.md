@@ -569,7 +569,7 @@ interface PropertySchema {
 What the schema enforces:
 
 - **Entity type allowlist** — the keys of `typeSchemas.entity` (e.g. `"service"`, `"team"`) define the allowed entity `type` values (max 200 per knowledge type).
-- **Edge label allowlist** — the keys of `typeSchemas.edge` define the allowed edge `label` values, and that entry carries the edge's permitted ends and whether a subject may have more than one. The edge property `type` is free text: it is stored as given and no door validates it, so the schema's "edge type" is keyed by the `label`.
+- **Edge label allowlist** — the keys of `typeSchemas.edge` define the allowed edge `label` values, and that entry carries the edge's permitted ends and whether a subject may have more than one. The edge property `type` is free text that no door validates (surrounding whitespace is trimmed where it is written through REST or `update_edge`), so the schema's "edge type" is keyed by the `label`.
 - **Chrono type allowlist** — the keys of `typeSchemas.chrono` define the allowed `type` values.
 - **Fact type allowlist** — the keys of `typeSchemas.fact` define the allowed `type` values.
 - **Naming patterns** (`namingPattern`) — per entity type, a regex for validating `name` (max 500 chars, ReDoS-protected).

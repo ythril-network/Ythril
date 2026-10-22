@@ -55,7 +55,7 @@ export const save_edgeTool: ToolHandler = {
             fromKind: edgeEndpointKindSchema('from'),
             toKind: edgeEndpointKindSchema('to'),
             label: { type: 'string', minLength: 1, description: 'Relationship label (e.g. "works_at", "knows").' },
-            type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution"). Free text: it is stored as given and nothing validates it. What a space\'s schema declares and validates for an edge is its `label`.' },
+            type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution"). Free text: nothing validates it, and surrounding whitespace is trimmed where it is written through REST or `update_edge`. What a space\'s schema declares and validates for an edge is its `label`.' },
             weight: unitScoreSchema('Optional strength for this relationship, 0 to 1. Nothing derives it '
               + 'and nothing ranks on it — it is stored, returned, and sortable by `filter`, so it means '
               + 'whatever you decide it means. The 0–1 bound is enforced HERE and not on `save_bulk`, whose '

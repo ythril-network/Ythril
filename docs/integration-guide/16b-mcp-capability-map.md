@@ -2,7 +2,7 @@
 
 > Part of the [Ythril Integration Guide](../integration-guide.md). The tools themselves are on [MCP](16-mcp.md).
 
-## Capability map — both doors, and what a token needs
+## MCP capability map: every tool, its REST route and the rung it needs
 
 Every capability, the MCP tool and the REST route that perform it, and what a token needs to call it. The table is
 generated from the code and written by `scripts/surface-matrix.mjs --write`; a gate holds it equal to what the
@@ -73,7 +73,7 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `update_file_meta` | `POST /api/update_file_meta` · legacy: `PATCH /api/brain/spaces/:spaceId/files` | write `files` |
 | **Spaces** | | | |
 | | `list_spaces` | `POST /api/list_spaces` · legacy: `GET /api/spaces` | read (MCP) · REST exempt |
-| | `save_space` | `POST /api/save_space` · legacy: `POST /api/spaces` | write · both doors — `createSpaces` (or instance admin) |
+| | `save_space` | `POST /api/save_space` · legacy: `POST /api/spaces` | write (MCP) · REST exempt — `createSpaces` (or instance admin) |
 | | `update_space` | `POST /api/update_space` · legacy: `PATCH /api/spaces/:id` | write (MCP) · REST exempt — space-admin of the named space, and write `schema` |
 | | `space_rename` | `POST /api/space_rename` · legacy: `PATCH /api/spaces/:id/rename` | space-admin (MCP) · REST exempt — space-admin of the named space |
 | | `space_meta` | `POST /api/space_meta` · legacy: `GET /api/spaces/:id/meta` | read `schema` |
@@ -90,8 +90,8 @@ and the two are identical by construction. The REST routes with no tool are in
 | **Networks** | | | |
 | | `network_peers` | `POST /api/network_peers` · legacy: `GET /api/networks` | read `networks` — on every space of each network |
 | | `network_get` | `POST /api/network_get` · legacy: `GET /api/networks/:id` | read `networks` — on every space it carries |
-| | `network_create` | `POST /api/network_create` · legacy: `POST /api/networks` | write · both doors — write `networks` on every space, or administering each |
-| | `network_update` | `POST /api/network_update` · legacy: `PATCH /api/networks/:id` | **REST admin `networks` · MCP write** — admin `networks` on every space it carries |
+| | `network_create` | `POST /api/network_create` · legacy: `POST /api/networks` | write `networks` — on every space, or administering each |
+| | `network_update` | `POST /api/network_update` · legacy: `PATCH /api/networks/:id` | admin `networks` — on every space it carries |
 | | `network_leave` | `POST /api/network_leave` · legacy: `DELETE /api/networks/:id` | write `networks` — your own membership; admin for anyone's |
 | | `network_add_space` | `POST /api/network_add_space` · legacy: `POST /api/networks/:id/spaces` | write `networks` — admin `networks` on every space it carries · write on the added one |
 | | `network_pending_space` | `POST /api/network_pending_space` · legacy: `POST /api/networks/:id/pending-spaces` | write `networks` — accept: `networks: write` on an existing space, `createSpaces` for a new one · dismiss: `networks: admin` on every space the network carries |
@@ -117,7 +117,7 @@ and the two are identical by construction. The REST routes with no tool are in
 | **Personal views** | | | |
 | | `view_list` | `POST /api/view_list` · legacy: `GET /api/views` | read (MCP) · REST exempt — owner-scoped: any token with a rights matrix |
 | | `view_get` | `POST /api/view_get` · legacy: `GET /api/views/:id` | read (MCP) · REST exempt — owner-scoped: any token with a rights matrix |
-| | `view_create` | `POST /api/view_create` · legacy: `POST /api/views` | read · both doors — owner-scoped: any token with a rights matrix |
+| | `view_create` | `POST /api/view_create` · legacy: `POST /api/views` | read (MCP) · REST exempt — owner-scoped: any token with a rights matrix |
 | | `view_update` | `POST /api/view_update` · legacy: `PATCH /api/views/:id` | read (MCP) · REST exempt — owner-scoped: any token with a rights matrix |
 | | `view_delete` | `POST /api/view_delete` · legacy: `DELETE /api/views/:id` | read (MCP) · REST exempt — owner-scoped: any token with a rights matrix |
 | | `view_copy` | `POST /api/view_copy` · legacy: `POST /api/views/:id/copy` | read (MCP) · REST exempt — owner-scoped, and may manage the receiving token (MFA step-up on REST) |
