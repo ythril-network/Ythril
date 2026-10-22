@@ -103,12 +103,15 @@ export async function readFailedLog(jobId, { exec } = {}) {
  *
  * @param {string|number} id        the run id, decimal
  * @param {number} attempts         the run's latest attempt number (`attempt` of the run)
+ * @param {{ gh?: Function, beforeAttempt?: (attempt: number) => void }} [options]  `beforeAttempt(n)` runs before each attempt's
+ *   call and may throw to stop the reading: a caller's own deadline is checked BETWEEN the attempts of one run, not only between runs
  */
-export async function runAttemptsJobs(id, attempts, { gh = ghJson } = {}) {
+export async function runAttemptsJobs(id, attempts, { gh = ghJson, beforeAttempt } = {}) {
   const runId = decimalId(id);
   if (!Number.isInteger(attempts) || attempts < 1) throw new Error(`attempts ${JSON.stringify(attempts)} is not a whole number from 1`);
   const out = [];
   for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (beforeAttempt) beforeAttempt(attempt);
     // `-X GET` with `-F`: the page size goes in the query string (the default page holds 30 jobs).
     const answer = await gh(['api', `repos/${REPO_SLUG}/actions/runs/${runId}/attempts/${attempt}/jobs`, '-X', 'GET', '-F', 'per_page=100']);
     const jobs = Array.isArray(answer?.jobs) ? answer.jobs : [];

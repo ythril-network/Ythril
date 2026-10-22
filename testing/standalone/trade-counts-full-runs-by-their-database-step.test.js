@@ -27,7 +27,8 @@
  * - `report.before`: `{ counted, failures }` over the runs whose head does NOT descend from the cut-over: the baseline, never mixed
  *   into `after`.
  * - `report.named`: `[{ id, ref, kind, reason }]`, one entry per run that was left out or could not be read, `kind` one of
- *   `superseded`, `not-a-bundle`, `never-started`, `missing-field`; `reason` is a sentence.
+ *   `superseded`, `not-a-bundle`, `never-started`, `unread-budget` (the budget ended before the run, or between its attempts, was
+ *   read), `unplaced` (git cannot place the head against the cut-over, or the budget ended first), `missing-field`; `reason` is a sentence.
  * - `report.bundles`: `[{ bundle, runIds }]`, one entry per bundle (`bundle` is the number as a string, `'106'`).
  *
  * ## The counting rules, each its own case
@@ -35,9 +36,9 @@
  * | a run | counted | note |
  * |---|---|---|
  * | database step `failure` in attempt 1, `success` in attempt 2 | one failure | the failed attempt is invisible to the latest-attempt view |
- * | database step `cancelled`, a newer run of the same bundle exists | excluded, named `superseded` | cancelled by a push, says nothing about the tests |
- * | database step `cancelled`, no newer run of the bundle | one failure AND a timeout | the job's 30-minute limit reads as cancelled |
- * | database step `null` (never started) | named `never-started`, not counted | a setup failure is not a test failure |
+ * | database step `cancelled`, a newer run of the SAME REF created no later than the step's end | excluded, named `superseded` | cancelled by a push (`full-run.yml` cancels per ref); another ref of the bundle cancels nothing |
+ * | database step `cancelled`, no such run (a newer run on the ref came after the cancel, or only on another ref) | one failure AND a timeout | the job's 30-minute limit reads as cancelled |
+ * | database step `null` in EVERY attempt (never started) | named `never-started`, not counted | a setup failure is not a test failure; attempt 1 null and attempt 2 run is read from attempt 2 |
  * | a field missing (`startedAt`, `completedAt`, `conclusion`, `headSha`, `createdAt`, `ref`) | named `missing-field`, not counted | never zero minutes |
  * | `full-run/bundle-106-a0` and `full-run/bundle-106-a` | one bundle, `106` | a bundle spans refs |
  * | `full-run/probe-b85` | named `not-a-bundle`, not counted | a probe is no bundle |
@@ -45,7 +46,7 @@
  *
  * ## The units (the part that drifts)
  *
- * - `savedMinutes`: the database step's minutes of every counted run's FIRST attempt (a Full run's database half, which a local
+ * - `savedMinutes`: the database step's minutes of every counted run's FIRST attempt that ran the step (a Full run's database half, which a local
  *   preflight no longer runs: a proxy, since the local skip happens per preflight and its local time is not measured).
  * - `costMinutes`: the database step's minutes of the EXTRA runs a failure caused: the attempts after a run's first failed attempt,
  *   and every attempt of the runs that follow a failed run on the same bundle.
@@ -143,9 +144,12 @@ describe('tradeReport: what a database step counts as', () => {
     assert.equal(r.after.failures, 1);
   });
 
-  it('a cancelled database step on a run a newer run of the same bundle superseded is excluded, named, and never counted', async () => {
+  // full-run.yml cancels per REF (concurrency group `full-run-${{ github.ref }}`): a push to the same ref creates a run, and that
+  // creation cancels the one in flight. So a step is superseded only by a run of the SAME REF created no later than the step's end.
+  it('a cancelled database step on a run a newer run of the same ref cancelled is excluded, named, and never counted', async () => {
+    // The cancelled step ends 08:08; the newer run was created 08:06, the push that cancelled it.
     const superseded = run({ id: 1, ref: 'full-run/bundle-100', createdAt: '2026-10-23T08:00:00Z', attempts: [attempt(1, step('cancelled', '2026-10-23T08:05:00Z', 3))] });
-    const newer = run({ id: 2, ref: 'full-run/bundle-100', createdAt: '2026-10-23T08:10:00Z', attempts: [attempt(1, step('success', '2026-10-23T08:15:00Z', 10))] });
+    const newer = run({ id: 2, ref: 'full-run/bundle-100', createdAt: '2026-10-23T08:06:00Z', attempts: [attempt(1, step('success', '2026-10-23T08:15:00Z', 10))] });
     const r = await report([superseded, newer]);
     assert.deepEqual(namedKinds(r, 1), ['superseded'], 'the superseded run is named');
     assert.equal(r.after.counted, 1, 'only the newer run is counted');
@@ -153,12 +157,31 @@ describe('tradeReport: what a database step counts as', () => {
     assert.deepEqual(r.after.timeouts, []);
   });
 
-  it('the newer run may be on another ref of the same bundle (bundle-106-a0 superseded by bundle-106-a)', async () => {
-    const superseded = run({ id: 1, ref: 'full-run/bundle-106-a0', createdAt: '2026-10-23T08:00:00Z', attempts: [attempt(1, step('cancelled', '2026-10-23T08:05:00Z', 3))] });
-    const newer = run({ id: 2, ref: 'full-run/bundle-106-a', createdAt: '2026-10-23T08:10:00Z' });
-    const r = await report([superseded, newer]);
+  it('a newer run created at the very second the step was cancelled supersedes it ("no later than" the step\'s end)', async () => {
+    const cancelled = run({ id: 1, createdAt: '2026-10-23T08:00:00Z', attempts: [attempt(1, step('cancelled', '2026-10-23T08:05:00Z', 3))] });
+    const newer = run({ id: 2, createdAt: '2026-10-23T08:08:00Z' });
+    const r = await report([cancelled, newer]);
     assert.deepEqual(namedKinds(r, 1), ['superseded']);
-    assert.equal(r.after.failures, 0);
+  });
+
+  it('another ref of the same bundle is NOT a supersession: bundle-106-a0 is cancelled by nothing that bundle-106-a does', async () => {
+    // GitHub's concurrency group is the ref, so a run on another ref never cancels this one: the cancelled step is a timeout.
+    const cancelled = run({ id: 1, ref: 'full-run/bundle-106-a0', createdAt: '2026-10-23T08:00:00Z', attempts: [attempt(1, step('cancelled', '2026-10-23T08:05:00Z', 30))] });
+    const otherRef = run({ id: 2, ref: 'full-run/bundle-106-a', createdAt: '2026-10-23T08:10:00Z' });
+    const r = await report([cancelled, otherRef]);
+    assert.deepEqual(namedKinds(r, 1), [], 'not superseded, so not named as left out');
+    assert.equal(r.after.failures, 1);
+    assert.deepEqual(r.after.timeouts, [1]);
+  });
+
+  it('a newer run on the same ref created AFTER the step was cancelled supersedes nothing: the cancel was a timeout, and the push came later', async () => {
+    // The step ran 08:05 to 08:35 (the 30-minute limit); a push to the same ref at 09:00 did not cancel anything.
+    const timedOut = run({ id: 1, createdAt: '2026-10-23T08:00:00Z', attempts: [attempt(1, step('cancelled', '2026-10-23T08:05:00Z', 30))] });
+    const later = run({ id: 2, createdAt: '2026-10-23T09:00:00Z' });
+    const r = await report([timedOut, later]);
+    assert.deepEqual(namedKinds(r, 1), [], 'it is counted');
+    assert.equal(r.after.failures, 1);
+    assert.deepEqual(r.after.timeouts, [1]);
   });
 
   it('a cancelled step on a run of ANOTHER bundle is not superseded by it', async () => {
@@ -183,6 +206,36 @@ describe('tradeReport: what a database step counts as', () => {
     assert.equal(r.after.counted, 1, 'only the run that started its step is counted');
     assert.equal(r.after.failures, 0);
     assert.equal(r.after.savedMinutes, 10, 'its minutes are not counted as zero either: only the other run saved anything');
+  });
+
+  it('never-started means NO attempt ran the step: attempt 1 a setup failure and attempt 2 a failed database step is ONE failure, counted', async () => {
+    const r = await report([run({ id: 1, attempts: [attempt(1, null), attempt(2, step('failure', '2026-10-23T09:00:00Z', 6))] })]);
+    assert.deepEqual(namedKinds(r, 1), [], 'a run whose second attempt ran the step is not "never started"');
+    assert.equal(r.after.counted, 1);
+    assert.equal(r.after.failures, 1);
+  });
+
+  it('a run no attempt of which started the step is never-started', async () => {
+    const r = await report([run({ id: 1, attempts: [attempt(1, null), attempt(2, null)] })]);
+    assert.deepEqual(namedKinds(r, 1), ['never-started']);
+    assert.equal(r.after.counted, 0);
+  });
+
+  it('saved is the minutes of the FIRST attempt that ran the step: attempt 1 never ran, attempt 2 failed (7), attempt 3 passed (9)', async () => {
+    const r = await report([run({ id: 1, attempts: [
+      attempt(1, null), attempt(2, step('failure', '2026-10-23T09:00:00Z', 7)), attempt(3, step('success', '2026-10-23T10:00:00Z', 9)),
+    ] })]);
+    assert.equal(r.after.savedMinutes, 7, 'the first attempt that ran it is what a Full run spends');
+    assert.equal(r.after.costMinutes, 9, 'the repeat after its failure is the cost');
+  });
+
+  it('saved is the first attempt\'s minutes even when that attempt is the one left out of the counting (a superseded cancel): never the next one\'s', async () => {
+    const r = await report([
+      run({ id: 1, createdAt: '2026-10-23T08:00:00Z', attempts: [attempt(1, step('cancelled', '2026-10-23T08:05:00Z', 3)), attempt(2, step('success', '2026-10-23T12:00:00Z', 10))] }),
+      run({ id: 2, createdAt: '2026-10-23T08:06:00Z', attempts: [attempt(1, step('success', '2026-10-23T08:10:00Z', 20))] }),
+    ]);
+    assert.deepEqual(namedKinds(r, 1), [], 'run 1 still has a kept attempt, so it is counted');
+    assert.equal(r.after.savedMinutes, 3 + 20, 'run 1 saved its first attempt (3), not the second (10)');
   });
 
   for (const field of ['startedAt', 'completedAt', 'conclusion']) {
@@ -337,6 +390,237 @@ describe('the units: saved, cost and calendar time are three figures, and net is
   it('a counted timeout is a failure whose minutes are in the saving like any other run', async () => {
     const r = await report([run({ id: 7, attempts: [attempt(1, step('cancelled', '2026-10-23T08:05:00Z', 30))] })]);
     assert.equal(r.after.savedMinutes, 30);
+  });
+});
+
+describe('the names a left-out run is given: unread-budget and unplaced are not missing-field', () => {
+  it('a run the budget ended before it was read is named unread-budget, never counted, never "no attempt to read"', async () => {
+    const r = await report([run({ id: 1, attempts: [], unread: 'budget' }), run({ id: 2, ref: 'full-run/bundle-101' })]);
+    assert.deepEqual(namedKinds(r, 1), ['unread-budget']);
+    assert.match(r.named.find(n => n.id === 1).reason, /budget/i, 'the reason says the budget');
+    assert.equal(r.after.counted, 1);
+  });
+
+  it('a head git cannot place against the cut-over is named unplaced, never counted, and the reason says what git said', async () => {
+    const { tradeReport } = await trade();
+    const r = tradeReport({
+      runs: [run({ id: 1 }), run({ id: 2, ref: 'full-run/bundle-101', headSha: BEFORE_SHA })],
+      cutoverSha: CUTOVER,
+      isAncestor: (a, d) => { if (d === AFTER_SHA) throw new Error('git cannot place the commit (is it fetched?)'); return false; },
+    });
+    assert.deepEqual(namedKinds(r, 1), ['unplaced']);
+    assert.match(r.named.find(n => n.id === 1).reason, /cannot place/);
+    assert.equal(r.after.counted + r.before.counted, 1, 'only the run git could place is counted');
+  });
+});
+
+// A recorded job in the shape of the attempts endpoint (`repos/<repo>/actions/runs/<id>/attempts/<n>/jobs`): REST field names.
+const jobsWith = (name, over = {}) => [
+  { id: 1, name: 'lint', status: 'completed', conclusion: 'success', started_at: '2026-10-23T08:00:00Z', completed_at: '2026-10-23T08:02:00Z',
+    steps: [{ name: 'Set up job', status: 'completed', conclusion: 'success', number: 1, started_at: '2026-10-23T08:00:00Z', completed_at: '2026-10-23T08:00:01Z' }] },
+  { id: 2, name: 'tests', status: 'completed', conclusion: 'success', started_at: '2026-10-23T08:03:00Z', completed_at: '2026-10-23T08:30:00Z',
+    steps: [
+      { name: 'Set up job', status: 'completed', conclusion: 'success', number: 1, started_at: '2026-10-23T08:03:00Z', completed_at: '2026-10-23T08:03:02Z' },
+      { name, status: 'completed', conclusion: 'success', number: 2, started_at: '2026-10-23T08:05:04Z', completed_at: '2026-10-23T08:22:44Z', ...over },
+    ] },
+];
+
+describe('dbStepOf: the database step of one attempt\'s jobs, in the attempts endpoint\'s field names', () => {
+  // The step's name is derived from ci.yml, as the CLI does, so a rename cannot leave this reading a step that is gone.
+  const stepName = async () => {
+    const { stepNameRunning } = await import(new URL(`file:///${join(REPO_ROOT, 'scripts', '_shared', 'ci-run-reader.mjs').replace(/\\/g, '/')}`).href);
+    return stepNameRunning(/npm run test:standalone:db/);
+  };
+
+  it('reads started_at and completed_at as startedAt and completedAt, and the conclusion, of the step found by its name', async () => {
+    const { dbStepOf } = await trade();
+    assert.equal(typeof dbStepOf, 'function', 'scripts/trade.mjs must export dbStepOf');
+    const name = await stepName();
+    assert.deepEqual(dbStepOf(jobsWith(name), name), { conclusion: 'success', startedAt: '2026-10-23T08:05:04Z', completedAt: '2026-10-23T08:22:44Z' });
+  });
+
+  it('finds the step in whichever job holds it, and keeps a failure\'s conclusion', async () => {
+    const { dbStepOf } = await trade();
+    const name = await stepName();
+    assert.equal(dbStepOf(jobsWith(name, { conclusion: 'failure' }), name).conclusion, 'failure');
+  });
+
+  it('a skipped step never started: null, not a step of zero minutes', async () => {
+    const { dbStepOf } = await trade();
+    const name = await stepName();
+    assert.equal(dbStepOf(jobsWith(name, { conclusion: 'skipped', started_at: null, completed_at: null }), name), null);
+  });
+
+  it('no job holds the step: null; a job without steps is no error', async () => {
+    const { dbStepOf } = await trade();
+    assert.equal(dbStepOf(jobsWith('some other step'), 'the step'), null);
+    assert.equal(dbStepOf([{ id: 3, name: 'bare' }], 'the step'), null);
+    assert.equal(dbStepOf([], 'the step'), null);
+  });
+
+  it('a step still running keeps its null fields, so the counting names it missing-field instead of reading zero minutes', async () => {
+    const { dbStepOf } = await trade();
+    const name = await stepName();
+    const got = dbStepOf(jobsWith(name, { status: 'in_progress', conclusion: null, completed_at: null }), name);
+    assert.deepEqual(got, { conclusion: null, startedAt: '2026-10-23T08:05:04Z', completedAt: null });
+    const r = await report([run({ id: 1, attempts: [attempt(1, got)] })]);
+    assert.deepEqual(namedKinds(r, 1), ['missing-field']);
+  });
+});
+
+describe('cutoverOnMain and gitIsAncestor: git, through an injected exec', () => {
+  const SHA_OLD = '1111111111111111111111111111111111111111';
+  const SHA_NEW = '2222222222222222222222222222222222222222';
+  /** An exec fake: records `[file, args]` and answers or throws. */
+  const fakeExec = (answer) => { const calls = []; const exec = (file, args) => { calls.push([file, args]); return answer(file, args); }; exec.calls = calls; return exec; };
+  const failing = (message, extra = {}) => () => { throw Object.assign(new Error(message), extra); };
+
+  it('cutoverOnMain asks git for the commits that ADDED scripts/trade.mjs on origin/main, as an argument array, and takes the OLDEST', async () => {
+    const { cutoverOnMain } = await trade();
+    assert.equal(typeof cutoverOnMain, 'function', 'scripts/trade.mjs must export cutoverOnMain');
+    const exec = fakeExec(() => `${SHA_NEW}\n${SHA_OLD}\n`);
+    assert.deepEqual(cutoverOnMain({ exec }), { sha: SHA_OLD }, 'git log lists newest first: the last line is the cut-over');
+    assert.equal(exec.calls.length, 1);
+    const [file, args] = exec.calls[0];
+    assert.equal(file, 'git');
+    assert.deepEqual(args, ['log', 'origin/main', '--diff-filter=A', '--format=%H', '--', 'scripts/trade.mjs']);
+  });
+
+  it('cutoverOnMain reads Windows line endings', async () => {
+    const { cutoverOnMain } = await trade();
+    assert.deepEqual(cutoverOnMain({ exec: fakeExec(() => `${SHA_NEW}\r\n${SHA_OLD}\r\n`) }), { sha: SHA_OLD });
+  });
+
+  it('cutoverOnMain answers sha null WITHOUT a why when the script is not on origin/main yet (an empty log is an answer)', async () => {
+    const { cutoverOnMain } = await trade();
+    assert.deepEqual(cutoverOnMain({ exec: fakeExec(() => '') }), { sha: null });
+  });
+
+  it('cutoverOnMain answers sha null WITH a why when git is not found', async () => {
+    const { cutoverOnMain } = await trade();
+    const got = cutoverOnMain({ exec: fakeExec(failing('spawn git ENOENT', { code: 'ENOENT' })) });
+    assert.equal(got.sha, null);
+    assert.match(got.why, /ENOENT/);
+  });
+
+  it('cutoverOnMain answers sha null WITH a why when origin/main does not exist (a clone with no remote)', async () => {
+    const { cutoverOnMain } = await trade();
+    const got = cutoverOnMain({ exec: fakeExec(failing("Command failed: git log origin/main\nfatal: ambiguous argument 'origin/main': unknown revision", { status: 128 })) });
+    assert.equal(got.sha, null);
+    assert.match(got.why, /Command failed/);
+    assert.ok(!got.why.includes('\n'), 'one line');
+  });
+
+  it('cutoverOnMain refuses a line that is no commit id: a garbage answer is not a cut-over', async () => {
+    const { cutoverOnMain } = await trade();
+    const got = cutoverOnMain({ exec: fakeExec(() => 'warning: something\n') });
+    assert.equal(got.sha, null);
+    assert.ok(got.why, 'and says why');
+  });
+
+  it('gitIsAncestor is true when git exits 0, with the ids as their own arguments after the subcommand', async () => {
+    const { gitIsAncestor } = await trade();
+    assert.equal(typeof gitIsAncestor, 'function', 'scripts/trade.mjs must export gitIsAncestor');
+    const exec = fakeExec(() => '');
+    assert.equal(gitIsAncestor(SHA_OLD, SHA_NEW, { exec }), true);
+    assert.deepEqual(exec.calls[0], ['git', ['merge-base', '--is-ancestor', SHA_OLD, SHA_NEW]]);
+  });
+
+  it('gitIsAncestor is false when git exits 1 (not an ancestor)', async () => {
+    const { gitIsAncestor } = await trade();
+    assert.equal(gitIsAncestor(SHA_OLD, SHA_NEW, { exec: fakeExec(failing('exit 1', { status: 1 })) }), false);
+  });
+
+  it('gitIsAncestor THROWS when git cannot answer (exit 128, an unfetched commit), and says to fetch', async () => {
+    const { gitIsAncestor } = await trade();
+    assert.throws(() => gitIsAncestor(SHA_OLD, SHA_NEW, { exec: fakeExec(failing('fatal: Not a valid commit name', { status: 128 })) }), /git fetch origin/);
+  });
+
+  for (const bad of ['', 'abc', '--upload-pack=x', `${SHA_OLD}0`, 'A'.repeat(40), 'HEAD', `${SHA_OLD}\n`, null, undefined]) {
+    it(`gitIsAncestor refuses ${JSON.stringify(bad)} before git is called`, async () => {
+      const { gitIsAncestor } = await trade();
+      for (const [a, d] of [[bad, SHA_NEW], [SHA_OLD, bad]]) {
+        const exec = fakeExec(() => '');
+        assert.throws(() => gitIsAncestor(a, d, { exec }), /not a commit id/);
+        assert.equal(exec.calls.length, 0, 'git was not called');
+      }
+    });
+  }
+});
+
+describe('the budget: runs the ten minutes did not reach are named, and the bound is checked between attempts and before git', () => {
+  const STEP = 'the database step';
+  const entry = (id, attempts = 1, over = {}) => ({ databaseId: id, headBranch: `full-run/bundle-${id}`, headSha: AFTER_SHA, createdAt: '2026-10-23T08:00:00Z', attempt: attempts, ...over });
+  /** A gh fake answering every attempts call with one database step, advancing a fake clock by `cost` ms per call. */
+  const clockedGh = (clock, cost) => {
+    const calls = [];
+    const gh = (args) => {
+      calls.push(args); clock.t += cost;
+      return { total_count: 1, jobs: [{ steps: [{ name: STEP, conclusion: 'success', started_at: '2026-10-23T08:05:00Z', completed_at: '2026-10-23T08:15:00Z' }] }] };
+    };
+    gh.calls = calls;
+    return gh;
+  };
+
+  it('a run past the deadline is not read and is marked unread, and the report names it unread-budget', async () => {
+    const { readRuns, tradeReport } = await trade();
+    assert.equal(typeof readRuns, 'function', 'scripts/trade.mjs must export readRuns');
+    const clock = { t: 0 };
+    const gh = clockedGh(clock, 2000);
+    const { runs, unread } = await readRuns({ listing: [entry(1), entry(2), entry(3)], wanted: null, stepName: STEP, deadline: 1000, now: () => clock.t, gh });
+    assert.deepEqual(unread, [2, 3], 'run 1 was read before the deadline; the others were not');
+    assert.equal(gh.calls.length, 1, 'gh is not called for a run past the deadline');
+    assert.deepEqual(runs.map(r => r.id), [1, 2, 3]);
+    assert.equal(runs[0].attempts.length, 1);
+    assert.deepEqual(runs.slice(1).map(r => [r.unread, r.attempts.length]), [['budget', 0], ['budget', 0]]);
+    const r = tradeReport({ runs, cutoverSha: CUTOVER, isAncestor: isAncestorOf() });
+    assert.deepEqual([namedKinds(r, 2), namedKinds(r, 3)], [['unread-budget'], ['unread-budget']]);
+    assert.equal(r.after.counted, 1);
+  });
+
+  it('the deadline is also checked BETWEEN a run\'s attempts: a run cut after attempt 1 of 3 is unread whole, not counted on attempt 1 alone', async () => {
+    const { readRuns } = await trade();
+    const clock = { t: 0 };
+    const gh = clockedGh(clock, 2000);
+    const { runs, unread } = await readRuns({ listing: [entry(1, 3)], wanted: null, stepName: STEP, deadline: 1000, now: () => clock.t, gh });
+    assert.equal(gh.calls.length, 1, 'attempt 2 was not asked for after the deadline');
+    assert.deepEqual(unread, [1]);
+    assert.equal(runs[0].unread, 'budget');
+    assert.deepEqual(runs[0].attempts, [], 'a partly read run carries no attempts, so it cannot be counted as a run that never failed');
+  });
+
+  it('within the deadline every attempt is read and nothing is unread', async () => {
+    const { readRuns } = await trade();
+    const clock = { t: 0 };
+    const gh = clockedGh(clock, 1);
+    const { runs, unread } = await readRuns({ listing: [entry(1, 2)], wanted: null, stepName: STEP, deadline: 1000, now: () => clock.t, gh });
+    assert.deepEqual(unread, []);
+    assert.deepEqual(runs[0].attempts.map(a => [a.attempt, a.dbStep?.conclusion]), [[1, 'success'], [2, 'success']]);
+  });
+
+  it('a probe is kept for the report to name but never read, and a bundle not asked for is skipped (--line)', async () => {
+    const { readRuns } = await trade();
+    const clock = { t: 0 };
+    const gh = clockedGh(clock, 1);
+    const listing = [entry(1, 1, { headBranch: 'full-run/probe-b85' }), entry(2), entry(3)];
+    const all = await readRuns({ listing, wanted: null, stepName: STEP, deadline: 1000, now: () => clock.t, gh });
+    assert.deepEqual(all.runs.map(r => r.id), [1, 2, 3]);
+    assert.equal(gh.calls.length, 2, 'the probe was not read');
+    const some = await readRuns({ listing, wanted: new Set(['2']), stepName: STEP, deadline: 1000, now: () => clock.t, gh });
+    assert.deepEqual(some.runs.map(r => r.id), [2], 'only the wanted bundle');
+  });
+
+  it('git calls are under the same budget: placeWithin refuses once the deadline has passed, so the head is named unplaced', async () => {
+    const { placeWithin, tradeReport } = await trade();
+    assert.equal(typeof placeWithin, 'function', 'scripts/trade.mjs must export placeWithin');
+    const clock = { t: 0 };
+    const placed = placeWithin(isAncestorOf(), { deadline: 1000, now: () => clock.t });
+    assert.equal(placed(CUTOVER, AFTER_SHA), true, 'inside the budget it answers as git does');
+    clock.t = 2000;
+    assert.throws(() => placed(CUTOVER, AFTER_SHA), /budget/i);
+    const r = tradeReport({ runs: [run({ id: 1 })], cutoverSha: CUTOVER, isAncestor: placed });
+    assert.deepEqual(namedKinds(r, 1), ['unplaced']);
+    assert.match(r.named[0].reason, /budget/i);
   });
 });
 
