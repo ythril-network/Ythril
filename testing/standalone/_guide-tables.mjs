@@ -57,7 +57,8 @@ export function routeCell(r) {
   const canonical = `\`POST /api/${r.tool}\``;
   if (!r.route) return canonical;
   if (r.route === `POST /api/${r.tool}`) return canonical;
-  return `${canonical}<br>legacy: \`${r.route}\``;
+  // No `<br>`: the docs lint refuses inline HTML, and the generated page is linted like any other.
+  return `${canonical} · legacy: \`${r.route}\``;
 }
 
 /**
