@@ -55,15 +55,12 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { previousMajorTag, toolNamesAt } from './_previous-major-tools.mjs';
-import { renderCapabilityMap, renderRestOnlyBlock, capabilityMapModel, rungCell, isToolDoorPath } from './_guide-tables.mjs';
+import { GENERATED_REGIONS, regionMarkers, capabilityMapModel, rungCell, isToolDoorPath } from './_guide-tables.mjs';
 
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
 
-/** Each generated region: where it lives, what it is called, and what renders it. */
-const REGIONS = [
-  { page: 'docs/integration-guide/16b-mcp-capability-map.md', name: 'capability-map', render: renderCapabilityMap },
-  { page: 'docs/integration-guide/16-mcp.md', name: 'rest-only', render: renderRestOnlyBlock },
-];
+/** Each generated region (`GENERATED_REGIONS`, held once in `_guide-tables.mjs` with the script that writes them). */
+const REGIONS = GENERATED_REGIONS;
 
 const eol = s => s.replace(/\r\n/g, '\n');
 
@@ -71,17 +68,12 @@ const eol = s => s.replace(/\r\n/g, '\n');
 function regionOf({ page, name }) {
   assert.ok(existsSync(join(REPO_ROOT, page)), `${page} does not exist; the generated region \`${name}\` has no page to live on`);
   const text = eol(readFileSync(join(REPO_ROOT, page), 'utf8'));
-  const open = `<!-- generated: ${name} -->`;
-  const close = `<!-- /generated: ${name} -->`;
-  const opens = text.split(open).length - 1;
-  const closes = text.split(close).length - 1;
+  const { open, close, opens, closes, openAt, closeAt, from, to } = regionMarkers(text, name);
   assert.ok(opens === 1 && closes === 1,
     `${page} must carry the marker pair \`${open}\` ... \`${close}\` exactly once; it has the opening marker ${opens} time(s) `
     + `and the closing marker ${closes} time(s). Without the pair there is no region to compare against the render, so `
     + 'this fails here instead of comparing nothing.');
-  const from = text.indexOf(open) + open.length;
-  const to = text.indexOf(close);
-  assert.ok(from <= to, `${page}: the closing marker for \`${name}\` comes before its opening marker`);
+  assert.ok(openAt < closeAt, `${page}: the closing marker for \`${name}\` comes before its opening marker`);
   return text.slice(from, to);
 }
 

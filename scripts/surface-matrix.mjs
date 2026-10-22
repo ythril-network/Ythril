@@ -12,7 +12,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import {
-  capabilityMapModel, renderCapabilityMap, renderRestOnlyBlock, routeCell, rungCell, isToolDoorPath,
+  capabilityMapModel, renderCapabilityMap, routeCell, rungCell, isToolDoorPath, GENERATED_REGIONS, regionMarkers,
 } from '../testing/standalone/_guide-tables.mjs';
 
 const ROOT = process.cwd();
@@ -28,11 +28,6 @@ const read = p => readFileSync(join(ROOT, p), 'utf8');
  * nobody chose. It keeps the page's own line endings (the working tree is CRLF, the commit LF), and writes only
  * the two pages named here. Build the server first; the render reads `server/dist`.
  */
-const GENERATED_REGIONS = [
-  { page: 'docs/integration-guide/16b-mcp-capability-map.md', name: 'capability-map', render: renderCapabilityMap },
-  { page: 'docs/integration-guide/16-mcp.md', name: 'rest-only', render: renderRestOnlyBlock },
-];
-
 function writeGeneratedRegions() {
   let failed = false;
   for (const { page, name, render } of GENERATED_REGIONS) {
@@ -41,54 +36,21 @@ function writeGeneratedRegions() {
     const text = readFileSync(file, 'utf8');
     const crlf = text.includes('\r\n');
     const nl = crlf ? '\r\n' : '\n';
-    const open = `<!-- generated: ${name} -->`;
-    const close = `<!-- /generated: ${name} -->`;
-    const opens = text.split(open).length - 1;
-    const closes = text.split(close).length - 1;
-    if (opens !== 1 || closes !== 1 || text.indexOf(open) > text.indexOf(close)) {
+    const { open, close, opens, closes, ok, from, to } = regionMarkers(text, name);
+    if (!ok) {
       console.error(`${page} must carry \`${open}\` then \`${close}\` exactly once (found ${opens} and ${closes}); nothing was written to it.`);
       failed = true;
       continue;
     }
     const body = render().replace(/\r\n/g, '\n').split('\n').join(nl);
     // A blank line each side: a table directly under an HTML comment is glued to it and renders as literal pipes.
-    const next = text.slice(0, text.indexOf(open) + open.length) + nl + nl + body + nl + nl + text.slice(text.indexOf(close));
+    const next = text.slice(0, from) + nl + nl + body + nl + nl + text.slice(to);
     if (next !== text) writeFileSync(file, next, 'utf8');
     console.log(`${page}: \`${name}\` ${next === text ? 'already current' : 'written'}`);
   }
   process.exit(failed ? 1 : 0);
 }
 if (process.argv.includes('--write')) writeGeneratedRegions();
-/**
- * Comments out, LINE comments first.
- *
- * Order is not cosmetic. `api/data.ts:281` reads `// Follow the symlink — useful for /mnt/* or volume-mount
- * points`, and stripping block comments first treats that `/*` as an opener: it swallows 5,907 characters
- * through the next `*​/`, taking three route registrations with it. That is how this matrix reported 202 routes
- * when the routers serve 207. Removing line comments first makes the phantom opener disappear with its line.
- *
- * Two files in the tree hit it today (`api/data.ts`, `files/converters/pipeline.ts`), and 33 gates still carry
- * the other order — tracked as its own item rather than swept here.
- */
-const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
-
-// ── routes, as before ───────────────────────────────────────────────────────
-const APP = strip(read('server/src/app.ts'));
-const routerFile = new Map();
-for (const m of APP.matchAll(/import \{ (\w+) \} from '\.\/(api\/[^']+)\.js'/g)) routerFile.set(m[1], `server/src/${m[2]}.ts`);
-const mounts = [];
-for (const m of APP.matchAll(/app\.use\('(\/[^']*)',\s*(\w+)\)/g)) {
-  const file = routerFile.get(m[2]);
-  if (file) mounts.push({ mount: m[1], file });
-}
-const filesFor = file => {
-  if (!file.endsWith('/index.ts')) return [file];
-  const dir = file.slice(0, -'/index.ts'.length);
-  return execFileSync('git', ['ls-files', dir], { cwd: ROOT, encoding: 'utf8' })
-    .split('\n').map(l => l.trim()).filter(l => l.endsWith('.ts'));
-};
-const API_ALL = execFileSync('git', ['ls-files', 'server/src/api'], { cwd: ROOT, encoding: 'utf8' })
-  .split('\n').map(l => l.trim()).filter(l => l.endsWith('.ts'));
 
 /*
  * The routes, the mapping and the rungs come from `testing/standalone/_guide-tables.mjs`, not from a copy here.
@@ -162,7 +124,9 @@ writeFileSync(join(ROOT, 'todo/_matrix-capabilities.md'), out.join('\n'), 'utf8'
 /** The PUBLISHED table is `renderCapabilityMap` — the same text the integration guide's generated region is held to. */
 writeFileSync(join(ROOT, 'todo/_matrix-published.md'), renderCapabilityMap(rows), 'utf8');
 writeFileSync(join(ROOT, 'todo/_matrix-rest-only.md'), rest.join('\n'), 'utf8');
-const rungMismatch = rows.filter(r => r.route && r.restRung && r.restRung !== 'exempt' && r.restRung !== r.mcpRung);
+// A tool priced inside its handler (no row, no flag) has no MCP rung of its own to differ from the route's.
+const rungMismatch = rows.filter(r => r.route && r.restRung && r.restRung !== 'exempt' && r.mcpPriced !== 'handler'
+  && r.restRung !== r.mcpRung);
 /*
  * A mapped route with no rights row.
  *
@@ -183,7 +147,7 @@ const rungMismatch = rows.filter(r => r.route && r.restRung && r.restRung !== 'e
  * available fix would be to area-scope a route the design says is not.
  */
 const SPACE_SCOPED = r => !/\/api\/(tokens|networks)(\/|$)/.test(r.route ?? '')
-  && !isToolDoorPath(r.route);
+  && !isToolDoorPath(r.route, r.tool);
 const noRightsRow = rows.filter(r => r.route && r.restRung === null && SPACE_SCOPED(r));
 console.log(JSON.stringify({
   capabilities: rows.length, routes: routes.size, restOnly: restOnly.length,

@@ -73,7 +73,7 @@ message is rarely textually similar to the message's subject.
 
 ## Combining them: the two-call pattern that beats one clever call
 
-**Filter first, rank second — in one call.** `recall`'s `filter` accepts the same grammar `filter` does, including
+**Filter first, rank second — in one call.** `recall`'s `filter` accepts the same grammar the `filter` tool does, including
 `$or` and `$regex` nested to depth 8. **`topK` is filled from every record that satisfies the filter, whatever its
 vector rank** — so a filtered `topK: 10` returns ten when ten match, and nothing matching is silently dropped. An
 answer that could not be completed says `filter_window` in `degraded`.
@@ -162,4 +162,4 @@ has to be one.
 ---
 
 *The MCP tools take the same parameters as the routes throughout — see the
-[capability map](16b-mcp-capability-map.md#capability-map--both-doors-and-what-a-token-needs) for both doors side by side.*
+[capability map](16b-mcp-capability-map.md) for both doors side by side.*

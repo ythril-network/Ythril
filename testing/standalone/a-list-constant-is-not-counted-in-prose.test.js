@@ -21,7 +21,7 @@
  * expression per constant over every page is the cost that makes a gate nobody runs.
  *
  * A sentence naming one such constant may not also state a COUNT: a number (digits or a word) followed within
- * two words by a plural noun (`four rows`, `5 fields`, `the same five fields`), or an emptiness (`empty`,
+ * `WORDS_AFTER_A_NUMBER` words by a plural member noun (`four rows`, `5 fields`, `the same five fields`), or an emptiness (`empty`,
  * `none`, `zero`, `no entries`). Say what the list IS FOR and where it lives; the reader who needs the number
  * reads the list.
  *
@@ -30,7 +30,9 @@
  * It holds sentences that name the constant in backticks. A count that sits one sentence away (`the same five fields`
  * after a sentence that named the list) is not tied to it, and a number that counts something else in the same
  * sentence (a version, a date, a ticket id) is not a count of the list: only `<number> <plural noun>` and the
- * emptiness words are read, which is what keeps scalars, versions and env defaults out. Constants are held by
+ * emptiness words are read, which is what keeps scalars, versions and env defaults out. The noun must be a member noun
+ * of lists in general (`MEMBER_NOUNS`) or a word of the constant's own name, so a count in a noun outside both is
+ * missed. Constants are held by
  * SCREAMING_SNAKE_CASE name, so a list kept under a lowercase name is not reached.
  *
  * ## Derived, and floored
@@ -92,7 +94,8 @@ const EMPTINESS = /\b(?:empty|none|zero)\b/i;
 
 /**
  * The count phrase a sentence states about a list constant, or null: an emptiness (`EMPTY`, `none`, `zero`), or
- * a number followed within two words by a noun that is a member noun of lists in general or of this one by name.
+ * a number followed, within `WORDS_AFTER_A_NUMBER` words, by a noun that is a member noun of lists in general or of
+ * this one by name.
  */
 function countOf(sentence, constant) {
   const own = new Set(constant.split('_').map(singular));

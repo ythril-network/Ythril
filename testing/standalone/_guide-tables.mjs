@@ -49,8 +49,14 @@ const { restOnlyCapabilityMap } = await fromDist('mcp/parity.js');
 /** The fewest tools, pairings and rows that mean the registry and the map were really read. */
 const FLOOR = 30;
 
-/** A canonical tool-door route: `POST /api/<tool-name>`, served by the one generic `/:tool` route. */
-export const isToolDoorPath = route => /^POST \/api\/[a-z0-9_]+$/.test(route ?? '');
+/**
+ * Whether `route` is THIS tool's door: exactly `POST /api/<tool-name>`, served by the one generic `/:tool` route.
+ *
+ * It names the tool because the shape alone is not the question. `POST /api/spaces`, `/api/networks` and
+ * `/api/views` have the same shape and are ordinary REST routes, priced by `ROUTE_RIGHTS` and not by
+ * `TOOL_RIGHTS`; a shape test called them the tool door and their rows read "both doors", which is false.
+ */
+export const isToolDoorPath = (route, tool) => typeof tool === 'string' && tool !== '' && route === `POST /api/${tool}`;
 
 /** The REST cell — the canonical path first, and the older one named as older. */
 export function routeCell(r) {
@@ -69,13 +75,16 @@ export function rungCell(r) {
   if (!r.route) return `${r.mcpRung} (MCP)`;
   // One generic `/:tool` route serves every tool, so the requirement is the TOOL's and both doors read it
   // from `TOOL_RIGHTS`. Calling it instance-level would say the opposite about a per-space capability.
-  if (isToolDoorPath(r.route)) return `${r.mcpRung} · both doors`;
+  if (isToolDoorPath(r.route, r.tool)) return `${r.mcpRung} · both doors`;
   // The per-space matrix governs SPACE-scoped areas; `/api/spaces`, `/api/tokens` and `/api/networks` sit
   // outside it by design, so 'no row' there is the design rather than a gap.
   if (r.restRung === null) return `${r.mcpRung} (MCP) · instance-level`;
   if (r.restRung === 'exempt') return `${r.mcpRung} (MCP) · REST exempt`;
   const area = r.restArea ? ` \`${r.restArea}\`` : '';
-  if (r.restRung === r.mcpRung) return `${r.restRung}${area}`;
+  // A tool with no `TOOL_RIGHTS` row and no flag is priced INSIDE its handler (the act both doors call), so the
+  // `mcpRung` here is only the coarse mutating/read fallback: no requirement of the tool's own to set against the
+  // route's, and a difference drawn from it would be one the code does not have.
+  if (r.mcpPriced === 'handler' || r.restRung === r.mcpRung) return `${r.restRung}${area}`;
   return `**REST ${r.restRung}${area} · MCP ${r.mcpRung}**`;
 }
 
@@ -117,8 +126,9 @@ export function capabilityMapModel() {
   const missingTools = map.map(r => r[1]).filter(t => !toolNames.has(t));
   if (missingTools.length) throw new Error(`mapped tools that do not exist: ${missingTools.join(', ')}`);
   // A `POST /api/<tool-name>` row resolves to the generic mount, which is the route that serves it.
-  const missingRoutes = map.map(r => r[2])
-    .filter(r => r && !routes.has(r) && !(isToolDoorPath(r) && routes.has(THE_TOOL_DOOR)));
+  const missingRoutes = map
+    .filter(([, tool, r]) => r && !routes.has(r) && !(isToolDoorPath(r, tool) && routes.has(THE_TOOL_DOOR)))
+    .map(r => r[2]);
   if (missingRoutes.length) throw new Error(`mapped routes that do not exist: ${missingRoutes.join(' | ')}`);
   const unmapped = [...toolNames].filter(t => !map.some(r => r[1] === t)).sort();
   if (unmapped.length) throw new Error(`tools missing from the map: ${unmapped.join(', ')}`);
@@ -134,7 +144,9 @@ export function capabilityMapModel() {
     const restRung = route
       ? (RUNG.get(route) ?? (EXEMPT_ROUTES.has(route.split(' ').slice(1).join(' ')) ? 'exempt' : null))
       : null;
-    return { area, tool, route, note, mcpRung: toolRung(t), restRung, restArea: route ? (AREA_OF.get(route) ?? null) : null };
+    // What prices the tool on MCP: its own row, a flag, or neither — in which case its handler's act does.
+    const mcpPriced = TOOL_RUNG.has(tool) ? 'row' : (t.admin || t.spaceAdmin) ? 'flag' : 'handler';
+    return { area, tool, route, note, mcpRung: toolRung(t), mcpPriced, restRung, restArea: route ? (AREA_OF.get(route) ?? null) : null };
   });
   return { rows, map, routes, routeArea, tools: ALL_TOOLS };
 }
@@ -167,4 +179,37 @@ export function renderRestOnlyBlock() {
     throw new Error('restOnlyCapabilityMap() did not return {note, capabilities[]}; the REST-only block cannot be rendered.');
   }
   return '```json\n' + JSON.stringify({ restOnly: map }, null, 2) + '\n```';
+}
+
+/**
+ * Every generated region of the integration guide: the page it lives on, its name, and what renders it.
+ *
+ * ONE list, read by `scripts/surface-matrix.mjs --write` (which fills them) and by the gate that holds each to its
+ * render. It was written twice, once in each, and a region added to one and not the other is a region that is
+ * either never filled or never held.
+ */
+export const GENERATED_REGIONS = [
+  { page: 'docs/integration-guide/16b-mcp-capability-map.md', name: 'capability-map', render: renderCapabilityMap },
+  { page: 'docs/integration-guide/16-mcp.md', name: 'rest-only', render: renderRestOnlyBlock },
+];
+
+/**
+ * Where a region's markers are in `text`: `<!-- generated: NAME -->` then `<!-- /generated: NAME -->`.
+ *
+ * `ok` is true only for exactly one of each, opening first. A page that lost its markers, or repeats them, is not
+ * `ok`, and both callers refuse it rather than guess a place: the gate would otherwise compare nothing and the
+ * writer would append a table somewhere nobody chose. `from` and `to` bound the text between the markers.
+ */
+export function regionMarkers(text, name) {
+  const open = `<!-- generated: ${name} -->`;
+  const close = `<!-- /generated: ${name} -->`;
+  const opens = text.split(open).length - 1;
+  const closes = text.split(close).length - 1;
+  const openAt = text.indexOf(open);
+  const closeAt = text.indexOf(close);
+  return {
+    open, close, opens, closes, openAt, closeAt,
+    ok: opens === 1 && closes === 1 && openAt < closeAt,
+    from: openAt + open.length, to: closeAt,
+  };
 }

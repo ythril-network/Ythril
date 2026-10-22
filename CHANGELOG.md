@@ -179,7 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UI:** **Settings → Preferences** has a **Date and time** card (**Automatic**, **ISO 8601** or **Day.month.year, 24-hour**; **local time** or **UTC**), kept in this browser.
 - **UI:** The Files page says why a rename, delete or new folder was refused; a refusal naming a remedy stays until dismissed and a server fault shows its request id; act refusals and counted sentences are translated, Polish buttons are commands.
 - **UI:** Settings → Spaces shows a space waiting for search as "Waiting for search service". The Query tab's structured mode is called Filter; the Graph view reads every page of `graph_traverse` and says when the walk stopped at its `limit`.
-- **Docs:** The hosting guide names `YTHRIL_MONGO_MEM_LIMIT` (default `4g`). Help gains a testing guide.
+- **Docs:** The hosting guide names `YTHRIL_MONGO_MEM_LIMIT` (default `4g`). Help gains a testing guide. The integration guide's tool tables come from code; an edge's `type` is free text.
 - **CI:** A push to `full-run/<bundle>` runs every `ci.yml` job as checks named `Full run / <job>`, testing a bundle before its pull request; `Build & Test` stays the only merge gate.
 
 ### Fixed
@@ -233,11 +233,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database:** `POST /api/admin/data/config/test` answers an unreachable host `200` with `{ "ok": false, "error": … }`. A large entity merge no longer prints `MaxListenersExceededWarning`.
 - **Backup:** A scheduled backup that outlasts its cron period is skipped, not overlapped; its failure line reads `Scheduled backup failed: …`, was `Scheduled backup error: …`.
 - **Backup:** A restore holds each space until it equals the backup, never lowers its counter, resumes after a crash, and peers resend what came after the backup.
-- **Backup:** A migration copies the data before switching (it came back empty).
+- **Backup:** A migration copies the data before switching (the instance came back empty).
 - **Media:** A job holds its file by path, not in memory, and is complete only after its file is; an ffmpeg step stops after 10 minutes, an audio segment at 5, a video at 1000 keyframes; a killed job leaves no plaintext.
 - **Media:** With `reprocessSyncedImages` off a pushed image is no longer analysed for faces; the setting governs push and pull.
 - **UI:** The client never shows an answer older than the last one asked for (graph depth slider, record tabs, selected record card). The Graph tab says why it is slow after 3 s and ends in an error state with Retry after 30 s;
-- **Help:** Links in Help no longer open dead tabs and keep their place in the URL. The guide's tool tables are generated from code; an edge's `type` is free text.
+- **Help:** Links in Help no longer open dead tabs and keep their place in the URL.
 - **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails when the run is not listed after three minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`); it reported success.
 - **CI:** The keyset gate finds a seq ordering however spelled; the validator gate follows act bodies.
 
