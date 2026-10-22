@@ -200,7 +200,7 @@ export const save_bulkTool: ToolHandler = {
                       + 'the identity alongside `from` and `to`, and embedded — so it is what a `recall` '
                       + 'ranks this edge on.',
                   },
-                  type:        { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution"). Free text; nothing validates it against a list.' },
+                  type:        { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution"). Free text: nothing validates it against a list. What a space\'s schema declares and validates for an edge is its `label`.' },
                   weight:      {
                     type: 'number',
                     description: 'Optional edge weight. `save_edge` BOUNDS this to 0–1 and this door does '

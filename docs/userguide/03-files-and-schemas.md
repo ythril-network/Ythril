@@ -306,7 +306,8 @@ it is not under (`staleGuards`, a leftover of an older version): that is not a b
 violations, and the next write that meets it clears it. A link pointing at something that no longer exists is reported separately, as a dangling link, and not as
 a wrong type; whether it is refused when written is the space's *Strict linkage* setting, not this rule.
 
-**Both are set on the Schema tab**, under **Permitted ends** when an edge type is selected. Two lists — the
+**Both are set on the Schema tab**, under **Permitted ends** when an edge type is selected. (An edge type there is
+named for the edge's *label*; the free-text `type` property an edge may also carry is not validated by any schema.) Two lists — the
 types allowed at the **From** end and at the **To** end — and a checkbox for the cardinality. A list you leave
 untouched means *any entity type*, which is not the same as an empty one: unticking the last box returns that
 end to *any* rather than forbidding every edge of the label.
