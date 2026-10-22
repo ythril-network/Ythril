@@ -413,7 +413,7 @@ and the flag stamps no `seq` or `updatedAt`.
 **What a flagged record is not, and the one door that still reaches it.** It is not a file the space has, so it is
 absent from the listing and from every file count (`GET /spaces/:spaceId/stats`, the MCP `space_stats` tool and a
 space's own shape all answer the same number); it is not a result of `recall` or `similar`, on either door, nor of the
-lexical half of a search; a graph walk does not reach it and attaches none of its fields; it is not a valid edge or
+lexical half of a search, nor named as a near-duplicate of a write or a side of a contradiction; a graph walk does not reach it and attaches none of its fields; it is not a valid edge or
 link target, so a strict-linkage space refuses a reference to it exactly as it refuses a path that never existed; the
 by-path metadata read, the extract route and `PATCH` answer `404` for it, and `update_file_meta` refuses it exactly as
 it refuses a path that never existed (`isError` on MCP, `400` on `POST /api/update_file_meta`, like every tool failure). **The exception is the
