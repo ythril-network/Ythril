@@ -201,7 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** A pushed file's later description and tag edits are no longer skipped; arriving bytes revive a soft-deleted path and get this instance's retention window; a metadata arrival no longer overwrites a newer copy.
 - **Files:** A file's processing status or a move of a peer's file no longer changes its `updatedAt` (a false Merkle divergence); changed media over a `complete` file is analysed again.
 - **Files:** A soft-deleted file's record keeps no description, vector, chunk or face, and is removed once the space's file retention window, counted from the deletion, has passed; a space with no file window keeps it.
-- **Files:** Re-uploading a file with metadata takes one sequence number and a write that changes nothing takes none.
+- **Files:** A re-upload with metadata takes one sequence number; a write that changes nothing takes none.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered, never over a row's own description or tags, waiting up to 30 days for a missing file; a wrong-typed key or any `parentFileId` is discarded and counted refused.
 - **Files:** Moving a file or folder leaves nothing at its old path, even mid-processing, and carries chunks, sidecars, queued jobs and links (`PATCH /api/files/:spaceId`, `move_file`); a retried move completes only a move it began.
 - **Files:** Each record ends wholly at its old or new path, a case-only rename moves its record too, and a directory delete is audited with `kind: "directory"`. REST delete, `delete_file` and the TTL sweep complete a file whose bytes are gone but metadata remains.
@@ -233,13 +233,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database:** `POST /api/admin/data/config/test` answers an unreachable host `200` with `{ "ok": false, "error": … }`. A large entity merge no longer prints `MaxListenersExceededWarning`.
 - **Backup:** A scheduled backup that outlasts its cron period is skipped, not overlapped; its failure line reads `Scheduled backup failed: …`, was `Scheduled backup error: …`.
 - **Backup:** A restore holds each space until it equals the backup, never lowers its counter, resumes after a crash, and peers resend what came after the backup.
-- **Backup:** A migration copies the data before switching (the instance came back on an empty database).
+- **Backup:** A migration copies the data before switching (it came back empty).
 - **Media:** A job holds its file by path, not in memory, and is complete only after its file is; an ffmpeg step stops after 10 minutes, an audio segment at 5, a video at 1000 keyframes; a killed job leaves no plaintext.
-- **Media:** With `reprocessSyncedImages` off, an image a peer pushes is no longer analysed for faces; the setting governs push and pull.
+- **Media:** With `reprocessSyncedImages` off a pushed image is no longer analysed for faces; the setting governs push and pull.
 - **UI:** The client never shows an answer older than the last one asked for (graph depth slider, record tabs, selected record card). The Graph tab says why it is slow after 3 s and ends in an error state with Retry after 30 s;
-- **Help:** Links in Help no longer open dead tabs and keep their place in the URL.
-- **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails when the run is missing from its listing after three minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`); it reported success.
-- **CI:** The keyset gate finds a seq ordering however spelled; the validator gate follows space act bodies.
+- **Help:** Links in Help no longer open dead tabs and keep their place in the URL. The guide's tool tables are generated from code; an edge's `type` is free text.
+- **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails when the run is not listed after three minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`); it reported success.
+- **CI:** The keyset gate finds a seq ordering however spelled; the validator gate follows act bodies.
 
 ### Security
 
