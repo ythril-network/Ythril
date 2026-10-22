@@ -55,7 +55,7 @@ export const save_edgeTool: ToolHandler = {
             fromKind: edgeEndpointKindSchema('from'),
             toKind: edgeEndpointKindSchema('to'),
             label: { type: 'string', minLength: 1, description: 'Relationship label (e.g. "works_at", "knows").' },
-            type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution").' },
+            type: { type: 'string', description: 'Optional edge type (e.g. "causal", "attribution"). Free text: it is stored as given and nothing validates it. What a space\'s schema declares and validates for an edge is its `label`.' },
             weight: unitScoreSchema('Optional strength for this relationship, 0 to 1. Nothing derives it '
               + 'and nothing ranks on it — it is stored, returned, and sortable by `filter`, so it means '
               + 'whatever you decide it means. The 0–1 bound is enforced HERE and not on `save_bulk`, whose '
@@ -180,7 +180,8 @@ export const update_edgeTool: ToolHandler = {
     + 'PARAMETERS:\n'
     + '- `id` — the edge\'s `_id`, as `graph_traverse`, `filter` and `recall`\'s `_graph` report it. Required.\n'
     + '- `label` — the relationship\'s name, replaced when sent. Re-embeds, AND CHANGES THE `_id`: since 3.6 an edge id is derived from `(from, to, label)` so two peers creating one relationship agree on its id without talking, and a label is part of that identity. The result carries the NEW `_id` and the old one 404s — read it back rather than reusing the id you sent. Every other field patches in place. The same happens to an edge whose endpoint moves in an entity merge.\n'
-    + '- `type` — replaced when sent, and re-validated against the space\'s edge-type allowlist.\n'
+    + '- `type` — replaced when sent. The edge property `type` is free text and nothing validates it; what a space '
+    + 'declares and validates for an edge is keyed by its `label`.\n'
     + '- `weight` — 0 to 1. Ranking uses it; traversal does not filter on it.\n'
     + '- `description` — replaced when sent.\n'
     + '- `tags` — MERGED into the existing tags, never replacing them.\n'

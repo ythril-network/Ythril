@@ -136,7 +136,8 @@ you opened it* and a **Reload the schema** button; reloading drops your unsaved 
   - **Retention** — how long records of *this type* are kept, overriding the space-wide window on the Danger tab. Leave **Delete records after** empty to inherit it; the hint names the number you would inherit. A type with a window carries a yellow **ttl** badge in the list, so what expires is visible without opening each type.
     - **Drop detail after (days)** appears for **chrono types only**. It removes the description, matched text and embedding at that point — the record stops competing in search — while its properties, title, type and dates stay queryable. Useful for telemetry that crowds out real answers but whose fields are still worth having. It must be **shorter** than the delete window, or it could never happen; the editor says so if it isn't.
     - A type **linked to the Schema Library** has no retention of its own: a library entry cannot carry a window (it would apply to every space using it). **Unlink** first, or set the window on the space-wide default instead. Saving a type *to* the library also leaves its window behind, and says so when it does.
-  - **Permitted ends** — **edge types only**: which entity types may sit at each end of a link with this
+  - **Permitted ends** — **edge types only** (an edge type here is named for the edge's *label*; the `type`
+    property an edge may also carry is free text that no schema validates): which entity types may sit at each end of a link with this
     label, and whether an entity may have more than one. Two lists (**From** and **To**) plus **At most one
     edge with this label per source entity** (whatever it points at; in a strict space two writes at the same moment
     cannot both store one). A list left untouched means any entity type — unticking the last

@@ -367,7 +367,7 @@ POST /api/brain/spaces/:spaceId/edges
 | `toKind` | no | The same for `to`. |
 | `label` | yes | Relationship label (e.g. `depends_on`, `related_to`) |
 | `weight` | no | Numeric weight (0–1). Defaults to none. |
-| `type` | no | Free-form edge type string (e.g. `causal`, `hierarchical`). |
+| `type` | no | The edge property `type`: free text (e.g. `causal`, `hierarchical`), stored as given, and nothing validates it. What a space's schema declares and validates for an edge is its `label`. |
 | `tags` | no | Array of strings. Merged (union) with existing tags on upsert. Included in embedding text and filterable via `recall`. |
 | `description` | no | Optional prose description of the relationship. Included in embedding text. |
 | `properties` | no | Optional key-value metadata object. Values must be string, number, or boolean. Shallow-merged on upsert. |
