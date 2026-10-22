@@ -29,7 +29,7 @@ import { oldestHoldAgeSeconds } from '../util/seq.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
 import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
 import { JUDGED_WRITE_OPERATIONS } from '../contract/judged-write-operations.js';
-import { webhookFirstDeliveryCounts, webhookRetriesDroppedCounts } from '../webhooks/dispatcher.js';
+import { webhookFirstDeliveryCounts, webhookRetriesDroppedCounts, webhookRetryTicksCutCount } from '../webhooks/dispatcher.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { FILE_MISMATCH_CLASSES } from '../files/file-mismatch-classes.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
@@ -1043,7 +1043,10 @@ export const webhookFirstDeliveriesQueuedTotal = counterMirroringTally({
   read: () => webhookFirstDeliveryCounts().queued,
 });
 
-/** First deliveries that found their subscription's queue full and were written straight to the retry queue instead, counted by the rows persisted. */
+/**
+ * First deliveries that found their subscription's queue full and were written straight to the retry queue instead, counted by the rows the
+ * queue HOLDS: a write whose reply was lost is read back, and its rows that landed are counted here (Q-580).
+ */
 export const webhookFirstDeliveriesOverflowedTotal = counterMirroringTally({
   name: 'ythril_webhook_first_deliveries_overflowed_total',
   help: 'Webhook first deliveries persisted straight to the retry queue because their subscription already had its bound in flight and queued',
@@ -1051,14 +1054,28 @@ export const webhookFirstDeliveriesOverflowedTotal = counterMirroringTally({
 });
 
 /**
- * First deliveries the dispatcher could not persist and so lost: the retry-queue write of an overflowed or shutdown-queued delivery failed
- * (the database was not answering). Every other path of a first delivery either delivers or persists, so a value above zero is an event a
- * subscriber was never sent and nothing will send; the line the dispatcher logs names the cause once per window, this counts them all.
+ * Webhook events whose retry row a failed write did not leave in the queue, by `reason` (Q-580). Three writers: the overflow flush (an
+ * overflowed or shutdown-queued first delivery), the requeue after a failed first delivery, and the poll's requeue of a failed retry. After
+ * a failed write the rows are read back: `not_stored` is a row the store is known not to hold (the write was refused, or ended by the
+ * server's own deadline), an event nothing will send; `not_known_stored` is one the read could not account for (the write may still land,
+ * the row was already due and may have been delivered, or the read itself failed). Alert on `not_stored`; take ratios with
+ * `sum without(reason)`. The dispatcher names the cause once per window.
  */
 export const webhookFirstDeliveriesLostTotal = counterMirroringTally({
   name: 'ythril_webhook_first_deliveries_lost_total',
-  help: 'Webhook first deliveries lost because writing them to the retry queue failed (an overflowed delivery, or one queued at shutdown)',
+  help: 'Webhook events whose retry-queue row a failed write did not leave stored, by reason: not_stored (known not stored) or not_known_stored (could not be confirmed)',
+  labelName: 'reason',
   read: () => webhookFirstDeliveryCounts().lost,
+});
+
+/**
+ * Ticks of the webhook retry poll that stopped starting deliveries at their budget (`RETRY_TICK_BUDGET_MS`), leaving due retries queued for
+ * the next tick (Q-483). A tick that ends inside its budget is not counted; the dispatcher says a cut once per window.
+ */
+export const webhookRetryTicksCutTotal = counterMirroringTally({
+  name: 'ythril_webhook_retry_ticks_cut_total',
+  help: 'Webhook retry poll ticks that stopped starting deliveries at their time budget and left due retries queued for the next tick',
+  read: webhookRetryTicksCutCount,
 });
 
 /**

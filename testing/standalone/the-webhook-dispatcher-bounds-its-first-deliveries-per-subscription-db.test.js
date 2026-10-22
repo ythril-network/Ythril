@@ -28,10 +28,19 @@
  *  - **A success writes nothing:** a first delivery that succeeds to a subscription that is already active and has no failures does not
  *    write the subscription (`markWebhookSuccess` writes only on a status change): a burst of N is not N writes of an unchanged row.
  *
+ *  - **The counter is read once the flush is settled, never when its rows become visible (Q-580).** Main CI at 0caad1fd failed
+ *    `0 !== 1436` here: the rows are visible to another connection before `insertMany` resolves in the dispatcher and the counter
+ *    rises (probe P1(a): 22 of 30 trials, up to 101 ms early). The case that counts the overflow awaits
+ *    `dispatcher.settledRetryWrites()` first, and a case of its own HOLDS the write's reply after the real call resolved, which is
+ *    that race made certain rather than waited for.
+ *
  * ## Seen red
  *
  * On the base the dispatcher has no seam, so the first case fails: the bound cannot be observed because the first delivery is
  * hard-wired to `attemptDelivery` over the network. Every other case needs the seam and fails on it first.
+ *
+ * Q-580, at cf89b68a: the held-reply case reads the counter at 0 with the flush's rows in the collection (the rule); the overflow
+ * case fails on the missing `settledRetryWrites` export, before its counter assertion.
  *
  * Run: node --test testing/standalone/the-webhook-dispatcher-bounds-its-first-deliveries-per-subscription-db.test.js
  * (requires the harness Mongo and a prior `npm run build:server`)
@@ -42,6 +51,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { parkDriverCall } from './_parked-driver-call.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'firstdeliv';
@@ -160,6 +170,10 @@ describe('the dispatcher bounds its first deliveries per subscription (Q-469)', 
       await waitFor(async () => (await retried(a)).length > 0, 30_000, 50, () => 'no event of the held sink overflowed to the retry queue', { what: 'overflow persisted' });
     } finally { await drainA(hold, state, 'kept'); }
 
+    // Settled, not visible: the rows are readable before the flush's insertMany resolves in the dispatcher (Q-580, P1(a)).
+    assert.equal(typeof dispatcher.settledRetryWrites, 'function',
+      'webhooks/dispatcher.ts exports no settledRetryWrites: a reader of the overflow counter has nothing to wait on but the rows, which are visible before the counter rises');
+    await dispatcher.settledRetryWrites();
     const persisted = await retried(a);
     assert.equal(new Set(persisted).size, persisted.length, 'an overflowed event was persisted twice');
     assert.deepEqual(persisted.filter(p => state.delivered.get(a)?.has(p)), [],
@@ -177,6 +191,33 @@ describe('the dispatcher bounds its first deliveries per subscription (Q-469)', 
     const queuedDelta = await counted('ythril_webhook_first_deliveries_queued_total') - queuedBefore;
     assert.ok(queuedDelta >= dispatcher.FIRST_DELIVERY_BOUND - dispatcher.FIRST_DELIVERY_CONCURRENCY,
       `the queued counter moved by ${queuedDelta}, fewer than the ${dispatcher.FIRST_DELIVERY_BOUND - dispatcher.FIRST_DELIVERY_CONCURRENCY} deliveries that waited behind the held sink's running ones`);
+  });
+
+  it('the overflow counter equals the rows once the flush is settled, even while the write\'s reply is still on its way (Q-580)', async () => {
+    assert.equal(typeof dispatcher.setFirstDeliveryDepsForTest, 'function', 'webhooks/dispatcher.ts exports no setFirstDeliveryDepsForTest');
+    const hold = gate();
+    const { deps, state } = rig({ holdA: hold });
+    dispatcher.setFirstDeliveryDepsForTest(deps);
+    const overflowedBefore = await counted('ythril_webhook_first_deliveries_overflowed_total');
+    // The retry queue is not a space's collection: its name is the empty space and its suffix (`_webhook_retry_queue`). AFTER the
+    // real call: the rows are stored and the dispatcher has not been answered, the window CI's read fell into.
+    const reply = parkDriverCall(acts.door.mongo, '', RETRY_QUEUE.slice(1), 'insertMany', () => true);
+    let rowsRead, delta;
+    try {
+      burst('raced');
+      await reply.reached;
+      // Every event resolved, so every overflow row has been handed to the flush: nothing is pushed after the reading below.
+      await waitFor(() => (state.delivered.get(b)?.size ?? 0) === BURST, 30_000, 50, 'sink B never received every event', { what: 'every event resolved' });
+      assert.ok((await retried(a)).length > 0, 'fixture: the held write stored no rows, so there is no window to read in');
+      // The reader asks for a settled flush; one that has nothing to ask reads now, while the reply is held, as CI's test did.
+      const settled = typeof dispatcher.settledRetryWrites === 'function' ? dispatcher.settledRetryWrites() : null;
+      if (settled) { reply.release(); await settled; }
+      rowsRead = (await retried(a)).filter(p => p.startsWith('raced/')).length;
+      delta = await counted('ythril_webhook_first_deliveries_overflowed_total') - overflowedBefore;
+    } finally { reply.release(); await drainA(hold, state, 'raced'); }
+    assert.equal(delta, rowsRead,
+      `the overflow counter rose by ${delta} while ${rowsRead} overflow rows were stored: it was read before the flush that stored them had settled`);
+    assert.equal(typeof dispatcher.settledRetryWrites, 'function', 'webhooks/dispatcher.ts exports no settledRetryWrites');
   });
 
   it('a first delivery that succeeds to an active subscription writes nothing to the subscription', async () => {

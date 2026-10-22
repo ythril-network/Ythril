@@ -75,6 +75,13 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     log.error(`Read-spill indexes could not be ensured (spills will not expire until they are): ${err}`);
   }
 
+  // The webhook retry queue's indexes as a step of their OWN, not awaited (Q-483): a build over a large queue must not hold the boot, and
+  // the poll works without them, only slower. The replaced { scheduledAt: 1 } is dropped only once both compounds are listed.
+  void (async () => {
+    const { initRetryQueueIndexes } = await import('./webhooks/dispatcher.js');
+    await initRetryQueueIndexes();
+  })().catch((err: unknown) => { log.warn(`Webhook retry queue indexes could not be ensured (the retry poll reads the queue unindexed until they are): ${err}`); });
+
   // ── Phase 1: DB initialisation (best-effort) ──────────────────────────────
   try {
     // Ensure the built-in general space exists BEFORE initAllSpaces() so its
@@ -93,8 +100,6 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     await initWebhookDeliveryIndexes();
     // 6.0: a subscription that named only retired proxy ids is disabled, never emptied (an empty list means every space).
     await retireWebhookSpaceIds((await import('./config/loader.js')).getConfig().retiredSpaceIds ?? []);
-    const { initRetryQueueIndexes } = await import('./webhooks/dispatcher.js');
-    await initRetryQueueIndexes();
 
     const { resetStaleWatermarksIfNeeded } = await import('./util/seq.js');
     await resetStaleWatermarksIfNeeded();

@@ -32,6 +32,7 @@
 import { describe, it, before, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { settle } from './_virtual-time.mjs';
+import { gate, ok, failed, armedRetryWorker } from './_retry-poll-rig.mjs';
 
 let dispatcher, onHousekeepingSignal;
 
@@ -40,19 +41,15 @@ before(async () => {
   ({ onHousekeepingSignal } = await import('../../server/dist/util/housekeeping-signals.js'));
 });
 
-const gate = () => { let release; const p = new Promise(r => { release = r; }); return { p, release }; };
-
 const job = (n, over = {}) => ({
   _id: `job-${n}`, webhookId: `sink-${n}`, body: '{}', event: 'entity.created', spaceId: 's', deliveryId: `d-${n}`,
   attempt: 2, scheduledAt: new Date(0), createdAt: new Date(0), ...over,
 });
-const ok = { id: 'x', webhookId: 'x', event: 'entity.created', spaceId: 's', timestamp: '', responseStatus: 204, latencyMs: 1, success: true };
-const failed = { ...ok, responseStatus: 500, success: false, error: 'HTTP 500' };
 
 /** A worker over fakes: every door it uses is recorded, and the timer is a function the test calls. */
 function rig({ due = [], deliver = async () => ok } = {}) {
   const events = [];
-  const state = { dueCalls: 0, inFlight: 0, peak: 0, delivered: [], handle: null, tickFn: null, disarmed: 0 };
+  const state = { dueCalls: 0, inFlight: 0, peak: 0, delivered: [] };
   const deps = {
     dueJobs: async () => { state.dueCalls++; return typeof due === 'function' ? due(state.dueCalls) : due; },
     removeJob: async (id) => { events.push(`remove ${id}`); },
@@ -67,12 +64,7 @@ function rig({ due = [], deliver = async () => ok } = {}) {
     requeue: async (j) => { events.push(`requeue ${j._id} attempt ${j.attempt + 1}`); },
   };
   const lines = { warn: [], error: [] };
-  const worker = dispatcher.createRetryWorker(deps, {
-    arm: (fn) => { state.tickFn = fn; state.handle = { refed: true, unref() { state.handle.refed = false; return state.handle; } }; return state.handle; },
-    disarm: () => { state.disarmed++; },
-    warn: (m) => lines.warn.push(m), error: (m) => lines.error.push(m),
-  });
-  const fire = async () => { state.tickFn(); await settle(); };
+  const { worker, fire } = armedRetryWorker(dispatcher, deps, state, lines);
   return { worker, deps, events, state, lines, fire };
 }
 
@@ -129,6 +121,65 @@ describe('the retry poll delivers four at a time', () => {
     await settle();
     assert.equal(r.state.delivered.length, 6);
     assert.equal(r.state.inFlight, 0);
+  });
+});
+
+/*
+ * One subscription holds at most two of the four slots (bundle-169, Q-483). The head-of-line case above is one slow SINK among six; the case it
+ * does not cover is one subscription with many due rows, whose hung sink holds all four slots for its whole 10 s delivery timeout and leaves every
+ * other subscription's retry waiting behind it. The cap goes through `mapLimitPerKey` (awaited, so the overlap skip and remove-before-deliver hold),
+ * and an item whose subscription is at its cap waits WITHOUT holding a slot.
+ *
+ * Red at base: nothing is capped per subscription, so the held subscription's first four rows take all four slots, its peak is four, and the
+ * three others are not reached. The cap's figure is `RETRY_PER_KEY` when the build exports it (the gate
+ * `the-webhook-drain-figures-in-the-docs-match-the-code` reads it) and the design's 2 until then.
+ */
+describe('the retry poll gives one subscription at most two of the four slots', () => {
+  const CAP = dispatcher => dispatcher.RETRY_PER_KEY ?? 2;
+  const at = (sub, n) => job(`${sub}-${n}`, { webhookId: sub, scheduledAt: new Date(1000 * n) });
+
+  it('six due rows of one held subscription and three single-row others: the held one never has more than two in flight, the others are delivered meanwhile', async () => {
+    const hold = gate();
+    const perSub = new Map(); const peakSub = new Map();
+    const jobs = [...[1, 2, 3, 4, 5, 6].map(n => at('held', n)), at('b', 7), at('c', 8), at('d', 9)];
+    const r = rig({
+      due: [...jobs],
+      deliver: async (sub, j) => {
+        const k = j.webhookId;
+        perSub.set(k, (perSub.get(k) ?? 0) + 1); peakSub.set(k, Math.max(peakSub.get(k) ?? 0, perSub.get(k)));
+        try {
+          if (k === 'held') { await hold.p; return ok; }
+          await new Promise(res => setImmediate(res));
+          return ok;
+        } finally { perSub.set(k, perSub.get(k) - 1); }
+      },
+    });
+    r.worker.job.start();
+    await r.fire();
+    const cap = CAP(dispatcher);
+    assert.equal(peakSub.get('held'), cap, `the held subscription had ${peakSub.get('held')} deliveries in flight at once (cap ${cap})`);
+    assert.deepEqual(['job-b-7', 'job-c-8', 'job-d-9'].filter(id => !r.state.delivered.includes(id)), [],
+      `a subscription at its cap held slots its waiting rows could not use: delivered ${r.state.delivered.join(' ')}`);
+    assert.equal(r.state.inFlight, cap, 'only the held subscription\'s two deliveries are still running');
+    hold.release();
+    await settle();
+    assert.equal(r.state.delivered.length, 9, 'a row waiting behind its subscription\'s cap was never delivered');
+    assert.ok(r.state.peak <= dispatcher.RETRY_CONCURRENCY);
+  });
+
+  it('a lone subscription with six due rows is delivered two at a time, not four', async () => {
+    const perSub = { now: 0, peak: 0 };
+    const r = rig({
+      due: [1, 2, 3, 4, 5, 6].map(n => at('lone', n)),
+      deliver: async () => {
+        perSub.now++; perSub.peak = Math.max(perSub.peak, perSub.now);
+        try { await new Promise(res => setImmediate(res)); return ok; } finally { perSub.now--; }
+      },
+    });
+    r.worker.job.start();
+    await r.fire();
+    assert.equal(perSub.peak, CAP(dispatcher), `${perSub.peak} of one subscription's rows were in flight at once`);
+    assert.equal(r.state.delivered.length, 6, 'a row of a capped subscription was dropped from the tick');
   });
 });
 

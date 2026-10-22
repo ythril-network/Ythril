@@ -119,7 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schemas:** `rules` on a type and the space: CEL with a message, saved only if this instance runs them, refused in `strict`, returned in `warn` ([Schema API](docs/integration-guide/06a-schema-api.md#rules)); `invalidRules` names any that stopped compiling.
 - **Schemas:** `schema_validate` (MCP) and `validate-schema` check a sample record or the stored data; `space_schema_layers` answers `fields` (`own`, `effective`, `winner`, `hidden`), `unknownFields`, `refusedRounds`.
 - **Schemas:** A write reaching several networks answers `layers`; unknown meta keys in a layer or round are named, not refused; a round carries only its changes, applied whole.
-- **Server:** New `ythril_schema_refusals_total{door,outcome}`, `ythril_schema_rules_invalid`, `ythril_schema_rule_engine_available`, `ythril_schema_violations_recorded_total{source}`.
+- **Server:** New `ythril_schema_refusals_total{door,outcome}`, `ythril_schema_rules_invalid`, `ythril_schema_rule_engine_available`, `ythril_schema_violations_recorded_total{source}`, `ythril_webhook_retry_ticks_cut_total`.
 - **Server:** `docker:wipe` records the instance and rebuilds it at its commit, refusing data it would delete; `docker:compact` restarts it.
 - **UI:** The Schema tab gains a Rules editor and **Validate**; record forms mark undeclared keys.
 - **MCP:** `save_entity`, `save_chrono` and `save_edge` take `waitForEmbedding`, as REST does.
@@ -179,6 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UI:** Settings → Spaces shows a space waiting for search as "Waiting for search service". The Graph view reads every page of `graph_traverse` and says when the walk stopped at its `limit`.
 - **Docs:** The hosting guide names `YTHRIL_MONGO_MEM_LIMIT` (default `4g`). Help gains a testing guide. The integration guide's tool tables come from code; an edge's `type` is free text.
 - **Backup:** A restore reports, per space, the files that no longer match their records (the page, `GET /api/admin/data/restore`, the log), and repairs nothing ([guide](docs/integration-guide/12a-data-management-api.md)).
+- **Webhooks:** `ythril_webhook_first_deliveries_lost_total` gains `reason` (`not_stored`, `not_known_stored`) and counts every retry-row write; alert on `not_stored`; ratios: `sum without(reason)`.
 - **CI:** A push to `full-run/<bundle>` runs every `ci.yml` job as checks named `Full run / <job>`, testing a bundle before its pull request; `Build & Test` stays the only merge gate.
 
 ### Fixed
@@ -188,7 +189,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Store:** A timed-out transaction leaves no document locked.
 - **Sync:** A chrono `type` outside the space's vocabulary is still stored on pull (a push answers `unknownType`). Two peers pushing different text for one fact at one seq keep both (a fork), with the divergent copy's `createdAt` and `updatedAt`.
 - **Sync:** Strict-linkage violations are recorded for every landed edge and link on every door, once per dangling end after a pull or push is whole. A push no longer waits for it; a part-way pull checks what landed.
-- **Sync:** A file deletion reaches every peer once: its tombstone goes out only once the file is gone, once per path, is never pruned before it is sent, and survives a wipe or a peer that sent the bytes first.
+- **Sync:** A file deletion reaches every peer once: its tombstone is sent once per path after the file is gone, never pruned unsent, and survives a wipe or a peer that sent the bytes first.
 - **Sync:** A stalled write can no longer stop a space's replication (it ends within the write bound): gauge `ythril_seq_horizon_oldest_hold_seconds`, warning `seq horizon held <age>s …`.
 - **Sync:** A peer passes on all its deletions of a kind beyond 1000, by pull and push. A page holding one id twice stores the highest seq; a stale tombstone is deleted only once its superseding record landed.
 - **Sync:** Pulled records and entities pushed to `POST /api/sync/entities` are embedded (re-embed earlier pulls once per space: `POST /api/spaces/:id/reembed`); a counter left behind answers a push `500` and sets `counterBehind: true` on an import.
@@ -220,25 +221,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schemas:** `PATCH` and `schema_update` store `meta.stampSkew` and `whenDuePasses` (one was refused, one dropped); a library `PATCH` no longer drops `suppressEmbeddings`, `endpoints` and `functional`.
 - **Spaces:** One space that cannot be initialised no longer stops start-up or a reload for the others: it is logged once and retried at the next reload; index: `building`, then `ready`/`failed`.
 - **Spaces:** Deleting a space no longer loses a race with the media worker (`ENOTEMPTY`), and one unfinished delete no longer makes later renames and deletes answer `500 "… is still pending"`.
-- **Tokens:** A completed network handshake revokes the peer tokens it replaces, on both sides and for club pairings, and start-up drops unused leftovers; a peer no longer accumulates one `peer:` token per join.
+- **Tokens:** A completed network handshake revokes the peer tokens it replaces, on both sides and for club pairings, and start-up drops unused leftovers.
 - **Networks:** Every door opening a vote round answers it as the vote list shows; a joiner past its deadline loses its credential next sweep.
-- **Networks:** A vote round ends at its deadline without anyone touching it: a job concludes it as expired every minute, and a peer's round past its deadline, past 72 hours or already concluded here is never adopted.
+- **Networks:** A vote round ends at its deadline unattended (a job expires it each minute); a peer's round past its deadline, past 72 hours or concluded here is never adopted.
 - **Housekeeping:** An error or hang in one space no longer stops a background job for the others. New `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` (default 240 s) ends each of their database operations.
 - **Housekeeping:** A pass ends early when the database does not answer or 3 spaces in a row time out; a timed-out space is passed over 60 s, doubling to 300 s. Undeletable: `ythril_housekeeping_records_failed_total`.
 - **Housekeeping:** A reindex run the server could not resume at start is retried every few seconds, and one whose sweeper died is taken over once its lease expires.
-- **Housekeeping:** Duplicate and contradiction scans report a lookup failure and move past a record that keeps failing; their review lists page instead of stopping at 500. An automerge a space refuses is reported once per pair.
+- **Housekeeping:** Duplicate and contradiction scans report a lookup failure and move past a record that keeps failing; their review lists page past 500. An automerge a space refuses is reported once per pair.
 - **Server:** A background job no longer logs under the id of the request that armed it. An unknown tool answers `404`. The notify event store holds at most 1 MiB; its event list pages and says when cut.
 - **Database:** Pushed and pulled pages and store-side bulks write in chunks of at most 99 999 operations and 16 MiB; a duplicate key then a timeout answers `503`, not `400`. The `MONGO_URI` user must be able to list and end its own operations.
 - **Database:** A write answered `503` "timed out, retry" can no longer land after the answer: the server's deadline ends it, with a backstop 500 ms later.
 - **Database:** `POST /api/admin/data/config/test` answers an unreachable host `200` with `{ "ok": false, "error": … }`. A large entity merge no longer prints `MaxListenersExceededWarning`.
 - **Backup:** A scheduled backup that outlasts its cron period is skipped, not overlapped; its failure line reads `Scheduled backup failed: …`, was `Scheduled backup error: …`.
 - **Backup:** A restore holds each space until it equals the backup, never lowers its counter, resumes after a crash, and peers resend what came after the backup. A migration copies the data before switching (it came back empty).
-- **Media:** A job holds its file by path, not in memory, and is complete only after its file is; an ffmpeg step stops after 10 minutes, an audio segment at 5, a video at 1000 keyframes; a killed job leaves no plaintext.
-- **Media:** With `reprocessSyncedImages` off a pushed image is no longer analysed for faces; the setting governs push and pull.
-- **UI:** The client never shows an answer older than the last one asked for (graph depth, record tabs, record card). The Graph tab says why it is slow after 3 s and ends in an error state with Retry after 30 s.
-- **Help:** Links in Help no longer open dead tabs and keep their place in the URL.
-- **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails when the run is not listed after three minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`); it reported success.
-- **CI:** The keyset gate finds a seq ordering however spelled; the validator gate follows act bodies.
+- **Media:** A job holds its file by path and is complete only after its file is; ffmpeg stops after 10 minutes, audio at 5, video at 1000 keyframes; a killed job leaves no plaintext; `reprocessSyncedImages` off skips faces on pushed images too.
+- **Webhooks:** One subscription's retry backlog no longer delays another's; a failed retry-queue write is counted by the rows stored.
+- **UI:** The client never shows an answer older than the last one asked for (graph depth, record tabs, record card). The Graph tab says why it is slow after 3 s and errors with Retry after 30 s. Help links no longer open dead tabs.
+- **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails when the run is not listed in 3 minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`). The keyset gate finds any seq ordering; the validator gate follows act bodies.
 
 ### Security
 
