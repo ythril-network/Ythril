@@ -38,7 +38,6 @@ import { openPushDoor } from './_push-door.mjs';
 import { withCollectionAsView } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const GOOD = 'initgood';
 const BAD = 'initbad';

@@ -32,7 +32,6 @@ const skip = await mongoSkipReason();
 describe('D-41: the wipe tool is the space admin\'s, on both tool doors', { skip }, () => {
   let mongo; let callTool;
   before(async () => {
-    process.env['YTHRIL_MODELS_OFFLINE'] = '1';
     mongo = await openTestMongo('d41_tool');
     await databaseTakesCollections(mongo);
     await boot(dir, { networks: [] });

@@ -41,8 +41,6 @@ import { syncBuiltinESMExports } from 'node:module';
 import { openPushDoor } from './_push-door.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-
 export { MARKER, streamOfSize } from './_sized-stream.mjs';
 
 // ── ffmpeg, at the process boundary ──────────────────────────────────────────────────────────────────────────────

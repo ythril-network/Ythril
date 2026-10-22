@@ -38,7 +38,6 @@ const skip = await mongoSkipReason();
 describe('D-41: the admin wipe route asks MFA only when the admin enabled it', { skip }, () => {
   let mongo; let server; let totp; let tokens;
   before(async () => {
-    process.env['YTHRIL_MODELS_OFFLINE'] = '1';
     mongo = await openTestMongo('d41_mfa');
     await databaseTakesCollections(mongo);
     await boot(dir, { networks: [] });

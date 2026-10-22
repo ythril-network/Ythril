@@ -39,11 +39,8 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-job-orphan-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
-// Unreachable model: a genuinely failed job cannot be produced against a working embedder.
-const EMPTY_CACHE = path.join(tmpDir, 'empty-model-cache');
-fs.mkdirSync(EMPTY_CACHE, { recursive: true });
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-process.env['MODEL_CACHE_DIR'] = EMPTY_CACHE;
+// Unreachable model (the harness sets offline and a cache path that never exists): a genuinely failed job cannot be
+// produced against a working embedder.
 
 let mongo, memory, entities, edges, chrono, queue;
 

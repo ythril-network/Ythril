@@ -35,7 +35,6 @@ import { deferred, resetRunnerForTest, untilRunnerIdle } from './_space-act-harn
 import { restoreModules, takeBackup, requestRestore, restoreAsActs, restoreEntries, startRestoreActs } from './_restore-act.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const SUITE = 'restorerefuse';
 const T = { timeout: 90_000 };

@@ -41,7 +41,6 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'e2rd';
 const T0 = '2026-09-01T00:00:00.000Z';

@@ -88,7 +88,7 @@ import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
 import { readCappedBody } from './_shared/capped-body.mjs';
 import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
-import { readTimingLog, TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
+import { readTimingLog, TIMING_RESULTS_FOLDER, TIMING_SCOPES } from '../testing/_shared/timing-reporter.mjs';
 import { maskText } from './_shared/mask-text.mjs';
 import { holdsWithin, waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
@@ -146,7 +146,7 @@ export const TEST_RUN_SCHEMA = Object.freeze({
   skipped: { type: 'number', required: true, doc: 'Tests and suites skipped.' },
   todo: { type: 'number', required: true, doc: 'Tests marked todo.' },
   outcome: { type: 'string', required: true, values: ['passed', 'failed', 'cancelled', 'incomplete'], doc: '`incomplete` when the results cannot be vouched for (no sentinel, wrong count, cut line; for the client a test that never reached a verdict, or a runner that failed with no failure counted).' },
-  scope: { type: 'string', required: true, values: ['full', 'subset', 'files'], doc: 'What the runner covered. Baselines are drawn from `full` only.' },
+  scope: { type: 'string', required: true, values: [...TIMING_SCOPES], doc: 'What the runner covered. Baselines are drawn from `full` only.' },
   layout: { type: 'string', required: true, values: ['local', 'ci-serial-v1', 'ci-parallel-v2'], doc: 'A label for the shape of the workflow or machine: `ci-parallel-v2` when the run left results of more than one test job, `ci-serial-v1` when it left one. Not a key to compare records by: records written before the label was derived this way all say `ci-serial-v1`.' },
   dirty: { type: 'boolean', required: true, doc: 'The working tree had uncommitted changes (always false for CI).' },
   measurements: { type: 'string', required: true, doc: 'JSON: every file\'s ms, tests, skips and failures, and the slowest tests; `none` when the run had no usable artifact.' },

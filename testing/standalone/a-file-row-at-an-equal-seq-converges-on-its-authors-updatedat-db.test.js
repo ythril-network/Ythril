@@ -73,7 +73,6 @@ import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { parkWrites } from './_write-faults.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'convergence';
 const AUTHOR = Object.freeze({ instanceId: 'conv-author', instanceLabel: 'The author' });

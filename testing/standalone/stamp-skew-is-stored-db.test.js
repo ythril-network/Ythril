@@ -38,12 +38,8 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-stamp-skew-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
-// No embedder: this suite is about a stored FIELD, and a create that waits on a model would either be slow or fail for
-// reasons that have nothing to do with the stamp.
-const EMPTY_CACHE = path.join(tmpDir, 'empty-model-cache');
-fs.mkdirSync(EMPTY_CACHE, { recursive: true });
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-process.env['MODEL_CACHE_DIR'] = EMPTY_CACHE;
+// No embedder (the harness forbids the download and gives a cache path that never exists): this suite is about a stored
+// FIELD, and a create that waits on a model would either be slow or fail for reasons that have nothing to do with the stamp.
 
 let mongo, memory, entities, edges, chrono;
 

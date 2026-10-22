@@ -41,7 +41,6 @@ import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest, deferred, untilRunnerIdle, auditRowsOf } from './_space-act-harness.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 process.env['NODE_ENV'] = 'test';
 process.env['YTHRIL_DB_MIGRATION_ENABLED'] = 'true';
 delete process.env['YTHRIL_MONGO_INFRA_MANAGED'];

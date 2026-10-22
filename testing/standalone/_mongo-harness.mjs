@@ -31,11 +31,30 @@
  *
  * Each caller gets its own database (`ythril_harness_<suite>`), dropped on entry and exit, so the
  * harness can never see or corrupt the data the integration/sync suites are using on the same server.
+ *
+ * ## It never lets the local model download (Q-583)
+ *
+ * A recall, a write, a merge or a file embed in a database test reaches the local model loader. On a cold cache that
+ * starts a download of about 274 MB inside the test's own timeout, which fails a test on a slow link for reasons that
+ * have nothing to do with what it tests. So this module, at import and before anything it exports can run, sets the
+ * model offline AND points the cache at a path that holds no model and is never created: offline alone, with a warm
+ * default cache, would still run real inference. A test that needs ranking uses the stub embedder (`EMBEDDING_URL`).
+ * Every database test imports this module, so no test can forget the guard, and
+ * `a-database-test-never-downloads-a-model.test.js` forbids a second copy of it.
+ *
+ * The harness is also imported by `testing/sync/setup.js`, `_shared/reindex-run-seed.mjs` and the bench scripts. They
+ * get 'unavailable' from the local model too, which is what they want: a script that measures real inference must
+ * not import this module.
  */
 
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { absentInputReason } from '../_shared/absent-input.mjs';
 import { TEST_MONGO_HOST, TEST_MONGO_PORT } from '../_shared/test-mongo-address.mjs';
+
+process.env['YTHRIL_MODELS_OFFLINE'] = '1';
+process.env['MODEL_CACHE_DIR'] = path.join(os.tmpdir(), 'ythril-test-no-model-cache');
 
 /** Host/port of the published test Mongo (`_shared/test-mongo-address.mjs`, so a pure test can read it too). */
 export { TEST_MONGO_HOST, TEST_MONGO_PORT };

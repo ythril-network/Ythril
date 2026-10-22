@@ -40,7 +40,6 @@ import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
 import { replicatedFixtureFamilies, tieRun, missingAndRepeated } from './_seq-tie-families.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'tiepull';
 /** The page the pull engine asks for (`limit: '200'` in `pullType`): the engine cases put a run across this. */

@@ -78,8 +78,6 @@ export const undeclaredKeySpaces = () => MODES.map(mode => ({
  *   `{ status, body, text }`, `mcp` answers `{ status, isError, body, text }`
  */
 export async function openUndeclaredKeyDoors({ suite, extraSpaces = [] }) {
-  // A merge or an ingest would embed inline unless the space suppresses it; never let a test fetch a model.
-  process.env['YTHRIL_MODELS_OFFLINE'] = '1';
   const door = await openPushDoor({ suite, spaces: [...undeclaredKeySpaces(), ...extraSpaces] });
   let server;
   try {

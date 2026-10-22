@@ -43,9 +43,8 @@ const SPACE = 'mergehubbench';
 const INSTANCE = 'merge-hub-bench';
 const AUTHOR = { instanceId: INSTANCE, instanceLabel: 'bench' };
 
-// The survivor's re-embed must not download a model in the middle of a timing; an unavailable model is a failure
-// the merge already swallows.
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
+// The survivor's re-embed must not download a model in the middle of a timing; the harness forbids it, and an
+// unavailable model is a failure the merge already swallows.
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-merge-hub-bench-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 process.env['DATA_ROOT'] = path.join(tmpDir, 'data');

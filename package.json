@@ -17,6 +17,7 @@
     "build:client": "npm run build:prod --workspace=client",
     "lint:docs": "markdownlint-cli2 \"docs/**/*.md\"",
     "preflight": "node ./scripts/preflight.mjs",
+    "preflight:static": "node ./scripts/preflight.mjs --static",
     "start": "npm run start --workspace=server",
     "docker:build": "docker compose build && docker builder prune --keep-storage 3g --force",
     "docker:build:test": "docker compose -p ythril-test -f testing/docker-compose.test.yml build && docker builder prune --keep-storage 3g --force",

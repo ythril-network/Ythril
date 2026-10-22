@@ -49,7 +49,6 @@ import { driverWriteFailures, failWrites, holdDocumentLock } from './_write-faul
 import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 process.env['NODE_ENV'] = 'test';
 process.env['YTHRIL_DB_MIGRATION_ENABLED'] = 'true';
 delete process.env['YTHRIL_MONGO_INFRA_MANAGED'];

@@ -22,11 +22,8 @@ const SPACE = 'general';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-q94-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
-// No embedder: the failure path is the condition, not an accident of the machine.
-const EMPTY_CACHE = path.join(tmpDir, 'empty-model-cache');
-fs.mkdirSync(EMPTY_CACHE, { recursive: true });
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-process.env['MODEL_CACHE_DIR'] = EMPTY_CACHE;
+// No embedder (the harness forbids the download and gives a cache path that never exists): the failure path is the
+// condition, not an accident of the machine.
 
 let mongo, embedRecord;
 const entities = () => mongo.col(`${SPACE}_entities`);

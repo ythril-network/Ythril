@@ -17,12 +17,10 @@
  * space auth and the raw-body parser, which a request built here replaces by handing the body in as a Buffer. The chunked
  * upload is the same handler reached with a `Content-Range`, so both shapes go through the code a peer reaches.
  *
- * It does not stub the writer, the quota, the chunk assembly or the metadata layer. Models are offline (`YTHRIL_MODELS_OFFLINE`)
- * so a stored file is queued and never embedded.
+ * It does not stub the writer, the quota, the chunk assembly or the metadata layer. Models are offline (the harness sets
+ * `YTHRIL_MODELS_OFFLINE`) so a stored file is queued and never embedded.
  */
 import assert from 'node:assert/strict';
-
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 /**
  * @returns {Promise<{ post: (o: object) => Promise<{ code: number, body: any }> }>}

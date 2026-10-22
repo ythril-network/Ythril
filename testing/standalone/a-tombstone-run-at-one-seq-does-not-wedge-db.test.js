@@ -46,7 +46,6 @@ import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { missingAndRepeated } from './_seq-tie-families.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'tsrun';
 const RUN_SEQ = 50;

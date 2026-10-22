@@ -35,8 +35,6 @@ const SPACE = 'general';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-wire-budget-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config', 'config.json');
 process.env['DATA_ROOT'] = tmpDir;
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-process.env['MODEL_CACHE_DIR'] = path.join(tmpDir, 'empty-model-cache');
 
 /** The MCP default budget and the REST one — literal on purpose: the fixture must not read the code it tests. */
 const MCP_DEFAULT = 25_000;
@@ -57,7 +55,6 @@ const wireBytes = v => Buffer.byteLength(JSON.stringify(v), 'utf8');
 describe('a tool answer crosses the wire within the budget it states', { skip }, () => {
   before(async () => {
     fs.mkdirSync(path.dirname(process.env['CONFIG_PATH']), { recursive: true });
-    fs.mkdirSync(process.env['MODEL_CACHE_DIR'], { recursive: true });
     fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
       instanceId: 'wire', instanceLabel: 'wire', spaces: [{ id: SPACE, label: 'General', folders: [] }], networks: [], tokens: [],
     }), { mode: 0o600 });

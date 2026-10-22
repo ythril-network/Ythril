@@ -41,16 +41,9 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { mountedRoutes } from './_routes.mjs';
 import { openViewDoors, viewOf, rowsOf, viewMembersOf } from './_view-doors.mjs';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
-// The recall and similar case asks whether the view RESOLVES, not whether a model ranks: with no model present and downloads
-// forbidden, recall answers "unavailable" at once (SEED_LOCATED accepts it). Left to a fresh cache, the first recall downloads the
-// embedding model (about 274 MB) inside the case's 60 s, and fails on a slow link for reasons that have nothing to do with views.
-const EMPTY_MODEL_CACHE = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-q531-no-model-'));
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-process.env['MODEL_CACHE_DIR'] = EMPTY_MODEL_CACHE;
+// The recall and similar case asks whether the view RESOLVES, not whether a model ranks: the harness forbids the model download
+// and points the cache at a path that never exists, so recall answers "unavailable" at once (SEED_LOCATED accepts it).
 
 const skip = await mongoSkipReason();
 const QA = 'vp-qa';

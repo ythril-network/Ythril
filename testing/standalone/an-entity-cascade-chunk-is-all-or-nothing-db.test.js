@@ -34,7 +34,6 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { withValidator } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-cascade-atomic-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');

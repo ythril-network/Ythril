@@ -39,7 +39,6 @@ import { clearActEntries, resetRunnerForTest } from './_space-act-harness.mjs';
 import { restoreModules, takeBackup, restoreThenReport, spaceRowsOfReport, classOf, FILE_CLASSES } from './_restore-act.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const SUITE = 'restorefilesstep';
 const SPACE = 'restorefiles';

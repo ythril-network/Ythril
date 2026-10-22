@@ -33,7 +33,6 @@ import { openFileActDoors } from './_file-act-doors.mjs';
 import { seedActEntry, clearActEntries, deferred } from './_space-act-harness.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const S = 'treecount';
 
 /** Park the NEXT call of `fsp[name]` whose first argument contains `marker`, behind a latch; every other call goes through. One shot. */

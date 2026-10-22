@@ -41,9 +41,6 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-dupe-merge-rung-'))
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 process.env['DATA_ROOT'] = tmpDir;
-// A merge embeds its survivor. Nothing here is about vectors, so the spaces suppress embedding (the merge honours it)
-// and the model may not be fetched: without both, the first merge downloads a model into the temp data root.
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 /** S holds the pair; T is the other space a token may write in. */
 const S = 'dqpairs';

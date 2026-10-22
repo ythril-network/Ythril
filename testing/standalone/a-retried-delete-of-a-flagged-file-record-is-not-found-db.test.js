@@ -37,7 +37,6 @@ import { openPushDoor } from './_push-door.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'gonedel';
 const T0 = '2026-09-01T00:00:00.000Z';

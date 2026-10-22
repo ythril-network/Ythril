@@ -55,7 +55,6 @@ import {
 } from './_restore-act.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const SUITE = 'restorefilesreport';
 const T = { timeout: 180_000 };

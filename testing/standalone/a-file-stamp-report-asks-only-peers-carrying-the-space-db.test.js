@@ -36,7 +36,6 @@ import { privateAddressSkipReason, privateHostAddress } from './_private-address
 import { openStampDoor, PEER, sha256Of, bytesOf } from './_file-stamp-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'stampcarry';
 const OTHER_SPACE = 'stampcarry-elsewhere';

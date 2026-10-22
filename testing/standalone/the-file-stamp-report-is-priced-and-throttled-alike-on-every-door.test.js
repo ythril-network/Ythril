@@ -42,7 +42,6 @@ import { openStampDoor } from './_file-stamp-door.mjs';
 import { openStampDoors } from './_file-stamp-doors.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'stamprail';
 const DOOR_NAMES = ['route', 'toolRest', 'mcp'];

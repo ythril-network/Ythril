@@ -33,7 +33,6 @@ import { parkWrites } from './_write-faults.mjs';
 import { clearActEntries, resetRunnerForTest } from './_space-act-harness.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const S = 'admitwait';
 
 describe('a wipe waits for every write admitted before it, and no such write survives it', { skip }, () => {

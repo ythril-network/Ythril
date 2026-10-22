@@ -52,9 +52,6 @@ import { UPLOAD_DOORS } from './_byte-door-uploads.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
-// Models are offline: only the caption endpoint below is reachable, and the space suppresses vectors, so nothing asks an embedder.
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const S = 'arrivedfaces';

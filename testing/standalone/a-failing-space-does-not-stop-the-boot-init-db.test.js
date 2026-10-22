@@ -41,7 +41,6 @@ import { withCollectionAsView } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const FIRST = 'bootfirst';
 const MIDDLE = 'bootmid';

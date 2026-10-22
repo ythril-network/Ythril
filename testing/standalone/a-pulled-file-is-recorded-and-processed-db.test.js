@@ -51,9 +51,6 @@ import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
-// Models are offline: a stored file is queued and never embedded, so only what the PULL does is observed.
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
-
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const S = 'pulledfile';

@@ -60,10 +60,11 @@ export const TIMING_ENV = Object.freeze({
 
 /**
  * What a run covered, said by the RUNNER (only it knows): the whole suite, a subset of it (preflight's offline
- * half, a name pattern), or named files. A run that is not told is a `subset`, never `full`: a baseline built from
- * runs that merely did not say would be built from partial ones.
+ * half, a name pattern), named files, or `static` (preflight --static: the pure half alone, never a push pass). A
+ * run that is not told is a `subset`, never `full`: a baseline built from runs that merely did not say would be built
+ * from partial ones.
  */
-export const TIMING_SCOPES = Object.freeze(['full', 'subset', 'files']);
+export const TIMING_SCOPES = Object.freeze(['full', 'subset', 'files', 'static']);
 export const DEFAULT_TIMING_SCOPE = 'subset';
 
 /** The longest failure message stored, in characters. */

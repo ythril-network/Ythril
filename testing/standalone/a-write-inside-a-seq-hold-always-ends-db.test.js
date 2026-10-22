@@ -59,8 +59,6 @@ import { holdDocumentLock, holdCounterLock, settleWithin, eventually, setWriteBo
 import { holderCases, loadHolderModules, seedHolderSpace, heldSeqAllocated, F } from './_seq-hold-cases.mjs';
 
 const skip = await mongoSkipReason();
-// A merge embeds its survivor inline unless the space suppresses it; never let a test fetch a model.
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 /** The space every holder case stalls in, and a second for the pull case (its counter row stays free). */
 const S = 'holdends';

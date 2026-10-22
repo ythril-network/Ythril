@@ -38,7 +38,6 @@ import { deferred, resetRunnerForTest, untilRunnerIdle } from './_space-act-harn
 import { restoreModules, takeBackup, restoreAsActs, startRestoreActs } from './_restore-act.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const SUITE = 'restorehold';
 const S = 'restoreheld';

@@ -34,8 +34,8 @@
  *
  * Automerge is reached for real: the scanner finds the pair by `$vectorSearch` over the stored vectors (the harness
  * Mongo is Atlas Local), so the space is created with its vector index and the case waits until the index sees the
- * pair. `YTHRIL_MODELS_OFFLINE` keeps the survivor's re-embed from downloading a model: the merge swallows an embed
- * failure, which is the behaviour it has when the model is unavailable.
+ * pair. The harness keeps the survivor's re-embed from downloading a model (`YTHRIL_MODELS_OFFLINE`, set in
+ * `_mongo-harness.mjs`): the merge swallows an embed failure, which is the behaviour it has when the model is unavailable.
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-refused-merge-answers-alike-on-every-door-db.test.js
@@ -55,7 +55,6 @@ import { seedHub, relinkProblems, vectorOf } from './_merge-hub.mjs';
 
 const skip = await mongoSkipReason();
 
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-merge-doors-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 process.env['DATA_ROOT'] = path.join(tmpDir, 'data');

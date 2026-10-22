@@ -32,7 +32,6 @@ import { seedHub, vectorOf } from './_merge-hub.mjs';
 
 const skip = await mongoSkipReason();
 
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-merge-vectors-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 process.env['DATA_ROOT'] = path.join(tmpDir, 'data');

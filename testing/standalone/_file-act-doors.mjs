@@ -37,7 +37,6 @@ import { openPushDoor } from './_push-door.mjs';
 import { privateHostAddress } from './_private-address.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 process.env['SYNC_ALLOW_PRIVATE_PEERS'] = 'true';
 process.env['SYNC_ALLOW_INSECURE_PEERS'] = 'true';
 

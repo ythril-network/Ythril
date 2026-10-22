@@ -28,8 +28,8 @@
  *
  * A test whose result depends on whether the machine happens to hold 274 MB of model weights is not
  * measuring what it claims to. Every row now seeds its document with one `insertOne`, uniformly, and
- * `YTHRIL_MODELS_OFFLINE=1` makes the update paths' guarded re-embed fail fast instead of reaching for
- * the network. Uniformity is deliberate too: a table where three rows take one route and the fourth
+ * the harness's `YTHRIL_MODELS_OFFLINE=1` makes the update paths' guarded re-embed fail fast instead of reaching for
+ * the network (the update paths catch the failure and keep the stored embedding). Uniformity is deliberate too: a table where three rows take one route and the fourth
  * takes another invites exactly the divergence it is checking for.
  *
  * Run: `npm run test:up` first, then
@@ -51,9 +51,6 @@ const SPACE = 'general';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-merge-rule-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
-// No network, no cache probe, no 274 MB download. The update paths catch the failure and keep the
-// stored embedding, which is exactly the behaviour under test here (none — this is about properties).
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 let mongo, brain;
 

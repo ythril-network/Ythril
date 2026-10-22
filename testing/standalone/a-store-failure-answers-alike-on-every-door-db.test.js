@@ -46,7 +46,6 @@ import { mountedRoutesWithSource } from './_routes.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 // Five faults run over every door in ONE process: ~376 requests each, from one credential. The instance's limiter
 // answers 429 to a door past its quota, before the store is reached, and the later faults were judged on the doors the
 // earlier ones had left quota for (bundle-53 G1: 58, then 6 of ~100 reached). A limiter is not what this gate asks about.

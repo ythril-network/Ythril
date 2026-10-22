@@ -34,7 +34,6 @@ import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, resetRunnerForTest, netFixture, seedActEntry } from './_space-act-harness.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const T = { timeout: 45_000 };
 const RECEIVED = ['lastSeqReceived', 'tombstoneRereadAt', 'fileMetaRereadAt'];

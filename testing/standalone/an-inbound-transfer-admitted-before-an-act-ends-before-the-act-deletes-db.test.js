@@ -51,7 +51,6 @@ import { rowRules } from './_row-rules.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const S = 'inbact';

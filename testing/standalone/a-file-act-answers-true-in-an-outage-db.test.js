@@ -43,7 +43,6 @@ import { logLinesDuring } from './_log-lines.mjs';
 import { toolDoor } from './_file-act-doors.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'fileoutage';
 const T0 = '2026-09-01T00:00:00.000Z';

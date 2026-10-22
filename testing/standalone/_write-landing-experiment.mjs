@@ -45,7 +45,6 @@ import { holderCases, loadHolderModules, seedHolderSpace } from './_seq-hold-cas
 import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 /** The least the bound may be set to (`config/env-num.ts`). */
 let BOUND = { writeTimeoutMs: 1000, holdDeadlineMs: 1000 };

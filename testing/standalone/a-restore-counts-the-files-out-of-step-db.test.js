@@ -28,7 +28,6 @@ import { clearActEntries, resetRunnerForTest } from './_space-act-harness.mjs';
 import { restoreModules, takeBackup, restoreThenReport, spaceRowsOfReport, classOf } from './_restore-act.mjs';
 
 const skip = await mongoSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const SUITE = 'restorefilescounter';
 const SPACE = 'restorecounted';

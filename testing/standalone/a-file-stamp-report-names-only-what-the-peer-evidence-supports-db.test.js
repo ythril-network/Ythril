@@ -49,7 +49,6 @@ import { build } from './_push-door.mjs';
 import { openStampDoor, PEER, PEER_AUTHOR, PEER_CREATED, OURS_CREATED, sha256Of, bytesOf } from './_file-stamp-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'stampev';
 const LIKELY = 'likely-stamped-here';

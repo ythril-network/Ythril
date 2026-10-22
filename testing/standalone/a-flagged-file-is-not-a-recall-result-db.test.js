@@ -49,7 +49,6 @@ process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
 process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 process.env['YTHRIL_HYBRID_SEARCH'] = 'off';
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const S = 'e2rec';
 /** An hour old: outside the fresh-write window, so only the INDEX can supply these rows. */

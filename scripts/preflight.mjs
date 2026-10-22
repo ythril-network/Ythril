@@ -21,6 +21,10 @@
  * running. This is the fast half: seconds, no containers, run it before every push.
  *
  * Usage:  npm run preflight
+ *         npm run preflight:static   (`--static`: every gate that needs no database and runs no suite of its own -
+ *         the source and built gates, the pure half of the offline tests, parse, unrun-tests, surface, docs, todo,
+ *         changelog and the client type-check. It skips the database half and its probe, the client unit tests,
+ *         the production build and its budgets, and it is NEVER a push pass: its verdict says so, Q-584.)
  */
 import { execSync, execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -33,6 +37,17 @@ import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
 import { TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS } from './_shared/client-results.mjs';
+
+/**
+ * `--static`, and nothing else: an unknown argument is refused rather than ignored, because `--statc` falling through
+ * to the full run gives three minutes to someone who asked for one, and a full verdict to someone who asked for a subset.
+ */
+const STATIC = process.argv.includes('--static');
+const unknownArgs = process.argv.slice(2).filter(a => a !== '--static');
+if (unknownArgs.length) {
+  console.error(`preflight: unknown argument(s) ${unknownArgs.join(' ')}; the only one is --static`);
+  process.exit(2);
+}
 
 /** Where the client's Vitest JSON report is written; the path ci.yml's client step and the recorder read. */
 const CLIENT_REPORT = join(TIMING_RESULTS_FOLDER, CLIENT_RESULTS);
@@ -123,7 +138,8 @@ let skippedForDb = 0;
  * capped, and the plan that says so is `offlineRuns`, the one `test:standalone` runs too — see
  * `DB_TEST_CONCURRENCY` in the shared split.
  */
-const runs = offlineRuns(standaloneSplit);
+// Under --static only the pure batches run: the database half needs the test stack, which a static run never assumes.
+const runs = offlineRuns(standaloneSplit).filter(r => !STATIC || r.kind === 'pure');
 let standaloneFailed = false;
 // Timing, through the shared helper: one destination per batch, the flags AFTER the plan's own args so the batch
 // budget and the cap stay about the files, and the recorder's credentials out of the children's environment.
@@ -133,7 +149,7 @@ const batchesOfKind = {};
 for (const [i, r] of runs.entries()) {
   if (runs.length > 1) console.log(`  batch ${i + 1}/${runs.length} — ${r.files.length} ${r.kind} file(s)`);
   batchesOfKind[r.kind] = (batchesOfKind[r.kind] ?? 0) + 1;
-  const flags = timingReporterFlags({ suite: 'preflight', batch: `${r.kind}-${batchesOfKind[r.kind]}`, scope: 'subset' });
+  const flags = timingReporterFlags({ suite: 'preflight', batch: `${r.kind}-${batchesOfKind[r.kind]}`, scope: STATIC ? 'static' : 'subset' });
   // An argument array and no shell: through cmd.exe the line is capped at 8 191 characters, and the reporter's flags
   // on top of a budget-sized batch went over it ("The command line is too long", no test output). CreateProcess
   // allows 32 767, which is the limit the batch budget is sized under.
@@ -161,8 +177,9 @@ if (standaloneFailed) {
  *
  * Derived from IMPORTS plus one TCP probe rather than by parsing test output: a suite that needs the harness
  * cannot have run if the port is closed, and that is knowable without reading a single line of the report.
+ * A static run ran no database suite, so it has nothing to probe.
  */
-{
+if (!STATIC) {
   // The split's own answer, not a second spelling of it: the substring match that was here also counted a gate
   // that only NAMES the harness.
   const needsDb = offlineDb;
@@ -322,22 +339,27 @@ try { run('npm run typecheck:client'); } catch {
   failures.push({ name: 'typecheck:client', why: 'types the test run transpiles past and the AOT build never sees' });
 }
 
-console.log('\n── client unit tests (includes i18n key coverage) ──');
+console.log(STATIC ? '\n── client unit tests: not in a static run ──' : '\n── client unit tests (includes i18n key coverage) ──');
 // The command is ci.yml's client step, character for character (`ci-workflow-is-sound` holds the two equal): this step is
 // the local producer of `test-results/client.json`, which `npm run test:client` does not write. The old report goes first,
 // so a run that dies before writing one cannot leave an earlier run's report standing as this run's; the runner's own
 // verdict is stamped into whatever it wrote, so the recorder can call a run incomplete that counts no failure.
+// A static run clears it too and writes none, so no earlier run's report is read as this one's.
 rmSync(CLIENT_REPORT, { force: true });
-let clientOutcome = 'success';
-try { run('npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json'); } catch {
-  clientOutcome = 'failure';
-  failures.push({ name: 'test:client', why: 'component behaviour, and translation keys missing from de/pl' });
+if (!STATIC) {
+  let clientOutcome = 'success';
+  try { run('npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json'); } catch {
+    clientOutcome = 'failure';
+    failures.push({ name: 'test:client', why: 'component behaviour, and translation keys missing from de/pl' });
+  }
+  stampRunnerOutcome(CLIENT_REPORT, clientOutcome);
 }
-stampRunnerOutcome(CLIENT_REPORT, clientOutcome);
 
 // The production build type-checks TEMPLATES (AOT) and compiles under the app's own tsconfig, neither of
 // which the unit-test run does. It caught a `[...NodeList]` spread that every test passed straight over,
 // and it is where an unknown element, a bad binding or a broken inline template surfaces. ~7 seconds.
+// The build and the budget check read one output, so a static run skips them together.
+if (!STATIC) {
 console.log('\n── client production build (AOT template type-check) ──');
 let buildOut = '';
 try {
@@ -378,17 +400,21 @@ try {
 } catch (e) {
   failures.push({ name: 'bundle-budgets', why: `could not verify budget names: ${e}` });
 }
+}
 
 console.log('\n' + '='.repeat(76));
+// A static run is never a push pass: its verdict never says PASSED, which is the line preflight-mark.js records.
 if (failures.length === 0) {
-  console.log('Preflight PASSED. Docker-dependent suites (integration, sync, red-team) still run in CI.');
-  if (skippedForDb > 0) {
+  console.log(STATIC
+    ? 'Preflight STATIC passed - not a push pass. The database half, the client unit tests and the production build did not run.'
+    : 'Preflight PASSED. Docker-dependent suites (integration, sync, red-team) still run in CI.');
+  if (!STATIC && skippedForDb > 0) {
     console.log(`  ...but ${skippedForDb} standalone suite(s) did NOT run — no test database. `
       + '`npm run test:up`, then re-run, if this change touches a signature or a stored shape.');
   }
   process.exit(0);
 }
-console.log(`Preflight FAILED — ${failures.length} gate(s):\n`);
+console.log(`Preflight ${STATIC ? 'STATIC FAILED' : 'FAILED'} — ${failures.length} gate(s):\n`);
 for (const f of failures) console.log(`  ${f.name}\n      ${f.why}`);
 console.log('\nEach of these catches something that produces no error on its own. Fix before pushing.');
 process.exit(1);

@@ -43,7 +43,6 @@ import { resetRunnerForTest } from './_space-act-harness.mjs';
 import { loadRunnerIfBuilt, settleActs } from './_space-act-modules.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
-process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const HELD = 'gossipheld';
