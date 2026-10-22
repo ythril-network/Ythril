@@ -86,3 +86,27 @@ export function blankComments(src) {
   }
   return out;
 }
+
+/**
+ * The COMMENTS only, LINE NUMBERS kept — the complement of {@link blankComments}: every character of code or
+ * string becomes a space, every comment character stays, every newline stays.
+ *
+ * ## Why this exists beside the strippers
+ *
+ * Every function above answers "what does the CODE say". A gate holding a COMMENT to the code — a route a
+ * comment names, a count a comment states — has the opposite question, and answering it with a regular
+ * expression over the raw file reads code and strings as if they were prose. This takes the comments with the
+ * same tokenizer `blankComments` uses (strings are skipped, so a `//` inside `'https://…'` is not a comment),
+ * so the two cannot disagree about where a comment starts.
+ *
+ * A reported line number is the line in the file, as with `blankComments`.
+ */
+export function commentsOnly(src) {
+  const code = blankComments(src);
+  let out = '';
+  for (let i = 0; i < src.length; i++) {
+    if (src[i] === '\n') out += '\n';
+    else out += code[i] !== src[i] ? src[i] : ' ';
+  }
+  return out;
+}
