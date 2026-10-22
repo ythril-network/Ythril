@@ -90,7 +90,15 @@ async function sealOnce(session: ClientSession): Promise<boolean> {
  */
 async function sealTransaction(session: ClientSession): Promise<EndedOperation> {
   return outsideWriteBound(async () => {
-    const canSeal = getMongo().options.retryWrites !== false;
+    let canSeal: boolean;
+    try {
+      canSeal = getMongo().options.retryWrites !== false;
+    } catch (err) {
+      // No client (shutdown closed it): nothing can be sent. Said, and the caller still gets its own error.
+      const why = `no client: ${err instanceof Error ? err.message : String(err)}`;
+      log.error(`Bounded transaction: the store stopped answering with a statement possibly in flight, and its end could not be confirmed (${peerText(why)}).`);
+      return { outcome: 'unconfirmed', killed: 0, why };
+    }
     if (canSeal && await sealOnce(session)) return { outcome: 'gone', killed: 0 };
     let killed = 0;
     let why: string;
@@ -102,7 +110,7 @@ async function sealTransaction(session: ClientSession): Promise<EndedOperation> 
       why = `${canSeal ? 'the first seal was not answered' : 'retryWrites=false, so no seal can be sent'}, and the kill failed: ${err instanceof Error ? err.message : String(err)}`;
     }
     if (canSeal && await sealOnce(session)) {
-      log.warn(`Bounded transaction: the store stopped answering with a statement possibly in flight; ${why}, so the session was killed and sealed again. `
+      log.warn(`Bounded transaction: the store stopped answering with a statement possibly in flight; ${why}; ${killed ? 'the session was killed and ' : ''}a second seal was answered. `
         + 'Nothing it sent can land or hold a document now.');
       return { outcome: 'gone', killed };
     }

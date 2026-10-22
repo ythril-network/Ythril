@@ -167,7 +167,8 @@ describe('4. there is one door onto the database', () => {
     'server/src/db/migrate-act.ts': 'A migrate\'s TARGET, which is not this process\'s database: it lists the target\'s collections (a read) and builds the source\'s indexes there after `restoreDatabase` copied into it. It writes no record; the process ends after the copy, and the boot on the new URI reconciles every space (`initSpace`).',
     'server/src/ready.ts': 'A readiness probe: admin ping and listSearchIndexes, both reads.',
     'server/src/api/about.ts': 'serverInfo for the About page — a read of the admin database.',
-    'server/src/db/store-answers.ts': 'storeAnswers: a ping of the admin database, writes nothing, and goes around getDb() on purpose: it carries its own timeoutMS, and a housekeeping scope\'s bound laid over a ping about the bound would be a bound about itself.',
+    'server/src/db/bounded-transaction.ts': 'The seal of a transaction the bound ended (`Q-530`): a retryable updateOne that matches nothing on `transaction_seal` (never a record collection, never upserts) and `killSessions` on admin. Off getDb() on purpose: the plain-write door would add its comment, its maxTimeMS and the bound to a write whose own bound is SEAL_MS and which runs after the bound has ended.',
+    'server/src/db/store-answers.ts':'storeAnswers: a ping of the admin database, writes nothing, and goes around getDb() on purpose: it carries its own timeoutMS, and a housekeeping scope\'s bound laid over a ping about the bound would be a bound about itself.',
   };
 
   const doors = sources.filter(s => /new\s+MongoClient\s*\(|\.db\s*\(/.test(s.code)).map(s => s.file);
