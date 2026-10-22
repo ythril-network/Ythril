@@ -62,13 +62,15 @@ import { inChunks } from '../util/chunks.js';
 import { log, peerText } from '../util/log.js';
 import type { FileMetaDoc, SpaceConfig } from '../config/types.js';
 import { walkUpFileChains } from './ancestry.js';
-import { LIVE_FILE_ROW } from './live-file-row.js';
+import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
 import { cancelMediaJobs } from './media/job-queue.js';
 import { pathsCarriedByOwedMoves } from './move-markers.js';
 import { belongsTo } from './moved-paths.js';
 import { owningFilesOf } from './derived-rows.js';
 import { bytesPresentAt } from './stored-bytes.js';
 import { heldFileTombstones } from './tombstones.js';
+import { forgetPathKeyedCache } from './path-keyed-cache.js';
+import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
 
 /** Rows (and link sources) one page reads. */
 export const REPAIR_PAGE_SIZE = 500;
@@ -157,6 +159,8 @@ interface Leaked { id: string; jobIds: string[] }
  * derived row above them (never the live file at the top of a foreign chain: that file is somebody's) are taken first, so a run that read its
  * parent live writes nothing after the children went (`every-remover-of-file-rows-revokes-claims-first`), in one batched cancel for the page.
  *
+ * The embed jobs and the hash cache entries of the rows it removed go after them (`file-embed-work.ts`, `path-keyed-cache.ts`).
+ *
  * **The job at the gone file's own path is not taken**: nothing here says that path is still dead, and a file uploaded there since has a
  * queued job of its own, which a cancel would take from it. The delete that made the file gone took that job.
  */
@@ -170,6 +174,12 @@ async function removeLeakedRows(spaceId: string, leaked: readonly Leaked[], stam
   for (const part of inChunks(ids, READ_CHUNK)) {
     removed += (await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part }, parentFileId: { $type: 'string' }, ...notAfter(stamp) }))).deletedCount;
   }
+  // What the removed rows leave keyed by their ids: their embed jobs, and a cache entry where a leaked sidecar row had bytes. Only the rows
+  // the delete really took (its filter carries the stamp): a row written since keeps its job.
+  const left = await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'files'), ids, { _id: 1 }, { filter: NOT_A_FLAGGED_ROW });
+  const gone = ids.filter(id => !left.has(id));
+  await retireEmbedWorkOfRemovedRows(spaceId, { ids: gone });
+  await forgetPathKeyedCache(spaceId, { ids: gone });
   return removed;
 }
 

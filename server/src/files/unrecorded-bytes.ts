@@ -40,7 +40,7 @@
  * up or to remove the bytes is said once per window through the shared reporter, with the path as its unit.
  */
 import { deleteStoredIfPresent } from './stored-bytes.js';
-import { forgetFileHashes } from './manifest.js';
+import { forgetPathKeyedCache } from './path-keyed-cache.js';
 import { hasLiveFileRecordExactlyAt } from './file-meta.js';
 import { peerFileKey } from './sandbox.js';
 import { invalidateUsageCache } from '../quota/quota.js';
@@ -78,7 +78,7 @@ export async function removeUnrecordedBytes(spaceId: string, filePath: string, c
   }
   invalidateUsageCache();   // freed disk: the next quota check must not charge for it
   try {
-    await withinWriteBound(() => forgetFileHashes(spaceId, [key]));
+    await withinWriteBound(() => forgetPathKeyedCache(spaceId, { ids: [key] }));
   } catch (err) {
     sayCleanupFailure(spaceId, key, err);   // a stale cache entry for a missing file is pruned by the next full manifest walk
   }

@@ -23,20 +23,26 @@ import { toDocId } from '../util/paths.js';
 import { hasLiveFileRecordExactlyAt, retireFileMeta } from './file-meta.js';
 import { cancelJobsOwnedBy, cancelMediaJob } from './media/job-queue.js';
 import { deleteRowsDerivedFrom, rowsOfFiles } from './derived-rows.js';
+import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
 import { spaceRoot } from './sandbox.js';
 import { isMissingPath, isOneNameUnderTwoSpellings } from './stored-bytes.js';
 
 /**
  * Remove the record a peer's tombstone names, the rows derived from it (chunks, the converted-sidecar row, extracted images and the captions
  * and faces beneath them: they belong to the record, and left behind they are orphans) and its jobs — and nothing of the entry: the other
- * spelling's record stands on those bytes and on the sidecar files beside them, which both spellings name. The jobs first, as every remover of
+ * spelling's record stands on those bytes and on the sidecar files beside them, which both spellings name (and so does the hash cache entry,
+ * keyed by the entry's own spelling). The jobs first, as every remover of
  * a file's rows revokes the claims before it removes the rows.
  */
 export async function removeOnlyTheRecordNamed(spaceId: string, rel: string): Promise<void> {
   const id = toDocId(rel);
   await cancelMediaJob(spaceId, id);
   await cancelJobsOwnedBy(spaceId, id, 'file');
-  await deleteRowsDerivedFrom(spaceId, (await rowsOfFiles(spaceId, [id], [])).ids);
+  const { ids } = await rowsOfFiles(spaceId, [id], []);
+  await deleteRowsDerivedFrom(spaceId, ids);
+  // The embed jobs of the record and of the rows derived from it. The hash cache entry stays: it is keyed by the on-disk spelling, which
+  // still names the bytes the other spelling's record stands on.
+  await retireEmbedWorkOfRemovedRows(spaceId, { ids: [...ids] });
   await retireFileMeta(spaceId, id);
 }
 

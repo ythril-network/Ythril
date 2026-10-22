@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import type { ActSetReport, ActSetSpaceReport } from '../../core/admin-data.types';
+import type { ActSetReport, ActSetSpaceReport, RestoreFileClass } from '../../core/admin-data.types';
 import { DateFormatService } from '../../core/date-format.service';
 import { pluralText } from '../../core/plural-text';
 import { actRowView, actWhenText, type ActRowView } from '../../core/space-act-view';
@@ -12,6 +12,21 @@ import type { StepProgress } from '../../shared/step-progress.model';
 /** The colour of a set's state pill, as a pure function of the state the reader sees (a set state, or the client's own `stopped`). */
 export function actSetVariant(state: string): StatusVariant {
   return state === 'completed' ? 'ok' : state === 'abandoned' || state === 'stopped' ? 'warn' : 'pending';
+}
+
+/** The classes of a restore's files report this client has words for, in the order a reader meets them; others follow, by their raw name. */
+const FILE_CLASS_ORDER = ['missing_row', 'stale_row', 'unprocessed', 'row_without_bytes', 'soft_deleted_with_bytes'];
+
+/** What the card says of one restored space's files (`ActSetProgressComponent.filesView`). */
+interface FilesView {
+  /** The space is not plainly OK: files are out of step, or were not checked. */
+  attention: boolean;
+  /** Why the check did not run; empty when it did. */
+  reason: string;
+  summary: string;
+  groups: { cls: string; text: string; paths: string[] }[];
+  /** Some class names fewer paths than it has files. */
+  truncated: boolean;
 }
 
 /** A report that may name the spaces a restore emptied or left out (a migrate's names neither). */
@@ -47,7 +62,8 @@ type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
       <li style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
         <span style="font-weight:500;">{{ s.id }}</span>
         @let row = rowView(s);
-        <app-status-pill [variant]="row.variant" [dot]="true">{{ row.stateKey | transloco }}</app-status-pill>
+        @let files = filesView(s);
+        <app-status-pill [variant]="files?.attention ? 'warn' : row.variant" [dot]="true">{{ row.stateKey | transloco }}</app-status-pill>
         @if (row.showsAttempts) {
           <span style="color:var(--text-muted);">{{ 'spaces.dangerZone.act.attempts' | transloco: { count: s.attempts } }}</span>
         }
@@ -56,6 +72,24 @@ type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
         }
         @if (s.lastError) { <span style="flex-basis:100%;color:var(--text-secondary);">{{ 'spaces.dangerZone.act.lastError' | transloco }} {{ s.lastError }}</span> }
         @if (s.needsAbandon) { <span style="flex-basis:100%;color:var(--text-secondary);">{{ 'data.progress.needsAbandon' | transloco }}</span> }
+        @if (files; as f) {
+          @if (f.reason) {
+            <span style="flex-basis:100%;color:var(--text-secondary);">{{ 'data.progress.files.notChecked' | transloco: { reason: f.reason } }}</span>
+          } @else if (f.groups.length > 0) {
+            <span style="flex-basis:100%;color:var(--text-secondary);">{{ f.summary }}</span>
+            <details style="flex-basis:100%;color:var(--text-secondary);">
+              <summary style="cursor:pointer;">{{ 'data.progress.files.showNames' | transloco }}</summary>
+              @for (g of f.groups; track g.cls) {
+                <div style="margin:6px 0 2px;font-weight:500;">{{ g.text }} </div>
+                @for (p of g.paths; track p) { <div style="overflow-wrap:anywhere;word-break:break-word;font-family:var(--font-mono, monospace);font-size:12px;">{{ p }} </div> }
+              }
+              <p style="margin:6px 0 0;color:var(--text-muted);font-size:12px;">
+                @if (f.truncated) { {{ 'data.progress.files.truncated' | transloco }} }
+                {{ 'data.progress.files.syncNote' | transloco }}
+              </p>
+            </details>
+          }
+        }
       </li>
     }
   </ul>
@@ -117,6 +151,46 @@ export class ActSetProgressComponent {
   doneText(): string {
     const r = this.report();
     return pluralText(this.transloco, this.transloco.getActiveLang(), 'data.progress.spacesDone', r.total, { done: r.done });
+  }
+
+  /**
+   * What a RESTORE says of one space's files, or null where it says nothing: a migrate's card (its rows carry no such field, and one that
+   * did is not shown), a row without the field, and a space checked with nothing out of step. `attention` paints the row's pill a warning,
+   * and the words say the same, so the colour is never the only signal. An unknown class (a newer server) keeps its raw name.
+   */
+  filesView(s: ActSetSpaceReport): FilesView | null {
+    const files = this.kind() === 'restore' ? s.files : undefined;
+    if (!files) return null;
+    if (!files.checked) return { attention: true, reason: files.reason, summary: '', groups: [], truncated: false };
+    const lang = this.transloco.getActiveLang();
+    const entries = Object.entries(files.classes).filter(([, c]) => c.count > 0);
+    if (entries.length === 0) return null;
+    const known = (cls: string): number => FILE_CLASS_ORDER.indexOf(cls);
+    entries.sort(([a], [b]) => (known(a) < 0 ? FILE_CLASS_ORDER.length : known(a)) - (known(b) < 0 ? FILE_CLASS_ORDER.length : known(b)));
+    const total = entries.reduce((n, [, c]) => n + c.count, 0);
+    return {
+      attention: true, reason: '', truncated: entries.some(([, c]) => c.paths.length < c.count),
+      summary: pluralText(this.transloco, lang, 'data.progress.files.mismatch', total),
+      groups: entries.map(([cls, c]) => ({ cls, text: this.classText(cls, c), paths: c.paths })),
+    };
+  }
+
+  /** One class's sentence, in the plural form of its count; a class this client has no words for is its raw name and its count. */
+  private classText(cls: string, c: RestoreFileClass): string {
+    // One literal base per class, so the key-coverage gate can see every plural key this reads (a template literal it cannot).
+    switch (cls) {
+      case 'missing_row': return this.counted('data.progress.files.class.missing_row', c.count);
+      case 'stale_row': return this.counted('data.progress.files.class.stale_row', c.count);
+      case 'unprocessed': return this.counted('data.progress.files.class.unprocessed', c.count);
+      case 'row_without_bytes': return this.counted('data.progress.files.class.row_without_bytes', c.count);
+      case 'soft_deleted_with_bytes': return this.counted('data.progress.files.class.soft_deleted_with_bytes', c.count);
+      default: return this.counted('data.progress.files.class.unknown', c.count, { name: cls });
+    }
+  }
+
+  /** A sentence about `count`, in the active language's plural form. */
+  private counted(base: string, count: number, params: Record<string, unknown> = {}): string {
+    return pluralText(this.transloco, this.transloco.getActiveLang(), base, count, params);
   }
 
   emptiedText(): string { return this.listText('data.restore.emptied', this.report().emptied); }

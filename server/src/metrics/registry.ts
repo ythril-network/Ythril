@@ -31,6 +31,7 @@ import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
 import { JUDGED_WRITE_OPERATIONS } from '../contract/judged-write-operations.js';
 import { webhookFirstDeliveryCounts, webhookRetriesDroppedCounts } from '../webhooks/dispatcher.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
+import { FILE_MISMATCH_CLASSES } from '../files/file-mismatch-classes.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
 import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
 import { log, peerList, peerText } from '../util/log.js';
@@ -1489,6 +1490,21 @@ export const syncFileArrivalsTotal = new Counter({
 });
 // Declared at 0, so a scrape before the first arrival reports 0 rather than nothing (`recallDegradedTotal`).
 for (const door of FILE_ARRIVAL_DOORS) for (const outcome of FILE_ARRIVAL_OUTCOMES) syncFileArrivalsTotal.labels({ door, outcome }).inc(0);
+
+/**
+ * The files a restore found out of step with their records, by `class` (`files/disk-against-rows.ts`: `missing_row`, `stale_row`,
+ * `unprocessed`, `row_without_bytes`, `soft_deleted_with_bytes`). Counted once per restored space whose files were checked, by the
+ * number of files of the class - the count in the report, never the capped list of paths. No space label: a space id is a label value an
+ * operator chooses, and the report names the spaces.
+ */
+export const restoreFilesOutOfStepTotal = new Counter({
+  name: 'ythril_restore_files_out_of_step_total',
+  help: 'Files a restore found out of step with their records, by class (missing_row, stale_row, unprocessed, row_without_bytes, soft_deleted_with_bytes)',
+  labelNames: ['class'] as const,
+  registers: [register],
+});
+// Declared at 0, so a scrape before the first restore reports 0 rather than nothing (`syncFileArrivalsTotal`).
+for (const cls of FILE_MISMATCH_CLASSES) restoreFilesOutOfStepTotal.labels({ class: cls }).inc(0);
 
 /**
  * The doors a record arrives through that are recorded against this instance's schema (`sync/arrival-recording.ts`, R6-9), the values of

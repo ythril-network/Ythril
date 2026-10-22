@@ -73,7 +73,7 @@ const EXEMPT = {
   'server/src/brain/ttl-sweep.ts:flaggedPage': 'the page of the purge unit: it selects rows BY the flag, because the audit records of deleted files are exactly what it reaps once the space\'s file window has passed since the deletion',
   'server/src/brain/ttl-sweep.ts:stillFlagged': 'the purge unit\'s reading of "the deleter matched nothing": it asks whether the row is STILL flagged, so a re-upload that revived the path between the page and the delete is the correct outcome rather than a reported failure',
   'server/src/files/derived-fields.ts:stripFlaggedRowsOnce': 'the one-off repair of rows flagged before the flag write stripped them: it selects flagged rows that still hold what the bytes made, which is the work it exists to do',
-  'server/src/sync/file-sync.ts:heldRowsFor': 'the pull decides ON the flag: `HeldRow.deletedAt` is what makes `repairReasonOf` answer null ("a soft-deleted row is not repaired"), and a predicate would make a deleted file read as `missing_row` and take its bytes back',
+  'server/src/files/disk-against-rows.ts:heldRowsFor': 'the pull and the restore decide ON the flag (the classifier moved out of file-sync, bundle-111): `HeldRow.deletedAt` is what makes `repairReasonOf` answer null ("a soft-deleted row is not repaired"), and a predicate would make a deleted file read as `missing_row` and take its bytes back',
   'server/src/sync/push-reads.ts:readPushStored': 'the arrival planner compares the STORED seq, for every family; a hidden row reads as "nothing stored" and lets any arriving seq win over it. The flagged-row rule belongs to the writer (`writeArrivals`, above)',
   'server/src/app.ts:GET /api/admin/spaces/:spaceId/export': 'a full snapshot carries the audit rows on purpose: a restore brings the flag back with the record (`restoredFileFlag`), and filtering here would drop deletion history out of every backup',
   // ── the audit record has to be readable somewhere, and this is the door
@@ -211,7 +211,7 @@ describe('the derivation finds the readers at all, so the rule cannot pass by fi
     assert.ok(READERS.length >= 40, `only ${READERS.length} reader(s) of the files collection found — the derivation is broken`);
     const keys = new Set(READERS.map(r => r.key.replace('server/src/', '')));
     for (const k of ['brain/entity-refs.ts:missingRefs', 'brain/edge-endpoint-names.ts:resolveEndpointName',
-      'brain/traverse-bodies.ts:withTraverseBodies', 'files/dispatch.ts:readPriorProcessing', 'sync/file-sync.ts:heldRowsFor',
+      'brain/traverse-bodies.ts:withTraverseBodies', 'files/dispatch.ts:readPriorProcessing', 'files/disk-against-rows.ts:heldRowsFor',
       'brain/space-shape.ts:build', 'mcp/tools/spaces.ts:space_statsTool.handle', 'brain/embed-record.ts:embedStoredRecord']) {
       assert.ok(keys.has(k), `${k} reads the files collection and the derivation did not find it — it is blind to that shape`);
     }

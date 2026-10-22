@@ -146,14 +146,17 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
       assert.deepEqual(moved.author, LOCAL);
     });
 
-    it('queues no embed job, and the rows derived from the file move WITH it, their parent re-rooted (they used to be left for a second step)', async () => {
+    it('re-embeds the moved file at its new id, and the rows derived from the file move WITH it, their parent re-rooted (they used to be left for a second step)', async () => {
       await put('docs/old.md');
       const chunk = { _id: 'docs/old.md#chunk0', spaceId: SPACE, path: 'docs/old.md#chunk0', parentFileId: 'docs/old.md', chunkIndex: 0, content: 'body', tags: [], createdAt: T0, updatedAt: T0, sizeBytes: 4, author: PEER };
       await files().insertOne(chunk);
 
       await move('docs/old.md', 'docs/new.md');
 
-      assert.equal(await embedJobs().countDocuments({}), 0, 'a rename re-queued an embed: the record\'s text did not change, its id did');
+      // A top-level file's embed text carries its path, so a rename re-embeds it at the new id (Q-459; the old 'text did not
+      // change' premise was refuted in bundle-111's design review) - and nothing is left queued at the old id.
+      assert.deepEqual((await embedJobs().find({}, { projection: { _id: 1 } }).toArray()).map(j => j._id).sort(), ['file:docs/new.md'],
+        'a rename did not re-queue the moved file at its new id, or left a job at the old one');
       assert.equal(await files().findOne({ _id: 'docs/old.md#chunk0' }), null, 'the derived row stayed at the old id');
       assert.deepEqual(await files().findOne({ _id: 'docs/new.md#chunk0' }),
         { ...chunk, _id: 'docs/new.md#chunk0', path: 'docs/new.md#chunk0', parentFileId: 'docs/new.md', deliveredBy: '' },
@@ -307,10 +310,10 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
       assert.deepEqual(await linkTargets('dir/sub/b.md'), []);
     });
 
-    it('queues no embed job', async () => {
+    it('re-embeds each moved file at its new id and leaves no job at an old one', async () => {
       await put('dir/a.md');
       await move('dir', 'moved');
-      assert.equal(await embedJobs().countDocuments({}), 0);
+      assert.deepEqual((await embedJobs().find({}, { projection: { _id: 1 } }).toArray()).map(j => j._id).sort(), ['file:moved/a.md']);
     });
   });
 });

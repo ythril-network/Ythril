@@ -18,6 +18,18 @@ export interface RestoreStarted {
   leftOut: string[];
 }
 
+/** One class of a restored space's files report: how many files, and at most a share of their paths. */
+export interface RestoreFileClass { count: number; paths: string[] }
+
+/**
+ * What a restore says of one space's files (`files` of the space's row, restore sets only): the classes that have a file, by the
+ * server's class name (`missing_row`, `stale_row`, `unprocessed`, `row_without_bytes`, `soft_deleted_with_bytes`; read as the server's
+ * string, so a newer server's class still shows), or the reason the check could not run.
+ */
+export type RestoreFilesReport =
+  | { checked: true; classes: Record<string, RestoreFileClass> }
+  | { checked: false; reason: string };
+
 /** One space of a set's report. */
 export interface ActSetSpaceReport {
   id: string;
@@ -32,6 +44,8 @@ export interface ActSetSpaceReport {
   completedAt?: string;
   edgeIndexes?: unknown;
   vectorIndexes?: unknown;
+  /** A restore's check of the space's files against its restored records; absent on a migrate's rows. */
+  files?: RestoreFilesReport;
 }
 
 /** Where a set stands, or how the last one ended: the part a restore's and a migrate's report share. */

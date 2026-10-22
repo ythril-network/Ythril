@@ -296,8 +296,8 @@ See [Admin API](12a-data-management-api.md#post-apiadmindatarestore) for the who
   `POST /api/admin/data/restore/abandon`.
 - **A restore makes every space equal to the backup.** A space created after the backup is emptied, a backup naming a space this
   instance no longer serves is refused (`400 backup_names_unserved_spaces`) unless `leaveOut` names it, and a broken backup is
-  refused before anything is replaced (`400 backup_not_whole`). The audit log, the queues and the files' bytes are not restored,
-  and records erased after the backup come back.
+  refused before anything is replaced (`400 backup_not_whole`). The audit log, the queues and the files' bytes are not restored
+  (each space's report lists the files that then no longer match their records), and records erased after the backup come back.
 - **`POST /api/admin/data/migrate` copies the database online and answers `202`** `{ migrateId, spaces }` (it answered `200`
   and left the copy to a restart that never made it). It is refused with `409 INFRA_MANAGED` when a non-empty `MONGO_URI`
   supplies the URI, and with `409 target_not_empty` when the target holds anything. **An empty `MONGO_URI` now counts as unset**

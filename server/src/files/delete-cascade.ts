@@ -54,7 +54,9 @@ import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { bytesPresent, deleteStoredIfPresent, isMissingPath } from './stored-bytes.js';
 import { ConfirmRequired, FileSystemFault, SpaceRootRefused } from './act-answers.js';
 import { fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, retireFileMetaUnder } from './file-meta.js';
-import { forgetFileHashesByPrefix } from './manifest.js';
+import { forgetPathKeyedCache } from './path-keyed-cache.js';
+import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
+import { rootsOfDirectory } from './derived-rows.js';
 import { cancelJobsOwnedBy } from './media/job-queue.js';
 import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { removeFileHere, removeLinksOfDeletedFiles } from './remove-file-here.js';
@@ -252,8 +254,8 @@ export async function deleteDirectoryCascade(spaceId: string, dirPath: string, a
 const directoryAt = (spaceId: string, dirPath: string): string => `for space ${peerText(spaceId)}, path ${peerText(dirPath)}`;
 
 /**
- * What the files under a directory left BESIDE their rows, taken by prefix: their queued jobs, their conversion sidecars and the
- * cached hash of each. One command per kind of leaving whatever the number of files, which is why a directory's removal goes
+ * What the files under a directory left BESIDE their rows, taken by prefix: their queued jobs, their conversion sidecars, the
+ * cached hash of each and their embed jobs. One command per kind of leaving whatever the number of files, which is why a directory's removal goes
  * through this and never through {@link removeFileHere} once per file. A store failure is thrown, so the act fails and its retry
  * completes it; any other failure is logged and survived (`unlessTheStoreFailed`). The rows are not here: they are the caller's,
  * LAST ({@link retireRowsUnderDirectory}), because they are what tells a retry the act is still owed.
@@ -265,7 +267,10 @@ async function removeWhatADirectoryLeftBesideItsRows(spaceId: string, dirPath: s
   // Sidecar records and files (`_converted/<path>`, `_extracted/<path>`) live outside the folder prefix.
   await unlessTheStoreFailed(`deleteConversionArtifactsByPrefix error ${at}`, () => deleteConversionArtifactsByPrefix(spaceId, dirPath));
   // The cached hash of every file the tree held, as one file's delete forgets its own: the cache must not advertise a path nothing holds.
-  await unlessTheStoreFailed(`forgetFileHashesByPrefix error ${at}`, () => forgetFileHashesByPrefix(spaceId, dirPath));
+  await unlessTheStoreFailed(`forgetPathKeyedCache error ${at}`, () => forgetPathKeyedCache(spaceId, { under: [dirPath] }));
+  // The embed jobs of the files the tree held, read from their rows (the rows derived from them went with the sidecars, above).
+  await unlessTheStoreFailed(`retireEmbedWorkOfRemovedRows error ${at}`,
+    async () => retireEmbedWorkOfRemovedRows(spaceId, { ids: await rootsOfDirectory(spaceId, dirPath) }));
 }
 
 /**

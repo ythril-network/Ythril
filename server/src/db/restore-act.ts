@@ -21,13 +21,20 @@
  *   collections, so the unique indexes refuse a duplicate the backup holds at the insert), the backup's records are loaded, the counter is
  *   written to at least the floor, and the vector indexes are reconciled. A broken backup or a duplicate is an INPUT failure: not retried,
  *   the space stays held until an operator abandons (`POST /api/admin/data/restore/abandon`, `spaces/act-set-abandon.ts`). A store outage is retried.
+ * - **The file report** ({@link filesReportOfSpace}) closes the body, still under the hold: a backup carries the database and not the bytes under
+ *   `<DATA_ROOT>/files`, so the restored rows describe the backup's moment over the bytes of THIS one. Each space's files are read against its
+ *   rows (`files/disk-against-rows.ts`, the classifier the pull shares) and the space's report says which no longer match, by class. It reports
+ *   and repairs nothing - a tombstone written by a restore would delete a peer's copy - and it can never fail the restore: a check that throws or
+ *   outlasts the file-system bound is `files: { checked: false, reason }` and the restore goes on, because a throw would make the runner drop and
+ *   reload the space again.
  * - **The completion** is the runner's write: it removes the entry, forgets the RECEIVE marks the registration named (`forgetReceived`),
  *   marks the space done on the set with its index results, and - for the last one - ends the set, after which {@link onRestoreEnd} tells
  *   every cache the database was replaced, restarts the leaked-row scans and writes the outcome's audit row.
  *
  * ## Not restored, on purpose
  *
- * Only space collections and each space's own counter doc. The audit log records what happened, the restore included, and rolling it
+ * Only space collections and each space's own counter doc - and not the bytes under `<DATA_ROOT>/files`, which the file report above names
+ * where they no longer match. The audit log records what happened, the restore included, and rolling it
  * back would erase that record; `space_activity`, the webhook subscriptions and queues and the other instance collections are this
  * instance's own running state.
  */
@@ -42,7 +49,7 @@ import { ensureEdgeGuardIndex } from '../spaces/edge-guard-index.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 import {
-  defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, instanceWideActStanding,
+  defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, instanceWideActStanding, spaceActSetOf, spaceActKnob,
   SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from '../spaces/space-act-runner.js';
 import type { SpaceActKind, SpaceActSet } from '../config/types.js';
@@ -50,9 +57,81 @@ import { seqFloor, bumpSeq } from '../util/seq.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { RESTORE_ABANDONED_OPERATION, RESTORE_COMPLETED_OPERATION } from '../audit/act-set-operations.js';
 import { log, peerText } from '../util/log.js';
+import { warnOnce } from '../util/warn-once.js';
+import { isTimeBoundEnded } from '../util/time-bound.js';
+import { readDiskAgainstRows, FILE_MISMATCH_CLASSES, type FileMismatchClass } from '../files/disk-against-rows.js';
 
 const KIND = 'restore' satisfies SpaceActKind;
 const COUNTERS = 'ythril_counters';
+
+// ── what a restore says about a space's files ───────────────────────────────────────────────────────────────────────
+
+/** The most paths one class of one space names in the report. */
+export const REPORT_PATHS_PER_CLASS = 10;
+/**
+ * The most paths the report of a whole restore names, over every space and class. The report is kept on the restore set in the config file
+ * until the next restore, so it is bounded by this and not by the number of spaces: each space's share is this divided by the spaces of the
+ * set, which is fixed before any space runs (a share taken from a running total would depend on which space ended first).
+ */
+export const REPORT_PATHS_PER_RESTORE = 200;
+/** The longest one reported path is quoted (`peerText`): a name a peer chose is bounded and its escapes written out. */
+const REPORT_PATH_MAX = 256;
+
+/** One class of the files report: how many files, and at most a share of their paths. */
+export interface FileClassReport { count: number; paths: string[] }
+
+/** What a restored space reports of its files. */
+export type RestoreFilesReport =
+  | { checked: true; classes: Partial<Record<FileMismatchClass, FileClassReport>> }
+  | { checked: false; reason: string };
+
+/**
+ * The per-class report of `classes` within `allowance` paths for the whole space: only the classes that have a file, each with its exact count
+ * and an equal share of the allowance (at most {@link REPORT_PATHS_PER_CLASS}), every path quoted bounded. The allowance is shared by class so
+ * one large class cannot leave the others naming nothing.
+ */
+export function filesReportOf(classes: Readonly<Record<FileMismatchClass, readonly string[]>>, allowance: number): RestoreFilesReport {
+  const named = FILE_MISMATCH_CLASSES.filter(c => classes[c].length > 0);
+  const share = named.length === 0 ? 0 : Math.max(0, Math.min(REPORT_PATHS_PER_CLASS, Math.floor(allowance / named.length)));
+  return {
+    checked: true,
+    classes: Object.fromEntries(named.map(c => [c, {
+      count: classes[c].length,
+      paths: classes[c].slice(0, share).map(p => peerText(p, { max: REPORT_PATH_MAX })),
+    } satisfies FileClassReport])),
+  };
+}
+
+/** Says once per restore and space why that space's files were not checked: the cause belongs in the log, never in the report. */
+const checkFailureSaid = warnOnce<string>({ max: 1_000 });
+
+/**
+ * The files report of one restored space, which can never throw: a failure of the check is `checked: false` with a reason of ours (no driver
+ * text, which can carry a connection string), the cause said once through {@link checkFailureSaid}.
+ */
+async function filesReportOfSpace(ctx: SpaceActBodyContext, spaceId: string): Promise<RestoreFilesReport> {
+  try {
+    const spaces = Object.keys(spaceActSetOf(KIND)?.members ?? {}).length;
+    const classes = await readDiskAgainstRows(spaceId, ctx.fileTree);
+    const report = filesReportOf(classes, Math.floor(REPORT_PATHS_PER_RESTORE / Math.max(1, spaces)));
+    await countFilesOutOfStep(classes);
+    return report;
+  } catch (err) {
+    checkFailureSaid(`${ctx.entry.setId ?? ctx.entry.id}\0${spaceId}`,
+      () => log.warn(`restore: the file check of space '${peerText(spaceId)}' failed: ${peerText(err)}`));
+    if (isTimeBoundEnded(err)) {
+      const ms = spaceActKnob('SPACE_ACT_FS_MS');
+      return { checked: false, reason: `the check of the files took longer than ${ms >= 1000 ? `${ms / 1000} s` : `${ms} ms`} and was left unfinished; the rows of this space may not match the bytes on disk` };
+    }
+    return { checked: false, reason: 'the check of the files could not run (see the server log); the rows of this space may not match the bytes on disk' };
+  }
+}
+
+/** Count the files of each class (`ythril_restore_files_out_of_step_total`); the registry is loaded here, as the runner loads it, never at import. */
+async function countFilesOutOfStep(classes: Readonly<Record<FileMismatchClass, readonly string[]>>): Promise<void> {
+  const { restoreFilesOutOfStepTotal } = await import('../metrics/registry.js');
+  for (const c of FILE_MISMATCH_CLASSES) if (classes[c].length > 0) restoreFilesOutOfStepTotal.labels({ class: c }).inc(classes[c].length);
+}
 
 /** The space a backup collection belongs to, or null for an instance collection. */
 const spaceOfCollection = (name: string): string | null => parseSpaceCollection(name)?.spaceId ?? null;
@@ -122,8 +201,26 @@ function onRestoreEnd(set: Readonly<SpaceActSet>): void {
   if (set.outcome === 'abandoned') {
     log.warn(`restore of backup '${peerText(set.backupId ?? '')}' abandoned; possibly half restored: ${left.map(s => `'${peerText(s)}'`).join(', ') || 'none'}`);
   } else {
-    log.info(`restore of backup '${peerText(set.backupId ?? '')}' completed for ${Object.keys(set.members).length} space(s)`);
+    const out = filesOutOfStepOf(set);
+    log.info(`restore of backup '${peerText(set.backupId ?? '')}' completed for ${Object.keys(set.members).length} space(s); files out of step with their records: ${out.total}`
+      + (out.total > 0 ? ` (${FILE_MISMATCH_CLASSES.filter(c => out.byClass[c] > 0).map(c => `${c} ${out.byClass[c]}`).join(', ')})` : ''));
+    if (out.notChecked.length > 0) {
+      log.warn(`restore of backup '${peerText(set.backupId ?? '')}': files not checked for ${out.notChecked.length} space(s): ${out.notChecked.map(s => `'${peerText(s)}'`).join(', ')}; the report names the reason of each`);
+    }
   }
+}
+
+/** What the members' file reports add up to: the files out of step by class and in all, and the spaces whose files were not checked. */
+function filesOutOfStepOf(set: Readonly<SpaceActSet>): { total: number; byClass: Record<FileMismatchClass, number>; notChecked: string[] } {
+  const byClass = Object.fromEntries(FILE_MISMATCH_CLASSES.map(c => [c, 0])) as Record<FileMismatchClass, number>;
+  const notChecked: string[] = [];
+  for (const [id, member] of Object.entries(set.members)) {
+    const files = member.report?.['files'] as RestoreFilesReport | undefined;
+    if (!files) continue;
+    if (!files.checked) { notChecked.push(id); continue; }
+    for (const c of FILE_MISMATCH_CLASSES) byClass[c] += files.classes[c]?.count ?? 0;
+  }
+  return { total: FILE_MISMATCH_CLASSES.reduce((n, c) => n + byClass[c], 0), byClass, notChecked };
 }
 
 // ── the body ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -201,7 +298,10 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
     log.error(`restore: failed to rebuild vector indexes for space '${peerText(spaceId)}': ${peerText(err)}`);
     vectorIndexes = 'failed';
   }
-  return { report: { edgeIndexes: { failed: [] }, vectorIndexes } };
+
+  // The files against the restored rows: last, so nothing after it can fail the body (a retry drops and loads the space again).
+  const files = await filesReportOfSpace(ctx, spaceId);
+  return { report: { edgeIndexes: { failed: [] }, vectorIndexes, files } };
 }
 
 defineSpaceActBody(KIND, restoreSpace);

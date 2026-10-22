@@ -46,6 +46,8 @@ import { replaceDerivedFileRows, type DerivedWriteOutcome } from '../derived-fie
 import { mapLimit } from '../../util/map-limit.js';
 import { inChunks } from '../../util/chunks.js';
 import { assertSpaceTakesWrites } from '../../spaces/space-write-gate.js';
+import { forgetPathKeyedCache } from '../path-keyed-cache.js';
+import { retireEmbedWorkOfRemovedRows } from '../file-embed-work.js';
 
 export type InputFormat = 'pdf' | 'docx' | 'epub' | 'html' | 'md' | 'txt' | 'text' | 'auto';
 
@@ -644,7 +646,9 @@ export async function deleteConversionArtifacts(
  *  2. **A derived row at a sidecar path whose parent is gone** (an orphan the walk cannot reach from a root), by id.
  *  3. **The rows an arrival made** at a sidecar path — top-level, no `parentFileId` — each retired as the file's own row is
  *     (`retireFileMeta`: flagged under `softDeleteFileMeta`, else removed). Their children went in step 1: they were roots of it.
- *  4. **The sidecar bytes**: `deleteMany` does not touch disk, and the trees would otherwise be orphaned on the filesystem.
+ *  4. **The embed jobs of every row taken** (`retireEmbedWorkOfRemovedRows`), never the roots': the file a re-conversion keeps is the caller's.
+ *  5. **The sidecar bytes**, and the hash cache entries of their paths: `deleteMany` does not touch disk, and the trees would otherwise be
+ *     orphaned on the filesystem.
  *
  * A file's remover and a directory's used to each hand-write a part of this, one level deep, and each missed a different half:
  * the file's left the arrivals' rows, the directory's left those and the rows two levels down (bundle-71, Q-349).
@@ -658,8 +662,13 @@ async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[],
   const derivedHere = atSidecars.filter(r => r.parentFileId !== undefined).map(r => r._id);
   for (const part of inChunks(derivedHere, READ_CHUNK)) await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }));
   for (const r of atSidecars) if (r.parentFileId === undefined) await retireFileMeta(spaceId, r._id);
+  // The embed jobs of every row taken above — read from the rows, never by an id prefix — and not the roots': a root is the caller's
+  // (a re-conversion keeps its file).
+  const rootSet = new Set(roots);
+  await retireEmbedWorkOfRemovedRows(spaceId, { ids: [...ids].filter(id => !rootSet.has(id)) });
 
   await removeSidecarBytes(spaceId, owned);
+  await forgetPathKeyedCache(spaceId, { ids: owned.filter(s => s.shape === 'file').map(s => s.path), under: owned.filter(s => s.shape === 'tree').map(s => s.path) });
 }
 
 /**

@@ -160,6 +160,9 @@ file bytes) — and the import puts them back. What to expect from a restore:
   for older than a restored record by a peer. Running the same import again is safe — it replaces — and moves the
   counter.
 - File previews and passages are rebuilt from the file itself, so they are not part of the export.
+- **The file bytes are not part of it, and an import gives no report on them.** A file's record comes back without its
+  size and hash, so the import does not say which files on disk no longer match their records. A whole [restore](#restore)
+  does.
 - **It keeps this instance's sync positions, unlike a whole [restore](#restore).** Peers do not send again what they had
   already sent, so a record the import put back to an older copy than a peer holds stays older here until it changes again
   on that peer. A record the export does not hold is left as it is, not removed.
@@ -291,6 +294,32 @@ Once you confirm, the request is accepted at once and the work runs in the backg
 queues and webhook subscriptions; and the files' bytes on disk. A file's details come back as the backup has them while
 its bytes stay as they are now, so after a restore a file can be listed without its bytes, or bytes can be on disk that no
 file names.
+
+**What a restore tells you about files.** Once a space's records are back, the restore compares that space's files on disk
+with its file records and lists, per space, the files that no longer match. It only reports: it changes no file, no record
+and no cache, and it never deletes anything, because a deletion written by a restore would also delete the file on every
+peer. The page shows it on each space's row (a row with files out of step is marked as a warning, and **Show file names**
+opens the names), and the same report is in the answer of `GET /api/admin/data/restore`
+([Data management API](../integration-guide/12a-data-management-api.md)). A file is in one of these groups:
+
+- **No record** - bytes on disk that no file record names, for instance a file uploaded after the backup.
+- **Record names other bytes** - the file was changed after the backup.
+- **No processing** - the record shows the file was never converted or analysed, though its kind is.
+- **Record without a file** - the record says it holds bytes and none are on disk, for instance a file deleted after the backup.
+- **Deleted file on disk again** - a file the backup records as deleted has bytes again, for instance uploaded again.
+
+Each group gives its exact count and at most ten names, and the names listed across the whole restore are capped, so a
+space with a great many files out of step lists the first of each group and still counts all of them. Names are shortened
+when very long. The report is kept until the next restore and can name files that have been deleted since; the completion
+line in the server log carries the total.
+
+A space whose files could not be compared in time (the time allowed is two minutes) or at all says so on its row instead,
+and the restore still completes. Files kept by this instance alone - conversion results, conflict copies, schema
+snapshots - are not compared.
+
+If a space is shared over a network, the file may come back by itself: sync fetches a file again when a peer holds exactly
+the same bytes, a few files per space per cycle, and only in the direction the network allows. A file no peer has, such as
+one uploaded here after the backup, stays as it is until you deal with it.
 
 **What it does bring back, and you may not expect:** records erased after the backup, erasure requests included. The audit
 log still records the erasure, so erase them again. A record deleted here after the backup that the peers have since

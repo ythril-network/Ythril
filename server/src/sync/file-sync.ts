@@ -22,11 +22,11 @@ import {
 } from '../files/stored-bytes.js';
 import { resolveSafePathChecked, fileKeyOf } from '../files/sandbox.js';
 import { buildFileManifest, seedFileHash, type ManifestEntry } from '../files/manifest.js';
-import { recordArrivedBytes, countFileArrival, type FileRepairReason } from '../files/bytes-arrived.js';
-import { resolveInputFormat } from '../files/converters/pipeline.js';
+import { heldRowsFor, repairReasonOf } from '../files/disk-against-rows.js';
+import { toDocId } from '../util/paths.js';
+import { recordArrivedBytes, countFileArrival } from '../files/bytes-arrived.js';
 import { removeUnrecordedBytes } from '../files/unrecorded-bytes.js';
 import { checkQuota, QuotaError, REPEATED_CHECK_USAGE_WINDOW_MS } from '../quota/quota.js';
-import { withinHousekeepingBound } from '../db/write-bound.js';
 import { reportSpaceFailure, reportSpaceRecovered } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import {
@@ -67,48 +67,9 @@ const QUOTA_STEP = declareStep('File pull quota');
 const REPAIR_STEP = declareStep('File pull repair');
 const BODY_STEP = declareStep('File pull body');
 
-/**
- * What the pull reads of a space's top-level file row, once per cycle (`heldRowsFor`): the hash and processing state the row
- * records, whether it is soft-deleted, and the hash this instance and the peer last both held.
- */
-interface HeldRow { sha256?: string; embeddingStatus?: string; deletedAt?: string; syncBase?: Record<string, string> }
-
-/**
- * Why the bytes already on disk at `key` (hash `diskSha256`) need their record brought up to date — or `null` when they do not.
- * Pure. The three reasons are the three ways an arrival leaves a file half-recorded: a row that says another hash than the disk
- * (the write that records the arrival failed and was swallowed, or an older release stored the row and not the new bytes'), no row
- * at all (the bytes are there and nothing names them: they are taken back, never recorded, because a row made here for them
- * would name this instance their author and deliverer), and a class that processes with no processing state (a release before
- * the pull dispatched). A soft-deleted row is not repaired: the file is deleted here, and what is on disk is not its bytes.
- */
-export function repairReasonOf(row: HeldRow | undefined, diskSha256: string, key: string): FileRepairReason | null {
-  if (!row) return 'missing_row';
-  if (row.deletedAt !== undefined) return null;
-  if (row.sha256 !== diskSha256) return 'stale_row';
-  if (row.embeddingStatus === undefined && resolveInputFormat(key) !== 'text') return 'unprocessed';
-  return null;
-}
-
-/**
- * The top-level file rows of a space as the pull needs them, by id, read ONCE per call of `syncFiles` (the base of each path, the
- * hash and state the row records) and replacing the per-peer base query that was the only read it made. Chunk and sidecar
- * rows (`parentFileId`) are not files here. A full cursor, projected, under the store bound: a read that hangs ends at the bound
- * and is the space's failure, reported by the caller's catch.
- */
-async function heldRowsFor(spaceId: string, peerId: string): Promise<Map<string, HeldRow>> {
-  const baseKey = syncBasePath(peerId);
-  return withinHousekeepingBound(async () => {
-    const docs = await col<SyncedFileMeta>(spaceCollection(spaceId, 'files'))
-      .find(asFilter<SyncedFileMeta>({ parentFileId: { $exists: false } }),
-        { projection: { _id: 1, sha256: 1, embeddingStatus: 1, deletedAt: 1, [baseKey]: 1 } }).toArray();
-    return new Map(docs.map(d => [String(d._id), {
-      ...(d.sha256 !== undefined ? { sha256: d.sha256 } : {}),
-      ...(d.embeddingStatus !== undefined ? { embeddingStatus: d.embeddingStatus } : {}),
-      ...(d.deletedAt !== undefined ? { deletedAt: d.deletedAt } : {}),
-      ...(d.syncBase?.[peerId] !== undefined ? { syncBase: { [peerId]: String(d.syncBase[peerId]) } } : {}),
-    } satisfies HeldRow]));
-  });
-}
+// What the pull reads of a space's file rows, and why a held file needs its record brought up to date, are the classifier's
+// (`files/disk-against-rows.ts`): the restore asks the same question of the same rows, and one answer serves both.
+export { repairReasonOf };
 
 /**
  * Say, once per window per space and path, that a pulled file was not recorded or could not be fetched (a quota refusal, a failed
@@ -258,10 +219,12 @@ export async function syncFiles(
 
     // Build our manifest for comparison
     const ours = await buildFileManifest(spaceId);
-    const oursMap = new Map(ours.map(e => [e.path, e]));
+    // Keyed as the rows and the arriving keys are (`toDocId`), not by the on-disk spelling: a name stored NFD is the one file its NFC key
+    // names, where the raw spelling made it a file this instance "did not have" and fetched a second time.
+    const oursMap = new Map(ours.map(e => [toDocId(e.path), e]));
     // One read of the space's top-level rows per call: the agreed hash of each path (`syncBase.<peer>`, Q-66) and what each row
     // records of its bytes (`repairReasonOf`). Replaces the read that returned the bases alone.
-    const held = await heldRowsFor(spaceId, member.instanceId);
+    const held = await heldRowsFor(spaceId, { peerId: member.instanceId, baseKey: syncBasePath(member.instanceId) });
     const bases = { get: (path: string): string | undefined => held.get(path)?.syncBase?.[member.instanceId] };
     // Bytes this cycle has written, for the quota question of the next fetch: a cached measurement does not see them yet.
     let pulledBytes = 0;
@@ -506,7 +469,8 @@ export async function syncFiles(
         || wasRefusedUpload(member.instanceId, spaceId, localPath, localEntry.sha256);
       if (decideFilePush(localEntry, peerManifestMap.get(localPath), bases.get(localPath), answered) === 'skip') continue;
       try {
-        const absPath = path.join(spaceRoot, localPath);
+        // The bytes are read where the manifest found them (the on-disk spelling), never at the NFC key the loop is keyed by.
+        const absPath = path.join(spaceRoot, localEntry.path);
         // One request to the peer's upload door for THIS file. Whole-file body: BATCH_FETCH_TIMEOUT_MS is a control-plane budget
         // and would abort any upload slower than a minute. Same reasoning as the download above — see PEER_TRANSFER_TIMEOUT_MS.
         // What goes in it (one streamed body, or ranges under the peer's limit) is `pushStoredFile`'s to decide.
