@@ -19,7 +19,7 @@
  *  - **The final flush:** an event emitted AFTER the drain closed the limiter is a row by the time the second call returns.
  *  - **The drain is bounded:** with the retry-queue write held, the call returns within its `withinMs` (not after the write), and says so.
  *  - **A failed write is counted and said at warn:** the lost counter rises by the events, and the drain's line names how many.
- *  - **The index** `{ scheduledAt: 1 }` exists after `initRetryQueueIndexes`, which startup calls beside the store's own.
+ *  - **The indexes** `{ scheduledAt: 1, webhookId: 1 }` and `{ webhookId: 1, scheduledAt: 1 }` exist after `initRetryQueueIndexes`, which startup calls beside the store's own.
  *
  * The limiter is module-global and a drain closes it for the life of the process, so the cases below run in one order, in this file alone.
  *
@@ -143,10 +143,12 @@ describe('the dispatcher persists what it never attempted at shutdown (Q-469)', 
     assert.ok(logs.getLogLines(300).some(l => l.includes('4 queued webhook deliveries could not be persisted for retry')), 'the shutdown said nothing at warn about the deliveries it could not persist');
   });
 
-  it('the retry queue has an index on scheduledAt, ensured by the module that owns the queue at startup', async () => {
+  it('the retry queue has its two scheduledAt compounds, ensured by the module that owns the queue at startup', async () => {
     await dispatcher.initRetryQueueIndexes();
-    const indexes = await acts.door.mongo.col(RETRY_QUEUE).indexes();
-    assert.ok(indexes.some(i => JSON.stringify(i.key) === JSON.stringify({ scheduledAt: 1 })), `no { scheduledAt: 1 } index on ${RETRY_QUEUE}: ${JSON.stringify(indexes.map(i => i.key))}`);
+    const keys = (await acts.door.mongo.col(RETRY_QUEUE).indexes()).map(i => JSON.stringify(i.key));
+    for (const want of [{ scheduledAt: 1, webhookId: 1 }, { webhookId: 1, scheduledAt: 1 }]) {
+      assert.ok(keys.includes(JSON.stringify(want)), `no ${JSON.stringify(want)} index on ${RETRY_QUEUE}: ${keys.join(' ')}`);
+    }
   });
 
   it('startup calls it: bootstrap awaits initRetryQueueIndexes', () => {

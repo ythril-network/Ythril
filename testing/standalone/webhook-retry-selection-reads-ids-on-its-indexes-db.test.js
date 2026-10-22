@@ -84,7 +84,7 @@ const rowOf = (webhookId, n, at) => ({
 async function seed(plan) {
   await queue.deleteMany({});
   const docs = plan.flatMap(({ webhookId, count, from }) => Array.from({ length: count }, (_, i) => rowOf(webhookId, i, from + i)));
-  for (let i = 0; i < docs.length; i += 2000) await queue.insertMany(docs.slice(i, i + 2000));
+  await queue.insertMany(docs);
 }
 const remaining = async (webhookId) => await queue.countDocuments({ webhookId });
 
