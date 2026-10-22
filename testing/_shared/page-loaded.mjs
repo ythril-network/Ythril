@@ -4,9 +4,10 @@
  * ## What it prevents
  *
  * A sweep that measures a page after a fixed pause has guessed how long the first data load takes. On a slow instance it
- * measures the skeleton, and the report is clean about a page it never saw. `waitUntil: 'networkidle'` is not the answer
- * either: the app holds an SSE stream and polls, so its network is never idle once a page is up. What does mean "loaded"
- * is the loading indicators being gone, and the sweeps had each written that list — so it is here, once.
+ * measures the skeleton, and the report is clean about a page it never saw. A quiet network (`waitUntil: 'networkidle'`)
+ * is not the answer either: it says the requests in flight have ended, not that a deferred block has rendered what they
+ * brought. What does mean "loaded" is the loading indicators being gone, and the sweeps had each written that list — so
+ * it is here, once.
  *
  * The list is what the app shows while a page is still loading, and nothing else: the Overview's shimmer lines
  * (`app-skeleton-lines`), the `.loading-overlay` every page and tab puts up while its request is out, the file tree's
@@ -20,8 +21,12 @@
 /** What the app shows while a page is still loading. */
 export const LOADING = 'app-skeleton-lines, .loading-overlay, .tree-spinner, section[aria-busy="true"]';
 
-/** The routed page's own element: the shell's `main.main` holds `.page-help` and then the routed component. */
-export const ROUTED_PAGE = 'main.main > :not(.page-help)';
+/**
+ * The routed page's own element. The shell's `main.main` holds `.page-help`, the `<router-outlet>`, and — once the route has
+ * rendered — the routed component right after the outlet. The outlet itself is there from the first paint of the shell, so a
+ * selector it can match (`:not(.page-help)`) would hold before any page exists.
+ */
+export const ROUTED_PAGE = 'main.main > router-outlet + *';
 
 /**
  * Resolve when nothing in {@link LOADING} is on `page`; throw after `timeout`.

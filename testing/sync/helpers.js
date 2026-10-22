@@ -128,6 +128,24 @@ export async function postRetry429(baseUrl, token, path, data, maxRetries = 3) {
 }
 
 /**
+ * Run a sync cycle on `baseUrl`'s network that STARTED after this call, to its end; throw if it did not complete.
+ *
+ * What a negative sync assertion ("the record did not reach X") stands on: a completed cycle that had the record to carry.
+ * `?wait=true` alone is not that, because a trigger that arrives while a cycle runs JOINS it and answers with its result —
+ * a cycle that may have begun before the write. The second call either joins the rerun the first one queued or starts
+ * a fresh cycle, and both began after the write; that second answer is the one this returns.
+ */
+export async function syncCycleStartedAfterNow(baseUrl, token, networkId) {
+  const completed = async (which) => {
+    const r = await postRetry429(baseUrl, token, `/api/networks/${networkId}/sync?wait=true`, {});
+    if (r.status !== 200) throw new Error(`the ${which} sync cycle on ${baseUrl} did not complete: ${r.status} ${JSON.stringify(r.body)}`);
+    return r;
+  };
+  await completed('first');
+  return completed('second');
+}
+
+/**
  * PATCH with JSON body.
  *
  * `headers` is optional and merges over the defaults — it exists for `If-Match`, which is a header rather

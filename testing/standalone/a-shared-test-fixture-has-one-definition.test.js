@@ -21,7 +21,7 @@
  *
  * Its title says "has one definition", and the body checks the rows below, not every helper in the suite. A row is
  * added when a second copy is extracted, which is exactly when the spelling is known. What IS held here: the timing
- * fixtures (`_fixtures/`) take their `sleep` from the one export. A copy spelled so differently that no row's pattern
+ * fixtures (`_fixtures/`) take their `elapse` from the one export. A copy spelled so differently that no row's pattern
  * sees it is not caught — the patterns are the shape each copy had, not a proof about every possible one.
  *
  * What is NOT held here any more, because one gate per rule: a hand-written fixed delay and a hand-bound test server,
