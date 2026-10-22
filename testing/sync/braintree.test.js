@@ -34,7 +34,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, waitFor, getInstanceId, makeTriggerProbe, readRecord, createTestSpace } from './helpers.js';
+import { INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, waitFor, getInstanceId, makeTriggerProbe, readRecord, createTestSpace, syncCycleStartedAfterNow } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -221,10 +221,9 @@ describe('Braintree topology (A -> B -> C)', () => {
 
     // B would try to sync schedule — but C is push-only so B only receives from its parent A
     // Run a COMPLETED cycle on B (B syncs from A, not from C). Negative assertion: a waitFor on the absent record
-    // would return at once and prove nothing (Q3), and a fixed wait guesses how long a cycle takes. `?wait=true`
-    // answers when B's turn has run to its end, so the record's absence after it is the cycle's verdict.
-    const cycle = await postRetry429(INSTANCES.b, tokenB, `/api/networks/${networkId}/sync?wait=true`, {});
-    assert.equal(cycle.status, 200, `B's sync cycle did not complete: ${JSON.stringify(cycle.body)}`);
+    // would return at once and prove nothing (Q3), and a fixed wait guesses how long a cycle takes. A cycle that began
+    // after the write and ran to its end is the verdict.
+    await syncCycleStartedAfterNow(INSTANCES.b, tokenB, networkId);
     const r = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', leafMemId);
     assert.equal(r.status, 404, 'Leaf fact should NOT have propagated to B');
     console.log(`  Leaf fact correctly absent from B ✓`);
@@ -240,8 +239,7 @@ describe('Braintree topology (A -> B -> C)', () => {
 
     // A COMPLETED cycle on A — A only receives from its own parent (none) and pushes to B. Negative assertion:
     // the cycle's end is the positive control (see above), not a fixed wait.
-    const cycle = await postRetry429(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true`, {});
-    assert.equal(cycle.status, 200, `A's sync cycle did not complete: ${JSON.stringify(cycle.body)}`);
+    await syncCycleStartedAfterNow(INSTANCES.a, tokenA, networkId);
     const r = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', nodeMemId);
     assert.equal(r.status, 404, 'Node fact should NOT have propagated to A');
     console.log(`  Node fact correctly absent from A ✓`);

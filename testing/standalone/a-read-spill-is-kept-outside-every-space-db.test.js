@@ -362,11 +362,11 @@ describe('a read spill lives in the instance store, never in a space', { skip },
     it('past its byte share a token evicts its OWN oldest spill, which then answers 410 to it alone', async () => {
       const theirs = await putOk({ issuedTo: TOKEN_B, items: records(1, 400_000) });
       await elapse(5, 'timestamps differ: eviction takes the oldest spill, so each must be created at its own millisecond');
-      const first =await putOk({ items: records(1, 400_000) });
+      const first = await putOk({ items: records(1, 400_000) });
       await elapse(5, 'timestamps differ: eviction takes the oldest spill, so each must be created at its own millisecond');
-      const second =await putOk({ items: records(1, 400_000) });
+      const second = await putOk({ items: records(1, 400_000) });
       await elapse(5, 'timestamps differ: eviction takes the oldest spill, so each must be created at its own millisecond');
-      const third =await putOk({ items: records(1, 400_000) });   // 1.2 MB against a 1 MB share
+      const third = await putOk({ items: records(1, 400_000) });   // 1.2 MB against a 1 MB share
 
       assert.equal((await read(first.id)).status, 410, 'the owner learns its spill was evicted');
       assert.equal((await read(first.id, TOKEN_B)).status, 404, 'nobody else learns it existed');

@@ -82,7 +82,7 @@ describe('/ready and the search watcher', { skip }, () => {
     // state are the same fact.
     assert.equal(readiness.searchReadinessSnapshot().state, 'up', '/ready said search answers while the readiness state still says down');
     await waitFor(() => called === 1, 5_000, 50, undefined, { what: 'the waiters to be called by /ready\'s success' });
-    assert.equal(called, 1,'the waiters were not called by /ready\'s success');
+    assert.equal(called, 1, 'the waiters were not called by /ready\'s success');
   });
 
   it('concurrent /ready requests share one probe', async () => {

@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, syncUntil, whichSideLostIt, readRecord, getInstanceId } from './helpers.js';
+import { INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, syncUntil, whichSideLostIt, readRecord, getInstanceId, syncCycleStartedAfterNow } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -163,15 +163,13 @@ describe('Pub/Sub topology (A -> B subscriber)', () => {
     const subMemId = write.body._id ?? write.body.id;
 
     // Negative assertion: a waitFor on the absent record would return at once and prove nothing (Q3), and a fixed
-    // wait guesses how long a cycle takes. Each sync below is a COMPLETED cycle (`?wait=true` answers when the turn
-    // has run to its end), so the record's absence after both is their verdict.
+    // wait guesses how long a cycle takes. Each sync below is a cycle that began after the write and ran to its end,
+    // so the record's absence after both is their verdict.
     // B syncs — B has A as direction='pull', so B only pulls from A, never pushes
-    const cycleB = await postRetry429(INSTANCES.b, tokenB, `/api/networks/${networkId}/sync?wait=true`, {});
-    assert.equal(cycleB.status, 200, `B's sync cycle did not complete: ${JSON.stringify(cycleB.body)}`);
+    await syncCycleStartedAfterNow(INSTANCES.b, tokenB, networkId);
 
     // A syncs — A pushes to B, never pulls from B
-    const cycleA = await postRetry429(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true`, {});
-    assert.equal(cycleA.status, 200, `A's sync cycle did not complete: ${JSON.stringify(cycleA.body)}`);
+    await syncCycleStartedAfterNow(INSTANCES.a, tokenA, networkId);
 
     const r = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', subMemId);
     assert.equal(r.status, 404, 'Subscriber fact should NOT appear on publisher');
