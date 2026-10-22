@@ -53,6 +53,13 @@ const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
 
 const T = { timeout: 45_000 };
+/**
+ * The operation bound a row sets when it needs ONE batch ended (Q-578): a figure no real batch of these seeds reaches, the
+ * migrate tests' own. `SPACE_ACT_OP_MS` bounds every store operation of the act, not only the batch a hook holds, so a
+ * 40 ms bound also ended REAL batches on a loaded CI host and the row failed for a reason that was not its rule. The batch
+ * the row needs ended is held by a hook that never resolves; the bound's race ends it, and only it.
+ */
+const BATCH_BOUND_MS = 2000;
 const SPACES = ['wipe-a', 'wipe-b', 'other-a', 'other-b', 'del-a', 'del-b', 'del-c', 'two-nets', 'files-a', 'stuck', 'ren-c', 'del-d', 'big-a', 'gone-a', 'boot-a', 'am3-del', 'am3-wipe', 'late-a', 'closing-a', 'gauge-a', 'ren-d', 'del-e'];
 
 describe('the space-act runner registers, runs once, completes in one write, retries and stops without a failure', { skip }, () => {
@@ -347,10 +354,13 @@ describe('the space-act runner registers, runs once, completes in one write, ret
 
   it('R-W6b: a bounded operation that ends with no progress FAILS the attempt into owed — the run answers, it does not hang', T, async () => {
     await seed('wipe-b');
-    runner.setSpaceActKnobsForTest({ SPACE_ACT_OP_MS: 40, SPACE_ACT_BATCH: 10 });
-    runner.setSpaceActHooksForTest({ beforeBatch: (collection) => (isOf(collection, 'wipe-b') ? new Promise(() => {}) : undefined) });
+    runner.setSpaceActKnobsForTest({ SPACE_ACT_OP_MS: BATCH_BOUND_MS, SPACE_ACT_BATCH: 10 });
+    // The hook's batch is the one the bound ends: the first batch's real find has run by the time the hook is reached.
+    let held = 0;
+    runner.setSpaceActHooksForTest({ beforeBatch: (collection) => (isOf(collection, 'wipe-b') ? (held++, new Promise(() => {})) : undefined) });
     const { entry } = register({ kind: 'wipe', localId: 'wipe-b' });
     const r = await runner.runSpaceAct(entry.id);
+    assert.equal(held, 1, `the hook held ${held} batch(es): the bound ended something other than the held batch (a real find), or ended it twice`);
     assert.equal(r.ok, false, 'an operation the bound ended with nothing deleted reported success');
     const owed = entriesOf(loader)[0];
     assert.equal(owed?.state, 'owed'); assert.equal(owed?.attempts, 1);
@@ -359,7 +369,7 @@ describe('the space-act runner registers, runs once, completes in one write, ret
 
   it('R-X6a: a batch the bound ended after earlier batches made progress is retried inside the attempt — no failure is counted and the wipe completes', T, async () => {
     await seed('big-a', 35);
-    runner.setSpaceActKnobsForTest({ SPACE_ACT_BATCH: 10, SPACE_ACT_OP_MS: 40 });
+    runner.setSpaceActKnobsForTest({ SPACE_ACT_BATCH: 10, SPACE_ACT_OP_MS: BATCH_BOUND_MS });
     let call = 0; let hung = false;
     runner.setSpaceActHooksForTest({ beforeBatch: (collection) => {
       if (!isOf(collection, 'big-a')) return undefined;
@@ -384,6 +394,8 @@ describe('the space-act runner registers, runs once, completes in one write, ret
     const r = await runner.runSpaceAct(stuck.entry.id);
     assert.equal(r.ok, false, 'a tree removal that never returned was waited for ever or reported success');
     assert.equal(runner.spaceActsRunning(), 0, 'the slot is still held by the stuck tree removal');
+    // The 40 ms bound was for the held tree step alone: the second act's REAL removal runs at the production bound (Q-578).
+    runner.setSpaceActKnobsForTest(null);
     const other = register({ kind: 'wipe', localId: 'wipe-a' });
     await settledOk(runner.runSpaceAct(other.entry.id));
     assert.equal(await factCount('wipe-a'), 0);

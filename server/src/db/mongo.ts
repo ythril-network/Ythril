@@ -90,6 +90,12 @@ export async function connectMongo(): Promise<MongoClient> {
       else log.debug('MongoDB connected');
       // Once per connection, after it works: a string that cannot connect has a worse thing to say.
       warnIfSocketTimeoutBelowWriteBound(uri);
+      // A transaction the bound ends is sealed by a retryable write (db/bounded-transaction.ts); without retryable writes the
+      // driver sends it with no transaction number, so it cannot seal, and a late statement can keep its documents locked.
+      if (_client.options.retryWrites === false) {
+        log.warn('MongoDB connection string: retryWrites=false. A transaction the write bound ends cannot be sealed, so a statement of it '
+          + 'that reaches the server late can keep the documents it wrote locked against the next write. Leave retryWrites unset (true).');
+      }
       return _client;
     } catch (err) {
       // Close the failed client before making another, or each retry leaks its topology and its timers.

@@ -20,7 +20,7 @@
  *
  * A VIEW named like the space's facts collection, over a source document whose pipeline stage cannot convert a string: every read
  * of it is refused by the server (code 241) while the store answers every other call. A space that fails and a store that does
- * not. The stalled space is `withStalledReads`, ended by the housekeeping bound at under a second.
+ * not. The stalled space is `withStalledReads`, ended by the housekeeping bound (`BOUND_MS`) well before its stall is over.
  *
  * Mutations seen red (restored by hand): the boot loop put back to a bare `for`, the report put back to a bare `log.warn`, the
  * step undeclared, the walk's bound removed (the stall runs to its end).
@@ -46,8 +46,14 @@ const SUPPRESSING = { suppressEmbeddings: true };
 const SPACES = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india'];
 const HEALTHY = ['bravo', 'charlie'];
 const VECTOR = { embedding: [0.1, 0.2, 0.3], embeddingModel: 'test-model' };
-const STALL_MS = 1000;
-const BOUND_MS = 400;
+/*
+ * The bound is set no lower than a real read needs (Q-578): it bounds EVERY space's reads, the healthy ones' too, and at 400 ms a
+ * healthy space on a loaded CI host ran past it beside the hung one. So the bound is the floor a real operation is given (1000 ms,
+ * `a-test-bounds-only-the-operation-it-holds`), and only the hung space is held: its stall outlasts the bound twice over, so the
+ * bound, not the stall's end, is what ends it.
+ */
+const BOUND_MS = 1000;
+const STALL_MS = 2 * BOUND_MS;
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-g18-'));
 // The loader reads CONFIG_PATH when it is first imported: set before any import below.
@@ -344,7 +350,7 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     assert.ok(walk.quarantinedSpaces().includes('echo'), 'the hung space was not quarantined');
     await assertHealthySpacesSwept();
     // One count per failing SPACE. The rule is not "one failure in this file": the boot sweep walks every space, and on a slow store
-    // a healthy one can run past a 400 ms bound too (the CI run that showed it: 'hotel' timed out beside 'echo', each its own failure,
+    // a healthy one can run past the bound too (the CI run that showed it: 'hotel' timed out beside 'echo', each its own failure,
     // each its own line). So the counts are matched to the spaces that SAID a failure — a space counted twice has one line and two
     // counts, and a failure counted but never said has a count and no line.
     const said = spacesSaidToFail();
