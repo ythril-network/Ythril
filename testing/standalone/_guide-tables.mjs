@@ -18,6 +18,9 @@
  * over the coarse tool flags for a tool that has a row). **The REST-only block**: what `help()` reports under
  * `restOnly`, taken from `restOnlyCapabilityMap()` itself rather than from a copy of its rows.
  *
+ * A tool's hand-written note about its token requirement (`TOOL_NOTES` in `_capability-map.mjs`) follows the
+ * computed cell, so a fact an integrator relied on survives the table being generated.
+ *
  * It does NOT render the documentation-hit columns (which of our files mentions a tool). They describe our
  * own bookkeeping, and a published region containing them would change every time any page is edited, so the
  * gate that compares the region would be circular. Those stay in the script, over the rows this returns.
@@ -36,7 +39,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './_sources.mjs';
 import { mountedRoutes } from './_routes.mjs';
-import { CAPABILITIES, THE_TOOL_DOOR } from './_capability-map.mjs';
+import { CAPABILITIES, THE_TOOL_DOOR, TOOL_NOTES } from './_capability-map.mjs';
 
 const fromDist = rel => import(pathToFileURL(join(REPO_ROOT, 'server/dist', rel)).href);
 const { ALL_TOOLS } = await fromDist('mcp/tools/index.js');
@@ -119,8 +122,14 @@ export function capabilityMapModel() {
   const unmapped = [...toolNames].filter(t => !map.some(r => r[1] === t)).sort();
   if (unmapped.length) throw new Error(`tools missing from the map: ${unmapped.join(', ')}`);
 
-  const rows = map.map(([area, tool, route, note]) => {
+  const strayNotes = [...TOOL_NOTES.keys()].filter(t => !toolNames.has(t));
+  if (strayNotes.length) throw new Error(`capability notes for tools that do not exist: ${strayNotes.join(', ')}`);
+  const noted = new Set();
+  const rows = map.map(([area, tool, route]) => {
     const t = ALL_TOOLS.find(x => x.name === tool);
+    // A tool paired with two routes states its note once, on its first row.
+    const note = noted.has(tool) ? undefined : TOOL_NOTES.get(tool);
+    noted.add(tool);
     const restRung = route
       ? (RUNG.get(route) ?? (EXEMPT_ROUTES.has(route.split(' ').slice(1).join(' ')) ? 'exempt' : null))
       : null;
@@ -140,7 +149,7 @@ export function renderCapabilityMap(rows = capabilityMapModel().rows) {
   let area = null;
   for (const r of rows) {
     if (r.area !== area) { area = r.area; pub.push(`| **${area}** | | | |`); }
-    pub.push(`| | \`${r.tool}\` | ${routeCell(r)} | ${rungCell(r)} |`);
+    pub.push(`| | \`${r.tool}\` | ${routeCell(r)} | ${rungCell(r)}${r.note ? ` — ${r.note}` : ''} |`);
   }
   return pub.join('\n');
 }

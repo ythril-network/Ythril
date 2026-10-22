@@ -29,14 +29,6 @@ export class AuthApi {
     return this.http.get<{ configured: boolean }>('/api/setup/status');
   }
 
-  completeSetup(body: {
-    code: string;
-    label: string;
-    settingsPassword: string;
-  }): Observable<{ plaintext: string }> {
-    return this.http.post<{ plaintext: string }>('/api/setup', body);
-  }
-
   // ── Tokens ────────────────────────────────────────────────────────────────
 
   getMe(): Observable<TokenRecord> {

@@ -96,6 +96,8 @@ export const HELP_DOCS = [
       'integration-guide/12a-data-management-api.md',
       'integration-guide/13-audit-log-api.md', 'integration-guide/14-duplicates-and-webhooks.md',
       'integration-guide/15-about-and-embedding.md', 'integration-guide/16-mcp.md',
+      // The capability map came out of 16 so it could be generated from the code (Q-546): a seam of its own.
+      'integration-guide/16b-mcp-capability-map.md',
       'integration-guide/17-quotas-pagination-oidc.md',
     ],
   },

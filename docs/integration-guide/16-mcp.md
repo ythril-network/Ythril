@@ -188,7 +188,7 @@ are the shapes this door replaces, and they are documented on their own pages.
 
 ### Read-Only Tokens
 
-When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_pending_space`, `network_vote`, `network_invite`, `network_fork`, `network_join_remote`, `network_join_by_key`, `network_member_add`, `network_member_remove`, `network_introduction_accept`, `network_member_admit`, `network_member_signing_key`, `network_reparent_self`, `network_member_adopt`, `network_member_revert_parent`, `space_set_network_precedence`, `update_space`, `space_rename`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `query`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`, `network_peers`, `network_get`, `network_votes`, `network_vote_outcomes`, `network_sync_history`, `network_change_notes`, `space_schema_layers`, `schema_validate`) work normally. `list_tokens` and `file_stamp_report` are read-only but **admin-gated** — see the admin-only note below. `network_peers` and `network_get` show only the networks the token may see.
+When connecting with a `readOnly` token, mutating tools (`save_fact`, `update_fact`, `delete_fact`, `save_entity`, `update_entity`, `delete_entity`, `graph_merge`, `save_edge`, `update_edge`, `delete_edge`, `save_link`, `delete_link`, `save_chrono`, `update_chrono`, `delete_chrono`, `save_bulk`, `ingest`, `write_file`, `delete_file`, `create_dir`, `move_file`, `retry_embed_file`, `retry_embed_record`, `retry_embed_media`, `update_file_meta`, `network_sync`, `network_create`, `network_update`, `network_leave`, `network_add_space`, `network_pending_space`, `network_vote`, `network_invite`, `network_fork`, `network_join_remote`, `network_join_by_key`, `network_member_add`, `network_member_remove`, `network_introduction_accept`, `network_member_admit`, `network_member_signing_key`, `network_reparent_self`, `network_member_adopt`, `network_member_revert_parent`, `space_set_network_precedence`, `update_space`, `space_rename`, `schema_update`, `save_space`, `space_reindex`, `space_reembed`, `delete_space_data`) are **hidden** from `tools/list` and rejected with an error if called directly. Read-only tools (`help`, `recall`, `similar`, `filter`, `read_spill`, `space_stats`, `space_meta`, `list_spaces`, `read_file`, `list_dir`, `graph_traverse`, `list_embed_jobs`, `delete_entity_preview`, `ingest_status`, `network_peers`, `network_get`, `network_votes`, `network_vote_outcomes`, `network_sync_history`, `network_change_notes`, `space_schema_layers`, `schema_validate`) work normally. `list_tokens` and `file_stamp_report` are read-only but **admin-gated** — see the admin-only note below. `network_peers` and `network_get` show only the networks the token may see.
 
 **The personal-view tools are not `mutating` for this purpose:** `view_list`, `view_get`, `view_create`, `view_update`, `view_delete` and `view_copy` are owner-scoped, so a read-only token sees and may call them; `view_claim`, `view_orphans`, `view_purge_retired` and `view_migration` are admin tools. A read tool takes the caller's own view as `space`; a write, admin or schema tool never does. The rules are in [Personal views](06d-personal-views.md#over-mcp).
 
@@ -302,18 +302,52 @@ permission. You should not have to ask which.
 **Never built:** `help` returns a `structuredContent.restOnly` block listing every capability that exists over
 REST and not yet over MCP — each with the route, the method, and *why* it is not a tool yet:
 
+<!-- generated: rest-only -->
+
 ```json
 {
   "restOnly": {
-    "note": "These capabilities exist over REST and are NOT yet on MCP. Each row is a confirmed absence, not a permission you lack …",
-    "capabilities": []
+    "note": "These capabilities exist over REST and are NOT yet on MCP. Each row is a confirmed absence, not a permission you lack — a tool you cannot see because of your token is hidden from tools/list instead.",
+    "capabilities": [
+      {
+        "capability": "a file's ORIGINAL BYTES",
+        "mcpTool": null,
+        "restEndpoint": "/api/files/:spaceId",
+        "method": "GET",
+        "why": "`read_file` returns EXTRACTED TEXT, which is the right answer for a document and the wrong one for a PNG, a zip or a signed PDF. There is no MCP route to the bytes at all, and the two are easy to mistake for each other because the text answer succeeds."
+      },
+      {
+        "capability": "the MEDIA embedding queue",
+        "mcpTool": null,
+        "restEndpoint": "/api/brain/spaces/:spaceId/embedding-queue/media",
+        "method": "GET",
+        "why": "`list_embed_jobs` lists RECORD jobs. Media — images, audio, video — is a separate queue with its own failures, and it is priced `files: read` where the record queue is `knowledge: read`, so the two are not one capability wearing two paths. `retry_embed_media` can RETRY what an MCP caller cannot list."
+      },
+      {
+        "capability": "the rights catalogue",
+        "mcpTool": null,
+        "restEndpoint": "/api/tokens/rights-catalog",
+        "method": "GET",
+        "why": "`help` publishes WHICH spaces you reach and where you administer, and then points at this REST URL for the definition of the rungs — so our own help text tells an MCP caller to leave MCP."
+      },
+      {
+        "capability": "write ONE type schema",
+        "mcpTool": null,
+        "restEndpoint": "/api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName",
+        "method": "PUT",
+        "why": "MCP can only replace the WHOLE schema map, through `schema_update`. That needs `schema: admin` where this route needs `schema: write`, and it is a read-modify-write, so two agents editing different types can lose one of the edits. The narrow write has no tool."
+      }
+    ]
   }
 }
 ```
 
-The list is empty today: every REST capability has its tool. A row, when there is one, carries `capability`,
-`mcpTool`, `restEndpoint`, `method` and `why`. `mcpTool` is `null` on every row by definition. A row disappearing means the tool now exists — a gate fails if a
-row survives its own tool being built, so the list cannot keep advertising a gap that has closed.
+<!-- /generated: rest-only -->
+
+The block above is what `help()` reports, generated from the same list; it is not typed here. Each row carries
+`capability`, `mcpTool`, `restEndpoint`, `method` and `why`. `mcpTool` is `null` on every row by definition. A row
+disappearing means the tool now exists — a gate fails if a row survives its own tool being built, so the list
+cannot keep advertising a gap that has closed.
 
 ### Available Tools
 
@@ -357,7 +391,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `update_fact` | Update an existing fact's fact, tags, links or `edges` (a refused one is a `schema_violation` and changes nothing), or delete specific fields via `deleteFields`; `suppressEmbeddings` retires it from semantic search |
 | `delete_fact` | Delete a fact by ID |
 | `recall` | Semantic search across all knowledge types (facts, entities, edges, chrono entries, files). Searches the specified `space`; omit `space` to search across all accessible spaces |
-| `query` | Structured MongoDB filter query (read-only) — supports `facts`, `entities`, `edges`, `chrono`, and `files` collections |
+| `filter` | Structured MongoDB filter query (read-only) — supports `facts`, `entities`, `edges`, `chrono`, and `files` collections |
 | `similar` | Find entries with high vector similarity to an existing entry by ID — no re-embedding step. Provide `space` to scope to one space, or omit it to search across all accessible spaces (like `recall`). Supports `traverse` (graph expansion) and `projection` (field selection, applied recursively through `_graph`). **Returns JSON at every depth since 3.1.0** — it answered plain text at `traverse: 0` before, so a client written against that must be updated; the per-result shape is `recall`'s, plus a `source` naming the entry you asked about. The legacy `crossSpace` flag is deprecated — omit `space` instead |
 | `read_spill` | Read the part of a `recall` or `similar` answer that did not fit — `remainder.spillId`, the matches past the budget, kept only with `remainderDump: true` (an older answer's `graphComplete.spillId` stays readable until it expires). `{id, skip?, maxChars?, maxBytes?, maxTokens?}`, no `space`, paged exactly like a search: whole items, `truncated`, `nextSkip`. **Only the token that ran the search can read it**, while it still holds knowledge read on every space whose records are inside; anyone else, an unknown id and an expired one get the same "not found". Lives up to one day and may be evicted earlier by the token's own newer spills. Nothing about a spill is written into any space. The REST half is `GET /api/brain/spills/:id` — see [Reading a spill](04a-recall-api.md#reading-a-spill-get-apibrainspillsid-and-mcp-read_spill) |
 | `space_stats` | Return counts of facts, entities, edges, chrono entries, and files |
@@ -372,7 +406,7 @@ row survives its own tool being built, so the list cannot keep advertising a gap
 | `delete_edge` | Delete an edge by ID |
 | `save_link` | Record that one record CONCERNS another — a fact about an entity, a file about a chrono entry. Six classes, no label and no weight: an edge says how two things relate, a link says only that one is about the other. The id is derived from the connection, so re-running it is a no-op |
 | `delete_link` | Remove one link by ID. Clears the array entry too, so nothing is left claiming the connection |
-| `traverse` | BFS graph traversal — follow edges from a starting entity up to `maxDepth` hops. Chrono entries referencing a reached node come back too, marked `kind: "chrono"` (`includeChrono: false` for entity-only); `includeMemories: true` reaches facts the same way (opt-in — they are numerous and count against `limit`); `includeFiles: true` reaches files, returning **file meta only** — path, description, tags, never passage text, and one node per file rather than per chunk; `includeEdges: false` drops the edge list from the answer without changing the walk |
+| `graph_traverse` | BFS graph traversal — follow edges from a starting entity up to `maxDepth` hops. Chrono entries referencing a reached node come back too, marked `kind: "chrono"` (`includeChrono: false` for entity-only); `includeMemories: true` reaches facts the same way (opt-in — they are numerous and count against `limit`); `includeFiles: true` reaches files, returning **file meta only** — path, description, tags, never passage text, and one node per file rather than per chunk; `includeEdges: false` drops the edge list from the answer without changing the walk |
 | `save_chrono` | Create a chrono entry (the five built-in types, or the space's own declared chrono types, which replace them); takes labelled `edges` like `save_entity`, and a refused one stores nothing; `waitForEmbedding` on create only, as on REST |
 | `update_chrono` | Update an existing chrono entry, including `edges` (upserted) and `suppressEmbeddings`. Requires at least one field beyond `id` |
 | `delete_chrono` | Delete a chrono entry by ID |
@@ -639,119 +673,10 @@ When `space` is omitted, `recall` searches across all accessible spaces — the 
 
 ### Capability map — both doors, and what a token needs
 
-Every capability, the MCP tool and the REST route that perform it, and the per-space rung a token needs. This is
-generated from the code and checked against the running routers, so it is the same list the server enforces
-rather than a summary someone maintained by hand.
+Every capability, the MCP tool and the REST route that perform it, and what a token needs to call it, is on its own page:
+[MCP capability map](16b-mcp-capability-map.md). It is generated from the code, so it is the list the server enforces.
 
-**How to read the token column.** REST enforces a per-space **rung** (`read` / `write` / `admin`) for an area —
-`knowledge`, `files`, `schema`, `dataQuality`. MCP gates on the token's flags: a read-only token cannot see
-mutating tools, and a non-admin token cannot see admin tools. Where the two differ the cell names both doors;
-no row does today — `schema_update` was the last one, and 4.4 brought both doors to `schema` `admin`.
-`instance-level` means the
-route sits outside the per-space matrix by design — `/api/spaces`, `/api/tokens`, `/api/networks`.
-
-**There is no "MCP only" any more.** Every tool in this table is `POST /api/<tool-name>` as well — see
-[The same tools over plain HTTP](#the-same-tools-over-plain-http). The REST column names the OLDER route
-where one exists, because that is the one whose shape differs; where it is blank, the tool door is the
-only shape and the two are identical by construction.
-
-| capability | MCP tool | REST route | token needs |
-|---|---|---|---|
-| **Brain — facts** | | | |
-| | `save_fact` | `POST /api/brain/spaces/:spaceId/facts` | write `knowledge` |
-| | `update_fact` | `PATCH /api/brain/spaces/:spaceId/facts/:id` | write `knowledge` |
-| | `delete_fact` | `DELETE /api/brain/spaces/:spaceId/facts/:id` | write `knowledge` |
-| **Brain — entities** | | | |
-| | `save_entity` | `POST /api/brain/spaces/:spaceId/entities` | write `knowledge` |
-| | `update_entity` | `PATCH /api/brain/spaces/:spaceId/entities/:id` | write `knowledge` |
-| | `delete_entity` | `DELETE /api/brain/spaces/:spaceId/entities/:id` | write `knowledge` |
-| | `graph_merge` | `POST /api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId` | write `knowledge` |
-| | `delete_entity_preview` | `GET /api/brain/spaces/:spaceId/entities/:id/cascade-preview` | read `knowledge` |
-| **Brain — edges** | | | |
-| | `save_edge` | `POST /api/brain/spaces/:spaceId/edges` | write `knowledge` |
-| | `update_edge` | `PATCH /api/brain/spaces/:spaceId/edges/:id` | write `knowledge` |
-| | `delete_edge` | `DELETE /api/brain/spaces/:spaceId/edges/:id` | write `knowledge` |
-| **Brain — links** | | | |
-| | `save_link` | `POST /api/brain/spaces/:spaceId/links` | write `knowledge` |
-| | `delete_link` | `DELETE /api/brain/spaces/:spaceId/links/:id` | write `knowledge` |
-| **Brain — chrono** | | | |
-| | `save_chrono` | `POST /api/brain/spaces/:spaceId/chrono` | write `knowledge` |
-| | `update_chrono` | `PATCH /api/brain/spaces/:spaceId/chrono/:id` | write `knowledge` |
-| | `delete_chrono` | `DELETE /api/brain/spaces/:spaceId/chrono/:id` | write `knowledge` |
-| **Brain — search** | | | |
-| | `recall` | `POST /api/brain/recall` | read `knowledge` |
-| | `query` | `POST /api/filter` | read `knowledge` |
-| | `similar` | `POST /api/brain/similar` | read `knowledge` |
-| | `read_spill` | `GET /api/brain/spills/:id` | read `knowledge` on every space in the spill, by the token that ran the search |
-| | `graph_traverse` | `POST /api/brain/spaces/:spaceId/traverse` | read `knowledge` |
-| **Brain — bulk** | | | |
-| | `save_bulk` | `POST /api/brain/spaces/:spaceId/bulk` | write `knowledge` |
-| **Brain — ingest** | | | |
-| | `ingest` | `POST /api/brain/spaces/:spaceId/ingest` | write `knowledge` |
-| | `ingest_status` | `GET /api/brain/spaces/:spaceId/ingest/:runId` | read `knowledge` |
-| **Brain — ops** | | | |
-| | `space_stats` | `GET /api/brain/spaces/:spaceId/stats` | read `knowledge` |
-| | `space_reindex` | `POST /api/brain/spaces/:spaceId/reindex` | admin `knowledge` |
-| | `list_embed_jobs` | `GET /api/brain/spaces/:spaceId/embedding-queue/records` | read `knowledge` |
-| | `retry_embed_record` | `POST /api/brain/spaces/:spaceId/embedding-queue/records/retry` | write `knowledge` |
-| | `retry_embed_media` | `POST /api/brain/spaces/:spaceId/embedding-queue/media/retry-failed` | write `files` |
-| **Files** | | | |
-| | `read_file` | `GET /api/files/:spaceId` | read `files` |
-| | `write_file` | `POST /api/files/:spaceId` | write `files` |
-| | `delete_file` | `DELETE /api/files/:spaceId` | write `files` (a directory too, with `confirm: true`, as on REST) |
-| | `move_file` | `PATCH /api/files/:spaceId` | write `files` |
-| | `list_dir` | `GET /api/files/:spaceId` | read `files` |
-| | `create_dir` | `POST /api/files/:spaceId/mkdir` | write `files` |
-| | `retry_embed_file` | `POST /api/files/:spaceId/retry_embedding` | write `files` |
-| | `update_file_meta` | `PATCH /api/brain/spaces/:spaceId/files` | write `files` |
-| **Spaces** | | | |
-| | `list_spaces` | `GET /api/spaces` | read (MCP) · instance-level |
-| | `save_space` | `POST /api/spaces` | `createSpaces` (or instance admin) · instance-level |
-| | `update_space` | `PATCH /api/spaces/:id` | space-admin of the named space, and write `schema` |
-| | `space_rename` | `PATCH /api/spaces/:id/rename` | space-admin of the named space |
-| | `space_meta` | `GET /api/spaces/:id/meta` | read `schema` |
-| | `schema_update` | `PUT /api/spaces/:id/schema` | admin `schema` |
-| | `delete_space_data` | `POST /api/delete_space_data` | space-admin |
-| | `file_stamp_report` | `POST /api/spaces/:id/file-stamp-report` | admin (MCP) · instance-level |
-| **Tokens** | | | |
-| | `list_tokens` | `GET /api/tokens` | admin (MCP) · instance-level |
-| **Personal views** | | | |
-| | `view_list`, `view_get`, `view_create`, `view_update`, `view_delete` | `GET`/`POST /api/views`, `GET`/`PATCH`/`DELETE /api/views/:id` | owner-scoped (any token with a rights matrix) |
-| | `view_copy` | `POST /api/views/:id/copy` | owner-scoped, and may manage the receiving token (MFA step-up on REST) |
-| | `view_orphans`, `view_claim`, `view_purge_retired`, `view_migration` | `/api/admin/views/orphans`, `/claim`, `/retired/:id/purge`, `/migration` | instance admin |
-| **Networks / sync** | | | |
-| | `network_peers` | `GET /api/networks` | read `networks` on every space of each network |
-| | `network_get` | `GET /api/networks/:id` | read `networks` on every space it carries |
-| | `network_create` | `POST /api/networks` | write `networks` on every space, or administering each |
-| | `network_update` | `PATCH /api/networks/:id` | admin `networks` on every space |
-| | `network_leave` | `DELETE /api/networks/:id` | write `networks` (own membership) · admin (anyone's) |
-| | `network_add_space` | `POST /api/networks/:id/spaces` | admin `networks` on every space it carries · write on the added one |
-| | `network_pending_space` | `POST /api/networks/:id/pending-spaces` | accept: `networks: write` on an existing space, `createSpaces` for a new one · dismiss: `networks: admin` on every space the network carries |
-| | `network_votes` | `GET /api/networks/:id/votes` | instance admin |
-| | `network_vote` | `POST /api/networks/:id/votes/:roundId` | instance admin |
-| | `network_vote_outcomes` | `GET /api/networks/:id/vote-outcomes` | instance admin |
-| | `network_sync_history` | `GET /api/networks/:id/sync-history` | instance admin |
-| | `network_change_notes` | `GET /api/networks/:id/change-notes` | instance admin |
-| | `network_invite` | `POST /api/networks/:id/invite` | instance admin · administers every space |
-| | `network_fork` | `POST /api/networks/:id/fork` | instance admin |
-| | `network_join_remote` | `POST /api/networks/join-remote` | `networks: write` on every space it maps to · `createSpaces` for a space it creates |
-| | `network_join_by_key` | `POST /api/networks/join-by-key` | `networks: write` on every space it maps to · `createSpaces` for a space it creates |
-| | `network_member_add` | `POST /api/networks/:id/members` | instance admin |
-| | `network_member_remove` | `DELETE /api/networks/:id/members/:instanceId` | instance admin |
-| | `network_introduction_accept` | `POST /api/networks/:id/introductions/:instanceId/accept` | instance admin |
-| | `network_member_admit` | `POST /api/networks/:id/join` | instance admin |
-| | `network_member_signing_key` | `PUT /api/networks/:id/members/:instanceId/signing-key` | instance admin |
-| | `network_reparent_self` | `POST /api/networks/:id/reparent-self` | instance admin |
-| | `network_member_adopt` | `POST /api/networks/:id/members/:instanceId/adopt` | instance admin |
-| | `network_member_revert_parent` | `POST /api/networks/:id/members/:instanceId/revert-parent` | instance admin |
-| | `space_schema_layers` | `GET /api/spaces/:id/schema-layers` | read `schema` |
-| | `schema_validate` | `POST /api/spaces/:id/validate-schema` | read `schema` |
-| | `space_set_network_precedence` | `PUT /api/spaces/:id/network-precedence` | admin `schema` |
-| | `network_sync` | `POST /api/networks/:id/sync` | admin (MCP) · instance-level |
-| **Meta** | | | |
-| | `help` | **MCP only** | read (MCP) |
-
-## Example: update_memory
+### Example: update_fact
 
 ```json
 {
@@ -788,7 +713,7 @@ To delete specific fields from a fact, entity, or edge, include a `deleteFields`
 
 System fields (`id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) cannot be listed in `deleteFields`. Deletions are permanent — recovery requires audit logs or a backup.
 
-### Example: delete_memory
+### Example: delete_fact
 
 ```json
 {
@@ -805,7 +730,7 @@ System fields (`id`, `name`, `type`, `spaceId`, `createdAt`, `updatedAt`) cannot
 
 Returns confirmation with the deleted ID. Creates a tombstone for sync propagation: it reaches every peer holding a copy this instance wrote and, on a pub/sub or tree network, everything downstream of this instance; a copy another instance wrote stays on a mesh peer. The fact's forks (facts carrying `forkOf` naming it, made by sync when a peer sent a different text at the same version) are their own records and are not deleted with it; to erase a text everywhere it was kept, find them with `filter` on `facts`, `{"forkOf": "<id>"}`, and delete each. Requires a non-read-only token.
 
-### Example: get_stats
+### Example: space_stats
 
 ```json
 {

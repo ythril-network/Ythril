@@ -164,6 +164,50 @@ export const CAPABILITIES = [
 ];
 
 /**
+ * What an integrator needs to know about a tool's token requirement that the two rung columns cannot say —
+ * keyed by tool name, rendered after the computed cell in the published capability map.
+ *
+ * ## Why they are here
+ *
+ * They were typed into a hand-written table in `16-mcp.md`, which is also where the table's rows rotted. The
+ * rows are generated now, so a note typed on the page would be overwritten by the next regeneration, and a note
+ * dropped to keep the table generated would be a fact an integrator relied on, gone. Held here, it is rendered
+ * by `_guide-tables.mjs` and travels with the row. Each says what a coarse rung cannot: the SPACES a rung must
+ * hold on, an extra grant beside it, or a behaviour of the token that is not a rung at all.
+ *
+ * A note is attached to the FIRST row of its tool, so a tool paired with two routes states it once. A key that
+ * names no tool is refused by the renderer: a note for a tool that was renamed would otherwise sit here unread.
+ */
+export const TOOL_NOTES = new Map(Object.entries({
+  read_spill: 'read `knowledge` on every space in the spill, by the token that ran the search',
+  delete_file: 'a directory too, with `confirm: true`, as on REST',
+  save_space: '`createSpaces` (or instance admin)',
+  update_space: 'space-admin of the named space, and write `schema`',
+  space_rename: 'space-admin of the named space',
+  delete_space_data: 'space-admin of the named space',
+  network_peers: 'on every space of each network',
+  network_get: 'on every space it carries',
+  network_create: 'write `networks` on every space, or administering each',
+  network_update: 'admin `networks` on every space it carries',
+  network_leave: 'your own membership; admin for anyone\'s',
+  network_add_space: 'admin `networks` on every space it carries · write on the added one',
+  network_pending_space: 'accept: `networks: write` on an existing space, `createSpaces` for a new one · dismiss: `networks: admin` on every space the network carries',
+  network_invite: 'instance admin · administers every space',
+  network_join_remote: '`networks: write` on every space it maps to · `createSpaces` for a space it creates',
+  network_join_by_key: '`networks: write` on every space it maps to · `createSpaces` for a space it creates',
+  view_list: 'owner-scoped: any token with a rights matrix',
+  view_get: 'owner-scoped: any token with a rights matrix',
+  view_create: 'owner-scoped: any token with a rights matrix',
+  view_update: 'owner-scoped: any token with a rights matrix',
+  view_delete: 'owner-scoped: any token with a rights matrix',
+  view_copy: 'owner-scoped, and may manage the receiving token (MFA step-up on REST)',
+  view_orphans: 'REST: `/api/admin/views/orphans`',
+  view_claim: 'REST: `/api/admin/views/claim`',
+  view_purge_retired: 'REST: `/api/admin/views/retired/:id/purge`',
+  view_migration: 'REST: `/api/admin/views/migration`',
+}));
+
+/**
  * Routes that are not a capability an MCP caller would reach for, each with the reason.
  *
  * Keyed by PREFIX where a family shares one reason — a reason repeated twenty-eight times is a reason
