@@ -33,6 +33,7 @@
  * reports as a bug and everybody stops trusting.
  */
 import { readStoredById } from '../db/read-by-id.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
 
 /** A record's single-valued claims, keyed by field name. */
@@ -98,7 +99,10 @@ export async function fetchStructuredClaims(
   for (const f of extraClaimFields(type)) fields[f] = 1;
 
   try {
-    const docs = await readStoredById<{ properties?: ClaimMap } & Record<string, unknown>>(`${spaceId}_${suffix}`, ids, fields);
+    // A claim read here becomes a contradiction a writer is shown or a candidate that is persisted: a deleted file's audit
+    // row holds no claim (`notFlaggedIfFile`, nothing for any other type).
+    const docs = await readStoredById<{ properties?: ClaimMap } & Record<string, unknown>>(`${spaceId}_${suffix}`, ids, fields,
+      { filter: notFlaggedIfFile(type) });
     for (const [id, d] of docs) out.set(id, structuredClaims(type, d));
   } catch { /* best-effort — an unjudged pair is recoverable, a failed write is not */ }
   return out;

@@ -40,7 +40,7 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import { col, asFilter } from '../db/mongo.js';
+import { idKeysetPage, type IdPage } from '../db/id-keyset-page.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { authorRef } from '../config/author.js';
@@ -494,20 +494,21 @@ function rowOf(doc: CandidateDoc, verdict: StampVerdict, evidence: readonly Peer
  * server): one retry straight after another for the scope's whole figure, with no I/O between them for a timer to fire in. A
  * report is a request, and a request's read has its deadline as an OPTION of the read, like every other read a door makes.
  */
-async function readCandidates(spaceId: string, self: string, peerIds: readonly string[], after: string | undefined, take: number, clock: RunClock): Promise<CandidateDoc[]> {
-  if (peerIds.length === 0) return [];
+async function readCandidates(spaceId: string, self: string, peerIds: readonly string[], after: string | undefined, take: number, clock: RunClock): Promise<IdPage<CandidateDoc>> {
+  if (peerIds.length === 0) return { rows: [], end: true };
   const filter = {
     ...LIVE_FILE_ROW,
     'author.instanceId': self,
     $or: peerIds.map(p => ({ [syncBasePath(p)]: { $exists: true } })),
-    ...(after !== undefined ? { _id: { $gt: after } } : {}),
   };
-  const projection = {
+  const projection: Record<string, 1> = {
     _id: 1, seq: 1, createdAt: 1, updatedAt: 1, sha256: 1, description: 1, descriptionSource: 1, tags: 1, properties: 1,
-    ...Object.fromEntries(peerIds.map(p => [syncBasePath(p), 1])),
+    ...Object.fromEntries(peerIds.map(p => [syncBasePath(p), 1] as const)),
   };
-  return col<CandidateDoc>(spaceCollection(spaceId, 'files'))
-    .find(asFilter<CandidateDoc>(filter), { projection, maxTimeMS: readBudgetMs(clock) }).sort({ _id: 1 }).limit(take).toArray() as Promise<CandidateDoc[]>;
+  // The pager's `last` is the extra row read only to say whether more exist: the caller's cursor is the last row it LISTS.
+  return idKeysetPage<CandidateDoc>({
+    collection: spaceCollection(spaceId, 'files'), filter, projection, size: take, maxTimeMS: Math.ceil(readBudgetMs(clock)),
+  }, after);
 }
 
 /** The ids among `ids` that are still live files of this instance: a row deleted or replaced since it was read is not reported. */
@@ -545,8 +546,9 @@ export async function fileStampReport(
 
   const peerIds = peerIdsCarryingSpace(spaceId).filter(id => id !== self);
   const read = await readCandidates(spaceId, self, peerIds, after, limit + 1, clock);
-  const truncated = read.length > limit;
-  const page = truncated ? read.slice(0, limit) : read;
+  // `take` is `limit + 1`, so a page that is not the end holds the one extra row that says more exist.
+  const truncated = !read.end;
+  const page = truncated ? read.rows.slice(0, limit) : read.rows;
 
   // What each peer is asked for: the keys of the candidates that record a base for it.
   const keys = new Map<string, string | null>(page.map(d => [String(d._id), keyOf(spaceId, String(d._id))]));

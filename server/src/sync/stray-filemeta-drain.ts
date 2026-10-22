@@ -40,7 +40,8 @@ import { getDb, col, asFilter } from '../db/mongo.js';
 import { heldFileTombstones, shadowDecision } from '../files/tombstones.js';
 import { writeArrivals, warnArrivalsNotStored } from './arrivals.js';
 import { admitArrivals } from './arrival-shape.js';
-import { fileMetaForWire } from '../api/sync/_shared.js';
+import { fileMetaForWire, FILE_META_WIRE_KEYS } from '../api/sync/_shared.js';
+import { idKeysetPage } from '../db/id-keyset-page.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { STRAY_FILEMETA_DRAIN_OPERATION } from '../audit/middleware.js';
 import { log } from '../util/log.js';
@@ -60,6 +61,15 @@ const WAIT_DAYS = 30;
  */
 
 type StrayDoc = { _id: string; keptSince?: string; seq?: number };
+
+/**
+ * What a page of the stray collection reads: the wire keys `fileMetaForWire` keeps for `admitArrivals`, and `keptSince`, the wait
+ * clock the drain reads itself. Derived from the schema's key list, so a key the schema gains is read without an edit here, and
+ * the old pull's local machinery (a vector among it) is never read.
+ */
+const STRAY_PROJECTION: Readonly<Record<string, 1>> = Object.fromEntries(
+  [...FILE_META_WIRE_KEYS, 'keptSince'].map(k => [k, 1] as const),
+);
 
 /** Who the drain's records came from, for the log lines. */
 const FROM = 'a 4.0-5.6.1 pull (stray filemeta collection)';
@@ -101,17 +111,20 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, c
   const cycleStart = new Date(startedAt).toISOString();
   let pages = 0;
   for (const waiting of [false, true]) {
-    let after: string | undefined;
-    while (pages < maxPages) {
+    const spec = {
+      collection: collName,
+      filter: { keptSince: waiting ? { $lt: cycleStart } : { $exists: false } },
+      projection: STRAY_PROJECTION,
+      size: pageSize,
+    };
+    // A page shorter than asked for ends the pass with no trailing read; an empty one spends no `maxPages`.
+    for (let after: string | undefined, end = false; !end && pages < maxPages;) {
       ctx.step = SUB.read;
-      const filter = {
-        keptSince: waiting ? { $lt: cycleStart } : { $exists: false },
-        ...(after === undefined ? {} : { _id: { $gt: after } }),
-      };
-      const page = await stray.find(asFilter<StrayDoc>(filter as never)).sort({ _id: 1 }).limit(pageSize).toArray();
+      const read = await idKeysetPage<StrayDoc>(spec, after);
+      ({ last: after, end } = read);
+      const page = read.rows;
       if (page.length === 0) break;
       pages++;
-      after = page[page.length - 1]!._id;
       ctx.step = SUB.write;
       // The one validation step every arrival passes (`Q-225`), over the record's WIRE keys: an old pull stored the
       // peer's row whole, and what it held besides the wire keys was never the publisher's to give. A record its

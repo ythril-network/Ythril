@@ -10,7 +10,12 @@
  *  - a filter that conditions `_id` itself (a prefix) keeps that condition once the cursor is added: no row outside the prefix
  *    is returned, and none inside it is skipped or read twice;
  *  - rows the callback of `eachIdPage` deletes do not move the cursor: every row is seen exactly once;
- *  - a size that is not a positive integer is refused, never read as "no limit".
+ *  - a size that is not a positive integer is refused, never read as "no limit";
+ *  - a caller's `maxTimeMS` (Q-481, design rev 4 item 1) is a server deadline PER PAGE for a read outside any bound scope: it reaches
+ *    the `find` command as given, a value that is not a positive integer is refused, and inside a scope (housekeeping or hold) it is
+ *    refused, because there a caller's `maxTimeMS` keeps the lower figure and takes no driver `timeoutMS`
+ *    (`a-housekeeping-op-carries-its-bound`), so a read against a store that stopped answering would be bounded by the server alone.
+ *    What reaches the server is read off the driver's own command events (`monitorCommands`), not off the pager's arguments.
  *
  * Run: node --test testing/standalone/the-id-keyset-pager-pages-by-id-and-keeps-the-callers-id-condition-db.test.js
  * (requires a prior `npm run build` in server/, and the test Mongo)
@@ -23,10 +28,16 @@ const skip = await mongoSkipReason();
 const COLLECTION = 'idpager_rows';
 
 describe('the _id pager', { skip }, () => {
-  let mongo, pager;
+  let mongo, pager, wb;
+  /** Every `find` the server's client sent on the pager's collection, as the driver handed it over. */
+  const finds = [];
   before(async () => {
-    mongo = await openTestMongo('idpager');
+    mongo = await openTestMongo('idpager', { query: '&monitorCommands=true' });
+    mongo.getMongo().on('commandStarted', (ev) => {
+      if (ev.commandName === 'find' && ev.command?.find === COLLECTION) finds.push(ev.command);
+    });
     pager = await import('../../server/dist/db/id-keyset-page.js');
+    wb = await import('../../server/dist/db/write-bound.js');
   });
   after(async () => { await closeTestMongo(); });
   beforeEach(async () => {
@@ -86,5 +97,44 @@ describe('the _id pager', { skip }, () => {
     for (const size of [0, -1, 1.5, NaN]) {
       await assert.rejects(() => pager.idKeysetPage(spec({ size }), undefined), /size must be a positive integer/);
     }
+  });
+
+  describe('a caller\'s maxTimeMS (Q-481 item 1)', () => {
+    it('outside any scope it reaches every page\'s find as given, and a spec without one sends none', async () => {
+      finds.length = 0;
+      await pager.eachIdPage(spec({ maxTimeMS: 750 }), async () => {});
+      assert.ok(finds.length >= 2, `the walk sent ${finds.length} find(s) on ${COLLECTION}: the command monitor sees nothing, so this case proves nothing`);
+      assert.deepEqual(finds.map(c => c.maxTimeMS), finds.map(() => 750),
+        'a maxTimeMS the caller set did not reach the server on every page: the read is bounded by nothing it asked for');
+      finds.length = 0;
+      await pager.idKeysetPage(spec(), undefined);
+      assert.equal(finds.length, 1);
+      assert.equal('maxTimeMS' in finds[0], false, 'a spec without maxTimeMS sent one anyway');
+    });
+
+    it('refuses a maxTimeMS that is not a positive integer, before reading', async () => {
+      for (const maxTimeMS of [0, -1, 1.5, NaN, Infinity, '500']) {
+        finds.length = 0;
+        await assert.rejects(() => pager.idKeysetPage(spec({ maxTimeMS }), undefined), /maxTimeMS/,
+          `maxTimeMS ${String(maxTimeMS)} was not refused`);
+        assert.equal(finds.length, 0, `maxTimeMS ${String(maxTimeMS)} was refused only after a read was sent`);
+      }
+    });
+
+    it('refuses a maxTimeMS inside a bound scope, housekeeping or hold, before reading', async () => {
+      const scopes = {
+        housekeeping: (fn) => wb.withinHousekeepingBound(fn, { opMs: 5000 }),
+        hold: (fn) => wb.withinWriteBound(fn),
+      };
+      for (const [name, within] of Object.entries(scopes)) {
+        finds.length = 0;
+        await assert.rejects(() => within(() => pager.idKeysetPage(spec({ maxTimeMS: 750 }), undefined)), /maxTimeMS/,
+          `inside a ${name} scope a caller's maxTimeMS was taken: it keeps the lower figure and gets no driver timeoutMS, so a read `
+          + 'against a store that stopped answering is bounded by the server alone');
+        assert.equal(finds.length, 0, `inside a ${name} scope the maxTimeMS was refused only after a read was sent`);
+        // The same page without one is the scope's to bound, and is read.
+        await within(() => pager.idKeysetPage(spec(), undefined));
+      }
+    });
   });
 });

@@ -42,7 +42,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { reconcileLinkRows } from './write-plan/commit.js';
 import { linkLabel, linkIdFor } from './link-id.js';
-import { LINK_CLASSES, linkClassesFrom, linksStartingFrom, fileLinksThisInstanceWrote } from './link-adjacency.js';
+import { LINK_CLASSES, linkClassesFrom, linksStartingFrom, fileLinksThisInstanceWrote, legacyField } from './link-adjacency.js';
 import { removeWithTombstones } from './tombstones.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
@@ -422,6 +422,18 @@ export async function removeLink(spaceId: string, id: string, actor?: WebhookAct
 }
 
 /**
+ * The link classes a whole document's legacy arrays are read for, by {@link reconcileLinksForDocument}: each is stored under
+ * `legacyField(kind)`. One list for the reader and for a walk that reads only what the reader needs
+ * ({@link documentLinkProjection}), so a page projected for it cannot leave out an array the reconcile reads.
+ */
+export const DOCUMENT_LINK_KINDS = ['entity', 'fact', 'chrono'] as const satisfies readonly RefKind[];
+
+/** What {@link reconcileLinksForDocument} reads of a document: `_id`, `author` and the legacy array of each document link kind. */
+export function documentLinkProjection(): Record<string, 1> {
+  return Object.fromEntries([['_id', 1], ['author', 1], ...DOCUMENT_LINK_KINDS.map(k => [legacyField(k), 1] as const)]);
+}
+
+/**
  * Reconcile one WHOLE DOCUMENT's links — for the paths that replace a record rather than update fields.
  *
  * Three callers, and they are the three that bypass the writer functions entirely: a record pushed by a
@@ -445,12 +457,11 @@ export async function reconcileLinksForDocument(
   /** Passed straight through — see `reconcileLinks`. The CONVERSION is the additive caller. */
   opts: { additive?: boolean } = {},
 ): Promise<{ added: number; removed: number }> {
-  const ids = (k: string) => (Array.isArray(doc[k]) ? doc[k] as string[] : undefined);
-  const desired: DesiredLinks = {
-    ...(ids('entityIds') !== undefined ? { entity: ids('entityIds')! } : {}),
-    ...(ids('memoryIds') !== undefined ? { fact: ids('memoryIds')! } : {}),
-    ...(ids('chronoIds') !== undefined ? { chrono: ids('chronoIds')! } : {}),
-  };
+  const desired: Partial<Record<RefKind, readonly string[]>> = {};
+  for (const kind of DOCUMENT_LINK_KINDS) {
+    const ids = doc[legacyField(kind)];
+    if (Array.isArray(ids)) desired[kind] = ids as string[];
+  }
   if (Object.keys(desired).length === 0) return { added: 0, removed: 0 };
   const author = doc['author'] as AuthorRef | undefined;
   /*
