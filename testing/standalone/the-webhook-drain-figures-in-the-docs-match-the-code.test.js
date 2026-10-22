@@ -11,10 +11,10 @@
  * ## The rule, and how the sentence is found
  *
  * The drain sentence is the one bullet of the doc whose bold lead names both retries and the drain (`- **Queued retries drain at a stated rate.** ...`): found by that
- * lead and not by a line number, with a floor of exactly one (zero would let every check below pass on nothing, two would make "the" sentence ambiguous). The four figures
- * are `RETRY_BATCH`, the retry interval (`RETRY_POLL_INTERVAL_MS`, in seconds), `RETRY_CONCURRENCY` and the per-subscription cap (`RETRY_PER_KEY`), each an export of
- * `dist/webhooks/dispatcher.js`. A figure is present when its number appears in the bullet; the four are checked as a multiset of the bullet's numbers, so a figure that two
- * of them share must appear twice.
+ * lead and not by a line number, with a floor of exactly one (zero would let every check below pass on nothing, two would make "the" sentence ambiguous). The figures
+ * are `RETRY_BATCH`, the retry interval (`RETRY_POLL_INTERVAL_MS`, in seconds), `RETRY_CONCURRENCY`, the per-subscription cap (`RETRY_PER_KEY`) and the tick's budget
+ * (`RETRY_TICK_BUDGET_MS`, in seconds), each an export of `dist/webhooks/dispatcher.js`. A figure is present only as its number directly before its own words
+ * (`UNIT_OF`: "50 due retries", "30 seconds after it began"), so another number of the sentence that happens to equal it cannot stand in for it.
  *
  * ## Seen red, in memory
  *
@@ -59,16 +59,27 @@ const drainBullets = (text) => bullets(text).filter(b => /retr/i.test(leadOf(b))
 /** The numbers of a text, in order. */
 const numbersOf = (text) => [...text.matchAll(/\b\d+\b/g)].map(m => Number(m[0]));
 /**
- * The figures that `text` does not carry: each figure must be one of the text's numbers, a figure that two share (same value) twice. THE rule; the doc is only its input.
+ * The words each figure is written with in the drain sentence: a figure counts only as the number directly before its own words, so another number of
+ * the sentence that happens to equal it (a concurrency of 30 against "30 seconds") cannot stand in for it.
+ */
+const UNIT_OF = {
+  RETRY_BATCH: 'due retries',
+  RETRY_POLL_INTERVAL_S: 'seconds the server',
+  RETRY_CONCURRENCY: 'at a time',
+  RETRY_PER_KEY: 'for any one subscription',
+  RETRY_TICK_BUDGET_S: 'seconds after it began',
+};
+/**
+ * The figures that `text` does not carry: each figure must appear as its number followed by its own words (`UNIT_OF`). THE rule; the doc is only its input.
  * @param {string} text  the drain sentence
  * @param {Record<string, number>} figures  name to value
  */
 function missingFigures(text, figures) {
-  const pool = numbersOf(text);
+  const flat = text.replace(/\s+/g, ' ');
   const missing = [];
   for (const [name, value] of Object.entries(figures)) {
-    const at = pool.indexOf(value);
-    if (at < 0) missing.push(name); else pool.splice(at, 1);
+    const words = UNIT_OF[name].split(' ').join('\\s+');
+    if (!new RegExp(`\\b${value}\\s+${words}\\b`).test(flat)) missing.push(name);
   }
   return missing;
 }
@@ -99,12 +110,14 @@ describe('the drain sentence states the figures the dispatcher runs with', () =>
       RETRY_POLL_INTERVAL_S: m.RETRY_POLL_INTERVAL_MS / 1000,
       RETRY_CONCURRENCY: m.RETRY_CONCURRENCY,
       RETRY_PER_KEY: m.RETRY_PER_KEY,
+      RETRY_TICK_BUDGET_S: m.RETRY_TICK_BUDGET_MS / 1000,
     };
   });
 
-  it('the dispatcher exports the four figures, as positive whole numbers', () => {
+  it('the dispatcher exports the drain figures, as positive whole numbers', () => {
+    assert.deepEqual(Object.keys(figures).sort(), Object.keys(UNIT_OF).sort(), 'a figure is read without its words in the sentence, or words are kept for a figure that is not read');
     for (const [name, value] of Object.entries(figures)) {
-      assert.ok(Number.isInteger(value) && value > 0, `${name} is ${String(value)}: the dispatcher does not export it as a positive whole number (the interval is read in whole seconds)`);
+      assert.ok(Number.isInteger(value) && value > 0, `${name} is ${String(value)}: the dispatcher does not export it as a positive whole number (the interval and the budget are read in whole seconds)`);
     }
     assert.ok(figures.RETRY_PER_KEY <= figures.RETRY_CONCURRENCY, 'the per-subscription cap is above the pool: it would cap nothing');
   });
@@ -116,7 +129,15 @@ describe('the drain sentence states the figures the dispatcher runs with', () =>
     assert.deepEqual(missing, [], `the drain sentence of ${DOC} does not state ${missing.join(', ')} as the code runs with it (${JSON.stringify(figures)})`);
   });
 
-  for (const name of ['RETRY_BATCH', 'RETRY_POLL_INTERVAL_S', 'RETRY_CONCURRENCY', 'RETRY_PER_KEY']) {
+  it('seen red: a figure written beside the wrong words is reported missing, though the number is in the sentence', () => {
+    const [sentence] = drainBullets(doc);
+    assert.ok(sentence, 'the doc has no drain sentence');
+    const swapped = { ...figures, RETRY_CONCURRENCY: figures.RETRY_TICK_BUDGET_S };
+    assert.ok(numbersOf(sentence).includes(swapped.RETRY_CONCURRENCY), 'fixture: the budget figure is not in the sentence');
+    assert.deepEqual(missingFigures(sentence, swapped), ['RETRY_CONCURRENCY'], 'a figure matched a number written for another figure');
+  });
+
+  for (const name of Object.keys(UNIT_OF)) {
     it(`seen red: ${name} changed in a COPY of the sentence is reported missing, and only it`, () => {
       const [sentence] = drainBullets(doc);
       assert.ok(sentence, 'the doc has no drain sentence to copy');

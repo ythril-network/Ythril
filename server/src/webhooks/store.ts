@@ -25,7 +25,7 @@ const DELIVERY_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 /**
  * Ensure the delivery collection has a TTL index on `_expireAt`.
  * Called once during startup from index.ts. (The retry queue's own index is ensured by the module that owns the queue,
- * `initRetryQueueIndexes` in `webhooks/dispatcher.ts`, called beside this one.)
+ * `initRetryQueueIndexes` in `webhooks/dispatcher.ts`, run by the bootstrap as a step of its own that the boot does not await.)
  */
 export async function initWebhookDeliveryIndexes(): Promise<void> {
   const dc = col<WebhookDelivery>(DELIVERIES_COLLECTION);

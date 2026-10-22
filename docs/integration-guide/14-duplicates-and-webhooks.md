@@ -646,10 +646,12 @@ whitespace are not preserved by a parse/stringify round trip.
   rows, the requeue after a failed first delivery, and the requeue of a failed retry (see [Setup and API](11-setup-api.md)).
 - **Queued retries drain at a stated rate.** Every 10 seconds the server takes up to 50 due retries and delivers 4 at a
   time, with at most 2 for any one subscription. The batch is shared across the subscriptions with retries due, so one
-  subscription's backlog cannot hold back another's. A subscription gets at least an equal share of the batch per tick,
-  and its oldest due retry goes first. A tick stops starting deliveries 30 seconds after it began, and what it did not
-  start waits for the next tick (counted in `ythril_webhook_retry_ticks_cut_total`). So a due retry starts within a few
-  ticks, however long another subscription's backlog is. That bound leaves out a DNS lookup of your endpoint, which has
+  subscription's backlog cannot hold back another's. While no more subscriptions have retries due than the batch holds,
+  each gets at least an equal share of it per tick; beyond that, the subscriptions whose oldest due retry is oldest are
+  served first and the rest wait for a later tick. A subscription's oldest due retry goes first. A tick stops starting
+  deliveries 30 seconds after it began, and what it did not start waits for the next tick (counted in
+  `ythril_webhook_retry_ticks_cut_total`). So a due retry starts within as many ticks as it takes the subscriptions due
+  before it to be served, however long any one subscription's backlog is. That bound leaves out a DNS lookup of your endpoint, which has
   no timeout of its own. Choosing a tick's retries reads one index entry per due retry.
 - **An event the server had not yet announced when it stopped is not announced later.** The announcement of a change is
   at-most-once: a stop between a write and its announcement loses the event, and a directory delete announces its files
