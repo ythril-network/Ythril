@@ -13,7 +13,7 @@ Two rules run through everything below, because both were learned the expensive 
 
 Run `npm run preflight` first, always. It runs every structural check that needs no Docker, in one command, and
 `scripts/preflight.mjs` is the list (`npm run preflight:static` runs the part that needs no test database and no suite of its
-own, about a minute, and is never a push pass). Then run the suites your change reaches. A maintainer's bundle then has its one full run on
+own, about five minutes against the full run's hour on a maintainer's machine, and is never a push pass). Then run the suites your change reaches. A maintainer's bundle then has its one full run on
 CI, before its pull request (see [The CI job graph](#the-ci-job-graph)), and a commit made after that run reruns locally only
 the test files its diff reaches.
 
