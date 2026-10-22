@@ -45,7 +45,7 @@ import { createRequire } from 'node:module';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { MUTATORS } from './_document-mutators.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 // Before ANY import of the store: a module that reads its caps at load time must see these.
 process.env['READ_SPILL_TOKEN_MAX_MB'] = '1';
@@ -361,12 +361,12 @@ describe('a read spill lives in the instance store, never in a space', { skip },
   describe('caps: a token pays for its own spills, never for somebody else\'s', () => {
     it('past its byte share a token evicts its OWN oldest spill, which then answers 410 to it alone', async () => {
       const theirs = await putOk({ issuedTo: TOKEN_B, items: records(1, 400_000) });
-      await sleep(5);
-      const first = await putOk({ items: records(1, 400_000) });
-      await sleep(5);
-      const second = await putOk({ items: records(1, 400_000) });
-      await sleep(5);
-      const third = await putOk({ items: records(1, 400_000) });   // 1.2 MB against a 1 MB share
+      await elapse(5, 'timestamps differ: eviction takes the oldest spill, so each must be created at its own millisecond');
+      const first =await putOk({ items: records(1, 400_000) });
+      await elapse(5, 'timestamps differ: eviction takes the oldest spill, so each must be created at its own millisecond');
+      const second =await putOk({ items: records(1, 400_000) });
+      await elapse(5, 'timestamps differ: eviction takes the oldest spill, so each must be created at its own millisecond');
+      const third =await putOk({ items: records(1, 400_000) });   // 1.2 MB against a 1 MB share
 
       assert.equal((await read(first.id)).status, 410, 'the owner learns its spill was evicted');
       assert.equal((await read(first.id, TOKEN_B)).status, 404, 'nobody else learns it existed');
@@ -378,7 +378,7 @@ describe('a read spill lives in the instance store, never in a space', { skip },
 
     it('past its count share a token evicts its own oldest', async () => {
       const ids = [];
-      for (let i = 0; i < 4; i++) { ids.push((await putOk({ items: [record(i)] })).id); await sleep(5); }
+      for (let i = 0; i < 4; i++) { ids.push((await putOk({ items: [record(i)] })).id); await elapse(5, 'timestamps differ: eviction takes the oldest spill, so each must be created at its own millisecond'); }
       assert.equal((await read(ids[0])).status, 410, 'the fourth spill against a count of three evicts the first');
       for (const id of ids.slice(1)) assert.equal((await read(id)).status, 200);
     });

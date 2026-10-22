@@ -19,7 +19,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, patch, waitFor } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { waitForValue } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -66,13 +66,11 @@ describe('Audit Log', () => {
     assert.equal(patchR.status, 200, `update should succeed: ${JSON.stringify(patchR.body)}`);
 
     // Poll for the update entry correlated by entryId.
-    let updateEntry;
-    for (let i = 0; i < 20 && !updateEntry; i++) {
-      await sleep(300);
+    const updateEntry = await waitForValue(async () => {
       const r = await get(INSTANCES.a, tokenA, `/api/admin/audit-log?operation=fact.update&spaceId=general&after=${encodeURIComponent(beforeTs)}&limit=50`);
       assert.equal(r.status, 200);
-      updateEntry = r.body.entries.find(e => e.entryId === memId);
-    }
+      return r.body.entries.find(e => e.entryId === memId);
+    }, 10_000, 100, undefined, { what: `a fact.update audit entry with entryId ${memId}` });
     assert.ok(updateEntry, `no fact.update audit entry with entryId === ${memId} — this op was not logged`);
     assert.equal(updateEntry.method, 'PATCH', 'update entry records the PATCH method');
     assert.equal(updateEntry.status, 200, 'update entry records the 200 result');

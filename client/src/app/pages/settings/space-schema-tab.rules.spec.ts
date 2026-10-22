@@ -134,14 +134,19 @@ async function mount(opts: MountOptions = {}) {
   };
   /** Let change detection, deferred blocks and the reads they issued run to rest. */
   const settle = async (until?: () => boolean): Promise<void> => {
-    for (let i = 0; i < 300; i++) {
+    const pass = async (): Promise<void> => {
       fixture.detectChanges();
       flushReads();
       await fixture.whenStable();
       fixture.detectChanges();
-      if (!until || until()) return;
-      await new Promise<void>(r => setTimeout(r, 10));
-    }
+    };
+    if (!until) { await pass(); return; }
+    // Real timers here, so the condition is polled by vitest's own wait; it throws naming the wait when it never holds,
+    // where the old count-bounded loop returned quietly and left the failure to whatever was asserted next.
+    await vi.waitFor(async () => {
+      await pass();
+      if (!until()) throw new Error('settle: the awaited state never rendered');
+    }, { timeout: 5_000, interval: 50 });
   };
 
   state.openSettings(ruledSpace());

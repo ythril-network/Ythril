@@ -45,7 +45,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Gauge } from 'prom-client';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const REGISTRY = '../../server/dist/metrics/registry.js';
 const SOURCE = 'server/src/metrics/registry.js'.replace('/dist/', '/src/');
@@ -70,7 +70,7 @@ function slowCollector(mod, { name, workMs, mode = 'ok' }) {
     registers: [mod.register],
     async collect() {
       await mod.withCollectBudget(name, async () => {
-        await sleep(workMs);
+        await elapse(workMs, 'simulated latency: the fake collector does slow work on purpose');
         if (mode === 'throw') throw new Error('collector failed');
         this.set({ space: 'alpha' }, 42);
       }, () => this.reset());
@@ -124,7 +124,7 @@ describe('the scrape budget', () => {
     await scrape(mod2);                       // populate
     g2.collect = async function () {          // then make it slow
       await mod2.withCollectBudget('storage_used_bytes', async () => {
-        await sleep(3000);
+        await elapse(3000, 'simulated latency: the collector outlasts the scrape budget on purpose');
         this.set({ space: 'alpha' }, 99);
       }, () => this.reset());
     };

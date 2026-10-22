@@ -42,7 +42,7 @@ import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { unitAt, queryAxis, startStubEmbedder, waitUntilTrue } from './_vector-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -123,7 +123,7 @@ describe('a space waiting for search is never marked failed', { skip }, () => {
     const started = Date.now();
     const verdict = await Promise.race([
       vectorIndex.waitForSpaceIndexesReady(WAIT, { timeoutMs: 600_000 }),
-      sleep(20_000).then(() => 'still waiting after 20 s'),
+      elapse(20_000, 'race timeout: the wait that should answer at once is reported as still waiting').then(() => 'still waiting after 20 s'),
     ]);
     assert.equal(verdict, 'deferred', 'a down search service must be reported as deferred, not as ready, failed or pending');
     assert.ok(Date.now() - started < 5_000, `took ${Date.now() - started} ms: it polled a service that is not there`);
@@ -161,7 +161,7 @@ describe('a space waiting for search is never marked failed', { skip }, () => {
     await lifecycle.createSpace({ id: 'bootgone', label: 'bootgone' }, { tokenId: null });
     assert.equal(await lifecycle.removeSpace('bootgone'), true);
     assert.equal(statusOf('bootnew'), 'building');
-    await sleep(500);
+    await elapse(500, 'absence window: a mark on the runtime-created space while search is down would be written inside it');
     assert.equal(statusOf('bootnew'), 'building', 'a runtime-created space was marked something while search was down');
   });
 
@@ -170,7 +170,7 @@ describe('a space waiting for search is never marked failed', { skip }, () => {
     const all = [WAIT, ...BOOT, 'bootnew'];
     await eventually('every waiting space reaching ready', () => all.every(id => statusOf(id) === 'ready') || all.map(id => `${id}:${statusOf(id)}`));
     for (const [id, set] of seen) assert.ok(!set.has('failed'), `${id} was marked failed at some point (saw ${[...set].join(', ')})`);
-    await sleep(1_500);
+    await elapse(1_500, 'absence window: a late confirmation would resurrect the deleted space inside it, once every waiting space reached ready');
     const names = (await mongo.getDb().listCollections({}, { nameOnly: true }).toArray()).map(c => c.name);
     assert.deepEqual(names.filter(n => n.startsWith('bootgone_')), [],
       'the late confirmation resurrected a space that was deleted while it waited');

@@ -21,7 +21,7 @@ import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const MODULE = pathToFileURL(join(REPO_ROOT, 'server', 'dist', 'http-connections.js')).href;
 const CHILD = `
@@ -58,9 +58,9 @@ describe('a request on an idle keep-alive connection survives a stall', () => {
     const idle = new http.Agent({ keepAlive: true, maxSockets: 1 });
     const busy = new http.Agent({ keepAlive: true, maxSockets: 1 });
     assert.equal((await request(idle, '/')).ok, true, 'the first request must succeed');
-    await sleep(500);
+    await elapse(500, 'ttl elapses: connection 1 must have been idle for a while before the stall begins');
     const stall = request(busy, '/stall');
-    await sleep(1_000);
+    await elapse(1_000, 'ttl elapses: one second of the 7 s stall must pass so connection 1 is idle while the loop is blocked');
     // The client sees a connection idle for 1.5 s; the server will see it idle for 8 s when it next looks.
     const reused = await request(idle, '/');
     await stall;

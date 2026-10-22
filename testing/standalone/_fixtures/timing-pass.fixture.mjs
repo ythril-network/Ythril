@@ -6,10 +6,10 @@
  * its tests'.
  */
 import { describe, it } from 'node:test';
-import { sleep } from '../../_shared/sleep.mjs';
+import { elapse } from '../../_shared/sleep.mjs';
 
 describe('pass suite', () => {
-  it('passes after a wait', async () => { await sleep(60); });
+  it('passes after a wait', async () => { await elapse(60, 'simulated latency: a passing test of measurable duration to compare with its file figure'); });
   it('passes at once', () => {});
   describe('nested suite', () => {
     it('passes nested', () => {});

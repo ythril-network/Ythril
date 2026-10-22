@@ -41,7 +41,7 @@ import { stripComments } from './_strip-comments.mjs';
 import { failWrites, setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -253,7 +253,7 @@ describe('legacy read spills are swept from the space', { skip }, () => {
       }
       const entries = () => mongo.col('audit_log').find({ operation: 'file.legacy_spill.sweep' }).toArray();
       assert.ok(await holdsWithin(async () => (await entries()).length >= 2, 5_000, 50), 'the entries are written');
-      await sleep(300);   // time is the subject: an extra entry would arrive in this window
+      await elapse(300, 'absence window: an extra audit entry would arrive after the two awaited above');   // time is the subject: an extra entry would arrive in this window
       const spaces = (await entries()).map(e => e.spaceId).sort();
       assert.deepEqual(spaces, [SPACE, SECOND].sort(), `one per cleaned space: ${spaces.join(', ')}`);
     });

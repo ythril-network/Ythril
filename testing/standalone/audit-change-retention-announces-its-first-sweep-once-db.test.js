@@ -16,7 +16,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { eventually } from './_write-faults.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -50,7 +50,7 @@ describe('the audit change-retention sweep announces its first pass once (real M
 
     assert.equal(await retention.redactExpiredChanges(), 0);
     assert.equal(await retention.redactExpiredChanges(), 0);
-    await sleep(200);      // an announcement that was going to arrive late has had its chance
+    await elapse(200, 'absence window: no second announcement after the first one arrived');      // an announcement that was going to arrive late has had its chance
     assert.equal(announcements().length, 1, `a later sweep announced again: ${announcements().join(' | ')}`);
   });
 

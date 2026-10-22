@@ -24,7 +24,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, waitFor, createTestSpace } from './helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -215,9 +215,9 @@ describe('Governed space deletion', () => {
     assert.equal(voteR.status, 200);
     assert.ok(voteR.body?.concluded === true, 'Veto must conclude the round immediately');
 
-    // Brief wait to confirm no async side-effect fires.
-    // Negative assertion — fixed wait is correct; do NOT convert to waitFor (Q3).
-    await sleep(500);
+    // Negative assertion: the positive control is the round's conclusion, awaited above; the window is for an async
+    // side-effect of it, which a waitFor on the surviving space would return from at once (Q3).
+    await elapse(500, 'absence window: after the veto concluded the round, no deletion may follow it');
 
     const listR = await get(INSTANCES.a, tokenA, '/api/spaces');
     assert.ok(listR.body?.spaces?.some(s => s.id === spaceId), 'Space must survive a veto');

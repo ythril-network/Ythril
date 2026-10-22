@@ -5,7 +5,7 @@
 
 import { execSync } from 'node:child_process';
 import { waitFor as sharedWaitFor } from '../_shared/wait-for.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 /** Synchronous sleep (these container-config readers are called synchronously). */
 function sleepSync(ms) {
@@ -110,6 +110,7 @@ export async function post(baseUrl, token, path, data) {
  * Reads the standard Retry-After HTTP header (seconds); defaults to 5 s.
  */
 export async function postRetry429(baseUrl, token, path, data, maxRetries = 3) {
+  // waits-differently: the server names each wait in Retry-After, and a fixed-interval poll would hit the limit it is backing off from
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const resp = await req(baseUrl, token, path, {
       method: 'POST',
@@ -120,7 +121,7 @@ export async function postRetry429(baseUrl, token, path, data, maxRetries = 3) {
       return { status: resp.status, body };
     }
     const retryAfter = parseInt(resp.headers.get('retry-after') ?? '5', 10);
-    await sleep(retryAfter * 1000);
+    await elapse(retryAfter * 1000, 'pacing: the Retry-After the rate limiter answered with');
   }
   // final attempt — return whatever we get
   return post(baseUrl, token, path, data);
@@ -754,6 +755,7 @@ export function patchableDocumentProcessing(dp) {
 
 export async function restoreOrFail(label, apply, verify, { attempts = 4, delayMs = 250 } = {}) {
   let last = 'never ran';
+  // waits-differently: the contract is a count of restore attempts (admin-state-cleanups-must-verify pins how many applies ran), not a deadline
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       await apply();
@@ -769,7 +771,7 @@ export async function restoreOrFail(label, apply, verify, { attempts = 4, delayM
       last = err instanceof Error ? err.message : String(err);
     }
     // Saturated rather than broken is the observed failure, and a wait is what fixes that.
-    await sleep(delayMs * attempt);
+    await elapse(delayMs * attempt, 'pacing: a growing backoff between restore attempts on a saturated instance');
   }
   throw new Error(
     `Could not restore ${label} after ${attempts} attempts (${last}). Refusing to exit quietly: this is `

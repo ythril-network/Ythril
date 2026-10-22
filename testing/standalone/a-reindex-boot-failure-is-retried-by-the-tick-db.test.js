@@ -49,7 +49,7 @@ import { logLinesDuring } from './_log-lines.mjs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -296,7 +296,7 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
         await seedRun('lease-held', { sweepLeaseAt: lease });
         await reindex.resumeReindexRuns();
         await reindex.reindexRunTick();
-        await sleep(400); // a sweep that WAS started begins on the next turn; give it far more than that
+        await elapse(400, 'absence window: a sweep started over a held lease would begin on the next turn and queue jobs inside it'); // a sweep that WAS started begins on the next turn; give it far more than that
         assert.equal((await rebuildQueued('lease-held')).size, 0, 'a sweep ran over a run that another process is sweeping');
         const doc = await runCol('lease-held').findOne({ _id: 'run' });
         assert.equal(doc.sweepLeaseAt, lease, 'and the lease it does not own was left alone');
@@ -354,7 +354,7 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
         await seedRun('lease-err', { sweepLeaseAt: lease, error: 'the sweep failed after 3 attempts' });
         await reindex.resumeReindexRuns();
         await reindex.reindexRunTick();
-        await sleep(400);
+        await elapse(400, 'absence window: a sweep started over an errored run would begin on the next turn and queue jobs inside it');
         assert.equal((await rebuildQueued('lease-err')).size, 0, 'an errored run needs an operator, not a retry');
         const doc = await runCol('lease-err').findOne({ _id: 'run' });
         assert.equal(doc.sweepLeaseAt, lease, 'and no lease was taken on it');
@@ -366,7 +366,7 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
         // twice (its count, then its walk).
         await seedFacts('lease-base', 8);
         await seedRun('lease-base', { sweepLeaseAt: STALE() });
-        const one = await aggregatesDuring(async () => { await reindex.resumeReindexRuns(); await sweepDone('lease-base'); await sleep(300); });
+        const one = await aggregatesDuring(async () => { await reindex.resumeReindexRuns(); await sweepDone('lease-base'); await elapse(300, 'absence window: a read of the facts collection after the lone sweep reported complete would be counted here'); });
         const perSweep = one.get(spaceCollection('lease-base', 'facts'));
         assert.ok(perSweep >= 1, `the lone sweep read the facts collection ${perSweep} time(s): the counter is not seeing the sweep`);
         await runCol('lease-base').deleteMany({});
@@ -377,7 +377,7 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
           await Promise.all([reindex.resumeReindexRuns(), reindex.reindexRunTick(), reindex.resumeReindexRuns(),
             reindex.reindexRunTick(), reindex.resumeReindexRuns()]);
           await sweepDone('lease-conc');
-          await sleep(400); // a second sweeper, had one started, has made its reads by now
+          await elapse(400, 'absence window: a second sweeper, had one started, would make its reads inside it, after the first one reported complete'); // a second sweeper, had one started, has made its reads by now
         });
         assert.equal(many.get(spaceCollection('lease-conc', 'facts')), perSweep,
           'five resumers swept the run more than once: nothing says who owns a sweep');
@@ -394,7 +394,7 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
           assert.ok(doc.sweepLeaseAt >= before && doc.sweepLeaseAt <= Date.now());
           await Promise.all([reindex.reindexRunTick(), reindex.reindexRunTick()]);
           await sweepDone('lease-new');
-          await sleep(300);
+          await elapse(300, 'absence window: a sweep the tick started over the creator\'s run would read the facts collection inside it, after the first reported complete');
         });
         stopWatcher();
         // One sweep: its count and its walk.

@@ -311,7 +311,7 @@ and whether a timer is left armed. They are made once, in
 | The same wait, answering the value the condition held with | `waitForValue(…)` |
 | Wait until a state was read that you accept, and get that reading back (the timeout names the last one read) | `waitForReading(read, accept, timeout, interval, options)` |
 | Wait for one operation for at most a time, without abandoning it, and learn whether it finished | `settleWithin(promise, ms)` in `testing/standalone/_write-faults.mjs` |
-| A fixed delay: time itself is the subject (a window that must elapse in full before something is asserted absent, a fixture that must take a measurable while). Anything else is a guess that wants a condition | `sleep(ms)` from `testing/_shared/sleep.mjs` |
+| A fixed delay: time itself is the subject. Anything else is a guess that wants a condition | `elapse(ms, '<kind>: <detail>')` from `testing/_shared/sleep.mjs`, the kind one of the kinds below |
 | A throwaway server on loopback, ended without waiting for a client that never leaves | `const local = await listenOnLoopback(http.createServer(app))` from `testing/_shared/local-server.mjs`; it gives `{ port, url, close }`, binds `127.0.0.1` only, and `close()` is safe twice |
 
 Use `holdsWithin` in a `before` hook that lets the tests decide: a throw there cancels the whole file, where a verdict
@@ -320,13 +320,32 @@ that throws anything else propagates at once. `diagnose` may be a function that 
 awaited. `waitFor` from `testing/sync/helpers.js` is this module with the thin-margin warning on, because a stack wait that
 passes with little budget left is one slow runner from a timeout; a poll of something in-process leaves it off.
 
+**A fixed delay names its kind.** A test that sleeps and then reads a result has guessed how long the thing takes, and a
+free-text reason ("let the server settle") is that guess with a label. So `elapse` takes `'<kind>: <detail>'` and throws,
+before arming any timer, unless the kind is one of these:
+
+| Kind | When time itself is the subject |
+|---|---|
+| `absence window` | nothing may happen during it — and the positive control (the thing that DOES happen) was awaited first |
+| `ttl elapses` | a time-to-live or a window has to run out before the next step |
+| `timestamps differ` | two writes must carry different millisecond stamps |
+| `simulated latency` | a fake does slow work on purpose |
+| `pacing` | a rate the subject enforces, or one the test keeps to on purpose |
+| `bind-mount propagation` | a file written on the host is not yet seen inside the container (a reload before then writes the stale file back) |
+| `sampler interval` | a sampler takes readings at a fixed rate until it is told to stop |
+| `race timeout` | the losing side of a `Promise.race` |
+
+The gate reads every call of `elapse` — awaited or not, in a `Promise.race`, a `.then`, a wrapper, under any import name
+— and wants its reason as a literal. Import it by name; a namespace or default import of `sleep.mjs`, or a re-export of
+it, is refused, because the gate could not see the calls through it.
+
 **A site that asks a different question stays, with a marker** in the comment block directly above it. Which marker
 depends on the site:
 
 | The site | Marker | Gate |
 |---|---|---|
-| A hand-written poll loop (a deadline read from the clock, an awaited sleep and a condition) | `// waits-differently: <reason>` above the loop | `a-poll-is-written-once` |
-| A fixed delay (`await new Promise(r => setTimeout(r, ms))`, `timers/promises`' `setTimeout`, or a local helper that is only that promise) | `// waits-differently: <reason>` above the delay, or above the loop it sits in | `a-test-waits-and-listens-through-one-helper` |
+| A hand-written poll loop: an awaited sleep and a condition, with either a deadline read from the clock, or a body that leaves the loop on the condition (`if (…) break`, a `try` that returns) however the loop is bounded — an attempt count is a poll too. A condition only in the loop's head (a work loop, a queue drain) is not | `// waits-differently: <reason>` above the loop | `a-poll-is-written-once` |
+| A fixed delay that is not `elapse` (`await new Promise(r => setTimeout(r, ms))`, `timers/promises`' `setTimeout`, a local helper that is only that promise, a browser page's `waitForTimeout`, a helper from elsewhere named like a sleep) | `// waits-differently: <reason>` above the delay, or above the loop it sits in | `a-test-waits-and-listens-through-one-helper` |
 | A hand-bound server (any `.listen(...)`: no host, a host variable, `localhost`, `0.0.0.0`, a LAN address, or `127.0.0.1` spelled by hand) | `// own-listener: <reason>` above the statement, or above the `new Promise` statement that holds it | `a-test-waits-and-listens-through-one-helper` |
 
 The reason must say something: two words at least, and a bare marker or a one-word one is the site without one. A marker
@@ -338,8 +357,9 @@ decided once, there, for the poll gate and the delay gate alike. The client cann
 the usual case for a marker on a poll.
 
 **What the gates do not read:** `benchmarks/` (product-facing, with no dependency on the test tree, so it imports nothing
-from `testing/_shared`) and the client's `*.spec.ts` (Vitest's own, run with fake timers and its own conventions). The
-gates read every other tracked `.js` and `.mjs` under `testing/` and `scripts/`.
+from `testing/_shared`). The delay and listener gate reads every other tracked `.js` and `.mjs` under `testing/` and
+`scripts/`, not the client's `*.spec.ts` (Vitest's own, run with fake timers); the poll gate reads `testing/` and the
+client specs too. Neither sees a `for…of` loop (bounded by its list) or a recursive poll (`setTimeout(poll, …)`).
 
 ## How a new test file reaches CI
 

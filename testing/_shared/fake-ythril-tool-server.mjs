@@ -38,7 +38,7 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { matchesFilter, readPath, UnsupportedFilterError } from './filter-matcher.mjs';
 import { listenOnLoopback } from './local-server.mjs';
-import { sleep } from './sleep.mjs';
+import { elapse } from './sleep.mjs';
 
 export const FAKE_SPACE = 'y-proj-ythril';
 export const FAKE_TOKEN = 'ythril_testtoken_0123456789abcdef';
@@ -88,7 +88,7 @@ export async function startFakeYthril({ token = FAKE_TOKEN, delayMs = 0, respond
         const call = { method: req.method, url: req.url, tool, args: body, authorization: req.headers['authorization'] ?? null, headers: { ...req.headers }, at: Date.now() };
         calls.push(call);
         if (hanging) return; // never answered: the client's own timeout is what ends it
-        if (state.delayMs) await sleep(state.delayMs);
+        if (state.delayMs) await elapse(state.delayMs, 'simulated latency: the fake answers a tool call only after the delay a test set');
         if (state.respond) {
           const answered = state.respond(call, body);
           if (answered) return send(answered.status, answered.body, answered.headers);

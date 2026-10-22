@@ -1,6 +1,6 @@
 /**
- * A test waits a fixed time through ONE helper (`sleep`) and starts a loopback server through ONE helper
- * (`listenOnLoopback`), or it says why it does neither (`Q-375`).
+ * A test waits a fixed time through ONE helper (`elapse`), naming which kind of delay it is, and starts a loopback server
+ * through ONE helper (`listenOnLoopback`), or it says why it does neither (`Q-375`, `Q-401`).
  *
  * ## What this prevents
  *
@@ -33,6 +33,16 @@
  * A LOOPBACK SERVER SITE is any `.listen(...)` call: no host, a host that is a name or a variable, `localhost`,
  * `::1`, `0.0.0.0`, a private address, `listen({ port, host })` — and the hand-bound `127.0.0.1` test server. Each
  * needs `listenOnLoopback(http.createServer(app))` or `// own-listener: <reason>`.
+ *
+ * ## Every delay names its kind (`Q-401`)
+ *
+ * A delay that is followed by reading a result has guessed how long the thing takes. So the shared delay is
+ * `elapse(ms, '<kind>: <detail>')`, the kind one of `sleep.mjs`' DELAY_KINDS, and `delayCalls` judges EVERY call of it —
+ * awaited or not, in a `Promise.race`, a `.then`, a wrapper, under any import name — by its literal reason, read the way
+ * `elapse` reads it at run time. The module is reached by its named exports only. Any other sleep (a browser page's
+ * `waitForTimeout`, a helper named like a sleep) carries the marker. Rows below: explained and refused, every spelling
+ * the design challenges named; and an independent plain-text count of the calls, with a floor, so the tree rule cannot
+ * be blind to a spelling and still pass.
  *
  * ## The markers
  *
@@ -69,7 +79,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { fixedDelays, listenerSites, awaitedSleeps } from '../_shared/timer-sites.mjs';
+import { fixedDelays, listenerSites, awaitedSleeps, delayCalls } from '../_shared/timer-sites.mjs';
+import { elapse, DELAY_KINDS } from '../_shared/sleep.mjs';
 import { pollLoops } from '../_shared/poll-loops.mjs';
 
 const src = (...lines) => lines.join('\n');
@@ -79,6 +90,9 @@ const listeners = (text) => listenerSites(text, 'testing/snippet.test.js');
 /** The one file each question is allowed to spell. A home is asserted by name (below), so it cannot go stale silently. */
 const DELAY_HOMES = ['testing/_shared/sleep.mjs', 'testing/_shared/wait-for.mjs'];
 const LISTENER_HOMES = ['testing/_shared/local-server.mjs'];
+
+/** This file: it calls `elapse` with refused reasons on purpose, to see `elapse` refuse them. Named, so nothing else is. */
+const ELAPSE_REFUSAL_TESTS = ['testing/standalone/a-test-waits-and-listens-through-one-helper.test.js'];
 
 describe('the classifier finds a fixed delay in every spelling it is written in', () => {
   const MUST_BE_FOUND = [
@@ -490,6 +504,14 @@ describe('one definition of "a sleep" — the poll gate and the delay classifier
       preamble: "import { setTimeout as hold } from 'node:timers/promises';", call: 'hold(25)', sleeps: true },
     { name: 'timers/promises reached as a member',
       preamble: "import timers from 'node:timers/promises';", call: 'timers.setTimeout(50)', sleeps: true },
+    { name: 'the shared elapse', preamble: "import { elapse } from '../_shared/sleep.mjs';",
+      call: "elapse(50, 'pacing: one probe per tick')", sleeps: true },
+    { name: 'the shared elapse under a name no list contains — known by its import, not its name',
+      preamble: "import { elapse as hold } from '../_shared/sleep.mjs';", call: "hold(50, 'pacing: one probe per tick')", sleeps: true },
+    { name: 'a local wrapper whose body calls the shared elapse',
+      preamble: "import { elapse } from '../_shared/sleep.mjs';\nconst later = () => elapse(15, 'timestamps differ: the next write is later');",
+      call: 'later()', sleeps: true },
+    { name: 'a browser page waiting a fixed time', preamble: '', call: 'page.waitForTimeout(700)', sleeps: true },
     // only looks like one ----------------------------------------------------------------------------------------------
     { name: 'a local `tick` that reads the clock', preamble: 'const tick = () => new Date();', call: 'tick()', sleeps: false },
     { name: 'a local `delay` that is a number, handed to something else', preamble: 'let delay = 250;', call: 'settle(delay)', sleeps: false },
@@ -535,6 +557,138 @@ describe('one definition of "a sleep" — the poll gate and the delay classifier
   });
 });
 
+describe('elapse refuses a delay that does not say which kind of delay it is, before it waits at all', () => {
+  it('the kinds are a closed, frozen list', () => {
+    assert.ok(Array.isArray(DELAY_KINDS) && Object.isFrozen(DELAY_KINDS), 'DELAY_KINDS is not a frozen array');
+    for (const kind of ['absence window', 'ttl elapses', 'timestamps differ', 'simulated latency', 'pacing',
+      'bind-mount propagation', 'sampler interval', 'race timeout']) {
+      assert.ok(DELAY_KINDS.includes(kind), `DELAY_KINDS lacks "${kind}"`);
+    }
+  });
+
+  it('a reason of a known kind with a detail waits and resolves', async () => {
+    const t0 = Date.now();
+    await elapse(20, 'pacing: one probe per tick');
+    assert.ok(Date.now() - t0 >= 15, 'elapse resolved before its time');
+  });
+
+  for (const [name, reason] of [
+    ['no reason', undefined],
+    ['a reason that is not a string', 42],
+    ['a reason with no kind', 'let the server settle'],
+    ['a kind nobody listed', 'server catches up: hopefully by now'],
+    ['a known kind with no detail', 'pacing:'],
+    ['a known kind with only blanks as detail', 'pacing:    '],
+  ]) {
+    it(`${name} throws synchronously — no promise is ever made`, () => {
+      let returned;
+      assert.throws(() => { returned = elapse(5, reason); }, /kind|reason/i);
+      assert.equal(returned, undefined);
+    });
+  }
+});
+
+describe('every call of the shared elapse names its kind in a literal, and every other sleep says why it waits differently', () => {
+  const ELAPSE = "import { elapse } from '../_shared/sleep.mjs';";
+  const calls = (text) => delayCalls(text, 'testing/snippet.test.js');
+  const problems = (text) => calls(text).filter(c => c.problem !== null).map(c => ({ line: c.line, problem: c.problem }));
+
+  const EXPLAINED = [
+    { name: 'awaited, a string literal of a known kind',
+      text: src(ELAPSE, 'async function t() {', "  await elapse(50, 'absence window: no second sweep after the first');", '}') },
+    { name: 'a template literal without substitutions',
+      text: src(ELAPSE, 'async function t() {', '  await elapse(5, `timestamps differ: the second write is later`);', '}') },
+    { name: 'an aliased import with a good reason',
+      text: src("import { elapse as hold } from '../_shared/sleep.mjs';", 'async function t() {', "  await hold(5, 'pacing: one request per tick');", '}') },
+    { name: 'inside a Promise.race, judged at its own call',
+      text: src(ELAPSE, 'async function t(p) {',
+        "  await Promise.race([p, elapse(10, 'race timeout: the event never came').then(() => { throw new Error('x'); })]);", '}') },
+    { name: 'not awaited, inside a local wrapper',
+      text: src(ELAPSE, "const later = () => elapse(15, 'timestamps differ: the next write is later');", 'async function t() { await later(); }') },
+    { name: 'a browser page wait with the marker above it',
+      text: src('async function t(page) {', '  // waits-differently: the chart animates in for a fixed time', '  await page.waitForTimeout(300);', '}') },
+    { name: 'a sleep named helper imported from elsewhere, with the marker above it',
+      text: src("import { delay } from './helpers.mjs';", 'async function t() {', '  // waits-differently: the vendor client paces itself', '  await delay(100);', '}') },
+    { name: 'CRLF line ends change nothing',
+      text: [ELAPSE, 'async function t() {', "  await elapse(50, 'absence window: no second sweep after the first');", '}'].join('\r\n') },
+  ];
+  for (const row of EXPLAINED) {
+    it(`explained: ${row.name}`, () => {
+      assert.deepEqual(problems(row.text), [], `a delay that says its kind was refused in:\n${row.text}`);
+      assert.ok(calls(row.text).length >= 1, `the instrument judged no call at all in:\n${row.text}`);
+    });
+  }
+
+  const REFUSED = [
+    { name: 'a reason whose kind nobody listed', line: 3, problem: 'reason-not-a-kind',
+      text: src(ELAPSE, 'async function t() {', "  await elapse(50, 'server catches up: hopefully by now');", '}') },
+    { name: 'a reason with no kind at all', line: 3, problem: 'reason-not-a-kind',
+      text: src(ELAPSE, 'async function t() {', "  await elapse(50, 'let it settle');", '}') },
+    { name: 'a known kind with no detail', line: 3, problem: 'reason-not-a-kind',
+      text: src(ELAPSE, 'async function t() {', "  await elapse(5, 'pacing:');", '}') },
+    { name: 'no reason at all', line: 3, problem: 'reason-not-literal',
+      text: src(ELAPSE, 'async function t() {', '  await elapse(5);', '}') },
+    { name: 'a reason held in a variable', line: 3, problem: 'reason-not-literal',
+      text: src(ELAPSE, 'async function t(why) {', '  await elapse(5, why);', '}') },
+    { name: 'a template literal with a substitution', line: 3, problem: 'reason-not-literal',
+      text: src(ELAPSE, 'async function t(n) {', '  await elapse(5, `pacing: ${n}`);', '}') },
+    { name: 'an unbraced if', line: 3, problem: 'reason-not-literal',
+      text: src(ELAPSE, 'async function t(x) {', '  if (x) await elapse(5, x);', '}') },
+    { name: 'an aliased import with no reason', line: 3, problem: 'reason-not-literal',
+      text: src("import { elapse as e } from '../_shared/sleep.mjs';", 'async function t() {', '  await e(5);', '}') },
+    { name: 'inside a Promise.race with a kind nobody listed', line: 3, problem: 'reason-not-a-kind',
+      text: src(ELAPSE, 'async function t(p) {', "  await Promise.race([p, elapse(10, 'give up: after ten')]);", '}') },
+    { name: 'a wrapper that passes its caller\'s reason through', line: 2, problem: 'reason-not-literal',
+      text: src(ELAPSE, 'const later = (why) => elapse(15, why);', "async function t() { await later('pacing: a b'); }") },
+    { name: 'not awaited, inside a .then', line: 3, problem: 'reason-not-a-kind',
+      text: src(ELAPSE, 'function t(chain) {', "  return chain.then(() => elapse(5, 'settle down'));", '}') },
+    { name: 'a browser page wait with no marker', line: 2, problem: 'no-marker',
+      text: src('async function t(page) {', '  await page.waitForTimeout(300);', '}') },
+    { name: 'a sleep named helper imported from elsewhere with no marker', line: 3, problem: 'no-marker',
+      text: src("import { delay } from './helpers.mjs';", 'async function t() {', '  await delay(100);', '}') },
+    { name: 'a sleep that is a method, no marker', line: 2, problem: 'no-marker',
+      text: src('async function t(h) {', '  await h.sleep(10);', '}') },
+    { name: 'a namespace import of the module — a side door around the binding rule', line: 1, problem: 'side-door',
+      text: src("import * as s from '../_shared/sleep.mjs';", "async function t() { await s.elapse(5, 'pacing: a b'); }") },
+    { name: 'a default import of the module', line: 1, problem: 'side-door',
+      text: src("import s from '../_shared/sleep.mjs';", 'export const x = s;') },
+    { name: 'a re-export of elapse', line: 1, problem: 'side-door',
+      text: src("export { elapse } from '../_shared/sleep.mjs';") },
+    { name: 'a re-export of everything', line: 1, problem: 'side-door',
+      text: src("export * from '../_shared/sleep.mjs';") },
+    { name: 'elapse handed on as a value, then called where no literal can be read', line: 2, problem: 'side-door',
+      text: src(ELAPSE, 'const later = elapse;', "async function t() { await later(5, 'pacing: a b'); }") },
+    { name: 'this file\'s elapse exported onward — a door for every importer of this file', line: 2, problem: 'side-door',
+      text: src(ELAPSE, 'export { elapse };') },
+    { name: 'the old sleep, imported by name', line: 1, problem: 'side-door',
+      text: src("import { sleep } from '../_shared/sleep.mjs';", 'export const x = sleep;') },
+  ];
+  for (const row of REFUSED) {
+    it(`refused: ${row.name}`, () => {
+      assert.deepEqual(problems(row.text), [{ line: row.line, problem: row.problem }], `in:\n${row.text}`);
+    });
+  }
+
+  it('what is not a delay is not judged', () => {
+    for (const text of [
+      src('function t(stream) { stream.pause(); }'),
+      src("// await elapse(5, 'not code');", 'export const x = 1;'),
+      src("export const advice = \"await elapse(5, 'in a string')\";"),
+      src('function t(fn) { setTimeout(fn, 10); }'),
+    ]) assert.deepEqual(calls(text), [], `something was judged in:\n${text}`);
+  });
+
+  it('the kind list is read from sleep.mjs, never written a second time', () => {
+    const [{ text }] = readTrackedSources(['testing/_shared/timer-sites.mjs'], { ext: ['.mjs'], floor: 1 });
+    const code = stripComments(text);
+    assert.match(code, /from\s+'\.\/sleep\.mjs'/, 'timer-sites.mjs does not take the delay kinds from sleep.mjs');
+    assert.ok(DELAY_KINDS.length >= 1, 'sleep.mjs exports no kinds: the check below would pass over nothing');
+    for (const kind of DELAY_KINDS) {
+      assert.ok(!code.includes(`'${kind}'`), `timer-sites.mjs spells the kind '${kind}' itself: a second copy of the list`);
+    }
+  });
+});
+
 describe('every tracked test and script', () => {
   const sources = readTrackedSources(['testing', 'scripts'], { ext: ['.js', '.mjs'], floor: 500 });
   const byFile = new Map(sources.map(s => [s.file, s.text]));
@@ -574,10 +728,54 @@ describe('every tracked test and script', () => {
       .filter(f => f.reason === null)
       .map(f => `${f.file}:${f.line}  ${f.text}`);
     assert.deepEqual(offenders, [],
-      'a hand-written fixed delay. Import `sleep` from testing/_shared/sleep.mjs. Time itself is rarely the subject: if you are '
-      + 'waiting for a CONDITION, use waitFor from testing/_shared/wait-for.mjs instead. If this one asks a different question '
+      'a hand-written fixed delay. Time itself is rarely the subject: if you are waiting for a CONDITION, use waitFor from '
+      + 'testing/_shared/wait-for.mjs. If time is the subject, import `elapse` from testing/_shared/sleep.mjs and name the kind '
+      + 'of delay: `elapse(ms, \'<kind>: <detail>\')`. If this one asks a different question '
       + '(a window that must elapse in full before something is asserted absent, a fixture that must take a measurable while), '
       + 'say so in the comment directly above it: `// waits-differently: <reason>`.');
+  });
+
+  it('every delay names its kind, or says why it waits differently', () => {
+    assert.ok(byFile.has(ELAPSE_REFUSAL_TESTS[0]), 'the exempt file is not among the scanned sources: it was moved, and the exemption with it');
+    const offenders = sources
+      .filter(s => !DELAY_HOMES.includes(s.file) && !ELAPSE_REFUSAL_TESTS.includes(s.file))
+      .flatMap(s => delayCalls(s.text, s.file))
+      .filter(c => c.problem !== null)
+      .map(c => `${c.file}:${c.line}  [${c.problem}]  ${c.text}`);
+    assert.deepEqual(offenders, [],
+      'a fixed delay that does not say which kind of delay it is. If you are waiting for a CONDITION, it is not a delay: '
+      + 'use waitFor from testing/_shared/wait-for.mjs. If time itself is the subject, import `elapse` by name from '
+      + 'testing/_shared/sleep.mjs and give it a literal `<kind>: <detail>` from DELAY_KINDS (absence window, ttl elapses, ...). '
+      + 'Any other delay (a browser page wait, a vendor helper) says why in the comment directly above it: '
+      + '`// waits-differently: <reason>`.');
+  });
+
+  it('the instrument judges every call of elapse a plain reading finds, and there are enough to mean something', () => {
+    // An independent count: the binding rule finds its calls through the syntax tree, this counts the bound names' calls
+    // in the comment-stripped text. A file where the two differ is a spelling the tree rule does not see.
+    let judged = 0;
+    const disagree = [];
+    for (const s of sources.filter(x => !DELAY_HOMES.includes(x.file) && !ELAPSE_REFUSAL_TESTS.includes(x.file))) {
+      const names = [...s.text.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*\/sleep\.mjs['"]/g)]
+        .flatMap(m => m[1].split(',').map(x => x.trim()).filter(Boolean))
+        .map(spec => spec.split(/\s+as\s+/))
+        .filter(([imported]) => imported === 'elapse')
+        .map(parts => parts.pop());
+      if (names.length === 0) continue;
+      const code = stripComments(s.text);
+      const plain = names.reduce((n, local) => n + [...code.matchAll(new RegExp(`(?<![\\w.$])${local}\\s*\\(`, 'g'))].length, 0);
+      const tree = delayCalls(s.text, s.file).filter(c => c.callee === 'elapse').length;
+      judged += tree;
+      if (plain !== tree) disagree.push(`${s.file}: ${plain} calls by reading, ${tree} judged`);
+    }
+    assert.deepEqual(disagree, [], 'the tree rule and a plain reading disagree about how many times elapse is called');
+    assert.ok(judged >= 100, `only ${judged} calls of elapse were judged across the tree; the floor is 100 — the instrument or the import spelling broke`);
+  });
+
+  it('the testing guide names every kind of delay', () => {
+    const [{ text }] = readTrackedSources(['docs/testing-guide.md'], { ext: ['.md'], floor: 1 });
+    const missing = DELAY_KINDS.filter(k => !text.includes(k));
+    assert.deepEqual(missing, [], 'docs/testing-guide.md does not name these kinds of delay; the list lives in sleep.mjs and the guide follows it');
   });
 
   it('none binds a test server itself, unless it says why it keeps its own', () => {

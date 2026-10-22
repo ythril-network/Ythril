@@ -42,7 +42,7 @@ import { startFreezableRelay } from './_freezable-relay.mjs';
 import { settleWithin, withStalledReads } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-inflight-bound-'));
@@ -99,7 +99,7 @@ describe('a store that stops answering ends an in-flight operation in its bound'
       let outcome;
       try {
         assert.ok(await holdsWithin(() => beats.count >= 1, 5_000, 20), 'the monitor made no heartbeat in 5 s');
-        await sleep(Math.max(0, beats.at + fraction * effective.heartbeatFrequencyMS - Date.now()));
+        await elapse(Math.max(0, beats.at + fraction * effective.heartbeatFrequencyMS - Date.now()), 'pacing: freeze the relay at a chosen phase of the monitor heartbeat cycle');
         // Frozen first, then the read: the bytes of a read sent to a store that has just stopped are dropped, so it IS in flight.
         relay.freeze();
         outcome = await settleWithin(mongo.getDb().collection('g6_probe').findOne({}), bound + slack);

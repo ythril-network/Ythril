@@ -29,7 +29,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-ready-'));
@@ -66,26 +67,26 @@ describe('/ready and the search watcher', { skip }, () => {
   });
 
   it('a successful /ready probe marks the service up at once and calls the waiters, before the watcher would', async () => {
-    await sleep(CACHE_EXPIRY_MS);
+    await elapse(CACHE_EXPIRY_MS, 'ttl elapses: the 2 s /ready probe cache expires, so the next probe is a fresh one');
     // Put the singleton into `down` the way production does: a cold window that ends unanswered.
     assert.equal(await readiness.searchAvailable(), false);
     assert.equal(readiness.searchReadinessSnapshot().state, 'down');
     let called = 0;
     readiness.afterSearchUp('ready-test', () => { called++; });
 
-    await sleep(CACHE_EXPIRY_MS);
+    await elapse(CACHE_EXPIRY_MS, 'ttl elapses: the 2 s /ready probe cache expires, so the next probe is a fresh one');
     outage.setDown(false);
     const r = await ready.getReadiness();
     assert.equal(r.checks.vectorSearch.status, 'ok');
     // No waiting on the watcher's own timer (its first delay is 2.5 s at the soonest): /ready's answer and the
     // state are the same fact.
     assert.equal(readiness.searchReadinessSnapshot().state, 'up', '/ready said search answers while the readiness state still says down');
-    await sleep(50);
-    assert.equal(called, 1, 'the waiters were not called by /ready\'s success');
+    await waitFor(() => called === 1, 5_000, 50, undefined, { what: 'the waiters to be called by /ready\'s success' });
+    assert.equal(called, 1,'the waiters were not called by /ready\'s success');
   });
 
   it('concurrent /ready requests share one probe', async () => {
-    await sleep(CACHE_EXPIRY_MS);
+    await elapse(CACHE_EXPIRY_MS, 'ttl elapses: the 2 s /ready probe cache expires, so the next probe is a fresh one');
     const before = outage.calls('listSearchIndexes', '_ready_probe');
     const answers = await Promise.all(Array.from({ length: 12 }, () => ready.getReadiness()));
     assert.equal(outage.calls('listSearchIndexes', '_ready_probe') - before, 1,

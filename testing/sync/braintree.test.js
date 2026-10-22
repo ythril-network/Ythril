@@ -20,7 +20,7 @@
  *
  * Each test deletes a record and a file the root wrote, and asserts the node's and the leaf's own records survive.
  * What each waits on is the end state it asserts, reached by completed cycles (`?wait=true`), so there is no fixed
- * sleep; the existing negative tests below keep theirs on purpose, since an absence cannot be waited for.
+ * sleep; the negative tests below read the absence after one completed cycle of the instance that would carry it.
  *
  * Instance C has no SKIP_*_RATE_LIMIT, so every call made TO C rides out a 429 (`postRetry429`), and C is read at a
  * two-second interval.
@@ -35,7 +35,6 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, postRetry429, get, del, delWithBody, triggerSync, waitFor, getInstanceId, makeTriggerProbe, readRecord, createTestSpace } from './helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -221,13 +220,11 @@ describe('Braintree topology (A -> B -> C)', () => {
     const leafMemId = write.body._id ?? write.body.id;
 
     // B would try to sync schedule — but C is push-only so B only receives from its parent A
-    // Trigger sync on B (B syncs from A, not from C)
-    await triggerSync(INSTANCES.b, tokenB, networkId);
-
-    // Wait a short time and verify this specific memory is NOT on B.
-    // Negative assertion — a fixed wait is correct here; do NOT convert to waitFor (Q3), which would
-    // return instantly on the absent record and prove nothing.
-    await sleep(3000);
+    // Run a COMPLETED cycle on B (B syncs from A, not from C). Negative assertion: a waitFor on the absent record
+    // would return at once and prove nothing (Q3), and a fixed wait guesses how long a cycle takes. `?wait=true`
+    // answers when B's turn has run to its end, so the record's absence after it is the cycle's verdict.
+    const cycle = await postRetry429(INSTANCES.b, tokenB, `/api/networks/${networkId}/sync?wait=true`, {});
+    assert.equal(cycle.status, 200, `B's sync cycle did not complete: ${JSON.stringify(cycle.body)}`);
     const r = await readRecord(INSTANCES.b, tokenB, testSpaceId, 'facts', leafMemId);
     assert.equal(r.status, 404, 'Leaf fact should NOT have propagated to B');
     console.log(`  Leaf fact correctly absent from B ✓`);
@@ -241,11 +238,10 @@ describe('Braintree topology (A -> B -> C)', () => {
     assert.equal(write.status, 201);
     const nodeMemId = write.body._id ?? write.body.id;
 
-    // Trigger sync on A — A only receives from its own parent (none) and pushes to B
-    await triggerSync(INSTANCES.a, tokenA, networkId);
-
-    // Negative assertion (see above) — fixed wait is correct; do NOT convert to waitFor (Q3).
-    await sleep(3000);
+    // A COMPLETED cycle on A — A only receives from its own parent (none) and pushes to B. Negative assertion:
+    // the cycle's end is the positive control (see above), not a fixed wait.
+    const cycle = await postRetry429(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true`, {});
+    assert.equal(cycle.status, 200, `A's sync cycle did not complete: ${JSON.stringify(cycle.body)}`);
     const r = await readRecord(INSTANCES.a, tokenA, testSpaceId, 'facts', nodeMemId);
     assert.equal(r.status, 404, 'Node fact should NOT have propagated to A');
     console.log(`  Node fact correctly absent from A ✓`);

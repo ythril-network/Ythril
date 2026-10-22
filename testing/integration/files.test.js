@@ -25,7 +25,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, req, reqJson, get, del, post, readCollection } from '../sync/helpers.js';
 import { waitForReading } from '../_shared/wait-for.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -419,8 +419,7 @@ describe('File metadata (MongoDB)', () => {
     const q1 = await listFileMeta({ path: filePath });
     const doc1 = q1.results[0];
 
-    // Small delay to ensure timestamp differs
-    await sleep(50);
+    await elapse(50, 'timestamps differ: the overwrite must carry a later updatedAt than the first upload');
     await uploadFile(tokenA, 'general', filePath, 'version 2 content is longer');
 
     const q2 = await listFileMeta({ path: filePath });

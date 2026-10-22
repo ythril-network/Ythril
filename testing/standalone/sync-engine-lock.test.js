@@ -33,7 +33,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sleep } from '../_shared/sleep.mjs';
+import { waitFor, holdsWithin } from '../_shared/wait-for.mjs';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-sync-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
@@ -125,7 +125,7 @@ describe('sync engine — space id mapping', () => {
 describe('sync engine — the per-network dedup lock', () => {
   beforeEach(async () => {
     // Let any queued rerun from a previous test drain, so each starts from an idle lock.
-    await sleep(50);
+    await waitFor(() => !engine.isNetworkSyncing('net-empty'), 5_000, 50, undefined, { what: 'the sync lock for net-empty to be released' });
   });
 
   it('reports a network as not syncing when idle', () => {
@@ -138,8 +138,9 @@ describe('sync engine — the per-network dedup lock', () => {
     const p = engine.runSyncForNetwork('net-empty');
     assert.equal(engine.isNetworkSyncing('net-empty'), true, 'lock should be held while in flight');
     await p;
-    await sleep(50);   // let the one queued rerun (if any) finish
-    assert.equal(engine.isNetworkSyncing('net-empty'), false, 'lock should be released after');
+    // The one queued rerun (if any) has to finish before the lock reads idle.
+    assert.ok(await holdsWithin(() => !engine.isNetworkSyncing('net-empty'), 5_000, 50, { what: 'the sync lock for net-empty to be released after the cycle' }),
+      'lock should be released after');
   });
 
   it('gives every concurrent trigger the same answer as the cycle they joined', async () => {
@@ -149,7 +150,7 @@ describe('sync engine — the per-network dedup lock', () => {
       Array.from({ length: 6 }, () => engine.runSyncForNetwork('net-empty')),
     );
     for (const r of results) assert.deepEqual(r, results[0]);
-    await sleep(50);
+    await waitFor(() => !engine.isNetworkSyncing('net-empty'), 5_000, 50, undefined, { what: 'the sync lock for net-empty to be released' });
   });
 
   /*
@@ -201,13 +202,13 @@ describe('sync engine — the per-network dedup lock', () => {
     assert.equal(engine.isNetworkSyncing('net-empty'), true);
     assert.equal(engine.isNetworkSyncing('some-other-network'), false);
     await p;
-    await sleep(50);
+    await waitFor(() => !engine.isNetworkSyncing('net-empty'), 5_000, 50, undefined, { what: 'the sync lock for net-empty to be released' });
   });
 
   it('completes a members-less cycle as a success, not an error', async () => {
     const result = await engine.runSyncForNetwork('net-empty');
     assert.deepEqual(result, { synced: 0, errors: 0 });
-    await sleep(50);
+    await waitFor(() => !engine.isNetworkSyncing('net-empty'), 5_000, 50, undefined, { what: 'the sync lock for net-empty to be released' });
   });
 });
 

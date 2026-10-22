@@ -44,7 +44,7 @@ import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { unitAt, queryAxis, startStubEmbedder, createSpaceCollections, waitUntilServing, waitUntilTrue } from './_vector-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -124,7 +124,7 @@ describe('a record written while search was down is indexed when it returns', { 
     const readsBefore = outage.calls('findOne', coll);
     for (let i = 0; i < 6; i++) await mongo.col(coll).insertOne(rec(SPACE, `more-${i}`));
     await presence.searchIndexPresenceSettled(SPACE);
-    await sleep(300);
+    await elapse(300, 'absence window: a reconcile a write to a deferred collection started would probe the store inside it');
     assert.equal(outage.calls('findOne', coll), readsBefore,
       'a write to a deferred collection started a reconcile — with search down, every write would retry the probe path');
     assert.equal(presence._presenceBeliefOf(coll), 'deferred');
@@ -138,7 +138,7 @@ describe('a record written while search was down is indexed when it returns', { 
     assert.equal(presence._presenceBeliefOf(coll), 'indexed');
     await waitUntilServing(mongo, coll, `${coll}_embedding`, { dims: DIMS, n: 7 });
     // Past the fresh-write window only the index can answer: the records must be in it.
-    await sleep(FRESH_MS + 500);
+    await elapse(FRESH_MS + 500, 'ttl elapses: the fresh-write window must run out so only the index can answer the recall');
     const got = await recallMod.recall(SPACE, 'Q', 20, undefined, ['entity'], undefined, undefined, undefined, { degraded: [] });
     assert.deepEqual(got.map(r => r._id).sort(), ['first', ...Array.from({ length: 6 }, (_, i) => `more-${i}`)].sort());
   });

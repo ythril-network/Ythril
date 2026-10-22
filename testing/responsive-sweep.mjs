@@ -98,6 +98,7 @@
  */
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
+import { loadingGone as loadingGoneOn, pageLoaded as pageLoadedOn, ROUTED_PAGE } from './_shared/page-loaded.mjs';
 
 const BASE = process.env.BASE ?? 'http://localhost:4260';
 const STATE = process.env.STATE;          // storageState json from an authenticated session
@@ -124,6 +125,10 @@ const VIEWPORTS = [[1400, 900], [1024, 900], [600, 900], [420, 900], [320, 700]]
 
 /** Every tab-strip flavour in the app: Brain's `.tabs`, and anything using the ARIA role. */
 const TAB_SELECTOR = '.tabs .tab, [role="tab"]';
+
+/** When this page has loaded: the shared waits of `_shared/page-loaded.mjs`, bound to the one page this sweep drives. */
+const loadingGone = () => loadingGoneOn(page);
+const pageLoaded = (loaded) => pageLoadedOn(page, loaded);
 
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'msedge' });
 
@@ -328,8 +333,7 @@ async function sweepFilesTab(routeLabel, w) {
   for (const treeOpen of [true, false]) {
     await page.evaluate(open => localStorage.setItem('ythril.sidebar', open ? 'open' : 'closed'), treeOpen);
     await page.goto(BASE + FILES_TAB, { waitUntil: 'networkidle', timeout: 25_000 });
-    await page.waitForSelector('app-file-listing table tbody tr', { timeout: 10_000 }).catch(() => {});
-    await page.waitForTimeout(500);
+    await pageLoaded('app-file-listing table tbody tr');
     const state = { width: w, treeOpen, paneOpen: false };
     const label = `${routeLabel} [files table, tree ${treeOpen ? 'open' : 'closed'}]`;
     if (report(label, await measureFilesTable(state))) await shoot(label, w);
@@ -338,7 +342,7 @@ async function sweepFilesTab(routeLabel, w) {
     const file = page.locator('app-file-listing tbody .file-name-btn:not(.dir)').first();
     if (await file.count()) {
       await file.click().catch(() => {});
-      await page.waitForTimeout(500);
+      await pageLoaded('app-file-detail-pane');
       const paneLabel = `${routeLabel} [files table, tree ${treeOpen ? 'open' : 'closed'}, pane open]`;
       if (report(paneLabel, await measureFilesTable({ ...state, paneOpen: true }))) await shoot(paneLabel, w);
     }
@@ -381,7 +385,12 @@ async function sweepTabs(routeLabel, w, depth = 0) {
     } catch {
       continue;   // a tab that vanished when a sibling was activated is not a finding
     }
-    await page.waitForTimeout(450);   // deferred blocks and the first data fetch
+    // No element is common to every panel to say its data has rendered (a panel with rows, one with an empty state, one that
+    // is a form), so the wait covers what IS observable, the loading indicators going, and the pause below only the first
+    // paint of a panel that shows none.
+    await loadingGone();
+    // waits-differently: no loaded element is common to every tab panel, and a panel with no indicator has nothing to observe
+    await page.waitForTimeout(450);
 
     const panelLabel = `${routeLabel} > ${label || `tab#${i}`}`;
     if (report(panelLabel, await measure())) await shoot(panelLabel, w);
@@ -414,7 +423,7 @@ for (const locale of LOCALES) {
         console.log(`${route}  — load timed out, skipped`);
         continue;
       }
-      await page.waitForTimeout(700);   // let deferred blocks and async data settle
+      await pageLoaded(ROUTED_PAGE);   // deferred blocks and async data: the loading indicators are gone
 
       if (report(route, await measure())) await shoot(route, w);
       if (route === FILES_TAB) await sweepFilesTab(route, w);

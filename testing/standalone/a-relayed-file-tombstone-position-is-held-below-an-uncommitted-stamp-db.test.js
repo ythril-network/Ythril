@@ -30,7 +30,7 @@ import { build, peerToken } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { parkWrites, settleWithin } from './_write-faults.mjs';
 import { writesAPosition, sentThenAcknowledged, pruneAt } from './_position-hold.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -68,7 +68,7 @@ describe('a relayed file tombstone position is held below an uncommitted stamp',
       first = deliver([tomb('first.txt')]);
       const reached = await settleWithin(park.reached, REACH_MS);
       assert.ok(reached.settled, `fixture: the first page's store never reached its position stamp write within ${REACH_MS} ms — nothing was parked`);
-      await sleep(5);   // the second page's receive time must differ from the parked stamp at millisecond resolution
+      await elapse(5, 'timestamps differ: the second page\'s receive time must differ from the parked stamp');   // the second page's receive time must differ from the parked stamp at millisecond resolution
       second = await settleWithin(deliver([tomb('second.txt')]), LATER_MS);
       assert.ok(second.settled, `fixture: the second page was not applied within ${LATER_MS} ms while the first was parked`);
       ({ upTo } = await sentThenAcknowledged(S));

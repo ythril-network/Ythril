@@ -27,8 +27,8 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, patch, delWithBody } from '../sync/helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { INSTANCES, post, patch, get, delWithBody } from '../sync/helpers.js';
+import { waitFor, holdsWithin } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CANDIDATE_CONFIGS = [
@@ -98,10 +98,12 @@ describe('config.json write safety', () => {
     const cfg = readConfig();
     cfg.spaces.find(s => s.id === edited).label = 'Edited By Hand';
     writeConfig(cfg);
-    // Let the bind-mount propagate AND the config watcher's stat poll (2s) notice.
+    // Let the bind-mount propagate AND the config watcher's stat poll (2s) notice: the reload refreshes the
+    // in-memory config, so the API listing shows the hand edit once the server has it.
     // Without this the request below would race the watcher and the test would be
     // asserting the old behaviour half the time.
-    await sleep(4000);
+    await waitFor(async () => (await get(INSTANCES.a, token, '/api/spaces')).body?.spaces?.find(s => s.id === edited)?.label === 'Edited By Hand',
+      40_000, 100, undefined, { what: 'the config watcher to load the hand-edited label into the running server' });
 
     // Now make the server persist config from its own copy, via an unrelated change.
     // No `confirm` — the rename route never accepted one, and since `RenameSpaceBody` became `.strict()` a
@@ -109,7 +111,9 @@ describe('config.json write safety', () => {
     // body, which does require it) and was passing on the strength of the leniency that change removed.
     const renameR = await patch(INSTANCES.a, token, `/api/spaces/${victim}/rename`, { newId: renamed });
     assert.equal(renameR.status, 200, JSON.stringify(renameR.body));
-    await sleep(600);
+    // The rename is on disk (through the bind mount) before the label is read back from the same file.
+    await waitFor(() => readConfig().spaces.some(s => s.id === renamed), 10_000, 100, undefined,
+      { what: 'the renamed space to show in config.json on disk' });
 
     const after = readConfig();
     assert.equal(
@@ -135,13 +139,8 @@ describe('config.json write safety', () => {
     // So: wait for space S to be ready (its write has landed), edit S on disk, THEN create space T, whose readiness
     // write is the background write under test and is guaranteed to come after the edit. Both S's edit and S's own
     // status must survive T's write.
-    const waitReady = async (spaceId) => {
-      for (let i = 0; i < 60; i++) {
-        if (readConfig().spaces.find(s => s.id === spaceId)?.indexStatus === 'ready') return true;
-        await sleep(1000);
-      }
-      return false;
-    };
+    const waitReady = (spaceId) => holdsWithin(() => readConfig().spaces.find(s => s.id === spaceId)?.indexStatus === 'ready',
+      60_000, 100, { what: `space '${spaceId}' to reach indexStatus=ready in config.json` });
     const s = `cfgsafe-ready-${RUN_ID}`;
     const t = `cfgsafe-later-${RUN_ID}`;
     const createS = await post(INSTANCES.a, token, '/api/spaces', { id: s, label: 'Readiness Race' });
@@ -155,7 +154,8 @@ describe('config.json write safety', () => {
     // The same window the first case waits out: the bind mount propagates and the config watcher's 2 s stat poll
     // reloads the edit. A server write inside that window is the documented gap the watcher narrows, not this
     // case's subject, which is the readiness write holding a stale snapshot.
-    await sleep(4000);
+    await waitFor(async () => (await get(INSTANCES.a, token, '/api/spaces')).body?.spaces?.find(sp => sp.id === s)?.label === 'Relabelled Before A Later Write',
+      40_000, 100, undefined, { what: 'the config watcher to load the relabelled space into the running server' });
 
     const createT = await post(INSTANCES.a, token, '/api/spaces', { id: t, label: 'Later Space' });
     assert.equal(createT.status, 201, JSON.stringify(createT.body));

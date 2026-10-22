@@ -37,7 +37,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as wb from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const { callBounded, withinWriteBound, SERVER_FIRST_MARGIN_MS } = wb;
 
@@ -160,7 +160,7 @@ describe('the housekeeping bound is a scope of the one bound', () => {
       wb.setWriteBoundForTest({ holdDeadlineMs: 30 });
       try {
         const sent = await wb.withinHousekeepingBound(async () => {
-          await sleep(80); // longer than a hold's deadline would allow
+          await elapse(80, 'ttl elapses: the 30 ms hold deadline a hold would enforce must run out before the operations are sent'); // longer than a hold's deadline would allow
           const out = [];
           for (let i = 0; i < 5; i++) out.push(await callBounded('find', [{}, {}], (a) => a[1], TARGET));
           return out;
@@ -168,7 +168,7 @@ describe('the housekeeping bound is a scope of the one bound', () => {
         assert.equal(sent.length, 5);
         for (const o of sent) assert.equal(o.timeoutMS, 7000);
         // The control: the same wait inside a hold refuses the operation unsent, so the comparison above is the scope's, not the clock's.
-        const refused = await withinWriteBound(async () => { await sleep(80); try { callBounded('find', [{}, {}], (a) => a, TARGET); return null; } catch (e) { return e; } });
+        const refused = await withinWriteBound(async () => { await elapse(80, 'ttl elapses: the hold\'s 30 ms deadline must run out before the operation is attempted'); try { callBounded('find', [{}, {}], (a) => a, TARGET); return null; } catch (e) { return e; } });
         assert.ok(refused instanceof StoreTimeout, 'a hold whose deadline passed must refuse the operation — the control for the case above');
       } finally {
         wb.setWriteBoundForTest({ holdDeadlineMs: 20_000 });
@@ -187,7 +187,7 @@ describe('the housekeeping bound is a scope of the one bound', () => {
       wb.setWriteBoundForTest({ holdDeadlineMs: 40 });
       try {
         const refused = await withinWriteBound(() => wb.withinHousekeepingBound(async () => {
-          await sleep(90);
+          await elapse(90, 'ttl elapses: the enclosing hold\'s 40 ms deadline must run out before the operation is attempted');
           try { callBounded('find', [{}, {}], (a) => a, TARGET); return null; } catch (e) { return e; }
         }));
         assert.ok(refused instanceof StoreTimeout, 'an inner walk escaped the hold it ran inside');
@@ -237,7 +237,7 @@ describe('the housekeeping bound is a scope of the one bound', () => {
     it('a scope that has ended binds nothing: work it left running is not bounded by it', async () => {
       let later;
       await wb.withinHousekeepingBound(async () => {
-        later = (async () => { await sleep(30); const args = [{}, {}]; let seen; callBounded('find', args, (a) => { seen = a; return null; }, TARGET); return { args, seen }; })();
+        later = (async () => { await elapse(30, 'ttl elapses: the housekeeping scope must have ended before the work it left running calls the driver'); const args = [{}, {}]; let seen; callBounded('find', args, (a) => { seen = a; return null; }, TARGET); return { args, seen }; })();
       });
       const { args, seen } = await later;
       assert.equal(seen, args, 'an ended scope still bounded an operation');

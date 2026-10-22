@@ -11,7 +11,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 const DIMS = 4;
@@ -25,12 +25,8 @@ const QUERY = unit([0.9, 0.3, 0.2, 0.1]);
 let mongo, score;
 
 async function waitQueryable(coll, name) {
-  for (let i = 0; i < 120; i++) {
-    const idx = await coll.listSearchIndexes(name).toArray();
-    if (idx[0]?.queryable) return;
-    await sleep(500);
-  }
-  throw new Error(`search index ${name} never became queryable`);
+  await waitFor(async () => (await coll.listSearchIndexes(name).toArray())[0]?.queryable, 60_000, 100, undefined,
+    { what: `search index ${name} to become queryable` });
 }
 
 describe('the local score mapping agrees with the engine, per metric', { skip }, () => {

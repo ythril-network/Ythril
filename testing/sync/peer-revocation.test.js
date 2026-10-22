@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { dockerExec, INSTANCES, post, get, del, waitFor, createTestSpace } from './helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -167,9 +167,10 @@ describe('Peer credential revocation (H7)', () => {
     const rm1 = await del(INSTANCES.a, tokenA, `/api/networks/${nid1}/members/${instanceIdB}`);
     assert.equal(rm1.status, 204);
 
-    // Give the async revocation a moment, then confirm the PAT survived.
-    // Negative assertion — fixed wait is correct; do NOT convert to waitFor (Q3).
-    await sleep(1500);
+    // Negative assertion (a waitFor on the surviving PAT would return at once, Q3). The positive control is the 204
+    // above: the removal starts `revokePeerCredentialsIfOrphaned` before answering, and its keep-or-revoke decision
+    // is taken before its first await. The window covers a revocation that would land after the answer.
+    await elapse(1500, 'absence window: after the 204 removal from one network, no revocation of the PAT may follow');
     assert.ok(
       tokensWithPeerId('ythril-a', instanceIdB).length >= 1,
       'PAT must survive while B is still a member of another network',

@@ -49,7 +49,8 @@ import assert from 'node:assert/strict';
 import { COLLECTION_SUFFIX } from '../../server/dist/config/types-knowledge.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const ROOT = process.cwd();
 const REGISTRY_SRC = join(ROOT, 'server/src/metrics/registry.ts');
@@ -122,9 +123,7 @@ describe('the storage collector', () => {
     await scrape();
 
     // The walk is real but tiny here — wait for the coalesced promise rather than guessing at a delay.
-    for (let i = 0; i < 200 && quota.usageRefreshInFlight(); i++) {
-      await sleep(10);
-    }
+    await waitFor(() => !quota.usageRefreshInFlight(), 5_000, 50, undefined, { what: 'the background usage refresh to finish' });
     assert.notEqual(quota.peekUsage(), null, 'the cold scrape did not start a measurement, so it never arrives');
 
     const text = await scrape();
@@ -144,12 +143,10 @@ describe('the storage collector', () => {
 
     for (let i = 0; i < 9; i++) quota.refreshUsageInBackground();
 
-    for (let i = 0; i < 300 && quota.usageRefreshInFlight(); i++) {
-      await sleep(10);
-    }
+    await waitFor(() => !quota.usageRefreshInFlight(), 5_000, 50, undefined, { what: 'the coalesced usage refresh to finish' });
     // Let any un-coalesced stragglers land before counting, or an unguarded run could still be in flight and
     // the test would under-count its way to a pass.
-    await sleep(60);
+    await elapse(60, 'absence window: no second walk lands after the coalesced refresh finished');
 
     assert.equal(
       quota.usageMeasurementCount() - before, 1,
@@ -173,9 +170,7 @@ describe('the storage collector', () => {
   it('5. exposes how stale the numbers are', async () => {
     quota.invalidateUsageCache();
     quota.refreshUsageInBackground();
-    for (let i = 0; i < 200 && quota.usageRefreshInFlight(); i++) {
-      await sleep(10);
-    }
+    await waitFor(() => !quota.usageRefreshInFlight(), 5_000, 50, undefined, { what: 'the background usage refresh to finish' });
     // POISON the gauge, do not reset it. Two traps here, both hit in sequence:
     //   1. a prom-client gauge retains its last value, and test 3 already scraped — so with no preparation at all,
     //      a mutation that stops setting the age still reads a plausible number left behind;

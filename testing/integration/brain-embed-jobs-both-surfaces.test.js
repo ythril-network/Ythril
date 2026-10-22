@@ -29,7 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, delWithBody } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -182,16 +182,15 @@ describe('MCP: the same two capabilities, through the other door', () => {
      * about the MCP one in the middle, and in such a window a second implementation still has nowhere to hide.
      */
     let rest, mcp, again;
-    for (let i = 0; i < 10; i++) {
+    await holdsWithin(async () => {
       rest = await listRest();
       mcp = await session.callTool('list_embed_jobs', { space: SPACE });
       again = await listRest();
       assert.ok(!mcp?.isError, `refused: ${JSON.stringify(mcp)}`);
-      if (JSON.stringify(rest.body.counts) === JSON.stringify(again.body.counts)) break;
-      await sleep(300);
-    }
+      return JSON.stringify(rest.body.counts) === JSON.stringify(again.body.counts);
+    }, 10_000, 100, { what: 'two REST readings of the embed queue that agree around the MCP one' });
     assert.deepEqual(again.body.counts, rest.body.counts,
-      'the queue moved on all ten attempts, so nothing here can be compared — the embedder is not settling');
+      'the queue moved on every attempt, so nothing here can be compared — the embedder is not settling');
     assert.deepEqual(mcp.structuredContent.counts, rest.body.counts,
       'the two surfaces must answer the same question with the same numbers');
     assert.match(mcp.content[0].text, /pending/i, 'and a human-readable line, because a model reads the text');

@@ -42,7 +42,7 @@ import { sawLiveWrite } from './_active-operations.mjs';
 import { startDelayedWriteRelay } from './_delayed-write-relay.mjs';
 import { openStalledWriteDoors, seedDoorSpace, stalledWriteDoors } from './_stalled-write-doors.mjs';
 import { holderCases, loadHolderModules, seedHolderSpace } from './_seq-hold-cases.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -156,7 +156,7 @@ async function watchForLanding(lane, atAnswer) {
   const landed = new Set();
   const until = Date.now() + SETTLE_MS;
   do {
-    await sleep(POLL_MS);
+    await elapse(POLL_MS, 'sampler interval: the lane is read every POLL_MS for the whole settle window, collecting every landing');
     for (const d of changedDocuments(atAnswer, await step('the read of the settle window', () => readLane(lane.space)))) landed.add(d);
   } while (Date.now() < until);
   return [...landed].sort();

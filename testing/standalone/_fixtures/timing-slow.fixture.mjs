@@ -7,14 +7,14 @@
  */
 import { test } from 'node:test';
 import { READY } from './timing-constants.mjs';
-import { sleep } from '../../_shared/sleep.mjs';
+import { elapse } from '../../_shared/sleep.mjs';
 
 test('finishes before the kill', () => {});
 
 test('is still running when the kill comes', async () => {
   // Long enough for the report of the first test to have reached the reporter, short enough that the orphaned
   // worker (the gate kills the runner, not this process) goes away by itself.
-  await sleep(1500);
+  await elapse(1500, 'simulated latency: a run that reaches the reporter before it announces itself');
   console.log(READY);
-  await sleep(8000);
+  await elapse(8000, 'simulated latency: a test still running when the gate kills its runner');
 });

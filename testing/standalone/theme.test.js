@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post } from '../sync/helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,7 +60,8 @@ function writeConfig(cfg) {
 
 async function reloadConfig() {
   // Wait for Docker Desktop bind-mount propagation before triggering reload.
-  await sleep(600);
+  // A condition wait cannot stand in for it: the only probe is the reload itself, and a reload that reads the stale file destroys the change.
+  await elapse(600, 'bind-mount propagation: Docker Desktop delivers the host write to the container late, and a reload that reads the stale file overwrites it');
   const r = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
   assert.equal(r.status, 200, `reload-config failed: ${JSON.stringify(r.body)}`);
 }
@@ -109,15 +110,16 @@ describe('GET /api/theme — external theming endpoint', () => {
     // initial reload (saveConfig() in the server may have written back the
     // stale version on the first attempt).
     let body;
+    // waits-differently: every miss rewrites the file and reloads it, and a reload inside a waitFor probe would read the stale file and destroy the change
     for (let attempt = 0; attempt < 10; attempt++) {
       const r = await fetch(`${INSTANCES.a}/api/theme`);
       assert.equal(r.status, 200);
       body = await r.json();
       if (body.cssUrl === testUrl) break;
       writeConfig(cfg);
-      await sleep(600);
+      await elapse(600, 'bind-mount propagation: the rewritten file reaches the container before the reload reads it');
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-      await sleep(400);
+      await elapse(400, 'pacing: spacing between attempts to make the theme visible');
     }
     assert.equal(body.cssUrl, testUrl, `Expected cssUrl '${testUrl}', got '${body.cssUrl}'`);
   });

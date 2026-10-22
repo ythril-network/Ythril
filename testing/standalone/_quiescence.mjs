@@ -84,6 +84,7 @@ export function busyQueues(queues) {
 export async function untilQuiescentOf(queues, { stable = 4, maxTurns = 4000 } = {}) {
   let idleTurns = 0;
   let busy = [];
+  // waits-differently: the bound is a count of event-loop turns, not a clock deadline - the same count was a second on Windows and a tenth of one on CI when it was a time, and the turn is what the queues drain on
   for (let i = 0; i < maxTurns; i++) {
     busy = busyQueues(queues);
     if (busy.length === 0) { if (++idleTurns >= stable) return; } else idleTurns = 0;

@@ -25,7 +25,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'node:crypto';
 import { INSTANCES, post, get, waitFor, createTestSpace } from './helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -107,17 +106,24 @@ describe('a link arriving FROM a file is checked like any other', () => {
     });
     assert.equal(e.status, 200, JSON.stringify(e.body));
 
+    // A control link in the SAME page, to an entity that is not here: one check judges a page and records its
+    // violations in one write (`sync/linkage-check.ts`), so once the control's violation is visible the check that
+    // would have reported the resolvable link has run.
+    const controlPath = `q39/${RUN}/present-target-control.md`;
     const r = await post(INSTANCES.a, token, `/api/sync/batch-upsert?spaceId=${SPACE}`, {
-      links: [linkDoc({ from: filePath, fromKind: 'file', to: entityId, toKind: 'entity' })],
+      links: [
+        linkDoc({ from: filePath, fromKind: 'file', to: entityId, toKind: 'entity' }),
+        linkDoc({ from: controlPath, fromKind: 'file', to: randomUUID(), toKind: 'entity' }),
+      ],
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
 
     /*
      * A negative assertion on a fire-and-forget write needs a WAIT, or it passes because the check had not
-     * run yet rather than because it found nothing. The positive case above establishes that ten seconds is
-     * long enough for one to land; this waits the same way and then requires the list to be clean.
+     * run yet rather than because it found nothing. It waits on the control's violation — the positive
+     * control — and then requires the resolvable link to have none.
      */
-    await sleep(3_000);
+    assert.ok(await violationFor(controlPath), `the control link ${controlPath} was never checked, so its page was not`);
     const list = await get(INSTANCES.a, token, '/api/conflicts/link-violations');
     assert.equal(list.status, 200);
     const v = (list.body.violations ?? []).find(x => x.docId === filePath);

@@ -47,7 +47,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { parkWrites, withCollectionAsView } from './_write-faults.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { waitForValue } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 const SUITE = 'strayfm';
@@ -90,14 +90,11 @@ const arrivedRow = (space, id, extra = {}) => {
 /** Fail rather than hang when a hold is never reached. */
 const within = (p, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what} was never reached`)), 5000))]);
 
+/** The audit write is fire-and-forget, so wait for the entry rather than read once. */
 async function auditFor(space, operation) {
   const audit = door.mongo.getDb().collection('audit_log');
-  for (let i = 0; i < 50; i++) {        // the audit write is fire-and-forget, so poll rather than sleep once
-    const e = await audit.findOne({ spaceId: space, operation });
-    if (e) return e;
-    await sleep(20);
-  }
-  return null;
+  return waitForValue(() => audit.findOne({ spaceId: space, operation }), 5000, 50, undefined,
+    { what: `an audit entry for ${operation} in ${space}` });
 }
 
 describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered into the space files', { skip }, () => {

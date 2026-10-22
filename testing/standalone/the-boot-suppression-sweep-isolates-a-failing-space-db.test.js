@@ -36,7 +36,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { withCollectionAsView, withStalledReads, setWriteBoundForTest } from './_write-faults.mjs';
 import { MongoNetworkError } from 'mongodb';
 import { waitFor } from '../_shared/wait-for.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -68,12 +68,14 @@ const warnsFor = (space) => lines.filter(l => l.includes('WARN') && l.includes(S
 /**
  * Reads of `collName` fail with `makeError()` once `gate` (a promise) opens: `find(...).toArray()` is what the sweep reads with.
  * Returns the restore. A failure made at the call, not by the store, so the CLASS of the error is the test's to choose.
+ * `reachedReads` counts the reads that arrived at a patched collection, held at `gate` or not: how a case knows a sweep is held.
  */
+let reachedReads = 0;
 function failReadsOf(proto, collName, makeError, gate = Promise.resolve()) {
   const original = proto.find;
   proto.find = function patched(...args) {
     if (this.collectionName !== collName) return original.apply(this, args);
-    return { toArray: async () => { await gate; throw makeError(); } };
+    return { toArray: async () => { reachedReads += 1; await gate; throw makeError(); } };
   };
   return () => { proto.find = original; };
 }
@@ -195,7 +197,7 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
       assert.doesNotThrow(() => sweep.sweepAfterMetaWrite('delta', SUPPRESSING), 'asking for the sweep threw into the meta write');
       assert.ok(await waitFor(() => warnsFor('delta').length > 0, 10_000, 50, undefined, { what: 'the failed meta-write sweep to be said' }));
       // Room for an unhandled rejection or a second line to show itself.
-      await sleep(300);
+      await elapse(300, 'absence window: no unhandled rejection or second line after the first line was said');
     }, { pipeline: [{ $addFields: { _x: { $toInt: '$a' } } }] });
 
     const said = warnsFor('delta');
@@ -226,13 +228,14 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     let open;
     const gate = new Promise(r => { open = r; });
     const restore = failReadsOf(Object.getPrototypeOf(mongo.col('probe')), 'foxtrot_facts', () => new Error('foxtrot read refused'), gate);
+    const readsBefore = reachedReads;
     try {
       sweep.sweepAfterMetaWrite('foxtrot', SUPPRESSING);
-      await sleep(50); // the first sweep is now held at its read
+      await waitFor(() => reachedReads > readsBefore, 5_000, 50, undefined, { what: 'the first sweep to be held at its read' }); // the first sweep is now held at its read
       sweep.sweepAfterMetaWrite('foxtrot', SUPPRESSING); // joins it and queues one rerun, which nobody awaits
       open();
       assert.ok(await waitFor(() => failures.length >= 2, 10_000, 50, undefined, { what: 'the sweep and its rerun to fail' }));
-      await sleep(300);
+      await elapse(300, 'absence window: no third failure or unhandled rejection after the sweep and its rerun failed');
     } finally { restore(); }
 
     assert.equal(failures.length, 2, `${failures.length} failures counted for one sweep and one rerun: a failure was said twice or lost`);
@@ -248,14 +251,18 @@ describe('the suppression sweep isolates a failing space', { skip }, () => {
     const gate = new Promise(r => { open = r; });
     const restore = failReadsOf(Object.getPrototypeOf(mongo.col('probe')), 'golf_facts', () => new Error('golf read refused'), gate);
     let boot;
+    const readsBefore = reachedReads;
     try {
       sweep.sweepAfterMetaWrite('golf', SUPPRESSING);
-      await sleep(50); // held at its read
+      await waitFor(() => reachedReads > readsBefore, 5_000, 50, undefined, { what: 'the golf sweep to be held at its read' }); // held at its read
       boot = sweep.sweepEverySpaceAtBoot(); // reaches golf, joins the held sweep
-      await sleep(300);
+      // No observable says the walk has joined (a join reads nothing), so it is given time to reach golf before the gate opens.
+      await elapse(300, 'pacing: the boot walk reaches golf and joins the held sweep before the gate opens');
       open();
       await boot;
-      await sleep(300);
+      // The rerun the join queued fails after the walk returned: wait for its report, then give a third a window to show itself.
+      await waitFor(() => failures.length >= 2, 10_000, 50, undefined, { what: 'the held sweep and the rerun its join queued to fail' });
+      await elapse(300, 'absence window: no third failure or unhandled rejection after the sweep and its rerun failed');
     } finally { restore(); }
 
     // The held sweep failed once (the walk, which awaited it, says it) and the rerun the join queued failed once (nobody

@@ -22,7 +22,7 @@ import { describe, it, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 let log, runWithRequestId, currentRequestId, subscribe;
 
@@ -81,11 +81,11 @@ describe('the id is ambient for the duration of a request', () => {
      */
     const seen = [];
     const one = runWithRequestId('req-one', async () => {
-      await sleep(5);
+      await elapse(5, 'simulated latency: the first request awaits before logging, so the two continuations interleave');
       seen.push(['one', currentRequestId()]);
     });
     const two = runWithRequestId('req-two', async () => {
-      await sleep(1);
+      await elapse(1, 'simulated latency: the second request awaits before logging, so the two continuations interleave');
       seen.push(['two', currentRequestId()]);
     });
     await Promise.all([one, two]);

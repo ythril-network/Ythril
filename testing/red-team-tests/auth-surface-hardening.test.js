@@ -34,7 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, dockerExec } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -358,14 +358,11 @@ describe('M8 — a TOTP code cannot be replayed inside its validity window', () 
    *  so the first request can surface as ECONNRESET. Drive one through until the
    *  API answers cleanly. */
   async function waitForApi() {
-    for (let i = 0; i < 30; i++) {
+    await waitFor(async () => {
       try {
-        const r = await fetch(`${INSTANCES.a}/health`);
-        if (r.ok) return;
-      } catch { /* stale socket / still booting */ }
-      await sleep(500);
-    }
-    throw new Error('instance A did not come back after restart');
+        return (await fetch(`${INSTANCES.a}/health`)).ok;
+      } catch { return false; /* stale socket / still booting */ }
+    }, 15_000, 100, 'instance A did not come back after restart', { what: 'instance A /health to answer ok' });
   }
 
   // RFC 6238 TOTP (SHA-1, 30 s, 6 digits) — mirrors server/src/auth/totp.ts

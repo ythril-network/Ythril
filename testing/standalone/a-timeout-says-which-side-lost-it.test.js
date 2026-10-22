@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { waitFor } from '../sync/helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const never = async () => false;
@@ -39,7 +39,7 @@ describe('waitFor can be given a diagnostic that goes and looks', () => {
   it('awaits an async diagnose instead of interpolating a promise', async () => {
     await assert.rejects(
       () => waitFor(never, 30, 10, async () => {
-        await sleep(5);
+        await elapse(5, 'simulated latency: a diagnosis that goes and looks takes a moment');
         return 'the sender holds it at seq 42';
       }),
       (err) => {

@@ -39,7 +39,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason, openTestMongo, closeTestMongo } from './_mongo-harness.mjs';
 import { holdDocumentLock, holdCounterLock, settleWithin } from './_write-faults.mjs';
 import { activeOperations, describeOperations, waitForLiveWrite } from './_active-operations.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -106,7 +106,7 @@ describe('a released lock leaves no live write', { skip }, () => {
         try {
           const stalled = await waitForLiveWrite(mongo, shape.coll);
           assert.ok(stalled, `fixture: the write behind the lock was never active on ${shape.coll} — the stall is not real, or currentOp does not see it`);
-          await sleep(STALLED_FOR_MS);
+          await elapse(STALLED_FOR_MS, 'ttl elapses: the write stays stalled past the point where the server\'s retry sleeps are at their longest');
         } finally {
           await lock.release();
         }
