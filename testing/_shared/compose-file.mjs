@@ -71,6 +71,22 @@ export function memoryMiB(value) {
   return Number(m[1]) * ({ g: 1024, m: 1, k: 1 / 1024 })[m[2].toLowerCase()];
 }
 
+/**
+ * The command a service's healthcheck RUNS, read per form compose accepts: `["CMD-SHELL", s]` and `["CMD", "sh", "-c", s]`
+ * run `s` in a shell, and a bare string is `CMD-SHELL` written short. Anything else — an exec form with no shell, `["NONE"]`,
+ * no healthcheck at all — throws: read as an empty command, it would pass or fail a rule about a command nobody runs.
+ * The one place the forms are known, so a rule on "what the probe runs first" is written once, against the string.
+ */
+export function healthcheckCommand(service) {
+  const test = service?.healthcheck?.test;
+  if (typeof test === 'string' && test.trim() !== '') return test;
+  if (Array.isArray(test)) {
+    if (test[0] === 'CMD-SHELL' && test.length === 2 && typeof test[1] === 'string') return test[1];
+    if (test[0] === 'CMD' && test.length === 4 && test[1] === 'sh' && test[2] === '-c' && typeof test[3] === 'string') return test[3];
+  }
+  throw new Error(`a healthcheck test this module cannot read as a shell command: ${JSON.stringify(test ?? null)}`);
+}
+
 /** A service's `environment`, as `{ KEY: value }` — compose accepts a map or a list of `KEY=value`. */
 export function environmentOf(service) {
   const env = service?.environment;

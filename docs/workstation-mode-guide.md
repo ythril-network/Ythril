@@ -278,6 +278,16 @@ docker compose up -d
 docker compose down -v
 ```
 
+### Wiping Docker's disk (Windows)
+
+`npm run docker:wipe` (or `npm run machine:free -- -Wipe`) deletes Docker Desktop's data disk: every image, container and named volume. Data in bind mounts survives it; with the override in [Workstation (Docker) setup](#workstation-docker-setup--one-time) that is `local-data/` and `config/`.
+
+While the engine answers, the wipe first records the instance running from this checkout in `local-data/owner-instance/owner-instance.json` (services, images, builds, bind mounts and the commit; never an environment), stops it cleanly, and after Docker is back rebuilds every service with a `build:` at that commit (passed as the `GIT_REVISION` build argument, which the Ythril image keeps as its `org.opencontainers.image.revision` label; `unknown` when unset) and starts the recorded services with `docker compose up --wait`.
+
+It refuses, before stopping anything, when a running service mounts a named volume that the compose file's `x-ythril: disposable-volumes:` list does not name, and always one at `/data`, `/data/db` or `/data/configdb`: the default `ythril-data`, `ythril-mongo-data` and `ythril-mongo-configdb` volumes are refused, so bind them as the override does first. Only the two model-cache volumes are named there; their models are fetched again on first use. It is a list rather than a label on each volume because adding a label to an existing volume makes `docker compose up` offer to recreate it, which deletes it.
+
+A wipe that stopped part-way leaves its record pending, and the next one refuses until told: `-UseRecord` restores that record, `-DiscardRecord` replaces it, and `-RestoreOnly` brings the recorded instance back without deleting anything. When the engine did not answer, nothing is recorded and the wipe ends by naming the `docker compose up` to run yourself. `npm run docker:compact` stops and brings back the same instance on its own.
+
 ---
 
 ## Update to newer image version
@@ -347,6 +357,9 @@ services:
   ythril:
     build: .
     image: ythril-local
+    # Built from this checkout, never pulled: `docker compose pull`, and the restore after a
+    # Docker wipe, must not look for `ythril-local` in a registry.
+    pull_policy: never
     extra_hosts:
       - "host-gateway:host-gateway"
     volumes:
