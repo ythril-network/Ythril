@@ -42,7 +42,7 @@
 import { deleteStoredIfPresent } from './stored-bytes.js';
 import { forgetPathKeyedCache } from './path-keyed-cache.js';
 import { hasLiveFileRecordExactlyAt } from './file-meta.js';
-import { peerFileKey } from './sandbox.js';
+import { heldFileAt, peerFileKey } from './sandbox.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
@@ -57,17 +57,18 @@ function sayCleanupFailure(spaceId: string, key: string, err: unknown): void {
 }
 
 /**
- * @param filePath the path as the door was given it (or the pull's key): resolved and symlink-checked here
+ * @param at the path as the door was given it (or the pull's key), resolved and symlink-checked here; or bytes this instance holds,
+ *   already located where its manifest found them (`heldFileAt`), whose on-disk spelling can differ from their key's
  * @param cause the failure of the record step that left the bytes unrecorded, or `null` when there is none (the pull's repair)
  * @returns whether the bytes were taken back: `false` when a live row names the path, and `false` when the lookup (or the removal)
  *   failed, which is said, never thrown, and `false` when the store was not asked because `cause` is the store not answering
  */
-export async function removeUnrecordedBytes(spaceId: string, filePath: string, cause: unknown): Promise<boolean> {
+export async function removeUnrecordedBytes(spaceId: string, at: string | { held: string }, cause: unknown): Promise<boolean> {
   // Not said here: the failure is the caller's, which rethrows or reports it, and a second line would log the store's text twice.
   if (cause != null && storeIsNotAnswering(cause)) return false;
-  let key = filePath;
+  let key = typeof at === 'string' ? at : at.held;
   try {
-    const resolved = await peerFileKey(spaceId, filePath);
+    const resolved = typeof at === 'string' ? await peerFileKey(spaceId, at) : await heldFileAt(spaceId, at.held);
     key = resolved.key;
     // A lookup that throws is NOT "no row": it lands in the catch below with the bytes still on disk.
     if (await withinWriteBound(() => hasLiveFileRecordExactlyAt(spaceId, key))) return false;

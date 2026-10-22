@@ -25,7 +25,7 @@
  *   `<DATA_ROOT>/files`, so the restored rows describe the backup's moment over the bytes of THIS one. Each space's files are read against its
  *   rows (`files/disk-against-rows.ts`, the classifier the pull shares) and the space's report says which no longer match, by class. It reports
  *   and repairs nothing - a tombstone written by a restore would delete a peer's copy - and it can never fail the restore: a check that throws or
- *   outlasts the file-system bound is `files: { checked: false, reason }` and the restore goes on, because a throw would make the runner drop and
+ *   outlasts the file-system bound is `files: { checked: false, reasonCode, reason }` and the restore goes on, because a throw would make the runner drop and
  *   reload the space again.
  * - **The completion** is the runner's write: it removes the entry, forgets the RECEIVE marks the registration named (`forgetReceived`),
  *   marks the space done on the set with its index results, and - for the last one - ends the set, after which {@link onRestoreEnd} tells
@@ -80,10 +80,18 @@ const REPORT_PATH_MAX = 256;
 /** One class of the files report: how many files, and at most a share of their paths. */
 export interface FileClassReport { count: number; paths: string[] }
 
+/**
+ * Why a space's files were not checked: `timeout` (the file-system bound ended the check; `limitMs` is that bound) or `failed` (it could not
+ * run; the cause is in the server log). A client words each code in its own language; `reason` is the same in English, for a reader of the raw
+ * report, and names what to do.
+ */
+export const FILES_NOT_CHECKED_CODES = ['timeout', 'failed'] as const;
+export type FilesNotCheckedCode = typeof FILES_NOT_CHECKED_CODES[number];
+
 /** What a restored space reports of its files. */
 export type RestoreFilesReport =
   | { checked: true; classes: Partial<Record<FileMismatchClass, FileClassReport>> }
-  | { checked: false; reason: string };
+  | { checked: false; reasonCode: FilesNotCheckedCode; limitMs?: number; reason: string };
 
 /**
  * The per-class report of `classes` within `allowance` paths for the whole space: only the classes that have a file, each with its exact count
@@ -119,11 +127,14 @@ async function filesReportOfSpace(ctx: SpaceActBodyContext, spaceId: string): Pr
   } catch (err) {
     checkFailureSaid(`${ctx.entry.setId ?? ctx.entry.id}\0${spaceId}`,
       () => log.warn(`restore: the file check of space '${peerText(spaceId)}' failed: ${peerText(err)}`));
+    const again = 'restoring the backup again repeats the check';
     if (isTimeBoundEnded(err)) {
       const ms = spaceActKnob('SPACE_ACT_FS_MS');
-      return { checked: false, reason: `the check of the files took longer than ${ms >= 1000 ? `${ms / 1000} s` : `${ms} ms`} and was left unfinished; the rows of this space may not match the bytes on disk` };
+      return { checked: false, reasonCode: 'timeout', limitMs: ms, reason: `the check of the files took longer than ${ms >= 1000 ? `${ms / 1000} s` : `${ms} ms`} `
+        + `and was left unfinished, so the files of this space were not compared with its restored records; ${again}` };
     }
-    return { checked: false, reason: 'the check of the files could not run (see the server log); the rows of this space may not match the bytes on disk' };
+    return { checked: false, reasonCode: 'failed', reason: 'the check of the files could not run (the server log names the cause), so the files of this '
+      + `space were not compared with its restored records; ${again}` };
   }
 }
 

@@ -5,11 +5,9 @@
  * `no-new-god-files.test.js` and file sync kept growing inside it: Q-68 (the peer's local id for the plain file
  * routes) and the conflict rule that follows it both belong here, beside the transfer they change.
  */
-import path from 'node:path';
 import { Readable } from 'node:stream';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { v4 as uuidv4 } from 'uuid';
-import { getDataRoot } from '../config/loader.js';
 import type { NetworkMember, ConflictDoc, FileMetaDoc } from '../config/types.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -20,7 +18,7 @@ import { ISO_START_CURSOR, ISO_READ_START, type IsoPosition } from '../util/seq-
 import {
   stageStored, commitStaged, statStored, bytesPresent, isMissingPath, type StagedStoredFile,
 } from '../files/stored-bytes.js';
-import { resolveSafePathChecked, fileKeyOf } from '../files/sandbox.js';
+import { resolveSafePathChecked, fileKeyOf, heldFileAt } from '../files/sandbox.js';
 import { buildFileManifest, seedFileHash, type ManifestEntry } from '../files/manifest.js';
 import { heldRowsFor, repairReasonOf } from '../files/disk-against-rows.js';
 import { toDocId } from '../util/paths.js';
@@ -230,9 +228,6 @@ export async function syncFiles(
     let pulledBytes = 0;
     let repairs = 0;
 
-    const dataRoot = getDataRoot();
-    const spaceRoot = path.resolve(dataRoot, 'files', spaceId);
-
     // A peer's entry is a spelling of a path until it is resolved (Q-404): every lookup below — the local manifest, the sync
     // base, the held tombstones, the file row — is made by the KEY, as the write is made at the resolved path. The peer's own
     // text is used for one thing, asking the peer for the bytes it advertised under it. The key is derived lexically, with no
@@ -297,7 +292,9 @@ export async function syncFiles(
               // their author and their deliverer, which a peer's file must never be (the derived-description guard and the
               // authorless-placeholder test both read `author == this instance`). So they are taken back, and the next cycle delivers
               // them as an ordinary arrival, with its true deliverer.
-              if (await removeUnrecordedBytes(spaceId, key, null)) countFileArrival('pull', 'repaired_missing_row');
+              // Removed where the manifest found them (`heldFileAt`): `key` is the NFC row id, and on a file system that keeps a
+              // decomposed name the bytes are not at it. The record is still looked up by the same key.
+              if (await removeUnrecordedBytes(spaceId, { held: local.path }, null)) countFileArrival('pull', 'repaired_missing_row');
               continue;
             }
             // A row exists, so the author and deliverer it already has stay: only its size, hash and processing are brought up to date.
@@ -313,8 +310,11 @@ export async function syncFiles(
 
       try {
         // The one place this entry's path meets the disk: resolved WITH the symlink check, before a byte is fetched for a path
-        // the write would refuse (the key above is lexical).
-        const abs = await resolveSafePathChecked(spaceId, key);
+        // the write would refuse (the key above is lexical). A file this instance holds is written where its manifest found it
+        // (`heldFileAt`: the on-disk spelling, which a decomposed name keeps): at the NFC key the disk check below would find nothing,
+        // and a change the peer alone made would land as a conflict copy beside the one file, on every cycle.
+        const resolveTarget = async (): Promise<string> => (local ? (await heldFileAt(spaceId, local.path)).abs : await resolveSafePathChecked(spaceId, key));
+        const abs = await resolveTarget();
         // The space quota, asked BEFORE the body is fetched, on the size the manifest declares: a pull used to fetch and write
         // whatever the space held. The measurement may be a few seconds old, so the bytes this call has already written are added.
         // A refusal is not a delivery: no base is written, and the file is asked for again once there is room.
@@ -391,7 +391,7 @@ export async function syncFiles(
           // again and the disk is asked whether it still holds what this pull decided on: the stage took as long as the peer did,
           // so a local edit may have landed meanwhile, and then the peer's bytes are a conflict, not a replacement.
           const committed = (!local || action === 'replace')
-            && await commitStaged(abs, staged, { stillValid: async () => (await resolveSafePathChecked(spaceId, key)) === abs && await diskStillHolds(abs, local) });
+            && await commitStaged(abs, staged, { stillValid: async () => (await resolveTarget()) === abs && await diskStillHolds(abs, local) });
           if (committed) {
             pulledBytes += staged.size;
             try {
@@ -406,7 +406,7 @@ export async function syncFiles(
               // are removed (`removeUnrecordedBytes`, the one answer every door that writes bytes gives: it keeps them only when a
               // live row still names the path, an overwrite, or the lookup could not say), no base is written, and the next cycle delivers the file again with
               // its true deliverer (Q-254).
-              await removeUnrecordedBytes(spaceId, key, err);
+              await removeUnrecordedBytes(spaceId, local ? { held: local.path } : key, err);
               sayPullFailure(RECORD_STEP, spaceId, key, err);   // counted `record_failed` by the recorder
               continue;
             }
@@ -470,7 +470,7 @@ export async function syncFiles(
       if (decideFilePush(localEntry, peerManifestMap.get(localPath), bases.get(localPath), answered) === 'skip') continue;
       try {
         // The bytes are read where the manifest found them (the on-disk spelling), never at the NFC key the loop is keyed by.
-        const absPath = path.join(spaceRoot, localEntry.path);
+        const absPath = (await heldFileAt(spaceId, localEntry.path)).abs;
         // One request to the peer's upload door for THIS file. Whole-file body: BATCH_FETCH_TIMEOUT_MS is a control-plane budget
         // and would abort any upload slower than a minute. Same reasoning as the download above — see PEER_TRANSFER_TIMEOUT_MS.
         // What goes in it (one streamed body, or ranges under the peer's limit) is `pushStoredFile`'s to decide.

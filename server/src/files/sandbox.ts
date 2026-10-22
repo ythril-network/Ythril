@@ -188,6 +188,27 @@ export async function peerFileKey(spaceId: string, userPath: string): Promise<{ 
   return resolved;
 }
 
+/**
+ * Where a file this instance HOLDS is, given the path its own manifest walk found it at (`buildFileManifest`'s `path`): that spelling
+ * kept as it is on disk, with the boundary and symlink checks of {@link peerFileKey}, and the key the file's row has.
+ *
+ * ## What it prevents (bundle-111)
+ *
+ * Every other resolver normalises a path to NFC first, which is right for a path somebody supplies (one name, one key) and wrong for
+ * bytes already on disk under a decomposed (NFD) name, which some file systems keep: the push read, the pull's replace and its
+ * take-back all looked at the NFC spelling, where nothing is. A replace then found "no file" and wrote a conflict copy on every cycle,
+ * and a take-back removed nothing. Bytes the manifest found are touched where they are; their row is still found by `key`.
+ *
+ * @throws RangeError when the path leaves the space or names a symlinked escape
+ */
+export async function heldFileAt(spaceId: string, manifestPath: string): Promise<{ abs: string; key: string }> {
+  const root = spaceRoot(spaceId);
+  const abs = path.resolve(root, manifestPath.replace(/\\/g, '/').replace(/^\/+/, ''));
+  if (!isWithin(root, abs) || abs === root) throw new RequestRefusal(`Path traversal attempt: '${manifestPath}'`);
+  await assertNoSymlinkEscape(spaceId, abs);
+  return { abs, key: toDocId(path.relative(root, abs)) };
+}
+
 /** Return the absolute data root for a space's files */
 export function spaceRoot(spaceId: string): string {
   const dataRoot = getDataRoot();

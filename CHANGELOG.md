@@ -197,7 +197,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A driver argument error drops only its own document (`rejected`; a single route `400`). A merge-dropped duplicate edge's or re-keyed link's tombstone carries `originalSeq`.
 - **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good, and a refused element's seq no longer moves it; a tombstone `instanceId` over 256 characters is refused.
 - **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since is kept. An admin restore removes a file description, source, property, tag or mark its backup lacks (`keysRemoved`).
-- **Sync:** A pull counts a file stored under a decomposed (NFD) name once, where it used to see two files.
+- **Sync:** A pull counts a file stored under a decomposed (NFD) name once, where it used to see two files, and replaces or takes back its bytes where they are.
 - **Files:** A peer's file, pushed or pulled, is processed by this instance's rules (converted, chunked, media); a new version replaces old passages; a failed record write leaves no new file unless the database was down.
 - **Files:** A pushed file's later description and tag edits are no longer skipped; arriving bytes revive a soft-deleted path and get this instance's retention window; a metadata arrival no longer overwrites a newer copy.
 - **Files:** A file's processing status or a move of a peer's file no longer changes its `updatedAt` (a false Merkle divergence); changed media over a `complete` file is analysed again. A re-upload with metadata takes one seq; a write that changes nothing takes none.

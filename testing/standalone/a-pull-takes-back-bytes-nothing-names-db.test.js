@@ -270,4 +270,37 @@ describe('the pull takes back what nothing names, and says what it refuses', { s
       assert.equal(removed, true, 'the answer does not say the bytes were taken back');
     });
   });
+
+  describe('a name this instance stores decomposed (NFD) is the one file its NFC key names (bundle-111 lens S1)', () => {
+    // The pull is keyed by the NFC row id; the bytes are where the manifest found them. Both cases go red with the disk touched at the key.
+    const NFC = 'Café.html'.normalize('NFC');
+    const NFD = NFC.normalize('NFD');
+    const names = () => fs.readdirSync(door.localFilesRoot(S)).filter(n => n.normalize('NFC') === NFC);
+
+    it('bytes held under the NFD name with no row are taken back from where they are, and the file arrives once', async () => {
+      assert.notEqual(NFD, NFC, 'the fixture name has no decomposed form');
+      const content = 'bytes under a decomposed name whose record failed';
+      door.writeLocalFile(S, NFD, content);
+      door.seedPeerFile(S, NFC, content);
+      const removed = await counted('repaired_missing_row');
+      for (let c = 0; c < CYCLES && !(await rowOf(NFC)); c++) await door.sync();
+      assert.ok(await rowOf(NFC), 'the file never arrived with a row');
+      assert.deepEqual(names(), [NFC], 'the decomposed bytes were left beside the delivered file: the take-back looked at the NFC key');
+      assert.equal(await counted('repaired_missing_row') - removed, 1);
+    });
+
+    it('a change the peer alone made replaces the NFD file in place: no conflict copy and no second spelling', async () => {
+      const AGREED = 'the version both instances last agreed on';
+      const THEIRS = 'the version only the peer changed since';
+      door.writeLocalFile(S, NFD, AGREED);
+      await door.coll(S, 'files').insertOne(build.filemeta(S, NFC, 3, {
+        author: PEER_AUTHOR, deliveredBy: PEER, sizeBytes: Buffer.byteLength(AGREED), sha256: sha(AGREED), syncBase: { [PEER]: sha(AGREED) },
+      }));
+      door.seedPeerFile(S, NFC, THEIRS);
+      await door.sync();
+      assert.equal(await door.coll(S, 'conflicts').countDocuments({}), 0, 'a change only the peer made became a conflict copy');
+      assert.equal(names().length, 1, `the file is on disk under ${names().length} spellings: ${JSON.stringify(names())}`);
+      assert.equal(fs.readFileSync(path.join(door.localFilesRoot(S), names()[0]), 'utf8'), THEIRS, 'the peer\'s change did not replace the file');
+    });
+  });
 });

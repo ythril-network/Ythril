@@ -21,7 +21,7 @@ const FILE_CLASS_ORDER = ['missing_row', 'stale_row', 'unprocessed', 'row_withou
 interface FilesView {
   /** The space is not plainly OK: files are out of step, or were not checked. */
   attention: boolean;
-  /** Why the check did not run; empty when it did. */
+  /** Why the check did not run, in the active language; empty when it did. */
   reason: string;
   summary: string;
   groups: { cls: string; text: string; paths: string[] }[];
@@ -74,7 +74,7 @@ type ShownReport = ActSetReport & { emptied?: string[]; leftOut?: string[] };
         @if (s.needsAbandon) { <span style="flex-basis:100%;color:var(--text-secondary);">{{ 'data.progress.needsAbandon' | transloco }}</span> }
         @if (files; as f) {
           @if (f.reason) {
-            <span style="flex-basis:100%;color:var(--text-secondary);">{{ 'data.progress.files.notChecked' | transloco: { reason: f.reason } }}</span>
+            <span style="flex-basis:100%;color:var(--text-secondary);">{{ f.reason }}</span>
           } @else if (f.groups.length > 0) {
             <span style="flex-basis:100%;color:var(--text-secondary);">{{ f.summary }}</span>
             <details style="flex-basis:100%;color:var(--text-secondary);">
@@ -161,7 +161,7 @@ export class ActSetProgressComponent {
   filesView(s: ActSetSpaceReport): FilesView | null {
     const files = this.kind() === 'restore' ? s.files : undefined;
     if (!files) return null;
-    if (!files.checked) return { attention: true, reason: files.reason, summary: '', groups: [], truncated: false };
+    if (!files.checked) return { attention: true, reason: this.notCheckedText(files), summary: '', groups: [], truncated: false };
     const lang = this.transloco.getActiveLang();
     const entries = Object.entries(files.classes).filter(([, c]) => c.count > 0);
     if (entries.length === 0) return null;
@@ -173,6 +173,18 @@ export class ActSetProgressComponent {
       summary: pluralText(this.transloco, lang, 'data.progress.files.mismatch', total),
       groups: entries.map(([cls, c]) => ({ cls, text: this.classText(cls, c), paths: c.paths })),
     };
+  }
+
+  /**
+   * Why a space's files were not checked, in the active language, from the server's code: the server's own `reason` is English, so it is
+   * shown only for a code this client has no words for (a newer server), never in place of a translation.
+   */
+  private notCheckedText(files: { reasonCode?: string; limitMs?: number; reason: string }): string {
+    switch (files.reasonCode) {
+      case 'timeout': return this.transloco.translate('data.progress.files.notChecked.timeout', { seconds: Math.round((files.limitMs ?? 0) / 1000) });
+      case 'failed': return this.transloco.translate('data.progress.files.notChecked.failed');
+      default: return this.transloco.translate('data.progress.files.notChecked.other', { reason: files.reason });
+    }
   }
 
   /** One class's sentence, in the plural form of its count; a class this client has no words for is its raw name and its count. */

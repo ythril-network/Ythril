@@ -313,6 +313,10 @@ space with a great many files out of step lists the first of each group and stil
 when very long. The report is kept until the next restore and can name files that have been deleted since; the completion
 line in the server log carries the total.
 
+If the comparison could not finish for a space - it ran past its two minutes, or could not run at all - the row says that
+the files of that space were not checked and why, and the space is restored all the same. The server log names the cause;
+restoring the backup again repeats the check.
+
 A space whose files could not be compared in time (the time allowed is two minutes) or at all says so on its row instead,
 and the restore still completes. Files kept by this instance alone - conversion results, conflict copies, schema
 snapshots - are not compared.

@@ -28,7 +28,8 @@ export interface RestoreFileClass { count: number; paths: string[] }
  */
 export type RestoreFilesReport =
   | { checked: true; classes: Record<string, RestoreFileClass> }
-  | { checked: false; reason: string };
+  /** `reasonCode` is `timeout` (with `limitMs`, the bound that ended the check) or `failed`; `reason` is the server's English sentence. */
+  | { checked: false; reasonCode?: string; limitMs?: number; reason: string };
 
 /** One space of a set's report. */
 export interface ActSetSpaceReport {
