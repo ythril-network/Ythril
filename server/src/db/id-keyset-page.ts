@@ -3,7 +3,8 @@
  *
  * ## What it prevents
  *
- * This is the one `_id` pager; Q-481 converts the older sweeps that still page by `_id` inline.
+ * This is the one `_id` pager. Q-481 converted the sweeps that paged by `_id` inline; what still writes an `_id` range or sort
+ * answers another question, each named with its reason in `every-id-keyset-goes-through-the-one-pager`.
  *
  * A walk that has to read a collection a page at a time, and has to be able to act on a page (delete it, flag it, decide on it)
  * between one read and the next, pages by `_id`: the cursor is the last id, so the rows the walk changes do not move it, and a row
@@ -20,9 +21,10 @@
  *   (a prefix, a range) is narrowed by the cursor.
  * - **The end is a page shorter than `size`**: {@link IdPage.end}. A walk whose cursor is stored between ticks reads one page per
  *   call ({@link idKeysetPage}); a walk that goes straight on takes {@link eachIdPage}, which stops there and hands the callback no
- *   empty page.
- * - **The bound is the caller's scope, not an option**: the reads go through `col()`, so inside a housekeeping scope each carries
- *   its figure (`a-housekeeping-op-carries-its-bound`). A page that is acted on is acted on by the caller's own writes, which carry
+ *   empty page - or loops over {@link idKeysetPage} itself where a callback cannot serve: a page budget across passes (the stray
+ *   drain's `maxPages`), or a boot migration whose walk the boot gate must see (a block-body callback hides it).
+ * - **Inside a scope the bound is the scope's; outside one, a per-page option**: the reads go through `col()`, so inside a
+ *   housekeeping scope each carries its figure (`a-housekeeping-op-carries-its-bound`). A page that is acted on is acted on by the caller's own writes, which carry
  *   theirs; nothing here writes. A read OUTSIDE any scope may name a per-page server deadline ({@link IdPageSpec.maxTimeMS}); inside
  *   one that option is refused, so a page is never bounded by the server alone.
  *

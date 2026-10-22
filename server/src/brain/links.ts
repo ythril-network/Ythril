@@ -426,7 +426,7 @@ export async function removeLink(spaceId: string, id: string, actor?: WebhookAct
  * `legacyField(kind)`. One list for the reader and for a walk that reads only what the reader needs
  * ({@link documentLinkProjection}), so a page projected for it cannot leave out an array the reconcile reads.
  */
-export const DOCUMENT_LINK_KINDS = ['entity', 'fact', 'chrono'] as const satisfies readonly RefKind[];
+export const DOCUMENT_LINK_KINDS: readonly RefKind[] = [...new Set(LINK_CLASSES.map(c => c.toKind))];
 
 /** What {@link reconcileLinksForDocument} reads of a document: `_id`, `author` and the legacy array of each document link kind. */
 export function documentLinkProjection(): Record<string, 1> {
@@ -457,7 +457,7 @@ export async function reconcileLinksForDocument(
   /** Passed straight through — see `reconcileLinks`. The CONVERSION is the additive caller. */
   opts: { additive?: boolean } = {},
 ): Promise<{ added: number; removed: number }> {
-  const desired: Partial<Record<RefKind, readonly string[]>> = {};
+  const desired: DesiredLinks = {};
   for (const kind of DOCUMENT_LINK_KINDS) {
     const ids = doc[legacyField(kind)];
     if (Array.isArray(ids)) desired[kind] = ids as string[];
