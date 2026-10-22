@@ -44,34 +44,23 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
-import { mountedRoutes } from './_routes.mjs';
+import { ROUTES, TOOL_NAMES, resolves } from './_route-match.mjs';
 
-/** A parameter, on either side, is a hole that matches exactly one segment. */
-const HOLE = '\u0001';
-const shape = p => p
-  // The QUERY STRING is not part of the route. `GET /api/spaces/${id}/meta?resolve=1` is the meta route
-  // with an argument on it, and six such calls read as unmatched until this line existed.
-  .split('?')[0]
-  .replace(/\$\{[^}]*\}/g, HOLE)
-  .replace(/:[A-Za-z0-9_]+/g, HOLE)
-  .replace(/\/+$/, '');
+/** A tool the registry really has, for the cases that need one. Derived, so renaming a tool cannot stale it. */
+const REAL_TOOL = [...TOOL_NAMES].sort()[0];
 
-const ROUTES = mountedRoutes().map(r => ({ method: r.method, segs: shape(r.path).split('/') }));
+/*
+ * The matcher is `_route-match.mjs`, shared with the gates that ask the same question of a path in a comment.
+ * It holds the rule this file's blind spot used to state: `POST /api/:tool` answers only a name in the tool
+ * registry, so a mistyped tool name no longer resolves.
+ */
 const ROUTE_SHAPES = ROUTES.map(r => r.segs);
-
-/** `method` narrows it when the call site gave one; without it, any verb will do. */
-function resolves(path, method) {
-  const segs = shape(path).split('/');
-  return ROUTES.some(r => (method === undefined || r.method === method)
-    && r.segs.length === segs.length
-    && r.segs.every((s, i) => s === HOLE || segs[i] === HOLE || s === segs[i]));
-}
 
 /**
  * Every `/api/…` call the shipped client makes, with its VERB where the verb is on the same expression.
  *
- * **The verb is what turns this from a shape check into a real one.** `POST /api/:tool` is a live route, so
- * path alone resolves every two-segment `/api/x` and the gate cannot tell a real tool from a typo. Matched
+ * **The verb is what turns this from a shape check into a real one.** `POST /api/:tool` is a live route, and
+ * the matcher narrows it to the tool registry, so a typo in a tool name no longer resolves through it. Matched
  * with the method, the question is exact — and on its first run with the verb it found a dead one:
  * `updateSyncSchedule` PATCHed `/api/networks/:id/members/:memberId`, which the server has never served
  * (members takes POST, PUT on the signing key, and DELETE). Nothing called it, so nothing had 404d yet.
@@ -97,8 +86,17 @@ function clientCalls() {
   return out;
 }
 
-/** A path whose template is not closed on this line cannot be read statically. */
-const unreadable = p => (p.match(/\$\{/g) ?? []).length !== (p.match(/\}/g) ?? []).length;
+/**
+ * A path that cannot be read as ONE call: a template not closed on this line, or a literal ending in `/`.
+ *
+ * The second is a PREFIX, not a call — `req.url.includes('/api/admin/')` in the MFA interceptor tests whether a
+ * URL is under a mount, and no route ends in a slash. It resolved only while `POST /api/:tool` swallowed every
+ * two-segment path (`/api/admin/` loses its slash and becomes `/api/admin`); with the tool door narrowed it is
+ * exactly what it looks like, a string that names no route. Counted with the unreadable ones below so the skip
+ * cannot grow to cover real calls.
+ */
+const unreadable = p => (p.match(/\$\{/g) ?? []).length !== (p.match(/\}/g) ?? []).length
+  || p.split('?')[0].endsWith('/');
 
 describe('the sweep reads both sides before concluding', () => {
   it('finds the server\'s routes', () => {
@@ -122,15 +120,18 @@ describe('the sweep reads both sides before concluding', () => {
     assert.ok(!resolves('/api/no/such/path/at/all/here'), 'an invented path must not resolve');
 
     /*
-     * AND THE BLIND SPOT, asserted so it is a stated limit rather than a surprise.
+     * THE TOOL DOOR IS NARROWED, and these are the two halves of it.
      *
-     * `POST /api/:tool` is a real route — the REST door onto the tool surface — so EVERY two-segment
-     * `/api/x` resolves, whatever `x` is. The gate cannot tell a mistyped one from a tool name, because
-     * the client writes the path and the verb in different places and only the path is in the literal.
-     * Nothing else in the API has a parameter that shallow, so the hole is exactly one segment deep.
+     * `POST /api/:tool` is a real route — the REST door onto the tool surface — and its parameter used to match
+     * EVERY two-segment `/api/x`, so a mistyped tool name resolved and the gate could not tell it from a real
+     * one. The door answers only the tool registry, so `x` has to be a tool (or a template hole the caller
+     * fills in), with a verb or without one.
      */
-    assert.ok(resolves('/api/anything-at-all'),
-      'if this stops resolving, `POST /api/:tool` has gone and the note above should go with it');
+    assert.ok(!resolves('/api/anything-at-all'), 'a two-segment path that is no tool must not resolve through the tool door');
+    assert.ok(!resolves('/api/anything-at-all', 'POST'), 'a POST to a name that is no tool must not resolve');
+    assert.ok(resolves(`/api/${REAL_TOOL}`, 'POST'), 'a POST to a registry tool must resolve through the tool door');
+    assert.ok(resolves(`/api/${REAL_TOOL}`), 'a call naming no verb still resolves by its path when the name is a tool');
+    assert.ok(resolves('/api/${tool}', 'POST'), 'a template hole in the tool segment is a name the caller fills in');
   });
 });
 
