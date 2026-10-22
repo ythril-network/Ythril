@@ -160,7 +160,7 @@ npm run preflight
 
 Runs every structural gate that does **not** need Docker — `scripts/preflight.mjs` is the list: the registry, wiring and coverage gates, the documentation gates, docs lint, the standalone files that need no instance, and the client suite (which includes i18n key coverage). No containers.
 
-`npm run preflight:static` runs the same list without anything that needs the test database or runs a suite of its own (the database half of the standalone files, the client suite, the production build and its budgets): about a minute, for the moment between edits. It is never a push pass, and its verdict says so.
+`npm run preflight:static` runs the same list without anything that needs the test database or runs a suite of its own (the database half of the standalone files, the client suite, the production build and its budgets): about five minutes rather than an hour, for the moment between edits. It is never a push pass, and its verdict says so.
 
 These are grouped into one command because they share a property: **each catches something that produces no error, no failed build and no failed unit test.** An unregistered icon renders as a blank space. A scheduler nobody starts looks like one with nothing to do. A documented endpoint that doesn't exist returns a 404 with nothing to explain it. A translation key missing from `de`/`pl` renders the raw key.
 
