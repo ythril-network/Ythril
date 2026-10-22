@@ -73,18 +73,21 @@ Write-Host '  inside the VM. This script prunes nothing itself, on purpose - del
 Write-Host '  different decision from returning empty space.'
 
 $owner = $null
+$stopAttempted = $false
 $dockerQuit = $false
 try {
   # -- Stop the VM -----------------------------------------------------------------------------------
   if (-not $AssumeStopped) {
     Section 'Stopping Docker Desktop and WSL'
-    $engine = $true
-    try { $null = Invoke-Native { docker info } } catch { $engine = $false }
+    $engine = Test-DockerEngine
     if ($engine) {
       # Compaction deletes nothing, so this reads what runs WITHOUT the wipe's data guard.
       $owner = Read-OwnerInstance -RepoRoot $repo
       if ($owner) {
         Write-Host "  stopping the owner's instance: $(Format-OwnerRecord -Record $owner)"
+        # Set BEFORE the call: a stop that fails part-way has stopped some of the services, and the finally
+        # brings back what it stopped (U4a).
+        $stopAttempted = $true
         Stop-OwnerInstance -Record $owner
       }
     }
@@ -180,11 +183,13 @@ try {
   if ($dockerQuit) {
     Section 'Restarting Docker Desktop'
     Start-DockerDesktop
-    if ($owner) {
-      Section "Bringing the owner's instance back"
-      Wait-Engine
-      Start-OwnerInstance -Record $owner
-      Write-Host "  back: $(Format-OwnerRecord -Record $owner)"
-    }
+  }
+  # Whenever the stop was attempted, whether or not Docker was quit after it: a stop that threw has left the
+  # engine running and part of the instance down.
+  if ($stopAttempted -and $owner) {
+    Section "Bringing the owner's instance back"
+    Wait-Engine
+    Start-OwnerInstance -Record $owner
+    Write-Host "  back: $(Format-OwnerRecord -Record $owner)"
   }
 }

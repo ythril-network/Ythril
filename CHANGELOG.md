@@ -120,7 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schemas:** `schema_validate` (MCP) and `validate-schema` check a sample record or the stored data; `space_schema_layers` answers `fields` (`own`, `effective`, `winner`, `hidden`), `unknownFields`, `refusedRounds`.
 - **Schemas:** A write reaching several networks answers `layers`; unknown meta keys in a layer or round are named, not refused; a round carries only its changes, applied whole.
 - **Server:** New `ythril_schema_refusals_total{door,outcome}`, `ythril_schema_rules_invalid`, `ythril_schema_rule_engine_available`, `ythril_schema_violations_recorded_total{source}`.
-- **Server:** `docker:wipe` records the running instance, refuses a named volume not in `x-ythril.disposable-volumes` and restores it built at its commit; `docker:compact` restarts it too.
+- **Server:** `docker:wipe` records the instance and rebuilds it at its commit, refusing data it would delete; `docker:compact` restarts it.
 - **UI:** The Schema tab gains a Rules editor and **Validate**; record forms mark undeclared keys.
 - **MCP:** `save_entity`, `save_chrono` and `save_edge` take `waitForEmbedding`, as REST does.
 
@@ -131,7 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Errors:** Pool checkouts time out only where `waitQueueTimeoutMS` is in `MONGO_URI`. A failed space rename answers its code (`ENOENT`), not the data path.
 - **Database:** New `YTHRIL_WRITE_TIMEOUT_MS` (default 30 s per write operation) and `YTHRIL_HOLD_DEADLINE_MS` (45 s per hold); both refuse `0`. A `timeoutMS` in `MONGO_URI` does not apply to them; boot warns once on a `socketTimeoutMS` below the write bound.
 - **Database:** Boot logs one INFO line, `MongoDB client options: …`, a changed string takes a restart. An operation in flight when the database stops answering ends with the retryable `503` (`0` means no bound; `loadBalanced`: selection only).
-- **Database:** The compose Mongo healthcheck runs the image's `runner healthcheck` first: `up --wait` waits out its first boot.
+- **Database:** The compose Mongo healthcheck waits out the first boot.
 - **Database:** The first connection retries more kinds of "not up yet"; bad credentials fail at once. A search service (`mongot`) that starts after the app is picked up by a background retry; a waiting space stays `building` and `GET /api/spaces` adds `indexWaiting` and `indexWaitingSince`.
 - **Database:** `indexStatus: "failed"` now means only a build that failed or timed out; an alert keyed on it stops firing for a late service. `INDEX_READY_TIMEOUT_MS` starts when indexes are confirmed. `GET /ready` shares one probe.
 - **Database:** A collection's vector index exists only while it holds a record: dropped `SEARCH_INDEX_DROP_DELAY_MS` (default `60000`) after its last is deleted, and at boot for empty ones; it answers search empty (`empty: true` in `pipeline-status`).
@@ -234,6 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UI:** The client never shows an answer older than the last one asked for (graph depth, record tabs, record card). The Graph tab says why it is slow after 3 s and ends in an error state with Retry after 30 s.
 - **Help:** Links in Help no longer open dead tabs and keep their place in the URL.
 - **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails when the run is not listed after three minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`); it reported success.
+- **CI:** The keyset gate finds a seq ordering however spelled; the validator gate follows act bodies.
 
 ### Security
 

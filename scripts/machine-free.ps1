@@ -21,9 +21,11 @@
 # With -Wipe, step 4 is docker-wipe.ps1 instead: the whole data disk is deleted - every image, container and
 # named volume. Data in bind mounts survives it: the owner's instance keeps its database under local-data/ and
 # its configuration under config/, and the wipe records that instance, stops it, and brings it back rebuilt
-# from the commit it ran (scripts/owner-instance.ps1). It refuses, before anything is stopped, when the running
-# instance keeps data in a named volume that is not labelled disposable. Opt-in because the delete cannot be
-# undone. -RestoreOnly, -UseRecord and -DiscardRecord go with -Wipe and are passed to docker-wipe.ps1.
+# from the commit it ran (scripts/owner-instance.ps1). It refuses - BEFORE the test stack is removed and the prune
+# runs, which cannot be undone either - when the instance's project holds a named volume that the compose file's
+# x-ythril.disposable-volumes list does not name, or another project runs. The guard needs the engine: with it down
+# nothing is checked. Opt-in because the delete cannot be undone. -RestoreOnly, -UseRecord and -DiscardRecord go
+# with -Wipe and are passed to docker-wipe.ps1.
 #
 # ASCII ONLY: Windows PowerShell 5.1 reads a BOM-less script as ANSI (see docker-compact.ps1).
 #
@@ -42,6 +44,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'docker-desktop.ps1')
+. (Join-Path $PSScriptRoot 'owner-instance.ps1')
 $repo = Split-Path -Parent $PSScriptRoot
 function Section($t) { Write-Host ''; Write-Host ("-- $t " + ('-' * [Math]::Max(0, 60 - $t.Length))) }
 function GiB($bytes) { '{0:N1} GiB' -f ($bytes / 1GB) }
@@ -66,8 +69,15 @@ Write-Host "  memory free: $(GiB $before.MemFree)   Docker VM holds: $(GiB $befo
 Write-Host "  disk free:   C: $(GiB $before.DiskC)   O: $(GiB $before.DiskO)"
 
 # A one-shot probe, not a wait: an engine that does not answer here is the case the next steps work around.
-$engine = $true
-try { $null = Invoke-Native { docker info } } catch { $engine = $false }
+$engine = Test-DockerEngine
+
+if ($Wipe -and $engine -and -not $RestoreOnly) {
+  # The wipe's own refusal, asked FIRST: the removal of the test stack and the prune below are not undone by a
+  # wipe that refuses later, so a refusal must leave the machine as it was.
+  Section 'Checking the wipe may go ahead'
+  $null = Get-OwnerInstance -RepoRoot $repo
+  Write-Host '  no named volume or other project stands in its way.'
+}
 
 if ($engine -and -not $RestoreOnly) {
   Section 'Removing the test stack'
