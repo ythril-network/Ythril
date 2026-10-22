@@ -638,9 +638,19 @@ whitespace are not preserved by a parse/stringify round trip.
   the first deliveries did, and in no particular order relative to them. Events queued in memory when the server stops are
   stored in the retry queue as well, within the shutdown's drain budget. The deliveries that were being sent at that moment
   are not waited for. The server reports both paths as `ythril_webhook_first_deliveries_queued_total` and
-  `ythril_webhook_first_deliveries_overflowed_total`. **When the retry queue itself cannot be written** (the database is not
-  answering) those events are lost, and `ythril_webhook_first_deliveries_lost_total` counts them (see
-  [Setup and API](11-setup-api.md)).
+  `ythril_webhook_first_deliveries_overflowed_total`. **When a write to the retry queue fails**, the server reads the rows
+  back and counts by what the queue holds, not by the error: rows that landed are delivered as usual. A row it cannot find
+  is counted in `ythril_webhook_first_deliveries_lost_total`, with a `reason`. `not_stored` means the store refused the
+  write, so nothing will send that event. `not_known_stored` means the read could not account for the row: it may still
+  land, it may already have been delivered, or the read failed. Three writes are counted this way: the overflow and shutdown
+  rows, the requeue after a failed first delivery, and the requeue of a failed retry (see [Setup and API](11-setup-api.md)).
+- **Queued retries drain at a stated rate.** Every 10 seconds the server takes up to 50 due retries and delivers 4 at a
+  time, with at most 2 for any one subscription. The batch is shared across the subscriptions with retries due, so one
+  subscription's backlog cannot hold back another's. A subscription gets at least an equal share of the batch per tick,
+  and its oldest due retry goes first. A tick stops starting deliveries 30 seconds after it began, and what it did not
+  start waits for the next tick (counted in `ythril_webhook_retry_ticks_cut_total`). So a due retry starts within a few
+  ticks, however long another subscription's backlog is. That bound leaves out a DNS lookup of your endpoint, which has
+  no timeout of its own. Choosing a tick's retries reads one index entry per due retry.
 - **An event the server had not yet announced when it stopped is not announced later.** The announcement of a change is
   at-most-once: a stop between a write and its announcement loses the event, and a directory delete announces its files
   after their rows are removed. Deduplicate for repeats, and reconcile from the data (a listing) when a gap would matter.

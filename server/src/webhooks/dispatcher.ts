@@ -23,13 +23,17 @@ import { publishBrainChange } from '../brain/brain-events.js';
 import type { WebhookEventType, WebhookEventPayload, WebhookDelivery, WebhookSubscription } from './types.js';
 import { withJitter } from '../util/backoff.js';
 import { intervalJob, type IntervalJob, type IntervalJobDeps } from '../util/interval-job.js';
-import { mapLimit } from '../util/map-limit.js';
+import { mapLimit, mapLimitPerKey } from '../util/map-limit.js';
 import { keyedLimiter } from '../util/keyed-limiter.js';
 import { writeInOneCommands } from '../db/one-command.js';
 import { warnOnce } from '../util/warn-once.js';
 import { drainedQueue } from '../util/drained-queue.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { settledWithin } from '../util/time-bound.js';
+import { detachedWrite } from '../db/write-bound.js';
+import { readRowsById } from '../db/read-by-id.js';
+import { dropIndexesIfPresent, indexNamesOf } from '../db/index-names.js';
+import { retryRowsStored, type RetryRowVerdict } from './retry-rows-stored.js';
 
 /** Retry schedule in milliseconds: 10s, 30s, 1m, 5m, 30m, 1h */
 const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 300_000, 1_800_000, 3_600_000];
@@ -37,15 +41,28 @@ export const MAX_ATTEMPTS = RETRY_DELAYS_MS.length + 1;
 const DELIVERY_TIMEOUT_MS = 10_000;
 const RETRY_COLLECTION = '_webhook_retry_queue';
 
+/** The two keys the poll's choice reads (bundle-169, Q-483): the due subscriptions, covered, and one subscription's earliest due rows. */
+const DUE_KEYS_INDEX = { scheduledAt: 1, webhookId: 1 } as const;
+const LANE_INDEX = { webhookId: 1, scheduledAt: 1 } as const;
+/** The index the two compounds replace; its only reader was the poll's old `find().sort({ scheduledAt: 1 })`. */
+const REPLACED_INDEX = 'scheduledAt_1';
+
 /**
- * Ensure the retry queue's index on `scheduledAt`, once at startup (`bootstrap.ts`, beside the store's own indexes). The poll reads the queue
- * `{ scheduledAt: { $lte: now } }` sorted by it, every ten seconds; the queue is small until a burst overflows into it (a directory delete
- * to a sink that is down), and then each poll would scan and sort all of it.
+ * Ensure the retry queue's indexes, at startup, as a step of its own that the boot does not wait for (`bootstrap.ts`): the queue is
+ * small until a burst overflows into it (a directory delete to a sink that is down), and a build over a large one must not hold the
+ * listen. The poll works without them, only slower.
+ *
+ * The two compounds the poll's choice reads are built first, and the `{ scheduledAt: 1 }` they replace is dropped only once both are
+ * listed (`dropIndexesIfPresent`), so the queue is never left with neither.
  */
 export async function initRetryQueueIndexes(): Promise<void> {
-  await col<RetryJob>(RETRY_COLLECTION).createIndex({ scheduledAt: 1 });
+  const queue = col<RetryJob>(RETRY_COLLECTION);
+  const names = [await queue.createIndex(DUE_KEYS_INDEX), await queue.createIndex(LANE_INDEX)];
+  const present = await indexNamesOf(RETRY_COLLECTION);
+  if (names.every(n => present.includes(n))) await dropIndexesIfPresent(RETRY_COLLECTION, [REPLACED_INDEX], present);
 }
-const RETRY_POLL_INTERVAL_MS = 10_000;
+/** How often the retry poll runs a tick. The drain sentence of integration guide 14 states it (a gate compares). */
+export const RETRY_POLL_INTERVAL_MS = 10_000;
 
 // ── Retry queue document ────────────────────────────────────────────────────
 
@@ -67,14 +84,23 @@ export interface RetryJob {
 export const RETRY_JOB_LABEL = 'Webhook retry poll';
 /** How many due retries one tick delivers at once. */
 export const RETRY_CONCURRENCY = 4;
-/** The most due retries one tick takes from the queue. */
-const RETRY_BATCH = 50;
+/** The most of those {@link RETRY_CONCURRENCY} slots one subscription holds at once, so a hung sink cannot take the whole tick. */
+export const RETRY_PER_KEY = 2;
+/** The most due retries one tick takes from the queue, shared across the due subscriptions (see `chooseDueRetries`). */
+export const RETRY_BATCH = 50;
+/**
+ * A tick stops STARTING deliveries this long after it began; a row it did not start stays queued (the row is removed in `retryOne`, which
+ * an unstarted row never reaches). So a tick of slow sinks ends in about this plus one delivery timeout, not in its batch times that timeout.
+ */
+export const RETRY_TICK_BUDGET_MS = 30_000;
 
 /**
  * What one retry tick reaches. Production is {@link realRetryPollDeps}; a test hands in fakes (the queue is a collection, and a
  * delivery is an outbound request that the SSRF guard would refuse to send to anything a test could listen on).
  */
 export interface RetryPollDeps {
+  /** The poll's clock, ms (the tick's budget is read from it). Production leaves it out: `Date.now`. */
+  now?: () => number;
   dueJobs(now: Date): Promise<RetryJob[]>;
   removeJob(id: string): Promise<void>;
   getWebhook(id: string): Promise<WebhookSubscription | null>;
@@ -85,18 +111,57 @@ export interface RetryPollDeps {
   requeue(job: RetryJob): Promise<void>;
 }
 
+/**
+ * The tick's rows: at most {@link RETRY_BATCH}, shared across the due subscriptions, chosen from ids and index keys and only then read whole.
+ *
+ * It took the 50 OLDEST due rows, whoever they belonged to, so one subscription with a backlog (all of it older than anyone else's) filled
+ * every tick and another subscription's single retry waited until the backlog had drained. Now:
+ *
+ *  1. the due subscriptions and each one's oldest due row: one aggregate COVERED by `{ scheduledAt: 1, webhookId: 1 }` (no document is
+ *     read; the cost is one index key per due row), oldest first, at most the batch of them;
+ *  2. each subscription's earliest due ids, a share of `max(1, floor(batch / subscriptions))` on `{ webhookId: 1, scheduledAt: 1 }`, and
+ *     what a subscription did not need passed to those that filled theirs, until the batch is full or nobody has more;
+ *  3. the chosen rows read by `_id` (`readRowsById`): bodies only for those.
+ *
+ * The order the poll starts them in is the poll's (`laneOrdered`), not this read's.
+ */
+async function chooseDueRetries(now: Date): Promise<RetryJob[]> {
+  const queue = col<RetryJob>(RETRY_COLLECTION);
+  const lanes = await queue.aggregate<{ _id: string }>([
+    { $match: { scheduledAt: { $lte: now } } },
+    { $group: { _id: '$webhookId', oldest: { $min: '$scheduledAt' } } },
+    { $sort: { oldest: 1, _id: 1 } },
+    { $limit: RETRY_BATCH },
+  ]).toArray();
+  const taken = new Map<string, string[]>(lanes.map(l => [String(l._id), []]));
+  let left = RETRY_BATCH;
+  let open = [...taken.keys()];
+  while (left > 0 && open.length > 0) {
+    const share = Math.max(1, Math.floor(left / open.length));
+    const got = await mapLimit(open.slice(0, left), RETRY_CONCURRENCY, async (webhookId) => {
+      const ids = await queue.find({ webhookId, scheduledAt: { $lte: now } } as Filter<RetryJob>, { projection: { _id: 1 } })
+        .sort({ scheduledAt: 1 } as Sort).skip(taken.get(webhookId)!.length).limit(share).toArray();
+      return { webhookId, ids: ids.map(d => String(d._id)) };
+    });
+    open = [];
+    for (const { webhookId, ids } of got) {
+      const keep = ids.slice(0, left);
+      taken.get(webhookId)!.push(...keep);
+      left -= keep.length;
+      if (ids.length === share) open.push(webhookId);
+    }
+  }
+  return await readRowsById<RetryJob>(RETRY_COLLECTION, [...taken.values()].flat(), 'all');
+}
+
 const realRetryPollDeps: RetryPollDeps = {
-  dueJobs: async (now) => await col<RetryJob>(RETRY_COLLECTION)
-    .find({ scheduledAt: { $lte: now } } as Filter<RetryJob>)
-    .sort({ scheduledAt: 1 } as Sort)
-    .limit(RETRY_BATCH)
-    .toArray() as RetryJob[],
+  dueJobs: chooseDueRetries,
   removeJob: async (id) => { await col<RetryJob>(RETRY_COLLECTION).deleteOne({ _id: id } as Filter<RetryJob>); },
   getWebhook: (id) => getWebhookFull(id),
   deliver: (sub, job) => attemptDelivery(sub, job.body, job.event, job.spaceId, job.deliveryId),
   markSuccess: markWebhookSuccess,
   markFailure: markWebhookFailure,
-  requeue: (job) => enqueueRetry(job.webhookId, job.body, job.event, job.spaceId, job.deliveryId, job.attempt + 1),
+  requeue: (job) => writeRetryRow(retryJobFor(job.webhookId, job.body, job.event, job.spaceId, job.deliveryId, job.attempt + 1)),
 };
 
 /**
@@ -117,6 +182,14 @@ const realRetryPollDeps: RetryPollDeps = {
  *
  * One job failing (a database error after its row was removed, an unexpected throw in delivery) is said and the others of the
  * tick go on; a failure before any job is read (the queue itself) is the interval job's: `Webhook retry poll failed: …`.
+ *
+ * ## It is shared across subscriptions, and it ends at a budget (bundle-169, Q-483)
+ *
+ * One subscription holds at most {@link RETRY_PER_KEY} of the four slots (`mapLimitPerKey`: a row whose subscription is at its cap
+ * waits without holding a slot), the rows start in the order of each subscription's OLDEST due row, one row per subscription in turn
+ * (`laneOrdered`), and a tick stops starting deliveries at {@link RETRY_TICK_BUDGET_MS}: the rows it did not start stay queued, the cut
+ * is counted (`ythril_webhook_retry_ticks_cut_total`) and said once per window. A subscription not started in a cut tick keeps the
+ * oldest row, so it leads the next one.
  */
 export function createRetryWorker(deps: RetryPollDeps = realRetryPollDeps, jobDeps?: IntervalJobDeps): { job: IntervalJob } {
   const job = intervalJob(RETRY_JOB_LABEL, RETRY_POLL_INTERVAL_MS, () => pollRetryQueue(deps), jobDeps);
@@ -138,8 +211,42 @@ export function stopRetryWorker(): void {
 }
 
 async function pollRetryQueue(deps: RetryPollDeps): Promise<void> {
-  const jobs = await deps.dueJobs(new Date());
-  await mapLimit(jobs, RETRY_CONCURRENCY, (job) => retryOne(deps, job));
+  const now = deps.now ?? Date.now;
+  const began = now();
+  const jobs = laneOrdered(await deps.dueJobs(new Date(began)));
+  let notStarted = 0;
+  await mapLimitPerKey(jobs, RETRY_CONCURRENCY, j => j.webhookId, RETRY_PER_KEY, async (job) => {
+    // The budget is asked at each START, never of a delivery in flight: an unstarted row is still in the queue.
+    if (now() - began >= RETRY_TICK_BUDGET_MS) { notStarted++; return; }
+    await retryOne(deps, job);
+  });
+  if (notStarted > 0) {
+    retryTicksCut++;
+    sayDeliveryFailureOnce('retry-tick-cut', 'all', () => {
+      log.warn(`Webhook retry poll stopped starting deliveries after its ${RETRY_TICK_BUDGET_MS / 1000} s budget; ${notStarted} due retries stay queued for the next tick (counted in ythril_webhook_retry_ticks_cut_total)`);
+    });
+  }
+}
+
+/**
+ * The tick's rows in the order they start: subscriptions by their OLDEST due row, one row of each in turn, each subscription's rows
+ * earliest first. Whatever order the selection hands over, so a subscription left unstarted by a cut tick leads the next.
+ */
+function laneOrdered(jobs: readonly RetryJob[]): RetryJob[] {
+  const lanes = new Map<string, RetryJob[]>();
+  for (const j of jobs) { const l = lanes.get(j.webhookId); if (l) l.push(j); else lanes.set(j.webhookId, [j]); }
+  const at = (j: RetryJob): number => new Date(j.scheduledAt).getTime();
+  const ordered = [...lanes.values()].map(l => l.sort((x, y) => at(x) - at(y)));
+  ordered.sort((x, y) => at(x[0]!) - at(y[0]!));
+  const out: RetryJob[] = [];
+  for (let round = 0; out.length < jobs.length; round++) for (const l of ordered) if (round < l.length) out.push(l[round]!);
+  return out;
+}
+
+/** Ticks of the retry poll that stopped starting deliveries at their budget: `ythril_webhook_retry_ticks_cut_total`. */
+let retryTicksCut = 0;
+export function webhookRetryTicksCutCount(): number {
+  return retryTicksCut;
 }
 
 async function retryOne(deps: RetryPollDeps, job: RetryJob): Promise<void> {
@@ -215,15 +322,18 @@ function retryJobFor(
   };
 }
 
-async function enqueueRetry(
-  webhookId: string,
-  body: string,
-  event: WebhookEventType,
-  spaceId: string,
-  deliveryId: string,
-  attempt: number,
-): Promise<void> {
-  await col<RetryJob>(RETRY_COLLECTION).insertOne(asDoc<RetryJob>(retryJobFor(webhookId, body, event, spaceId, deliveryId, attempt)));
+/**
+ * Write ONE retry row (the requeue after a failed first delivery, and the poll's requeue of a failed retry). A write that fails is counted
+ * by what the queue holds (`countRetryRowsAfterFailure`): a row that landed is not lost and the call resolves; one that did not is counted
+ * lost by its reason and the failure is thrown on to the caller's reporter, which names it.
+ */
+async function writeRetryRow(job: RetryJob): Promise<void> {
+  try {
+    await col<RetryJob>(RETRY_COLLECTION).insertOne(asDoc<RetryJob>(job));
+  } catch (err) {
+    const { stored } = await countRetryRowsAfterFailure([{ job, overflow: false }], err);
+    if (stored === 0) throw err;
+  }
 }
 
 // ── Delivery failure lines ──────────────────────────────────────────────────
@@ -376,16 +486,50 @@ export function setFirstDeliveryDepsForTest(deps: FirstDeliveryDeps | null): voi
   firstDeliveryOverride = deps;
 }
 
-/** The tally behind `ythril_webhook_first_deliveries_queued_total`, `_overflowed_total` and `_lost_total`; the registry reads it at scrape time. */
-const firstDeliveryTally = { queued: 0, overflowed: 0, lost: 0 };
-export function webhookFirstDeliveryCounts(): { queued: number; overflowed: number; lost: number } {
-  return { ...firstDeliveryTally };
+/** Why a retry row is counted lost: the labels of `ythril_webhook_first_deliveries_lost_total` (see `retry-rows-stored.ts`). */
+type LostReason = Exclude<RetryRowVerdict, 'stored'>;
+
+/**
+ * The tally behind `ythril_webhook_first_deliveries_queued_total`, `_overflowed_total` and `_lost_total{reason}`; the registry reads it at
+ * scrape time. `overflowed` and `lost` are counted by what the queue HOLDS after a failed write, never by the write's answer.
+ */
+const firstDeliveryTally = { queued: 0, overflowed: 0, lost: { not_stored: 0, not_known_stored: 0 } as Record<LostReason, number> };
+export function webhookFirstDeliveryCounts(): { queued: number; overflowed: number; lost: Readonly<Record<LostReason, number>> } {
+  return { queued: firstDeliveryTally.queued, overflowed: firstDeliveryTally.overflowed, lost: { ...firstDeliveryTally.lost } };
+}
+const lostTotal = (): number => firstDeliveryTally.lost.not_stored + firstDeliveryTally.lost.not_known_stored;
+
+/**
+ * The read-back deadline while the shutdown drains (`drainFirstDeliveries`), so a read-back after a failed write takes the drain's budget
+ * and not a write bound of its own; `null` otherwise.
+ */
+let shutdownReadBackDeadline: number | null = null;
+
+/**
+ * After a write of `rows` failed with `err`: read them back, count `overflowed` for the overflow rows the queue holds and `lost` by
+ * reason for each row it does not, and answer how many were stored and lost. The one place a failed retry-row write is counted, for all
+ * three writers (the overflow flush, the first-delivery requeue, the poll's requeue).
+ */
+async function countRetryRowsAfterFailure(
+  rows: readonly { job: RetryJob; overflow: boolean }[], err: unknown,
+): Promise<{ stored: number; lost: number }> {
+  const deadline = shutdownReadBackDeadline;
+  const verdicts = await retryRowsStored(RETRY_COLLECTION, rows.map(r => r.job), err, deadline === null ? {} : { timeLeft: () => deadline - Date.now() });
+  let stored = 0; let lost = 0;
+  for (const { job, overflow } of rows) {
+    const v = verdicts.get(job._id) ?? 'not_known_stored';
+    if (v === 'stored') { stored++; if (overflow) firstDeliveryTally.overflowed++; continue; }
+    lost++;
+    firstDeliveryTally.lost[v]++;
+  }
+  return { stored, lost };
 }
 
 const firstDeliveries = keyedLimiter<string, FirstDelivery>({
   concurrency: FIRST_DELIVERY_CONCURRENCY,
   bound: FIRST_DELIVERY_BOUND,
-  run: (_id, d) => deliverFirst(d),
+  // Detached: the delivery's writes (its requeue, `markWebhookSuccess`) belong to no request, whatever request emitted the event.
+  run: (_id, d) => detachedWrite(() => deliverFirst(d)),
   onError: (id, err) => { sayDeliveryFailureOnce('delivery-error', id, () => { log.warn(`Webhook delivery error for ${peerText(id)}: ${peerText(err)}`); }); },
 });
 
@@ -403,18 +547,20 @@ function offerFirstDelivery(d: FirstDelivery): void {
  * write each is thousands of pending driver operations. One flush at a time; rows that arrive while it writes are taken by the same loop.
  */
 const pendingRetryRows = drainedQueue<{ job: RetryJob; overflow: boolean }>(
-  async (batch) => {
+  // Detached: the flush belongs to no request, and a request's hold deadline must not end a write whose rows may land (C5, N1).
+  async (batch) => await detachedWrite(async () => {
     try {
       // Sliced by bytes and count so each write is ONE wire command (`db/one-command.ts`): a retry body is a whole event payload.
       await writeInOneCommands(batch.map(b => asDoc<RetryJob>(b.job)), (slice, { ordered }) => col<RetryJob>(RETRY_COLLECTION).insertMany(slice, { ordered }), { ordered: false });
       firstDeliveryTally.overflowed += batch.filter(b => b.overflow).length;
     } catch (err) {
-      // Counted as lost: `writeInOneCommands` may have landed some slices before one failed, so this is an upper bound, which is the
-      // honest side for a counter of events a subscriber may never be sent.
-      firstDeliveryTally.lost += batch.length;
-      sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue write failed; up to ${batch.length} first deliveries were not persisted and are lost (counted in ythril_webhook_first_deliveries_lost_total): ${peerText(err)}`); });
+      // Counted by what the queue holds after the failure, not by the answer: rows can land with the reply lost (Q-580).
+      const { lost } = await countRetryRowsAfterFailure(batch, err);
+      if (lost > 0) {
+        sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue write failed; ${lost} of ${batch.length} first deliveries are not known to be stored (counted in ythril_webhook_first_deliveries_lost_total by reason): ${peerText(err)}`); });
+      }
     }
-  },
+  }),
   {
     beforeFirstBatch: yieldToEventLoop, // the rest of the burst joins this batch
     onError: err => { sayDeliveryFailureOnce('persist', 'retry-queue', () => { log.warn(`Webhook retry queue flush failed: ${peerText(err)}`); }); },
@@ -437,19 +583,29 @@ function persistForRetry(d: FirstDelivery, { overflow }: { overflow: boolean }):
  * on to the rows, and nobody awaited those. The second call closes nothing (the limiter is already closed) and waits for what is left.
  */
 export async function drainFirstDeliveries({ withinMs }: { withinMs: number }): Promise<number> {
-  const lostBefore = firstDeliveryTally.lost;
+  const lostBefore = lostTotal();
+  shutdownReadBackDeadline = Date.now() + withinMs;
   const queued = firstDeliveries.close();
   for (const d of queued) persistForRetry(d, { overflow: false });
   // Events emitted but not yet resolved are resolved now, against the closed limiter: each lands in the rows below.
-  const written = (async () => { await emitQueue.settled(); await pendingRetryRows.settled(); })();
+  const written = (async () => { await emitQueue.settled(); await settledRetryWrites(); })();
   const outcome = await settledWithin(written, withinMs);
   if (!outcome.finished) {
     log.warn(`Shutdown: the webhook retry queue did not finish writing within ${withinMs}ms (${emitQueue.size} events unresolved, ${pendingRetryRows.size} rows unwritten); those deliveries are lost`);
   }
-  if (firstDeliveryTally.lost > lostBefore) {
-    log.warn(`Shutdown: ${firstDeliveryTally.lost - lostBefore} queued webhook deliveries could not be persisted for retry`);
+  if (lostTotal() > lostBefore) {
+    log.warn(`Shutdown: ${lostTotal() - lostBefore} queued webhook deliveries could not be persisted for retry`);
   }
   return queued.length;
+}
+
+/**
+ * Resolves when every retry row handed to the overflow flush so far, and every one handed to it meanwhile, has been written and COUNTED.
+ * Used by the shutdown drain, and by a reader of the overflow counters (a test): the rows are visible to another connection before the
+ * write resolves here and the counter rises (Q-580, probe P1(a)), so a reader that waits for the rows reads the counter too early.
+ */
+export async function settledRetryWrites(): Promise<void> {
+  await pendingRetryRows.settled();
 }
 
 /**
@@ -465,9 +621,9 @@ async function deliverFirst(d: FirstDelivery): Promise<void> {
   if (result.success) {
     await markWebhookSuccess(sub.id);
   } else {
-    // Enqueue first retry (attempt 2). A write that fails leaves the event with no copy anywhere: counted before the failure goes to the
+    // Enqueue first retry (attempt 2). A write that fails is counted by what the queue holds; one that left no copy goes on to the
     // limiter's reporter, which names it.
-    try { await enqueueRetry(sub.id, body, event, spaceId, deliveryId, 2); } catch (err) { firstDeliveryTally.lost++; throw err; }
+    await writeRetryRow(retryJobFor(sub.id, body, event, spaceId, deliveryId, 2));
     sayDeliveryFailureOnce('first', sub.id, () => { log.warn(`Webhook first delivery failed for ${peerText(sub.id)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)} — queued for retry`); });
   }
 }

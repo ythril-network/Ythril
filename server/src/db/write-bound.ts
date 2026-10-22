@@ -282,6 +282,25 @@ export function outsideWriteBound<T>(fn: () => T): T {
 }
 
 /**
+ * Run `fn` — a write that belongs to NO request — with each database operation ended at `writeTimeoutMs()`, and no deadline across it
+ * (bundle-169, Q-580). The question it answers: "how is a write bounded that some request started but none owns?"
+ *
+ * ## What it prevents
+ *
+ * Work a request starts and leaves running (a webhook emit: its first deliveries, the overflow rows, a requeue) inherits the request's
+ * scope through AsyncLocalStorage. While that scope is still active, the request's HOLD deadline ends the detached write — its rows
+ * land or not as the store decides, and the writer counts them lost; once the scope has ended, the write is bounded by nothing at all
+ * (a dead scope binds nothing). Both halves are inside here, so a caller cannot keep one and drop the other: the inherited scope is left
+ * (`outsideWriteBound`), and a scope of its own is opened with the per-operation figure and no deadline.
+ *
+ * Not {@link withinWriteBoundOf} (`files/media/lease.ts`): that one asks for a deadline across a transaction's whole life, a figure the
+ * server holds the transaction to. A detached write has no such life to bound; each of its operations is ended on its own.
+ */
+export function detachedWrite<T>(fn: () => Promise<T>): Promise<T> {
+  return outsideWriteBound(() => withinScope(Infinity, writeTimeoutMs(), fn));
+}
+
+/**
  * Milliseconds left before the active scope's DEADLINE, or `undefined` when there is none to be left before: outside any
  * scope, and inside a housekeeping scope that has no deadline. Never below 0, never `Infinity`.
  *
