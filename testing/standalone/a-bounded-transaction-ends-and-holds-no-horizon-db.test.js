@@ -47,7 +47,7 @@
  * the session marked dirty, and one report line when no seal sent after the last kill answered. Every row waits on a latch
  * (a held message, the server's reply to it, the call's own answer), never on a sleep. At the base no seal, kill or dirty
  * mark exists, so rows (i), (ii)/(vii), (iv), (v), (vi) and (viii) are red for that; (iii) is green at the base and guards the
- * seal from running on an ordinary refusal. `SEAL_MS` is read from the module once it exports it.
+ * seal from running on an ordinary refusal. `SEAL_MS` is read from the module.
  *
  * ## The stall is REAL (`_write-faults.mjs`)
  *
@@ -80,12 +80,6 @@ const JOBS = `${S}_media_jobs`;
 /** The write bound a stalled case waits out, and how long past it a bounded call may take to be reported ended (generous: the rule is 2 s against the driver's 120 s). */
 const BOUND = { writeTimeoutMs: 2000, holdDeadlineMs: 2000 };
 const SLACK_MS = 3000;
-/**
- * The seal's own bound (design rev 4.3, `Q-530`): the implementation declares and exports it as `SEAL_MS` from
- * `server/dist/db/bounded-transaction.js`, default 2000 ms. It does not exist at the base, so the design's default stands in
- * until the export does — read from the module whenever it is there.
- */
-const SEAL_MS_DEFAULT = 2000;
 /** A fenced write's bound: `lease.ts` `LEASED_WRITE_BOUND_FACTOR` (2, not exported) times the write bound. */
 const LEASED_BOUND_MS = 2 * BOUND.writeTimeoutMs;
 /** The landed read-back's own fresh bound (`withinWriteBound` in `bounded-transaction.ts`): the write bound. */
@@ -237,7 +231,8 @@ describe('a bounded transaction ends, holds no horizon, and ends its session', {
     } catch (err) { boundedError = err; }
     storeCondition = await import('../../server/dist/db/store-condition.js');
     logLines = await import('../../server/dist/util/log.js');
-    SEAL_MS = typeof bounded?.SEAL_MS === 'number' ? bounded.SEAL_MS : SEAL_MS_DEFAULT;
+    SEAL_MS = bounded?.SEAL_MS;
+    assert.equal(typeof SEAL_MS, 'number', 'fixture: bounded-transaction.js exports no SEAL_MS (the seal\'s own bound), so the cap cannot be sized');
     KILL_WAIT_MS = writeBound.KILL_WAIT_MS;
     assert.equal(typeof KILL_WAIT_MS, 'number', 'fixture: write-bound.js exports no KILL_WAIT_MS, so the cap cannot be sized');
     CAP_MS = LEASED_BOUND_MS + 2 * SEAL_MS + KILL_WAIT_MS + READ_BACK_MS + SLACK_MS;
