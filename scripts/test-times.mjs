@@ -12,6 +12,10 @@
  *     node scripts/test-times.mjs --summary --results <dir>   the run's page (CI's advisory job); records nothing
  *     node scripts/test-times.mjs --help
  *
+ * Its REST pager over Actions runs (and its artifact download) is separate from `scripts/_shared/ci-run-reader.mjs`, the
+ * `gh`-based reader that `skip-check` and `trade` share, on purpose: this one reads trusted `main` runs with a token and runs
+ * where `gh` is not installed (CI's advisory job); that one serves maintainer commands on a machine logged in to `gh`.
+ *
  * ## What this prevents
  *
  * Six ways a recorder like this goes wrong quietly, each closed in one place:
