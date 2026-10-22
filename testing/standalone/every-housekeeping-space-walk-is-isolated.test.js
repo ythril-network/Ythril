@@ -129,6 +129,11 @@ const UNBOUNDED_CALL_EXEMPTIONS = [
     why: 'The bound\'s own mechanism: after the backstop it finds the database\'s operation by its comment and kills it. It is how a bound ends, so '
       + 'it cannot be inside one.',
   },
+  {
+    methods: ['command'], files: ['server/src/db/bounded-transaction.ts'],
+    why: 'The seal\'s fallback: `killSessions` on the session of a transaction the bound ended, run after that bound and outside it on '
+      + 'purpose, with its own `timeoutMS` (KILL_WAIT_MS). It is how a bound-ended transaction is ended, so it cannot be inside one.',
+  },
 ];
 
 /** Model and network calls a walk reaches: function key -> why it is not ended by the housekeeping figure. Each must carry its own signal. */

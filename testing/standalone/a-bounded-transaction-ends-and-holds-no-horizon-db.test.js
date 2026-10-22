@@ -677,10 +677,11 @@ describe('a bounded transaction ends, holds no horizon, and ends its session', {
     }
   });
 
-  // Last: it reconnects the server's client with retryWrites=false (the harness drops the database on open).
+  // Last: it reconnects the server's client with retryWrites=false, on a database of its own name (the harness drops a database on
+  // open and on close, and one name per open keeps a-db-harness-name-is-unique true).
   it('Q-530 (viii): on a client with retryWrites=false no seal is sent (it would carry no txnNumber); the kill runs and the outcome is reported unconfirmed', { timeout: 60_000 }, async () => {
     await closeTestMongo();
-    mongo = await openTestMongo('boundedtxn', { port: relay.port, query: '&retryWrites=false' });
+    mongo = await openTestMongo('boundedtxnnoretry', { port: relay.port, query: '&retryWrites=false' });
     let writes, kills;
     const run = await boundEndedFencedWrite('job-q530-viii', (orphan) => {
       writes = relay.record(isWriteOutsideTransactionOf(orphan));

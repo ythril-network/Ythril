@@ -110,7 +110,7 @@ async function sealTransaction(session: ClientSession): Promise<EndedOperation> 
       why = `${canSeal ? 'the first seal was not answered' : 'retryWrites=false, so no seal can be sent'}, and the kill failed: ${err instanceof Error ? err.message : String(err)}`;
     }
     if (canSeal && await sealOnce(session)) {
-      log.warn(`Bounded transaction: the store stopped answering with a statement possibly in flight; ${why}; ${killed ? 'the session was killed and ' : ''}a second seal was answered. `
+      log.warn(`Bounded transaction: the store stopped answering with a statement possibly in flight; ${peerText(why)}; ${killed ? 'the session was killed and ' : ''}a second seal was answered. `
         + 'Nothing it sent can land or hold a document now.');
       return { outcome: 'gone', killed };
     }
