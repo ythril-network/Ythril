@@ -37,5 +37,6 @@ stands on its own.
 15. [About, Theme & Embedded Mode](integration-guide/15-about-and-embedding.md)
    Theme API · Embedded (chrome-less) Mode
 16. [MCP (Model Context Protocol)](integration-guide/16-mcp.md)
+   Capability map: [both doors and what a token needs](integration-guide/16b-mcp-capability-map.md)
 17. [Quotas, Pagination & OIDC](integration-guide/17-quotas-pagination-oidc.md)
    Pagination · OIDC (OpenID Connect) Authentication

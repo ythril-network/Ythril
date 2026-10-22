@@ -8,13 +8,57 @@
  *
  * A second table lists the REST routes no tool covers, so the REST-only surface is visible rather than implied.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { capabilityMapModel, renderCapabilityMap, routeCell, rungCell, isToolDoorPath } from '../testing/standalone/_guide-tables.mjs';
+import {
+  capabilityMapModel, renderCapabilityMap, renderRestOnlyBlock, routeCell, rungCell, isToolDoorPath,
+} from '../testing/standalone/_guide-tables.mjs';
 
 const ROOT = process.cwd();
 const read = p => readFileSync(join(ROOT, p), 'utf8');
+
+/**
+ * `--write`: fill each generated region of the integration guide from the code, and nothing else.
+ *
+ * A region is the text between `<!-- generated: NAME -->` and `<!-- /generated: NAME -->`. The gate
+ * `the-guide-tables-are-generated-from-code` compares each one with the same render, so a page edited by hand
+ * inside its markers is red until this runs. It REFUSES a page whose markers are missing or repeated rather than
+ * appending a region somewhere it guessed: a table placed by a script that could not find its place is a table
+ * nobody chose. It keeps the page's own line endings (the working tree is CRLF, the commit LF), and writes only
+ * the two pages named here. Build the server first; the render reads `server/dist`.
+ */
+const GENERATED_REGIONS = [
+  { page: 'docs/integration-guide/16b-mcp-capability-map.md', name: 'capability-map', render: renderCapabilityMap },
+  { page: 'docs/integration-guide/16-mcp.md', name: 'rest-only', render: renderRestOnlyBlock },
+];
+
+function writeGeneratedRegions() {
+  let failed = false;
+  for (const { page, name, render } of GENERATED_REGIONS) {
+    const file = join(ROOT, page);
+    if (!existsSync(file)) { console.error(`${page} does not exist; the region \`${name}\` has no page to live on.`); failed = true; continue; }
+    const text = readFileSync(file, 'utf8');
+    const crlf = text.includes('\r\n');
+    const nl = crlf ? '\r\n' : '\n';
+    const open = `<!-- generated: ${name} -->`;
+    const close = `<!-- /generated: ${name} -->`;
+    const opens = text.split(open).length - 1;
+    const closes = text.split(close).length - 1;
+    if (opens !== 1 || closes !== 1 || text.indexOf(open) > text.indexOf(close)) {
+      console.error(`${page} must carry \`${open}\` then \`${close}\` exactly once (found ${opens} and ${closes}); nothing was written to it.`);
+      failed = true;
+      continue;
+    }
+    const body = render().replace(/\r\n/g, '\n').split('\n').join(nl);
+    // A blank line each side: a table directly under an HTML comment is glued to it and renders as literal pipes.
+    const next = text.slice(0, text.indexOf(open) + open.length) + nl + nl + body + nl + nl + text.slice(text.indexOf(close));
+    if (next !== text) writeFileSync(file, next, 'utf8');
+    console.log(`${page}: \`${name}\` ${next === text ? 'already current' : 'written'}`);
+  }
+  process.exit(failed ? 1 : 0);
+}
+if (process.argv.includes('--write')) writeGeneratedRegions();
 /**
  * Comments out, LINE comments first.
  *

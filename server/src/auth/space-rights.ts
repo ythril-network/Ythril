@@ -95,12 +95,14 @@ export interface RouteRight {
  * and `DELETE /api/files/:spaceId`.
  *
  * **What deliberately did NOT move:**
- * - The **collection wipes** (`DELETE /facts`, `/entities`, `/edges`, `/chrono`) stay `admin`. Their MCP
- *   counterpart `delete_space_data` is governed by its `spaceAdmin` flag (D-41), not by this table: emptying a whole
- *   space is the space admin's act, while a collection wipe here stays the area's `admin` rung — and emptying a
+ * - The **collection wipes** stayed `admin` for as long as they were served: `DELETE /facts` (removed),
+ *   `/entities` (removed), `/edges` (removed) and `/chrono` (removed), each replaced by one tool. What answers
+ *   them today is `delete_space_data` on the generic tool door `POST /api/delete_space_data`, governed by its
+ *   `spaceAdmin` flag (D-41), not by this table: emptying a whole space is the space admin's act, and emptying a
  *   collection is not the same act as deleting a row.
- * - `DELETE /api/brain/spaces/:spaceId/files` (the file-META record) stays `admin`. No tool mirrors it, so
- *   lowering it would weaken a door for parity with nothing.
+ * - `DELETE /api/brain/spaces/:spaceId/files` (removed) was the file-META record's delete and stayed `admin`
+ *   while it was served. No tool mirrored it, so lowering it would have weakened a door for parity with nothing.
+ *   A file's record goes with the file, through `DELETE /api/files/:spaceId`.
  * - `schema_update` used to be listed here as the one known difference in the OTHER direction — REST
  *   asking `schema: write` while the tool demanded instance admin. Both halves have since moved and the two
  *   doors now agree: the route is `schema: admin` (the whole-map replace is the area's irreversible act) and

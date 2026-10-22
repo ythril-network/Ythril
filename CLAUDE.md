@@ -7,7 +7,7 @@
 Not "eventually", not "the tool wraps the route later" — the same commit. This is the single most expensive lesson this
 codebase has: five capabilities shipped REST-only because a route was written and its tool "would follow", and
 the canary operator had to report all five from the outside before anyone noticed. `mcp-rest-parity.test.js` gates the
-capability half and `REST_ONLY_CAPABILITIES` is EMPTY — a row added there is a regression, not a plan.
+capability half. `REST_ONLY_CAPABILITIES` (in `mcp/parity.ts`, and published by `help()` under `restOnly`) lists what exists on REST alone, each with its reason: a row added there is a regression, not a plan.
 
 **Parameters count too, and this is the half that hides.** A capability present on both surfaces still violates the rule
 if one door accepts less:
@@ -47,7 +47,7 @@ agree:
 1. **the REST route**
 2. **the MCP tool** — same parameters, same defaults, same caps, same refusals
 3. **`docs/integration-guide/`** — the integrator's reference
-4. **`docs/userguide/` — the page an operator would actually open for this capability.** Six pages, and which one it is
+4. **`docs/userguide/` — the page an operator would actually open for this capability.** The userguide is a handful of pages, and which one it is
    follows the surface the operator uses: a search parameter is `02-brain.md` → Brain → Query → Semantic Search, a
    token control is
    `04-settings.md`, a model or media control `04a-media-and-embedding.md`, retention and audit are `05-storage-data-and-audit.md`. Do not read this row as "the Brain page" —
@@ -308,7 +308,7 @@ PUSH, which zod strips because no `Incoming*` schema declares the field. **Pull 
 bundle-30). It fetched `full=true` and `replaceOne`d what came back, so a pulled record carried the sender's
 vector and was stored with it, for as long as the sentence had been read as covering both.
 
-**And the vector was not the expensive half.** The same five fields are excluded from the space hash, and
+**And the vector was not the expensive half.** The same local-only fields are excluded from the space hash, and
 two of them are the retention stamps — `_expireAt` and `_contentExpireAt`. `brain/ttl-sweep.ts` deletes
 every record whose stamp has passed, across every space, through the normal delete path. **So a pulled
 stamp let one instance decide when another deleted its data** — an operator who configured a year of

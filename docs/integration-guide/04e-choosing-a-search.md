@@ -16,9 +16,9 @@ This page is the decision, then the tuning. The parameters themselves are docume
 | you know | use |
 |---|---|
 | roughly **what it says** | `recall` — meaning-ranked |
-| exactly **which field equals what** | `query` — a filter, no ranking |
+| exactly **which field equals what** | `filter` — a filter, no ranking |
 | **a record**, and want ones like it | `similar` — no re-embedding |
-| **a record**, and want what it connects to | `traverse`, or `recall` with `traverse > 0` |
+| **a record**, and want what it connects to | `graph_traverse`, or `recall` with `traverse > 0` |
 
 If two of those are true at once, read on: the combinations are where the real choice is.
 
@@ -29,7 +29,7 @@ If two of those are true at once, read on: the combinations are where the real c
 
 **It is the wrong tool when you need completeness.** `topK` is a cut, and a cut with a *rank* behind it: result 11
 of a `topK: 10` is not absent, it simply lost. If your question is *"every record where `status` is open"*, the
-honest answer is `query` — `recall` will give you ten good guesses.
+honest answer is `filter` — `recall` will give you ten good guesses.
 
 Reach for it when:
 
@@ -37,9 +37,9 @@ Reach for it when:
 - the vocabulary in the store does not match the vocabulary in the question
 - "close enough, best first" is what you want
 
-## `query` — when you can name the condition
+## `filter` — when you can name the condition
 
-`query` runs an allowlisted MongoDB filter and returns rows in a **total order** (`seq`, `updatedAt`, `createdAt`,
+`filter` runs an allowlisted MongoDB filter and returns rows in a **total order** (`seq`, `updatedAt`, `createdAt`,
 `_id`), so it pages without a row drifting between pages. It does not rank, and it does not care what anything
 means.
 
@@ -58,7 +58,7 @@ Given an id, `similar` uses that record's **stored** vector — no embedding cal
 For deduplication, "more like this", and merge detection it is both cheaper and more accurate than pasting the
 record's own text into `recall`.
 
-## `traverse` vs `recall` with `traverse`
+## `graph_traverse` vs `recall` with `traverse`
 
 Both walk edges in both directions. The difference is where the walk **starts**:
 
@@ -73,7 +73,7 @@ message is rarely textually similar to the message's subject.
 
 ## Combining them: the two-call pattern that beats one clever call
 
-**Filter first, rank second — in one call.** `recall`'s `filter` accepts the same grammar `query` does, including
+**Filter first, rank second — in one call.** `recall`'s `filter` accepts the same grammar `filter` does, including
 `$or` and `$regex` nested to depth 8. **`topK` is filled from every record that satisfies the filter, whatever its
 vector rank** — so a filtered `topK: 10` returns ten when ten match, and nothing matching is silently dropped. An
 answer that could not be completed says `filter_window` in `degraded`.
@@ -93,7 +93,7 @@ schema is what keeps it on the fast path.
 bodies — by far the largest field in a result, paid for `topK` times. Find *where* something is, then read only the
 chunk you chose.
 
-**Count, then fetch.** `query` with a `projection` of `{"_id": 1}` and `total` tells you how big the answer is
+**Count, then fetch.** `filter` with a `projection` of `{"_id": 1}` and `total` tells you how big the answer is
 before you decide to pull it.
 
 ## Optimising by what you are actually doing
@@ -105,9 +105,9 @@ by a cross-encoder — it improves the top of the list, so a *smaller* `topK` be
 
 ### "I want everything that matches a condition"
 
-`query`, with `skip`/`sort`/`dir` and `total`. Not `recall` with a huge `topK` — nothing caps it since 4.0,
+`filter`, with `skip`/`sort`/`dir` and `total`. Not `recall` with a huge `topK` — nothing caps it since 4.0,
 so it will not lie to you, but the tail of a ranked list is noise rather than completeness, and you pay
-meaning-ranking's cost for every one of those rows. `query` filters instead of ranking, which is the
+meaning-ranking's cost for every one of those rows. `filter` filters instead of ranking, which is the
 question you are actually asking.
 
 ### "I want context around an answer"
@@ -152,7 +152,7 @@ has to be one.
 
 | symptom | cause | fix |
 |---|---|---|
-| counts that keep growing | paging `recall` with `topK`/an unsupported `offset` | `query` with `skip` and `total` |
+| counts that keep growing | paging `recall` with `topK`/an unsupported `offset` | `filter` with `skip` and `total` |
 | a phrase search finds nothing | `$regex` over prose | `recall` |
 | "this record is not in the results" | a match left out because its graph could not be read whole | check `incompleteRows` — it names the match and the `reason`; a narrower `edgeLabels` or a lower `traverse` brings it back whole |
 | "there are no more matches" | a budgeted answer read as the whole result | check `truncated` and page with `nextSkip` as `skip`; `remainder.spillId` is the same records kept in one spill |
@@ -162,4 +162,4 @@ has to be one.
 ---
 
 *The MCP tools take the same parameters as the routes throughout — see the
-[capability map](16-mcp.md#capability-map--both-doors-and-what-a-token-needs) for both doors side by side.*
+[capability map](16b-mcp-capability-map.md#capability-map--both-doors-and-what-a-token-needs) for both doors side by side.*
