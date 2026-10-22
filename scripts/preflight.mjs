@@ -17,20 +17,21 @@
  * ── What this is not ────────────────────────────────────────────────────────────────────────────
  *
  * Not a replacement for CI. It deliberately skips everything needing Docker or a live instance
- * (integration, sync, red-team), because a gate that takes fifteen minutes is a gate people stop
- * running. This is the fast half: seconds, no containers, run it before every push.
+ * (integration, sync, red-team) and every test file that needs the test database, because a gate that
+ * takes fifteen minutes is a gate people stop running. This is the fast half: no containers, no
+ * database, run it before every push. The database test files are CI's Full run (owner decision,
+ * 2026-10-22, Q-588), and `scripts/trade.mjs` measures what that saves and costs.
  *
  * Usage:  npm run preflight
- *         npm run preflight:static   (`--static`: every gate that needs no database and runs no suite of its own -
- *         the source and built gates, the pure half of the offline tests, parse, unrun-tests, surface, docs, todo,
- *         changelog and the client type-check. It skips the database half and its probe, the client unit tests,
- *         the production build and its budgets, and it is NEVER a push pass: its verdict says so, Q-584.)
+ *         npm run preflight:static   (`--static`: every gate that runs no suite of its own - the source and built
+ *         gates, the pure half of the offline tests, parse, unrun-tests, surface, docs, todo, changelog and the client
+ *         type-check. Both modes run the pure test files only; `--static` also skips the client unit tests, the
+ *         production build and its budgets, and it is NEVER a push pass: its verdict says so, Q-584.)
  */
 import { execSync, execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 
 import { join } from 'node:path';
-import { Socket } from 'node:net';
 import { splitStandalone, offlineRuns } from '../testing/_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../testing/_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
@@ -104,24 +105,23 @@ try { run('npm run build:server'); } catch { failures.push({ name: 'build:server
 
 for (const [file, why] of BUILT_GATES) gate(file, why, file);
 
-// Every standalone test that does NOT need a running instance, rather than the curated handful above.
+// Every standalone test that needs neither a running instance nor the test database, rather than the curated handful above.
 //
 // `npm run test:standalone` assumes the Docker stack — a handful of those files drive a live server on
-// :3200. The rest are pure: they import from `server/dist` and assert on logic. Those had no reason to
-// wait for CI, and waiting for CI is exactly how a PR that changed `toRecallRecord`'s output shipped
-// with the test contradicting it still asserting the old shape.
+// :3200, and the database-backed ones need the test database. The rest are pure: they import from
+// `server/dist` and assert on logic. Those had no reason to wait for CI, and waiting for CI is exactly how
+// a PR that changed `toRecallRecord`'s output shipped with the test contradicting it still asserting the old shape.
 //
 // THE SPLIT AND THE BATCHING MOVED TO `testing/_shared/standalone-split.mjs`, whole, with the
 // measurements that produced them. `test:standalone` asks the same question, and two copies of it is two
 // places for preflight and the suite to disagree about which gates exist — which is the one divergence
 // that makes a green preflight worthless.
 const standaloneSplit = splitStandalone();
-const { all: allStandalone, offline: pure, offlineDb } = standaloneSplit;
+const { all: allStandalone, offline, offlinePure: pure, offlineDb } = standaloneSplit;
 console.log(`
-── standalone tests that need no running instance (${pure.length} of ${allStandalone.length}; `
-  + `${allStandalone.length - pure.length} declare @needs-instance and run in CI) ──`);
-/** How many standalone suites stood down for want of the test database. Reported in the verdict. */
-let skippedForDb = 0;
+── standalone tests that need no running instance and no database (${pure.length} of ${allStandalone.length}; `
+  + `${allStandalone.length - offline.length} declare @needs-instance and run in CI) ──`);
+console.log(`  ${offlineDb.length} database test files are not run here; CI's Full run runs them.`);
 
 /*
  * DEFAULT CONCURRENCY — one worker per core — and the flag that was here is gone.
@@ -134,12 +134,12 @@ let skippedForDb = 0;
  * Preflight ran them serially too, so the offline set cost about three and a half minutes twice per
  * cycle — once here and once in `test:all:core`.
  *
- * EXCEPT the database-backed files, which share one MongoDB and ran it out of memory at full width: they run
- * capped, and the plan that says so is `offlineRuns`, the one `test:standalone` runs too — see
- * `DB_TEST_CONCURRENCY` in the shared split.
+ * The database-backed files are NOT in this run, in either mode (Q-588, owner decision 2026-10-22): they share one MongoDB
+ * (`DB_TEST_CONCURRENCY` in the shared split caps them there), a machine without the test stack skipped them silently, and
+ * CI's Full run runs them. `offlineRuns` is the plan `test:standalone` runs too; this keeps its pure batches only, and the
+ * gate `a-preflight-runs-no-database-batch-and-static-is-never-a-push-pass` holds that for both modes.
  */
-// Under --static only the pure batches run: the database half needs the test stack, which a static run never assumes.
-const runs = offlineRuns(standaloneSplit).filter(r => !STATIC || r.kind === 'pure');
+const runs = offlineRuns(standaloneSplit).filter(r => r.kind === 'pure');
 let standaloneFailed = false;
 // Timing, through the shared helper: one destination per batch, the flags AFTER the plan's own args so the batch
 // budget and the cap stay about the files, and the recorder's credentials out of the children's environment.
@@ -163,55 +163,13 @@ if (standaloneFailed) {
   failures.push({ name: 'test:standalone (offline subset)', why: 'server contracts and pure logic — no Docker needed, so no reason to learn this from CI' });
 }
 
-/*
- * ── how many of those suites could not actually run ──
- *
- * `_mongo-harness.mjs` skips its suite with an actionable message when the test database is down, and THROWS
- * in CI rather than reporting a green no-op. That is the right split. What was missing is here: preflight said
- * "PASSED" while thirty-one suites had quietly stood down, and "passed" read as "everything ran".
- *
- * It cost a 21-minute CI round trip on A-3. Removing one positional from `remember()` shifted the argument
- * after it, and the only suites that call `remember()` with that many positionals are database ones — so the
- * seven failures were invisible locally and arrived as behaviour failures ("waitForEmbedding still fails
- * loudly") rather than as a signature mismatch.
- *
- * Derived from IMPORTS plus one TCP probe rather than by parsing test output: a suite that needs the harness
- * cannot have run if the port is closed, and that is knowable without reading a single line of the report.
- * A static run ran no database suite, so it has nothing to probe.
- */
-if (!STATIC) {
-  // The split's own answer, not a second spelling of it: the substring match that was here also counted a gate
-  // that only NAMES the harness.
-  const needsDb = offlineDb;
-  const port = Number(process.env['YTHRIL_TEST_MONGO_PORT'] ?? 27117);
-  const host = process.env['YTHRIL_TEST_MONGO_HOST'] ?? '127.0.0.1';
-
-  const reachable = await new Promise(resolve => {
-    const sock = new Socket();
-    const done = (v) => { sock.destroy(); resolve(v); };
-    sock.setTimeout(1500);
-    sock.once('connect', () => done(true));
-    sock.once('timeout', () => done(false));
-    sock.once('error', () => done(false));
-    sock.connect(port, host);
-  });
-
-  if (reachable) {
-    console.log(`  ${needsDb.length} database suite(s) ran — the test stack is up on ${host}:${port}.`);
-  } else if (needsDb.length > 0) {
-    console.log(`
-  ${needsDb.length} standalone suite(s) SKIPPED themselves: no test database on ${host}:${port}.`);
-    console.log('  They run in CI, where the harness throws rather than skipping. `npm run test:up` runs them here.');
-    skippedForDb = needsDb.length;
-  }
-}
-
 // ── every test file PARSES, including the ones only CI runs ────────────────────────────────────────────────
 //
-// The offline subset above executes ~250 standalone files, so a syntax error in one of those fails loudly
-// here. The Docker-dependent suites — integration, sync, red-team — are never even PARSED locally, so a
-// broken one is invisible until CI, and it does not fail as an assertion: node reports a module-load error
-// at `line 1:1` with an import stack, which reads nothing like the test that is actually broken.
+// The pure subset above executes its standalone files, so a syntax error in one of those fails loudly
+// here. The database-backed files and the Docker-dependent suites — integration, sync, red-team — are not
+// RUN locally, so without this step a broken one would be invisible until CI, and it would not fail as an
+// assertion: node reports a module-load error at `line 1:1` with an import stack, which reads nothing like
+// the test that is actually broken. This step parses every test file, those included.
 //
 // Paid for on 2026-08-06: an apostrophe lost its backslash on the way through a shell heredoc, the file
 // stopped parsing, local preflight was green, and CI spent a full Docker run to say so. `node --check` over
@@ -407,12 +365,8 @@ console.log('\n' + '='.repeat(76));
 // ~/.claude/hooks/preflight-mark.js refuses to record even though the run exits 0.
 if (failures.length === 0) {
   console.log(STATIC
-    ? 'Preflight STATIC passed - not a push pass. The database half, the client unit tests and the production build did not run.'
-    : 'Preflight PASSED. Docker-dependent suites (integration, sync, red-team) still run in CI.');
-  if (!STATIC && skippedForDb > 0) {
-    console.log(`  ...but ${skippedForDb} standalone suite(s) did NOT run — no test database. `
-      + '`npm run test:up`, then re-run, if this change touches a signature or a stored shape.');
-  }
+    ? 'Preflight STATIC passed - not a push pass. The client unit tests, the production build and the bundle budgets did not run.'
+    : 'Preflight PASSED. The database test files and the Docker-dependent suites (integration, sync, red-team) run in CI.');
   process.exit(0);
 }
 console.log(`Preflight ${STATIC ? 'STATIC FAILED' : 'FAILED'} — ${failures.length} gate(s):\n`);

@@ -11,9 +11,11 @@ Two rules run through everything below, because both were learned the expensive 
 
 ## Running the suites
 
-Run `npm run preflight` first, always. It runs every structural check that needs no Docker, in one command, and
-`scripts/preflight.mjs` is the list (`npm run preflight:static` runs the part that needs no test database and no suite of its
-own, about five minutes against the full run's hour on a maintainer's machine, and is never a push pass). Then run the suites your change reaches. A maintainer's bundle then has its one full run on
+Run `npm run preflight` first, always. It runs every structural check that needs no Docker and no test database, in one command, and
+`scripts/preflight.mjs` is the list: it runs the pure standalone test files and no database test file, in either mode, and says how many
+database test files it did not run (those are CI's Full run). `npm run preflight:static` also leaves out the client unit tests, the
+production build and its budgets, takes about five minutes against the full run's hour on a maintainer's machine, and is never a push
+pass. Then run the suites your change reaches. A maintainer's bundle then has its one full run on
 CI, before its pull request (see [The CI job graph](#the-ci-job-graph)), and a commit made after that run reruns locally only
 the test files its diff reaches.
 
@@ -297,6 +299,13 @@ can fix there, and refused in CI unless it is expected.**
   pass or fail is named. It exits 2, not 0, when the results cannot answer (a missing or cut-off file).
   `node scripts/skip-check.mjs <run id>` reads that step's verdict for one finished run, with the same exit codes; a
   partial re-run whose gate job did not reach the step answers 2.
+- **What local preflight's missing database half costs and saves** is measured, not argued: `node scripts/trade.mjs` (optionally
+  `--limit N`, or `--line full-run/bundle-<n>` for one Work-Log line) reads the Full runs through `gh` and counts each by the
+  conclusion of its database step in every attempt. It reports CI minutes saved (the database step of each Full run, a proxy
+  for the local time skipped), CI minutes the failures cost (the repeats they caused), and the calendar time from a failing step
+  to the next green one on its own line, apart from the CI minutes. Runs from before the change are the baseline, reported
+  separately; pull request runs of `ci.yml` are outside it. It exits 2 when `gh` is missing or logged out, or when the listing
+  fills its limit.
 - **Locally**, Windows-only skips and the like stay skips; the refusal is CI's.
 
 A test that needs a precondition (a session, a prior test's output) throws once in its `before` hook or in one assert
@@ -505,7 +514,7 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 
 | Variable | Read by | Meaning |
 |---|---|---|
-| `YTHRIL_TEST_MONGO_HOST`, `YTHRIL_TEST_MONGO_PORT` | `scripts/preflight.mjs` | Where preflight finds the test MongoDB. Defaults are the test stack's loopback address and published port. |
+| `YTHRIL_TEST_MONGO_HOST`, `YTHRIL_TEST_MONGO_PORT` | `testing/_shared/test-mongo-address.mjs` | Where the database-backed standalone tests find the test MongoDB (CI's Full run and `npm run test:up`; local preflight runs none of them). Defaults are the test stack's loopback address and published port. |
 | `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs` | The recorder's instance and token. See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
 | `GH_TOKEN`, `GITHUB_API_URL` | `scripts/test-times.mjs` | Read access to this repository's Actions runs, and the API base. |
 | `CLIENT_TEST_OUTCOME` | `scripts/mask-client-report.mjs` | The client test command's own result (`success`, `failure`, `cancelled` or `skipped`), which CI's mask step passes and which is written into the masked report as `runnerOutcome`; the recorder reads a failed runner with no failure counted as an incomplete run. Unset: nothing is stamped. |

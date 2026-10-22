@@ -1,9 +1,10 @@
 /**
- * Preflight must not silently skip a test.
+ * Preflight must not silently skip a test it says it runs. (Since Q-588 it runs no database test file at all, and says how many
+ * it leaves to CI's Full run; this file is about the split between files that need a live server and the rest.)
  *
  * ## What went wrong
  *
- * Preflight runs the standalone tests that need no live server, and it decided which those were by
+ * Preflight ran the standalone tests that need no live server (today: the pure ones; the database files are CI's), and it decided which those were by
  * CONTENT MATCH: `fetch(|127.0.0.1|localhost:|INSTANCES|BASE_URL`. That guarded one direction — a test
  * that really does hit the network without a marker fails loudly with ECONNREFUSED — and completely
  * missed the other: a **pure** test that merely *mentions* one of those strings was excluded and never
@@ -22,7 +23,7 @@
  * ## The rule now
  *
  * The split is **declared**, not inferred: a test that drives a live server says `@needs-instance` in
- * its header. Everything else runs in preflight. Zero files were wrong in that direction when measured,
+ * its header. Everything else is offline: the pure files run in preflight and the database-backed ones in CI. Zero files were wrong in that direction when measured,
  * so the only failure mode a marker introduces is the loud one that was already handled.
  *
  * Run: node --test testing/standalone/preflight-coverage.test.js

@@ -1,13 +1,21 @@
 /**
- * `npm run preflight -- --static` runs every gate that needs no stack and no suite, and it is never mistaken for the push pass.
+ * Preflight runs NO database test file, in either mode, and `npm run preflight -- --static` is never mistaken for the push pass (Q-588).
+ *
+ * Two rules, one file, because they read the same text the same way:
+ *
+ * 1. **The run plan holds no database batch, whatever the flag.** Local preflight runs the pure standalone files only; the
+ *    database files (`kind: 'db'` in `offlineRuns`) are CI's Full run, and a report (`scripts/trade.mjs`) measures what that
+ *    costs and saves. The probe of the test database is gone with them: nothing local asks whether a stack is up.
+ * 2. **`--static` leaves out the client unit suite, the production build and the bundle budgets, and is never the push pass.**
+ *    Its verdict says "not a push pass" (the words `~/.claude/hooks/preflight-mark.js` refuses to record on exit 0); the full
+ *    run's verdict says "Preflight PASSED" and never "not a push pass".
  *
  * ## The failure this prevents
  *
- * A "fast subset" of preflight is wanted: the gates that need no database and run no test suite, for the moment between
- * edits when the full run (about three minutes of suites) is the wrong price. Three ways it goes wrong, each silent:
- *
- * - **It runs a suite after all.** A new step lands inside the static path and the "minute" becomes five; or the skipped
- *   regions are the wrong ones and a database batch runs against a machine with no database.
+ * - **A database batch comes back.** The filter on `offlineRuns` is written as `!STATIC || r.kind === 'pure'` again, a second
+ *   loop is added, or a probe returns "to report what could not run": the owner's decision (2026-10-22) is that the local run
+ *   is pure only, and a plan that runs a database batch on a machine with no database reports suites that stood down as green.
+ * - **It runs a suite after all.** A new step lands inside the static path and the "minute" becomes five.
  * - **It skips a gate.** The flag is written as an `if` around "the slow part", a step is added below it later, and the
  *   static run quietly leaves out one of the checks it exists to run.
  * - **It says PASSED.** `~/.claude/hooks/preflight-mark.js` records a pass on exit 0 and refuses one whose output says
@@ -25,21 +33,23 @@
  *   the flag set and once without (`reachable`), so `if (!STATIC)`, `STATIC ? a : b`, `!STATIC && x()` and an inline
  *   `process.argv.includes('--static')` are all the same rule;
  * - a REGION is found by the call it makes (the client unit-test command, `build:prod`, the `client/angular.json` read, the
- *   TCP probe of the test database, a `--test` batch), never by a line number or a variable name. Each region must be
- *   reachable in the full run and unreachable under `--static`; the one exception is the batch call, which is shared by the
- *   pure and the database half and must therefore select by kind under `--static`;
+ *   TCP probe of the test database, a `--test` batch), never by a line number or a variable name. Each of the three static-skipped
+ *   regions must be reachable in the full run and unreachable under `--static`; the probe region must not exist at all; the batch
+ *   call is shared by every plan entry and must therefore sit in a loop whose list selects only kind `pure`, from a test the flag
+ *   does not enter (`.filter(r => r.kind === 'pure')`, or an `if` in the loop body that leaves the iteration for a `db` run);
  * - every OTHER step call (`run`, `execSync`, `execFileSync`, `gate`) must be reachable under `--static`, so a step added
  *   later is static unless a guard says it is a suite.
  *
  * Seen red by the RULE, and by mutation: `analyse()` is run over the real file with the flag neutralised, with an unguarded
- * copy of a region's call inserted, and with the kind filter taken out of the batch loop; each must name the region.
- * The mutations are in memory and the file is never written.
+ * copy of a region's call inserted, with a probe put back, with the kind filter taken out (a db run put back into the plan) and
+ * with the old `!STATIC ||` guard put back in front of it; each must name the region. The mutations are in memory and the file is
+ * never written.
  *
  * Not edited by this gate's author, and not read by it: the five other readers of preflight's text
  * (`preflight-coverage`, `ci-workflow-is-sound`, `a-client-report-is-masked-before-upload`,
  * `a-test-child-environment-is-one-module`, `ci-workflow-fixture`). A flag that leaves the text in place keeps them green.
  *
- * Run: node --test testing/standalone/a-static-preflight-runs-no-suite-and-is-never-a-push-pass.test.js
+ * Run: node --test testing/standalone/a-preflight-runs-no-database-batch-and-static-is-never-a-push-pass.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -251,7 +261,10 @@ const REGIONS = {
     && n.arguments.some(a => ts.isArrayLiteralExpression(a) && a.elements.some(el => isString(el) && el.text === '--test')
       && a.elements.some(el => ts.isSpreadElement(el))),
 };
-const SKIPPED_UNDER_STATIC = ['client-suite', 'client-build', 'bundle-budgets', 'database-probe'];
+/** The three things `--static` leaves out: the client suite, the production build and the bundle budgets. */
+const SKIPPED_UNDER_STATIC = ['client-suite', 'client-build', 'bundle-budgets'];
+/** Regions that must not exist at all: the probe of the test database went with the database batches (Q-588). */
+const GONE = ['database-probe'];
 
 const STEP_CALLEES = ['run', 'execSync', 'execFileSync', 'gate'];
 
@@ -286,33 +299,64 @@ function loopIterables(node, decls) {
   return [];
 }
 
-const KINDS = ['pure', 'db'];
-const namesKind = (expr) => {
-  let hit = false;
-  visit(expr, (n) => {
-    if (isString(n) && KINDS.includes(n.text)) hit = true;
-    if (ts.isIdentifier(n) && ['offlinePure', 'offlineDb'].includes(n.text)) hit = true;
-  });
-  return hit;
+/** `x.kind === 'pure'` / `x.kind !== 'db'` (what a plan keeps) and `x.kind === 'db'` / `x.kind !== 'pure'` (what it drops): a bare comparison, nothing else in it. */
+const kindComparison = (e0) => {
+  const e = unwrap(e0);
+  if (!ts.isBinaryExpression(e)) return null;
+  const eq = EQ.includes(e.operatorToken.kind);
+  if (!eq && !NE.includes(e.operatorToken.kind)) return null;
+  const sides = [e.left, e.right].map(unwrap);
+  const lit = sides.find(isString);
+  if (!lit || !sides.some(x => !isString(x)) || !['pure', 'db'].includes(lit.text)) return null;
+  return { keepsPure: (lit.text === 'pure') === eq, node: e };
 };
 
-/**
- * Does the loop around this `--test` batch leave the database batches out under `--static`? Two shapes, both stated by what they
- * contain: the list it iterates is built from the flag AND names the kind (`.filter(r => !STATIC || r.kind === 'pure')`), or the
- * loop's own body holds an `if` that reads the flag, names the kind and leaves the iteration (`continue`, `break`, `return`).
- */
-function dbBatchesDropped(node, decls, S) {
-  if (loopIterables(node, decls).some(x => readsFlag(x, S) && namesKind(x))) return true;
+/** The expression a `.filter(...)` callback returns (an arrow's body, or the one `return` of a block); null when `call` is not a filter. */
+function filterPredicate(call) {
+  if (!ts.isCallExpression(call) || calleeName(call) !== 'filter') return null;
+  const fn = call.arguments[0];
+  if (!fn || !(ts.isArrowFunction(fn) || ts.isFunctionExpression(fn))) return null;
+  if (!ts.isBlock(fn.body)) return fn.body;
+  return fn.body.statements.find(ts.isReturnStatement)?.expression ?? null;
+}
+
+/** Every `.filter(r => r.kind === 'pure')` in the list a loop around `node` iterates: the predicate is that comparison and nothing else, so the flag is not in it. */
+function pureFilters(node, decls) {
+  const out = [];
+  for (const x of loopIterables(node, decls)) {
+    visit(x, (n) => { const p = filterPredicate(n); if (p && kindComparison(p)?.keepsPure) out.push({ call: n, predicate: p }); });
+  }
+  return out;
+}
+
+/** The loop's own `if (r.kind === 'db') continue;` (or `!== 'pure'`): an `if` that is that bare comparison, leaves the iteration, and sits under no flag test inside the loop. */
+function dbSkips(node, S) {
+  const out = [];
   for (let p = node.parent; p && !ts.isFunctionLike(p); p = p.parent) {
     if (!isLoop(p)) continue;
-    let found = false;
     visit(p.statement, (n) => {
-      if (!ts.isIfStatement(n) || !readsFlag(n.expression, S) || !namesKind(n.expression)) return;
-      visit(n.thenStatement, (m) => { if (ts.isContinueStatement(m) || ts.isBreakStatement(m) || ts.isReturnStatement(m)) found = true; });
+      if (!ts.isIfStatement(n)) return;
+      const c = kindComparison(n.expression);
+      if (!c || c.keepsPure) return;
+      let leaves = false;
+      visit(n.thenStatement, (m) => { if (ts.isContinueStatement(m) || ts.isBreakStatement(m) || ts.isReturnStatement(m)) leaves = true; });
+      let guarded = false;
+      for (let a = n.parent; a && a !== p; a = a.parent) if (ts.isIfStatement(a) && readsFlag(a.expression, S)) guarded = true;
+      if (leaves && !guarded) out.push(n);
     });
-    return found;
+    break;
   }
-  return false;
+  return out;
+}
+
+/**
+ * Does the plan this `--test` batch runs hold only kind `pure`, whatever the flag? Two shapes, both stated by what they contain: the
+ * list the loop iterates is filtered by a bare `kind === 'pure'` comparison, or the loop's own body leaves the iteration for a `db`
+ * run. Neither may read the flag: a plan that selects by kind only under `--static` is the old plan, and runs the database half in
+ * the full mode.
+ */
+function planHoldsOnlyPure(node, decls, S) {
+  return pureFilters(node, decls).length > 0 || dbSkips(node, S).length > 0;
 }
 
 // ─────────────────────────────────────────────────── the rule, as violations ─────────────────────────────────────────────────────
@@ -377,8 +421,12 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
 
   // The regions: kept by the full run, gone under --static.
   const regions = regionNodes(sf);
-  for (const region of Object.keys(REGIONS)) {
+  for (const region of Object.keys(REGIONS).filter(k => !GONE.includes(k))) {
     if (regions[region].length === 0) say(region, `no call of the '${region}' region found in ${PREFLIGHT_FILE}: the rule would be asserted over nothing`);
+  }
+  // The probe of the test database is gone with the database batches: a socket opened to ask whether a stack is up is back.
+  for (const region of GONE) {
+    for (const n of regions[region]) say(region, `${region} (line ${lineOf(sf, n)}) is back in ${PREFLIGHT_FILE}: local preflight runs no database test, so nothing local asks whether a database is up`);
   }
   for (const region of SKIPPED_UNDER_STATIC) {
     for (const n of regions[region]) {
@@ -391,7 +439,7 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
     const at = `line ${lineOf(sf, n)}`;
     if (!reachable(n, false, S)) say('database-batch', `the batch call (${at}) does not run in the full preflight`);
     if (!reachable(n, true, S)) say('database-batch', `the batch call (${at}) is skipped under ${STATIC_FLAG} whole: the pure half (the timer and walk rule gates live there) must run`);
-    else if (!dbBatchesDropped(n, decls, S)) say('database-batch', `the batch call (${at}) runs the database half under ${STATIC_FLAG}: no loop around it selects by kind from the flag`);
+    if (!planHoldsOnlyPure(n, decls, S)) say('database-batch', `the batch call (${at}) can run a database batch: no loop around it selects only kind 'pure' from a test the flag does not enter, so a db run is in the plan in at least one mode`);
   }
 
   // Every other step runs under --static.
@@ -422,6 +470,8 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
   if (!underFull.some(t => t.includes('Preflight PASSED'))) say('verdict', "the full run no longer prints 'Preflight PASSED', the line the mark copies");
   const staticInFull = underFull.find(t => /static/i.test(t));
   if (staticInFull) say('verdict', `the full run prints a static verdict: ${JSON.stringify(staticInFull.slice(0, 60))}`);
+  const notAPushPassInFull = underFull.find(t => /not a push pass/i.test(t));
+  if (notAPushPassInFull) say('verdict', `the full run says "not a push pass": ${JSON.stringify(notAPushPassInFull.slice(0, 60))}; the mark would refuse the pass the full run exists to give`);
 
   // The timing scope.
   const scopes = [];
@@ -474,29 +524,53 @@ function insertUnguardedCopy(src, region) {
   return `${src.slice(0, at)}\n${node.getText()};\n${src.slice(at)}`;
 }
 
-/** The kind filter taken out of the batch loop: every use of the flag in what the loop iterates (and in its own `if`s) becomes `false`. */
-function dropKindFilter(src) {
-  const sf = parsed(src, 'kind');
+/** The batch loop's selection, as the source ranges a mutation may rewrite: a `.filter` call (replaced by what it filters) or a loop-body `if` that skips db runs. */
+function planSelection(src, tag) {
+  const sf = parsed(src, tag);
   const decls = bindingsOf(sf);
   const S = flagNames(decls);
   const node = regionNodes(sf)['database-batch'][0];
   assert.ok(node, "the mutation found no 'database-batch' call");
-  const edits = [];
-  const strip = (root) => visit(root, (n) => {
-    if (ts.isIdentifier(n) && S.has(n.text) && !ts.isVariableDeclaration(n.parent)) edits.push({ start: n.getStart(sf), end: n.getEnd(), text: 'false' });
-    else if (ts.isExpression(n) && isFlagTest(n)) edits.push({ start: n.getStart(sf), end: n.getEnd(), text: 'false' });
-  });
-  for (const x of loopIterables(node, decls)) strip(x);
-  for (let p = node.parent; p && !ts.isFunctionLike(p); p = p.parent) {
-    if (isLoop(p)) { strip(p.statement); break; }
-  }
-  assert.ok(edits.length > 0, 'the mutation found no use of the flag in the batch loop');
+  return { sf, node, filters: pureFilters(node, decls), skips: dbSkips(node, S) };
+}
+
+/**
+ * A db run put back into the plan: the kind filter taken out of the batch loop's list (the `.filter(...)` call becomes what it
+ * filtered), or the loop's `if` that skips db runs made empty. The plan then runs every kind, in both modes.
+ */
+function putDbRunBack(src) {
+  const { sf, filters, skips } = planSelection(src, 'db-back');
+  const edits = filters.map(({ call }) => ({ start: call.getStart(sf), end: call.getEnd(), text: call.expression.expression.getText() }))
+    .concat(skips.map(n => ({ start: n.getStart(sf), end: n.getEnd(), text: ';' })));
+  assert.ok(edits.length > 0, 'the mutation found no kind selection in the batch loop to take out');
   return edit(src, edits);
+}
+
+/**
+ * The OLD guard put back in front of the selection: `!STATIC || <kind is pure>`, so the plan keeps every kind in the full mode and
+ * only `--static` selects by kind. This is the plan the file had before Q-588, and it is the one the rule must not mistake for the
+ * new one because it, too, names the kind and reads the flag.
+ */
+function putStaticOnlyGuardBack(src) {
+  const { sf, filters, skips } = planSelection(src, 'static-only');
+  const notStatic = `!process.argv.includes('${STATIC_FLAG}')`;
+  const edits = filters.map(({ predicate }) => ({ start: predicate.getStart(sf), end: predicate.getEnd(), text: `${notStatic} || ${predicate.getText()}` }))
+    .concat(skips.map(n => ({ start: n.expression.getStart(sf), end: n.expression.getEnd(), text: `${notStatic} ? false : ${n.expression.getText()}` })));
+  assert.ok(edits.length > 0, 'the mutation found no kind selection in the batch loop to guard');
+  return edit(src, edits);
+}
+
+/** The probe of the test database put back: a socket opened as a statement straight after the imports. */
+function putProbeBack(src) {
+  const sf = parsed(src, 'probe');
+  const imports = sf.statements.filter(ts.isImportDeclaration);
+  const at = imports.length ? imports[imports.length - 1].getEnd() : 0;
+  return `${src.slice(0, at)}\nnew Socket().connect(27117, '127.0.0.1');\n${src.slice(at)}`;
 }
 
 // ─────────────────────────────────────────── the rule over the real file (red at base) ───────────────────────────────────────────
 
-describe('scripts/preflight.mjs under --static (the real file, read as text)', () => {
+describe('scripts/preflight.mjs: no database batch in either mode, and --static (the real file, read as text)', () => {
   it('reads the flag from the command line', () => regionHolds(REAL, 'flag'));
 
   it('refuses an argument it does not know, so a mistyped flag never runs the full preflight silently', () => regionHolds(REAL, 'refusal'));
@@ -505,7 +579,15 @@ describe('scripts/preflight.mjs under --static (the real file, read as text)', (
     it(`the ${region} region runs in the full preflight and not under --static`, () => regionHolds(REAL, region));
   }
 
-  it('the offline batches keep the pure half under --static and select the database half out by kind', () => regionHolds(REAL, 'database-batch'));
+  it('the run plan holds no database batch in EITHER mode: the loop over offlineRuns selects only kind pure, from a test the flag does not enter', () => regionHolds(REAL, 'database-batch'));
+
+  it('the probe of the test database is gone: no socket is opened to ask whether a stack is up', () => regionHolds(REAL, 'database-probe'));
+
+  it("says how many database test files are not run here, and that CI's Full run runs them", () => {
+    // The sentence is the half an operator reads; the count in it is computed, so only the words are asserted.
+    assert.match(stripComments(REAL), /database test files are not run here; CI's Full run runs them/,
+      "preflight no longer says '<n> database test files are not run here; CI's Full run runs them'");
+  });
 
   it('every other step runs under --static: a step added later is static unless a guard says it is a suite', () => regionHolds(REAL, 'steps'));
 
@@ -515,6 +597,12 @@ describe('scripts/preflight.mjs under --static (the real file, read as text)', (
     // The mark records on exit 0, and a static run that passes exits 0: these words in the code (not a comment) are what
     // keep it from being recorded, whatever command the project's preflight slot names.
     assert.match(stripComments(REAL), /not a push pass/i, 'the static verdict no longer says "not a push pass", so preflight-mark would record it as the pass');
+  });
+
+  it('the full verdict says "Preflight PASSED" and never "not a push pass"', () => {
+    const v = analyse(REAL).filter(x => x.region === 'verdict');
+    assert.deepEqual(v, [], v.map(x => x.message).join('\n'));
+    assert.match(stripComments(REAL), /Preflight PASSED/, 'the full run no longer prints the line the mark copies');
   });
 
   it("the static run labels its timing scope 'static', not 'subset'", () => regionHolds(REAL, 'scope'));
@@ -532,10 +620,10 @@ describe('scripts/preflight.mjs under --static (the real file, read as text)', (
       assert.equal(v.length, 0, `the real file does not hold the rule, so no mutation of it can be judged:\n${v.map(x => `  - [${x.region}] ${x.message}`).join('\n')}`);
     };
 
-    it('the flag neutralised: every skipped region, the batch filter, the verdict and the scope go red', () => {
+    it('the flag neutralised: every skipped region, the verdict and the scope go red', () => {
       cleanBaseline();
       const v = analyse(neutraliseFlag(REAL));
-      for (const region of [...SKIPPED_UNDER_STATIC, 'database-batch', 'verdict', 'scope', 'flag']) {
+      for (const region of [...SKIPPED_UNDER_STATIC, 'verdict', 'scope', 'flag']) {
         assert.ok(v.some(x => x.region === region), `neutralising the flag left '${region}' green`);
       }
     });
@@ -548,10 +636,22 @@ describe('scripts/preflight.mjs under --static (the real file, read as text)', (
       });
     }
 
-    it('the kind filter taken out of the batch loop lets the database half through, and is named', () => {
+    it('a db run put back into the plan (the kind selection taken out of the batch loop) is named', () => {
       cleanBaseline();
-      const v = analyse(dropKindFilter(REAL));
-      assert.ok(v.some(x => x.region === 'database-batch'), 'a batch loop that ignores the flag left the rule green');
+      const v = analyse(putDbRunBack(REAL));
+      assert.ok(v.some(x => x.region === 'database-batch'), 'a batch loop that runs every kind left the rule green');
+    });
+
+    it('the old `!--static ||` guard put back in front of the kind selection (db runs in the full mode only) is named', () => {
+      cleanBaseline();
+      const v = analyse(putStaticOnlyGuardBack(REAL));
+      assert.ok(v.some(x => x.region === 'database-batch'), 'a plan that selects by kind only under --static left the rule green');
+    });
+
+    it('the probe of the test database put back is named', () => {
+      cleanBaseline();
+      const v = analyse(putProbeBack(REAL));
+      assert.ok(v.some(x => x.region === 'database-probe'), 'a socket opened to the test database left the rule green');
     });
 
     it('the full verdict printed under --static is named', () => {
@@ -561,15 +661,22 @@ describe('scripts/preflight.mjs under --static (the real file, read as text)', (
       const v = analyse(mutated);
       assert.ok(v.some(x => x.region === 'verdict'), 'a static verdict that begins "Preflight PASSED" left the rule green');
     });
+
+    it('"not a push pass" said by the full verdict is named', () => {
+      cleanBaseline();
+      const mutated = REAL.replace(/(['"`])Preflight PASSED/, (m, q) => `${q}Preflight PASSED - not a push pass`);
+      assert.notEqual(mutated, REAL, 'the full verdict literal was not found to mutate');
+      const v = analyse(mutated);
+      assert.ok(v.some(x => x.region === 'verdict' && /not a push pass/.test(x.message)), 'a full verdict that says "not a push pass" left the rule green');
+    });
   });
 });
 
 // ──────────────────────────────── the analyser itself, over literal samples (green at base: it guards the gate) ───────────────────
 
-/** One right shape: a guard per region, a `.filter` on the batch list, a conditional verdict and scope. */
+/** One right shape: a guard per region, a `.filter` on the batch list that keeps pure runs in both modes, a conditional verdict and scope. */
 const SAMPLE_FILTER = `
 import { execSync, execFileSync } from 'node:child_process';
-import { Socket } from 'node:net';
 const STATIC = process.argv.slice(2).includes('--static');
 const unknown = process.argv.slice(2).filter(a => a !== '--static');
 if (unknown.length > 0) { console.error('preflight: unknown argument ' + unknown[0]); process.exit(2); }
@@ -579,13 +686,10 @@ function gate(name) { run('node --test ' + name); }
 const failures = [];
 for (const g of ['a', 'b']) gate(g);
 run('npm run build:server');
-const runs = offlineRuns(split).filter(r => !STATIC || r.kind === 'pure');
+const runs = offlineRuns(split).filter(r => r.kind === 'pure');
 for (const [i, r] of runs.entries()) {
   const flags = timingReporterFlags({ suite: 'preflight', batch: \`\${r.kind}-\${i}\`, scope: STATIC ? 'static' : 'subset' });
   execFileSync('node', ['--test', ...r.args, ...flags.args, ...r.files]);
-}
-if (!STATIC) {
-  const up = await new Promise(resolve => { const sock = new Socket(); sock.connect(27117, '127.0.0.1'); resolve(sock); });
 }
 execSync('git ls-files "testing/**/*.js"', { encoding: 'utf8' });
 run('node scripts/unrun-tests.mjs');
@@ -605,20 +709,18 @@ if (failures.length === 0) {
 process.exit(1);
 `;
 
-/** A second right shape, spelled differently: an inline flag test, a `continue` in the loop, if/else around the verdict and the client block. */
+/** A second right shape, spelled differently: an inline flag test, an unfiltered list with a `continue` for a db run in the loop body, if/else around the verdict and the client block. */
 const SAMPLE_CONTINUE = `
 import { execSync, execFileSync } from 'node:child_process';
-import { Socket } from 'node:net';
 if (process.argv.slice(2).some(a => a !== '--static')) { console.log('usage: preflight [--static]'); process.exit(2); }
 const run = (cmd) => execSync(cmd, { stdio: 'inherit' });
 function gate(name) { run('node --test ' + name); }
 for (const g of ['a', 'b']) gate(g);
 run('npm run build:server');
 for (const [i, r] of offlineRuns(split).entries()) {
-  if (process.argv.includes('--static') && r.kind === 'db') continue;
+  if (r.kind === 'db') continue;
   execFileSync('node', ['--test', ...r.files], { env: timingReporterFlags({ scope: process.argv.includes('--static') ? 'static' : 'subset' }).env });
 }
-process.argv.includes('--static') || new Socket().connect(27117);
 execSync('git ls-files "testing/**/*.js"');
 run('node scripts/unrun-tests.mjs');
 run('node scripts/surface-matrix-audit.mjs');
@@ -635,17 +737,17 @@ if (process.argv.includes('--static')) { console.log('Preflight STATIC passed - 
 else { console.log('Preflight PASSED.'); }
 `;
 
-describe('the static-preflight rule, over literal samples', () => {
-  for (const [name, sample] of [['a flag variable and a filtered batch list', SAMPLE_FILTER], ['an inline flag test and a continue in the loop', SAMPLE_CONTINUE]]) {
+describe('the preflight rules, over literal samples', () => {
+  for (const [name, sample] of [['a filtered batch list and a flag variable', SAMPLE_FILTER], ['a continue for a db run in the loop and an inline flag test', SAMPLE_CONTINUE]]) {
     describe(name, () => {
       it('holds the rule', () => {
         const v = analyse(sample);
         assert.deepEqual(v, [], v.map(x => `[${x.region}] ${x.message}`).join('\n'));
       });
 
-      it('goes red with the flag neutralised, naming every region', () => {
+      it('goes red with the flag neutralised, naming every skipped region', () => {
         const v = analyse(neutraliseFlag(sample));
-        for (const region of [...SKIPPED_UNDER_STATIC, 'database-batch', 'verdict', 'scope', 'flag']) {
+        for (const region of [...SKIPPED_UNDER_STATIC, 'verdict', 'scope', 'flag']) {
           assert.ok(v.some(x => x.region === region), `'${region}' stayed green with the flag neutralised`);
         }
       });
@@ -656,21 +758,35 @@ describe('the static-preflight rule, over literal samples', () => {
         });
       }
 
-      it('goes red when the batch loop stops selecting by kind', () => {
-        assert.ok(analyse(dropKindFilter(sample)).some(x => x.region === 'database-batch'));
+      it('goes red when a db run is put back into the plan', () => {
+        assert.ok(analyse(putDbRunBack(sample)).some(x => x.region === 'database-batch'));
+      });
+
+      it('goes red when the old static-only guard is put back in front of the kind selection', () => {
+        assert.ok(analyse(putStaticOnlyGuardBack(sample)).some(x => x.region === 'database-batch'));
+      });
+
+      it('goes red when the probe is put back', () => {
+        assert.ok(analyse(putProbeBack(sample)).some(x => x.region === 'database-probe'));
       });
     });
   }
 
-  it('a comment that names a region, the full verdict or the flag is not a call and counts for nothing', () => {
-    const noisy = `// run('npm run test --workspace=client'); console.log('Preflight PASSED'); const STATIC = argv.includes('--static');\n${SAMPLE_FILTER}`;
+  it('a comment that names a region, the full verdict, the probe or the flag is not a call and counts for nothing', () => {
+    const noisy = `// run('npm run test --workspace=client'); console.log('Preflight PASSED'); new Socket(); const STATIC = argv.includes('--static');\n${SAMPLE_FILTER}`;
     assert.deepEqual(analyse(noisy), []);
     assert.equal(stripComments(noisy).includes('const STATIC = argv.includes'), false, 'the comment is gone once stripped');
   });
 
-  it('is red when the script reads no flag (what the base file is)', () => {
+  it('a plan that selects by kind only when the flag is set is the old plan, and is named', () => {
+    const old = SAMPLE_FILTER.replace("r => r.kind === 'pure'", "r => !STATIC || r.kind === 'pure'");
+    assert.notEqual(old, SAMPLE_FILTER);
+    assert.ok(analyse(old).some(x => x.region === 'database-batch'));
+  });
+
+  it('is red when the script reads no flag (what a file with no --static is)', () => {
     const v = analyse(SAMPLE_FILTER.replaceAll("'--static'", "'--other'"));
-    for (const region of ['flag', 'steps', 'database-batch']) assert.ok(v.some(x => x.region === region), `'${region}' not named`);
+    for (const region of ['flag', 'steps']) assert.ok(v.some(x => x.region === region), `'${region}' not named`);
   });
 
   it('is red when an unknown argument is not refused, or the refusal is not conditioned on the command line', () => {
@@ -682,9 +798,12 @@ describe('the static-preflight rule, over literal samples', () => {
     assert.ok(analyse(unconditioned).some(x => x.region === 'refusal'));
   });
 
-  it('is red when the static verdict is the full verdict, and when the static scope is the subset scope', () => {
+  it('is red when the static verdict is the full verdict, when the full verdict says "not a push pass", and when the static scope is the subset scope', () => {
     const sameVerdict = SAMPLE_FILTER.replace("'Preflight STATIC passed - not a push pass.'", "'Preflight PASSED. static'");
     assert.ok(analyse(sameVerdict).some(x => x.region === 'verdict'));
+    const fullSaysStatic = SAMPLE_FILTER.replace("'Preflight PASSED. Docker", "'Preflight PASSED - not a push pass. Docker");
+    assert.notEqual(fullSaysStatic, SAMPLE_FILTER);
+    assert.ok(analyse(fullSaysStatic).some(x => x.region === 'verdict'));
     const sameScope = SAMPLE_FILTER.replace("STATIC ? 'static' : 'subset'", "'subset'");
     assert.ok(analyse(sameScope).some(x => x.region === 'scope'));
   });

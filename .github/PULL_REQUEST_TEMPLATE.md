@@ -16,7 +16,7 @@
 
 <!-- How was this tested? Which test suites cover it? Were new tests added? -->
 
-- [ ] `npm run preflight` passes, then the suites the change reaches, as far as you can run them (see `docs/testing-guide.md`); CI runs every suite on this pull request, and no `full-run/` push is asked of you
+- [ ] `npm run preflight` passes (it runs no database test file: the database half runs only in CI), then the suites the change reaches, as far as you can run them (see `docs/testing-guide.md`); CI runs every suite on this pull request, and no `full-run/` push is asked of you
 - [ ] New tests added and tracked by git (if behaviour changed or new feature)
 - [ ] Manual testing notes (if applicable)
 

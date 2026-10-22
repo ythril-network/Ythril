@@ -20,18 +20,19 @@
  *
  * The unknown wins over a finding, as in `unexpected-skips`: a log that also says the derivation failed is not a list.
  * The step is found by what it runs (`unexpected-skips.mjs`), read from ci.yml, never by a name written here.
+ *
+ * ## One reader of a run
+ *
+ * The run, its failed log, the run-id check, the bound on the `gh` call and the step finder are `./_shared/ci-run-reader.mjs`'s,
+ * the one reader `scripts/trade.mjs` uses as well: this file holds the verdict (the table above) and nothing that spawns `gh`.
+ * `scripts/test-times.mjs` keeps its own REST pager on purpose (it reads artifacts with a token where `gh` is not installed), and
+ * says so in its docblock.
  */
-import { execFileSync } from 'node:child_process';
 import { isEntryPoint } from './_shared/script-cli.mjs';
-import { loadCi, jobEntries, stepsOf } from '../testing/_shared/ci-workflow.mjs';
+import { readRun, readFailedLog, stepNameRunning } from './_shared/ci-run-reader.mjs';
 
 /** The name of ci.yml's step that runs the skip rule. Throws when there is not exactly one: a guess would read the wrong step. */
-export function skipStepName() {
-  const names = jobEntries(loadCi()).flatMap(({ job }) => stepsOf(job))
-    .filter(s => typeof s.run === 'string' && /scripts\/unexpected-skips\.mjs/.test(s.run)).map(s => s.name);
-  if (names.length !== 1 || !names[0]) throw new Error(`ci.yml holds ${names.length} named step(s) running unexpected-skips.mjs; expected one`);
-  return names[0];
-}
+export const skipStepName = () => stepNameRunning(/scripts\/unexpected-skips\.mjs/);
 
 /** A gh log line without its `<job>\t<step>\t<timestamp> ` prefix. */
 const textOf = (line) => line.replace(/^[^\t]*\t[^\t]*\t\S+Z ?/, '');
@@ -58,19 +59,19 @@ export function skipVerdict({ run, failedLog }, stepName = skipStepName()) {
 }
 
 const USAGE = 'usage: node scripts/skip-check.mjs <run id>   (the run id is a decimal number: gh run list shows it)';
-const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] });
 
 if (isEntryPoint(import.meta.url)) {
   const args = process.argv.slice(2);
+  // The reader refuses a non-decimal id itself; this is the usage message for it, said before any call.
   if (args.length !== 1 || !/^\d+$/.test(args[0])) {
     console.error(USAGE);
     process.exit(2);
   }
   try {
-    const run = JSON.parse(gh(['run', 'view', args[0], '--json', 'status,conclusion,attempt,headSha,jobs']));
+    const run = await readRun(args[0]);
     const stepName = skipStepName();
     const job = (run.jobs ?? []).find(j => (j.steps ?? []).some(s => s.name === stepName && s.conclusion === 'failure'));
-    const failedLog = job ? gh(['run', 'view', '--job', String(job.databaseId), '--log-failed']) : '';
+    const failedLog = job ? await readFailedLog(job.databaseId) : '';
     const { code, lines } = skipVerdict({ run, failedLog }, stepName);
     console.log(`skip-check: run ${args[0]} (head ${String(run.headSha ?? '').slice(0, 8)}, attempt ${run.attempt ?? '?'}): exit ${code}`);
     for (const l of lines) console.log(l);
