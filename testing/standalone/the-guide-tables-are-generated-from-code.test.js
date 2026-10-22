@@ -55,7 +55,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { previousMajorTag, toolNamesAt } from './_previous-major-tools.mjs';
-import { renderCapabilityMap, renderRestOnlyBlock } from './_guide-tables.mjs';
+import { renderCapabilityMap, renderRestOnlyBlock, capabilityMapModel, rungCell, isToolDoorPath } from './_guide-tables.mjs';
 
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
 
@@ -111,6 +111,41 @@ describe('a generated region equals what the code renders', () => {
         + '(build the server first — it reads `server/dist`). An edit inside the markers is overwritten by the next regeneration.');
     });
   }
+});
+
+// ── what the rung cell is allowed to say ────────────────────────────────────────────────────────────────────────
+
+const { TOOL_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
+
+describe('the rung cell states only what the code has', () => {
+  const rows = capabilityMapModel().rows;
+
+  it('the tool door is a tool\'s own route, not any POST /api/<word>', () => {
+    // `POST /api/spaces`, `/api/networks` and `/api/views` are ordinary REST routes priced by `ROUTE_RIGHTS`; only
+    // `POST /api/<the row's tool>` is served by the generic `/:tool` route that `TOOL_RIGHTS` prices.
+    assert.equal(isToolDoorPath('POST /api/spaces', 'save_space'), false);
+    assert.equal(isToolDoorPath('POST /api/networks', 'network_create'), false);
+    assert.equal(isToolDoorPath('POST /api/views', 'view_create'), false);
+    assert.equal(isToolDoorPath('POST /api/save_space', 'save_space'), true);
+    assert.equal(isToolDoorPath('POST /api/save_space', 'save_fact'), false, 'another tool\'s door is not this tool\'s');
+  });
+
+  it('a row says "both doors" only when its REST route is the tool\'s own door', () => {
+    const both = rows.filter(r => rungCell(r).includes('both doors'));
+    const wrong = both.filter(r => r.route !== `POST /api/${r.tool}`).map(r => `${r.tool} -> ${r.route}`);
+    assert.deepEqual(wrong, [], 'a row claims one rung on both doors for a REST route that is not the tool door');
+    assert.ok(both.length >= 1, 'no row says "both doors", so none was held');
+  });
+
+  it('a row states a door difference only when the tool is priced by a row or a flag', () => {
+    const priced = new Set(TOOL_RIGHTS.map(r => r.tool));
+    const flagged = new Set(ALL_TOOLS.filter(t => t.admin || t.spaceAdmin).map(t => t.name));
+    const differing = rows.filter(r => /· MCP \S+\*\*/.test(rungCell(r)));
+    const unfounded = differing.filter(r => !priced.has(r.tool) && !flagged.has(r.tool)).map(r => r.tool);
+    assert.deepEqual(unfounded, [],
+      'a tool priced inside its handler has no MCP rung to put against the route\'s; the cell claims a difference the code does not have');
+    assert.ok(rows.filter(r => r.route && r.restRung && r.restRung !== 'exempt').length >= 20, 'too few priced rows were read');
+  });
 });
 
 // ── tool names in headings and tool tables ──────────────────────────────────────────────────────────────────────
