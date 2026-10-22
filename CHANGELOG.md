@@ -120,6 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schemas:** `schema_validate` (MCP) and `validate-schema` check a sample record or the stored data; `space_schema_layers` answers `fields` (`own`, `effective`, `winner`, `hidden`), `unknownFields`, `refusedRounds`.
 - **Schemas:** A write reaching several networks answers `layers`; unknown meta keys in a layer or round are named, not refused; a round carries only its changes, applied whole.
 - **Server:** New `ythril_schema_refusals_total{door,outcome}`, `ythril_schema_rules_invalid`, `ythril_schema_rule_engine_available`, `ythril_schema_violations_recorded_total{source}`.
+- **Server:** `docker:wipe` records the running instance, refuses a named volume not in `x-ythril.disposable-volumes` and restores it built at its commit; `docker:compact` restarts it too.
 - **UI:** The Schema tab gains a Rules editor and **Validate**; record forms mark undeclared keys.
 - **MCP:** `save_entity`, `save_chrono` and `save_edge` take `waitForEmbedding`, as REST does.
 
@@ -130,8 +131,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Errors:** Pool checkouts time out only where `waitQueueTimeoutMS` is in `MONGO_URI`. A failed space rename answers its code (`ENOENT`), not the data path.
 - **Database:** New `YTHRIL_WRITE_TIMEOUT_MS` (default 30 s per write operation) and `YTHRIL_HOLD_DEADLINE_MS` (45 s per hold); both refuse `0`. A `timeoutMS` in `MONGO_URI` does not apply to them; boot warns once on a `socketTimeoutMS` below the write bound.
 - **Database:** Boot logs one INFO line, `MongoDB client options: …`, a changed string takes a restart. An operation in flight when the database stops answering ends with the retryable `503` (`0` means no bound; `loadBalanced`: selection only).
-- **Database:** The first connection retries more kinds of "not up yet"; bad credentials fail at once.
-- **Database:** A search service (`mongot`) that starts after the app is picked up by a background retry; a waiting space stays `building` and `GET /api/spaces` adds `indexWaiting` and `indexWaitingSince`.
+- **Database:** The compose Mongo healthcheck runs the image's `runner healthcheck` first: `up --wait` waits out its first boot.
+- **Database:** The first connection retries more kinds of "not up yet"; bad credentials fail at once. A search service (`mongot`) that starts after the app is picked up by a background retry; a waiting space stays `building` and `GET /api/spaces` adds `indexWaiting` and `indexWaitingSince`.
 - **Database:** `indexStatus: "failed"` now means only a build that failed or timed out; an alert keyed on it stops firing for a late service. `INDEX_READY_TIMEOUT_MS` starts when indexes are confirmed. `GET /ready` shares one probe.
 - **Database:** A collection's vector index exists only while it holds a record: dropped `SEARCH_INDEX_DROP_DELAY_MS` (default `60000`) after its last is deleted, and at boot for empty ones; it answers search empty (`empty: true` in `pipeline-status`).
 - **Server:** `space.reload_added` is written after initialisation with its real status. A refused manual reload moves `ythril_config_reload_failed_total` and holds `ythril_config_reload_pending`; a reload that succeeds clears the gauge.
@@ -151,17 +152,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A subscriber that left a pub/sub space gets `423` `space_declined` once; the publisher stops sending it, and the sync history lists it as `declined`, not held.
 - **Embedding:** The bundled model runs in a supervised child process: embedding no longer blocks the server and a native fault no longer takes it down; it exits after ten idle minutes.
 - **Embedding:** `mem_limit` or a pod memory limit counts both processes. The child gets no secrets. A lost process is replaced after a growing delay; a record that kills it three times is `failed`, the crash in its `lastError`.
-- **Embedding:** A model that cannot load stays failed until it or an offline flag changes, or a restart.
 - **Embedding:** New `ythril_embed_wait_seconds`, `ythril_embed_process_restarts_total{reason}`, `ythril_embed_process_state`; `GET /api/admin/pipeline-status` gains `inference` and `state: "down"` on a sticky load failure.
-- **Embedding:** A recall query is embedded ahead of queued documents; `embedConcurrency` keeps its defaults (2 bundled, 8 external) and bounds queue pressure on one process.
+- **Embedding:** A recall query is embedded ahead of queued documents; `embedConcurrency` keeps its defaults (2 bundled, 8 external) and bounds queue pressure on one process. A model that cannot load stays failed until it or an offline flag changes, or a restart.
 - **Embedding:** `POST /api/brain/spaces/:id/reindex` and `space_reindex` record a run and return; every record is queued as a rebuild and the run survives a restart.
 - **Embedding:** `GET .../reindex-status` and `space_meta` carry `reindexRun: { running, remaining, failed }`; poll until `running` is `false`. `needsReindex` stays `true` and recall refuses until every record is rebuilt.
 - **Media:** A raised `workerConcurrency` takes effect within one poll interval.
-- **Search:** Every answer the size budget cuts carries `budgetBoundBy` (the limit that cut it) on both doors.
 - **Search:** `filter`'s `limit` stays uncapped: a single-space read stops at twice the answer budget and answers `truncated` with `nextSkip`. `recall` and `similar` with `traverse > 0` walk up to 16 result rows together.
-- **Search:** Text rank is per record type: a fact no longer outranks an entity for being longer; fused results carry `vectorRank` and `lexicalRank` beside `fusedScore`.
-- **MCP:** `list_embed_jobs` takes `skip` and on both doors returns `transientFailures`.
-- **MCP:** `recall`, `similar`, `filter` and `read_spill` take their size parameters from one schema: MCP accepts any `maxBytes` and raises a `maxChars` under 1000 to 1000, as REST did.
+- **Search:** Text rank is per record type: a fact no longer outranks an entity for being longer; fused results carry `vectorRank` and `lexicalRank` beside `fusedScore`. An answer the size budget cuts carries `budgetBoundBy` on both doors.
+- **MCP:** `recall`, `similar`, `filter` and `read_spill` take their size parameters from one schema: MCP accepts any `maxBytes` and raises a `maxChars` under 1000 to 1000, as REST did. `list_embed_jobs` takes `skip` and returns `transientFailures`.
 - **MCP:** Tool calls cache one validator per token reach (64 kept), counted in `ythril_tool_validator_cache_total{result="hit|miss|evict"}`. The delete tools and `move_file` say which peers a deletion reaches.
 - **Schemas:** A schema-library type reads as `{ "$ref": "library:<name>", ...definition }` on `GET /api/spaces/:id/meta` and `space_meta`; `resolve=false` returns the stored `{ $ref }` alone.
 - **Spaces:** `GET /api/spaces/:id/meta` and `space_meta` keep `stats` and `actualSchema` per space until the next write to its records; an unchanged read is near-instant. The admin wipe of a space in no network answers `status: "wiped"` beside `deleted`.
@@ -199,9 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since is kept. An admin restore removes a file description, source, property, tag or mark its backup lacks (`keysRemoved`).
 - **Files:** A peer's file, pushed or pulled, is processed by this instance's rules (converted, chunked, media); a new version replaces old passages; a failed record write leaves no new file unless the database was down.
 - **Files:** A pushed file's later description and tag edits are no longer skipped; arriving bytes revive a soft-deleted path and get this instance's retention window; a metadata arrival no longer overwrites a newer copy.
-- **Files:** A file's processing status or a move of a peer's file no longer changes its `updatedAt` (a false Merkle divergence); changed media over a `complete` file is analysed again.
+- **Files:** A file's processing status or a move of a peer's file no longer changes its `updatedAt` (a false Merkle divergence); changed media over a `complete` file is analysed again. A re-upload with metadata takes one seq; a write that changes nothing takes none.
 - **Files:** A soft-deleted file's record keeps no description, vector, chunk or face, and is removed once the space's file retention window, counted from the deletion, has passed; a space with no file window keeps it.
-- **Files:** A re-upload with metadata takes one sequence number; a write that changes nothing takes none.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered, never over a row's own description or tags, waiting up to 30 days for a missing file; a wrong-typed key or any `parentFileId` is discarded and counted refused.
 - **Files:** Moving a file or folder leaves nothing at its old path, even mid-processing, and carries chunks, sidecars, queued jobs and links (`PATCH /api/files/:spaceId`, `move_file`); a retried move completes only a move it began.
 - **Files:** Each record ends wholly at its old or new path, a case-only rename moves its record too, and a directory delete is audited with `kind: "directory"`. REST delete, `delete_file` and the TTL sweep complete a file whose bytes are gone but metadata remains.
@@ -209,10 +206,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** A media or conversion job no longer writes a chunk, caption, face or description for a file deleted, moved or wiped while it ran; the TTL sweep removes the rows a previous version leaked.
 - **Files:** New `ythril_file_act_answers_total{code}`, `ythril_file_move_rows_replaced_total{space}` and `ythril_file_move_link_fallback_total`; without hard links a move renames, which a foreign write can defeat.
 - **Search:** `recall`, `similar` and the write-time duplicate check right after a space's first write no longer answer `503` while its vector index initialises. `filter`'s `total` counts what a `fromName`, `toName` or `entityName` join matches, on REST and MCP.
-- **Records:** A small entity merges into a hub of any size; a too-large refusal says *more than* the bound and `relinks` is a lower bound.
+- **Records:** A small entity merges into a hub of any size; a too-large refusal says *more than* the bound and `relinks` is a lower bound. Two writers can no longer both store an edge under a `functional` label in a `strict` space.
 - **Records:** A refused entity cascade removes nothing; a cascade-removed edge always leaves its tombstone. `graph_traverse` and `POST /api/brain/spaces/:id/traverse` answer whole nodes in hop order with `skip`/`nextSkip`, `remainderDump`, `limitReached`.
 - **Records:** A bulk edge whose end is a `$ref` to a fact or chrono entry stores that record's kind. A chrono entry rewritten through its `id` re-embeds its content, and an edge stores the property default its label's schema defines.
-- **Records:** Two writers can no longer both store an edge under a `functional` label in a `strict` space: the loser is refused like a sequential one.
 - **Embedding:** A record or file this instance suppresses (flag, type or space) keeps no vector from a peer's update or file bytes, passages, captions and transcripts included; a record retired from search gets none when rewritten without the flag.
 - **Embedding:** Suppression turned on by a network or a saved type schema removes vectors already stored, files included, at once and at every start.
 - **Embedding:** An embed job no longer writes a vector over a record that changed while it embedded. A reindex embeds the same text as the original write; `reembed` no longer gives a passage, face crop or converted copy a vector of its path.
@@ -232,14 +228,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database:** A write answered `503` "timed out, retry" can no longer land after the answer: the server's deadline ends it, with a backstop 500 ms later.
 - **Database:** `POST /api/admin/data/config/test` answers an unreachable host `200` with `{ "ok": false, "error": … }`. A large entity merge no longer prints `MaxListenersExceededWarning`.
 - **Backup:** A scheduled backup that outlasts its cron period is skipped, not overlapped; its failure line reads `Scheduled backup failed: …`, was `Scheduled backup error: …`.
-- **Backup:** A restore holds each space until it equals the backup, never lowers its counter, resumes after a crash, and peers resend what came after the backup.
-- **Backup:** A migration copies the data before switching (the instance came back empty).
+- **Backup:** A restore holds each space until it equals the backup, never lowers its counter, resumes after a crash, and peers resend what came after the backup. A migration copies the data before switching (it came back empty).
 - **Media:** A job holds its file by path, not in memory, and is complete only after its file is; an ffmpeg step stops after 10 minutes, an audio segment at 5, a video at 1000 keyframes; a killed job leaves no plaintext.
 - **Media:** With `reprocessSyncedImages` off a pushed image is no longer analysed for faces; the setting governs push and pull.
-- **UI:** The client never shows an answer older than the last one asked for (graph depth slider, record tabs, selected record card). The Graph tab says why it is slow after 3 s and ends in an error state with Retry after 30 s;
+- **UI:** The client never shows an answer older than the last one asked for (graph depth, record tabs, record card). The Graph tab says why it is slow after 3 s and ends in an error state with Retry after 30 s.
 - **Help:** Links in Help no longer open dead tabs and keep their place in the URL.
 - **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails when the run is not listed after three minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`); it reported success.
-- **CI:** The keyset gate finds a seq ordering however spelled; the validator gate follows act bodies.
 
 ### Security
 

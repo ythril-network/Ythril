@@ -124,11 +124,17 @@
       - ythril-mongo-data:/data/db
       - ythril-mongo-configdb:/data/configdb
     healthcheck:
-      # Wait for the replica set to elect a primary (not just mongod accepting connections).
+      # The image's own `runner healthcheck` FIRST, once, before either branch: the Atlas Local
+      # image boots in three phases and restarts mongod a last time after the replica set already
+      # has a primary, closing every connection open to it. Only the image's check tells that
+      # phase apart, so without it `up --wait` reports healthy about a server that is about to
+      # restart (Q-385; `a-mongo-is-healthy-only-when-its-first-boot-is-over` holds every compose
+      # file to it).
+      # Then wait for the replica set to elect a primary (not just mongod accepting connections).
       # mongosh does NOT pick the root credentials up from the environment, so pass them
       # explicitly — otherwise the healthcheck fails permanently once auth is enabled.
       # Falls back to an unauthenticated probe when no credentials are configured.
-      test: ["CMD", "sh", "-c", "if [ -n \"$$MONGODB_INITDB_ROOT_USERNAME\" ]; then mongosh --quiet -u \"$$MONGODB_INITDB_ROOT_USERNAME\" -p \"$$MONGODB_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)'; else mongosh --quiet --eval 'db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)'; fi"]
+      test: ["CMD", "sh", "-c", "/usr/local/bin/runner healthcheck && if [ -n \"$$MONGODB_INITDB_ROOT_USERNAME\" ]; then mongosh --quiet -u \"$$MONGODB_INITDB_ROOT_USERNAME\" -p \"$$MONGODB_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)'; else mongosh --quiet --eval 'db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)'; fi"]
       interval: 10s
       timeout: 10s
       retries: 18
@@ -425,6 +431,15 @@ volumes:
   ythril-mongo-configdb:
   ythril-ollama-models:
   ythril-whisper-cache:
+
+# The volumes that hold only what is fetched again (model weights, a model cache). A Docker wipe
+# (scripts/owner-instance.ps1) deletes a running instance's named volume only when it is named here, and
+# never one at /data, /data/db or /data/configdb. A list here and not a label on the volume: a label added
+# to an existing volume makes compose ask to recreate it - deleting it - on every install's next `up`.
+x-ythril:
+  disposable-volumes:
+    - ythril-ollama-models
+    - ythril-whisper-cache
 
 networks:
   # SECURITY: the database and the media sidecars are deliberately on SEPARATE networks.

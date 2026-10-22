@@ -34,7 +34,7 @@
 # (`connection 2 to 127.0.0.1:27117 closed`, PR #1489's CI), and an instance's first connection was reset mid-handshake
 # (the boot retry in db/mongo.ts exists for that). The image's own `runner healthcheck` is the one probe that tells the
 # phases apart — measured on a fresh container, it failed throughout the second phase and passed after the restart — so it
-# comes first and the primary check stays behind it. `a-test-mongo-is-healthy-only-when-its-first-boot-is-over` holds
+# comes first and the primary check stays behind it. `a-mongo-is-healthy-only-when-its-first-boot-is-over` holds
 # every atlas-local service to it.
 x-mongo-healthcheck: &mongo-healthcheck
   test: ["CMD-SHELL", "/usr/local/bin/runner healthcheck && mongosh --quiet -u ythril -p ythril-test-pw --authenticationDatabase admin --eval 'db.adminCommand({replSetGetStatus:1}).myState===1 ? 1 : quit(1)'"]

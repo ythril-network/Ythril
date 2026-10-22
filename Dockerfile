@@ -324,3 +324,10 @@ RUN mkdir -p /data /config && chown -R node:node /data /config
 USER node
 
 CMD ["node", "server/dist/index.js"]
+
+# The commit the image was built from, readable with `docker image inspect` (Q-294). scripts/owner-instance.ps1
+# rebuilds the owner's instance after a Docker wipe from a worktree at the commit it recorded and passes it here,
+# so the rebuilt image says which commit it is. The LAST instructions of the stage on purpose: a build arg
+# invalidates the cache of every instruction after the point it is used, and here there is none.
+ARG GIT_REVISION=unknown
+LABEL org.opencontainers.image.revision="${GIT_REVISION}"
