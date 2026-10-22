@@ -277,7 +277,10 @@ longer whole, or that holds records one of the space's unique indexes refuses, i
 - the audit log, which records what happened, the restore included; `space_activity`; the webhook subscriptions and delivery
   queues; the other instance collections; and `config.json`;
 - the files' bytes on disk. A file's record comes back as the backup has it while its bytes stay as they are now, so after a
-  restore a file can be listed without its bytes, or bytes can be on disk that no record names.
+  restore a file can be listed without its bytes, or bytes can be on disk that no record names. The restore does not repair
+  that, and it says where it happened: each restored space's row of [`GET /api/admin/data/restore`](#get-apiadmindatarestore)
+  carries a `files` report (below), changing no byte, record, tombstone or hash-cache entry (a tombstone written by a restore
+  would delete the file on every peer).
 
 **What comes back that you may not expect.** Records erased after the backup come back, erasure requests included, while the
 kept audit log still records the erasure: erase them again. A record deleted here after the backup whose deletion the peers have
@@ -312,7 +315,10 @@ restore itself.
   "total": 3,
   "spaces": [
     { "id": "general", "state": "done", "attempts": 0, "completedAt": "2026-04-23T10:05:09.000Z",
-      "edgeIndexes": { "failed": [] }, "vectorIndexes": "rebuilding" },
+      "edgeIndexes": { "failed": [] }, "vectorIndexes": "rebuilding",
+      "files": { "checked": true, "classes": {
+        "stale_row": { "count": 1, "paths": ["reports/q3.json"] },
+        "row_without_bytes": { "count": 12, "paths": ["old/a.pdf", "old/b.pdf"] } } } },
     { "id": "notes", "state": "owed", "attempts": 2, "lastError": "…", "retryAt": "2026-04-23T10:06:00.000Z" },
     { "id": "scratch", "state": "running", "attempts": 1 }
   ],
@@ -334,6 +340,26 @@ restore itself.
 | `spaces[].needsAbandon` | `true`: the failure is the backup's, so retrying cannot help; [abandon](#post-apiadmindatarestoreabandon) |
 | `spaces[].vectorIndexes` | `rebuilding` (the builds started and are warming up) or `failed` (they could not start; the space was still restored) |
 | `spaces[].edgeIndexes` | `{ "failed": [] }`: the edge identity and guard indexes stand. One that cannot be built fails the act instead |
+| `spaces[].files` | What the restore found of the space's files against its restored records: `{ "checked": true, "classes": { <class>: { "count", "paths" } } }`, a class with no file absent, or `{ "checked": false, "reason" }` when the check could not run. Present on a `done` space of a restore only (a migrate's rows carry none) |
+
+**`files` in detail.** The classes: `missing_row` (bytes on disk no live record names), `stale_row` (a live record whose `sha256`
+is not the bytes'), `unprocessed` (a live record of a kind that is converted or analysed, with no processing state),
+`row_without_bytes` (a live record that holds a `sha256` and finds no bytes on disk) and `soft_deleted_with_bytes` (a
+soft-deleted record whose path has bytes again). `count` is every file of the class. `paths` holds at most 10 of them, fewer
+when the whole restore's cap on named paths (200, shared equally between its spaces) is reached; each is quoted bounded (256
+characters, escapes written out), and a path is in the record's normalised (NFC) spelling, so a name stored decomposed counts
+once. A client that meets a class it does not know shows the raw name. Never compared: a conversion's sidecars, conflict copies,
+schema snapshots, legacy read spills, chunk rows, and a record that holds no `sha256` (an import's). `checked: false` carries a
+`reason` of ours, never the driver's text: the check ran past the file-system bound (120 s per space) or failed; the space is
+restored either way, and the set stays `completed`. The check runs inside the space's hold, last, reads the cache without
+writing it, and the report is kept on the set (in `config.json`) until the next restore, so it can name a file deleted since.
+On the log, `restore of backup … completed` carries the total files out of step with their per-class counts, and one warning
+names the spaces that were not checked; `ythril_restore_files_out_of_step_total{class}` counts the files per class, in total
+([metrics](11-setup-api.md)).
+
+Whether the file comes back is per file, not per class: on a space shared over a network a pull fetches a file again only
+where a peer offers the same hash (a few files per space per cycle, in the direction the network allows), so a file no peer
+holds, such as one uploaded here after the backup, stays out of step.
 
 Poll it until `state` is not `running`. The Data page does, while it is open.
 

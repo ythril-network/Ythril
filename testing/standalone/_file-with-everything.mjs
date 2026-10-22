@@ -16,6 +16,16 @@
  * them; or, with `arrivedSidecars`, the converted Markdown and the second image as the TOP-LEVEL rows a peer's bytes made before
  * sidecars became instance-local (no `parentFileId`, seq 0, the peer as author). `arrivedChild` adds a derived row under the
  * ARRIVED second image: what an arrived sidecar's own conversion left, reachable only through the arrived row.
+ *
+ * ## What is keyed by the file's paths besides its rows (bundle-111, Q-459)
+ *
+ * Opt-in, so a suite that does not ask about them reads exactly the set it always read. `queued` queues an embed job for EVERY row of
+ * the file — its own, the chunk, each sidecar and the rows under the image — through the queue's own sweep lane (`enqueueEmbedJobs`),
+ * so the job ids are the queue's spelling (`embedJobId`) and never a hand-written `file:` prefix. `cached` writes the manifest's hash
+ * cache entry for every row that HAS bytes ({@link BYTE_KINDS}), keyed by the path and carrying the bytes' real size and mtime, so the
+ * next manifest walk reuses it — with a SENTINEL hash ({@link sentinelSha}) the bytes do not have: a manifest that answers the sentinel
+ * for a path read the cache entry, and one that answers the real hash re-read the bytes. That is how "the entry was carried, not
+ * re-hashed" is told from the store, without a spy.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +35,10 @@ import { build } from './_push-door.mjs';
 /** The peer whose bytes landed first: the author and deliverer of an arrived sidecar's row. */
 export const ARRIVER = Object.freeze({ instanceId: 'arriving-peer', instanceLabel: 'Arriving peer' });
 export const sha = (s) => createHash('sha256').update(s).digest('hex');
+/** The hash a `cached` seed writes for `id`: a valid-looking sha256 that no seeded bytes have. */
+export const sentinelSha = (id) => sha(`a cached entry, never these bytes: ${id}`);
+/** The kinds of `seedFileWithEverything`'s ids that have bytes on disk, so a hash cache entry. The rest are rows only. */
+export const BYTE_KINDS = Object.freeze(['file', 'converted', 'image', 'secondImage']);
 
 /**
  * @param {string} S  the space the rows and bytes live in
@@ -47,9 +61,10 @@ export function fileWithEverything(S, acts) {
 
   /**
    * File `f` with everything (see the module docblock). Returns every id the file owns, by kind, so a failure names what was left.
-   * `expired` stamps the retention window a TTL sweep reads; `derivedUpdatedAt` stores that `updatedAt` on every derived row.
+   * `expired` stamps the retention window a TTL sweep reads; `derivedUpdatedAt` stores that `updatedAt` on every derived row;
+   * `queued` and `cached` seed the embed jobs and the hash cache entries (see the module docblock).
    */
-  async function seedFileWithEverything(f, { expired = false, arrivedSidecars = false, arrivedChild = false, derivedUpdatedAt } = {}) {
+  async function seedFileWithEverything(f, { expired = false, arrivedSidecars = false, arrivedChild = false, derivedUpdatedAt, queued = false, cached = false } = {}) {
     const { door } = acts();
     const bytes = `content of ${f}`;
     put(f, bytes);
@@ -81,6 +96,16 @@ export function fileWithEverything(S, acts) {
       ...(arrivedChild ? [d(ids.secondCaption, secondImg, { content: 'a second caption' })] : []),
     ]);
     await door.coll(S, 'media_jobs').insertOne({ _id: img, spaceId: S, status: 'pending' });
+    if (queued) {
+      const { enqueueEmbedJobs, EMBED_PRIORITY } = await import('../../server/dist/brain/embed-queue.js');
+      await enqueueEmbedJobs(S, 'file', Object.values(ids), { priority: EMBED_PRIORITY.background });
+    }
+    if (cached) {
+      await door.coll(S, 'file_hashes').insertMany(BYTE_KINDS.map(kind => {
+        const st = fs.statSync(path.join(acts().root(), ids[kind]));
+        return { _id: ids[kind], size: st.size, mtimeMs: st.mtimeMs, sha256: sentinelSha(ids[kind]), plainSize: st.size };
+      }));
+    }
     return ids;
   }
 

@@ -45,6 +45,7 @@ import type { FileMetaDoc } from '../config/types.js';
 import { rekeyedRow } from '../sync/local-only-fields.js';
 import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
 import { jobIdsOwnedBy } from './media/job-queue.js';
+import { cacheEntryBytesOf } from './path-keyed-cache.js';
 import { belongsTo, idAfterMove, isAtOrUnder, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
 
 /** One row a move carries. */
@@ -234,7 +235,8 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
   // A row with no parent is a file of its own: `a#b.txt` beside `a` is not re-keyed with `a` (`isDerivedRowOf`).
   const topLevel = new Set(facts.filter(r => r.parentFileId === undefined).map(r => r._id));
   const rows: PlannedRow[] = facts.map(r => ({
-    from: r._id, to: idAfterMove(r._id, from, to, topLevel), group: groupOf(r._id), bytes: r.bytes, top: r.parentFileId === undefined,
+    // The row and the hash cache entry the batch carries with it (`carryPathKeyedCache`): both are written in the batch's transaction.
+    from: r._id, to: idAfterMove(r._id, from, to, topLevel), group: groupOf(r._id), bytes: r.bytes + cacheEntryBytesOf(r._id), top: r.parentFileId === undefined,
   })).sort((a, b) => (a.group < b.group ? -1 : a.group > b.group ? 1 : a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
 
   const { flagged, replaced, refused } = await holdsAtDestination(spaceId, rows, to, kind, phase);

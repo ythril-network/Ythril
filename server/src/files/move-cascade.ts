@@ -23,10 +23,12 @@
  *     beside an unrelated file at the destination, and it records what the bytes were (size and mtime, so the bytes at the
  *     destination can be told from a different file's) and who asked. An act that cannot record its removal does not begin.
  *  4. **Carry the records in BATCHES**, each one transaction under a byte budget (`files/move-timing.ts`): the file rows, every row
- *     derived from them and the jobs are re-keyed together (`files/rekey-rows.ts`), after the batch's links were converged onto the
- *     new ids and before the old ids' links are removed (`files/move-links.ts`). Whatever fails, each file is wholly at its old path
- *     or wholly at its new one.
- *  5. **Forget the marker** only when nothing of the move is still owed.
+ *     derived from them, their hash cache entries (`files/path-keyed-cache.ts`) and the jobs are re-keyed together (`files/rekey-rows.ts`),
+ *     after the batch's links were converged onto the new ids and before the old ids' links are removed (`files/move-links.ts`). Whatever
+ *     fails, each file is wholly at its old path or wholly at its new one.
+ *  5. **Re-queue the embed work** once every batch has committed (`files/file-embed-work.ts`): a moved file's embed text is built from
+ *     its path, so the vector it carried is the old path's. Read from the rows at the destination, best-effort, never making the move owed.
+ *  6. **Forget the marker** only when nothing of the move is still owed.
  *
  * ## What a failure after the bytes moved is
  *
@@ -62,7 +64,7 @@
  */
 import { moveFile, finishHalfLinkedMove, listFilesRecursive } from './files.js';
 import { holdJobsForMove, releaseMoveHold, extendMoveHold, markSpaceMayHaveWork, rekeyJobsForMove } from './media/job-queue.js';
-import { kindAt, movedId, movedPairs, movedSidecars } from './moved-paths.js';
+import { kindAt, movedId, movedPairs, movedSidecars, sidecarsOf, type PathKind } from './moved-paths.js';
 import { removeTree } from './remove-tree.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresentAt, isOneNameUnderTwoSpellings } from './stored-bytes.js';
@@ -87,6 +89,8 @@ import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { fileMoveBatchReplansTotal, fileMoveRowsReplacedTotal, fileMovesFinishedWithoutSidecarTotal } from '../metrics/registry.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { removeSidecarsAMoveCouldNotPlace } from './converters/pipeline.js';
+import { carryPathKeyedCache, forgetPathKeyedCache } from './path-keyed-cache.js';
+import { requeueEmbedWorkOfMovedRows } from './file-embed-work.js';
 
 const why = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -149,6 +153,8 @@ async function carryBatch(spaceId: string, plan: MovePlan, batch: MoveBatch, hel
           refuse: (to) => new StaleRekeyPlan(`a row appeared at '${to}' since the batch was planned`),
           replacements: { replaced: batch.replaced, flagged: batch.flagged },
         });
+        // The hash cache entries of the moved rows, in the same transaction: the rows and their entries commit together.
+        await carryPathKeyedCache(spaceId, session, moves);
       }
       return rekeyJobsForMove(spaceId, src, dst, held, kind, { session, jobIds: batch.jobIds });
     }, { landed });
@@ -208,6 +214,8 @@ const aliasOf = async (spaceId: string, plan: MovePlan): Promise<boolean> => awa
  * unwrapped: the marker stays, the jobs stay held, the move stays owed and says so, and deleting that file lets it finish.
  */
 async function completeMove(spaceId: string, src: string, dst: string, held: readonly string[]): Promise<void> {
+  let unplacedAtSource: readonly string[] = [];
+  let kindMoved: PathKind = 'file';
   try {
     // The bytes have moved, so what the path IS is read where they went.
     const kind = await kindAt(spaceId, dst);
@@ -255,11 +263,24 @@ async function completeMove(spaceId: string, src: string, dst: string, held: rea
     // The records have been carried: the tombstones a case-only rename kept pending (its old spelling answers on the disk whether or not the
     // rename happened, so only the records say) are published now. For any other move this finds nothing pending.
     await settleBegunMove(spaceId, src, dst);
+    // What no row carried: the cache entries of rowless files under the source (a conflict copy, unrecorded bytes) and of its sidecars'
+    // trees. Forgotten, not carried — the next manifest walk hashes them at the destination once.
+    const trees = sidecarsOf(src, kind);
+    await forgetPathKeyedCache(spaceId, {
+      ids: [src, ...trees.filter(s => s.shape === 'file').map(s => s.path)],
+      under: [...(kind === 'directory' ? [src] : []), ...trees.filter(s => s.shape === 'tree').map(s => s.path)],
+    });
+    unplacedAtSource = plan.unplacedSidecars ?? [];
+    kindMoved = kind;
   } catch (err) {
     log.warn(`The move ${peerText(spaceId)}, ${peerText(src)} → ${peerText(dst)} stopped after its bytes moved and is owed: ${peerText(why(err))}`);
     if (err instanceof DestinationHeldAfterMove) throw err;
     throw new MoveStillOwed(src, dst, err);
   }
+  // Every batch has committed: the moved rows are queued at their new ids — read from the rows at the destination, so the batches an earlier
+  // attempt of an owed move committed are queued too — and their old ids' jobs retired. Best-effort, never thrown (`file-embed-work.ts`):
+  // the records are moved, and a queue fault must not leave the move owed. BEFORE the marker goes, so a crash in between is finished again.
+  await requeueEmbedWorkOfMovedRows(spaceId, { src, dst, kind: kindMoved, unplaced: unplacedAtSource });
   // Finished: nothing is owed, so its marker must not make a later orphan at `src` look like this move. A move that is still owed
   // (something of it was not carried: a file whose bytes came back) keeps its marker.
   await forgetFinishedMove(spaceId, src, dst);

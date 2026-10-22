@@ -102,3 +102,45 @@ export async function restoreAsActs(modules, body) {
   assert.ok(restoreEntries(modules.loader).length > 0, `POST /restore answered 202 and registered no restore act: ${JSON.stringify(answer.body)}`);
   return answer;
 }
+
+// ── what a restore says about a space's files (bundle-111, Q-557) ──────────────────────────────────────────────────────────
+
+/**
+ * The classes a restore's per-space `files` report names, in the order the design lists them (rev 3 step 6). The first three are the
+ * pull's `FileRepairReason`s (`sync/file-sync.ts` `repairReasonOf`); the last two are the restore's own and are NOT pull reasons (V-S7).
+ */
+export const FILE_CLASSES = Object.freeze(['missing_row', 'stale_row', 'unprocessed', 'row_without_bytes', 'soft_deleted_with_bytes']);
+
+/**
+ * The per-class path cap of the report (rev 3 step 8: "at most 10 paths per class"). The server's named constant is the authority; this is
+ * the number the design states, and a suite that disagrees with it fails on the design, not on a guess.
+ */
+export const REPORT_PATHS_PER_CLASS = 10;
+
+/**
+ * The shape this suite reads, one place: a space's row of `GET /api/admin/data/restore` carries
+ * `files: { checked: true, classes: { <class>: { count, paths } } }` (a class with nothing to say may be absent) or
+ * `files: { checked: false, reason }` when the check could not run. `count` is every file of that class; `paths` is at most
+ * {@link REPORT_PATHS_PER_CLASS} of them, peerText-bounded.
+ */
+export const classOf = (files, cls) => files?.classes?.[cls] ?? { count: 0, paths: [] };
+
+/** Every path a `files` report names, whatever its class. */
+export const reportedPaths = (files) => FILE_CLASSES.flatMap(c => classOf(files, c).paths);
+
+/** `GET /api/admin/data/restore`, asserted 200; the body. */
+export async function restoreReportBody(router) {
+  const answer = await callDataDoor(router, 'get', '/restore');
+  assert.equal(answer.status, 200, `GET /restore answered ${answer.status}: ${JSON.stringify(answer.body)}`);
+  return answer.body;
+}
+
+/** The space rows of a restore report, by space id. */
+export const spaceRowsOfReport = (body) => Object.fromEntries((body?.spaces ?? []).map(s => [s.id, s]));
+
+/** Restore `backupId` through the acts, run them to their end, and answer the report the operator would then read. */
+export async function restoreThenReport(modules, backupId) {
+  await restoreAsActs(modules, { backupId });
+  await settleRestoreActs(modules.runner, modules.loader);
+  return restoreReportBody(modules.dataRouter);
+}

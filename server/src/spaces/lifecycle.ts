@@ -34,6 +34,8 @@ import { forgetSpaceShape } from '../brain/space-shape.js';
 import { cancelEveryJobOfSpace, ensureMediaJobIndexes } from '../files/media/job-queue.js';
 import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
 import { ensureFileTombstoneIndexes, forgetFileTombstonesOf } from '../files/tombstones.js';
+import { forgetPathKeyedCache } from '../files/path-keyed-cache.js';
+import { retireEmbedWorkOfRemovedRows } from '../files/file-embed-work.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { createKeysetIndexesFor } from './keyset-indexes.js';
 import { ensureEdgeGuardIndex, edgeIndexFailure } from './edge-guard-index.js';
@@ -1118,9 +1120,12 @@ async function wipeSpaceUnqueued(ctx: SpaceActBodyContext): Promise<SpaceActBody
     // the emptied space (Q-406).
     counts['files'] = await ctx.deleteInBatches(spaceCollection(spaceId, 'files'), {}, ids => col(spaceCollection(spaceId, 'files')).deleteMany(byIds(ids)));
     await forgetFileTombstonesOf(spaceId, own);
-    // What hangs off the file rows: their conflict copies and the hashes kept for them.
+    // What hangs off the file rows: their conflict copies, what is keyed by their paths (the hash cache) and their embed jobs (a wiped
+    // file's job answered `gone`, and a failed one stayed for ever) — each in the wipe's bounded batches.
     await ctx.deleteInBatches(spaceCollection(spaceId, 'conflicts'), {}, ids => col(spaceCollection(spaceId, 'conflicts')).deleteMany(byIds(ids)));
-    await ctx.deleteInBatches(spaceCollection(spaceId, 'fileHashes'), {}, ids => col(spaceCollection(spaceId, 'fileHashes')).deleteMany(byIds(ids)));
+    const inBatches = (coll: string, filter: Record<string, unknown>): Promise<number> => ctx.deleteInBatches(coll, filter, ids => col(coll).deleteMany(byIds(ids)));
+    await forgetPathKeyedCache(spaceId, { everyPath: inBatches });
+    await retireEmbedWorkOfRemovedRows(spaceId, { everyRow: inBatches });
 
     // Delete the physical files directory, then recreate it empty; and the space's staged chunk uploads.
     // Validate the resolved path stays within the expected data root to guard

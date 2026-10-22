@@ -9,7 +9,8 @@
  * dominated file sync. The cache (collection `<spaceId>_file_hashes`, keyed by path
  * with the (size, mtime) it was hashed at) lets an unchanged file reuse its stored
  * hash; only new or modified files (size or mtime changed) are re-read. The cache is
- * a LOCAL derived index — it is never synced, and it is dropped with the space.
+ * a LOCAL derived index — it is never synced, and it is dropped with the space. What forgets an entry (a remover of
+ * file rows) or carries it (a move) is `files/path-keyed-cache.ts`, the one list of what is keyed by a file's path.
  */
 
 import fs from 'fs/promises';
@@ -18,14 +19,11 @@ import { sha256OfStream } from '../util/sha256-tap.js';
 import { getDataRoot } from '../config/loader.js';
 import { col, asFilter, asBulk } from '../db/mongo.js';
 import { writeInOneCommands } from '../db/one-command.js';
-import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { isMissingPath, openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
 import { log, peerText } from '../util/log.js';
 import { noteUnreadable, clearUnreadable } from './unreadable-files.js';
 import { spillIdFromPath } from '../brain/spill-path.js';
-import { toDocId } from '../util/paths.js';
-import { escapeRegex } from '../util/redos.js';
 
 export interface ManifestEntry {
   path: string;        // relative to space files root, e.g. "notes/2024.md"
@@ -66,11 +64,14 @@ async function hashFile(absPath: string): Promise<{ sha256: string; size: number
  * @param since  when set, only files modified at/after this time are included.
  * @param opts.force  bypass the hash cache and re-read every file (reconciliation
  *   safety valve for the rare out-of-band edit that preserves size AND mtime).
+ * @param opts.readOnly  read the cache and never write it: no new hashes persisted, no stale entry pruned. For a caller that
+ *   looks at the disk while the space is held (a restore's file report, `files/disk-against-rows.ts`) and must leave the
+ *   cache exactly as it found it - a walk the bound ended keeps running, and a write from it would land after the hold.
  */
 export async function buildFileManifest(
   spaceId: string,
   since?: Date,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; readOnly?: boolean } = {},
 ): Promise<ManifestEntry[]> {
   const root = spaceFilesRoot(spaceId);
   const cacheColl = col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes'));
@@ -152,7 +153,7 @@ export async function buildFileManifest(
   await walk(root);
 
   // Persist newly-computed / changed hashes so the next round reuses them.
-  if (updates.length > 0) {
+  if (updates.length > 0 && !opts.readOnly) {
     await writeInOneCommands(
       updates.map(u => ({ replaceOne: { filter: { _id: u._id }, replacement: u, upsert: true } })),
       (slice, { ordered }) => cacheColl.bulkWrite(asBulk<HashCacheDoc>(slice), { ordered }),
@@ -161,7 +162,7 @@ export async function buildFileManifest(
   }
   // Prune cache entries for files that no longer exist (only on a full walk, where
   // `seen` is complete). Bounded by the number of deletions since the last build.
-  if (!since && !opts.force) {
+  if (!since && !opts.force && !opts.readOnly) {
     const stale = [...cache.keys()].filter(p => !seen.has(p));
     if (stale.length > 0) {
       await cacheColl.deleteMany(asFilter<HashCacheDoc>({ _id: { $in: stale } }));
@@ -169,34 +170,6 @@ export async function buildFileManifest(
   }
 
   return results;
-}
-
-/**
- * Forget the cached hash of files that are gone, so the cache never advertises a path nothing holds — what a delete does
- * (`files/remove-file-here.ts`) and what the legacy spill sweep does, one spelling of "this path has no bytes any more".
- * A full manifest walk prunes the same entries on its next round; this is the delete saying so itself, which an
- * incremental walk never does.
- */
-export async function forgetFileHashes(spaceId: string, ids: readonly string[]): Promise<void> {
-  const cache = col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes'));
-  for (const chunk of inChunks([...new Set(ids)], ROWS_PER_BULK_COMMAND)) {
-    await cache.deleteMany(asFilter<HashCacheDoc>({ _id: { $in: chunk } }));
-  }
-}
-
-/**
- * {@link forgetFileHashes} for every path under the directory `dirPath` — what a directory delete does for the tree it took
- * (`files/delete-cascade.ts`), as a single file's delete does for its path. Without it the cache keeps advertising every file
- * of a tree nothing holds until a full manifest walk happens to prune it, which an incremental one never does.
- *
- * The prefix is the directory's path and a `/`, regex-escaped, so `my.dir` never forgets `myXdir/` nor `my.dir2/`; an empty
- * path matches nothing here rather than everything.
- */
-export async function forgetFileHashesByPrefix(spaceId: string, dirPath: string): Promise<void> {
-  const norm = toDocId(dirPath).replace(/\/?$/, '');
-  if (!norm) return;
-  await col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes')).deleteMany(
-    asFilter<HashCacheDoc>({ _id: { $regex: `^${escapeRegex(norm + '/')}` } }));
 }
 
 /**

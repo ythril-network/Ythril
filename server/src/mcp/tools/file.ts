@@ -258,8 +258,8 @@ export const delete_fileTool: ToolHandler = {
     + '`confirm` has no effect on a file, and anything but a boolean is `400`.\n\n'
     + 'IT IS A CASCADE, not just an unlink. The blob goes, a sync tombstone is written, the metadata record is '
     + 'removed (or flagged deleted when the instance keeps them for audit), any queued media or text job is '
-    + 'CANCELLED so it cannot outlive the file and retry for ever, conversion artifacts such as extracted text '
-    + 'and thumbnails are removed, the links this instance wrote from the file and from what was derived from it are '
+    + 'CANCELLED so it cannot outlive the file and retry for ever, the embedding jobs of the file and of everything derived '
+    + 'from it are dropped, conversion artifacts such as extracted text and thumbnails are removed, the links this instance wrote from the file and from what was derived from it are '
     + 'removed with a tombstone each (a link another instance wrote stays with it), and the space\'s usage figure is invalidated. '
     + 'A `file.deleted` webhook fires for the file, and a directory delete fires one `file.deleted` per file it removed '
     + '(never for a conversion\'s derived record or a file an earlier delete flagged), each announced once even when an '
@@ -383,10 +383,11 @@ export const move_fileTool: ToolHandler = {
     + 'stands at `dst`, the call is refused with `409` and `code: "destination_exists"` and nothing changes; to replace, delete '
     + 'the destination first (`delete_file`; that deletes it on every instance it is replicated to). A name that only a deleted '
     + 'file\'s audit record holds is free. Missing parent directories of `dst` ARE created for you.\n\n'
-    + 'THE FILE IS NOT RE-READ. Moving does not re-extract text, re-run media analysis or re-embed: the '
-    + 'content did not change, only where it lives. A file that failed extraction at the old path is still '
-    + 'failed at the new one — use `retry_embed_file` for that, which is a different question from where the '
-    + 'file sits.\n\n'
+    + 'THE FILE IS NOT RE-READ. Moving does not re-extract text or re-run media analysis: the content did not change, '
+    + 'only where it lives. The moved file IS re-embedded, because the text it is ranked by includes its path: it is '
+    + 'queued for embedding at its new path once the move has finished, and a passage or caption that was waiting to be '
+    + 'embedded keeps waiting under its new name. A file that failed extraction at the old path is still failed at the '
+    + 'new one — use `retry_embed_file` for that, which is a different question from where the file sits.\n\n'
     + 'A MOVE THAT COULD NOT FINISH IS FINISHED ON ITS OWN, and a failed move is SAFE TO RETRY with the same `src` and '
     + '`dst`. A store failure is a retryable error, never a success. Before the bytes move nothing changes, and no peer is '
     + 'told of the tombstones it wrote (they are published only once the bytes each one names have moved — a conversion '
@@ -419,7 +420,7 @@ export const move_fileTool: ToolHandler = {
               + 'file, or a path inside the directory being moved) is REFUSED with `409` before anything changes, and so is a '
               + 'name where a file, a folder or a file\'s record already stands (`destination_exists`): a move never replaces '
               + 'anything, so delete the destination first. Missing parent directories are created. The file '
-              + 'is not re-read, so a failed extraction stays failed.'),
+              + 'is not re-read, so a failed extraction stays failed; it is re-embedded at its new path, whose text includes the path.'),
           },
           required: ['space', 'src', 'dst'],
           additionalProperties: false,

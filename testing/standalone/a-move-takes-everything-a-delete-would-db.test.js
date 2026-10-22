@@ -26,15 +26,38 @@
  *     `updateMany` on `convertedFileId` (the parent's pointer is still right afterwards)
  *  4. a derived row keeps its stored `updatedAt` across the move
  *
+ * ## What is keyed by the paths besides the rows (bundle-111, Q-459; design rev 3 step 5, V-S2, V-S4, V-S9, rev 3.1)
+ *
+ * The hash cache (`<space>_file_hashes`, keyed by the on-disk spelling) and the embed queue (one job per row id). A move re-keyed
+ * neither: the old path's cache entry stayed, the moved file kept the OLD path's vector (its embed text is built from its path) with no
+ * job at its new id, and the old id's job answered `gone`. A delete left every embed job of the file and its derived rows.
+ *
+ *  5. (a) after a move of a file or a directory with sidecars: every moved TOP-LEVEL row is queued at its new id whether or not it had
+ *     a job, every row that had a job has one at its new id, no job and no cache entry is left at an old id, and the cache entry is
+ *     CARRIED — the next manifest answers the sentinel hash the entry holds, which the bytes do not have;
+ *     (b) a cache entry a manifest build wrote at the destination between the bytes and the carry does not stop the move, and is
+ *     replaced by the carried one;
+ *     (c) an owed move whose first attempt committed one batch is finished — by a request retry and by housekeeping — with the rows of
+ *     the batch committed EARLIER queued too;
+ *     (d) a delete (file, directory, and the media worker's reconcile of a source gone from disk) leaves no embed job of any row of the
+ *     file; a file literally named `<name>#1.md` is not a derived row of `<name>` and keeps its job through the delete and a move;
+ *     (e) a failed job left at a destination, whose file was deleted, does not stop a move onto it;
+ *     (f) an NFD-named file (its cache key the on-disk NFD spelling, its row id NFC) — its cache entry follows a move of its directory;
+ *     and a store that fails after the commit leaves the move finished and says so once.
+ *
  * Run: node --test testing/standalone/a-move-takes-everything-a-delete-would-db.test.js
  * (requires a prior `npm run build:server`)
  */
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
-import { fileWithEverything } from './_file-with-everything.mjs';
+import { fileWithEverything, sentinelSha, BYTE_KINDS } from './_file-with-everything.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -42,7 +65,7 @@ const S = 'moveeverything';
 const STORED_UPDATED_AT = '2026-03-05T10:00:00.000Z';
 
 let acts, door, loader;
-const { derived, seedFileWithEverything, seedNeighbour } = fileWithEverything(S, () => acts);
+const { derived, fileRow, seedFileWithEverything, seedNeighbour } = fileWithEverything(S, () => acts);
 
 const rowOf = (id) => door.coll(S, 'files').findOne({ _id: id });
 /** The id `id` has once `src` is at `dst`: the first occurrence of the old path, under the path itself or a sidecar root. Spelled here, not read from `movedId`. */
@@ -93,7 +116,7 @@ describe('a move takes everything a delete would, and does it in a bounded numbe
   });
   beforeEach(async () => {
     await acts.reset();
-    for (const part of ['media_jobs', 'file_hashes']) await door.coll(S, part).deleteMany({});
+    for (const part of ['media_jobs', 'file_hashes', 'embed_jobs']) await door.coll(S, part).deleteMany({});
     loader.getConfig().softDeleteFileMeta = false;
   });
 
@@ -265,6 +288,268 @@ describe('a move takes everything a delete would, and does it in a bounded numbe
       }
       assert.ok(found.length >= 5, `fixture: only ${found.length} derived rows reached their moved id`);
       assert.deepEqual(restamped, [], 'a move stamped `updatedAt: now` on derived rows it did not rewrite: a write that stamps no version must not move the timestamp read beside it');
+    });
+  });
+
+  describe('what is keyed by the paths besides the rows: the hash cache and the embed jobs (Q-459)', () => {
+    let queue, manifest, timing, finish, walk, mediaQueue, worker;
+    const embedJobs = () => door.coll(S, 'embed_jobs');
+    const hashes = () => door.coll(S, 'file_hashes');
+    const jobOf = (id) => embedJobs().findOne({ _id: queue.embedJobId('file', id) });
+    const cacheAt = (key) => hashes().findOne({ _id: key });
+    /** What the next manifest walk answers, `path -> sha256`. */
+    const manifestNow = async () => new Map((await manifest.buildFileManifest(S)).map(e => [e.path, e.sha256]));
+    const LATER = () => new Date(Date.now() + 24 * 3_600_000);
+
+    /** The Nth `insertMany` on the files collection runs `act` first (or throws `act` when it is an Error). The batch's rows are written by it. */
+    function onFilesInsert(n, act) {
+      const proto = Object.getPrototypeOf(door.mongo.col('probe'));
+      const original = proto.insertMany;
+      let calls = 0;
+      let fired = 0;
+      proto.insertMany = async function hooked(...args) {
+        if (this.collectionName === `${S}_files` && ++calls === n) {
+          fired++;
+          if (act instanceof Error) throw act;
+          await act();
+        }
+        return original.apply(this, args);
+      };
+      return { restore: () => { proto.insertMany = original; }, fired: () => fired };
+    }
+
+    /** One housekeeping pass over the space, inside a walk as production runs it. */
+    async function housekeeping() {
+      let outcome;
+      const runner = walk.createHousekeepingWalk({ storeAnswers: async () => true });
+      await runner.eachSpace('TTL sweep: finishing interrupted file moves', [{ id: S }], async () => { outcome = await finish.finishOwedMoves(S, LATER()); });
+      return outcome;
+    }
+
+    before(async () => {
+      queue = await import('../../server/dist/brain/embed-queue.js');
+      manifest = await import('../../server/dist/files/manifest.js');
+      timing = await import('../../server/dist/files/move-timing.js');
+      finish = await import('../../server/dist/files/finish-owed-moves.js');
+      walk = await import('../../server/dist/util/housekeeping-walk.js');
+      mediaQueue = await import('../../server/dist/files/media/job-queue.js');
+      worker = await import('../../server/dist/files/media/worker.js');
+    });
+    afterEach(() => { timing.setMoveTimingForTest(null); worker.stopMediaEmbeddingWorker(); });
+
+    for (const shapeName of ['file', 'directory']) {
+      const shape = SHAPES[shapeName];
+      for (const queued of [true, false]) {
+        it(`(a) a ${shapeName}, ${queued ? 'every row queued' : 'nothing queued'}: every moved top-level row is queued at its new id, nothing is left at an old id, and the cache entry is carried, not re-hashed`, async () => {
+          const src = shape.root('a');
+          const dst = shape.root('moved');
+          const set = await shape.seed(src, { queued, cached: true });
+          const subjects = labelled(set);
+          const withBytes = set.flatMap(ids => BYTE_KINDS.map(kind => ids[kind]));
+          if (queued) for (const s of subjects) assert.ok(await jobOf(s.id), `fixture: ${s.label} was not queued`);
+          for (const id of withBytes) assert.ok(await cacheAt(id), `fixture: no cache entry for ${id}`);
+          const before = new Map();
+          for (const id of withBytes) before.set(id, fs.statSync(path.join(acts.root(), id)));
+
+          const a = await acts.move('REST', src, dst);
+          assert.ok(!acts.failed(a), `move: ${JSON.stringify(a.body ?? a.text)}`);
+
+          const leftAtOld = [];
+          for (const s of subjects) if (await jobOf(s.id)) leftAtOld.push(`${s.label}: an embed job at the old id ${s.id}`);
+          for (const id of withBytes) if (await cacheAt(id)) leftAtOld.push(`a hash cache entry at the old path ${id}`);
+          assert.deepEqual(leftAtOld, [], 'the move left what is keyed by the old paths behind');
+
+          const notQueued = [];
+          for (const s of subjects) {
+            const newId = movedTo(s.id, src, dst);
+            const row = await rowOf(newId);
+            const topLevel = row && row.parentFileId === undefined;
+            if ((topLevel || queued) && !(await jobOf(newId))) notQueued.push(`${s.label}${topLevel ? ' (top level)' : ''}: no embed job at ${newId}`);
+          }
+          assert.deepEqual(notQueued, [], 'a moved row is not queued at its new id: it keeps the vector its OLD path\'s text was embedded from');
+
+          const notCarried = [];
+          for (const id of withBytes) {
+            const newId = movedTo(id, src, dst);
+            const entry = await cacheAt(newId);
+            if (entry?.sha256 !== sentinelSha(id)) notCarried.push(`${newId}: the cache entry at the new path is ${JSON.stringify(entry)}, not the one carried from ${id}`);
+          }
+          assert.deepEqual(notCarried, [], 'the move did not carry the hash cache entry to the moved path');
+          const kept = [];
+          for (const id of withBytes) {
+            const st = fs.statSync(path.join(acts.root(), movedTo(id, src, dst)));
+            if (st.size !== before.get(id).size || st.mtimeMs !== before.get(id).mtimeMs) kept.push(id);
+          }
+          assert.deepEqual(kept, [], 'fixture: the move rewrote the bytes (size or mtime changed), so no cache entry could be reused');
+          const m = await manifestNow();
+          const rehashed = withBytes.filter(id => m.get(movedTo(id, src, dst)) !== sentinelSha(id));
+          assert.deepEqual(rehashed, [], 'the next manifest re-read the moved bytes instead of reusing the carried entry');
+        });
+      }
+    }
+
+    it('(b) a cache entry a manifest build wrote at the destination after the bytes moved and before the carry: the move finishes, and the carried entry replaces it', async () => {
+      const src = 'docs/stale-src.txt';
+      const dst = 'docs/stale-dst.txt';
+      await seedFileWithEverything(src, { cached: true });
+      const hook = onFilesInsert(1, () => hashes().replaceOne({ _id: dst }, { _id: dst, size: 1, mtimeMs: 1, sha256: 'a manifest build in the window' }, { upsert: true }));
+      let a;
+      try { a = await acts.move('REST', src, dst); } finally { hook.restore(); }
+      assert.equal(hook.fired(), 1, 'fixture: the hook never ran: the move does not write its rows with insertMany');
+      assert.ok(!acts.failed(a), `a stale cache entry at the destination stopped the move: ${JSON.stringify(a.body ?? a.text)}`);
+      assert.ok(await rowOf(dst), 'the record did not reach the destination');
+      assert.equal((await cacheAt(dst))?.sha256, sentinelSha(src), 'the entry at the destination is not the one carried from the source');
+      assert.equal(await cacheAt(src), null, 'the source\'s entry was left behind');
+    });
+
+    for (const retry of ['a request retry', 'housekeeping (finishOwedMoves)']) {
+      it(`(c) an owed move whose first attempt committed one batch, finished by ${retry}: every moved row is queued, the earlier batch's too`, async () => {
+        timing.setMoveTimingForTest({ txnBytes: 1 });
+        for (const n of ['a', 'b', 'c']) await acts.seed(`owed/${n}.txt`);
+        const fault = onFilesInsert(2, new Error('the store failed between the batches'));
+        let first;
+        try { first = await acts.move('REST', 'owed', 'owed-moved'); } finally { fault.restore(); }
+        assert.equal(fault.fired(), 1, 'fixture: the fault never fired: the move does not write a batch per file');
+        assert.equal(acts.statusOf(first), 503, `fixture: the stopped move was not owed: ${JSON.stringify(first.body ?? first.text)}`);
+        assert.ok(await rowOf('owed-moved/a.txt'), 'fixture: batch 1 did not commit in the first attempt');
+
+        if (retry === 'a request retry') {
+          const again = await acts.move('REST', 'owed', 'owed-moved');
+          assert.ok(!acts.failed(again), `the retry did not finish the move: ${JSON.stringify(again.body ?? again.text)}`);
+        } else {
+          const outcome = await housekeeping();
+          assert.equal(outcome?.finished, 1, `housekeeping did not finish the move: ${JSON.stringify(outcome)}`);
+        }
+        const problems = [];
+        for (const n of ['a', 'b', 'c']) {
+          if (!(await rowOf(`owed-moved/${n}.txt`))) problems.push(`${n}: no record at the destination`);
+          if (!(await jobOf(`owed-moved/${n}.txt`))) problems.push(`${n}: no embed job at the moved id`);
+          if (await jobOf(`owed/${n}.txt`)) problems.push(`${n}: an embed job at the old id`);
+        }
+        assert.deepEqual(problems, [], 'the finished move did not queue every moved row: a batch an earlier attempt committed is not in the retry\'s plan, so it is read from the rows at the destination or it is never re-embedded');
+      });
+    }
+
+    for (const [shapeName, shape] of Object.entries(SHAPES)) {
+      it(`(d) a ${shapeName} delete leaves no embed job of any row of the file: its own, its chunk, its sidecars and the rows under them`, async () => {
+        const root = shape.root('gone');
+        const set = await shape.seed(root, { queued: true });
+        for (const s of labelled(set)) assert.ok(await jobOf(s.id), `fixture: ${s.label} was not queued`);
+        const del = await shape.remove(root);
+        assert.ok(!acts.failed(del), `delete: ${JSON.stringify(del.body)}`);
+        const left = [];
+        for (const s of labelled(set)) if (await jobOf(s.id)) left.push(`${s.label}: ${s.id}`);
+        assert.deepEqual(left, [], 'the delete left embed jobs of rows it removed: each answers `gone` when claimed, and one at a later move\'s destination is in that move\'s way');
+      });
+    }
+
+    it('(d) the media worker, finding a job\'s source gone from disk, removes the file\'s embed jobs with its rows', async () => {
+      const loader2 = await import('../../server/dist/config/loader.js');
+      const saved = loader2.getConfig().mediaEmbedding;
+      loader2.getConfig().mediaEmbedding = {
+        levels: { images: 'caption' }, visionProvider: 'local', workerPollIntervalMs: 100, workerMaxPollIntervalMs: 200, faceRecognition: { enabled: false },
+      };
+      try {
+        const f = 'pics/vanished.png';
+        const ids = await seedFileWithEverything(f, { queued: true });
+        await door.coll(S, 'media_jobs').deleteMany({});
+        await mediaQueue.enqueueMediaJob(S, f, 'image/png', 'image');
+        fs.rmSync(path.join(acts.root(), f));               // the source is gone; no move owes it
+        worker.startMediaEmbeddingWorker();
+        await waitFor(async () => (await rowOf(f)) === null, 30_000, 50,
+          async () => `the worker never reconciled the vanished source: ${JSON.stringify(await door.coll(S, 'media_jobs').findOne({ _id: f }))}`);
+        worker.stopMediaEmbeddingWorker();
+        const left = [];
+        for (const [kind, id] of Object.entries(ids)) if (await jobOf(id)) left.push(`${kind}: ${id}`);
+        assert.deepEqual(left, [], 'the reconcile removed the rows of a vanished file and left their embed jobs');
+      } finally {
+        worker.stopMediaEmbeddingWorker();
+        loader2.getConfig().mediaEmbedding = saved;
+      }
+    });
+
+    for (const act of ['delete', 'move']) {
+      it(`(d) a file literally named '<name>#1.md' is not a derived row of '<name>': a ${act} of '<name>' leaves its job and its record`, async () => {
+        const name = 'docs/hash.txt';
+        const lookalike = `${name}#1.md`;
+        await acts.seed(name);
+        await acts.seed(lookalike);
+        await door.coll(S, 'files').insertOne(derived(`${name}#chunk-0`, name));
+        await queue.enqueueEmbedJobs(S, 'file', [name, `${name}#chunk-0`, lookalike], { priority: queue.EMBED_PRIORITY.background });
+
+        const a = act === 'delete' ? await acts.del('REST', name) : await acts.move('REST', name, 'docs/hash-moved.txt');
+        assert.ok(!acts.failed(a), `${act}: ${JSON.stringify(a.body ?? a.text)}`);
+
+        assert.ok(await rowOf(lookalike), `the ${act} took the record of a file whose name merely starts with '${name}#'`);
+        assert.ok(await jobOf(lookalike), `the ${act} took the embed job of '${lookalike}': derived ids were matched by an id prefix, not read from the rows`);
+        const gone = [];
+        for (const id of [name, `${name}#chunk-0`]) if (await jobOf(id)) gone.push(id);
+        assert.deepEqual(gone, [], `the ${act} left the embed jobs of '${name}' and its chunk at their old ids`);
+        if (act === 'move') assert.ok(await jobOf('docs/hash-moved.txt'), 'the moved file is not queued at its new id');
+      });
+    }
+
+    it('(e) a failed embed job left at a destination whose file was deleted does not stop a move onto it, and the moved row is queued afresh', async () => {
+      const src = 'docs/e-src.txt';
+      const dst = 'docs/e-dst.txt';
+      await acts.seed(src);
+      await acts.seed(dst);
+      await queue.enqueueEmbedJobs(S, 'file', [dst], { priority: queue.EMBED_PRIORITY.background });
+      await embedJobs().updateOne({ _id: queue.embedJobId('file', dst) }, { $set: { status: 'failed', attempts: 5, lastError: 'the old content failed' } });
+      const del = await acts.del('REST', dst);
+      assert.ok(!acts.failed(del), `delete: ${JSON.stringify(del.body)}`);
+
+      const a = await acts.move('REST', src, dst);
+      assert.ok(!acts.failed(a), `a leftover job at the destination stopped the move: ${JSON.stringify(a.body ?? a.text)}`);
+      assert.ok(await rowOf(dst), 'the record did not reach the destination');
+      const job = await jobOf(dst);
+      assert.equal(job?.status, 'pending', `the moved row's job at the destination is ${JSON.stringify(job)}: the deleted file's failed job was left there, so the moved file is never embedded`);
+      assert.equal(job?.attempts, 0, 'the moved row inherited the deleted file\'s spent attempts');
+    });
+
+    it('(f) an NFD-named file (cache key the on-disk spelling, row id NFC): its cache entry follows a move of its directory', async () => {
+      const nfd = 'café.txt';
+      const nfc = nfd.normalize('NFC');
+      assert.notEqual(nfd, nfc, 'fixture: the two spellings are one');
+      const abs = path.join(acts.root(), 'nfd-dir', nfd);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, 'bytes placed by something that spells names in NFD');
+      assert.equal(fs.readdirSync(path.dirname(abs))[0], nfd, 'fixture: this file system does not keep an NFD name as written (premise P2): the test asks nothing here');
+      await door.coll(S, 'files').insertOne(fileRow(`nfd-dir/${nfc}`, 'bytes placed by something that spells names in NFD'));
+      const st = fs.statSync(abs);
+      await hashes().insertOne({ _id: `nfd-dir/${nfd}`, size: st.size, mtimeMs: st.mtimeMs, sha256: sentinelSha('nfd'), plainSize: st.size });
+
+      const a = await acts.move('REST', 'nfd-dir', 'nfd-moved');
+      assert.ok(!acts.failed(a), `move: ${JSON.stringify(a.body ?? a.text)}`);
+      assert.ok(fs.existsSync(path.join(acts.root(), 'nfd-moved', nfd)), 'fixture: the bytes did not move');
+
+      const old = (await hashes().find({}).toArray()).map(d => d._id).filter(k => k.startsWith('nfd-dir/'));
+      assert.deepEqual(old, [], 'the cache entry at the old NFD spelling was left: carry and forget reached only the NFC row id');
+      assert.equal((await cacheAt(`nfd-moved/${nfd}`))?.sha256, sentinelSha('nfd'), 'the cache entry did not follow the file under the spelling the manifest keys it by');
+      assert.equal((await manifestNow()).get(`nfd-moved/${nfd}`), sentinelSha('nfd'), 'the next manifest re-read the moved bytes instead of reusing the carried entry');
+    });
+
+    it('(f) the store failing after the commit: the move finishes, is not owed, and the failure is said once', async () => {
+      timing.setMoveTimingForTest({ txnBytes: 1 });
+      for (const n of ['a', 'b', 'c']) await acts.seed(`late/${n}.txt`);
+      const proto = Object.getPrototypeOf(door.mongo.col('probe'));
+      const original = proto.bulkWrite;
+      let fired = 0;
+      proto.bulkWrite = async function failing(...args) {
+        if (this.collectionName === `${S}_embed_jobs`) { fired++; throw new Error('the store failed after the commit'); }
+        return original.apply(this, args);
+      };
+      let a;
+      let lines;
+      try {
+        ({ lines, result: a } = await logLinesDuring(() => acts.move('REST', 'late', 'late-moved')));
+      } finally { proto.bulkWrite = original; }
+      assert.ok(fired >= 1, 'the store was never asked to queue the moved rows after the commit: the move re-queues nothing');
+      assert.ok(!acts.failed(a), `a failure after the commit failed the move: ${JSON.stringify(a.body ?? a.text)}`);
+      for (const n of ['a', 'b', 'c']) assert.ok(await rowOf(`late-moved/${n}.txt`), `${n}: the record did not reach the destination`);
+      assert.equal(await (await import('../../server/dist/files/move-markers.js')).moveIsOwed(S, 'late', 'late-moved'), false, 'the move was left owed over a best-effort step after its commit');
+      const said = lines.filter(l => /embed/i.test(l) && l.includes(S));
+      assert.equal(said.length, 1, `the failure after the commit was said ${said.length} times, not once: ${JSON.stringify(said)}`);
     });
   });
 });
