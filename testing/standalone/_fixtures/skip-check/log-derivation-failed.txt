@@ -1,0 +1,5 @@
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.1000000Z ##[group]Run node scripts/unexpected-skips.mjs --results test-results
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.1000001Z node scripts/unexpected-skips.mjs --results test-results
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.1000002Z ##[endgroup]
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.3000000Z unexpected-skips: the derivation failed — test-results holds no test event
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.3100000Z ##[error]Process completed with exit code 2.

@@ -1,0 +1,8 @@
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.1000000Z ##[group]Run node scripts/unexpected-skips.mjs --results test-results
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.1000001Z node scripts/unexpected-skips.mjs --results test-results
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.1000002Z ##[endgroup]
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.3000000Z unexpected-skips: 2 skipped test(s) CI did not expect:
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.3000001Z   testing/standalone/an-example-gate.test.js  "reads the sidecar's answer"  "the sidecar never came up"
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.3000002Z   client/src/app/example/example.component.spec.ts  "renders the empty state"  (no reason given)
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.3000003Z A skip proves nothing. Make the test run (or make its absent input a failure under CI); only a skip whose reason starts `expected-in-ci:` in a file on the list in testing/_shared/expected-in-ci.mjs is allowed to stand.
+Full run / Build & Test	No skip nobody expected	2026-10-22T16:41:01.3100000Z ##[error]Process completed with exit code 1.
