@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, patch, get, del } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { waitForValue } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -38,13 +38,10 @@ after(async () => {
 
 /** The newest fact.update entry for this fact written by `method` after `since`. */
 async function entry(method, since) {
-  for (let i = 0; i < 20; i++) {
+  return waitForValue(async () => {
     const r = await get(INSTANCES.a, admin, `/api/admin/audit-log?operation=fact.update&spaceId=general&after=${encodeURIComponent(since)}&limit=50`);
-    const hit = (r.body.entries ?? []).find(e => e.method === method && e.entryId === factId);
-    if (hit) return hit;
-    await sleep(250);
-  }
-  return null;
+    return (r.body.entries ?? []).find(e => e.method === method && e.entryId === factId);
+  }, 10_000, 100, undefined, { what: `a ${method} fact.update audit entry for ${factId}` });
 }
 
 describe('an MCP edit carries its change list', () => {

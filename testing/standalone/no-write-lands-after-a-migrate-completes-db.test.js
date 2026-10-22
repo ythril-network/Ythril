@@ -107,6 +107,7 @@ describe('no write lands after a migrate completes, on any door (real MongoDB)',
     // Polled every turn of the event loop, and at the FIRST turn the completion write is visible the gate is read synchronously: a
     // closure made after an await in the end hook leaves a turn where the URI is saved and the gate is open, and this sees it. The bound
     // is turns, about 30 s of them (every fiftieth a 15 ms timer): a whole copy with its indexes outlasted 4000 turns on the harness.
+    // waits-differently: a waitFor probes every 50 ms at best and would miss the one turn this must read the gate on
     for (let i = 0; i < 100_000; i++) {
       if (loader.getConfig().mongo?.uri === TARGET_URI && migrateEntries().length === 0) {
         gateAtCompletion = gate.spaceWriteRefusal(S);

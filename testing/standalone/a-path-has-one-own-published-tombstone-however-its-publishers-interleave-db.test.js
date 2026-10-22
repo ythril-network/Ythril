@@ -54,7 +54,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, eventually, failWrites } from './_write-faults.mjs';
 import { holdWhileOtherRuns, parkReadsAfterAnswer } from './_read-park.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'tombrace';
@@ -121,7 +121,7 @@ describe('a path ends with one own published tombstone, however its publishers i
         // The path is uploaded again — a newer version of it — and deleted again, while the first publish waits.
         await acts.door.coll(S, 'files').updateOne({ _id: 're.txt' }, { $set: { seq: 9 } });
         await acts.files.writeFile(S, 're.txt', 'uploaded again');
-        await sleep(5);
+        await elapse(5, 'timestamps differ: the second delete\'s stamp must be later than the parked first publish\'s');
         const later = await tombstones.writePendingFileTombstones(S, ['re.txt']);
         assert.equal(later.docs[0]?.rowSeq, 9, 'the second delete did not read the newer version');
         unlink('re.txt');
@@ -147,7 +147,7 @@ describe('a path ends with one own published tombstone, however its publishers i
     assert.ok(!acts.failed(await acts.del('REST', 'keep.txt')), 'the delete did not happen');
     const [published] = await publishedFor('keep.txt');
     assert.ok(published, 'the delete published nothing');
-    await sleep(5);
+    await elapse(5, 'timestamps differ: the leftover pending tombstone\'s stamp must be later than the published one\'s');
     // A leftover the published tombstone does not cover yet: a failed attempt's write that landed after it.
     const leftover = await tombstones.writePendingFileTombstones(S, ['keep.txt']);
     assert.equal((await pendingFor('keep.txt')).length, 1, 'the leftover was not written — the case is not reached');
@@ -196,7 +196,7 @@ describe('a path ends with one own published tombstone, however its publishers i
     const move = { from: 'mv/from.txt', to: 'mv/to.txt' };
     await tombstones.writePendingFileTombstones(S, ['mv/from.txt'], move);
     assert.equal((await markerMod.moveMarkerOf(S, move.from, move.to)) !== undefined, true, 'the move\'s marker was not written — the case is not reached');
-    await sleep(5);
+    await elapse(5, 'timestamps differ: the covering act\'s stamp must be later than the move row\'s');
     // Another act on the source path (no marker of its own) publishes: the move's row is "another pending tombstone" of the path.
     const covering = await tombstones.writePendingFileTombstones(S, ['mv/from.txt']);
     await tombstones.confirmFileTombstones(covering);
@@ -221,7 +221,7 @@ describe('a path ends with one own published tombstone, however its publishers i
     // The age of a row, whichever of its stamps the code reads it by.
     await acts.door.coll(S, 'file_tombstones').updateMany({ path: { $in: [old.from, owed.from] } },
       { $set: { deletedAt: longAgo, positionAt: longAgo, writtenAt: longAgo, settleAt: longAgo } });
-    await sleep(5);
+    await elapse(5, 'timestamps differ: the prune must run at a later millisecond than the stamps written above');
 
     await tombstones.pruneFileTombstonesUpTo(S, FAR);
     assert.equal((await publishedFor(young.from)).length, 1, 'the prune took the tombstone of a move begun moments ago: its marker is the only record that the move is owed');
@@ -248,7 +248,7 @@ describe('a path ends with one own published tombstone, however its publishers i
       await acts.seed('rel.txt', { seq: 4 });
       const own = await tombstones.writePendingFileTombstones(S, ['rel.txt']);
       unlink('rel.txt');
-      await sleep(5);
+      await elapse(5, 'timestamps differ: the relayed tombstone\'s receive time must be later than the own act\'s write');
       // A peer's tombstone for the same path arrives (its position is the RECEIVE time, later than the own act was written).
       await tombstones.storeRelayedFileTombstones(S, [{ _id: `relayed-${extra.rowSeq ?? 'bare'}`, path: 'rel.txt',
         deletedAt: '2026-09-01T00:00:00.000Z', issuer: 'some-other-instance', ...extra }]);
@@ -265,7 +265,7 @@ describe('a path ends with one own published tombstone, however its publishers i
   it('(f) the act\'s confirm and the TTL settle publishing one path publish ONE tombstone', async () => {
     // Two pending tombstones for one path: an earlier attempt's (stale) and the retry's (fresh). Nothing holds bytes there.
     const attempt = await tombstones.writePendingFileTombstones(S, ['two.txt']);
-    await sleep(60);
+    await elapse(60, 'timestamps differ: the retry must be written more than the 30 ms staleness margin after the attempt');
     const retry = await tombstones.writePendingFileTombstones(S, ['two.txt']);
     assert.equal((await pendingFor('two.txt')).length, 2, 'the two attempts were not both written — the case is not reached');
     // A settle that finds only the earlier one stale.

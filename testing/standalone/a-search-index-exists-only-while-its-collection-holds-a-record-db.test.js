@@ -40,7 +40,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { unitAt, queryAxis, startStubEmbedder, createSpaceCollections, waitUntilServing, waitUntilTrue } from './_vector-harness.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -136,7 +136,7 @@ describe('a search index exists only while its collection holds a record', { ski
     for (const s of SUFFIXES.filter(x => x !== 'entities')) assert.deepEqual(await names(`${SPACE}_${s}`), []);
     await waitUntilServing(mongo, coll, `${coll}_embedding`, { dims: DIMS, n: 1 });
 
-    await sleep(Math.max(0, writtenAt + FRESH_MS + 500 - Date.now()));
+    await elapse(Math.max(0, writtenAt + FRESH_MS + 500 - Date.now()), 'ttl elapses: the fresh-write window must run out so only the index can answer the recall');
     const later = await recallAll(SPACE);
     assert.deepEqual(later.ids, ['first'], 'past the fresh window only the index can answer — it did not ingest the first record');
   });

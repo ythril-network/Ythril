@@ -23,7 +23,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, patch, get, delWithBody, readCollection } from '../sync/helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { waitForReading } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -65,15 +65,10 @@ const upload = (space, name, content) =>
 /** Poll until the file leaves `pending`, then report its final state.
  *  The metadata endpoint returns a LIST (`{ files: [...] }`) even when filtered to one path. */
 async function settle(space, name) {
-  let last;
-  for (let i = 0; i < 60; i++) {
-    await sleep(500);
-    const r = await readCollection(INSTANCES.a, token, space, 'files', { path: name });
-    last = (r.results ?? [])[0];
-    const status = last?.embeddingStatus;
-    if (status && status !== 'pending' && status !== 'processing') return last;
-  }
-  throw new Error(`file ${space}/${name} never settled (last seen: ${JSON.stringify(last ?? null)})`);
+  return waitForReading(
+    async () => ((await readCollection(INSTANCES.a, token, space, 'files', { path: name })).results ?? [])[0] ?? null,
+    (file) => { const status = file?.embeddingStatus; return status && status !== 'pending' && status !== 'processing'; },
+    30_000, 100, { what: `file ${space}/${name} to settle out of pending/processing` });
 }
 
 const created = [];

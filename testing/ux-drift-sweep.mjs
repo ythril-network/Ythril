@@ -38,6 +38,7 @@
  */
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
+import { pageLoaded, ROUTED_PAGE } from './_shared/page-loaded.mjs';
 
 const BASE = process.env['UX_BASE'] ?? 'http://localhost:3260';
 const TOKEN_FILE = process.env['UX_TOKEN_FILE'] ?? 'token.txt';
@@ -108,7 +109,8 @@ const groups = {
 
 for (const [path, name] of PAGES) {
   await page.goto(BASE + path, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(1200);          // let the first data load settle; skeletons are not the final state
+  // The first data load has to land: a skeleton is not the final state, and a miss throws rather than measuring one.
+  await pageLoaded(page, ROUTED_PAGE, 30_000);
   for (const g of Object.values(groups)) {
     for (const [sig, n] of Object.entries(await measure(g.sel, g.props))) {
       (g.map[sig] ??= []).push(`${name}×${n}`);

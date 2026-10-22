@@ -34,7 +34,7 @@ import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { adminRights } from './_cel-doors.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 process.env['YTHRIL_MODELS_OFFLINE'] = '1';
@@ -190,8 +190,8 @@ describe('a delete of a file record already gone answers 404 on every door', { s
     // new one, every truthiness check reads green, and the record claims the file was deleted later than it was.
     const stampedBy = (await record('dir/one.txt'))?.deletedAt;
     assert.equal(typeof stampedBy, 'string', 'the first delete did not flag the record');
-    // waits-differently: not a condition — a window that must elapse in full, so a second flag would carry a later stamp than the first
-    await sleep(25);
+    // Not a condition — a window that must elapse in full, so a second flag would carry a later stamp than the first
+    await elapse(25, 'timestamps differ: a second flag on the record would carry a later stamp than the first');
     const tombstonesBefore = await tombstones();
     const dir = await restDelete('dir', { confirm: true });
     assert.ok(succeeded(dir), `the directory is still on disk and its delete is allowed: ${dir.status} ${JSON.stringify(dir.detail)}`);

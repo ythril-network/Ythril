@@ -38,7 +38,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { eventually } from './_write-faults.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'metasweep';
@@ -69,7 +69,7 @@ describe('a meta write sweeps once, wherever it lands', { skip }, () => {
   beforeEach(async () => {
     await door.wipe(S);
     spaces.updateSpace(S, { meta: {} });
-    await sleep(200);
+    await elapse(200, 'ttl elapses: the sweep the reset write queues is not awaited by the write and must have run before the next case counts commands');
   });
 
   it('two meta writes in one turn sweep once, against the later meta', async () => {
@@ -80,7 +80,7 @@ describe('a meta write sweeps once, wherever it lands', { skip }, () => {
       await until(async () => !(await hasVector('fa')) && !(await hasVector('fb')),
         'the sweep did not remove both vectors');
       // Room for a second sweep to show itself, had one started.
-      await sleep(500);
+      await elapse(500, 'absence window: a second sweep would show itself here, once the first one\'s effect was awaited above');
     });
     const updates = commands.filter(c => c === `update ${S}_facts`);
     assert.equal(updates.length, 1,

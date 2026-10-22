@@ -43,7 +43,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, delWithBody, waitFor, waitForReindexRunEnd, filterRest } from '../sync/helpers.js';
 import { seedActiveReindexRun, clearSeededReindexState, closeReindexSeed } from '../_shared/reindex-run-seed.mjs';
-import { sleep } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -253,9 +252,10 @@ describe('reindex — what the API can actually attribute to it', () => {
     assert.ok(snapshot.size > 0, 'nothing to compare — the space has no memories');
 
     await reindex(SPACE);
-    // Give the job time to have touched them; the assertion is about what did NOT change, so waiting longer is safe.
-    await waitFor(async () => (await status(SPACE)).status === 200, 10_000, 1_000);
-    await sleep(5_000);
+    // Wait for the run to END, not for a guessed while: the route answers only once the run is recorded as running
+    // (`startReindex` before the 200), so `running: false` after it means every record the job will touch is touched.
+    // A status that reads 200 says nothing about that — it was 200 before the reindex too.
+    await waitForReindexRunEnd(INSTANCES.a, token, SPACE, 180_000);
 
     const after = await filterRest(INSTANCES.a, token, { space: SPACE, ...({ collection: 'facts', filter: {}, projection: { _id: 1, seq: 1, updatedAt: 1 }, limit: 20 }) });
     for (const r of after.body.results ?? []) {

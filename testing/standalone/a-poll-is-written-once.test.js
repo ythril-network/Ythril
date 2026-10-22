@@ -24,10 +24,13 @@
  * window that must elapse in full, a deliberate busy-spin, a poll that reads the clock for another reason). The
  * reason has to say something: a bare marker is the loop without one.
  *
+ * OR (`Q-401`) the loop awaits a sleep and its BODY leaves on a condition that is not the clock (an `if` that breaks,
+ * returns or throws; a `try` that leaves on success), however it is bounded: an attempt count, a flag, nothing. A
+ * condition only in the loop's head never makes a poll on its own — a work loop and a queue drain are bounded that way.
+ *
  * The detection is read out of the syntax tree (`testing/_shared/poll-loops.mjs`), so a loop in a comment or a
  * string is not a loop, and a clock held in a variable (`const now = Date.now()`) is still the clock. It does NOT
- * see a loop bounded by an attempt count or a recursive poll: neither reads a deadline, and this gate answers the
- * question the plan names.
+ * see a `for…of` (bounded by its list) or a recursive poll.
  *
  * ## Why the instrument is exercised before it is trusted
  *
@@ -167,6 +170,35 @@ describe('the detector finds a poll in every spelling it is written in', () => {
       '    await h.sleep(10);',
       '  }',
       '}'),
+    'a loop bounded by an attempt count whose body leaves when the probe holds': src(
+      'async function retry(probe) {',
+      '  for (let i = 0; i < 30; i++) {',
+      '    if (await probe()) return true;',
+      '    await sleep(1000);',
+      '  }',
+      '}'),
+    'an attempt-count loop that stamps the clock into a request, and leaves on the answer': src(
+      'async function restore(post, u) {',
+      '  for (let attempt = 0; attempt < 20; attempt++) {',
+      '    const probe = await post(u, { fact: `probe-${Date.now()}` });',
+      '    if (probe.status === 201) break;',
+      '    await sleep(400);',
+      '  }',
+      '}'),
+    'an attempt count AND a flag in the head, the probe read synchronously in the body': src(
+      'async function settle(readConfig) {',
+      '  for (let i = 0; i < 60 && !stop; i++) {',
+      '    if (readConfig().ready) return true;',
+      '    await sleep(1000);',
+      '  }',
+      '}'),
+    'no bound at all, only the body\'s exit': src(
+      'async function until(probe) {',
+      '  while (true) {',
+      '    if (await probe()) break;',
+      '    await sleep(10);',
+      '  }',
+      '}'),
     'retry until the probe stops throwing — the server that is restarting': src(
       'async function waitForApi(deadline) {',
       '  while (Date.now() < deadline) {',
@@ -186,12 +218,16 @@ describe('the detector finds a poll in every spelling it is written in', () => {
 
 describe('the detector leaves alone what is not a poll', () => {
   const MUST_NOT_BE_FOUND = {
-    'a loop bounded by an attempt count, not a deadline (the gate\'s stated edge)': src(
-      'async function retry(probe) {',
-      '  for (let i = 0; i < 30; i++) {',
-      '    if (await probe()) return true;',
-      '    await sleep(1000);',
+    'an attempt-count WORK loop: it sleeps between writes and never leaves on an answer': src(
+      'async function fill(putOk, out) {',
+      '  for (let i = 0; i < 4; i++) {',
+      '    out.push(await putOk());',
+      '    await sleep(5);',
       '  }',
+      '}'),
+    'a variable in the head only — the head alone never makes a poll': src(
+      'async function run(state) {',
+      '  for (let i = 0; i < 20 && state.reads === 0; i++) await sleep(10);',
       '}'),
     'a delay until a time — it tests nothing': src(
       'async function pad(end) {',
@@ -219,14 +255,6 @@ describe('the detector leaves alone what is not a poll', () => {
       '    const r = await work(queue.shift());',
       '    if (r.failed) log(Date.now() - t0);',
       '    await sleep(1);',
-      '  }',
-      '}'),
-    'an attempt-count loop that stamps the clock into a request': src(
-      'async function restore(post, u) {',
-      '  for (let attempt = 0; attempt < 20; attempt++) {',
-      '    const probe = await post(u, { fact: `probe-${Date.now()}` });',
-      '    if (probe.status === 201) break;',
-      '    await sleep(400);',
       '  }',
       '}'),
     'a for…of — bounded by its list, the clock only a guard': src(

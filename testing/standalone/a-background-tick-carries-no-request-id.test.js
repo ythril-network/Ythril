@@ -31,7 +31,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { waitFor } from '../_shared/wait-for.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 import { moduleIndex } from './_call-graph.mjs';
 import { scheduledJobs, JOB_FLOORS } from './_scheduled-jobs.mjs';
 
@@ -105,7 +105,7 @@ describe('outsideRequest', () => {
       const inside = [];
       const value = await log.outsideRequest(async () => {
         inside.push(log.currentRequestId());
-        await sleep(5);
+        await elapse(5, 'simulated latency: the function under test resumes on a timer, and its continuation must still see no request id');
         inside.push(log.currentRequestId());
         return 42;
       });

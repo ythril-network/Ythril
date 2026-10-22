@@ -26,13 +26,13 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'deletewindows';
 const nowIso = () => new Date().toISOString();
 // A link written after the row went must carry a later createdAt than the stamp taken before it, so a moment has to pass.
-const later = () => sleep(15);
+const later = () => elapse(15, 'timestamps differ: the link written after the row went must carry a later createdAt than the stamp taken before it');
 
 let acts, cascade;
 

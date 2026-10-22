@@ -7,11 +7,11 @@
  * reported at all.
  */
 import { test, describe } from 'node:test';
-import { sleep } from '../../_shared/sleep.mjs';
+import { elapse } from '../../_shared/sleep.mjs';
 
 test('skip via option true', { skip: true }, () => {});
 test('skip via option reason', { skip: 'because option reason' }, () => {});
-test('skip via t.skip() inside', async (t) => { await sleep(20); t.skip('because t.skip reason'); });
+test('skip via t.skip() inside', async (t) => { await elapse(20, 'simulated latency: a test that runs a while before it skips itself'); t.skip('because t.skip reason'); });
 test('skip via t.skip() without a reason', (t) => { t.skip(); });
 test('skip via t.skip() then return', async (t) => { t.skip('t.skip then return'); return; });
 test.skip('skip via test.skip', () => {});

@@ -26,8 +26,7 @@ import assert from 'node:assert/strict';
 import { MongoClient, MongoOperationTimeoutError } from 'mongodb';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { startFreezableRelay } from './_freezable-relay.mjs';
-import { holdsWithin } from '../_shared/wait-for.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { holdsWithin, waitFor } from '../_shared/wait-for.mjs';
 import { createStoreAnswers, STORE_PING_MS } from '../../server/dist/db/store-answers.js';
 import { createProbeCache } from '../../server/dist/util/cached-probe.js';
 
@@ -40,12 +39,14 @@ const SLACK_MS = CONNECT_MS + HEARTBEAT_MS;
 
 describe('storeAnswers against a frozen store', { skip }, () => {
   let relay; let client; let answers;
+  let poolClears = 0;
 
   before(async () => {
     relay = await startFreezableRelay('ythril_harness_store_answers', {
       query: `&connectTimeoutMS=${CONNECT_MS}&heartbeatFrequencyMS=${HEARTBEAT_MS}&serverSelectionTimeoutMS=20000`,
     });
     client = new MongoClient(relay.uri);
+    client.on('connectionPoolCleared', () => { poolClears += 1; });
     await client.connect();
     await client.db('admin').command({ ping: 1 }, { timeoutMS: 5_000 });
     // A fresh memo for each question: the memo is tested in the pure suite, and here it would hide the store's own answer.
@@ -63,9 +64,10 @@ describe('storeAnswers against a frozen store', { skip }, () => {
   });
 
   it('settles at its own bound as MongoOperationTimeoutError, with the pool already cleared, and answers false', async () => {
+    const clearsBefore = poolClears;
     relay.freeze();
     // Let the monitor's heartbeat notice and clear the pool: from here a ping waits for SERVER SELECTION, which is 20 s here.
-    await sleep(CONNECT_MS + 2 * HEARTBEAT_MS + 500);
+    await waitFor(() => poolClears > clearsBefore, 25_000, 50, undefined, { what: 'the monitor to notice the frozen store and clear the pool' });
 
     const started = Date.now();
     const direct = await client.db('admin').command({ ping: 1 }, { timeoutMS: STORE_PING_MS }).then(() => null, (e) => e);

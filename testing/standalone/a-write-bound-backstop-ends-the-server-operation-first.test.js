@@ -29,7 +29,7 @@ import { logLinesDuring } from './_log-lines.mjs';
 import * as writeBound from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
 import { observeRecordWrites } from '../../server/dist/db/record-write-observer.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 // A namespace import, so a build without `KILL_WAIT_MS` fails the cases that assert on behaviour and not the whole file at link time.
 const { callBounded, withinWriteBound, setWriteBoundForTest, SERVER_FIRST_MARGIN_MS, KILL_WAIT_MS, PLAIN_WRITE_METHODS } = writeBound;
@@ -46,7 +46,7 @@ function fakeServer({ killable = true, arrivesAfterLooks = 0, commandLatencyMs =
   s.attach = (comment) => { s.comment = comment; s.alive = arrivesAfterLooks === 0; };
   s.command = async (command) => {
     s.calls.push(command);
-    if (commandLatencyMs) await sleep(commandLatencyMs);
+    if (commandLatencyMs) await elapse(commandLatencyMs, 'simulated latency: the fake server answers each operations command slowly');
     if (command.aggregate === 1) {
       const stages = command.pipeline;
       assert.ok(stages[0].$currentOp, 'the first stage of a $currentOp pipeline must be $currentOp');
@@ -157,7 +157,7 @@ describe('the write bound\'s backstop ends the server operation before it answer
     const server = fakeServer({ killable: false });
     const { lines, result } = await logLinesDuring(async () => {
       const r = await bounded('updateOne', hangingDriver(server), TARGET(server));
-      await sleep(KILL_WAIT_MS + 200); // a second line from a late settle or a repeat would arrive in this window
+      await elapse(KILL_WAIT_MS + 200, 'absence window: no second backstop line after the caller was answered'); // a second line from a late settle or a repeat would arrive in this window
       return r;
     });
     assert.ok(result.error instanceof StoreTimeout, 'the caller must be answered');
@@ -174,18 +174,18 @@ describe('the write bound\'s backstop ends the server operation before it answer
 
   it('the server answering first (code 50) needs none of it: no look, no kill', async () => {
     const server = fakeServer();
-    const driver = (args) => { server.attach(optionsOf(args)?.comment); return sleep(BOUND_MS).then(() => { throw Object.assign(new Error('operation exceeded time limit'), { code: 50, name: 'MongoServerError' }); }); };
+    const driver = (args) => { server.attach(optionsOf(args)?.comment); return elapse(BOUND_MS, 'simulated latency: the server answers code 50 after the bound').then(() => { throw Object.assign(new Error('operation exceeded time limit'), { code: 50, name: 'MongoServerError' }); }); };
     const r = await bounded('updateOne', driver, TARGET(server));
     assert.ok(r.error instanceof StoreTimeout);
-    await sleep(SERVER_FIRST_MARGIN_MS + 100);
+    await elapse(SERVER_FIRST_MARGIN_MS + 100, 'absence window: no operations call after the server answered first');
     assert.deepEqual(server.calls, []);
   });
 
   it('a write that succeeds needs none of it either', async () => {
     const server = fakeServer();
-    const r = await bounded('insertOne', () => sleep(5).then(() => ({ acknowledged: true })), TARGET(server));
+    const r = await bounded('insertOne', () => elapse(5, 'simulated latency: the write succeeds after a moment').then(() => ({ acknowledged: true })), TARGET(server));
     assert.equal(r.ok, true);
-    await sleep(SERVER_FIRST_MARGIN_MS + 100);
+    await elapse(SERVER_FIRST_MARGIN_MS + 100, 'absence window: no operations call after the write succeeded');
     assert.deepEqual(server.calls, []);
   });
 

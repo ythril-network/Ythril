@@ -36,7 +36,7 @@ import { createRequire } from 'node:module';
 import * as wb from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
 import * as observer from '../../server/dist/db/record-write-observer.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const require = createRequire(import.meta.url);
 const { Db } = require('mongodb');
@@ -184,7 +184,7 @@ describe('through observeRecordWrites, over a recording Db', () => {
     try {
       const { db, calls } = recordingDb();
       await wb.withinWriteBound(async () => {
-        await sleep(60);
+        await elapse(60, 'ttl elapses: the hold\'s 20 ms deadline must run out before the calls are made');
         assert.throws(() => observed(db).listCollections(), StoreTimeout);
         await assert.rejects(observed(db).dropCollection('x'), StoreTimeout);
       });

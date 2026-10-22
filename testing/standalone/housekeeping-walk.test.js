@@ -31,7 +31,7 @@ import { spaceFailureReporter } from '../../server/dist/util/space-failure.js';
 import { onHousekeepingSignal } from '../../server/dist/util/housekeeping-signals.js';
 import * as wb from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const STEP = 'Test step';
 
@@ -126,7 +126,7 @@ describe('eachSpace: isolation and the shape of what it returns', () => {
       let inFlight = 0; let peak = 0;
       await walk.eachSpace(STEP, ['a', 'b', 'c', 'd', 'e'], async () => {
         inFlight++; peak = Math.max(peak, inFlight);
-        await sleep(5);
+        await elapse(5, 'simulated latency: each space\'s work takes a moment, so the concurrent ones overlap');
         inFlight--;
       }, limit === undefined ? {} : { limit });
       assert.equal(peak, expected, `limit ${limit}`);

@@ -31,7 +31,8 @@ import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -104,26 +105,28 @@ describe('a rebuild job skips the insert-time duplicate check', { skip }, () => 
     dupeReads = 0;
   });
 
-  /** Run the one job, then give the fire-and-forget evaluation time to start. */
-  async function runAndSettle() {
+  /** Run the one job; the fire-and-forget evaluation it may start is the caller's to wait for, or to wait out. */
+  async function runTheJob() {
     assert.equal(await worker.runOneEmbedJob(), true, 'the seeded job was claimed');
-    for (let i = 0; i < 20 && dupeReads === 0; i++) await sleep(25);
   }
 
   it('a priority-0 job (a local write) runs the duplicate check', async () => {
     // The control: without it, "not called" below could mean the counter sees nothing at all.
     await seedEntity('e-write');
     await seedJob('e-write', { priority: 0 });
-    await runAndSettle();
-    assert.ok(dupeReads > 0, 'a freshly written record must still be evaluated against its neighbours');
+    await runTheJob();
+    assert.ok(await holdsWithin(() => dupeReads > 0, 5_000, 50, { what: 'the fire-and-forget duplicate evaluation to read the space rule' }),
+      'a freshly written record must still be evaluated against its neighbours');
   });
 
   it('a rebuild job at priority 2 (a reindex) does not', async () => {
     await seedEntity('e-rebuild');
     await seedJob('e-rebuild', { priority: 2, rebuild: true });
-    await runAndSettle();
+    await runTheJob();
     assert.ok(Array.isArray((await mongo.col(`${SPACE}_entities`).findOne({ _id: 'e-rebuild' })).embedding),
       'precondition: the rebuild job did embed the record');
+    // The case above is the positive control: the same job at priority 0 starts its evaluation within this window.
+    await elapse(500, 'absence window: the duplicate evaluation a priority-0 job starts would start here');
     assert.equal(dupeReads, 0,
       'a reindex re-embeds records that were each evaluated when written — re-running the insert rule for every one is a full scan nobody asked for');
   });

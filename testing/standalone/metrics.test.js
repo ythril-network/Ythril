@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES } from '../sync/helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -250,7 +250,8 @@ describe('GET /metrics — Prometheus endpoint', () => {
     // Consume the response body so the server's 'finish' event fires promptly
     await r.text();
     // Allow the server's finish callback to run and increment the counter
-    await sleep(100);
+    await waitFor(async () => sumCounterValues((await getMetrics()).text, 'ythril_http_requests_total') > sumCounterValues(before.text, 'ythril_http_requests_total'),
+      5_000, 100, undefined, { what: 'ythril_http_requests_total to rise above its reading from before the request' });
 
     const after = await getMetrics();
 

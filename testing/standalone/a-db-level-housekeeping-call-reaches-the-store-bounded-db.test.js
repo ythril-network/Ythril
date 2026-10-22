@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import { MongoClient } from 'mongodb';
 import { openTestMongo, closeTestMongo, mongoSkipReason, testMongoUri } from './_mongo-harness.mjs';
 import { holdDocumentLock } from './_write-faults.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 import * as wb from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
 import { observeRecordWrites } from '../../server/dist/db/record-write-observer.js';
@@ -113,7 +113,7 @@ describe('a Db-level housekeeping call reaches the store bounded', { skip }, () 
     assert.ok(error instanceof StoreTimeout, `the stalled drop was answered ${error}, not StoreTimeout`);
     assert.ok(ms >= 900 && ms < 6000, `answered after ${ms} ms, not at the figure`);
     // A drop the bound ended must not run when its blocker goes: give the server the time it would need to apply it.
-    await sleep(2500);
+    await elapse(2500, 'absence window: the drop the bound ended must not run after its blocker was released (the StoreTimeout above is the positive control)');
     const still = await db.listCollections({ name: 'hk_stalled' }).toArray();
     assert.equal(still.length, 1, 'the drop landed after the caller was answered a timeout');
     await db.dropCollection('hk_stalled');

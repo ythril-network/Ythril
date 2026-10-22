@@ -28,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -72,7 +72,8 @@ async function applyConfig(cfg) {
   // Wait for Docker Desktop bind-mount propagation before triggering reload.
   // Without this delay the container may still read the pre-write file and
   // saveConfig() will write the stale version back, overwriting our change.
-  await sleep(600);
+  // A condition wait cannot stand in for it: the only probe is the reload itself, and a reload that reads the stale file destroys the change.
+  await elapse(600, 'bind-mount propagation: Docker Desktop delivers the host write to the container late, and a reload that reads the stale file overwrites it');
   const r = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
   assert.equal(r.status, 200, `reload-config failed: ${JSON.stringify(r.body)}`);
   assert.equal(r.body.ok, true);
@@ -153,18 +154,19 @@ describe('POST /api/admin/reload-config — quota changes take effect', () => {
     if (!originalConfig) return;
     // Retry restore until a write succeeds — prevents zero-quota from leaking into
     // subsequent test files if bind-mount propagation is slow on Docker Desktop.
+    // waits-differently: every miss rewrites the file and reloads it, and a reload inside a waitFor probe would read the stale file and destroy the change
     for (let attempt = 0; attempt < 20; attempt++) {
       try {
         writeConfig(originalConfig);
-        await sleep(600);
+        await elapse(600, 'bind-mount propagation: the restored file reaches the container before the reload reads it');
         const reloadR = await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-        if (reloadR.status !== 200) { await sleep(400); continue; }
+        if (reloadR.status !== 200) { await elapse(400, 'pacing: spacing between restore attempts after a refused reload'); continue; }
         const probe = await post(INSTANCES.a, token, '/api/brain/spaces/general/facts', {
           fact: `__quota-cleanup-probe-${Date.now()}__`,
         });
         if (probe.status === 201) break;
       } catch { /* ignore, keep retrying */ }
-      await sleep(400);
+      await elapse(400, 'pacing: spacing between restore attempts');
     }
   });
 
@@ -206,9 +208,9 @@ describe('POST /api/admin/reload-config — quota changes take effect', () => {
       body = r.body;
       if (status !== 201) {
         writeConfig(originalConfig);
-        await sleep(600);
+        await elapse(600, 'bind-mount propagation: the restored file reaches the container before the reload reads it');
         await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-        await sleep(400);
+        await elapse(400, 'pacing: spacing between restore-and-write attempts');
       }
     }
     assert.equal(status, 201,
@@ -232,6 +234,7 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
     const { storage: _dropped, ...baseConfig } = readConfig();
     originalConfig = baseConfig;
     // Ensure the server is also free of quota enforcement before proceeding.
+    // waits-differently: every miss rewrites the file and reloads it, and a reload inside a waitFor probe would read the stale file and destroy the change
     for (let attempt = 0; attempt < 20; attempt++) {
       const probe = await post(INSTANCES.a, token, '/api/brain/spaces/general/facts', {
         fact: `__space-suite-quota-guard-${Date.now()}__`,
@@ -239,9 +242,9 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
       if (probe.status === 201) break;
       // Server still has quota active — write the no-storage config and reload.
       writeConfig(originalConfig);
-      await sleep(600);
+      await elapse(600, 'bind-mount propagation: the no-storage file reaches the container before the reload reads it');
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-      await sleep(400);
+      await elapse(400, 'pacing: spacing between quota-guard attempts');
     }
   });
 
@@ -262,6 +265,7 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
     // Retry until the space appears in /api/spaces — bind-mount propagation may be slow
     // on Docker Desktop (same pattern as the "removing a space" test below).
     let spaceVisible = false;
+    // waits-differently: every miss rewrites the file and reloads it, and a reload inside a waitFor probe would read the stale file and destroy the change
     for (let attempt = 0; attempt < 20 && !spaceVisible; attempt++) {
       const check = await fetch(`${INSTANCES.a}/api/spaces`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -272,9 +276,9 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
         break;
       }
       writeConfig(withNewSpace);
-      await sleep(600);
+      await elapse(600, 'bind-mount propagation: the file with the new space reaches the container before the reload reads it');
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-      await sleep(400);
+      await elapse(400, 'pacing: spacing between attempts to make the new space visible');
     }
     assert.ok(spaceVisible, `Space '${NEW_SPACE_ID}' should appear in /api/spaces after reload`);
 
@@ -289,7 +293,7 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
     // NEW_SPACE_ID is still in config from the previous test. A file that simply lacks it used to remove it with no
     // trace; now the running instance keeps it, and only an explicit removal takes it out.
     await applyConfig(originalConfig);
-    await sleep(400);
+    await elapse(400, 'absence window: the kept space is not removed after the reload that left it out (applyConfig awaited the reload\'s 200)');
     const check = await fetch(`${INSTANCES.a}/api/spaces`, { headers: { Authorization: `Bearer ${token}` } });
     const data = await check.json();
     assert.ok(data.spaces?.find(s => s.id === NEW_SPACE_ID), `'${NEW_SPACE_ID}' must survive a reload that only leaves it out`);
@@ -304,6 +308,7 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
     // have written the kept space back via saveConfig's atomic rename — re-trigger
     // reload until the space is actually gone from the live /api/spaces list (max 3 s).
     let spaceGone = false;
+    // waits-differently: every miss rewrites the file and reloads it, and a reload inside a waitFor probe would read the stale file and destroy the change
     for (let attempt = 0; attempt < 20 && !spaceGone; attempt++) {
       const check = await fetch(`${INSTANCES.a}/api/spaces`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -314,9 +319,9 @@ describe('POST /api/admin/reload-config — space config changes take effect', (
         break;
       }
       writeConfig(removal);
-      await sleep(600);
+      await elapse(600, 'bind-mount propagation: the file listing removeSpaces reaches the container before the reload reads it');
       await post(INSTANCES.a, token, '/api/admin/reload-config', {});
-      await sleep(400);
+      await elapse(400, 'pacing: spacing between attempts to remove the space');
     }
     assert.ok(spaceGone, `Space '${NEW_SPACE_ID}' should be gone from /api/spaces after a reload that lists it in removeSpaces`);
 

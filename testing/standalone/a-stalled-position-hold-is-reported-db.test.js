@@ -38,7 +38,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { holdDocumentLock, settleWithin, setWriteBoundForTest } from './_write-faults.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -84,12 +84,12 @@ describe('a stalled file-tombstone position hold is reported', { skip }, () => {
       let done = false;
       const op = Promise.resolve().then(() => tombstones.confirmFileTombstones(pending)).finally(() => { done = true; });
       // Past the warn age, still inside the bound: the hold is open and old enough to owe a report.
-      await sleep(WARN_MS + 300);
+      await elapse(WARN_MS + 300, 'ttl elapses: the hold must outlive its warn age while still inside the bound');
       seen.settledDuring = done;
       seen.readAt = new Date().toISOString();
       if (!seen.capMissing) {
         seen.capA = await tombstones.settledPositionCap(S);
-        await sleep(50);
+        await elapse(50, 'timestamps differ: a cap that follows the clock would read differently at a later moment than the first read');
         seen.capB = await tombstones.settledPositionCap(S);
       }
       seen.during = await gaugeFor(register, S);
@@ -102,7 +102,7 @@ describe('a stalled file-tombstone position hold is reported', { skip }, () => {
     if (!seen.res?.settled) await seen.res?.rest;
     if (!seen.capMissing) {
       seen.capAfterA = await tombstones.settledPositionCap(S);
-      await sleep(20);
+      await elapse(20, 'timestamps differ: a cap that follows the clock must read later the second time, once nothing is held');
       seen.capAfterB = await tombstones.settledPositionCap(S);
     }
   });

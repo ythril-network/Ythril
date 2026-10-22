@@ -32,7 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, waitFor } from '../sync/helpers.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -188,16 +188,33 @@ describe('Webhook dispatch — real match + sign + deliver + log', () => {
   });
 
   it('a space-filter mismatch does not deliver (a fact in an unsubscribed space)', async () => {
-    const created = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceY}/facts`, {
-      fact: `webhook-nomatch-${RUN}`, tags: ['wh'],
+    // The positive control: a hook that DOES match spaceY. One dispatch pass offers an event to every hook that
+    // matches it (`_emitAsync`), so once this hook holds the spaceY delivery, the pass that would have leaked it to
+    // the spaceX-scoped hook has run.
+    const y = await post(INSTANCES.a, token, '/api/admin/webhooks', {
+      url: `${SINK}?w=control-y`, secret: 'whsec_control_1234',
+      spaces: [spaceY], events: ['fact.created'],
     });
-    assert.equal(created.status, 201);
+    assert.equal(y.status, 201, `create control hook: ${JSON.stringify(y.body)}`);
+    const hookY = y.body.id;
+    try {
+      const created = await post(INSTANCES.a, token, `/api/brain/spaces/${spaceY}/facts`, {
+        fact: `webhook-nomatch-${RUN}`, tags: ['wh'],
+      });
+      assert.equal(created.status, 201);
 
-    // Give the dispatcher a moment, then assert no spaceY delivery landed on the
-    // spaceX-scoped webhook.
-    await sleep(3000);
-    const r = await get(INSTANCES.a, token, `/api/admin/webhooks/${hookMatch}/deliveries`);
-    const leaked = (r.body.deliveries ?? []).find(d => d.spaceId === spaceY);
-    assert.ok(!leaked, 'a webhook scoped to spaceX must not receive spaceY events');
+      await waitFor(async () => {
+        const r = await get(INSTANCES.a, token, `/api/admin/webhooks/${hookY}/deliveries`);
+        return (r.body.deliveries ?? []).some(d => d.spaceId === spaceY && d.event === 'fact.created');
+      }, 30_000, 100, 'the spaceY-scoped control hook never recorded the spaceY fact.created',
+      { what: 'the control hook to record the spaceY delivery' });
+      await elapse(500, 'absence window: after the control hook recorded the spaceY delivery, the same pass may not record one on the spaceX hook');
+
+      const r = await get(INSTANCES.a, token, `/api/admin/webhooks/${hookMatch}/deliveries`);
+      const leaked = (r.body.deliveries ?? []).find(d => d.spaceId === spaceY);
+      assert.ok(!leaked, 'a webhook scoped to spaceX must not receive spaceY events');
+    } finally {
+      await del(INSTANCES.a, token, `/api/admin/webhooks/${hookY}`).catch(() => {});
+    }
   });
 });

@@ -37,7 +37,7 @@ import { openFileActDoors } from './_file-act-doors.mjs';
 import { parkWrites, settleWithin } from './_write-faults.mjs';
 import { writesAPosition, sentThenAcknowledged, pruneAt } from './_position-hold.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -87,7 +87,7 @@ describe('a file tombstone position is held below an uncommitted stamp', { skip 
     try {
       t1 = acts.del('REST', 't1.txt');
       await park.reached('the first delete\'s publish');
-      await sleep(5);   // the later stamp must differ from the parked one at millisecond resolution
+      await elapse(5, 'timestamps differ: the later stamp must differ from the parked one');   // the later stamp must differ from the parked one at millisecond resolution
       // On the unchanged code T2 publishes at once. On the fixed code it may wait behind T1 (one publisher at a time), and then
       // there is nothing yet to acknowledge: both are allowed, the prune below is what must hold.
       t2 = await settleWithin(acts.del('REST', 't2.txt'), LATER_MS);
@@ -116,7 +116,7 @@ describe('a file tombstone position is held below an uncommitted stamp', { skip 
     try {
       pass = tombstones.positionLegacyFileTombstones(S);
       await park.reached('the legacy pass');
-      await sleep(5);   // the later position must differ from the stamp at millisecond resolution
+      await elapse(5, 'timestamps differ: the later position must differ from the parked stamp');   // the later position must differ from the stamp at millisecond resolution
       const at = new Date().toISOString();
       await acts.door.coll(S, 'file_tombstones').insertOne({ _id: 'later-1', spaceId: S, path: 'later.txt', deletedAt: at, positionAt: at });
       ({ upTo } = await sentThenAcknowledged(S));

@@ -104,14 +104,14 @@ describe('a shared fixture or helper is defined in one module', () => {
     });
   }
 
-  it('the timing fixtures take their sleep from the one export instead of defining it', () => {
+  it('the timing fixtures take their delay from the one export instead of defining it', () => {
     const fixtures = sources.filter(s => s.file.startsWith('testing/standalone/_fixtures/'));
-    const sleepers = fixtures.filter(s => /\bsleep\(/.test(s.code));
-    assert.ok(sleepers.length >= 3, `only ${sleepers.length} fixture(s) sleep — the scan is not looking at the fixtures`);
-    const defining = sleepers.filter(s => /\b(?:const|function)\s+sleep\b/.test(s.code)).map(s => s.file);
-    assert.deepEqual(defining, [], 'these fixtures define their own sleep: import it from testing/_shared/sleep.mjs');
-    const notImporting = sleepers.filter(s => !/from\s+'[^']*_shared\/sleep\.mjs'/.test(s.code)).map(s => s.file);
-    assert.deepEqual(notImporting, [], 'these fixtures call sleep and do not import it from testing/_shared/sleep.mjs');
+    const sleepers = fixtures.filter(s => /\belapse\(/.test(s.code));
+    assert.ok(sleepers.length >= 3, `only ${sleepers.length} fixture(s) call elapse — the scan is not looking at the fixtures`);
+    const defining = fixtures.filter(s => /\b(?:const|function)\s+(?:sleep|elapse)\b/.test(s.code)).map(s => s.file);
+    assert.deepEqual(defining, [], 'these fixtures define their own delay: import elapse from testing/_shared/sleep.mjs');
+    const notImporting = sleepers.filter(s => !/import\s*\{[^}]*\belapse\b[^}]*\}\s*from\s+'[^']*_shared\/sleep\.mjs'/.test(s.code)).map(s => s.file);
+    assert.deepEqual(notImporting, [], 'these fixtures call elapse and do not import it by name from testing/_shared/sleep.mjs');
   });
 
   it('the timing helpers and the skips reader take the repository root from _sources.mjs', () => {

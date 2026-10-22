@@ -25,7 +25,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { blankComments } from './_strip-comments.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 let mapLimit;
 before(async () => { ({ mapLimit } = await import('../../server/dist/util/map-limit.js')); });
@@ -35,7 +35,7 @@ describe('mapLimit, the one bounded-concurrency helper', () => {
     let inFlight = 0, peak = 0;
     const out = await mapLimit([30, 5, 20, 1, 10, 15], 3, async (ms, i) => {
       inFlight++; peak = Math.max(peak, inFlight);
-      await sleep(ms);
+      await elapse(ms, 'simulated latency: each item of the list takes its own time, so the helper\'s concurrency can be observed');
       inFlight--;
       return i;
     });
@@ -45,7 +45,7 @@ describe('mapLimit, the one bounded-concurrency helper', () => {
 
   it('runs concurrently: six 50 ms items at limit 3 finish in about two rounds, not six', async () => {
     const t0 = Date.now();
-    await mapLimit([1, 2, 3, 4, 5, 6], 3, () => sleep(50));
+    await mapLimit([1, 2, 3, 4, 5, 6], 3, () => elapse(50, 'simulated latency: six items of 50 ms each, so concurrent rounds and serial runs take measurably different times'));
     const took = Date.now() - t0;
     assert.ok(took < 250, `took ${took} ms — the items ran one after another`);
   });

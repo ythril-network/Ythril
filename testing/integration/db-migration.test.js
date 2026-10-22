@@ -22,8 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, get, post, del, reqJson, readRecord } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
-import { sleep } from '../_shared/sleep.mjs';
-import { waitForReading } from '../_shared/wait-for.mjs';
+import { waitFor, waitForReading } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -77,7 +76,8 @@ async function adminDel(path_) {
  */
 async function ensureMaintenanceOff() {
   let last = '';
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  // The instance may be saturated rather than broken, so each failed attempt is ridden out until the deadline.
+  await waitFor(async () => {
     try {
       /*
        * The STATUS is checked, not just the absence of a throw. `reqJson` resolves for every response — it
@@ -87,19 +87,16 @@ async function ensureMaintenanceOff() {
        */
       const set = await adminPost('/api/admin/data/maintenance', { active: false });
       const check = await adminGet('/api/admin/data/maintenance');
-      if (check.status === 200 && check.body?.active === false) return;
+      if (check.status === 200 && check.body?.active === false) return true;
       last = `POST ${set.status}, GET ${check.status} active=${JSON.stringify(check.body?.active)}`;
     } catch (err) {
       last = err instanceof Error ? err.message : String(err);
     }
-    // The instance may be saturated rather than broken; give it a moment before asking again.
-    await sleep(250 * attempt);
-  }
-  throw new Error(
-    `Could not turn maintenance mode off after 4 attempts (${last}). Refusing to exit quietly: this instance `
+    return false;
+  }, 10_000, 100, () => `last attempt: ${last}. Refusing to exit quietly: this instance `
     + 'answers 503 to everything while maintenance is on, so leaving it set makes every later suite in this job '
     + 'fail for a reason that has nothing to do with what it tests.',
-  );
+  { what: 'maintenance mode to read as off' });
 }
 
 // ── Data Config ───────────────────────────────────────────────────────────────

@@ -26,9 +26,15 @@
  * Without the third it is a delay, not a wait (`while (Date.now() < end) await sleep(10)`); without the first it
  * is something the clock does not bound (a work queue); without the second it does not yield.
  *
- * **What it deliberately does not see, so nobody reads it as more:** a loop bounded by an attempt COUNT
- * (`for (let i = 0; i < 30; i++)`) and a recursive poll (`setTimeout(poll, …)`). Neither reads a deadline from the
- * clock; the question this module answers is the one the plan names.
+ * **Or, whatever bounds it (`Q-401`):** an awaited sleep and a BODY that leaves the loop on a condition that is not
+ * the clock — an `if` that breaks, returns or throws, or a `try` that leaves on success. A loop bounded by an attempt
+ * count (`for (let i = 0; i < 30; i++) { if (await ok()) break; await sleep(1000); }`), a flag, or nothing at all is
+ * still waiting for an answer, and every copy of it re-decides what the timeout says. A condition only in the HEAD
+ * (`while (queue.length)`, `i < 20 && !done`) is how a work loop or a drain is bounded too, so it alone never makes a
+ * poll: a work loop that sleeps between writes and never leaves on an answer is not one.
+ *
+ * **What it deliberately does not see, so nobody reads it as more:** a `for…of` / `for…in` (bounded by its list) and a
+ * recursive poll (`setTimeout(poll, …)`).
  *
  * ## The marker
  *
@@ -135,13 +141,19 @@ function leaves_(stmt) {
 }
 
 /**
- * Classify one loop: does it exit on the clock, and does it test a condition?
- * @returns {{ deadline: boolean, condition: boolean }}
+ * Classify one loop: does it exit on the clock, does it test a condition, and does its BODY leave on one?
+ *
+ * `exits` is the half `Q-401` added: an `if` that is not about the clock and leaves the loop, or a `try` that leaves on
+ * success. A loop with one waits for its answer however it is bounded — a deadline, an attempt count, nothing — while a
+ * condition only in the HEAD (`while (queue.length)`, `i < 20 && !done`) is how a work loop or a drain is bounded too,
+ * so the head alone never makes a poll.
+ * @returns {{ deadline: boolean, condition: boolean, exits: boolean }}
  */
 function classify(loop, clocked) {
   const timeish = (e) => readsClock(e) || usesName(e, clocked);
   let deadline = false;
   let condition = false;
+  let exits = false;
 
   const cond = ts.isForStatement(loop) ? loop.condition : loop.expression;
   if (cond) {
@@ -156,16 +168,17 @@ function classify(loop, clocked) {
         if (leaves_(n.thenStatement) || (n.elseStatement && leaves_(n.elseStatement))) deadline = true;
       } else if (!isConstant(n.expression)) {
         condition = true;
+        if (leaves_(n.thenStatement) || (n.elseStatement && leaves_(n.elseStatement))) exits = true;
       }
     }
     // `assert.ok(Date.now() < deadline, 'never …')` — the deadline as an assertion rather than an `if`
     if (ts.isCallExpression(n) && /^assert(\.strict)?(\.ok)?$/.test(n.expression.getText())
       && n.arguments.length > 0 && timeish(n.arguments[0])) deadline = true;
     // retry-until-it-stops-throwing: the probe is the condition
-    if (ts.isTryStatement(n) && leaves_(n.tryBlock)) condition = true;
+    if (ts.isTryStatement(n) && leaves_(n.tryBlock)) { condition = true; exits = true; }
   };
   walkOwnCode(body, visit);
-  return { deadline, condition };
+  return { deadline, condition, exits };
 }
 
 function usesName(expr, names) {
@@ -190,8 +203,8 @@ export function pollLoops(text, file = 'snippet.js') {
   const out = [];
   const visit = (n) => {
     if (LOOP_KINDS.has(n.kind) && awaitsSleep(n, sleeps)) {
-      const { deadline, condition } = classify(n, clocked);
-      if (deadline && condition) {
+      const { deadline, condition, exits } = classify(n, clocked);
+      if ((deadline && condition) || exits) {
         out.push({
           file,
           line: lineOf(sf, n),

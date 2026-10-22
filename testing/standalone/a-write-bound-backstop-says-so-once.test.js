@@ -28,7 +28,7 @@ import { logLinesDuring } from './_log-lines.mjs';
 import { callBounded, withinWriteBound, setWriteBoundForTest, SERVER_FIRST_MARGIN_MS } from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
 import { observeRecordWrites } from '../../server/dist/db/record-write-observer.js';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 /** The bound the cases run at: small, so the backstop (bound + the margin) is a fraction of a second away. */
 const BOUND_MS = 40;
@@ -61,7 +61,7 @@ describe('the write bound\'s backstop says so, once', () => {
   it('the backstop firing is ONE warn line naming the method and the bound', async () => {
     const { lines, result } = await logLinesDuring(async () => {
       const r = await bounded('insertOne', () => new Promise(() => {}));
-      await sleep(SERVER_FIRST_MARGIN_MS + 200); // a second line, from a late settle or a repeat, would arrive in this window
+      await elapse(SERVER_FIRST_MARGIN_MS + 200, 'absence window: no second backstop line after the first'); // a second line, from a late settle or a repeat, would arrive in this window
       return r;
     });
     assert.equal(result.ok, false, 'a driver call that never answers must be ended by the backstop');
@@ -113,8 +113,8 @@ describe('the write bound\'s backstop says so, once', () => {
 
   it('the server answering first (code 50) is a timeout, and is NOT logged as the backstop', async () => {
     const { lines, result } = await logLinesDuring(async () => {
-      const r = await bounded('updateOne', () => sleep(BOUND_MS).then(() => { throw Object.assign(new Error('operation exceeded time limit'), { code: 50, name: 'MongoServerError' }); }));
-      await sleep(SERVER_FIRST_MARGIN_MS + 200);
+      const r = await bounded('updateOne', () => elapse(BOUND_MS, 'simulated latency: the server answers code 50 after the bound').then(() => { throw Object.assign(new Error('operation exceeded time limit'), { code: 50, name: 'MongoServerError' }); }));
+      await elapse(SERVER_FIRST_MARGIN_MS + 200, 'absence window: no backstop line after the server answered first');
       return r;
     });
     assert.ok(result.error instanceof StoreTimeout, 'the server\'s code 50 is still answered StoreTimeout');
@@ -123,8 +123,8 @@ describe('the write bound\'s backstop says so, once', () => {
 
   it('a write that succeeds logs nothing about the backstop', async () => {
     const { lines, result } = await logLinesDuring(async () => {
-      const r = await bounded('insertOne', () => sleep(5).then(() => ({ acknowledged: true })));
-      await sleep(SERVER_FIRST_MARGIN_MS + 200);
+      const r = await bounded('insertOne', () => elapse(5, 'simulated latency: the write succeeds after a moment').then(() => ({ acknowledged: true })));
+      await elapse(SERVER_FIRST_MARGIN_MS + 200, 'absence window: no backstop line after a write that succeeded');
       return r;
     });
     assert.equal(result.ok, true);

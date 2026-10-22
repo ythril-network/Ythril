@@ -42,7 +42,7 @@ import { INSTANCES, post, get, del, patch, delWithBody, readRecord, readCollecti
 import { openMcpSession } from '../sync/mcp-session.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { requireEmbedding } from '../_shared/embedding-required.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { waitForValue, WaitTimeout } from '../_shared/wait-for.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -77,7 +77,7 @@ async function rawGet(url) {
  * embedding endpoint …" (server/src/brain/embedding.ts) — so a stack with no embedding service still
  * skips deterministically instead of burning the full timeout.
   */
-async function waitForEmbeddingReady(session, space = 'general', { attempts = 15, delayMs = 2000 } = {}) {
+async function waitForEmbeddingReady(session, space = 'general', { timeoutMs = 30_000 } = {}) {
   const unreachable = (text) => text.includes('could not reach') || text.includes('unreachable');
 
   // Store ONE fact, then give the index time to catch up with it.
@@ -91,20 +91,25 @@ async function waitForEmbeddingReady(session, space = 'general', { attempts = 15
     return false;
   }
 
-  for (let i = 0; i < attempts; i++) {
-    const recalled = await session.callTool('recall', { space, query: fact, topK: 1 });
-    if (recalled?.isError) {
-      if (unreachable((recalled?.content?.[0]?.text ?? '').toLowerCase())) return false;
-    } else {
+  // Vector-index lag / model warm-up: the SAME fact becomes recallable. Probed every 500 ms rather than every
+  // 100 ms because each probe embeds the query, and a warming model is the thing being waited on.
+  try {
+    const verdict = await waitForValue(async () => {
+      const recalled = await session.callTool('recall', { space, query: fact, topK: 1 });
+      if (recalled?.isError) {
+        return unreachable((recalled?.content?.[0]?.text ?? '').toLowerCase()) ? 'unreachable' : false;
+      }
       let count = 0;
       try { count = JSON.parse(recalled?.content?.[0]?.text ?? '{}').count ?? 0; }
       catch { count = (recalled?.content?.[0]?.text ?? '').length > 0 ? 1 : 0; }
-      if (count > 0) return true;
-    }
-    await sleep(delayMs); // vector-index lag / model warm-up — the SAME fact becomes recallable
+      return count > 0 ? 'ready' : false;
+    }, timeoutMs, 500, undefined, { what: `the embedding probe fact ${fact} to be recallable` });
+    return verdict === 'ready';
+  } catch (err) {
+    if (!(err instanceof WaitTimeout)) throw err;
   }
   // Exhausted. Say what was actually observed — a silent 'not configured' is what hid this for so long.
-  console.log(`  embedding probe: stored ok but recall returned 0 after ${(attempts * delayMs) / 1000}s (vector-index lag exceeded the budget, or recall is broken) — fact=${fact}`);
+  console.log(`  embedding probe: stored ok but recall returned 0 after ${timeoutMs / 1000}s (vector-index lag exceeded the budget, or recall is broken) — fact=${fact}`);
   return false;
 }
 

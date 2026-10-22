@@ -42,7 +42,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './_sources.mjs';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const MODULE_PATH = join(REPO_ROOT, 'testing', '_shared', 'wait-for.mjs');
 
@@ -115,7 +115,7 @@ describe('a timeout says what never held', () => {
       /waitFor timed out after 40ms — because the widget never arrived$/);
     await assert.rejects(() => waitFor(never, 40, 10, () => 'sync detail'), /— sync detail$/);
     await assert.rejects(
-      () => waitFor(never, 40, 10, async () => { await sleep(5); return 'the sender holds it at seq 42'; }),
+      () => waitFor(never, 40, 10, async () => { await elapse(5, 'simulated latency: a diagnosis that goes and looks takes a moment'); return 'the sender holds it at seq 42'; }),
       (err) => {
         assert.match(err.message, /— the sender holds it at seq 42$/);
         assert.doesNotMatch(err.message, /\[object Promise\]/, 'diagnose was called without await');
@@ -204,7 +204,7 @@ describe('a probe cannot outlast the deadline', { timeout: 20_000 }, () => {
   });
 
   it('a slow probe that would have succeeded late still loses to the deadline', async () => {
-    const slowYes = async () => { await sleep(400); return true; };
+    const slowYes = async () => { await elapse(400, 'simulated latency: a probe that would have succeeded after the deadline'); return true; };
     await assert.rejects(() => waitFor(slowYes, 100, 10), /waitFor timed out after 100ms/);
   });
 
@@ -213,9 +213,9 @@ describe('a probe cannot outlast the deadline', { timeout: 20_000 }, () => {
     const onUnhandled = (reason) => escaped.push(reason);
     process.on('unhandledRejection', onUnhandled);
     try {
-      const lateBoom = async () => { await sleep(250); throw new Error('boom, after the deadline'); };
+      const lateBoom = async () => { await elapse(250, 'simulated latency: a probe that throws after the deadline'); throw new Error('boom, after the deadline'); };
       await assert.rejects(() => waitFor(lateBoom, 80, 10), /waitFor timed out after 80ms/);
-      await sleep(500);
+      await elapse(500, 'absence window: no unhandled rejection after the cut-off probe\'s late throw (the timeout was awaited)');
       assert.deepEqual(escaped.map(String), [], 'the abandoned probe rejected after the wait ended and nobody was listening');
     } finally {
       process.off('unhandledRejection', onUnhandled);

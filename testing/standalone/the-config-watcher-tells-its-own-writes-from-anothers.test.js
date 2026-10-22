@@ -27,7 +27,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sleep } from '../_shared/sleep.mjs';
+import { elapse } from '../_shared/sleep.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-own-write-'));
 const cfgPath = path.join(dir, 'config.json');
@@ -74,10 +75,9 @@ describe('the verdict on a change to config.json', () => {
 });
 
 describe('the watcher, with its listener captured', () => {
-  /** Hand the listener a stat as fs.watchFile would ((curr, prev) stats), then let the reload chain run. */
-  async function deliver(mtimeMs) {
+  /** Hand the listener a stat as fs.watchFile would ((curr, prev) stats); the reload chain runs after it, so a case waits for what it expects. */
+  function deliver(mtimeMs) {
     listener({ mtimeMs }, { mtimeMs: 0 });
-    await sleep(50);
   }
 
   it('does not reload when the poll delivers a stale stat of its own earlier write', async () => {
@@ -86,19 +86,23 @@ describe('the watcher, with its listener captured', () => {
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     loader.saveConfig({ ...cfg, note: 'first own write' });
     const first = fs.statSync(cfgPath).mtimeMs;
-    await sleep(30);
+    await elapse(30, 'timestamps differ: the two own writes must carry different mtimes');
     loader.saveConfig({ ...cfg, note: 'second own write' });
     assert.notEqual(fs.statSync(cfgPath).mtimeMs, first, 'fixture: the two own writes must differ in mtime for the case to mean anything');
 
-    await deliver(first);
+    deliver(first);
+    // Nothing observable says the chain decided not to reload; the next case is the control that a foreign edit does reload through this same listener.
+    await elapse(50, 'absence window: no reload runs after a stale stat of the own write is delivered');
     assert.equal(reloads, 0, 'a stale stat of the instance\'s own write was read as a foreign edit and reloaded the config');
   });
 
   it('still reloads, once, for a write that is not its own', async () => {
-    await sleep(30);
+    await elapse(30, 'timestamps differ: the operator edit must carry a different mtime from the own writes');
     const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     fs.writeFileSync(cfgPath, JSON.stringify({ ...raw, note: 'an operator edit' }));
-    await deliver(fs.statSync(cfgPath).mtimeMs);
+    deliver(fs.statSync(cfgPath).mtimeMs);
+    await waitFor(() => reloads >= 1, 5_000, 50, undefined, { what: 'the foreign edit to reload the config' });
+    await elapse(50, 'absence window: no second reload after the first one ran');
     assert.equal(reloads, 1, 'a foreign edit must still reload, exactly once');
   });
 });

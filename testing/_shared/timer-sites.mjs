@@ -11,6 +11,11 @@
  *   right interface, by a helper (`local-server.mjs`) or by an author who says why not.
  * - {@link awaitedSleeps}: which awaited calls are a sleep? The same question `poll-loops.mjs` asks of a loop body, so it
  *   takes its answer from {@link awaitsASleepIn} below, never from a name list of its own.
+ * - {@link delayCalls}: does every fixed delay say which KIND of delay it is (`Q-401`)? Each call of the shared `elapse`
+ *   — awaited or not, inside a `Promise.race`, a `.then` or a wrapper — passes a literal `<kind>: <detail>` that
+ *   `sleep.mjs` accepts; every other sleep (a browser page's `waitForTimeout`, a helper named like a sleep) carries the
+ *   marker. The module is reached by its named `elapse` and nothing else: a namespace or default import, a re-export or
+ *   the old `sleep` would be a door the binding rule cannot see through.
  *
  * ## What it prevents
  *
@@ -40,9 +45,19 @@
  * Syntax only — no type checker. Parsing, locating a node and walking a body are `syntax-tree.mjs`'s.
  */
 import { ts, parseSource, lineOf, unwrapExpression } from './syntax-tree.mjs';
+import { reasonProblem } from './sleep.mjs';
 
-/** Names that are a sleep wherever they are imported from. A same-file function is judged by its body, never by this list. */
-const SLEEP_NAMES = /^(sleep|sleepMs|delay|pause|nap|snooze|wait)$/i;
+/**
+ * Names that are a sleep wherever they are imported from. A same-file function is judged by its body, never by this list;
+ * the shared `elapse` is known by its import under any name, and is here as well so a method of that name is still one.
+ */
+const SLEEP_NAMES = /^(elapse|sleep|sleepMs|delay|pause|nap|snooze|wait|waitForTimeout)$/i;
+
+/** The module that holds the one fixed delay, under whatever relative path a file reaches it by. */
+const SLEEP_MODULE = /(^|\/)sleep\.mjs$/;
+
+/** What a file may take from it by name. Anything else, and any other form of import or export, is a side door. */
+const SLEEP_MODULE_EXPORTS = new Set(['elapse', 'DELAY_KINDS', 'reasonProblem']);
 
 /** `<tag>: <reason>` — at least two words, so the reason says something. Built fresh per use (a global regex shares state). */
 const markerPattern = (tag) => new RegExp(`${tag}:[ \\t]*(\\S+[ \\t]+\\S.*)`);
@@ -118,23 +133,37 @@ function markerAbove(sf, text, start, tag, { loopsOnly }) {
 // timers: what arms one
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** The names `node:timers/promises` is bound to in this file: `named` (`setTimeout`, under any rename) and `spaces` (`timers.setTimeout`). */
+/**
+ * The names a timer is bound to in this file: `node:timers/promises`' `setTimeout` as `named` (under any rename) and
+ * `spaces` (`timers.setTimeout`), and the shared `elapse` from `sleep.mjs` as `elapse` (under any rename).
+ */
 function timersPromisesBindings(sf) {
   const named = new Set();
   const spaces = new Set();
+  const elapse = new Set();
   for (const st of sf.statements) {
-    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier) || !TIMERS_PROMISES.test(st.moduleSpecifier.text)) continue;
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
     const clause = st.importClause;
     if (!clause) continue;
-    if (clause.name) spaces.add(clause.name.text);
     const bound = clause.namedBindings;
+    if (SLEEP_MODULE.test(st.moduleSpecifier.text)) {
+      if (bound && ts.isNamedImports(bound)) {
+        for (const el of bound.elements) if ((el.propertyName ?? el.name).text === 'elapse') elapse.add(el.name.text);
+      }
+      continue;
+    }
+    if (!TIMERS_PROMISES.test(st.moduleSpecifier.text)) continue;
+    if (clause.name) spaces.add(clause.name.text);
     if (bound && ts.isNamespaceImport(bound)) spaces.add(bound.name.text);
     if (bound && ts.isNamedImports(bound)) {
       for (const el of bound.elements) if ((el.propertyName ?? el.name).text === 'setTimeout') named.add(el.name.text);
     }
   }
-  return { named, spaces };
+  return { named, spaces, elapse };
 }
+
+/** A call of the shared `elapse`, under whatever name this file imported it as. */
+const callsElapse = (call, bound) => ts.isIdentifier(call.expression) && bound.elapse.has(call.expression.text);
 
 /** `setTimeout(...)` or `globalThis.setTimeout(...)` — the global timer, unless this file imported another under that name. */
 function armsGlobalTimer(call, bound) {
@@ -151,12 +180,15 @@ function callsTimersPromises(call, bound) {
     && bound.spaces.has(e.expression.text) && e.name.text === 'setTimeout';
 }
 
-/** Does anything in `node` arm a timer — the global one or `timers/promises`', never a socket's `.setTimeout`? */
+/**
+ * Does anything in `node` arm a timer — the global one, `timers/promises`' or the shared `elapse`, never a socket's
+ * `.setTimeout`? A wrapper around `elapse` (`const later = () => elapse(...)`) waits as much as one around `setTimeout`.
+ */
 function armsATimer(node, bound) {
   let hit = false;
   const visit = (n) => {
     if (hit) return;
-    if (ts.isCallExpression(n) && (armsGlobalTimer(n, bound) || callsTimersPromises(n, bound))) { hit = true; return; }
+    if (ts.isCallExpression(n) && (armsGlobalTimer(n, bound) || callsTimersPromises(n, bound) || callsElapse(n, bound))) { hit = true; return; }
     ts.forEachChild(n, visit);
   };
   visit(node);
@@ -236,7 +268,7 @@ export function awaitsASleepIn(sf) {
   const isSleepCall = (call) => {
     const e = call.expression;
     if (ts.isIdentifier(e) && locals.has(e.text)) return armsATimer(locals.get(e.text).body, bound);
-    if (callsTimersPromises(call, bound)) return true;
+    if (callsTimersPromises(call, bound) || callsElapse(call, bound)) return true;
     const name = ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : null;
     return name !== null && SLEEP_NAMES.test(name);
   };
@@ -314,6 +346,87 @@ export function listenerSites(text, file = 'snippet.js') {
   };
   visit(sf);
   return out;
+}
+
+/** Is `n` inside the operand of an `await`, without crossing into a function of its own on the way up? */
+function insideAwait(n) {
+  for (let p = n.parent; p; p = p.parent) {
+    if (ts.isAwaitExpression(p)) return true;
+    if (isFunctionNode(p)) return false;
+  }
+  return false;
+}
+
+/** The literal reason a call of `elapse` passes, judged by `sleep.mjs`' own reading: null, or what is wrong with it. */
+function elapseReasonProblem(call) {
+  const reason = call.arguments[1];
+  if (!reason || !(ts.isStringLiteral(reason) || ts.isNoSubstitutionTemplateLiteral(reason))) return 'reason-not-literal';
+  return reasonProblem(reason.text) === null ? null : 'reason-not-a-kind';
+}
+
+/**
+ * Every fixed delay in one source text that has to say which kind it is, judged; and every way of reaching `sleep.mjs`
+ * other than its named exports.
+ *
+ * - A call of the shared `elapse` (its import binding, under any rename), awaited or not: `problem` is
+ *   `reason-not-literal` when its reason is not a string literal (or a template without substitutions), else
+ *   `reason-not-a-kind` when `sleep.mjs` refuses it, else null. A marker does not excuse it — the reason is the marker.
+ * - An awaited call named like a sleep (`page.waitForTimeout`, `h.sleep`, an imported `delay`), not a function of this
+ *   file (whose body is judged where it is written) and not `elapse`: `no-marker` unless `// waits-differently:` sits
+ *   directly above its statement or a loop around it. `timers/promises`' `setTimeout` and the hand-written promise are
+ *   {@link fixedDelays}' to judge.
+ * - A namespace or default import of `sleep.mjs`, a named import it does not export, and any `export ... from` it:
+ *   `side-door`, at the declaration.
+ *
+ * @param {string} text
+ * @param {string} [file]
+ * @returns {Array<{ file: string, line: number, callee: string, problem: string|null, text: string }>}
+ */
+export function delayCalls(text, file = 'snippet.js') {
+  const sf = parseSource(file, text);
+  const bound = timersPromisesBindings(sf);
+  const locals = localFunctions(sf);
+  const out = [];
+  const record = (site, callee, problem) => out.push({ ...finding(sf, file, site, callee, null), callee, problem });
+  // A call through a side door (`s.elapse(...)` after `import * as s`) is the door's finding, made once at the import.
+  const doors = new Set();
+  const reachesSleepModule = (e) => ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && doors.has(e.expression.text);
+  for (const st of sf.statements) {
+    const spec = (ts.isImportDeclaration(st) || ts.isExportDeclaration(st)) && st.moduleSpecifier
+      && ts.isStringLiteral(st.moduleSpecifier) ? st.moduleSpecifier.text : null;
+    if (!spec || !SLEEP_MODULE.test(spec)) continue;
+    if (ts.isExportDeclaration(st)) { record(st, 'sleep.mjs', 'side-door'); continue; }
+    const clause = st.importClause;
+    const named = clause?.namedBindings;
+    if (clause?.name) doors.add(clause.name.text);
+    if (named && ts.isNamespaceImport(named)) doors.add(named.name.text);
+    const sideDoor = clause && (clause.name || (named && ts.isNamespaceImport(named))
+      || (named && ts.isNamedImports(named) && named.elements.some(el => !SLEEP_MODULE_EXPORTS.has((el.propertyName ?? el.name).text))));
+    if (sideDoor) record(st, 'sleep.mjs', 'side-door');
+  }
+  const visit = (n) => {
+    // `elapse` handed on as a value (`const e = elapse`, `items.map(elapse)`) is called where no literal can be read.
+    // `export { x } from '…/sleep.mjs'` names the module's export, not this file's binding; that door is reported above.
+    const reExportsTheModule = () => ts.isExportSpecifier(n.parent) && Boolean(n.parent.parent?.parent?.moduleSpecifier);
+    if (ts.isIdentifier(n) && bound.elapse.has(n.text) && !ts.isImportSpecifier(n.parent) && !reExportsTheModule()
+      && !(ts.isCallExpression(n.parent) && n.parent.expression === n)) {
+      record(n, 'elapse as a value', 'side-door');
+    }
+    if (ts.isCallExpression(n)) {
+      const e = n.expression;
+      if (callsElapse(n, bound)) {
+        record(n, 'elapse', elapseReasonProblem(n));
+      } else if (!(ts.isIdentifier(e) && locals.has(e.text)) && !reachesSleepModule(e) && insideAwait(n)) {
+        const name = ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : null;
+        if (name !== null && SLEEP_NAMES.test(name) && !callsTimersPromises(n, bound)) {
+          record(n, name, markerAbove(sf, text, n, 'waits-differently', { loopsOnly: true }) ? null : 'no-marker');
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out.sort((a, b) => a.line - b.line);
 }
 
 /**
