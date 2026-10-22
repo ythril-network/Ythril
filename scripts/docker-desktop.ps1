@@ -20,29 +20,119 @@
 # Its stderr is NOT an error by itself: docker writes progress there, and Windows PowerShell 5.1 turns each
 # such line into an ErrorRecord that `$ErrorActionPreference = 'Stop'` makes fatal. So the command runs under
 # `Continue`, and only its exit code decides.
+#
+# -TimeoutSeconds bounds ONE call: it needs -FilePath (a process this function owns and can end, with its children),
+# not a scriptblock, and on the bound it kills the process tree and throws naming the command and the bound. An
+# engine that has stopped answering must end a probe with its reason, not hang the script (U4b). Builds and `up`
+# are not bounded here: they carry their own --wait-timeout.
+#
+# The error text never carries a build argument's value: `--build-arg NAME=VALUE` is written NAME=*** (S1), because
+# a failed build's command line is printed and a build argument is where a token is passed.
 function Invoke-Native {
   param(
-    [Parameter(Mandatory = $true)][scriptblock]$Command,
-    [object[]]$ArgumentList = @()
+    [scriptblock]$Command,
+    [string]$FilePath,
+    [object[]]$ArgumentList = @(),
+    [int]$TimeoutSeconds = 0
   )
-  $old = $ErrorActionPreference
-  $ErrorActionPreference = 'Continue'
+  if ($Command -and $FilePath) { throw 'Invoke-Native takes -Command or -FilePath, not both.' }
+  if (-not $Command -and -not $FilePath) { throw 'Invoke-Native needs -Command or -FilePath.' }
+  if ($TimeoutSeconds -gt 0 -and -not $FilePath) { throw 'Invoke-Native -TimeoutSeconds needs -FilePath: a scriptblock cannot be ended.' }
   $out = New-Object System.Collections.Generic.List[string]
   $err = New-Object System.Collections.Generic.List[string]
-  try {
-    $global:LASTEXITCODE = 0
-    & $Command @ArgumentList 2>&1 | ForEach-Object {
-      if ($_ -is [System.Management.Automation.ErrorRecord]) { $err.Add("$_") } else { $out.Add("$_") }
+  $shown = if ($FilePath) { $FilePath } else { "$Command".Trim() }
+  $shownArgs = (Hide-BuildArgValues -ArgumentList $ArgumentList) -join ' '
+  if ($FilePath) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = (@($ArgumentList | ForEach-Object { ConvertTo-ProcessArgument -Value "$_" }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $outTask = $proc.StandardOutput.ReadToEndAsync()
+    $errTask = $proc.StandardError.ReadToEndAsync()
+    if ($TimeoutSeconds -gt 0) { $finished = $proc.WaitForExit($TimeoutSeconds * 1000) } else { $proc.WaitForExit(); $finished = $true }
+    if (-not $finished) {
+      try { & taskkill.exe /PID $proc.Id /T /F | Out-Null } catch { }
+      try { if (-not $proc.HasExited) { $proc.Kill() } } catch { }
+      throw ("{0} {1} did not finish within {2} s and was stopped." -f $shown, $shownArgs, $TimeoutSeconds)
     }
-    $code = $global:LASTEXITCODE
-  } finally {
-    $ErrorActionPreference = $old
+    $proc.WaitForExit()
+    $code = $proc.ExitCode
+    foreach ($l in ($outTask.Result -split "\r?\n")) { if ($l -ne '') { $out.Add($l) } }
+    foreach ($l in ($errTask.Result -split "\r?\n")) { if ($l -ne '') { $err.Add($l) } }
+  } else {
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      $global:LASTEXITCODE = 0
+      & $Command @ArgumentList 2>&1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) { $err.Add("$_") } else { $out.Add("$_") }
+      }
+      $code = $global:LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $old
+    }
   }
   if ($code -ne 0) {
     $said = ($err | Select-Object -Last 5) -join ' | '
-    throw ("{0} {1} exited {2}: {3}" -f "$Command".Trim(), ($ArgumentList -join ' '), $code, $said)
+    foreach ($v in (Get-BuildArgValues -ArgumentList $ArgumentList)) { $said = $said.Replace($v, '***') }
+    throw ("{0} {1} exited {2}: {3}" -f $shown, $shownArgs, $code, $said)
   }
   return $out.ToArray()
+}
+
+# The values of every `--build-arg NAME=VALUE` (or `--build-arg=NAME=VALUE`) in an argument list, empties dropped.
+function Get-BuildArgValues {
+  param([object[]]$ArgumentList = @())
+  $a = @($ArgumentList | ForEach-Object { "$_" })
+  $values = @()
+  for ($i = 0; $i -lt $a.Count; $i++) {
+    $pair = $null
+    if ($a[$i] -eq '--build-arg' -and ($i + 1) -lt $a.Count) { $pair = $a[$i + 1] }
+    elseif ($a[$i].StartsWith('--build-arg=')) { $pair = $a[$i].Substring('--build-arg='.Length) }
+    if ($pair -and $pair.Contains('=')) { $v = $pair.Substring($pair.IndexOf('=') + 1); if ($v) { $values += $v } }
+  }
+  return $values
+}
+
+# An argument list with every build argument's value written ***: the form an error or a log line may carry.
+function Hide-BuildArgValues {
+  param([object[]]$ArgumentList = @())
+  $a = @($ArgumentList | ForEach-Object { "$_" })
+  $shown = New-Object System.Collections.Generic.List[string]
+  for ($i = 0; $i -lt $a.Count; $i++) {
+    if ($a[$i] -eq '--build-arg' -and ($i + 1) -lt $a.Count) {
+      $shown.Add($a[$i]); $i++
+      $shown.Add(($a[$i] -replace '(?s)^([^=]+)=.*$', '$1=***'))
+    } elseif ($a[$i] -match '(?s)^--build-arg=([^=]+)=') {
+      $shown.Add("--build-arg=$($Matches[1])=***")
+    } else {
+      $shown.Add($a[$i])
+    }
+  }
+  return $shown.ToArray()
+}
+
+# One argument as a Windows command line carries it (CommandLineToArgvW rules).
+function ConvertTo-ProcessArgument {
+  param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+  if ($Value -ne '' -and $Value -notmatch '[\s"]') { return $Value }
+  $v = $Value -replace '(\\*)"', '$1$1\"'
+  $v = $v -replace '(\\+)$', '$1$1'
+  return ('"' + $v + '"')
+}
+
+# `docker info`, bounded at 20 s: the one probe every script asks, and the one that hangs on a half-dead engine.
+function Invoke-DockerInfo {
+  return (Invoke-Native -FilePath 'docker' -ArgumentList @('info') -TimeoutSeconds 20)
+}
+
+# Does the engine answer, within the bound? The one place the scripts ask it.
+function Test-DockerEngine {
+  try { $null = Invoke-DockerInfo; return $true } catch { return $false }
 }
 
 # The full path of docker_data.vhdx. THROWS when it is not found: a caller that deletes or compacts "nothing"

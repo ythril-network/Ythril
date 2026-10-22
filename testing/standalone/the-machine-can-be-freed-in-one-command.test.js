@@ -116,7 +116,58 @@ describe('docker-wipe.ps1 records the owner\'s instance before the delete and br
   });
 });
 
+describe('machine-free -Wipe asks the wipe\'s refusal before it removes anything', () => {
+  it('the data guard runs before the test stack is removed and before the prune, and only with -Wipe', () => {
+    const src = code();
+    const guard = at(src, /\bGet-OwnerInstance\b/);
+    const down = at(src, /docker compose[^\n]*\bdown\b/);
+    const prune = at(src, /docker system prune/);
+    assert.ok(guard > -1, `${SCRIPT} never asks Get-OwnerInstance: a refusing wipe is found out after the test stack is gone and everything is pruned`);
+    assert.ok(down > -1 && prune > -1, `${SCRIPT} no longer removes the test stack or prunes`);
+    assert.ok(guard < down, `${SCRIPT} removes the test stack before it asks whether the wipe may go ahead`);
+    assert.ok(guard < prune, `${SCRIPT} prunes before it asks whether the wipe may go ahead`);
+    assert.match(src.slice(Math.max(0, src.lastIndexOf('if (', guard)), guard), /\$Wipe\b/, `${SCRIPT} asks the wipe's refusal without -Wipe`);
+  });
+});
+
+describe('every probe of the engine is bounded, and the guard says it needs the engine', () => {
+  it('no script asks `docker info` through an unbounded Invoke-Native', () => {
+    for (const file of [SCRIPT, WIPE, COMPACT, OWNER, DESKTOP]) {
+      assert.doesNotMatch(codeOf(file), /Invoke-Native\s*(-Command\s*)?\{\s*docker\s+info/, `${file} probes the engine with no bound`);
+    }
+  });
+
+  it('the one probe carries a timeout, and the default docker seam routes `info` through it', () => {
+    assert.match(codeOf(DESKTOP), /function Invoke-DockerInfo[\s\S]*?-FilePath\s+'docker'[\s\S]*?-TimeoutSeconds\s+\d+/, `${DESKTOP}'s docker info probe has no timeout`);
+    assert.match(codeOf(OWNER), /function Invoke-DockerCli[\s\S]*?'info'[\s\S]*?Invoke-DockerInfo/, `${OWNER}'s default docker seam does not bound \`info\``);
+  });
+
+  it('the wipe and the guide say the guard runs only while the engine answers and checks nothing otherwise (U1c)', () => {
+    assert.match(headerOf(WIPE), /nothing is checked/i, `${WIPE}'s header does not say nothing is checked with the engine down`);
+    assert.match(codeOf(WIPE).replace(/\s+/g, ' '), /the data guard runs only while it does[^']*NO volume is checked/, `${WIPE}'s output does not say nothing is checked with the engine down`);
+    assert.match(readFileSync('docs/workstation-mode-guide.md', 'utf8').replace(/\s+/g, ' '), /only while the engine answers[^.]*nothing is checked/i, 'the workstation guide does not say nothing is checked with the engine down');
+  });
+
+  it('no wipe-path text still calls a volume "labelled disposable": the list is x-ythril.disposable-volumes', () => {
+    for (const file of [WIPE, SCRIPT, OWNER]) {
+      assert.doesNotMatch(readFileSync(file, 'utf8'), /\blabell?ed disposable/i, `${file} still says a volume is labelled disposable`);
+    }
+  });
+});
+
 describe('docker-compact.ps1 brings the owner\'s instance back itself, whatever happened in between', () => {
+  it('a stop that was attempted is brought back even when it failed part-way', () => {
+    const src = codeOf(COMPACT);
+    const flag = at(src, /\$stopAttempted\s*=\s*\$true/);
+    const stop = at(src, /\bStop-OwnerInstance\b/);
+    assert.ok(flag > -1 && stop > -1, `${COMPACT} has no stop-attempted flag before its stop`);
+    assert.ok(flag < stop, `${COMPACT} sets its flag after the stop call: a stop that throws part-way is never brought back`);
+    const fin = at(src, /\bfinally\s*\{/, stop);
+    const back = at(src, /\bStart-OwnerInstance\b/, fin);
+    assert.ok(fin > -1 && back > fin, `${COMPACT} has no bring-back in its finally`);
+    assert.match(src.slice(fin, back), /\$stopAttempted\b/, `${COMPACT}'s bring-back is not decided by the stop having been attempted`);
+  });
+
   it('it stops the owner\'s instance through the module, and the bring-back runs in a finally after it', () => {
     const src = codeOf(COMPACT);
     const stop = at(src, /\bStop-OwnerInstance\b/);

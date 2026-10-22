@@ -13,27 +13,35 @@
 #
 # ## What it promises
 #
-# - It records only what RUNS, and only named fields (image, build, bind mounts): never an environment and never
-#   the resolved config's text, which carries the Mongo password.
+# - It records only what RUNS, and only named fields (image, build, bind mounts): never an environment, never
+#   the resolved config's text, which carries the Mongo password, and of a build only its argument NAMES.
+#   The commit is the revision label of the built services' images when they all carry one, else the checkout's HEAD.
 # - A wipe is only harmless while every volume it deletes is disposable. `Get-OwnerInstance` refuses - throws,
-#   naming the service, the volume and the mount target - when a running service mounts a named volume that the
-#   config's top-level `x-ythril: disposable-volumes:` list does not name, and always for one at /data, /data/db or
-#   /data/configdb, named or not. Binds are never refused: they live outside the disk the wipe deletes. A list
-#   and not a volume label: a label added to an existing volume makes compose ask "Recreate (data will be
-#   lost)?" on every install at its next `up` (probed, compose 5.4.0), and a non-interactive `up` answers no.
+#   naming the volume (and, for a running service, the service and the mount target) - when this checkout's compose
+#   project holds a volume, running or not, that the config's top-level `x-ythril: disposable-volumes:` list does
+#   not name, and always for a named volume at /data, /data/db or /data/configdb. It refuses as well while another
+#   non-test project runs: the wipe deletes it and does not bring it back. Binds are never refused: they live
+#   outside the disk the wipe deletes. A list and not a volume label: a label added to an existing volume makes
+#   compose ask "Recreate (data will be lost)?" on every install at its next `up` (probed, compose 5.4.0), and a
+#   non-interactive `up` answers no. The guard runs only while the engine answers: with it down nothing is checked.
 # - A pending record (saved, not yet restored) is never overwritten without being told to: a wipe that died
 #   between the delete and the restore left the only description of the instance in it.
 # - Docker and git are reached through a parameter seam (-Docker, -Git: scriptblocks that return stdout and THROW
 #   on failure), so the behaviour is exercised from canned answers without touching an engine
 #   (testing/standalone/the-owner-instance-comes-back-after-a-wipe.test.js). The module never reads $LASTEXITCODE.
-# - Every wait is bounded: Wait-Engine by its timeout, compose by --wait-timeout.
+# - Every wait is bounded: Wait-Engine by its timeout, each `docker info` probe by 20 s (Invoke-DockerInfo), compose
+#   by --wait-timeout.
 #
 # ASCII ONLY: Windows PowerShell 5.1 reads a BOM-less script as ANSI (see docker-compact.ps1).
 
 . (Join-Path $PSScriptRoot 'docker-desktop.ps1')
 
 # The real CLIs behind the seam: stdout back, a non-zero exit thrown (Invoke-Native).
-function Invoke-DockerCli { Invoke-Native -Command { docker @args } -ArgumentList $args }
+# `docker info` is bounded (Invoke-DockerInfo, 20 s); builds and `up` are not (their own --wait-timeout).
+function Invoke-DockerCli {
+  if ($args.Count -gt 0 -and "$($args[0])" -eq 'info') { return (Invoke-DockerInfo) }
+  Invoke-Native -Command { docker @args } -ArgumentList $args
+}
 function Invoke-GitCli { Invoke-Native -Command { git @args } -ArgumentList $args }
 
 # -- Paths, compared as strings --------------------------------------------------------------------------------
@@ -116,8 +124,12 @@ function Read-RunningProjects {
   if ($mine.Count -gt 1) {
     throw ("More than one compose project runs from {0}: {1}. Stop all but the owner's instance first." -f $RepoRoot, (($mine | ForEach-Object { $_.name }) -join ', '))
   }
+  # Every other project that runs and is not a test project, whether or not this checkout's own runs: the wipe
+  # deletes them as well and brings back only the owner's (U1a).
+  $mineNames = @($mine | ForEach-Object { $_.name })
+  $others = @($projects.Values | Where-Object { $_.name -notmatch '^ythril-test' -and ($mineNames -notcontains $_.name) })
   if ($mine.Count -eq 0) {
-    return [pscustomobject]@{ record = $null; others = @($projects.Values | Where-Object { $_.name -notmatch '^ythril-test' }) }
+    return [pscustomobject]@{ record = $null; others = $others }
   }
   $p = $mine[0]
   $wd = $p.workingDir
@@ -126,43 +138,114 @@ function Read-RunningProjects {
   foreach ($f in $p.configFiles) { $argv += @('-f', $f) }
   $argv += @('config', '--format', 'json')
   $config = (@(& $Docker @argv) -join "`n") | ConvertFrom-Json
-  $commit = "$(@(& $Git -C $wd rev-parse HEAD) | Select-Object -First 1)".Trim()
+  $head = "$(@(& $Git -C $wd rev-parse HEAD) | Select-Object -First 1)".Trim()
 
-  # Named fields only: image, build, binds. Never `environment`, never the config text.
+  # Named fields only: image, build, binds. Never `environment`, never the config text. A build keeps its argument
+  # NAMES and never their values (S1): a value is where a token is passed, and Restore reads the values from the
+  # config when it needs them.
   $services = [ordered]@{}
   $mounts = New-Object System.Collections.Generic.List[object]
+  $builtImages = New-Object System.Collections.Generic.List[string]
   foreach ($s in ($p.services | Sort-Object)) {
     $def = $config.services.$s
     if (-not $def) { throw "Service '$s' of project '$($p.name)' runs, but its config does not declare it: the config read is not the one it was started with." }
     $build = $null
     if ($def.build) {
-      $build = [pscustomobject]@{ context = $def.build.context; dockerfile = $def.build.dockerfile; args = $def.build.args; target = $def.build.target }
+      $argNames = @()
+      if ($def.build.args) { $argNames = @($def.build.args.PSObject.Properties | ForEach-Object { $_.Name }) }
+      $build = [pscustomobject]@{ context = $def.build.context; dockerfile = $def.build.dockerfile; args = $argNames; target = $def.build.target }
+      $builtImages.Add($(if ($def.image) { "$($def.image)" } else { "$($p.name)-$s" }))
     }
     $binds = @(@($def.volumes) | Where-Object { $_ -and $_.type -eq 'bind' } | ForEach-Object { [pscustomobject]@{ source = $_.source; target = $_.target } })
     foreach ($v in @($def.volumes)) { if ($v -and $v.type -eq 'volume') { $mounts.Add([pscustomobject]@{ service = $s; volume = $v.source; target = $v.target }) } }
     $services[$s] = [pscustomobject]@{ image = $def.image; build = $build; binds = $binds }
   }
 
+  # The commit the running images were built at (their revision label), else the checkout's HEAD (U2): HEAD is
+  # wherever the checkout has moved since the instance was built.
+  $label = $null
+  if ($builtImages.Count -gt 0) { $label = Get-BuiltImageRevision -Images $builtImages.ToArray() -Docker $Docker }
   $record = [pscustomobject]@{
-    schema      = 1
-    project     = $p.name
-    workingDir  = $wd
-    configFiles = @($p.configFiles)
-    commit      = $commit
-    services    = [pscustomobject]$services
+    schema       = 1
+    project      = $p.name
+    workingDir   = $wd
+    configFiles  = @($p.configFiles)
+    commit       = $(if ($label) { $label } else { $head })
+    commitSource = $(if ($label) { 'image-label' } else { 'checkout-head' })
+    checkoutHead = $head
+    services     = [pscustomobject]$services
   }
   # Carried beside the record, never written: the guard reads it, the record file does not hold it.
-  $disposable = @()
-  $ext = $config.'x-ythril'
-  if ($ext -and $ext.'disposable-volumes') { $disposable = @($ext.'disposable-volumes' | ForEach-Object { "$_" }) }
-  Add-Member -InputObject $record -MemberType NoteProperty -Name '__volumes' -Value @{ mounts = $mounts.ToArray(); disposable = $disposable }
-  return [pscustomobject]@{ record = $record; others = @() }
+  Add-Member -InputObject $record -MemberType NoteProperty -Name '__volumes' -Value @{ mounts = $mounts.ToArray(); disposable = @(Get-DisposableVolumes -Config $config) }
+  return [pscustomobject]@{ record = $record; others = $others }
+}
+
+# The commit the images of the BUILT services were built at: the `org.opencontainers.image.revision` label, when
+# every one of them has it, it is not 'unknown' (the Dockerfile's default when GIT_REVISION was not passed) and they
+# all agree. $null otherwise - an image that is gone, unlabelled or at another revision cannot say which commit the
+# instance runs, and the caller falls back to the checkout's HEAD.
+function Get-BuiltImageRevision {
+  param([Parameter(Mandatory = $true)][string[]]$Images, [Parameter(Mandatory = $true)][scriptblock]$Docker)
+  $found = @()
+  foreach ($img in $Images) {
+    try { $labels = (@(& $Docker image inspect $img --format '{{json .Config.Labels}}') -join "`n") | ConvertFrom-Json } catch { return $null }
+    $rev = if ($labels) { "$($labels.'org.opencontainers.image.revision')".Trim() } else { '' }
+    if (-not $rev -or $rev -eq 'unknown') { return $null }
+    $found += $rev
+  }
+  if ($found.Count -eq 0 -or @($found | Select-Object -Unique).Count -ne 1) { return $null }
+  return $found[0]
+}
+
+# What the wipe says when the commit it will rebuild is not the checkout's: the images' label was used and HEAD
+# has moved on. $null when there is nothing to say.
+function Get-CommitNote {
+  param([Parameter(Mandatory = $true)]$Record)
+  if ("$($Record.commitSource)" -ne 'image-label') { return $null }
+  if (-not $Record.checkoutHead -or "$($Record.checkoutHead)" -eq "$($Record.commit)") { return $null }
+  return ('The running images were built at {0}, but this checkout is at {1}: the rebuild uses the images'' commit.' -f "$($Record.commit)".Substring(0, [Math]::Min(7, "$($Record.commit)".Length)), "$($Record.checkoutHead)".Substring(0, [Math]::Min(7, "$($Record.checkoutHead)".Length)))
+}
+
+# The compose file's top-level `x-ythril: disposable-volumes:` list: the volume KEYS it names, as an array.
+function Get-DisposableVolumes {
+  param([Parameter(Mandatory = $true)]$Config)
+  $ext = $Config.'x-ythril'
+  if ($ext -and $ext.'disposable-volumes') { return @($ext.'disposable-volumes' | ForEach-Object { "$_" }) }
+  return @()
+}
+
+# Every volume docker holds for a compose project - running or not, mounted or not - as { name; key }, where key is
+# the name the compose file gives it (the label compose puts on it, com.docker.compose.volume). Volumes of other
+# projects and anonymous volumes carry no such project label and are not listed: they are not the guard's subject.
+function Get-ProjectVolumes {
+  param([Parameter(Mandatory = $true)][string]$Project, [Parameter(Mandatory = $true)][scriptblock]$Docker)
+  $volumes = @()
+  $prefix = 'com.docker.compose.volume='
+  foreach ($line in @(& $Docker volume ls --filter "label=com.docker.compose.project=$Project" --format json)) {
+    $text = "$line".Trim()
+    if (-not $text) { continue }
+    foreach ($v in @($text | ConvertFrom-Json)) {
+      $key = $null
+      if ($v.Labels -is [string]) {
+        foreach ($kv in $v.Labels.Split(',')) { if ($kv.StartsWith($prefix)) { $key = $kv.Substring($prefix.Length) } }
+      } elseif ($v.Labels) {
+        $key = $v.Labels.'com.docker.compose.volume'
+      }
+      $volumes += [pscustomobject]@{ name = "$($v.Name)"; key = $(if ($key) { "$key" } else { "$($v.Name)" }) }
+    }
+  }
+  return $volumes
 }
 
 # The record of the instance a WIPE may take away: Read-OwnerInstance plus the data guard. Throws, naming the
-# service, the volume and the mount target, when deleting the data disk would delete data. Throws as well when no
-# project of this checkout runs and another, non-test project does: the wipe deletes that one too, and which of
-# them is the owner's is not ours to guess.
+# service, the volume and the mount target, when deleting the data disk would delete data. Throws as well when another,
+# non-test project runs - whether or not this checkout's own does: the wipe deletes it too and brings back only the
+# owner's, and which instance is the owner's is not ours to guess (U1a).
+#
+# The guard covers every volume of THIS checkout's project, running or not (U1b): the ones docker holds for it, each
+# of which must be named in x-ythril.disposable-volumes. With the instance stopped, the project and that list come
+# from the repository's own compose file. It runs only while the engine answers; with the engine down nothing is
+# read and nothing is checked (the wipe says so).
 function Get-OwnerInstance {
   param(
     [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -171,29 +254,47 @@ function Get-OwnerInstance {
   )
   $state = Read-RunningProjects -RepoRoot $RepoRoot -Docker $Docker -Git $Git
   $record = $state.record
-  if (-not $record) {
-    if ($state.others.Count -gt 0) {
-      $named = ($state.others | ForEach-Object { "$($_.name) ($($_.workingDir))" }) -join ', '
-      throw ("No compose project of {0} runs, and other projects do: {1}. Which of them is the owner's instance is not ours to guess - run this from that project's checkout, or stop them first." -f $RepoRoot, $named)
-    }
-    return $null
+  if ($state.others.Count -gt 0) {
+    $named =($state.others | ForEach-Object { "$($_.name) ($($_.workingDir))" }) -join ', '
+    $lead = if ($record) { "Project '$($record.project)' of $RepoRoot runs, and other projects do too" } else { "No compose project of $RepoRoot runs, and other projects do" }
+    throw ("{0}: {1}. The wipe deletes them as well and brings back only the owner's instance, and which of them is the owner's is not ours to guess - run this from that project's checkout, or stop them first." -f $lead, $named)
+  }
+  if ($record) {
+    $project = $record.project
+    $disposable = @($record.__volumes.disposable)
+  } else {
+    # Stopped: what the repository's compose file (and its override) declares is what a start would create.
+    $config = (@(& $Docker compose --project-directory $RepoRoot config --format json) -join "`n") | ConvertFrom-Json
+    $project = "$($config.name)"
+    if (-not $project) { throw "The compose file of $RepoRoot names no project: the volumes the wipe would delete cannot be checked." }
+    $disposable = @(Get-DisposableVolumes -Config $config)
   }
   $neverDisposable = @('/data', '/data/db', '/data/configdb')
   $refused = @()
-  foreach ($m in $record.__volumes.mounts) {
-    $vol = if ($m.volume) { $m.volume } else { '(anonymous)' }
-    $target = "$($m.target)".TrimEnd('/')
-    if ($neverDisposable -contains $target) {
-      $refused += "service '$($m.service)' mounts the named volume '$vol' at $($m.target), which holds the instance's data and is never disposable"
-      continue
+  $mountRefused = @()
+  if ($record) {
+    foreach ($m in $record.__volumes.mounts) {
+      $vol = if ($m.volume) { $m.volume } else { '(anonymous)' }
+      $target = "$($m.target)".TrimEnd('/')
+      if ($neverDisposable -contains $target) {
+        $refused += "service '$($m.service)' mounts the named volume '$vol' at $($m.target), which holds the instance's data and is never disposable"
+        $mountRefused += $vol
+        continue
+      }
+      if (-not ($m.volume -and ($disposable -contains $m.volume))) {
+        $refused += "service '$($m.service)' mounts the named volume '$vol' at $($m.target), which x-ythril.disposable-volumes does not name"
+        $mountRefused += $vol
+      }
     }
-    if (-not ($m.volume -and ($record.__volumes.disposable -contains $m.volume))) {
-      $refused += "service '$($m.service)' mounts the named volume '$vol' at $($m.target), which x-ythril.disposable-volumes does not name"
-    }
+  }
+  foreach ($v in (Get-ProjectVolumes -Project $project -Docker $Docker)) {
+    if ($mountRefused -contains $v.key -or $disposable -contains $v.key) { continue }
+    $refused += "project '$project' holds the volume '$($v.name)' (compose volume '$($v.key)'), which x-ythril.disposable-volumes does not name"
   }
   if ($refused.Count -gt 0) {
     throw ("The wipe would delete data: {0}. A named volume lives on the disk the wipe deletes; bind it to a directory under the checkout (as docker-compose.override.yml does with local-data/), or name a volume that only holds what is fetched again in the compose file's x-ythril.disposable-volumes." -f ($refused -join '; '))
   }
+  if (-not $record) { return $null }
   $record.PSObject.Properties.Remove('__volumes')
   return $record
 }
@@ -251,14 +352,16 @@ function Save-OwnerInstance {
   $pending = Resolve-PendingRecord -Path $Path -UseRecord:$UseRecord -DiscardRecord:$DiscardRecord
   if ($pending) { return $pending }
   $full = [pscustomobject]@{
-    schema      = 1
-    state       = 'pending'
-    savedAt     = [DateTime]::UtcNow.ToString('o')
-    project     = $Record.project
-    workingDir  = $Record.workingDir
-    configFiles = @($Record.configFiles)
-    commit      = $Record.commit
-    services    = $Record.services
+    schema       = 1
+    state        = 'pending'
+    savedAt      = [DateTime]::UtcNow.ToString('o')
+    project      = $Record.project
+    workingDir   = $Record.workingDir
+    configFiles  = @($Record.configFiles)
+    commit       = $Record.commit
+    commitSource = $Record.commitSource
+    checkoutHead = $Record.checkoutHead
+    services     = $Record.services
   }
   Write-OwnerRecord -Record $full -Path $Path
   return $full
@@ -294,6 +397,14 @@ function Start-OwnerInstance {
   $null = & $Docker @argv
 }
 
+# The build-argument NAMES a record holds (an array of names; a record that held name/value pairs yields its names).
+function Get-RecordedBuildArgNames {
+  param($Build)
+  if (-not $Build -or -not $Build.args) { return @() }
+  if ($Build.args -is [pscustomobject]) { return @($Build.args.PSObject.Properties | ForEach-Object { $_.Name }) }
+  return @($Build.args | ForEach-Object { "$_" })
+}
+
 # A path under the recorded working directory, moved to the same place under the rebuild worktree.
 function Get-RebuildPath {
   param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$From, [Parameter(Mandatory = $true)][string]$To)
@@ -327,6 +438,10 @@ function Restore-OwnerInstance {
   $commit = "$($record.commit)"
   $built = @(Get-RecordedServices -Record $record | Where-Object { $record.services.$_.build })
   if ($built.Count -gt 0) {
+    # What each build needs - context, dockerfile, target and the argument VALUES - is read from the compose config
+    # now, while the engine is up: the record keeps only the argument names (S1).
+    $configArgv = @(Get-ComposeArguments -Record $record) + @('config', '--format', 'json')
+    $config = (@(& $Docker @configArgv) -join "`n") | ConvertFrom-Json
     $null = & $Git -C $wd cat-file -e "$commit^{commit}"
     $wt = Join-Path (Split-Path -Parent $Path) 'owner-rebuild'
     # A worktree a failed restore left behind would make `worktree add` refuse; this one is ours to replace.
@@ -336,11 +451,16 @@ function Restore-OwnerInstance {
     try {
       foreach ($n in $built) {
         $svc = $record.services.$n
-        $b = $svc.build
+        $b = $config.services.$n.build
+        if (-not $b) { throw "Service '$n' was recorded with a build, but the compose config no longer declares one: it cannot be rebuilt at $commit." }
         $tag = if ($svc.image) { $svc.image } else { "$($record.project)-$n" }
         $ctx = Get-RebuildPath -Path $b.context -From $wd -To $wt
         $argv = @('build', '-t', $tag, '--build-arg', "GIT_REVISION=$commit")
-        if ($b.args) { foreach ($a in $b.args.PSObject.Properties) { $argv += @('--build-arg', "$($a.Name)=$($a.Value)") } }
+        foreach ($name in (Get-RecordedBuildArgNames -Build $svc.build)) {
+          if ($name -eq 'GIT_REVISION') { continue }
+          $value = $b.args.$name
+          $argv += @('--build-arg', $(if ($null -ne $value) { "$name=$value" } else { $name }))
+        }
         if ($b.dockerfile) {
           $df = if ([IO.Path]::IsPathRooted($b.dockerfile)) { Get-RebuildPath -Path $b.dockerfile -From $wd -To $wt } else { Join-Path $ctx $b.dockerfile }
           $argv += @('-f', $df)

@@ -21,10 +21,12 @@
 # under local-data/ and its configuration under config/ in the checkout, and the wipe never touches them.
 # What a wipe used to lose was the instance itself -- nothing recorded what ran, so it stayed down until
 # someone remembered how it had been started (Q-294). Now, while the engine answers, the wipe records the
-# instance running from this checkout (scripts/owner-instance.ps1), refuses if any of its named volumes is
-# not labelled disposable, stops it cleanly, deletes the disk, waits for the engine and brings it back,
-# rebuilt from the commit it ran. When the engine does not answer there is nothing to read: nothing is
-# recorded and the last line names the command that brings an instance up by hand.
+# instance running from this checkout (scripts/owner-instance.ps1), refuses if any named volume of its project
+# is not in the compose file's x-ythril.disposable-volumes list, or if another project runs (the wipe deletes it
+# and does not bring it back), stops it cleanly, deletes the disk, waits for the engine and brings it back,
+# rebuilt from the commit it ran. The guard runs only while the engine answers: when it does not, there is
+# nothing to read, nothing is recorded and NOTHING IS CHECKED, and the last line names the command that
+# brings an instance up by hand.
 #
 # The test stack rebuilds with `npm run test:up:rebuild`.
 #
@@ -64,8 +66,8 @@ $recordPath = Join-Path $repo 'local-data\owner-instance\owner-instance.json'
 $record = $null
 $reclaimed = $null
 
-$engine = $true
-try { $null = Invoke-Native { docker info } } catch { $engine = $false }
+# Bounded at 20 s: a half-dead engine is "not answering", not a hang.
+$engine = Test-DockerEngine
 
 if ($RestoreOnly) {
   Section 'Restoring only - nothing is deleted'
@@ -84,12 +86,14 @@ if ($RestoreOnly) {
       $record = Save-OwnerInstance -Record $found -Path $recordPath -UseRecord:$UseRecord -DiscardRecord:$DiscardRecord
       Write-Host "  recorded at $recordPath"
       Write-Host "  $(Format-OwnerRecord -Record $record)"
+      $note = Get-CommitNote -Record $record
+      if ($note) { Write-Host "  $note" }
     } else {
       Write-Host "  no compose project of $repo runs."
       $record = Resolve-PendingRecord -Path $recordPath -UseRecord:$UseRecord -DiscardRecord:$DiscardRecord
     }
   } else {
-    Write-Host '  the engine does not answer: what runs cannot be read, so nothing is recorded and no volume is checked.'
+    Write-Host '  the engine does not answer: the data guard runs only while it does, so what runs is not read, nothing is recorded and NO volume is checked.'
     $record = Resolve-PendingRecord -Path $recordPath -UseRecord:$UseRecord -DiscardRecord:$DiscardRecord
   }
   if ($record -and -not $found) { Write-Host "  restoring the pending record: $(Format-OwnerRecord -Record $record)" }
@@ -114,7 +118,7 @@ if ($RestoreOnly) {
       if (-not (Test-Reachable $h 443)) { throw "$h does not answer on 443: the instance could not be rebuilt or pulled after the delete. Nothing was changed." }
     }
     Write-Host ('  {0:N1} GiB free after the delete; {1} reachable.' -f (($free + $size) / 1GB), ($hosts -join ', '))
-    Write-Host '  named volumes labelled disposable (media models, caches) go with the disk and are fetched again on first use.'
+    Write-Host '  named volumes in x-ythril.disposable-volumes (media models, caches) go with the disk and are fetched again on first use.'
 
     if ($found) {
       Section "Stopping the owner's instance"
