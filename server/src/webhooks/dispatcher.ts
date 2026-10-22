@@ -173,8 +173,8 @@ const realRetryPollDeps: RetryPollDeps = {
  * another. Both were wrong in a way a slow sink exposes: a sink that takes its whole delivery timeout held every other sink's
  * retries behind it, and the passes that fired meanwhile read the same queue. The job skips an overlapping tick (a second
  * delivery of the same event is the worse failure: the queue is re-read next tick, so a skip costs a delay, never a retry) and
- * counts it. And a tick delivers with a concurrency of {@link RETRY_CONCURRENCY} (`mapLimit`), so one slow sink holds one slot
- * of four and every other sink's retry goes out meanwhile.
+ * counts it. And a tick delivers with a concurrency of {@link RETRY_CONCURRENCY} and at most {@link RETRY_PER_KEY} per subscription
+ * (`mapLimitPerKey`), so one slow sink holds at most two slots and every other sink's retry goes out meanwhile.
  *
  * **What bounds a tick.** The job's tick runs inside the housekeeping bound, so every database operation here ends at
  * `housekeepingOpMs()`. A delivery is not a database operation and carries its own timeout (`DELIVERY_TIMEOUT_MS`, an abort
@@ -589,7 +589,8 @@ export async function drainFirstDeliveries({ withinMs }: { withinMs: number }): 
   for (const d of queued) persistForRetry(d, { overflow: false });
   // Events emitted but not yet resolved are resolved now, against the closed limiter: each lands in the rows below.
   const written = (async () => { await emitQueue.settled(); await settledRetryWrites(); })();
-  const outcome = await settledWithin(written, withinMs);
+  // The deadline is this call's: a read-back after it returns (the next call, a test) takes its own bound, not a spent budget.
+  const outcome = await settledWithin(written, withinMs).finally(() => { shutdownReadBackDeadline = null; });
   if (!outcome.finished) {
     log.warn(`Shutdown: the webhook retry queue did not finish writing within ${withinMs}ms (${emitQueue.size} events unresolved, ${pendingRetryRows.size} rows unwritten); those deliveries are lost`);
   }

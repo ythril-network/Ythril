@@ -160,6 +160,43 @@ describe('a webhook retry row is counted by what the store holds after the write
   beforeEach(async () => { await acts.door.mongo.col(RETRY_QUEUE).deleteMany({}); });
   afterEach(() => { faults.clear(); dispatcher.setFirstDeliveryDepsForTest(null); });
 
+  describe('the read-back verdict (retryRowsStored), per branch', () => {
+    // The rows are written or not by the test itself, so each verdict is read against a queue whose state is known; the errors are the
+    // driver's own. A row id no write ever stored is what a lost row looks like to the read-back.
+    let stored;
+    before(async () => { stored = await import('../../server/dist/webhooks/retry-rows-stored.js'); });
+    const past = () => new Date(Date.now() - 60_000);
+    const future = () => new Date(Date.now() + 60_000);
+
+    it('found: stored, whatever the write answered', async () => {
+      await acts.door.mongo.col(RETRY_QUEUE).insertOne({ _id: 'verdict-found', webhookId: 'v', scheduledAt: future() });
+      const v = await stored.retryRowsStored(RETRY_QUEUE, [{ _id: 'verdict-found', scheduledAt: future() }], F.storeGone.bulk);
+      assert.equal(v.get('verdict-found'), 'stored');
+    });
+
+    it('absent, not due, and the store refused the write: not_stored', async () => {
+      const v = await stored.retryRowsStored(RETRY_QUEUE, [{ _id: 'verdict-refused', scheduledAt: future() }], F.refused.duplicateKey);
+      assert.equal(v.get('verdict-refused'), 'not_stored');
+    });
+
+    it('absent and already due: not_known_stored, even after a refusal (the poll may have delivered and removed it)', async () => {
+      const v = await stored.retryRowsStored(RETRY_QUEUE, [{ _id: 'verdict-due', scheduledAt: past() }], F.refused.duplicateKey);
+      assert.equal(v.get('verdict-due'), 'not_known_stored');
+    });
+
+    it('absent, not due, and the store went away: not_known_stored (the write may still land)', async () => {
+      const v = await stored.retryRowsStored(RETRY_QUEUE, [{ _id: 'verdict-gone', scheduledAt: future() }], F.storeGone.bulk);
+      assert.equal(v.get('verdict-gone'), 'not_known_stored');
+    });
+
+    it('the read-back has no time left: not_known_stored for every row, found or not, and no throw', async () => {
+      await acts.door.mongo.col(RETRY_QUEUE).insertOne({ _id: 'verdict-unread', webhookId: 'v', scheduledAt: future() });
+      const rows = [{ _id: 'verdict-unread', scheduledAt: future() }, { _id: 'verdict-unread-absent', scheduledAt: future() }];
+      const v = await stored.retryRowsStored(RETRY_QUEUE, rows, F.refused.duplicateKey, { timeLeft: () => 0 });
+      assert.deepEqual([...v.values()], ['not_known_stored', 'not_known_stored'], 'a read-back that could not run claimed to know');
+    });
+  });
+
   describe('the overflow flush', () => {
     it('rows land and the reply is lost: overflowed by the rows stored, and nothing lost', async () => {
       const before = await reading();
