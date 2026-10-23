@@ -464,7 +464,7 @@ Webhooks allow external systems to receive real-time HTTP POST notifications whe
 | `bulk.write` | A bulk write completed (`POST /bulk` or MCP `save_bulk`). Per-item events are **not** fired for bulk; this one summary carries `entry` = `{ inserted, updated, connections, errorCount }` for a workflow to inspect. It fires whenever the call wrote anything — a batch that only converged on existing records (`updated`) or only attached connections counts. `errorCount` counts every row in `errors`, the unknown-field warning rows included (on a space set to `warn`, an item with an unknown field is stored and still counted there), so a warn batch that names unknown fields raises it. |
 | `duplicate.detected` | The duplicate scanner found a near-duplicate pair under a `notify` rule (see [Duplicate Scanner](#duplicate-scanner--action-rules)). Payload `entry` = `{ type, score, a: {record}, b: {record} }` |
 | `change_note.received` | A change note arrived from the instance above this one in a network (see [Sync API → A sync can carry a change note](09-sync-api.md#a-sync-can-carry-a-change-note)). Fired once per space the note concerns, or per space the network carries here for a note about the whole network. Payload `entry` = `{ id, networkId, networkLabel, from, author, generated, note, spaces }` |
-| `test.ping` | Synthetic test event sent via the test endpoint |
+| `test.ping` | Synthetic test event sent via the test endpoint, and the probe of a failing subscription, whose `entry` carries `"probe": true` (see [Delivery Guarantees](#delivery-guarantees)). Sent to the one subscription whatever its `events` filter |
 
 > Events fire for **both** REST API and MCP (agent) writes — emission lives in the shared
 > brain/file functions, so an agent creating a fact or entity delivers the same events a REST
@@ -540,10 +540,27 @@ Authorization: Bearer <admin-token>
       "consecutiveFailures": 0,
       "createdAt": "...",
       "updatedAt": "..."
+    },
+    {
+      "id": "...",
+      "url": "https://...",
+      "spaces": [],
+      "events": [],
+      "enabled": true,
+      "status": "failing",
+      "consecutiveFailures": 6,
+      "nextProbeAt": "2026-04-11T15:12:40.000Z",
+      "probeAttempts": 2,
+      "createdAt": "...",
+      "updatedAt": "..."
     }
   ]
 }
 ```
+
+A `failing` subscription also carries `nextProbeAt` (when it is next probed, UTC) and `probeAttempts` (probes so far); see
+[Delivery Guarantees](#delivery-guarantees). A subscription marked failing before probing existed has neither and is
+probed on the next tick.
 
 ### Get Subscription
 
@@ -585,7 +602,8 @@ POST /api/admin/webhooks/:id/test
 Authorization: Bearer <admin-token>
 ```
 
-Sends a synthetic `test.ping` event to the subscription's URL. Useful for verifying connectivity.
+Sends a synthetic `test.ping` event to the subscription's URL. Useful for verifying connectivity. A test delivery your
+endpoint answers with a `2xx` makes a failing subscription `active` again; a disabled one stays disabled.
 
 ### Delivery Log
 
@@ -702,11 +720,21 @@ whitespace are not preserved by a parse/stringify round trip.
 - **An event the server had not yet announced when it stopped is not announced later.** The announcement of a change is
   at-most-once: a stop between a write and its announcement loses the event, and a directory delete announces its files
   after their rows are removed. Deduplicate for repeats, and reconcile from the data (a listing) when a gap would matter.
-- After all retries are exhausted, the subscription status changes to `failing`. **A subscription that is down for longer
-  than the retry schedule while a large burst of events is sent is marked `failing` and receives nothing more until it is
-  re-enabled**, including the retries already queued for it, which are dropped when they come due (counted in
-  `ythril_webhook_retries_dropped_total`, by `reason`: `deleted`, `disabled` or `failing`). A subscription whose
-  `enabled` is not `true` takes no deliveries.
-- Re-enabling a failing subscription (`PATCH` with `enabled: true`) resets the failure counter.
+- **A subscription is marked `failing` after six exhausted retry schedules in a row**, each the full set of attempts of one
+  event; a delivered event resets the count to 0. A failing subscription receives no new events, and the retries already
+  queued for it are dropped when they come due (counted in `ythril_webhook_retries_dropped_total`, by `reason`: `deleted`,
+  `disabled` or `failing`); a dropped retry stays dropped after the subscription recovers. A subscription whose `enabled`
+  is not `true` takes no deliveries.
+- **A failing subscription recovers by itself.** The retry poll probes it with a `test.ping` event whose `entry` carries
+  `"probe": true`, signed like every delivery. The first probe goes out within a tick of the subscription being marked
+  failing, and each unanswered one doubles the wait from 1 minute to at most 1 hour, with jitter (so 30 to 60 minutes at
+  the cap), for as long as it stays failing. `nextProbeAt` and `probeAttempts` in the subscription's answer say when the
+  next probe goes and how many went before. A probe answered with a `2xx` makes the subscription `active` again **on
+  probation**: one more exhausted retry schedule marks it `failing` again, and a delivered event clears the probation.
+  Probes are counted in `ythril_webhook_probes_total{outcome}` and show in the delivery log as `test.ping` deliveries.
+  Retries still queued when it recovers are delivered on their own schedule, so they can arrive after newer events.
+- **Recovering it now:** a [test delivery](#test-delivery) that your endpoint answers with a `2xx` makes a failing
+  subscription `active` at once, with the failure count at 0. Re-enabling it (`PATCH` with `enabled: true`) does the same
+  without a delivery. Any `PATCH` that names `enabled` clears the probe schedule.
 
 ---

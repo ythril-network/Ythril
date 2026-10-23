@@ -13,6 +13,7 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
 import { SummaryStripComponent, SummaryItem } from '../../shared/summary-strip.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import { RelativeTimeComponent } from '../../shared/relative-time.component';
+import { InstantPipe } from '../../core/date-format.service';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import {
   Space, WebhookSubscription, WebhookDelivery, WebhookEventType, WEBHOOK_EVENT_GROUPS,
@@ -35,7 +36,7 @@ interface WebhookForm {
   selector: 'app-webhooks',
   standalone: true,
   imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent,
-            SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, HscrollTopDirective],
+            SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, HscrollTopDirective, InstantPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     .dialog-backdrop { position:fixed; inset:0; background:var(--bg-scrim); display:flex; align-items:center; justify-content:center; z-index:100; }
@@ -208,6 +209,10 @@ interface WebhookForm {
                       <app-status-pill [variant]="statusVariant(w.status)" [dot]="true">{{ 'webhooks.status.' + w.status | transloco }}</app-status-pill>
                       @if (w.consecutiveFailures > 0) {
                         <span class="muted" style="font-size:11px;">{{ failuresText(w.consecutiveFailures) }}</span>
+                      }
+                      <!-- a failing hook recovers by itself: say when it is probed next, as text, in the reader's date format -->
+                      @if (w.status === 'failing' && w.nextProbeAt) {
+                        <span class="muted" style="font-size:11px;">{{ 'webhooks.nextProbe' | transloco: { time: (w.nextProbeAt | instant) } }}</span>
                       }
                     </span>
                   </td>

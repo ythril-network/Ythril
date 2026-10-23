@@ -29,7 +29,8 @@ import { oldestHoldAgeSeconds } from '../util/seq.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
 import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
 import { JUDGED_WRITE_OPERATIONS } from '../contract/judged-write-operations.js';
-import { webhookFirstDeliveryCounts, webhookRetriesDroppedCounts, webhookRetryTicksCutCount } from '../webhooks/dispatcher.js';
+import { webhookFirstDeliveryCounts, webhookProbeCounts, webhookRetriesDroppedCounts, webhookRetryTicksCutCount } from '../webhooks/dispatcher.js';
+import { countFailingWebhooks } from '../webhooks/store.js';
 import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
 import { FILE_MISMATCH_CLASSES } from '../files/file-mismatch-classes.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
@@ -70,12 +71,12 @@ collectDefaultMetrics({ register });
  * continuously. Any of them could own the ten seconds. We cannot reproduce their load, so the instance reports
  * it instead.
  *
- * **All nine are timed, including the ones not suspected.** Instrumenting only the suspects would make the
+ * **All of them are timed, including the ones not suspected.** Instrumenting only the suspects would make the
  * measurement agree with the hypothesis by construction — and the useful outcome is as likely to be "the one I
  * expected is fast" as a confirmation.
  *
- * Cheap by design: one histogram observation per collector per scrape, so a 30-second scrape interval is nine
- * observations every thirty seconds. The buckets run out to 15 s because the value worth seeing is the one past
+ * Cheap by design: one histogram observation per collector per scrape, so a 30-second scrape interval is one
+ * observation per collector every thirty seconds. The buckets run out to 15 s because the value worth seeing is the one past
  * the 10 s timeout — a histogram whose top bucket is below the failure cannot describe it.
  */
 const collectDuration = new Histogram({
@@ -96,7 +97,7 @@ const collectDuration = new Histogram({
  */
 export const TIMED_COLLECTORS = [
   'facts_total', 'entities_total', 'edges_total', 'chrono_entries_total', 'storage_used_bytes',
-  'media_jobs_pending', 'media_jobs_processing', 'media_jobs_failed', 'media_job_phase',
+  'media_jobs_pending', 'media_jobs_processing', 'media_jobs_failed', 'media_job_phase', 'webhooks_failing',
 ] as const;
 
 /**
@@ -160,8 +161,8 @@ metricsScrapeDegraded.set(0);
  * all-or-nothing behaviour.
  *
  * **Concurrency is what makes one shared deadline correct.** prom-client 15 collects with `Promise.all`, so
- * the nine collectors run at once and the scrape costs the slowest one, not the sum. A per-collector budget
- * would have to be one-ninth as generous to give the same guarantee.
+ * the collectors run at once and the scrape costs the slowest one, not the sum. A per-collector budget
+ * would have to be the whole budget divided by their number to give the same guarantee.
  */
 export const DEFAULT_SCRAPE_BUDGET_MS = 8000;
 
@@ -264,7 +265,7 @@ const EXPIRED = Symbol('collector-budget-expired');
  * does not. A collector that awaits outside the budget re-creates the exact `up=0` the canary reported, and it
  * would do so silently — the scrape would simply get slow again with nothing naming the cause.
  *
- * Exported for that test, which needs a collector it can make arbitrarily slow. The nine real ones finish
+ * Exported for that test, which needs a collector it can make arbitrarily slow. The real ones finish
  * instantly without a database, so the mechanism is not otherwise reachable offline.
  */
 export async function withCollectBudget(
@@ -1088,6 +1089,31 @@ export const webhookRetriesDroppedTotal = counterMirroringTally({
   help: 'Queued webhook retries dropped without a delivery attempt, by reason: deleted (the subscription is gone), disabled (switched off) or failing (marked failing after its schedule ran out)',
   labelName: 'reason',
   read: webhookRetriesDroppedCounts,
+});
+
+/**
+ * Probes of failing webhook subscriptions by the retry poll, by `outcome` (Q-477): `recovered` (the sink answered and the probe's write
+ * recovered the subscription) or `failed` (the sink did not answer; it stays failing and is probed again on its schedule). A failing
+ * subscription is probed at most hourly, so a steady `failed` rate with no `recovered` is a sink that stays down.
+ */
+export const webhookProbesTotal = counterMirroringTally({
+  name: 'ythril_webhook_probes_total',
+  help: 'Probes of failing webhook subscriptions, by outcome: recovered (answered, subscription active again) or failed (not answered, probed again later)',
+  labelName: 'outcome',
+  read: webhookProbeCounts,
+});
+
+/**
+ * Webhook subscriptions failing now: refused every event and retry until a probe or an admin's test ping is answered (Q-477). Read from
+ * the store at scrape time, so it counts what another instance marked too.
+ */
+export const webhooksFailing = new Gauge({
+  name: 'ythril_webhooks_failing',
+  help: 'Webhook subscriptions currently marked failing (collected at scrape time)',
+  registers: [register],
+  async collect() {
+    await withCollectBudget('webhooks_failing', async () => { this.set(await countFailingWebhooks()); }, () => this.reset());
+  },
 });
 
 /**

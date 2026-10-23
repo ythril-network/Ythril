@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | The old proxy id leaves `spaces`, every network (peers see this member leave) and every token's rights, and answers `410` `space_retired` on every door; creating, renaming or joining under it is `409` | An instance admin purges it (`POST /api/admin/views/retired/:id/purge`) |
 | The upgrade writes `config.json.pre-6.0` before converting; 5.x does not read views, and views live in `config.json`, not in database backups | Roll back by restoring `config.json.pre-6.0`; back up `config.json` |
 | A webhook subscription that named only retired ids is disabled, not emptied | Subscribe to the member spaces |
-| `targetSpace` is refused by name on every write door (both REST spellings, MCP) and `proxyFor` on `POST /api/spaces` and `save_space` is refused by name | Send `space`; make a view with `POST /api/views` or `view_create` |
+| `targetSpace` is refused by name on every write door (both REST spellings, MCP), as is `proxyFor` on `POST /api/spaces` and `save_space` | Send `space`; make a view with `POST /api/views` or `view_create` |
 | New REST and MCP doors: `/api/views` (list, read, create, rename, delete, copy) and `view_list`, `view_get`, `view_create`, `view_update`, `view_delete`, `view_copy` | A view id in a URL is percent-encoded (`%40team`) |
 | New admin doors `/api/admin/views/{orphans,claim,retired/:id/purge,migration}` and their `view_*` tools; `GET /api/spaces` lists `retiredSpaceIds` to admins | Read the migration report after upgrading |
 | A read door takes your view as `space`, reads each member you can read at that moment and names them in `viewMembers`; a view never writes; 50 views per owner, 1 000 members | Name a member space to write |
@@ -39,14 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A `RangeError` the runtime raises on the upload, delete, move, `mkdir` and conflict-resolve routes is `500`, was `400`; our own path, encoding and chunk refusals stay `400` | A sync sender no longer drops a file for a server fault |
 | A stored file that cannot be read is `500` in our words on REST as on the tool doors; a synchronous sync trigger's and the join's failure bodies no longer carry the exception's text | Update body matchers |
 | A bulk conflict resolution's failed item for an error in our code is `code: "internal"`, was `file_system_fault` | Update body matchers |
-| A bulk write (`save_bulk`, `POST /api/brain/spaces/:id/bulk`) with an item that is not an object (`null`, a number, a string, an array) is `400` naming the item, before anything is written; it was a `500` or a silent `200` | Send objects; fix the named item |
+| A bulk write (`save_bulk`, `POST /api/brain/spaces/:id/bulk`) with an item that is not an object (`null`, a number, a string, an array) is `400` naming the item, writing nothing; was a `500` or a silent `200` | Send objects; fix the named item |
 | `GET /api/admin/data/browse-dirs` answers `404` for a directory that is gone, `403` for one the server may not read, `500` otherwise, in our words (was `400` with the runtime's sentence) | Update body matchers |
 | New counter `ythril_tool_failures_total{door,tool,class}`: tool calls answered by the caught-failure classifier, `class` from a fixed set | Alert on a rising `internal` or `file_system` |
 | A partly finished move is `503` `move_still_owed` with `Retry-After`; an act whose deletion cannot be recorded is `500` `act_not_recorded` | Retry (a `404` can mean it finished); repeat a move an older version stranded |
 | A move another file's records hold back is `409` `destination_held_after_move` (`path`, `heldBy`); one whose sidecar target was taken finishes without it (was `503`) | Delete `heldBy`, repeat; reprocess the file |
 | The sweep removes what earlier releases left behind deleted files, irreversibly | Watch `ythril_leaked_rows_removed_total` |
-| `POST /api/admin/reload-config` answers `500` naming spaces that failed to initialise, or `503` with `Retry-After` when the database was down, where it answered success | The next reload retries them |
-| `npm run links:convert` exits non-zero when a space could not be converted; the other spaces are still converted | Check the exit code in upgrade scripts |
+| `POST /api/admin/reload-config` answers `500` naming spaces that failed to initialise, or `503` with `Retry-After` when the database was down, was success | The next reload retries them |
+| `npm run links:convert` exits non-zero when a space could not be converted; the others are still converted | Check the exit code in upgrade scripts |
 | A background job's failure is logged as `<job> failed for space '<id>' (<part>): <reason> — retried <when>` or `<job> stopped: the store is not answering …` | Update log matchers |
 | One entity merge relinks at most 2500 records: a larger one answers `422` `code: "merge_too_large"` and writes nothing; a merge a `strict` space refuses answers `400`, was `500` | Split the merge or delete records first |
 | A bulk fact or chrono item carrying the `id` of an existing record counts in `updated`, not `inserted` (new records only); `bulk.write` fires for a batch that only converged | Read `updated` as well as `inserted` |
@@ -58,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Converted and extracted files (`_converted/`, `_extracted/`) no longer travel; each instance converts by its own settings, an offer answers `200 {"ignored":"instance-local"}` | Peers' sidecars are retired on upgrade |
 | A document or media file a peer pushes or this instance pulls is converted by this instance's pipeline, external assist included where consented | Expect conversion load and consented external-model traffic |
 | A removed description, source, property, tag or suppression mark reaches a peer only when both run this release; one made while a peer ran older reaches it on the file's next edit | Upgrade both ends; edit the file to resend |
-| A soft-deleted file's row stays local (never pushed, served or hashed) and the deletion travels as the file tombstone, which a receiver applies by its own `softDeleteFileMeta`; an older sender still pushes the row, stripped of its flag | Upgrade senders |
+| A soft-deleted file's row stays local (never pushed, served or hashed) and the deletion travels as the file tombstone, applied by the receiver's own `softDeleteFileMeta`; an older sender still pushes the row, stripped of its flag | Upgrade senders |
 | A file's processing status, or a move of another instance's file, no longer changes its `updatedAt`; one that drifted converges after a `MERKLE_DIVERGENCE` re-reads that peer's files | Without `merkle: true` it clears at its next edit |
 | A soft-deleted file's record answers `404` on the by-path read, the extract and `PATCH`, `update_file_meta` refuses it as a missing path, and leaves stats, search, graph and link targets; `filter` still returns it | Filter on `deletedAt` to find deleted files |
 | A file row whose `updatedAt` is not an ISO instant under 40 characters is refused on the sync doors (`400` on push) | Send ISO timestamps |
@@ -152,7 +152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** Each space gets a `(seq, _id)` index per record collection, built in the background on first start (paging stays tie-safe, slower). Each record stores the peer that delivered it (`deliveredBy`: local, never sent or shown).
 - **Sync:** New `ythril_sync_tombstones_applied_total`, `ythril_sync_tombstones_declined_total` and gauge `ythril_sync_tombstone_rereads_owed`. New `ythril_sync_file_arrivals_total{door,outcome}` counts file arrivals.
 - **Sync:** A subscriber that left a pub/sub space gets `423` `space_declined` once; the publisher stops sending it; sync history lists it `declined`, not held. A tombstone of a type the receiver does not know still answers `400`; the sender resends once upgraded.
-- **Embedding:** The bundled model runs in a supervised child process: embedding cannot block the server and a native fault cannot take it down; it exits after 10 idle minutes.
+- **Embedding:** The bundled model runs in a supervised child process: embedding cannot block the server, nor a native fault take it down; it exits after 10 idle minutes.
 - **Embedding:** `mem_limit` or a pod memory limit counts both processes. The child holds no secrets. A lost process is replaced after a growing delay; a record killing it three times is `failed`, the crash in its `lastError`.
 - **Embedding:** New `ythril_embed_wait_seconds`, `ythril_embed_process_restarts_total{reason}`, `ythril_embed_process_state`; `GET /api/admin/pipeline-status` gains `inference` and `state: "down"` on a sticky load failure.
 - **Embedding:** A recall query is embedded ahead of queued documents; `embedConcurrency` keeps its defaults (2 bundled, 8 external), bounding queue pressure. A model that cannot load stays failed until it, an offline flag or the process restarts.
@@ -181,7 +181,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UI:** Settings → Spaces shows a space waiting for search as "Waiting for search service". The Graph view reads every page of `graph_traverse` and says when the walk stopped at its `limit`.
 - **Docs:** The hosting guide names `YTHRIL_MONGO_MEM_LIMIT` (default `4g`). Help gains a testing guide. The integration guide's tool tables come from code; an edge's `type` is free text.
 - **Backup:** A restore reports, per space, files no longer matching their records (the page, `GET /api/admin/data/restore`, the log), and repairs nothing ([guide](docs/integration-guide/12a-data-management-api.md)).
-- **Webhooks:** `ythril_webhook_first_deliveries_lost_total` gains `reason` (`not_stored`, `not_known_stored`) and counts every retry-row write; alert on `not_stored`; ratios: `sum without(reason)`.
+- **Webhooks:** `ythril_webhook_first_deliveries_lost_total` gains `reason` (`not_stored`, `not_known_stored`), counting every retry-row write; alert on `not_stored`. New `ythril_webhook_probes_total{outcome}`, `ythril_webhooks_failing`; answers carry `nextProbeAt`, `probeAttempts`.
 - **CI:** A push to `full-run/<bundle>` runs every `ci.yml` job as `Full run / <job>` checks before the pull request; `Build & Test` stays the only merge gate.
 
 ### Fixed
@@ -202,8 +202,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since is kept. An admin restore removes a file description, source, property, tag or mark its backup lacks (`keysRemoved`).
 - **Files:** A peer's file, pushed or pulled, is processed by this instance's rules (converted, chunked, media); a new version replaces old passages; a failed record write leaves no new file unless the database was down.
 - **Files:** A pushed file's later description and tag edits apply; arriving bytes revive a soft-deleted path with this instance's retention; a metadata arrival no longer overwrites a newer copy.
-- **Files:** Processing status or a peer file's move leaves `updatedAt` alone (a false Merkle divergence); changed media over a `complete` file is analysed again. A re-upload with metadata takes one seq; a no-op write none.
-- **Files:** A soft-deleted file's record keeps no description, vector, chunk or face, and is removed one file retention window after its deletion; with no window it stays.
+- **Files:** Changed media over a `complete` file is analysed again. A re-upload with metadata takes one seq; a no-op write none.
+- **Files:** A soft-deleted file's record keeps no description, vector, chunk or face, and is removed one file retention window after deletion; with no window it stays.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered, never over a row's own description or tags; a wrong-typed key or any `parentFileId` is discarded and counted refused.
 - **Files:** Moving a file or folder leaves nothing at its old path, even mid-processing, and carries chunks, sidecars, queued jobs and links (`PATCH /api/files/:spaceId`, `move_file`); a retried move completes only a move it began.
 - **Files:** Each record ends wholly at its old or new path; a case-only rename moves its record; a directory delete is audited with `kind: "directory"`. Every delete door completes a file whose bytes are gone.
@@ -236,7 +236,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backup:** A scheduled backup that outlasts its cron period is skipped, not overlapped; its failure line reads `Scheduled backup failed: …`, was `Scheduled backup error: …`.
 - **Backup:** A restore holds each space until it equals the backup with every index (a failed unique one retries), never lowers its counter, resumes after a crash; peers resend what followed. A migration no longer comes back empty.
 - **Media:** A job holds its file by path and is complete only after its file is; ffmpeg stops after 10 minutes, audio at 5, video at 1000 keyframes; a killed job leaves no plaintext; `reprocessSyncedImages` off skips faces on pushed images too.
-- **Webhooks:** One subscription's retry backlog no longer delays another's; a failed retry-queue write is counted by the rows stored.
+- **Webhooks:** One subscription's retry backlog no longer delays another's; a failed retry-queue write counts by rows stored. A failing subscription is probed until it recovers; failures count atomically.
 - **UI:** The client never shows an answer older than the latest asked (graph depth, record tabs, record card). The Graph tab says why it is slow after 3 s and errors with Retry after 30 s. Help links no longer open dead tabs.
 - **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails when the run is not listed in 3 minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`). The keyset gate finds any seq ordering; the validator gate follows act bodies.
 

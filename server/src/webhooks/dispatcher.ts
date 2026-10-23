@@ -14,7 +14,10 @@
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { Filter, Sort } from 'mongodb';
-import { getMatchingWebhooks, getWebhookFull, recordDelivery, markWebhookSuccess, markWebhookFailure, acceptsDeliveries } from './store.js';
+import {
+  getMatchingWebhooks, getWebhookFull, recordDelivery, markWebhookSuccess, markWebhookFailure, acceptsDeliveries, claimDueProbe,
+  markProbeRecovered, FAILING_AFTER,
+} from './store.js';
 import { asDoc, col } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
@@ -106,9 +109,18 @@ export interface RetryPollDeps {
   getWebhook(id: string): Promise<WebhookSubscription | null>;
   deliver(sub: WebhookSubscription, job: RetryJob): Promise<WebhookDelivery>;
   markSuccess(webhookId: string): Promise<void>;
-  markFailure(webhookId: string): Promise<void>;
+  /** Count an exhausted schedule; answers whether this call flipped the subscription to failing (`markWebhookFailure`). */
+  markFailure(webhookId: string): Promise<boolean>;
   /** Put the job back for its next attempt (`job.attempt + 1`), at the next backoff step. */
   requeue(job: RetryJob): Promise<void>;
+  // The probe of failing subscriptions (Q-477). Production always has all three (`productionRetryPollDeps`); a fake that leaves
+  // `claimDueProbe` out has no probe due, which is what the poll tests written before probing existed hand in.
+  /** Claim one failing subscription whose probe is due (the claim also schedules the next one), or null. */
+  claimDueProbe?(now: Date): Promise<{ id: string; url: string } | null>;
+  /** Send the probe: one delivery, no retry. */
+  deliverProbe?(sub: WebhookSubscription, body: string, event: WebhookEventType, spaceId: string, deliveryId: string): Promise<WebhookDelivery>;
+  /** Recover the subscription the probe reached at `url`; answers whether this write changed the row. */
+  markProbeRecovered?(webhookId: string, url: string): Promise<boolean>;
 }
 
 /**
@@ -154,15 +166,26 @@ async function chooseDueRetries(now: Date): Promise<RetryJob[]> {
   return await readRowsById<RetryJob>(RETRY_COLLECTION, [...taken.values()].flat(), 'all');
 }
 
-const realRetryPollDeps: RetryPollDeps = {
-  dueJobs: chooseDueRetries,
-  removeJob: async (id) => { await col<RetryJob>(RETRY_COLLECTION).deleteOne({ _id: id } as Filter<RetryJob>); },
-  getWebhook: (id) => getWebhookFull(id),
-  deliver: (sub, job) => attemptDelivery(sub, job.body, job.event, job.spaceId, job.deliveryId),
-  markSuccess: markWebhookSuccess,
-  markFailure: markWebhookFailure,
-  requeue: (job) => writeRetryRow(retryJobFor(job.webhookId, job.body, job.event, job.spaceId, job.deliveryId, job.attempt + 1)),
-};
+/**
+ * The poll's deps as production runs them: the queue, the store's status writes and the SSRF-checked delivery. A new object per call,
+ * so a test can replace one door (the probe's delivery, the clock) and keep every other one production's. `getWebhook` is
+ * `getWebhookFull`: a delivery's HMAC is keyed with the DECRYPTED secret, and a probe reads its subscription through it too, never the
+ * row its claim returned (whose `secret` is the stored ciphertext).
+ */
+export function productionRetryPollDeps(): RetryPollDeps {
+  return {
+    dueJobs: chooseDueRetries,
+    removeJob: async (id) => { await col<RetryJob>(RETRY_COLLECTION).deleteOne({ _id: id } as Filter<RetryJob>); },
+    getWebhook: (id) => getWebhookFull(id),
+    deliver: (sub, job) => attemptDelivery(sub, job.body, job.event, job.spaceId, job.deliveryId),
+    markSuccess: markWebhookSuccess,
+    markFailure: markWebhookFailure,
+    requeue: (job) => writeRetryRow(retryJobFor(job.webhookId, job.body, job.event, job.spaceId, job.deliveryId, job.attempt + 1)),
+    claimDueProbe,
+    deliverProbe: attemptDelivery,
+    markProbeRecovered,
+  };
+}
 
 /**
  * The retry poll as an interval job (`Q-317`), and `deps` is a test seam: production never passes it.
@@ -190,8 +213,16 @@ const realRetryPollDeps: RetryPollDeps = {
  * (`laneOrdered`), and a tick stops starting deliveries at {@link RETRY_TICK_BUDGET_MS}: the rows it did not start stay queued, the cut
  * is counted (`ythril_webhook_retry_ticks_cut_total`) and said once per window. A subscription not started in a cut tick keeps the
  * oldest row, so it leads the next one.
+ *
+ * ## It probes failing subscriptions, first (Q-477)
+ *
+ * A subscription marked failing is refused every event and every retry; what brings it back is a probe: a `test.ping` in the test
+ * route's envelope, marked `entry.probe: true` ({@link probePayload}), sent by this same poll (no second timer). The probes of a tick run
+ * in ONE slot of their own, the first started before any retry, at most {@link PROBES_PER_TICK}, each claimed at its own start after
+ * the budget check a retry makes, so a spent tick claims nothing. A probe the sink answers recovers the subscription on probation
+ * (`markProbeRecovered`); one it refuses leaves it failing, already rescheduled by its claim (1 min doubling to 1 h, equal-jittered).
  */
-export function createRetryWorker(deps: RetryPollDeps = realRetryPollDeps, jobDeps?: IntervalJobDeps): { job: IntervalJob } {
+export function createRetryWorker(deps: RetryPollDeps = productionRetryPollDeps(), jobDeps?: IntervalJobDeps): { job: IntervalJob } {
   const job = intervalJob(RETRY_JOB_LABEL, RETRY_POLL_INTERVAL_MS, () => pollRetryQueue(deps), jobDeps);
   return { job };
 }
@@ -213,13 +244,24 @@ export function stopRetryWorker(): void {
 async function pollRetryQueue(deps: RetryPollDeps): Promise<void> {
   const now = deps.now ?? Date.now;
   const began = now();
-  const jobs = laneOrdered(await deps.dueJobs(new Date(began)));
+  // The budget is asked at each START, never of a delivery in flight: an unstarted row is still in the queue, an unclaimed probe still due.
+  const budgetSpent = (): boolean => now() - began >= RETRY_TICK_BUDGET_MS;
+  // The probes go first: the retries start once the first probe has started, or the probe slot has found nothing to start.
+  let probesStarted!: () => void;
+  const firstProbeStarted = new Promise<void>(resolve => { probesStarted = resolve; });
+  const probing = probeDueSubscriptions(deps, now, budgetSpent, probesStarted).finally(probesStarted);
+  await firstProbeStarted;
   let notStarted = 0;
-  await mapLimitPerKey(jobs, RETRY_CONCURRENCY, j => j.webhookId, RETRY_PER_KEY, async (job) => {
-    // The budget is asked at each START, never of a delivery in flight: an unstarted row is still in the queue.
-    if (now() - began >= RETRY_TICK_BUDGET_MS) { notStarted++; return; }
-    await retryOne(deps, job);
-  });
+  const retrying = (async () => {
+    const jobs = laneOrdered(await deps.dueJobs(new Date(began)));
+    await mapLimitPerKey(jobs, RETRY_CONCURRENCY, j => j.webhookId, RETRY_PER_KEY, async (job) => {
+      if (budgetSpent()) { notStarted++; return; }
+      await retryOne(deps, job);
+    });
+  })();
+  // Both halves run to their end before either's failure is the tick's, so a failed queue read never leaves a probe running past its tick.
+  const [probed, retried] = await Promise.allSettled([probing, retrying]);
+  for (const r of [retried, probed]) if (r.status === 'rejected') throw r.reason;
   if (notStarted > 0) {
     retryTicksCut++;
     sayDeliveryFailureOnce('retry-tick-cut', 'all', () => {
@@ -269,12 +311,88 @@ async function retryOne(deps: RetryPollDeps, job: RetryJob): Promise<void> {
     } else if (job.attempt < MAX_ATTEMPTS) {
       await deps.requeue(job);
       sayDeliveryFailureOnce('retry', job.webhookId, () => { log.warn(`Webhook retry ${job.attempt}/${MAX_ATTEMPTS} failed for ${peerText(job.webhookId)}: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)}`); });
-    } else {
-      await deps.markFailure(sub.id);
-      log.error(`Webhook ${peerText(sub.id)} marked as failing after ${MAX_ATTEMPTS} delivery attempts`);
+    } else if (await deps.markFailure(sub.id)) {
+      // Said by the exhausted schedule whose flip changed the row: once per flip, not once per exhausted schedule.
+      log.error(`Webhook ${peerText(sub.id)} marked as failing after ${FAILING_AFTER} retry schedules of ${MAX_ATTEMPTS} delivery attempts ran out; it is probed until it answers`);
     }
   } catch (err) {
     sayDeliveryFailureOnce('retry-error', job.webhookId, () => { log.warn(`Webhook retry queue error for ${peerText(job.webhookId)}: ${peerText(err)}`); });
+  }
+}
+
+// ── Probes of failing subscriptions ─────────────────────────────────────────
+
+/** The most failing subscriptions one tick probes, one after another in the probe slot. */
+export const PROBES_PER_TICK = 2;
+
+/** The `test.ping` envelope: the ONE shape the test route and the probe both send (`spaceId` and `spaceName` `'_test'`). */
+export function testPingPayload(entry: Record<string, unknown>, actor: WebhookActor = {}, at: Date = new Date()): WebhookEventPayload {
+  return {
+    event: 'test.ping',
+    timestamp: at.toISOString(),
+    spaceId: '_test',
+    spaceName: '_test',
+    entry,
+    ...(actor.tokenId ? { tokenId: actor.tokenId } : {}),
+    ...(actor.tokenLabel ? { tokenLabel: actor.tokenLabel } : {}),
+  };
+}
+
+/**
+ * A probe's body: the test route's envelope, marked `entry.probe: true` so a receiver can tell it from an admin's test. No event type of
+ * its own: a receiver switching on the event table already knows `test.ping`, and a new type would be one it refuses.
+ */
+export function probePayload(at: Date = new Date()): WebhookEventPayload {
+  return testPingPayload({ probe: true, message: 'Probe of a failing webhook subscription by Ythril' }, {}, at);
+}
+
+/** The tally behind `ythril_webhook_probes_total{outcome}`: a probe that recovered its subscription, and one the sink refused. */
+const probeOutcomes = { recovered: 0, failed: 0 };
+export function webhookProbeCounts(): Readonly<{ recovered: number; failed: number }> {
+  return { ...probeOutcomes };
+}
+
+/**
+ * The tick's probes: up to {@link PROBES_PER_TICK}, one at a time, each claimed at its own start after the budget check. `started` is
+ * called as the first probe's delivery begins (the retries wait for it, so the probes go first); the caller calls it again when this
+ * ends, for a tick with nothing to probe. A probe's failure is said and the next probe goes on.
+ */
+async function probeDueSubscriptions(deps: RetryPollDeps, now: () => number, budgetSpent: () => boolean, started: () => void): Promise<void> {
+  const { claimDueProbe: claim, deliverProbe, markProbeRecovered: recover } = deps;
+  if (!claim || !deliverProbe || !recover) return;
+  for (let n = 0; n < PROBES_PER_TICK; n++) {
+    if (budgetSpent()) return;
+    const due = await claim(new Date(now()));
+    if (!due) return;
+    try {
+      await probeOne(due.id, deps.getWebhook, deliverProbe, recover, started);
+    } catch (err) {
+      sayDeliveryFailureOnce('probe-error', due.id, () => { log.warn(`Webhook probe error for ${peerText(due.id)}: ${peerText(err)}`); });
+    }
+  }
+}
+
+async function probeOne(
+  id: string,
+  getWebhook: RetryPollDeps['getWebhook'],
+  deliverProbe: NonNullable<RetryPollDeps['deliverProbe']>,
+  recover: NonNullable<RetryPollDeps['markProbeRecovered']>,
+  started: () => void,
+): Promise<void> {
+  const sub = await getWebhook(id);
+  if (!sub) return; // deleted since the claim
+  const delivery = deliverProbe(sub, JSON.stringify(probePayload()), 'test.ping', '_test', uuidv4());
+  started();
+  const result = await delivery;
+  if (!result.success) {
+    probeOutcomes.failed++;
+    sayDeliveryFailureOnce('probe', id, () => { log.warn(`Webhook probe of failing ${peerText(id)} was not answered: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)}; it stays failing and is probed again on its schedule`); });
+    return;
+  }
+  // The URL the probe went to: a subscription whose URL changed meanwhile is not recovered by a probe of the old one.
+  if (await recover(id, sub.url)) {
+    probeOutcomes.recovered++;
+    log.info(`Webhook ${peerText(id)} recovered: its probe was answered, so it takes deliveries again (on probation: one more exhausted retry schedule marks it failing)`);
   }
 }
 

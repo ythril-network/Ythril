@@ -722,14 +722,14 @@ look at the database and at how much that job has to do.
 
 Webhooks send signed HTTP notifications to external systems when events occur. Manage them from **Settings → Webhooks** (admin token + MFA required).
 
-The page lists every webhook with its endpoint, event/space filters, and a status badge (**active**, **failing**, or auto-**disabled** after repeated failures). From there you can:
+The page lists every webhook with its endpoint, event/space filters, and a status badge: **active**, **failing** (its endpoint kept refusing deliveries), or **disabled** (switched off by you). A failing webhook also shows its count of failures and when it is next probed ("next probe" and a time in your date format). From there you can:
 
-- **Add / Edit** — set the HTTPS endpoint URL and a signing secret (at least 8 characters), choose which events and spaces to subscribe to (leave "all" selected for everything), and enable or disable it. The secret is write-only: it is never shown again, so on edit you leave the field blank to keep the current one.
-- **Test** — send a `test.ping` event to confirm the endpoint is reachable.
-- **Deliveries** — view recent delivery attempts with their HTTP status, latency, and any error.
+- **Add / Edit** — set the HTTPS endpoint URL and a signing secret (at least 8 characters), choose which events and spaces to subscribe to (leave "all" selected for everything), and enable or disable it. The secret is write-only: it is never shown again, so on edit you leave the field blank to keep the current one. Saving a failing webhook with **Enabled** ticked makes it active again with its failure count at 0.
+- **Test** — send a `test.ping` event to confirm the endpoint is reachable. A failing webhook whose endpoint answers the test is active again at once.
+- **Deliveries** — view recent delivery attempts with their HTTP status, latency, and any error. The probes of a failing webhook appear here as `test.ping` deliveries.
 - **Delete** — stop and remove a webhook.
 
-A webhook that is **failing** (its endpoint stayed down past the whole retry schedule) is sent nothing new, and the deliveries already waiting for it are dropped as they come due, until you re-enable it. A burst of events (a directory delete announces every file it removed) is sent to each endpoint a few at a time; the rest wait in the retry queue and arrive a little later, which the `ythril_webhook_first_deliveries_overflowed_total` metric counts.
+A webhook is marked **failing** after its endpoint refused six events in a row, each through its whole retry schedule. It is then sent nothing new, and the deliveries already waiting for it are dropped as they come due; they stay dropped after it recovers. **A failing webhook recovers by itself:** the server probes the endpoint with a `test.ping`, first right away, then at growing intervals up to about once an hour, and when the endpoint answers, the webhook is active again. Until it has delivered a real event, one more exhausted retry schedule marks it failing again. You can also recover it at once with **Test**, or by saving it with **Enabled** ticked. Deliveries still queued when it recovers arrive on their own schedule, so they can come after newer events. The `ythril_webhooks_failing` metric counts the failing webhooks. A burst of events (a directory delete announces every file it removed) is sent to each endpoint a few at a time; the rest wait in the retry queue and arrive a little later, which the `ythril_webhook_first_deliveries_overflowed_total` metric counts.
 
 All endpoints must be HTTPS and are SSRF-checked (private/reserved addresses are rejected). Everything the page does is also available directly through the admin API at `/api/admin/webhooks`:
 
