@@ -461,13 +461,22 @@ function retryJobFor(
  * lost by its reason and the failure is thrown on to the caller's reporter, which names it.
  */
 async function writeRetryRow(job: RetryJob): Promise<void> {
-  try {
-    await col<RetryJob>(RETRY_COLLECTION).insertOne(asDoc<RetryJob>(job));
-  } catch (err) {
-    const { stored } = await countRetryRowsAfterFailure([{ job, overflow: false }], err);
-    if (stored === 0) throw err;
-  }
+  const writing = (async () => {
+    try {
+      await col<RetryJob>(RETRY_COLLECTION).insertOne(asDoc<RetryJob>(job));
+    } catch (err) {
+      const { stored } = await countRetryRowsAfterFailure([{ job, overflow: false }], err);
+      if (stored === 0) throw err;
+    }
+  })();
+  // Held until written AND counted, for `settledRetryWrites`: a row that landed with its reply lost is visible before its read-back has
+  // counted it, so a reader that waited for the row read the counters while this write's verdict was still to come.
+  singleRetryWrites.add(writing);
+  try { await writing; } finally { singleRetryWrites.delete(writing); }
 }
+
+/** The single-row retry writes in flight (the requeues), each until it is written and, after a failure, counted. */
+const singleRetryWrites = new Set<Promise<void>>();
 
 // ── Delivery failure lines ──────────────────────────────────────────────────
 
@@ -734,12 +743,15 @@ export async function drainFirstDeliveries({ withinMs }: { withinMs: number }): 
 }
 
 /**
- * Resolves when every retry row handed to the overflow flush so far, and every one handed to it meanwhile, has been written and COUNTED.
- * Used by the shutdown drain, and by a reader of the overflow counters (a test): the rows are visible to another connection before the
- * write resolves here and the counter rises (Q-580, probe P1(a)), so a reader that waits for the rows reads the counter too early.
+ * Resolves when every retry row handed to the overflow flush so far, and every one handed to it meanwhile, has been written and COUNTED,
+ * and so has every single-row write (a requeue) started before the call or while it waits. Used by the shutdown drain, and by a reader of
+ * the counters (a test): the rows are visible to another connection before the write resolves here and the counter rises (Q-580, probe
+ * P1(a)), so a reader that waits for the rows reads the counter too early. The single-row half was missing: a requeue that landed with
+ * its reply lost was counted by a read-back that could finish after a reader had moved on, and after the row was gone (PR #1538's CI).
  */
 export async function settledRetryWrites(): Promise<void> {
   await pendingRetryRows.settled();
+  while (singleRetryWrites.size > 0) await Promise.allSettled([...singleRetryWrites]);
 }
 
 /**
