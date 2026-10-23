@@ -982,7 +982,7 @@ export interface ContradictionRecord {
    * refused `409 resolvedOtherwise`; the same choice finishes it, a dismiss or reopen releases it, and after ten minutes
    * another choice may take it over.
    */
-  resolving?: { resolution: 'edited' | 'linked' | 'superseded'; winner?: 'a' | 'b'; at: string };
+  resolving?: { resolution: 'edited' | 'linked' | 'superseded'; winner?: 'a' | 'b'; at: string; wrote?: { edgeId?: string; markedId?: string } };
   detectedAt: string;
   updatedAt: string;
 }
@@ -996,6 +996,7 @@ export interface ContradictionRecord {
  *   `winnerGone`          the record kept no longer exists, so no link was drawn
  *   `loserGone`           the record judged stale no longer exists: nothing marked, no link
  *   `edgePairUnlinkable`  the pair are edges, which cannot be the ends of an edge
+ *   `oppositeChoiceUndone` an unfinished resolve of the pair was undone first: exactly the edge it drew and the mark it set
  */
 export interface ContradictionResolveNote {
   code: string;

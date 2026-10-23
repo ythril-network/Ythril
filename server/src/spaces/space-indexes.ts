@@ -40,6 +40,10 @@
 import type { Document } from 'mongodb';
 import { col } from '../db/mongo.js';
 import { indexNamesOf } from '../db/index-names.js';
+import { boundOperationMs, housekeepingOpMs } from '../db/write-bound.js';
+import { StoreTimeout } from '../db/write-timeout.js';
+import { storeIsNotAnswering } from '../db/store-condition.js';
+import { withinTimeBound, isTimeBoundEnded } from '../util/time-bound.js';
 import { spaceCollection, SPACE_COLLECTIONS, type SpacePart } from '../db/space-collection.js';
 import { log, peerText } from '../util/log.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -262,12 +266,23 @@ const bestEffortKey = (spaceId: string, ix: SpaceIndex): string => `${spaceId}\u
 /**
  * Say a `best-effort` index that was not built: a warning naming the space and the index and what the space does without it, once
  * while it stays missing. Never a space failure, wherever it is built (`initSpace` or the background pass): the space works without
- * it, so a counted failure at every boot would be an alarm about a decision. A store that stopped answering is not hidden by this:
- * the next index of the run meets it and is judged by its own policy (or by the walk).
+ * it, so a counted failure at every boot would be an alarm about a decision. A store that stopped answering is not the index's
+ * failure: it is RETHROWN (`storeIsNotAnswering`), so the caller - inside a walk, the walk's verdict - hears it.
  */
 function bestEffortMissing(spaceId: string, ix: SpaceIndex, err: unknown): void {
+  // The store not answering is not the index's failure: it goes to the caller (inside a walk, the walk's verdict), whatever comes
+  // after this index in the declaration, and it does not use up the warning a real refusal of the index needs.
+  if (storeIsNotAnswering(err)) throw err;
   bestEffortSaid(bestEffortKey(spaceId, ix), () => log.warn(`Space '${peerText(spaceId)}': ${peerText(spaceIndexUnit(ix))} not built`
     + `${ix.withoutIt ? ` - ${peerText(ix.withoutIt)}` : ''} (${peerText(err)})`));
+}
+
+/**
+ * Forget what this module said about a space: its best-effort warnings. Called when the space is deleted (`commitSpaceDeletion`), so
+ * a deleted space keeps no slot, and a space created again under its id is warned about afresh.
+ */
+export function forgetSpaceIndexWarnings(spaceId: string): void {
+  for (const ix of SPACE_INDEXES) if (ix.policy === 'best-effort') bestEffortSaid.forget(bestEffortKey(spaceId, ix));
 }
 
 /** A best-effort index stood: the next time it is missing is news. */
@@ -308,10 +323,30 @@ export function buildSpaceIndexUnits(
  */
 export async function ensureTtlIndexes(spaceId: string): Promise<{ failed: { unit: string; reason: string }[] }> {
   const present = new Map<SpacePart, readonly string[]>();
-  for (const part of new Set(SWEEP_INDEXES.map(ix => ix.part))) present.set(part, await indexNamesOf(spaceCollection(spaceId, part)));
+  for (const part of new Set(SWEEP_INDEXES.map(ix => ix.part))) present.set(part, await indexNamesWithinBound(spaceCollection(spaceId, part)));
   const missing = SWEEP_INDEXES.filter(ix => !(present.get(ix.part) ?? []).includes(spaceIndexName(ix)));
   if (missing.length === 0) return { failed: [] };
   return buildSpaceIndexUnits(spaceId, missing);
+}
+
+/**
+ * The names of a collection's indexes, waited for at most one operation's figure: the enclosing bound's (`boundOperationMs`, a
+ * walk's per-operation figure) or the housekeeping one. A wait that ends is a {@link StoreTimeout}, so a walk judges it like any
+ * operation that ran past its bound (the space times out; the store is pinged before the walk is stopped).
+ *
+ * Why it is bounded when the index calls are not (`db/write-bound.ts`): a listing is metadata, whatever the size of the collection,
+ * so one figure is right for it - and the sweep lists every space's indexes at every tick, so one space whose listing hangs held the
+ * tick and, through the job's single flight, every later one: retention stopped for every space. The builds stay unbounded.
+ */
+async function indexNamesWithinBound(collName: string): Promise<string[]> {
+  const ms = boundOperationMs() ?? housekeepingOpMs();
+  const what = `listing the indexes of ${collName}`;
+  try {
+    return await withinTimeBound(indexNamesOf(collName), ms, what);
+  } catch (err) {
+    if (isTimeBoundEnded(err)) throw new StoreTimeout(what, { cause: err });
+    throw err;
+  }
 }
 
 /**

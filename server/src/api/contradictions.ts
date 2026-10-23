@@ -37,7 +37,8 @@ import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import { isRefKind } from '../config/types-knowledge.js';
 import { webhookToken } from './brain/_shared.js';
-import type { ContradictionCandidateDoc, ContradictionChoice, ContradictionResolveNote } from '../config/types.js';
+import type { ContradictionCandidateDoc, ContradictionChoice, ContradictionClaim, ContradictionResolveNote } from '../config/types.js';
+import { edgeIdFor } from '../brain/edge-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { pageMemberList } from '../brain/list-page.js';
 import { defaultBudgetChars } from '../brain/result-budget.js';
@@ -150,12 +151,15 @@ contradictionsRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyRead
       const { doc, spaceId } = found;
       const coll = collectionFor(spaceId);
       const dismissedContentHash = await pairContentHash(spaceId, doc.type, doc.aId, doc.bId);
-      await coll.updateOne(
+      const released = await coll.findOneAndUpdate(
         asFilter<ContradictionCandidateDoc>({ _id: id }),
-        // A dismiss releases a resolve's claim (L3): the pair is judged no disagreement, so no choice about it stands.
+        // A dismiss releases a resolve's claim (L3): the pair is judged no disagreement, so no choice about it stands, and
+        // what the claim recorded it wrote is undone.
         asUpdate<ContradictionCandidateDoc>({ $set: { status: 'dismissed', dismissedContentHash, updatedAt: new Date().toISOString() }, $unset: { resolving: '' } }),
-      );
-      res.json({ status: 'dismissed' });
+        { returnDocument: 'before' },
+      ) as ContradictionCandidateDoc | null;
+      const notes = await releaseClaim(req, spaceId, released);
+      res.json({ status: 'dismissed', ...(notes.length > 0 ? { notes } : {}) });
       return;
     }
     res.status(404).json({ error: 'Contradiction candidate not found' });
@@ -170,12 +174,17 @@ contradictionsRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadO
   try {
     const id = req.params['id'] as string;
     for (const spaceId of spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write')) {
-      const r = await collectionFor(spaceId).updateOne(
+      const released = await collectionFor(spaceId).findOneAndUpdate(
         asFilter<ContradictionCandidateDoc>({ _id: id, status: 'dismissed' }),
-        // A reopen releases any claim too (L3): the pair comes back to be judged afresh.
+        // A reopen releases any claim too (L3): the pair comes back to be judged afresh, and what the claim wrote is undone.
         asUpdate<ContradictionCandidateDoc>({ $set: { status: 'open', updatedAt: new Date().toISOString() }, $unset: { dismissedContentHash: '', resolving: '' } }),
-      );
-      if (r.matchedCount > 0) { res.json({ status: 'open' }); return; }
+        { returnDocument: 'before' },
+      ) as ContradictionCandidateDoc | null;
+      if (released) {
+        const notes = await releaseClaim(req, spaceId, released);
+        res.json({ status: 'open', ...(notes.length > 0 ? { notes } : {}) });
+        return;
+      }
     }
     res.status(404).json({ error: 'Dismissed contradiction candidate not found' });
   } catch (err) {
@@ -218,6 +227,12 @@ contradictionsRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadO
 //  - **A store failure part-way is a `503` that says what was written** (`written: {edge, markedRecord, closed}`),
 //    so the caller knows the retry is safe and what it will finish. Nothing else is caught: a refusal is a
 //    refusal and a fault is a fault.
+//  - **The claim records what it writes, as it writes it** (`resolving.wrote: {edgeId?, markedId?}`), each entry
+//    set under the claim immediately BEFORE its effect. So an effect lands only while this request holds the
+//    claim, and a claim taken over as stale (`RESOLVE_CLAIM_STALE_MS`) or released by a dismiss or reopen is
+//    undone EXACTLY — that edge deleted, that record's mark lifted, nothing else ever — and the undo is said
+//    (`oppositeChoiceUndone`). A resolve that finds its claim taken over undoes what it wrote itself and answers
+//    `409`; a first-time resolve never touches a mark or edge it did not write.
 contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const id = req.params['id'] as string;
@@ -250,42 +265,74 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
 
 const RESOLVE_WHERE = 'POST /api/contradictions/:id/resolve';
 
-/** What a resolve has written so far: the `503` for a failure part-way carries it, so a caller knows what its retry finishes. */
-interface Written { edge: boolean; markedRecord: boolean; closed: boolean }
+/** What one claim recorded it was about to write: the edge it drew, the record it marked. */
+type ClaimWrote = NonNullable<ContradictionClaim['wrote']>;
+
+/**
+ * What a resolve has written so far: the `503` for a failure part-way carries it, so a caller knows what its retry finishes.
+ * `undone` — present only when something was — is what this request undid of an abandoned claim's writes, or of its own after
+ * losing its claim.
+ */
+interface Written { edge: boolean; markedRecord: boolean; closed: boolean; undone?: ClaimWrote }
+
+/** This request's claim was taken over by another choice, or released, between two of its writes. */
+class ClaimLost extends Error {}
 
 /**
  * How old a claim must be before another choice may take it over (L3). A resolve is a handful of writes, each bounded by the
  * store's own deadline, so a claim this old belongs to a request that crashed or a `503` nobody retried — not one in flight.
  * Ten minutes rather than the write bound itself, because taking over a claim that IS in flight is the race the claim exists
- * to prevent.
+ * to prevent; and a slow resolver that is overtaken all the same stops at its next write and undoes its own.
  */
 export const RESOLVE_CLAIM_STALE_MS = 10 * 60_000;
 
 /**
- * The candidates this choice may claim: one nobody has claimed, one already claimed — resolving or resolved — by the SAME
- * choice, or one whose claim is older than {@link RESOLVE_CLAIM_STALE_MS} and not closed. A resolved candidate from before
- * the claim existed carries no `resolving`, so its choice is read from what it recorded (`sameResolved`).
+ * The candidates this choice may claim: one nobody has claimed, one already claimed by the SAME choice, or one whose claim is
+ * older than {@link RESOLVE_CLAIM_STALE_MS}. Never a resolved one: a resolved candidate is answered from what it recorded
+ * (`sameResolved`) and gets no claim, which a crash would otherwise leave on it for good.
  */
-function claimableBy(id: string, choice: ContradictionChoice, loserId: string | undefined): Record<string, unknown> {
+function claimableBy(id: string, choice: ContradictionChoice): Record<string, unknown> {
   const staleBefore = new Date(Date.now() - RESOLVE_CLAIM_STALE_MS).toISOString();
   return {
     _id: id,
+    status: { $ne: 'resolved' },
     $or: [
-      { status: { $ne: 'resolved' }, resolving: { $exists: false } },
+      { resolving: { $exists: false } },
       sameClaim(choice),
-      sameResolved(choice, loserId),
       // `$not: {$gte}` also takes a claim with no time on it, which only an unreleased build wrote.
-      { status: { $ne: 'resolved' }, 'resolving.at': { $not: { $gte: staleBefore } } },
+      { 'resolving.at': { $not: { $gte: staleBefore } } },
     ],
   };
 }
 
 /** The candidate's claim is this choice. `null` matches an absent winner, which is how `edited` and `linked` are stored. */
 const sameClaim = (choice: ContradictionChoice) => ({ 'resolving.resolution': choice.resolution, 'resolving.winner': choice.winner ?? null });
+const isSameChoice = (claim: ContradictionChoice | undefined, choice: ContradictionChoice) =>
+  claim !== undefined && claim.resolution === choice.resolution && (claim.winner ?? null) === (choice.winner ?? null);
 
 /** The candidate is already closed by this choice: its resolution, and for `superseded` the same loser. */
 const sameResolved = (choice: ContradictionChoice, loserId: string | undefined) =>
   ({ status: 'resolved', resolution: choice.resolution, supersededId: loserId ?? null });
+
+/**
+ * Undo exactly what a claim recorded: delete the edge it drew, lift the mark it set — through the writers, so each travels and
+ * is audited. Nothing a claim did not record is ever deleted or lifted: a mark set by hand or by another pair, an edge drawn
+ * by hand, are not this pair's to take back. Returns what was undone, or `undefined` when nothing was.
+ */
+async function undoClaim(req: express.Request, spaceId: string, type: ContradictionCandidateDoc['type'], wrote: ClaimWrote | undefined): Promise<ClaimWrote | undefined> {
+  if (!wrote) return undefined;
+  const undone: ClaimWrote = {};
+  if (wrote.edgeId && await deleteEdge(spaceId, wrote.edgeId, webhookToken(req))) undone.edgeId = wrote.edgeId;
+  if (wrote.markedId && canBeRetired(type) && await reinstateRecord(spaceId, type, wrote.markedId, webhookToken(req))) undone.markedId = wrote.markedId;
+  return undone.edgeId || undone.markedId ? undone : undefined;
+}
+
+/** The undo of an unfinished resolve, as a note naming what it took back. */
+function undoneNote(undone: ClaimWrote): ContradictionResolveNote {
+  const parts = [undone.edgeId ? `its edge '${undone.edgeId}' was deleted` : '', undone.markedId ? `the mark on '${undone.markedId}' was lifted` : '']
+    .filter(Boolean);
+  return { code: 'oppositeChoiceUndone', detail: `an unfinished resolve of this pair was undone first: ${parts.join(' and ')}` };
+}
 
 /** Refuse a resolve whose choice differs from the one the candidate is already resolving or resolved by: `409 resolvedOtherwise`. */
 async function answerResolvedOtherwise(res: express.Response, spaceId: string, id: string, written?: Written): Promise<void> {
@@ -295,7 +342,7 @@ async function answerResolvedOtherwise(res: express.Response, spaceId: string, i
   res.status(409).json({
     error: `this contradiction is already ${now.resolving ? 'being resolved' : 'resolved'} otherwise (as '${taken.resolution}'`
       + `${taken.winner ? `, keeping ${taken.winner}` : ''}); `
-      + (written ? 'what this request wrote before its claim was taken over is in `written`' : 'nothing was written by this request'),
+      + (written ? 'what this request wrote, and undid, is in `written`' : 'nothing was written by this request'),
     code: 'resolvedOtherwise', retryable: false, resolution: taken.resolution,
     ...(taken.winner ? { winner: taken.winner } : {}),
     ...(written ? { written } : {}),
@@ -324,28 +371,26 @@ function linkRefusedNote(err: EdgeSchemaViolation): ContradictionResolveNote {
   };
 }
 
-/**
- * Undo what the OPPOSITE choice about this pair left behind, before the standing choice writes (L3): its `supersedes` edge
- * (loser → winner) and its mark on the record now kept.
- *
- * Only an abandoned claim can have left them — a fresh or closed claim of the other choice refuses this request at the claim —
- * once it was taken over as stale, or released by a dismiss or reopen. Without this the space held both judgements: two
- * opposite edges, and both records marked superseded.
- *
- * The mark is taken off only when no OTHER record's `supersedes` edge points at the kept record: a mark that another
- * resolve or a hand-drawn edge explains is not this pair's to undo. A mark with no edge behind it from either (a link the
- * schema refused) is taken off — the one case this cannot tell apart from another pair's refused link, stated rather than hidden.
- */
-async function overruleOppositeChoice(
-  req: express.Request, spaceId: string, type: ContradictionCandidateDoc['type'], winnerId: string, loserId: string, winnerMarked: boolean,
+/** The pair's ends as stored: whether each exists and carries the mark. A soft-deleted file's row is gone for this question. */
+type Stored = Map<string, { _id: string; superseded?: boolean }>;
+
+/** A resolve whose candidate is already resolved by the same choice: answered from what it recorded, writing nothing. */
+async function answerAlreadyResolved(
+  res: express.Response, spaceId: string, now: ContradictionCandidateDoc, choice: ContradictionChoice, stored: Stored, edgeId: string | undefined,
 ): Promise<void> {
-  const edges = col<{ _id: string; from: string; to: string; label: string }>(spaceCollection(spaceId, 'edges'));
-  const opposite = await edges.find(asFilter<{ _id: string }>({ from: loserId, to: winnerId, label: SUPERSEDES_LABEL }),
-    { projection: { _id: 1 } }).toArray();
-  for (const e of opposite) await deleteEdge(spaceId, e._id, webhookToken(req));
-  if (!winnerMarked || !canBeRetired(type)) return;
-  const explained = await edges.countDocuments(asFilter<{ _id: string }>({ to: winnerId, label: SUPERSEDES_LABEL, from: { $ne: loserId } }), { limit: 1 });
-  if (explained === 0) await reinstateRecord(spaceId, type, winnerId, webhookToken(req));
+  const superseding = choice.resolution === 'superseded';
+  const e = edgeId ? await col<{ _id: string; from: string; to: string; label: string }>(spaceCollection(spaceId, 'edges'))
+    .findOne(asFilter<{ _id: string }>({ _id: edgeId }), { projection: { _id: 1, from: 1, to: 1, label: 1 } }) : null;
+  const notes = now.notes ?? [];
+  res.json({
+    status: 'resolved', resolution: choice.resolution,
+    ...(now.resolvedBy ? { resolvedBy: now.resolvedBy } : {}),
+    ...(now.supersededId ? { supersededId: now.supersededId } : {}),
+    ...(e ? { edge: { id: e._id, from: e.from, to: e.to, label: e.label } } : {}),
+    ...(superseding ? { markedRecord: stored.get(now.supersededId ?? '')?.superseded === true } : {}),
+    notes,
+    ...(notes.length > 0 ? { note: notes.map(n => n.detail).join('; ') } : {}),
+  });
 }
 
 async function resolveCandidate(
@@ -355,60 +400,96 @@ async function resolveCandidate(
   const superseding = choice.resolution === 'superseded';
   const winnerId = choice.winner === 'a' ? doc.aId : doc.bId;
   const loserId = choice.winner === 'a' ? doc.bId : doc.aId;
+  // The edge's id is its identity (`edgeIdFor`), so it is known — and recorded on the claim — before it is drawn.
+  const kind = isRefKind(doc.type) && doc.type !== 'entity' ? doc.type : undefined;
+  const edgeId = superseding && isRefKind(doc.type) ? edgeIdFor(winnerId, loserId, SUPERSEDES_LABEL, kind, kind) : undefined;
 
-  // 1. The pair as stored now: whether each end exists, and whether the loser already carries the mark. A soft-deleted
-  //    file's row is gone for this question, as it is for the edge writer's own existence check.
-  const stored = superseding
-    ? await readStoredById<{ _id: string; superseded?: boolean }>(spaceCollection(spaceId, COLLECTION[doc.type]),
-      [winnerId, loserId], { [RECORD_SUPERSEDED_FIELD]: 1 }, { filter: notFlaggedIfFile(doc.type) })
-    : new Map<string, { _id: string; superseded?: boolean }>();
+  // 1. The pair as stored now: whether each end exists, and whether the loser already carries the mark.
+  const readPair = (): Promise<Stored> => readStoredById<{ _id: string; superseded?: boolean }>(spaceCollection(spaceId, COLLECTION[doc.type]),
+    [winnerId, loserId], { [RECORD_SUPERSEDED_FIELD]: 1 }, { filter: notFlaggedIfFile(doc.type) });
+  const stored: Stored = superseding ? await readPair() : new Map();
 
-  // 2. The claim, before the first effect: a different choice is refused here, having written nothing.
-  const claimed = await coll.updateOne(
-    asFilter<ContradictionCandidateDoc>(claimableBy(doc._id, choice, superseding ? loserId : undefined)),
-    asUpdate<ContradictionCandidateDoc>({ $set: { resolving: { ...choice, at: new Date().toISOString() }, updatedAt: new Date().toISOString() } }),
-  );
-  if (claimed.matchedCount === 0) { await answerResolvedOtherwise(res, spaceId, doc._id); return; }
+  /** The candidate as it is now, answered: already resolved by this choice → 200 from its record; anything else → 409. */
+  const answerTaken = async (written?: Written): Promise<boolean> => {
+    const now = await coll.findOne(asFilter<ContradictionCandidateDoc>({ _id: doc._id, ...sameResolved(choice, superseding ? loserId : undefined) }));
+    if (now) { await answerAlreadyResolved(res, spaceId, now, choice, stored, edgeId); return true; }
+    await answerResolvedOtherwise(res, spaceId, doc._id, written);
+    return false;
+  };
+
+  // 2. The claim, before the first effect: a different choice is refused here, having written nothing. The candidate as it
+  //    was BEFORE the claim says whether this took over another choice's abandoned claim, and what that claim recorded.
+  const at = new Date().toISOString();
+  const before = await coll.findOneAndUpdate(
+    asFilter<ContradictionCandidateDoc>(claimableBy(doc._id, choice)),
+    asUpdate<ContradictionCandidateDoc>({ $set: { resolving: { ...choice, at }, updatedAt: at } }),
+    { returnDocument: 'before' },
+  ) as ContradictionCandidateDoc | null;
+  if (!before) { await answerTaken(); return; }
 
   const written: Written = { edge: false, markedRecord: false, closed: false };
   const notes: ContradictionResolveNote[] = [];
+  /** What THIS request recorded and wrote, which it undoes itself if it loses its claim. */
+  const mine: ClaimWrote = {};
+  /** Record `entry` on the claim, under it: the effect after this lands only while this request still holds the claim. */
+  const record = async (entry: ClaimWrote): Promise<void> => {
+    const r = await coll.updateOne(asFilter<ContradictionCandidateDoc>({ _id: doc._id, ...sameClaim(choice) }),
+      asUpdate<ContradictionCandidateDoc>({ $set: Object.fromEntries(Object.entries(entry).map(([k, v]) => [`resolving.wrote.${k}`, v])) }));
+    if (r.matchedCount === 0) throw new ClaimLost();
+  };
   let edge: { id: string; from: string; to: string; label: string } | null = null;
   try {
+    const prior = before.resolving;
+    if (prior && isSameChoice(prior, choice)) {
+      // The same choice's earlier claim (a retry, or a second request at once): what it recorded stays on the claim, so a
+      // later takeover still undoes all of it.
+      if (prior.wrote) await record(prior.wrote);
+    } else if (prior) {
+      // 2b. Another choice's claim, stale: undo exactly what it recorded, and say so.
+      const undone = await undoClaim(req, spaceId, doc.type, prior.wrote);
+      if (undone) { written.undone = undone; notes.push(undoneNote(undone)); }
+    }
+
     if (superseding) {
-      const winner = stored.get(winnerId);
-      const loser = stored.get(loserId);
+      // Re-read after an undo: the record the abandoned claim marked may be the one this choice keeps.
+      const now = written.undone?.markedId ? await readPair() : stored;
+      const winner = now.get(winnerId);
+      const loser = now.get(loserId);
       if (!winner) notes.push({ code: 'winnerGone', detail: `no edge drawn: the record kept, '${winnerId}', no longer exists` });
       if (!loser) notes.push({ code: 'loserGone', detail: `nothing marked and no edge drawn: the record judged stale, '${loserId}', no longer exists` });
 
       /*
-       * 3. The edge. from → to reads "winner supersedes loser", and `upsertEdge` is keyed on (from, to, label), so
-       * resolving the same choice again lands on the same edge.
+       * 3. The edge. from → to reads "winner supersedes loser", keyed on (from, to, label), so resolving the same choice
+       * again lands on the same edge. An edge that is already there — drawn by hand, or by this choice's earlier claim — is
+       * reported and not written again, and only an edge this request draws is recorded as the claim's.
        *
-       * DRAWN FOR EVERY PAIR KIND SINCE 5.0, because the walk follows an edge to a fact, chrono entry or file — which is
-       * the whole of what makes the edge half of this worth drawing. WHICH kinds can be an endpoint is `REF_KINDS`, read
-       * rather than restated: an EDGE is not among them, and cannot be. The scanner's defaults are facts, entities and
-       * chrono entries, but `contradictions.types` is configurable, so an edge pair reaches here; it keeps the judgement
-       * and says why there is no link (`edgePairUnlinkable`). Omitting the kinds means both ends are entities.
+       * DRAWN FOR EVERY PAIR KIND SINCE 5.0, because the walk follows an edge to a fact, chrono entry or file. WHICH kinds can
+       * be an endpoint is `REF_KINDS`: an EDGE is not among them. `contradictions.types` is configurable, so an edge pair
+       * reaches here; it keeps the judgement and says why there is no link (`edgePairUnlinkable`).
        *
        * Only the writer's own refusal is caught: a store failure, a lost race (`WriteConflict`) or a held space is not a
        * refusal, and taking one for `linkRefused` would close the candidate on a link that could have been drawn.
        */
-      // The claim can have been taken over from an abandoned opposite choice, or released by a dismiss or reopen after one
-      // wrote: its edge and mark are undone first, so the pair never holds two opposite judgements (L3).
-      if (winner && loser) await overruleOppositeChoice(req, spaceId, doc.type, winnerId, loserId, winner.superseded === true);
-
       if (winner && loser) {
-        if (isRefKind(doc.type)) {
-          const kind = doc.type === 'entity' ? undefined : doc.type;
-          try {
-            const e = await upsertEdge(spaceId, winnerId, loserId, SUPERSEDES_LABEL,
-              undefined, undefined, undefined, undefined, undefined, webhookToken(req),
-              undefined, { fromKind: kind, toKind: kind });
-            edge = { id: e._id, from: e.from, to: e.to, label: e.label };
+        if (edgeId) {
+          const edges = col<{ _id: string; from: string; to: string; label: string }>(spaceCollection(spaceId, 'edges'));
+          const there = await edges.findOne(asFilter<{ _id: string }>({ _id: edgeId }), { projection: { _id: 1, from: 1, to: 1, label: 1 } });
+          if (there) {
+            edge = { id: there._id, from: there.from, to: there.to, label: there.label };
             written.edge = true;
-          } catch (err) {
-            if (!(err instanceof EdgeSchemaViolation)) throw err;
-            notes.push(linkRefusedNote(err));
+          } else {
+            await record({ edgeId });
+            mine.edgeId = edgeId;
+            try {
+              const e = await upsertEdge(spaceId, winnerId, loserId, SUPERSEDES_LABEL,
+                undefined, undefined, undefined, undefined, undefined, webhookToken(req),
+                undefined, { fromKind: kind, toKind: kind });
+              edge = { id: e._id, from: e.from, to: e.to, label: e.label };
+              written.edge = true;
+            } catch (err) {
+              if (!(err instanceof EdgeSchemaViolation)) throw err;
+              notes.push(linkRefusedNote(err));
+            }
           }
         } else {
           notes.push({ code: 'edgePairUnlinkable', detail: `no edge drawn: an edge cannot be the endpoint of an edge, and this pair is of type '${doc.type}'` });
@@ -418,10 +499,16 @@ async function resolveCandidate(
       /*
        * 4. THE MARK GOES ON THE RECORD (`Q-35`). `supersededId` names the loser on the CANDIDATE, which no retrieval path
        * reads, so a resolve that stopped there changed nothing the next recall answered. The loser keeps its vector and
-       * keeps ranking — see `RECORD_SUPERSEDED_FIELD`. A loser already marked is not written again.
+       * keeps ranking — see `RECORD_SUPERSEDED_FIELD`. A loser already marked is not written again, and not recorded: the
+       * mark is not this request's to take back.
        */
       if (loser && canBeRetired(doc.type)) {
-        written.markedRecord = loser.superseded === true || await retireRecord(spaceId, doc.type, loserId, webhookToken(req));
+        if (loser.superseded === true) written.markedRecord = true;
+        else {
+          await record({ markedId: loserId });
+          mine.markedId = loserId;
+          written.markedRecord = await retireRecord(spaceId, doc.type, loserId, webhookToken(req));
+        }
       }
     }
 
@@ -438,7 +525,7 @@ async function resolveCandidate(
       asFilter<ContradictionCandidateDoc>({ _id: doc._id, $or: [sameClaim(choice), sameResolved(choice, superseding ? loserId : undefined)] }),
       asUpdate<ContradictionCandidateDoc>({ $set: set, $unset: { resolving: '', ...(notes.length > 0 ? {} : { notes: '' }) } }),
     );
-    if (closed.matchedCount === 0) { await answerResolvedOtherwise(res, spaceId, doc._id, written); return; }
+    if (closed.matchedCount === 0) throw new ClaimLost();
     written.closed = true;
 
     res.json({
@@ -450,12 +537,34 @@ async function resolveCandidate(
       // nowhere else is the defect `Q-35` ended, and a response that claimed the mark unconditionally would hide its return.
       ...(superseding ? { markedRecord: written.markedRecord } : {}),
       notes,
+      ...(written.undone ? { written } : {}),
       // The notes' sentences as one string, for a client older than `notes`.
       ...(notes.length > 0 ? { note: notes.map(n => n.detail).join('; ') } : {}),
     });
   } catch (err) {
+    if (err instanceof ClaimLost) {
+      // Closed by the same choice meanwhile: what this request wrote is that choice's too, and stays.
+      const sameNow = await coll.findOne(asFilter<ContradictionCandidateDoc>({ _id: doc._id, ...sameResolved(choice, superseding ? loserId : undefined) }));
+      if (sameNow) { await answerAlreadyResolved(res, spaceId, sameNow, choice, stored, edgeId); return; }
+      // Taken over by another choice, or released: take back what this request wrote, so its judgement is not left beside
+      // the standing one, and say what it wrote and undid.
+      const undone = await undoClaim(req, spaceId, doc.type, mine);
+      if (undone) written.undone = undone;
+      await answerResolvedOtherwise(res, spaceId, doc._id, written);
+      return;
+    }
     if (!sendPartWayFailure(res, err, written)) throw err;
   }
+}
+
+/**
+ * Release a candidate's claim and undo exactly what it recorded (dismiss, reopen): the claim is taken off atomically FIRST, so
+ * a resolver still holding it stops at its next write and undoes its own, and two releases cannot both undo. Returns the note
+ * saying what was undone, if anything.
+ */
+async function releaseClaim(req: express.Request, spaceId: string, released: ContradictionCandidateDoc | null): Promise<ContradictionResolveNote[]> {
+  const undone = released?.resolving ? await undoClaim(req, spaceId, released.type, released.resolving.wrote) : undefined;
+  return undone ? [undoneNote(undone)] : [];
 }
 
 // POST /api/contradictions/scan?space=<id> — run the sweep now instead of waiting for the schedule.

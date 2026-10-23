@@ -2126,6 +2126,11 @@ export interface ContradictionChoice {
  */
 export interface ContradictionClaim extends ContradictionChoice {
   at: string;
+  /**
+   * What this claim's resolve wrote, each entry set under the claim just BEFORE its effect: the `supersedes` edge it drew and
+   * the record it marked. A takeover, dismiss or reopen undoes exactly these, and nothing a claim did not record.
+   */
+  wrote?: { edgeId?: string; markedId?: string };
 }
 
 /**
@@ -2138,9 +2143,11 @@ export interface ContradictionClaim extends ContradictionChoice {
  *   `winnerGone`          the record the reviewer kept no longer exists, so no edge was drawn from it
  *   `loserGone`           the record the reviewer judged stale no longer exists: nothing to mark and no edge
  *   `edgePairUnlinkable`  the pair are edges, and an edge cannot be the endpoint of an edge
+ *   `oppositeChoiceUndone` an unfinished resolve of the pair (taken over as stale, or released by a dismiss or reopen) was
+ *                         undone: exactly the edge it drew and the mark it set, named in `detail`
  */
 export interface ContradictionResolveNote {
-  code: 'linkRefused' | 'winnerGone' | 'loserGone' | 'edgePairUnlinkable';
+  code: 'linkRefused' | 'winnerGone' | 'loserGone' | 'edgePairUnlinkable' | 'oppositeChoiceUndone';
   detail: string;
   /** The edge label the refused link carried. */
   label?: string;

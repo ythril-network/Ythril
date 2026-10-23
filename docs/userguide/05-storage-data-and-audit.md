@@ -287,10 +287,11 @@ Once you confirm, the request is accepted at once and the work runs in the backg
 2. Each space's data is replaced with the backup's, and **every index the space has is built again**: the search
    indexes, the ones that keep the retention sweep from reading every record of a collection, and the unique ones that
    stop the same edge, the same link, or two edges under a one-per-subject label, being stored twice by writers working
-   at the same moment. Its sequence counter is kept above every number this instance already handed out. A unique index
-   that cannot be built stops that space's part of the restore: the space keeps refusing writes, the server log names the
-   index that failed, and the space is tried again on its own. An index that only makes reads faster and cannot be built is named in
-   the server log, and the space is restored without it until it is built.
+   at the same moment. Its sequence counter is kept above every number this instance already handed out. An index that
+   cannot be built stops that space's part of the restore - every index except two kinds, and every unique one, the
+   one-per-subject lock included: the space keeps refusing writes, the server log names the index that failed, and the
+   space is tried again on its own. The two kinds a space is restored without, each named in the server log, are the
+   retention sweep's indexes (the next sweep cycle builds them) and the keyword index of search (`lexical_text`).
 3. Each space asks its peers again for what reached this instance after the backup was taken: the peers send it back.
 4. When the last space is done, maintenance ends. A restart in the middle resumes where it stopped.
 
@@ -686,9 +687,12 @@ Lines of other jobs follow the same shape; the ones whose wording is worth knowi
   only sign of it); `ttl_…` keeps the retention sweep from reading every record. `lexical_text`, the keyword half of
   search, is never one of these lines: when it cannot be built the server says so once as a warning (`Space '<id>':
   index lexical_text on <collection> not built - hybrid search falls back to vector-only for it`), at set-up and in the
-  background pass alike, and search falls back to meaning alone. The edge identity and link indexes, which refuse
-  the same edge or link stored twice, stop the space being set up (`space init`) or restored instead when they cannot
-  be built.
+  background pass alike, and search falls back to meaning alone. At set-up, the `Space indexes` line is only for the
+  one-per-subject lock and the retention sweep's indexes: every other index of a space - the edge identity and link
+  indexes, the type, tag and name indexes, the job queues' and the file tombstones' indexes, and the sync indexes of a
+  collection created at that moment - stops the space being set up instead (`space init`), and stops a restore of the
+  space too (see [Restore](#restore), which also requires the lock). In the background pass every index but
+  `lexical_text` is said as a `query indexes` line, and the space keeps working.
 - `Edge indexes failed for space '<id>' (guard index) (count: N): … — retried at once`: duplicate locks stopped the
   build of that lock index; the surplus locks were cleared and the build tried again.
 - `Functional guard heal failed for space '<id>' (<edge id>): … — retried at once`: a write found a leftover lock on an

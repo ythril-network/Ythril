@@ -53,6 +53,8 @@ const NOTES: Note[] = [
   { code: 'loserGone', detail: DETAIL },
   // A pair of edges (a scanner configured to cover them): no edge can join two edges, and the judgement is kept.
   { code: 'edgePairUnlinkable', detail: DETAIL },
+  // An unfinished resolve of the pair was undone first: exactly the edge it drew and the mark it set.
+  { code: 'oppositeChoiceUndone', detail: DETAIL },
 ];
 const placeholdersOf = (note: Record<string, string>) => Object.keys(note).filter(k => k !== 'code' && k !== 'detail');
 

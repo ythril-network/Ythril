@@ -34,7 +34,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, ADMIN_TOKEN, build } from './_push-door.mjs';
-import { failWrites } from './_write-faults.mjs';
+import { failWrites, parkWrites } from './_write-faults.mjs';
 import { ASYNC_MUTATORS } from './_document-mutators.mjs';
 import { callRouteAfterAuth } from './_route-after-auth.mjs';
 
@@ -59,6 +59,10 @@ const SPACES = {
   'stale-claim': {},
   'fresh-claim': {},
   'claim-on-wire': {},
+  'stale-edited': {},
+  'hand-set': {},
+  'slow-original': {},
+  'resolved-again': {},
 };
 const space = (name) => `q442-${name}`;
 
@@ -254,9 +258,19 @@ describe('a contradiction resolve keeps the judgement and converges', { skip }, 
   });
 
   describe('a claim nobody finishes does not pin the choice for ever (L3)', () => {
-    /** Put a claim for `winner` on the candidate, taken `ageMs` ago, as a resolve that stopped after the claim leaves it. */
-    const claim = (sp, candidateId, winner, ageMs, status = 'open') => door.coll(sp, 'contradiction_candidates').updateOne({ _id: candidateId },
-      { $set: { status, resolving: { resolution: 'superseded', winner, at: new Date(Date.now() - ageMs).toISOString() } } });
+    /**
+     * Put a claim for `winner` on the candidate, taken `ageMs` ago, as a resolve that stopped after the claim leaves it — with
+     * `wrote`, what that resolve recorded it was about to write (an edge id, a marked record id).
+     */
+    const claim = (sp, candidateId, winner, ageMs, status = 'open', wrote) => door.coll(sp, 'contradiction_candidates').updateOne({ _id: candidateId },
+      { $set: { status, resolving: { resolution: 'superseded', winner, at: new Date(Date.now() - ageMs).toISOString(), ...(wrote ? { wrote } : {}) } } });
+    /** What the abandoned resolve keeping `a` wrote: its edge a -> b and its mark on b. Returns the claim's `wrote`. */
+    const abandonedEffects = async ({ sp, coll, ids }, edgeId) => {
+      await door.coll(sp, 'edges').insertOne(build.edge(sp, edgeId, 40, { from: ids.a, to: ids.b, label: LABEL }));
+      await door.coll(sp, coll).updateOne({ _id: ids.b }, { $set: { superseded: true } });
+      return { edgeId, markedId: ids.b };
+    };
+    const staleMs = async () => (await import('../../server/dist/api/contradictions.js')).RESOLVE_CLAIM_STALE_MS + 60_000;
 
     it('the claim is on the wire, so a reviewer can see the pair is being resolved', { timeout: 60_000 }, async () => {
       const { sp, candidateId } = await seedPair('claim-on-wire', 'fact');
@@ -279,13 +293,14 @@ describe('a contradiction resolve keeps the judgement and converges', { skip }, 
     it('a claim older than the bound is taken over by another choice, and the abandoned choice\'s edge and mark go with it', { timeout: 60_000 }, async () => {
       const { RESOLVE_CLAIM_STALE_MS } = await import('../../server/dist/api/contradictions.js');
       assert.equal(typeof RESOLVE_CLAIM_STALE_MS, 'number', 'the stale bound is not exported');
-      const { sp, coll, ids, candidateId } = await seedPair('stale-claim', 'fact');
-      // What the abandoned resolve (keep a) had written before it stopped: its edge and its mark.
-      await door.coll(sp, 'edges').insertOne(build.edge(sp, 'stale-claim-abandoned', 40, { from: ids.a, to: ids.b, label: LABEL }));
-      await door.coll(sp, coll).updateOne({ _id: ids.b }, { $set: { superseded: true } });
-      await claim(sp, candidateId, 'a', RESOLVE_CLAIM_STALE_MS + 60_000);
+      const seeded = await seedPair('stale-claim', 'fact');
+      const { sp, coll, ids, candidateId } = seeded;
+      // What the abandoned resolve (keep a) had written before it stopped, and recorded on its claim: its edge and its mark.
+      const wrote = await abandonedEffects(seeded, 'stale-claim-abandoned');
+      await claim(sp, candidateId, 'a', RESOLVE_CLAIM_STALE_MS + 60_000, 'open', wrote);
       const res = await resolve(candidateId, 'b');
       assert.equal(res.code, 200, `a stale claim was not taken over: ${res.code} ${JSON.stringify(res.body)}`);
+      assert.ok(codes(res.body).includes('oppositeChoiceUndone'), `the undo is not reported: ${JSON.stringify(res.body)}`);
       const edges = await edgesBetween(sp, ids);
       assert.deepEqual(edges.map(e => [e.from, e.to]), [[ids.b, ids.a]], 'the space does not hold exactly the standing choice\'s edge');
       const flags = await Promise.all([ids.a, ids.b].map(id => record(sp, coll, id).then(d => d?.superseded === true)));
@@ -295,12 +310,78 @@ describe('a contradiction resolve keeps the judgement and converges', { skip }, 
       assert.equal(cand.resolving, undefined, 'the closed candidate still carries a claim');
     });
 
-    it('dismissing releases a claim', { timeout: 60_000 }, async () => {
-      const { sp, candidateId } = await seedPair('dismiss-releases', 'fact');
-      await claim(sp, candidateId, 'a', 0);
+    it('dismissing releases a claim, and undoes what it recorded', { timeout: 60_000 }, async () => {
+      const seeded = await seedPair('dismiss-releases', 'fact');
+      const { sp, coll, ids, candidateId } = seeded;
+      await claim(sp, candidateId, 'a', 0, 'open', await abandonedEffects(seeded, 'dismiss-releases-abandoned'));
       const res = await callRouteAfterAuth(router, 'post', '/:id/dismiss', { params: { id: candidateId }, authToken: ADMIN_TOKEN });
       assert.equal(res.code, 200, JSON.stringify(res.body));
       assert.equal((await candidate(sp, candidateId)).resolving, undefined, 'the dismissed candidate still carries the claim');
+      assert.deepEqual(await edgesBetween(sp, ids), [], 'the released claim\'s edge is still stored');
+      assert.notEqual((await record(sp, coll, ids.b))?.superseded, true, 'the released claim\'s mark is still on the record');
+      assert.ok(codes(res.body).includes('oppositeChoiceUndone'), `the dismiss does not report the undo: ${JSON.stringify(res.body)}`);
+    });
+
+    it('a stale claim that recorded an edge and a mark, taken over by `edited`: both undone, and the answer says so', { timeout: 60_000 }, async () => {
+      const seeded = await seedPair('stale-edited', 'fact');
+      const { sp, coll, ids, candidateId } = seeded;
+      await claim(sp, candidateId, 'a', await staleMs(), 'open', await abandonedEffects(seeded, 'stale-edited-abandoned'));
+      const res = await callRouteAfterAuth(router, 'post', '/:id/resolve', { params: { id: candidateId }, body: { resolution: 'edited' }, authToken: ADMIN_TOKEN });
+      assert.equal(res.code, 200, `the stale claim was not taken over by edited: ${res.code} ${JSON.stringify(res.body)}`);
+      assert.deepEqual(await edgesBetween(sp, ids), [], 'the abandoned choice\'s edge survived the takeover');
+      assert.notEqual((await record(sp, coll, ids.b))?.superseded, true, 'the abandoned choice\'s mark survived the takeover');
+      assert.ok(codes(res.body).includes('oppositeChoiceUndone'), `the undo is not reported: ${JSON.stringify(res.body)}`);
+      assert.ok(res.body.written?.undone, `the undo is not counted in written: ${JSON.stringify(res.body)}`);
+    });
+
+    it('a first-time resolve leaves a hand-set mark on the record it keeps, and a hand-drawn opposite edge', { timeout: 60_000 }, async () => {
+      const { sp, coll, ids, candidateId } = await seedPair('hand-set', 'fact');
+      await door.coll(sp, coll).updateOne({ _id: ids.a }, { $set: { superseded: true } });
+      await door.coll(sp, 'edges').insertOne(build.edge(sp, 'hand-set-drawn', 40, { from: ids.b, to: ids.a, label: LABEL }));
+      const res = await resolve(candidateId, 'a');
+      assert.equal(res.code, 200, JSON.stringify(res.body));
+      assert.equal((await record(sp, coll, ids.a))?.superseded, true, 'a first-time resolve lifted a mark it never wrote');
+      assert.ok((await edgesBetween(sp, ids)).some(e => e._id === 'hand-set-drawn'), 'a first-time resolve deleted an edge it never drew');
+      assert.ok(!codes(res.body).includes('oppositeChoiceUndone'), `nothing was undone, yet the answer says so: ${JSON.stringify(res.body)}`);
+    });
+
+    it('a slow resolver whose claim is taken over before its edge cannot land that edge', { timeout: 60_000 }, async () => {
+      const { sp, coll, ids, candidateId } = await seedPair('slow-original', 'fact');
+      const candColl = door.coll(sp, 'contradiction_candidates');
+      const park = parkWrites(Object.getPrototypeOf(candColl));
+      let slow;
+      try {
+        // Park the slow resolver's edge write: its claim is taken, its edge not yet stored.
+        const parked = park.arm(door.coll(sp, 'edges').collectionName);
+        slow = resolve(candidateId, 'a');
+        await parked.reached;
+        // Its claim goes stale and another choice takes it over and finishes.
+        await candColl.updateOne({ _id: candidateId }, { $set: { 'resolving.at': new Date(Date.now() - await staleMs()).toISOString() } });
+        const takeover = await resolve(candidateId, 'b');
+        assert.equal(takeover.code, 200, `the takeover failed: ${takeover.code} ${JSON.stringify(takeover.body)}`);
+        parked.release();
+        await slow;
+      } finally {
+        park.restore();
+      }
+      const late = await slow;
+      assert.equal(late.code, 409, `the slow resolver went on after its claim was taken over: ${late.code} ${JSON.stringify(late.body)}`);
+      assert.deepEqual((await edgesBetween(sp, ids)).map(e => [e.from, e.to]), [[ids.b, ids.a]], 'the slow resolver landed its edge after the takeover');
+      const flags = await Promise.all([ids.a, ids.b].map(id => record(sp, coll, id).then(d => d?.superseded === true)));
+      assert.deepEqual(flags, [true, false], 'the slow resolver landed its mark after the takeover');
+    });
+
+    it('a same-choice resolve on a resolved candidate writes no claim', { timeout: 60_000 }, async () => {
+      const { sp, candidateId } = await seedPair('resolved-again', 'fact');
+      assert.equal((await resolve(candidateId, 'a')).code, 200);
+      // Any write it attempted to the edges would fail; a resolve that writes nothing never meets it.
+      const fired = failEveryWriteTo(`${sp}_edges`);
+      let again;
+      try { again = await resolve(candidateId, 'a'); } finally { faults.clear(); }
+      assert.equal(again.code, 200, `a same-choice resolve on a resolved candidate was answered ${again.code}: ${JSON.stringify(again.body)}`);
+      assert.equal(fired(), 0, 'the same-choice resolve on a resolved candidate wrote an edge');
+      assert.equal((await candidate(sp, candidateId)).resolving, undefined, 'the resolved candidate was given a claim');
+      assert.equal(again.body.markedRecord, true, JSON.stringify(again.body));
     });
 
     it('reopening releases a claim, and the other choice can then be taken', { timeout: 60_000 }, async () => {

@@ -143,4 +143,68 @@ describe('a failing space index is contained and named (real MongoDB)', { skip }
     await ensureQueryIndexes();
     assert.deepEqual(findings, [], `a refused best-effort index in the background pass: ${findings.join('; ')}`);
   });
+
+  // Added by the bundle-101 re-review (Q4): a best-effort failure that is the STORE not answering is not the index's. Swallowed
+  // into the once-only warning, it burned that warning on a dead store and hid the store's condition from the walk whenever the
+  // best-effort index was the last thing a space built. The rule: such a failure reaches the walk (its stop line), no "not built"
+  // warning is said for it, and a later real refusal of the same index is still warned.
+  it('a best-effort build that meets a store that is not answering is the walk\'s verdict, and does not use up the warning', T, async () => {
+    const { MongoNetworkError } = await import('mongodb');
+    const declared = await requireSpaceIndexDeclaration(assert);
+    const e = declared.find(d => d.policy === 'best-effort');
+    assert.ok(e, 'the declaration holds no best-effort index');
+    await dropSpaceIndexes(db, 'walked');
+    fault.fail(`walked_${e.suffix}`, e.spec.name, new MongoNetworkError('connection closed by the test'));
+    const down = (await logLinesDuring(() => ensureQueryIndexes())).lines;
+    const firedDown = fault.fired();
+    fault.fail(`walked_${e.suffix}`, e.spec.name, refusal);
+    const refused = (await logLinesDuring(() => ensureQueryIndexes())).lines;
+    const firedRefused = fault.fired();
+    fault.clear();
+    await ensureQueryIndexes();
+    const findings = [];
+    if (firedDown === 0 || firedRefused === 0) findings.push(`the build was not tried (${firedDown}, ${firedRefused})`);
+    if (named(down, 'walked', e.spec.name) && down.some(l => /not built/.test(l))) findings.push('a dead store was said as the index not being built');
+    if (!down.some(l => /query indexes stopped: the store is not answering/.test(l)) && !down.some(l => /store is not answering/.test(l))) {
+      findings.push('the walk did not hear that the store is not answering');
+    }
+    if (!named(refused, 'walked', e.spec.name)) findings.push('the real refusal after it was not warned: the dead store used up the warning');
+    assert.deepEqual(findings, [], findings.join('; '));
+  });
+
+  // Added by the bundle-101 re-review (Q3): the TTL sweep looks at every space's indexes at every tick, and the listing was
+  // unbounded; one space whose listing hangs held the tick, and with the job's single flight every later tick, so retention stopped
+  // for every space. The rule: a listing is bounded by the housekeeping figure, a hung one is that space's failure said through the
+  // walk, and the other spaces' sweep indexes are still built in the same tick.
+  it('a sweep tick whose index listing hangs for one space says that space and still indexes the others', T, async () => {
+    const { ensureSweepIndexes } = await import('../../server/dist/brain/ttl-sweep.js');
+    const bound = await import('../../server/dist/db/write-bound.js');
+    const proto = Object.getPrototypeOf(db.collection('x'));
+    const original = proto.listIndexes;
+    const hung = 'reference_facts';
+    let hangs = 0;
+    proto.listIndexes = function listIndexes(...args) {
+      if (this.collectionName === hung) { hangs++; return { toArray: () => new Promise(() => {}) }; }
+      return original.apply(this, args);
+    };
+    bound.setWriteBoundForTest({ housekeepingOpMs: 1500 });
+    await db.collection('walked_facts').dropIndex('ttl_expireAt').catch(() => {});
+    let lines = [];
+    let outcome;
+    try {
+      const run = logLinesDuring(() => ensureSweepIndexes());
+      outcome = await Promise.race([run.then(r => { lines = r.lines; return 'ended'; }), new Promise(r => setTimeout(() => r('hung'), 20_000))]);
+    } finally {
+      proto.listIndexes = original;
+      bound.setWriteBoundForTest(null);
+    }
+    const findings = [];
+    if (hangs === 0) findings.push('the tick never listed the hung collection');
+    if (outcome !== 'ended') findings.push('the tick did not end: one hung listing held it');
+    else {
+      if (!lines.some(l => l.includes("'reference'") && /TTL sweep: indexes/.test(l))) findings.push('no line names the space whose listing hung');
+      if (!(await indexesOfSpace(db, 'walked')).has('facts:ttl_expireAt')) findings.push('the other space\'s sweep index was not built in the same tick');
+    }
+    assert.deepEqual(findings, [], findings.join('; '));
+  });
 });

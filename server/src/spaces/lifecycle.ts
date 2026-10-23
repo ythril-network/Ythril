@@ -35,7 +35,7 @@ import { cancelEveryJobOfSpace } from '../files/media/job-queue.js';
 import { dropReplacedFileTombstoneIndexes, forgetFileTombstonesOf } from '../files/tombstones.js';
 import { forgetPathKeyedCache } from '../files/path-keyed-cache.js';
 import { retireEmbedWorkOfRemovedRows } from '../files/file-embed-work.js';
-import { buildSpaceIndexesAtInit } from './space-indexes.js';
+import { buildSpaceIndexesAtInit, forgetSpaceIndexWarnings } from './space-indexes.js';
 import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -769,6 +769,7 @@ function commitSpaceDeletion(spaceId: string, write: (apply: (cfg: Config) => vo
   forgetSpaceSearchIndexWaiters(spaceId);
   forgetMerkleLeaves(spaceId);
   forgetSpaceShape(spaceId);
+  forgetSpaceIndexWarnings(spaceId);
 }
 
 /** What a wipe clears: every knowledge collection, so a new one cannot be left behind by one. */
