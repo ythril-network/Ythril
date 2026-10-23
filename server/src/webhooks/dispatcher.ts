@@ -349,10 +349,13 @@ export function probePayload(at: Date = new Date()): WebhookEventPayload {
 /**
  * The tally behind `ythril_webhook_probes_total{outcome}`: a probe that recovered its subscription, one the sink refused, and one the sink
  * answered whose recovery matched nothing (`superseded`: the subscription was disabled, its URL changed or it was recovered otherwise
- * while the probe was in flight). Every probe sent is counted under exactly one.
+ * while the probe was in flight), and `error`: the delivery threw, or the recovery write threw after the sink answered (the error itself
+ * is said by the probe step). Every probe whose delivery was started is counted under exactly one; a probe whose subscription could
+ * not be read was never sent and is not counted.
  */
-const probeOutcomes = { recovered: 0, failed: 0, superseded: 0 };
-export function webhookProbeCounts(): Readonly<{ recovered: number; failed: number; superseded: number }> {
+type ProbeOutcome = 'recovered' | 'failed' | 'superseded' | 'error';
+const probeOutcomes: Record<ProbeOutcome, number> = { recovered: 0, failed: 0, superseded: 0, error: 0 };
+export function webhookProbeCounts(): Readonly<Record<ProbeOutcome, number>> {
   return { ...probeOutcomes };
 }
 
@@ -385,20 +388,26 @@ async function probeOne(
 ): Promise<void> {
   const sub = await getWebhook(id);
   if (!sub) return; // deleted since the claim
-  const delivery = deliverProbe(sub, JSON.stringify(probePayload()), 'test.ping', '_test', uuidv4());
-  started();
-  const result = await delivery;
-  if (!result.success) {
-    probeOutcomes.failed++;
-    sayDeliveryFailureOnce('probe', id, () => { log.warn(`Webhook probe of failing ${peerText(id)} was not answered: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)}; it stays failing and is probed again on its schedule`); });
-    return;
-  }
-  // The URL the probe went to: a subscription whose URL changed meanwhile is not recovered by a probe of the old one.
-  if (await recover(id, sub.url)) {
-    probeOutcomes.recovered++;
-    log.info(`Webhook ${peerText(id)} recovered: its probe was answered, so it takes deliveries again (on probation: one more exhausted retry schedule marks it failing)`);
-  } else {
-    probeOutcomes.superseded++;
+  // From the delivery on, the probe is sent (or being sent): whatever ends it is counted under one outcome, a throw included.
+  let outcome: ProbeOutcome = 'error';
+  try {
+    let delivery: Promise<WebhookDelivery>;
+    try { delivery = deliverProbe(sub, JSON.stringify(probePayload()), 'test.ping', '_test', uuidv4()); } finally { started(); }
+    const result = await delivery;
+    if (!result.success) {
+      outcome = 'failed';
+      sayDeliveryFailureOnce('probe', id, () => { log.warn(`Webhook probe of failing ${peerText(id)} was not answered: ${peerText(result.error ?? `HTTP ${result.responseStatus}`)}; it stays failing and is probed again on its schedule`); });
+      return;
+    }
+    // The URL the probe went to: a subscription whose URL changed meanwhile is not recovered by a probe of the old one.
+    if (await recover(id, sub.url)) {
+      outcome = 'recovered';
+      log.info(`Webhook ${peerText(id)} recovered: its probe was answered, so it takes deliveries again (on probation: one more exhausted retry schedule marks it failing)`);
+    } else {
+      outcome = 'superseded';
+    }
+  } finally {
+    probeOutcomes[outcome]++;
   }
 }
 

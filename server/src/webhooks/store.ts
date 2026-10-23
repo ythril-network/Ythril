@@ -367,16 +367,20 @@ export async function markProbeRecovered(id: string, url: string): Promise<boole
  * recovered. Never a disabled or switched-off one. Writes only when that CHANGES the row, so a burst of N successful deliveries to a
  * healthy sink is not N writes of an unchanged row (and N cache invalidations, each making the next event re-read every subscription):
  * the collection decides, never this process's copy alone, which a failure another process counted has not reached (round 2, F2).
- * When the copy says there is nothing to reset, the collection is asked in the background, so the delivery does not wait on it; when
- * the copy says there is, the reset is awaited (the test ping's answer reads it).
+ * When the copy says there is nothing to reset, the collection is asked in the background (at most once per subscription per
+ * `CACHE_TTL_MS`), so the delivery does not wait on it; when the copy says there is, the reset is awaited by the caller (a first
+ * delivery or a retry; the test route answers `queued` without waiting for its delivery, so nothing reads this reset back).
+ *
+ * The background reset clears failures counted by ANOTHER instance between this success and the check landing, and does so on
+ * purpose: the sink answered, which is what the count measures, so a failure counted elsewhere just before is superseded by it.
  */
 export async function markWebhookSuccess(id: string): Promise<void> {
   const sub = (await ensureCache()).find(s => s.id === id);
   if (sub && sub.status === 'active' && (sub.consecutiveFailures ?? 0) === 0) {
     // The copy says there is nothing to reset, and it is up to CACHE_TTL_MS old: a failure ANOTHER process counted in that window is
     // not in it, and would survive this success. So the collection is asked too, but not on the delivery's time: a delivery that
-    // waited on a database round trip would let a burst outrun its sink's bound. One check per subscription runs at a time, and a
-    // success during it asks for one more after it (`checkAfterSuccess`), so every success is followed by a check that started after it.
+    // waited on a database round trip would let a burst outrun its sink's bound. At most one check per subscription per window
+    // (`checkAfterSuccess`).
     checkAfterSuccess(id);
     return;
   }
@@ -403,24 +407,33 @@ async function resetAfterSuccess(id: string): Promise<void> {
   if (result.modifiedCount > 0) invalidateCache();
 }
 
-/** The background checks after a success, per subscription: `again` is set by a success that arrived while one was running. */
-const successChecks = new Map<string, { again: boolean }>();
+/**
+ * When each subscription's last background check started. At most ONE check per subscription per {@link CACHE_TTL_MS} window: a
+ * success inside the window after a check started starts none (round 3). The window is the staleness this process already accepts for
+ * every status it reads from its copy, so a failure another instance counted is reset by the first success after the window at the
+ * latest, and a busy healthy subscription pays one read per window, not one per success. Keyed by id and bounded by the subscriptions.
+ */
+const successCheckStartedAt = new Map<string, number>();
 const successCheckFailed = warnOnce<string>({ max: 500, every: 10 * 60_000 });
+let successChecksStopped = false;
+
+/**
+ * Shutdown: start no more background checks after a success. A check started late in the drain would land after the connection
+ * closed and log a failure that says nothing true about the subscription. Called by the shutdown with the other webhook stops.
+ */
+export function stopSuccessChecks(): void {
+  successChecksStopped = true;
+}
 
 function checkAfterSuccess(id: string): void {
-  const running = successChecks.get(id);
-  if (running) { running.again = true; return; }
-  const state = { again: false };
-  successChecks.set(id, state);
-  void (async () => {
-    try {
-      do { state.again = false; await resetAfterSuccess(id); } while (state.again);
-    } catch (err) {
-      successCheckFailed(id, () => { log.warn(`Webhook ${peerText(id)}: the check after a delivery success failed (a failure counted by another instance may stand until the next success): ${peerText(err)}`); });
-    } finally {
-      successChecks.delete(id);
-    }
-  })();
+  if (successChecksStopped) return;
+  const now = Date.now();
+  const last = successCheckStartedAt.get(id);
+  if (last !== undefined && now - last < CACHE_TTL_MS) return;
+  successCheckStartedAt.set(id, now);
+  void resetAfterSuccess(id).catch((err: unknown) => {
+    successCheckFailed(id, () => { log.warn(`Webhook ${peerText(id)}: the check after a delivery success failed (a failure counted by another instance may stand until a later success): ${peerText(err)}`); });
+  });
 }
 
 /**

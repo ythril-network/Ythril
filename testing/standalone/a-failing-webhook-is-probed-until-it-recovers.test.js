@@ -328,6 +328,24 @@ describe('7. the status lines are said once, by the write that changed the row',
     assert.equal(after.failed - before.failed, 0);
   });
 
+  it('a probe whose delivery throws, or whose recovery write throws after the sink answered, is counted as error (round 3, item 5)', async () => {
+    const before = dispatcher.webhookProbeCounts();
+    assert.equal(typeof before.error, 'number', 'ythril_webhook_probes_total has no error outcome: a probe that threw is counted nowhere');
+    const boom = () => { throw new Error('boom'); };
+    const thrown = uniq('thr');
+    const r1 = rig({ probes: [{ id: thrown, url: urlOf(thrown) }], subs: { [thrown]: failingRow(thrown) }, deliverProbe: async () => boom() });
+    r1.worker.job.start();
+    await r1.fire();
+    const lost = uniq('lost');
+    const r2 = rig({ probes: [{ id: lost, url: urlOf(lost) }], subs: { [lost]: failingRow(lost) }, recovered: async () => boom() });
+    r2.worker.job.start();
+    await r2.fire();
+    assert.equal(r1.state.probes.length + r2.state.probes.length, 2, 'fixture: the two probes were not sent');
+    const after = dispatcher.webhookProbeCounts();
+    assert.equal(after.error - before.error, 2, 'a probe that threw (in its delivery, or in its recovery write after the sink answered) was not counted as error');
+    for (const k of ['recovered', 'failed', 'superseded']) assert.equal(after[k] - before[k], 0, `a probe that threw was counted as ${k}`);
+  });
+
   it('"recovered" is said once, by the recovery write that changed the row, and not by one that matched nothing', async () => {
     const id = uniq('rec');
     let call = 0;

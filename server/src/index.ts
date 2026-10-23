@@ -347,6 +347,9 @@ async function main(): Promise<void> {
     stopBrainEmbeddingWorker();
     const { stopRetryWorker, drainFirstDeliveries } = await import('./webhooks/dispatcher.js');
     stopRetryWorker();
+    // The background check after a webhook delivery success: none starts from here on, so none lands after `closeMongo`.
+    const { stopSuccessChecks } = await import('./webhooks/store.js');
+    stopSuccessChecks();
     // Space acts: refused from now on, and nothing waits for one. Each is on disk, so it resumes after the next start; a body that
     // fails from here on (the store closes under it) records nothing.
     const { closeSpaceActs } = await import('./spaces/space-act-runner.js');
