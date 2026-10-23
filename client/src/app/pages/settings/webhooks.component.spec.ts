@@ -106,11 +106,13 @@ describe('WebhooksComponent: a failing webhook shows its next probe time (Q-477)
   const LANGS = ['en', 'de', 'pl'] as const;
   const dict = (lang: string): Record<string, string> =>
     JSON.parse(readFileSync(resolve(__dirname, `../../../../public/assets/i18n/${lang}.json`), 'utf8'));
-  const NEXT_PROBE_AT = '2026-10-23T14:37:00.000Z';
+  // In the future whatever day the suite runs (a past one reads as due, round 2 F5a; the first version's date became the past on its own day).
+  const NEXT_PROBE_AT = '2099-10-23T14:37:00.000Z';
+  const PAST_PROBE_AT = '2020-01-01T08:00:00.000Z';
   /** The static text of a translation, its `{{ param }}` placeholders taken out. */
   const staticParts = (text: string): string[] => text.split(/\{\{[^}]*\}\}/).map(s => s.trim()).filter(Boolean);
 
-  async function render(lang: string) {
+  async function render(lang: string, nextProbeAt = NEXT_PROBE_AT) {
     TestBed.configureTestingModule({
       imports: [
         WebhooksComponent,
@@ -122,7 +124,7 @@ describe('WebhooksComponent: a failing webhook shows its next probe time (Q-477)
       ],
       providers: [
         { provide: AdminApi, useValue: { listWebhooks: vi.fn(() => of({ webhooks: [
-          webhook({ id: 'wf', status: 'failing', consecutiveFailures: 6, nextProbeAt: NEXT_PROBE_AT, probeAttempts: 2 } as Partial<WebhookSubscription>),
+          webhook({ id: 'wf', status: 'failing', consecutiveFailures: 6, nextProbeAt, probeAttempts: 2 } as Partial<WebhookSubscription>),
         ] })) } },
         { provide: SpacesApi, useValue: { listSpaces: () => of({ spaces: [] }) } },
         { provide: ToastService, useValue: { success: vi.fn(), error: vi.fn() } },
@@ -150,6 +152,16 @@ describe('WebhooksComponent: a failing webhook shows its next probe time (Q-477)
       expect(phrase, `public/assets/i18n/${lang}.json has no webhooks.nextProbe`).toBeTruthy();
       if (lang !== 'en') expect(phrase, `webhooks.nextProbe in ${lang} is the English text`).not.toBe(dict('en')['webhooks.nextProbe']);
       for (const part of staticParts(phrase)) expect(text, `the row does not say "${part}"`).toContain(part);
+    });
+
+    it(`${lang}: a next probe already past reads as due, never as a time in the past (round 2, F5a)`, async () => {
+      const text = await render(lang, PAST_PROBE_AT);
+      expect(text, 'fixture: the failing webhook row did not render').toContain(dict(lang)['webhooks.status.failing']);
+      const due = dict(lang)['webhooks.probeDue'];
+      expect(due, `public/assets/i18n/${lang}.json has no webhooks.probeDue`).toBeTruthy();
+      if (lang !== 'en') expect(due, `webhooks.probeDue in ${lang} is the English text`).not.toBe(dict('en')['webhooks.probeDue']);
+      expect(text, `a past next probe does not read as due: "${text}"`).toContain(due);
+      expect(text, `a past next probe still shows a clock time: "${text}"`).not.toMatch(/\b\d{1,2}[:.]\d{2}\b/);
     });
   }
 });

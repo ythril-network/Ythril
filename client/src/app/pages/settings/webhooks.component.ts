@@ -14,6 +14,7 @@ import { SummaryStripComponent, SummaryItem } from '../../shared/summary-strip.c
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { InstantPipe } from '../../core/date-format.service';
+import { toEpochMs } from '../../core/date-format';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import {
   Space, WebhookSubscription, WebhookDelivery, WebhookEventType, WEBHOOK_EVENT_GROUPS,
@@ -212,7 +213,11 @@ interface WebhookForm {
                       }
                       <!-- a failing hook recovers by itself: say when it is probed next, as text, in the reader's date format -->
                       @if (w.status === 'failing' && w.nextProbeAt) {
-                        <span class="muted" style="font-size:11px;">{{ 'webhooks.nextProbe' | transloco: { time: (w.nextProbeAt | instant) } }}</span>
+                        @if (probeDue(w.nextProbeAt)) {
+                          <span class="muted" style="font-size:11px;">{{ 'webhooks.probeDue' | transloco }}</span>
+                        } @else {
+                          <span class="muted" style="font-size:11px;">{{ 'webhooks.nextProbe' | transloco: { time: (w.nextProbeAt | instant) } }}</span>
+                        }
                       }
                     </span>
                   </td>
@@ -246,6 +251,12 @@ export class WebhooksComponent implements OnInit {
   /** "N consecutive failures", in the plural form the reader's language uses for N. */
   protected failuresText(count: number): string {
     return pluralText(this.transloco, this.transloco.getActiveLang(), 'webhooks.failures', count);
+  }
+
+  /** A next probe at or before now is due (the next tick takes it): said as such, never as a time already past. */
+  protected probeDue(nextProbeAt: string): boolean {
+    const at = toEpochMs(nextProbeAt);
+    return at !== null && at <= Date.now();
   }
 
   readonly eventGroups = WEBHOOK_EVENT_GROUPS;

@@ -9,7 +9,8 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Filter, UpdateFilter, Sort } from 'mongodb';
 import { col } from '../db/mongo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { warnOnce } from '../util/warn-once.js';
 import { backoffDelayMs } from '../util/backoff.js';
 import { encryptSecret, decryptSecret, isEncrypted } from '../util/crypto.js';
 import type { WebhookSubscription, WebhookDelivery, WebhookEventType } from './types.js';
@@ -195,6 +196,9 @@ export interface UpdateWebhookInput {
   enabled?: boolean;
 }
 
+/** The probe fields, removed whenever a subscription stops being failing: by an admin's `enabled`, a recovery or a success. */
+const PROBE_FIELDS_UNSET = { nextProbeAt: '', probeAttempts: '' } as const;
+
 /**
  * The update an admin's edit writes. `enabled` in the body, either way, is the explicit act on the subscription's status: `true` is the
  * documented reset (active, count 0) and `false` disables it, and both clear the probe schedule (`nextProbeAt`, `probeAttempts`), which
@@ -210,7 +214,7 @@ export function webhookUpdateWrite(input: UpdateWebhookInput): UpdateFilter<Webh
   $set['enabled'] = input.enabled;
   $set['status'] = input.enabled ? 'active' : 'disabled';
   if (input.enabled) $set['consecutiveFailures'] = 0;
-  return { $set, $unset: { nextProbeAt: '', probeAttempts: '' } } as UpdateFilter<WebhookSubscription>;
+  return { $set, $unset: PROBE_FIELDS_UNSET } as UpdateFilter<WebhookSubscription>;
 }
 
 export async function updateWebhook(
@@ -276,9 +280,6 @@ export const FAILING_AFTER = 6;
 const PROBE_BASE_MS = 60_000;
 const PROBE_CAP_MS = 3_600_000;
 
-/** The probe fields, removed whenever a subscription stops being failing. */
-const PROBE_FIELDS_UNSET = { nextProbeAt: '', probeAttempts: '' } as const;
-
 /**
  * The flip of a subscription to failing, once its count has reached {@link FAILING_AFTER}: from active (a row with no status is active,
  * as {@link acceptsDeliveries} reads it) and switched on, never from disabled and never twice. It schedules the first probe at once
@@ -299,20 +300,27 @@ export function failingFlipWrite(id: string, now: Date): { filter: Filter<Webhoo
  * and is due.
  */
 export function probeClaim(
-  row: Pick<WebhookSubscription, 'id'> & { probeAttempts?: number | null },
+  row: Pick<WebhookSubscription, 'id'> & { probeAttempts?: unknown },
   now: Date,
 ): { filter: Filter<WebhookSubscription>; update: UpdateFilter<WebhookSubscription> } {
-  const k = typeof row.probeAttempts === 'number' && row.probeAttempts > 0 ? row.probeAttempts : 0;
-  const attempts = k === 0 ? { $or: [{ probeAttempts: { $exists: false } }, { probeAttempts: 0 }] } : { probeAttempts: k };
+  const read = row.probeAttempts;
+  // A count is a whole number of 0 or more, or missing (a row failing since before probing existed). Anything else (null, -1, a string)
+  // is matched as the value it is, so the claim takes the row it read: a filter that missed it would leave that row first in the due
+  // order for ever, read by every try and claimed by none, and no other subscription would be probed again. Its count starts again.
+  const isCount = read === undefined || (typeof read === 'number' && Number.isInteger(read) && read >= 0);
+  const k = isCount ? ((read as number | undefined) ?? 0) : 0;
+  const attempts = !isCount ? { probeAttempts: read }
+    : k === 0 ? { $or: [{ probeAttempts: { $exists: false } }, { probeAttempts: 0 }] }
+    : { probeAttempts: k };
+  const nextProbeAt = new Date(now.getTime() + backoffDelayMs(k, PROBE_BASE_MS, PROBE_CAP_MS)).toISOString();
   return {
     filter: {
       id: row.id, status: 'failing', enabled: true,
       $and: [{ $or: [{ nextProbeAt: { $exists: false } }, { nextProbeAt: { $lte: now.toISOString() } }] }, attempts],
     } as Filter<WebhookSubscription>,
-    update: {
-      $set: { nextProbeAt: new Date(now.getTime() + backoffDelayMs(k, PROBE_BASE_MS, PROBE_CAP_MS)).toISOString() },
-      $inc: { probeAttempts: 1 },
-    } as UpdateFilter<WebhookSubscription>,
+    update: (isCount
+      ? { $set: { nextProbeAt }, $inc: { probeAttempts: 1 } }
+      : { $set: { nextProbeAt, probeAttempts: 1 } }) as UpdateFilter<WebhookSubscription>,
   };
 }
 
@@ -358,19 +366,61 @@ export async function markProbeRecovered(id: string, url: string): Promise<boole
  * A delivery succeeded (a real event, or an admin's test ping): the subscription is active with a count of 0, and a failing one is
  * recovered. Never a disabled or switched-off one. Writes only when that CHANGES the row, so a burst of N successful deliveries to a
  * healthy sink is not N writes of an unchanged row (and N cache invalidations, each making the next event re-read every subscription):
- * the cache is the fast path for the no-op, and the write's own filter decides.
+ * the collection decides, never this process's copy alone, which a failure another process counted has not reached (round 2, F2).
+ * When the copy says there is nothing to reset, the collection is asked in the background, so the delivery does not wait on it; when
+ * the copy says there is, the reset is awaited (the test ping's answer reads it).
  */
 export async function markWebhookSuccess(id: string): Promise<void> {
   const sub = (await ensureCache()).find(s => s.id === id);
-  if (sub && sub.status === 'active' && (sub.consecutiveFailures ?? 0) === 0) return;
-  const result = await col<WebhookSubscription>(COLLECTION).updateOne(
-    {
-      id, enabled: true, status: { $ne: 'disabled' },
-      $or: [{ status: { $ne: 'active' } }, { consecutiveFailures: { $ne: 0 } }],
-    } as Filter<WebhookSubscription>,
+  if (sub && sub.status === 'active' && (sub.consecutiveFailures ?? 0) === 0) {
+    // The copy says there is nothing to reset, and it is up to CACHE_TTL_MS old: a failure ANOTHER process counted in that window is
+    // not in it, and would survive this success. So the collection is asked too, but not on the delivery's time: a delivery that
+    // waited on a database round trip would let a burst outrun its sink's bound. One check per subscription runs at a time, and a
+    // success during it asks for one more after it (`checkAfterSuccess`), so every success is followed by a check that started after it.
+    checkAfterSuccess(id);
+    return;
+  }
+  await resetAfterSuccess(id);
+}
+
+/** What a success changes: a row that is switched on, not disabled, and either not active or carrying failures. */
+const needsResetAfterSuccess = (id: string): Filter<WebhookSubscription> => ({
+  id, enabled: true, status: { $ne: 'disabled' },
+  $or: [{ status: { $ne: 'active' } }, { consecutiveFailures: { $ne: 0 } }],
+} as Filter<WebhookSubscription>);
+
+/**
+ * Reset a subscription after a success, if the COLLECTION says it needs one. The read is the no-op path (a find, never a write of an
+ * unchanged row); the write's own filter asks the same question again when it lands.
+ */
+async function resetAfterSuccess(id: string): Promise<void> {
+  const subs = col<WebhookSubscription>(COLLECTION);
+  if (!(await subs.findOne(needsResetAfterSuccess(id), { projection: { _id: 1 } }))) return;
+  const result = await subs.updateOne(
+    needsResetAfterSuccess(id),
     { $set: { status: 'active', consecutiveFailures: 0 }, $unset: PROBE_FIELDS_UNSET } as UpdateFilter<WebhookSubscription>,
   );
   if (result.modifiedCount > 0) invalidateCache();
+}
+
+/** The background checks after a success, per subscription: `again` is set by a success that arrived while one was running. */
+const successChecks = new Map<string, { again: boolean }>();
+const successCheckFailed = warnOnce<string>({ max: 500, every: 10 * 60_000 });
+
+function checkAfterSuccess(id: string): void {
+  const running = successChecks.get(id);
+  if (running) { running.again = true; return; }
+  const state = { again: false };
+  successChecks.set(id, state);
+  void (async () => {
+    try {
+      do { state.again = false; await resetAfterSuccess(id); } while (state.again);
+    } catch (err) {
+      successCheckFailed(id, () => { log.warn(`Webhook ${peerText(id)}: the check after a delivery success failed (a failure counted by another instance may stand until the next success): ${peerText(err)}`); });
+    } finally {
+      successChecks.delete(id);
+    }
+  })();
 }
 
 /**
