@@ -82,28 +82,42 @@ export function structuredClaims(
  * time and never stored — so judging on it would produce a verdict that changes as the day passes while the
  * records themselves sit untouched. A persisted contradiction candidate has to mean the same thing tomorrow.
  *
- * Best-effort: returns an empty map rather than throwing, since every caller is on a path (a write, or a
- * background sweep) where failing to judge must not fail the operation.
+ * Best-effort: returns an empty map rather than throwing. For the WRITE path (`insert-contradictions.ts`), where failing to
+ * judge must not fail the write. The sweep reads through {@link readStructuredClaims}, which throws: a swallowed failure there
+ * judged the seed with no claims and settled its pairs as no-conflict.
  */
 export async function fetchStructuredClaims(
   spaceId: string, type: string, ids: string[],
 ): Promise<Map<string, ClaimMap | undefined>> {
+  try {
+    return await readStructuredClaims(spaceId, type, ids);
+  } catch { /* best-effort — an unjudged pair is recoverable, a failed write is not */ }
+  return new Map();
+}
+
+/**
+ * The same read as {@link fetchStructuredClaims}, and a failure THROWS. For the contradiction sweep (`Q-442` round 6): a claims
+ * read that failed there was swallowed, the seed judged with no claims, its pairs settled as no-conflict and the cursor moved
+ * past it — a pair never checked, recorded as checked. Thrown, it reaches the sweep's per-seed catch, which skips the seed this
+ * sweep and reports it; the next full pass judges it.
+ */
+export async function readStructuredClaims(
+  spaceId: string, type: string, ids: string[],
+): Promise<Map<string, ClaimMap | undefined>> {
   const out = new Map<string, ClaimMap | undefined>();
-  // `type` is an unvalidated string on purpose — every caller is on a best-effort path and holds one
-  // too. So the widening is HERE and visible, in one line, rather than being a map declared without keys:
-  // an unknown type yields `undefined` and the guard below returns nothing, which is the contract.
+  // `type` is an unvalidated string on purpose — every caller holds one. So the widening is HERE and visible, in one line,
+  // rather than being a map declared without keys: an unknown type yields `undefined` and the guard below returns nothing,
+  // which is the contract.
   const suffix = (COLLECTION_SUFFIX as Record<string, string | undefined>)[type];
   if (!suffix || ids.length === 0) return out;
 
   const fields: Record<string, 1> = { properties: 1 };
   for (const f of extraClaimFields(type)) fields[f] = 1;
 
-  try {
-    // A claim read here becomes a contradiction a writer is shown or a candidate that is persisted: a deleted file's audit
-    // row holds no claim (`notFlaggedIfFile`, nothing for any other type).
-    const docs = await readStoredById<{ properties?: ClaimMap } & Record<string, unknown>>(`${spaceId}_${suffix}`, ids, fields,
-      { filter: notFlaggedIfFile(type) });
-    for (const [id, d] of docs) out.set(id, structuredClaims(type, d));
-  } catch { /* best-effort — an unjudged pair is recoverable, a failed write is not */ }
+  // A claim read here becomes a contradiction a writer is shown or a candidate that is persisted: a deleted file's audit
+  // row holds no claim (`notFlaggedIfFile`, nothing for any other type).
+  const docs = await readStoredById<{ properties?: ClaimMap } & Record<string, unknown>>(`${spaceId}_${suffix}`, ids, fields,
+    { filter: notFlaggedIfFile(type) });
+  for (const [id, d] of docs) out.set(id, structuredClaims(type, d));
   return out;
 }

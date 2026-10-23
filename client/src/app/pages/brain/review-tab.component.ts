@@ -657,16 +657,16 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     this.toast.error(refusalText(this.transloco, e as Parameters<typeof refusalText>[1], 'review.contradictions.resolveError', RESOLVE_REFUSALS));
   }
 
-  /**
-   * A card whose pair a resolve has claimed and not closed (L3): which choice stands, named by the button that makes it, and
-   * what the reviewer can do — the same choice finishes it, a dismiss releases it. Without it the card looked open while
-   * every other choice was refused.
-   */
   /** The resolve found the record judged stale already gone, so nothing was marked: the card must not say it was. */
   loserWasGone(c: ContradictionRecord): boolean {
     return (c.notes ?? []).some(n => n.code === 'loserGone');
   }
 
+  /**
+   * A card whose pair a resolve has claimed and not closed (L3): which choice stands, named by the button that makes it, and
+   * what the reviewer can do — the same choice finishes it, a dismiss releases it. Without it the card looked open while
+   * every other choice was refused.
+   */
   resolvingText(c: ContradictionRecord): string {
     const r = c.resolving;
     if (!r) return '';

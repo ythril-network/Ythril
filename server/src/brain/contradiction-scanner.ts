@@ -38,7 +38,7 @@ import { needsReindex } from '../spaces/_shared.js';
 import { log, outsideRequest } from '../util/log.js';
 import { findSimilar, DEFAULT_DUPE_THRESHOLD, type RecallKnowledgeType, type RecallResult } from './recall.js';
 import { judgePair, consultedModel, type JudgeableRecord } from './contradiction-judge.js';
-import { extraClaimFields, fetchStructuredClaims, type ClaimMap } from './structured-claims.js';
+import { readStructuredClaims, type ClaimMap } from './structured-claims.js';
 import { recordContradiction, contradictionPairId } from './contradiction-candidates.js';
 import { nliConfigured, nliIsLocal } from './nli-client.js';
 import type { ContradictionScannerConfig, DupeScanType } from '../config/types.js';
@@ -209,11 +209,11 @@ export async function evalRecord(
     //    conflict (bundle-101 verify drive: two facts differing only in `port`, similarity 0.99, gave 0 candidates);
     //  - a chrono's stored columns (`status`) are claims too, and `RecallChrono.status` is derived from the clock, so judging
     //    on it would produce a candidate whose verdict changes overnight while both records sit untouched.
-    // The read is best-effort (an empty map when it fails); a neighbour then falls back to the claims its recall result
-    // carries, as before, and the seed has none — an unjudged pair, which the next sweep settles.
-    const stored = await fetchStructuredClaims(spaceId, type, [source._id, ...sameType.map(m => m._id)]);
-    const claimsOf = (r: RecallResult): ClaimMap | undefined =>
-      stored.has(r._id) ? stored.get(r._id) : (extraClaimFields(type).length > 0 ? undefined : r.properties);
+    // A read that FAILS throws (`readStructuredClaims`), past the catch below, to `scanSpace`'s per-seed catch: the seed is
+    // skipped this sweep and reported; it is judged again on the next full pass. Swallowed, it judged the seed with no claims
+    // and settled its pairs as no-conflict. A record the read does not find (deleted since the search) has no claims.
+    const stored = await readStructuredClaims(spaceId, type, [source._id, ...sameType.map(m => m._id)]);
+    const claimsOf = (r: RecallResult): ClaimMap | undefined => stored.get(r._id);
 
     const a = toJudgeable(source, claimsOf(source));
     // One pair, one judgement per sweep — see `unjudgedNeighbours`.
