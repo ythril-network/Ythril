@@ -20,7 +20,7 @@ import {
   deleteWebhook,
   listDeliveries,
 } from '../webhooks/store.js';
-import { deliverToWebhook } from '../webhooks/dispatcher.js';
+import { deliverToWebhook, testPingPayload } from '../webhooks/dispatcher.js';
 import { ALL_WEBHOOK_EVENTS } from '../webhooks/types.js';
 import type { WebhookEventType } from '../webhooks/types.js';
 import { log, refusalOfParse } from '../util/log.js';
@@ -157,15 +157,11 @@ webhooksRouter.post('/:id/test', async (req, res) => {
       return;
     }
 
-    const payload = {
-      event: 'test.ping' as const,
-      timestamp: new Date().toISOString(),
-      spaceId: '_test',
-      spaceName: '_test',
-      entry: { message: 'Test webhook delivery from Ythril' },
+    // The envelope a probe of a failing subscription is sent in too (`testPingPayload`); a delivered test ping recovers a failing one.
+    const payload = testPingPayload({ message: 'Test webhook delivery from Ythril' }, {
       ...(req.authToken && 'id' in req.authToken ? { tokenId: req.authToken.id } : {}),
       ...(req.authToken?.name ? { tokenLabel: req.authToken.name } : {}),
-    };
+    });
 
     // Deliver directly to THIS webhook only — not broadcast via emitWebhookEvent
     deliverToWebhook(full, JSON.stringify(payload), 'test.ping', '_test').catch(err => {

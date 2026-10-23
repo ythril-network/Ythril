@@ -1195,6 +1195,10 @@ export interface WebhookSubscription {
   updatedAt: string;
   status: 'active' | 'failing' | 'disabled';
   consecutiveFailures: number;
+  /** A failing subscription's next probe (ISO 8601 UTC); absent otherwise, and on one failing since before probing existed (probed at once). */
+  nextProbeAt?: string;
+  /** Probes of this failing subscription so far; the wait between them doubles from 1 min to at most 1 h. */
+  probeAttempts?: number;
 }
 
 /** Create/update payload. `secret` is write-only; omit on update to keep the existing one. */

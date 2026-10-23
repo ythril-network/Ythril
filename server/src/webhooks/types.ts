@@ -53,6 +53,13 @@ export interface WebhookSubscription {
   status: 'active' | 'failing' | 'disabled';
   /** Number of consecutive delivery failures. */
   consecutiveFailures: number;
+  /**
+   * When a FAILING subscription is next probed (ISO 8601 UTC), set by the flip to failing and moved on by each probe's claim (`Q-477`).
+   * Absent on an active or disabled subscription, and on one marked failing before probing existed: that one is probed on the first tick.
+   */
+  nextProbeAt?: string;
+  /** How many probes of this failing subscription have been made; the next probe's wait doubles from 1 min per attempt, capped at 1 h. */
+  probeAttempts?: number;
   /** The retired proxy ids the 6.0 upgrade disabled this subscription for, so a later boot does not disable it again after an admin re-enabled it. */
   retiredIdsDisabledFor?: string[];
 }

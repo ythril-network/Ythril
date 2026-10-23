@@ -6,9 +6,12 @@
  *   a secret (the server never returns it, so blank means "keep the existing one").
  * - The page stays OnPush.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, vi } from 'vitest';
 import { of } from 'rxjs';
+import { TranslocoService, TranslocoTestingModule } from '@jsverse/transloco';
 import { AdminApi } from '../../core/admin-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { ToastService } from '../../core/toast.service';
@@ -88,4 +91,65 @@ describe('WebhooksComponent — payload shaping (C1)', () => {
     expect('secret' in body).toBe(false);
     expect(body.enabled).toBe(false);
   });
+});
+
+/*
+ * A failing webhook says when it will be probed next (bundle-119, Q-477, design rev 3 item 13): the failing pill shows "next probe
+ * <time>" from the subscription's `nextProbeAt`, as text (readable without a tooltip), in the reader's language, with the time
+ * formatted for that language rather than the raw ISO instant. The time is asserted by PATTERN, never by value: the rendered hour is
+ * the runner's zone (pitfall-rendered-date-is-in-the-runners-zone). The phrase is read from the real dictionaries, so a key missing
+ * from de or pl, or left as the English text, is red here.
+ *
+ * Seen red at a644fe92: the row renders no probe time at all, and no dictionary has `webhooks.nextProbe`.
+ */
+describe('WebhooksComponent: a failing webhook shows its next probe time (Q-477)', () => {
+  const LANGS = ['en', 'de', 'pl'] as const;
+  const dict = (lang: string): Record<string, string> =>
+    JSON.parse(readFileSync(resolve(__dirname, `../../../../public/assets/i18n/${lang}.json`), 'utf8'));
+  const NEXT_PROBE_AT = '2026-10-23T14:37:00.000Z';
+  /** The static text of a translation, its `{{ param }}` placeholders taken out. */
+  const staticParts = (text: string): string[] => text.split(/\{\{[^}]*\}\}/).map(s => s.trim()).filter(Boolean);
+
+  async function render(lang: string) {
+    TestBed.configureTestingModule({
+      imports: [
+        WebhooksComponent,
+        TranslocoTestingModule.forRoot({
+          langs: Object.fromEntries(LANGS.map(l => [l, dict(l)])),
+          translocoConfig: { availableLangs: [...LANGS], defaultLang: 'en' },
+          preloadLangs: true,
+        }),
+      ],
+      providers: [
+        { provide: AdminApi, useValue: { listWebhooks: vi.fn(() => of({ webhooks: [
+          webhook({ id: 'wf', status: 'failing', consecutiveFailures: 6, nextProbeAt: NEXT_PROBE_AT, probeAttempts: 2 } as Partial<WebhookSubscription>),
+        ] })) } },
+        { provide: SpacesApi, useValue: { listSpaces: () => of({ spaces: [] }) } },
+        { provide: ToastService, useValue: { success: vi.fn(), error: vi.fn() } },
+        { provide: ConfirmDialogService, useValue: { confirm: vi.fn(() => Promise.resolve(true)) } },
+      ],
+    });
+    TestBed.inject(TranslocoService).setActiveLang(lang);
+    const fixture = TestBed.createComponent(WebhooksComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const row = [...(fixture.nativeElement as HTMLElement).querySelectorAll('tr')].find(tr => tr.textContent?.includes('x.example.com'));
+    return (row?.textContent ?? '').replace(/\s+/g, ' ');
+  }
+
+  for (const lang of LANGS) {
+    it(`${lang}: the failing row says "next probe" and a time formatted for ${lang}, as text`, async () => {
+      const text = await render(lang);
+      expect(text, 'fixture: the failing webhook row did not render').toContain(dict(lang)['webhooks.status.failing']);
+      // A clock time, whatever zone the runner is in: H:MM or HH:MM (en may add AM/PM; de and pl do not).
+      expect(text, `the failing row shows no next probe time: "${text}"`).toMatch(/\b\d{1,2}[:.]\d{2}\b/);
+      expect(text, 'the next probe time is the raw ISO instant, not a time formatted for the reader').not.toContain(NEXT_PROBE_AT);
+      if (lang !== 'en') expect(text, `a ${lang} time is written with AM/PM`).not.toMatch(/\b(AM|PM)\b/);
+      const phrase = dict(lang)['webhooks.nextProbe'];
+      expect(phrase, `public/assets/i18n/${lang}.json has no webhooks.nextProbe`).toBeTruthy();
+      if (lang !== 'en') expect(phrase, `webhooks.nextProbe in ${lang} is the English text`).not.toBe(dict('en')['webhooks.nextProbe']);
+      for (const part of staticParts(phrase)) expect(text, `the row does not say "${part}"`).toContain(part);
+    });
+  }
 });
