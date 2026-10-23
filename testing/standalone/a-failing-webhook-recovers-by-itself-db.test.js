@@ -87,7 +87,13 @@ function probeDeps({ deliverProbe, now }) {
     ...production,
     now: () => now(),
     dueJobs: async () => [],
-    ...(claim ? { claimDueProbe: async (at) => { state.claims++; try { return await claim(at); } finally { state.claimsSettled++; } } } : {}),
+    // A tick's probe step goes on after the case has what it waited for (its second claim): once `tick` closes the deps, that claim
+    // answers null, so a case's tick never claims a row the NEXT case created.
+    ...(claim ? { claimDueProbe: async (at) => {
+      if (state.closed) return null;
+      state.claims++;
+      try { return await claim(at); } finally { state.claimsSettled++; }
+    } } : {}),
     deliverProbe: async (sub, body, event, spaceId, deliveryId) => {
       state.probes.push({ id: sub.id, secret: sub.secret, body, event, spaceId, deliveryId });
       return deliverProbe(sub);
@@ -99,11 +105,17 @@ function probeDeps({ deliverProbe, now }) {
 /** One tick of a fresh worker (its own single flight, so a tick still finishing never makes this one a skip), awaited to `until`. */
 async function tick(deps, state, until, ms = 10_000) {
   const { worker, fire } = armedRetryWorker(dispatcher, deps, state);
+  state.closed = false;
   worker.job.start();
   await fire();
   worker.job.stop();
-  if (until) return holdsWithin(until, ms, 25);
-  return holdsWithin(() => state.claimsSettled >= 1, 2_000, 25);
+  try {
+    if (until) return await holdsWithin(until, ms, 25);
+    return await holdsWithin(() => state.claimsSettled >= 1, 2_000, 25);
+  } finally {
+    state.closed = true;
+    await holdsWithin(() => state.claimsSettled === state.claims, 2_000, 10);
+  }
 }
 
 /** A metric's value as an operator reads it from the scrape, or undefined when it is not on the scrape. */
@@ -117,7 +129,8 @@ async function scraped(name, labels = '') {
 
 describe('a failing webhook recovers by itself (Q-477)', { skip }, () => {
   before(async () => {
-    mongo = await openTestMongo(SUITE);
+    // Command monitoring on: case 19 counts the reads a burst of successes costs.
+    mongo = await openTestMongo(SUITE, { query: '&monitorCommands=true' });
     store = await import('../../server/dist/webhooks/store.js');
     // A second instance of the store module: its own cache over the same database, as a second process has.
     storeB = await import('../../server/dist/webhooks/store.js?instance=b');
@@ -335,6 +348,51 @@ describe('a failing webhook recovers by itself (Q-477)', { skip }, () => {
       const results = await Promise.all([store.claimDueProbe(new Date(T0)), storeB.claimDueProbe(new Date(T0))]);
       assert.equal(results.filter(r => r?.id === id).length, 1, `${results.filter(r => r?.id === id).length} claims of one due probe`);
       assert.equal((await rowOf(id)).probeAttempts, 1);
+    });
+  });
+
+  // ── Round 3 (re-review of e8f497c8) ─────────────────────────────────────────────────────────────────────────────────
+
+  /** The reads of `_webhooks` that ask whether a success must reset a row (the `$or` filter of the check), made while `fn` runs. */
+  async function successChecksDuring(fn) {
+    const client = mongo.getMongo();
+    const seen = [];
+    const listener = (ev) => {
+      if (ev.commandName === 'find' && ev.command?.find === WEBHOOKS && ev.command?.filter?.$or) seen.push(ev.command.filter.id);
+    };
+    client.on('commandStarted', listener);
+    try { await fn(); } finally { client.off('commandStarted', listener); }
+    return seen;
+  }
+
+  describe('19. a busy healthy subscription pays a bounded number of success checks (round 3, item 2)', () => {
+    it('20 successes spread over well under CACHE_TTL_MS cost at most one check read', async () => {
+      const { id } = await store.createWebhook({ url: 'https://example.invalid/busy', secret: 'busy-secret-0123456789' });
+      assert.ok((await store.getMatchingWebhooks('entity.created', 'any')).some(s => s.id === id), 'fixture: the subscription is not active in the copy');
+      const reads = await successChecksDuring(async () => {
+        for (let i = 0; i < 20; i++) {
+          await store.markWebhookSuccess(id);
+          await holdsWithin(() => false, 40, 20);   // each success after the last check has finished
+        }
+        await holdsWithin(() => false, 200, 50);
+      });
+      const mine = reads.filter(r => r === id).length;
+      assert.ok(mine >= 1, 'fixture: no check read at all, so the count proves nothing');
+      assert.ok(mine <= 1, `${mine} check reads for 20 successes inside one CACHE_TTL_MS window: a busy healthy subscription pays a read per success`);
+    });
+  });
+
+  describe('20. no success check starts once shutdown has begun (round 3, item 3)', () => {
+    it('after stopSuccessChecks, a success starts no read (a late one would land after closeMongo)', async () => {
+      assert.equal(typeof storeB.stopSuccessChecks, 'function', 'webhooks/store.ts exports no stopSuccessChecks: nothing stops the background checks at shutdown');
+      const { id } = await storeB.createWebhook({ url: 'https://example.invalid/stopping', secret: 'stop-secret-0123456789' });
+      assert.ok((await storeB.getMatchingWebhooks('entity.created', 'any')).some(s => s.id === id), 'fixture');
+      storeB.stopSuccessChecks();   // instance B only: A's module keeps its checks for the cases above
+      const reads = await successChecksDuring(async () => {
+        await storeB.markWebhookSuccess(id);
+        await holdsWithin(() => false, 200, 50);
+      });
+      assert.deepEqual(reads.filter(r => r === id), [], 'a success check started after shutdown began');
     });
   });
 });

@@ -1093,13 +1093,14 @@ export const webhookRetriesDroppedTotal = counterMirroringTally({
 
 /**
  * Probes of failing webhook subscriptions by the retry poll, by `outcome` (Q-477): `recovered` (the sink answered and the probe's write
- * recovered the subscription), `failed` (the sink did not answer; it stays failing and is probed again on its schedule) or `superseded`
- * (the sink answered, but the subscription was disabled, its URL changed or it recovered otherwise meanwhile, so nothing was recovered).
+ * recovered the subscription), `failed` (the sink did not answer; it stays failing and is probed again on its schedule), `superseded`
+ * (the sink answered, but the subscription was disabled, its URL changed or it recovered otherwise meanwhile, so nothing was recovered)
+ * or `error` (the probe's delivery threw, or its recovery write threw after the sink answered; the log says it once per window).
  * A failing subscription is probed at most hourly, so a steady `failed` rate with no `recovered` is a sink that stays down.
  */
 export const webhookProbesTotal = counterMirroringTally({
   name: 'ythril_webhook_probes_total',
-  help: 'Probes of failing webhook subscriptions, by outcome: recovered (answered, subscription active again), failed (not answered, probed again later) or superseded (answered after the subscription changed)',
+  help: 'Probes of failing webhook subscriptions, by outcome: recovered (answered, subscription active again), failed (not answered, probed again later), superseded (answered after the subscription changed) or error (the delivery or the recovery write threw)',
   labelName: 'outcome',
   read: webhookProbeCounts,
 });
