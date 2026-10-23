@@ -63,6 +63,10 @@ const SPACES = {
   'hand-set': {},
   'slow-original': {},
   'resolved-again': {},
+  'dep-mark': {},
+  'late-landing': {},
+  'reclaim-dismiss': {},
+  'functional-wrote': { meta: STRICT({ functional: true }) },
 };
 const space = (name) => `q442-${name}`;
 
@@ -393,6 +397,98 @@ describe('a contradiction resolve keeps the judgement and converges', { skip }, 
       const other = await resolve(candidateId, 'b');
       assert.equal(other.code, 200, `the released candidate refused another choice: ${other.code} ${JSON.stringify(other.body)}`);
       assert.deepEqual((await edgesBetween(sp, ids)).map(e => [e.from, e.to]), [[ids.b, ids.a]]);
+    });
+
+    /** Park the next write to the space's candidates that `when` admits; returns the park and its gate. */
+    const parkCandidateWrite = (sp, when) => {
+      const candColl = door.coll(sp, 'contradiction_candidates');
+      const park = parkWrites(Object.getPrototypeOf(candColl));
+      return { park, parked: park.arm(candColl.collectionName, { when }) };
+    };
+    const isClose = (m, args) => m === 'updateOne' && JSON.stringify(args[1] ?? {}).includes('"status":"resolved"');
+
+    it('a recorded mark another pair has since come to depend on is not lifted, and the note says it was kept', { timeout: 60_000 }, async () => {
+      const seeded = await seedPair('dep-mark', 'fact');
+      const { sp, coll, ids, candidateId } = seeded;
+      // C1 (keep a) marked b and was abandoned, having recorded the mark.
+      await door.coll(sp, coll).updateOne({ _id: ids.b }, { $set: { superseded: true } });
+      await claim(sp, candidateId, 'a', await staleMs(), 'open', { markedId: ids.b });
+      // A second pair (c, b) is resolved keeping c: it finds b marked, records nothing, and draws c -> b.
+      await door.coll(sp, coll).insertOne(build.fact(sp, 'dep-mark-c', 30));
+      const c2 = 'dep-mark-c:dep-mark-b';
+      await door.coll(sp, 'contradiction_candidates').insertOne({
+        _id: c2, spaceId: sp, type: 'fact', aId: 'dep-mark-c', aSummary: 'C', aSeq: 30, bId: ids.b, bSummary: 'B', bSeq: 11,
+        basis: 'nli', confidence: 0.9, status: 'open', detectedAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+      });
+      assert.equal((await resolve(c2, 'a')).code, 200);
+      // C1 is taken over: b's mark is now the second pair's too, and stays.
+      const res = await callRouteAfterAuth(router, 'post', '/:id/resolve', { params: { id: candidateId }, body: { resolution: 'edited' }, authToken: ADMIN_TOKEN });
+      assert.equal(res.code, 200, JSON.stringify(res.body));
+      assert.equal((await record(sp, coll, ids.b))?.superseded, true, 'the takeover lifted a mark another resolved pair depends on');
+      const note = (res.body.notes ?? []).find(n => n.code === 'oppositeChoiceUndone');
+      assert.ok(note && /kept/.test(note.detail), `the note does not say the mark was kept: ${JSON.stringify(res.body)}`);
+    });
+
+    it('a takeover clears an effect the overtaken request landed late, just before it closes', { timeout: 60_000 }, async () => {
+      const seeded = await seedPair('late-landing', 'fact');
+      const { sp, ids, candidateId } = seeded;
+      // The abandoned claim (keep a) recorded its edge and had not yet drawn it.
+      await claim(sp, candidateId, 'a', await staleMs(), 'open', { edgeId: 'late-landing-edge' });
+      // The takeover's first write to the candidate after its claim: past its first undo, well before its close.
+      const { park, parked } = parkCandidateWrite(sp, (m) => m === 'updateOne');
+      let takeover;
+      try {
+        takeover = resolve(candidateId, 'b');
+        await parked.reached;
+        // The overtaken request's edge lands now, after the takeover's undo and before its close.
+        await door.coll(sp, 'edges').insertOne(build.edge(sp, 'late-landing-edge', 41, { from: ids.a, to: ids.b, label: LABEL }));
+        parked.release();
+        takeover = await takeover;
+      } finally {
+        park.restore();
+      }
+      assert.equal(takeover.code, 200, JSON.stringify(takeover.body));
+      assert.deepEqual((await edgesBetween(sp, ids)).map(e => [e.from, e.to]), [[ids.b, ids.a]], 'the late-landed edge of the overtaken claim survived the takeover');
+    });
+
+    it('a dismiss between a same-choice re-claim and its next write still undoes what the earlier claim recorded', { timeout: 60_000 }, async () => {
+      const seeded = await seedPair('reclaim-dismiss', 'fact');
+      const { sp, coll, ids, candidateId } = seeded;
+      // A crashed resolve (keep a), fresh, recorded and wrote its edge and mark.
+      await claim(sp, candidateId, 'a', 0, 'open', await abandonedEffects(seeded, 'reclaim-dismiss-edge'));
+      const { park, parked } = parkCandidateWrite(sp, (m) => m === 'updateOne');
+      let again;
+      try {
+        again = resolve(candidateId, 'a');
+        await parked.reached;
+        const dismissed = await callRouteAfterAuth(router, 'post', '/:id/dismiss', { params: { id: candidateId }, authToken: ADMIN_TOKEN });
+        assert.equal(dismissed.code, 200, JSON.stringify(dismissed.body));
+        parked.release();
+        again = await again;
+      } finally {
+        park.restore();
+      }
+      assert.deepEqual(await edgesBetween(sp, ids), [], 'the earlier claim\'s edge was orphaned by the re-claim');
+      assert.notEqual((await record(sp, coll, ids.b))?.superseded, true, 'the earlier claim\'s mark was orphaned by the re-claim');
+    });
+
+    it('a refused link leaves no edge id on the claim, so a later undo cannot delete an edge drawn by hand', { timeout: 60_000 }, async () => {
+      const { sp, ids, candidateId } = await seedPair('functional-wrote', 'entity', { extra: [{ id: 'functional-wrote-c' }] });
+      await door.coll(sp, 'edges').insertOne(build.edge(sp, 'functional-wrote-existing', 30, { from: ids.a, to: 'functional-wrote-c', label: LABEL }));
+      const { park, parked } = parkCandidateWrite(sp, isClose);
+      let res; let wrote;
+      try {
+        res = resolve(candidateId, 'a');
+        await parked.reached;
+        wrote = (await candidate(sp, candidateId))?.resolving?.wrote;
+        parked.release();
+        res = await res;
+      } finally {
+        park.restore();
+      }
+      assert.ok(codes(res.body).includes('linkRefused'), JSON.stringify(res.body));
+      assert.equal(wrote?.edgeId, undefined, `the claim still records the refused edge: ${JSON.stringify(wrote)}`);
+      assert.equal(wrote?.markedId, ids.b, `the claim does not record its mark: ${JSON.stringify(wrote)}`);
     });
   });
 });
