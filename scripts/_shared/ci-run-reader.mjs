@@ -10,7 +10,9 @@
  *
  * - **A run id is all decimal digits, and is refused before any call.** An id becomes an argument of `gh run view` and, in
  *   {@link runAttemptsJobs}, part of an endpoint path: `../../orgs` or `1?x=2` would read another resource.
- * - **`gh` is called with an argument array and a 60 s bound, never a shell line.** A hang ends, and nothing is interpreted.
+ * - **`gh` is called with an argument array, a 60 s bound and a clean environment, never a shell line.** A hang ends, nothing is
+ *   interpreted, and the recorder's token (`YTHRIL_TEST_RUNS_*`, held by a process that records) is not handed to a program that
+ *   has no use for it: the environment is `testChildEnv()`'s.
  * - **A missing or logged-out `gh` is named.** {@link GhNotInstalledError} and {@link GhNotLoggedInError} say what to do, so a
  *   report is never printed from nothing and a caller can tell the two apart.
  * - **A step is found by what it RUNS, in `ci.yml`, and exactly one must match** ({@link stepNameRunning}): a name written in a
@@ -30,6 +32,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { loadCi, jobEntries, stepsOf } from '../../testing/_shared/ci-workflow.mjs';
+import { testChildEnv } from '../../testing/_shared/test-child-env.mjs';
 
 /** The repository every call reads, in one place: `gh run view` and the REST endpoint must name the same one. */
 export const REPO_SLUG = 'ythril-network/Ythril';
@@ -68,8 +71,10 @@ function decimalId(id, what = 'run id') {
 export function ghText(args, { exec = execFileSync } = {}) {
   if (!Array.isArray(args) || !args.every(a => typeof a === 'string')) throw new TypeError('gh is called with an argument array of strings, never a shell line');
   try {
-    // timeout: the bound on every call, 60 s; a hung gh ends and says so.
-    return String(exec('gh', args, { encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }));
+    // timeout: the bound on every call, 60 s; a hung gh ends and says so. env: `gh` runs a user's extensions and aliases and has no
+    // use for the recorder's token (`YTHRIL_TEST_RUNS_*`, held by a process that records): `testChildEnv` is the one place that
+    // says what a child inherits.
+    return String(exec('gh', args, { encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024, env: testChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] }));
   } catch (e) {
     if (e?.code === 'ENOENT') throw new GhNotInstalledError(e);
     if (/gh auth login|not logged in/i.test(`${e?.message ?? ''}\n${e?.stderr ?? ''}`)) throw new GhNotLoggedInError(e);

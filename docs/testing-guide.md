@@ -190,7 +190,7 @@ This is for maintainers who want a long history of how long main takes. A contri
 
 `scripts/test-times.mjs` turns the JSONL into one `Test-Run` chrono entry per node suite, and the client's vitest report
 (`test-results/client.json`) into one more, suite `client`, and writes them to a Ythril instance you point it at. The fields
-of an entry are one exported description, `TEST_RUN_SCHEMA` in the same script, and the recorder builds its object from that
+of an entry are one exported description, `TEST_RUN_SCHEMA` (declared in `scripts/_shared/telemetry-record.mjs`, exported from the script), and the recorder builds its object from that
 list, so a field outside it is a bug. **The recorder is run by hand**: nothing runs it after a local run or after a CI run,
 so a history has the gaps of the days nobody ran `--record` or `--record-ci`. Its commands:
 
@@ -204,8 +204,8 @@ node scripts/test-times.mjs --help                # every flag and variable, pri
 
 | Variable | Meaning |
 |---|---|
-| `YTHRIL_TEST_RUNS_URL` | The Ythril instance to record to. `https`, or `http` to `127.0.0.1`, `localhost` or `[::1]`. |
-| `YTHRIL_TEST_RUNS_TOKEN` | A token that may write chrono entries in the space the script records to. Never printed, never stored, never in a payload. |
+| `YTHRIL_TEST_RUNS_URL` | The Ythril instance to record to, for `test-times.mjs` and for `trade.mjs --record` / `--history`. `https`, or `http` to `127.0.0.1`, `localhost` or `[::1]`. |
+| `YTHRIL_TEST_RUNS_TOKEN` | A token that may write chrono entries in the space the scripts record to. Never printed, never stored, never in a payload, and never handed to the `gh` and `git` children of `trade.mjs`. |
 | `GH_TOKEN` | A token that may read this repository's Actions runs and artifacts, for `--record-ci` and `--rewrite`. |
 | `GITHUB_API_URL` | The Actions API base. Defaults to the public GitHub API. |
 | `YTHRIL_TEST_RUNS_LISTING_WAIT_MS` | For `--record-ci <runId>`: how long, in milliseconds, the listing is read again for a run it does not hold yet before the pass fails. A positive integer; default `180000`. |
@@ -217,7 +217,7 @@ What the recorder guarantees, and why each is there:
   `test-results/unrecorded/`, prints one line saying why, and exits 0. The next `--record` that can reach the instance
   sends what was kept.
 - **One record per run.** The identity is `recordKey` (`source:runId:attempt:job:suite`). The recorder finds by it, then
-  updates or inserts, under a lock so one machine has one writer, and collapses duplicates of a key to the newest.
+  updates or inserts, under a lock so one repository (every worktree of it) has one writer, and collapses duplicates of a key to the newest.
 - **The CI walk stops at the first recorded run.** `--record-ci` goes newest run first and stops at a run the instance holds a
   record of for every job whose results artifact the run still lists, deciding that from the artifact list and the keys it
   holds, with no download. A run recorded in part is completed (only the jobs it lacks are written), a recorded run whose
@@ -311,6 +311,33 @@ can fix there, and refused in CI unless it is expected.**
   missing or logged out, when any read fails, and when the listing fills its limit. A ten-minute budget ends the reading: it
   is checked before every attempt's `gh` call and every `git` placement, so a call in flight can run past it by its own 60
   seconds, and the runs it did not reach are named `unread-budget`.
+- **Recording that trade, and reading it back** (Q-590): a printed figure cannot show a trend, so
+  `node scripts/trade.mjs --record full-run/bundle-<n>` (one or more refs) writes ONE `Trade` chrono entry per bundle to the
+  instance `YTHRIL_TEST_RUNS_URL` names, in `y-proj-ythril`, keyed `properties.recordKey` = `trade:<n>`; the refs of one bundle
+  (`bundle-106-a0`, `bundle-106-a`) are one record. Every figure is a JSON number (failures, timeouts and unresolved failures
+  are counts; minutes are rounded to two decimals); the entry's `startsAt` is the first counted run's creation and `endsAt`
+  the last completion of a counted run. It reads with the limit it is given (`--limit`, default 500) and raises it until the
+  listing no longer fills it, up to 5000, then refuses naming `--limit`. A re-record replaces the stored record, writing every
+  field again, only when its run ids contain every run id the stored record holds (the listing shows the latest runs only);
+  otherwise it **keeps** the stored record and says it holds runs the listing no longer shows.
+  - **Refused, named, with nothing sent:** an unknown cut-over, a bundle with no counted run after it, and a bundle with a run
+    that is `unread-budget`, `unplaced` or `missing-field` (its figures would be partial). One refused bundle stops the whole
+    call; the others are not written either.
+  - **Exit 2, never 0, when a recording did not happen:** a bad argument (`--record` with no ref, with `--line`, a ref that is no
+    bundle: refused before any `gh` call), `YTHRIL_TEST_RUNS_URL` or `YTHRIL_TEST_RUNS_TOKEN` unset, `GITHUB_ACTIONS` or `CI`
+    set (CI never holds the token), a refused bundle, or a write the instance refused. 0 is a record written or kept.
+  - **The type is declared once, by hand, before the first `--record`:** `node scripts/trade.mjs --type-schema` prints the
+    `schema_update` arguments (the `Trade` type with every field, one year of retention, embeddings suppressed, the server's
+    default chrono types beside it, merge mode); send them with `schema_update` on `y-proj-ythril` and read the type back with
+    `space_meta`. Both record types (`Test-Run` and `Trade`) are declared from `scripts/_shared/telemetry-record.mjs`, the one
+    place a spec lives; a gate holds every spec it registers to what the server's validator accepts.
+  - **`node scripts/trade.mjs --history`** reads the `Trade` records back and prints the totals over time: the failure rate as the
+    sum of `afterFailures` over the sum of `afterCounted` across records (not a mean of per-record rates), and the mean saved,
+    cost, net and calendar minutes per bundle, over the records with at least one counted run.
+  - **One writer per repository.** The lock around find-plus-write lives in the git common dir, so two worktrees share it (it was
+    in `test-results/` and each checkout held its own); trade takes it only for the write, after the reading.
+  - **The children get a clean environment.** `gh` and `git` are started with `testChildEnv()`, so the recorder's token is not
+    handed to them.
 - **Locally**, Windows-only skips and the like stay skips; the refusal is CI's.
 
 A test that needs a precondition (a session, a prior test's output) throws once in its `before` hook or in one assert
@@ -520,7 +547,7 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 | Variable | Read by | Meaning |
 |---|---|---|
 | `YTHRIL_TEST_MONGO_HOST`, `YTHRIL_TEST_MONGO_PORT` | `testing/_shared/test-mongo-address.mjs` | Where the database-backed standalone tests find the test MongoDB (CI's Full run and `npm run test:up`; local preflight runs none of them). Defaults are the test stack's loopback address and published port. |
-| `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs` | The recorder's instance and token. See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
+| `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs`, `scripts/trade.mjs` | The recorder's instance and token (trade: `--record` and `--history`). See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
 | `GH_TOKEN`, `GITHUB_API_URL` | `scripts/test-times.mjs` | Read access to this repository's Actions runs, and the API base. |
 | `CLIENT_TEST_OUTCOME` | `scripts/mask-client-report.mjs` | The client test command's own result (`success`, `failure`, `cancelled` or `skipped`), which CI's mask step passes and which is written into the masked report as `runnerOutcome`; the recorder reads a failed runner with no failure counted as an incomplete run. Unset: nothing is stamped. |
 | `YTHRIL_TEST_WAIT_TIMING_FILE` | `testing/_shared/wait-for.mjs` | A file every wait appends one timing line to. Unset: nothing is recorded. |
