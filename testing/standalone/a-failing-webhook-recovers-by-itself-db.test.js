@@ -81,8 +81,13 @@ function probeDeps({ deliverProbe, now }) {
     ...(store.claimDueProbe ? { claimDueProbe: store.claimDueProbe } : {}),
     ...(store.markProbeRecovered ? { markProbeRecovered: store.markProbeRecovered } : {}),
   };
-  const state = { probes: [], claims: 0, claimsSettled: 0 };
+  // `claimed` counts the claims that took a row, `probesSettled` the probes whose outcome is in: the subscription was gone, the sink
+  // refused (or the delivery threw), or the recovery write answered. A claim's write lands BEFORE its probe is delivered, so a case
+  // that waited on what the claim wrote (`probeAttempts`) used to read the probes, the row and the counters while the probe was still
+  // on its way (the CI failure of PR #1538: "not probed on the first tick", 0 probes, with the probe's own line logged just after).
+  const state = { probes: [], claims: 0, claimsSettled: 0, claimed: 0, probesSettled: 0 };
   const claim = production.claimDueProbe;
+  const recover = production.markProbeRecovered;
   const deps = {
     ...production,
     now: () => now(),
@@ -92,29 +97,39 @@ function probeDeps({ deliverProbe, now }) {
     ...(claim ? { claimDueProbe: async (at) => {
       if (state.closed) return null;
       state.claims++;
-      try { return await claim(at); } finally { state.claimsSettled++; }
+      try { const got = await claim(at); if (got) state.claimed++; return got; } finally { state.claimsSettled++; }
     } } : {}),
+    getWebhook: async (id) => { const sub = await production.getWebhook(id); if (!sub) state.probesSettled++; return sub; },
     deliverProbe: async (sub, body, event, spaceId, deliveryId) => {
       state.probes.push({ id: sub.id, secret: sub.secret, body, event, spaceId, deliveryId });
-      return deliverProbe(sub);
+      let result;
+      try { result = await deliverProbe(sub); } catch (err) { state.probesSettled++; throw err; }
+      if (!result.success) state.probesSettled++;
+      return result;
     },
+    ...(recover ? { markProbeRecovered: async (id, url) => { try { return await recover(id, url); } finally { state.probesSettled++; } } } : {}),
   };
   return { deps, state };
 }
 
-/** One tick of a fresh worker (its own single flight, so a tick still finishing never makes this one a skip), awaited to `until`. */
+/**
+ * One tick of a fresh worker (its own single flight, so a tick still finishing never makes this one a skip), awaited to `until`, and
+ * then to its END: no claim in flight, and every probe it claimed settled. A case reads what the tick did, never what it had begun.
+ */
 async function tick(deps, state, until, ms = 10_000) {
   const { worker, fire } = armedRetryWorker(dispatcher, deps, state);
+  const claimsBefore = state.claimsSettled;
   state.closed = false;
   worker.job.start();
   await fire();
   worker.job.stop();
   try {
     if (until) return await holdsWithin(until, ms, 25);
-    return await holdsWithin(() => state.claimsSettled >= 1, 2_000, 25);
+    // THIS tick's first claim has answered (a count over every tick would be met before this one claimed anything).
+    return await holdsWithin(() => state.claimsSettled > claimsBefore, ms, 25);
   } finally {
     state.closed = true;
-    await holdsWithin(() => state.claimsSettled === state.claims, 2_000, 10);
+    await holdsWithin(() => state.claimsSettled === state.claims && state.probesSettled === state.claimed, ms, 10);
   }
 }
 

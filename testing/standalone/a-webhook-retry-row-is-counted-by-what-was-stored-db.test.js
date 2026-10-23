@@ -244,6 +244,10 @@ describe('a webhook retry row is counted by what the store holds after the write
       await waitFor(() => faults.fired('insertOne', RETRY_QUEUE) === 1, 30_000, 10, 'fixture: the second requeue never reached the injected refusal');
       await waitFor(async () => minus(await reading(), before).lost >= 1, 30_000, 25,
         async () => `the refused requeue was never counted lost: ${JSON.stringify(minus(await reading(), before))}`, { what: 'the refused requeue counted' });
+      // The refused one's count is NOT a latch for the landed one's: their read-backs run concurrently, and under load the landed one's
+      // finished after this case, once the next case's beforeEach had removed its row, so it counted a not_known_stored into the poll's
+      // case (PR #1538's CI, reproduced under load). Every requeue of this case is written and counted before it reads the counters.
+      await dispatcher.settledRetryWrites();
       const d = minus(await reading(), before);
       assert.deepEqual(await rowsOf(a, 'requeue-refused'), [], 'fixture: the refused requeue stored its row');
       assert.equal(d.lost, 1, `${d.lost} first-delivery requeues counted lost, of one refused and one stored: the row the queue holds was counted lost (${JSON.stringify(d)})`);
