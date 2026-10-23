@@ -217,8 +217,12 @@ POST /api/contradictions/:id/resolve
   ten minutes any other choice (`superseded`, `edited` or `linked`) may take it over. A release or takeover
   undoes **exactly what the claim recorded** — that edge deleted, that mark lifted — and says so in a note
   (`oppositeChoiceUndone`; on a takeover also in `written.undone`). Nothing a claim did not record is ever
-  touched: a mark set by hand or by another pair, or an edge drawn by hand, stays. A slow resolver whose claim
-  was taken over stops at its next write, undoes what it wrote, and answers `409` with `written`.
+  touched: a mark set by hand or by another pair, or an edge drawn by hand, stays — and so does a mark the claim
+  recorded that another pair has since come to rely on (another `supersedes` edge points at the record, or
+  another resolved finding names it as its loser): the note says it was kept (`written.undone.markKept`). A
+  slow resolver whose claim was taken over stops at its next write, undoes what it wrote, and answers `409`
+  with `written`; the takeover runs its undo once more just before it closes, so an effect the slow resolver
+  landed late is cleared too.
 - **A resolve of a finding already resolved the same way writes nothing.** It answers `200` from what the
   finding recorded.
 - **A store failure part-way is a `503` that says what was written.** It is retryable (`Retry-After`) and
@@ -242,7 +246,7 @@ shows them too. `note` (one string, the details joined) is still returned for an
 | `winnerGone` | The record kept no longer exists. | No edge; the loser is marked; the finding closed. |
 | `loserGone` | The record judged stale no longer exists. | No edge, nothing marked (`markedRecord: false`); the finding closed. |
 | `edgePairUnlinkable` | The pair are edges (a scanner configured to cover them), and an edge cannot be the endpoint of an edge. | The loser is marked and the finding closed. |
-| `oppositeChoiceUndone` | An unfinished resolve of this pair — taken over as stale, or released by `dismiss` or `reopen` — was undone first; `detail` names the edge deleted and the record whose mark was lifted. | Only what that claim recorded was undone; the resolve (or dismiss, reopen) then went on as asked. |
+| `oppositeChoiceUndone` | An unfinished resolve of this pair — taken over as stale, or released by `dismiss` or `reopen` — was undone first; `detail` names the edge deleted and the record whose mark was lifted — or kept, when another pair relies on it. | Only what that claim recorded was undone; the resolve (or dismiss, reopen) then went on as asked. |
 
 A store failure is never reported as a note: a refusal is the space's rules speaking, and a failure is the
 `503` above.
