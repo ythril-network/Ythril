@@ -17,26 +17,22 @@
  * catch typos and half-finished renames, which are always static.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { stripComments } from './strip-comments';
 import { callArguments } from './call-arguments';
+import { dictionary, I18N_DIR, LOCALES } from './i18n-dictionary';
+import { CLIENT_ROOT, trackedAppSources } from './tracked-sources';
+import { componentTemplates } from './component-templates';
+import { CORE_PLURAL_MODULES, pluralServiceNames } from './plural-mechanism';
 
-const SRC = resolve(__dirname, '..');
-const I18N = resolve(__dirname, '../../../public/assets/i18n');
+const SRC = resolve(CLIENT_ROOT, 'src/app');
 
-function walk(dir: string): string[] {
-  const out: string[] = [];
-  for (const name of readdirSync(dir)) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) out.push(...walk(p));
-    else if (p.endsWith('.ts') && !p.endsWith('.spec.ts')) out.push(p);
-  }
-  return out;
-}
-
-const load = (loc: string): Record<string, string> =>
-  JSON.parse(readFileSync(join(I18N, `${loc}.json`), 'utf8'));
+/**
+ * The client's tracked, non-spec sources as absolute paths. `git ls-files` (via `trackedAppSources`), never a directory walk: a
+ * gitignored or generated file is not the app, and the listing throws on a short result instead of returning one that every loop passes.
+ */
+const appSources = (): string[] => trackedAppSources().map(f => resolve(CLIENT_ROOT, f));
 
 /**
  * Static translation keys used in the source. Matches the two shapes the app actually uses:
@@ -47,7 +43,7 @@ function usedKeys(): Map<string, string[]> {
   const found = new Map<string, string[]>();
   const KEY = /'([a-zA-Z][\w-]*(?:\.[\w-]+)+)'\s*(?:\|\s*transloco|\))/g;
   const TRANSLATE = /translate\(\s*'([a-zA-Z][\w-]*(?:\.[\w-]+)+)'/g;
-  for (const file of walk(SRC)) {
+  for (const file of appSources()) {
     const text = readFileSync(file, 'utf8');
     for (const re of [KEY, TRANSLATE]) {
       re.lastIndex = 0;
@@ -78,42 +74,104 @@ function usedKeys(): Map<string, string[]> {
  */
 const UNCHECKED_BASES: Readonly<Record<string, string>> = {};
 
-/** Every plural base the client calls `pluralText` with, with where; unresolved identifiers are returned under `unresolved`. */
-function pluralBases(): { bases: Map<string, string[]>; unresolved: string[] } {
-  const bases = new Map<string, string[]>();
-  const unresolved: string[] = [];
-  const add = (base: string, where: string): void => { bases.set(base, [...(bases.get(base) ?? []), where]); };
-  for (const file of walk(SRC)) {
-    if (file.endsWith('plural-text.ts')) continue;
-    const src = stripComments(readFileSync(file, 'utf8'));
-    for (const m of src.matchAll(/\bpluralText\(/g)) {
-      const where = `${file.slice(SRC.length + 1)}:${src.slice(0, m.index!).split('\n').length}`;
-      const base = callArguments(src, m.index! + m[0].length - 1)[2] ?? '';
+/** One use of a plural base: the base, and the line it is written on. */
+interface BaseUse { base: string; line: number; via?: string }
+interface UnresolvedBase { line: number; why: string }
+
+/**
+ * The bases a (comment-stripped) source hands the plural mechanism through a CALL: `pluralText(t, lang, '<base>', n)` (third argument)
+ * and `<service>.text('<base>', n)` on a held PluralText service (first argument). A literal is a base; an identifier is resolved to the
+ * literals its function (a method or an arrow with that parameter) is called with in the same file; anything else, or an identifier that
+ * resolves to none, is returned as unresolved rather than skipped.
+ */
+export function basesCalledIn(src: string): { found: BaseUse[]; unresolved: UnresolvedBase[] } {
+  const found: BaseUse[] = [];
+  const unresolved: UnresolvedBase[] = [];
+  const calls: { re: RegExp; argument: number }[] = [{ re: /\bpluralText\(/g, argument: 2 }];
+  const services = pluralServiceNames(src);
+  if (services.length) calls.push({ re: new RegExp(`\\b(?:${services.join('|')})\\.text\\(`, 'g'), argument: 0 });
+  for (const { re, argument } of calls) {
+    for (const m of src.matchAll(re)) {
+      const line = src.slice(0, m.index!).split('\n').length;
+      const base = callArguments(src, m.index! + m[0].length - 1)[argument] ?? '';
       const literal = /^'([^']+)'$/.exec(base);
-      if (literal) { add(literal[1]!, where); continue; }
-      if (!/^[A-Za-z_]\w*$/.test(base)) { unresolved.push(`${where}: base \`${base}\` is neither a literal nor a parameter`); continue; }
+      if (literal) { found.push({ base: literal[1]!, line }); continue; }
+      if (!/^[A-Za-z_]\w*$/.test(base)) { unresolved.push({ line, why: `base \`${base}\` is neither a literal nor a parameter` }); continue; }
       const head = src.slice(0, m.index!);
       const decl = [...head.matchAll(new RegExp(`(?:\\b(\\w+)\\s*=\\s*(?:async\\s*)?|\\b(\\w+))\\([^()]*\\b${base}\\s*:`, 'g'))].pop();
       const fn = decl?.[1] ?? decl?.[2];
       const callers = fn ? [...src.matchAll(new RegExp(`\\b${fn}\\(\\s*'([^']+)'`, 'g'))].map(c => c[1]!) : [];
-      if (!callers.length) { unresolved.push(`${where}: base \`${base}\` resolves to no literal handed to ${fn ?? 'its function'} in this file`); continue; }
-      for (const c of callers) add(c, `${where} via ${fn}`);
+      if (!callers.length) { unresolved.push({ line, why: `base \`${base}\` resolves to no literal handed to ${fn ?? 'its function'} in this file` }); continue; }
+      for (const c of callers) found.push({ base: c, line, via: fn });
     }
+  }
+  return { found, unresolved };
+}
+
+/**
+ * The bases a template hands the `plural` pipe: `{{ n | plural:'<base>' }}`. Only a literal is a base: a pipe argument is a template
+ * expression with no function to resolve it through, so anything else is refused (`{{ n | plural:key }}` cannot be checked here).
+ */
+export function pipeBasesIn(template: string): { found: BaseUse[]; unresolved: UnresolvedBase[] } {
+  const found: BaseUse[] = [];
+  const unresolved: UnresolvedBase[] = [];
+  for (const m of template.matchAll(/\|\s*plural\b(?:\s*:\s*('[^']*'|[^\s:}|]*))?/g)) {
+    const line = template.slice(0, m.index!).split('\n').length;
+    const literal = /^'([^']+)'$/.exec(m[1] ?? '');
+    if (literal) found.push({ base: literal[1]!, line });
+    else unresolved.push({ line, why: `the plural pipe's base \`${m[1] ?? ''}\` is not a string literal` });
+  }
+  return { found, unresolved };
+}
+
+/** Every plural base the client names, with where; bases that cannot be read are returned under `unresolved`. */
+function pluralBases(): { bases: Map<string, string[]>; unresolved: string[] } {
+  const bases = new Map<string, string[]>();
+  const unresolved: string[] = [];
+  const add = (base: string, where: string): void => { bases.set(base, [...(bases.get(base) ?? []), where]); };
+  const rel = (file: string): string => file.slice(SRC.length + 1).replace(/\\/g, '/');
+  for (const file of appSources()) {
+    const repoPath = `src/app/${rel(file)}`;
+    if (CORE_PLURAL_MODULES.includes(repoPath)) continue;
+    const src = stripComments(readFileSync(file, 'utf8'));
+    const { found, unresolved: open } = basesCalledIn(src);
+    for (const u of found) add(u.base, `${rel(file)}:${u.line}${u.via ? ` via ${u.via}` : ''}`);
+    unresolved.push(...open.map(u => `${rel(file)}:${u.line}: ${u.why}`));
+  }
+  for (const t of componentTemplates()) {
+    const { found, unresolved: open } = pipeBasesIn(t.text);
+    for (const u of found) add(u.base, `${t.file.replace(/^src\/app\//, '')}:${t.startLine + u.line - 1} (pipe)`);
+    unresolved.push(...open.map(u => `${t.file.replace(/^src\/app\//, '')}:${t.startLine + u.line - 1}: ${u.why}`));
   }
   return { bases, unresolved };
 }
 
-describe('every pluralText base has its forms in every locale (Q-549, Q-472)', () => {
+describe('every plural base has its forms in every locale (Q-549, Q-472, Q-574)', () => {
   const { bases, unresolved } = pluralBases();
   const CATEGORY = /^(?:zero|one|two|few|many|other)$/;
   const formsOf = (dict: Record<string, string>, base: string): string[] =>
     Object.keys(dict).filter(k => k.startsWith(`${base}.`) && CATEGORY.test(k.slice(base.length + 1))).map(k => k.slice(base.length + 1));
 
-  it('finds the bases (a floor, so a changed call shape cannot pass by finding none)', () => {
+  it('finds the bases (a floor over every form - pluralText calls, service .text calls, the plural pipe - so a changed call shape cannot pass by finding none)', () => {
     expect(bases.size).toBeGreaterThanOrEqual(8);
   });
 
-  it('every call hands pluralText a literal base, or a parameter that resolves to literals in the same file', () => {
+  // The derivation is the gate. The service and the pipe have no caller at the base commit, so a derivation that never read one would pass
+  // everything: each form is shown a source, and the refusal of a base it cannot read is shown one too.
+  it('the derivation reads every form the mechanism is called in, and refuses a base it cannot read', () => {
+    const service = `class A { private readonly plural = inject(PluralText); a() { return this.plural.text('svc.literal', 2); } b() { return this.show('svc.viaParam', 1); } show(base: string, n: number) { return this.plural.text(base, n); } c() { return this.plural.text(this.key, 3); } }`;
+    expect(basesCalledIn(service).found.map(u => u.base).sort()).toEqual(['svc.literal', 'svc.viaParam']);
+    expect(basesCalledIn(service).unresolved.map(u => u.why)).toEqual([expect.stringContaining('this.key')]);
+    expect(basesCalledIn(`const t = pluralText(tr, lang, 'fn.literal', 2);`).found.map(u => u.base)).toEqual(['fn.literal']);
+    expect(basesCalledIn(`class B { x() { return other.text('not.a.service', 2); } }`).found).toEqual([]);
+
+    const pipe = pipeBasesIn(`<b>{{ n | plural:'pipe.literal' }}</b><i>{{ m | plural:'pipe.withParams':{ shown: 3 } }}</i><u>{{ k | plural:key }}</u><s>{{ j | plural }}</s>`);
+    expect(pipe.found.map(u => u.base)).toEqual(['pipe.literal', 'pipe.withParams']);
+    expect(pipe.unresolved).toHaveLength(2);
+    expect(pipeBasesIn(`{{ 'a.b' | transloco }} {{ x | pluralize }}`).found).toEqual([]);
+  });
+
+  it('every call and pipe use hands the mechanism a literal base, or (a call) a parameter that resolves to literals in the same file', () => {
     const open = unresolved.filter(u => !Object.keys(UNCHECKED_BASES).some(site => u.startsWith(site)));
     expect(open, 'pluralText bases that cannot be checked:\n  ' + open.join('\n  ')).toEqual([]);
   });
@@ -122,9 +180,9 @@ describe('every pluralText base has its forms in every locale (Q-549, Q-472)', (
   // happens to carry: a Polish base with only one/other falls back to `other` for 2-4 and renders the wrong case, and nothing fails.
   it('every language carries a form for every plural category its own rules use', () => {
     const wrong: string[] = [];
-    for (const loc of ['en', 'de', 'pl']) {
+    for (const loc of LOCALES) {
       const needed = new Intl.PluralRules(loc).resolvedOptions().pluralCategories;
-      const dict = load(loc);
+      const dict = dictionary(loc);
       for (const [base, sites] of bases) {
         const have = formsOf(dict, base);
         for (const need of needed) if (!have.includes(need)) wrong.push(`${loc}: ${base}.${need} is missing (called at ${sites.join(', ')})`);
@@ -135,7 +193,7 @@ describe('every pluralText base has its forms in every locale (Q-549, Q-472)', (
 });
 
 describe('i18n key coverage', () => {
-  const en = load('en');
+  const en = dictionary('en');
   const namespaces = new Set(Object.keys(en).map(k => k.split('.')[0]));
 
   it('every static key used in the source exists in en.json', () => {
@@ -163,7 +221,7 @@ describe('i18n key coverage', () => {
      * which is the whole reason the duplicate survived.
      */
     for (const loc of ['en', 'de', 'pl']) {
-      const src = readFileSync(join(I18N, `${loc}.json`), 'utf8');
+      const src = readFileSync(join(I18N_DIR, `${loc}.json`), 'utf8');
       const seen = new Set<string>();
       const dupes: string[] = [];
       for (const m of src.matchAll(/^\s*"([^"]+)":/gm)) {
@@ -177,7 +235,7 @@ describe('i18n key coverage', () => {
   it('de and pl carry exactly the same keys as en', () => {
     const enKeys = Object.keys(en).sort();
     for (const loc of ['de', 'pl']) {
-      const keys = Object.keys(load(loc)).sort();
+      const keys = Object.keys(dictionary(loc)).sort();
       const missing = enKeys.filter(k => !keys.includes(k));
       const extra = keys.filter(k => !enKeys.includes(k));
       expect(missing, `${loc}.json is missing keys present in en.json`).toEqual([]);
@@ -199,7 +257,7 @@ describe('i18n key coverage', () => {
     const offenders: string[] = [];
     let scanned = 0;
     for (const loc of ['en', 'de', 'pl']) {
-      for (const [key, value] of Object.entries(load(loc))) {
+      for (const [key, value] of Object.entries(dictionary(loc))) {
         if (typeof value !== 'string') continue;
         scanned++;
         const withoutDouble = value.replace(/\{\{[^}]*\}\}/g, '');
@@ -213,6 +271,28 @@ describe('i18n key coverage', () => {
       .toEqual([]);
   });
 
+  it('no value writes a placeholder with spaces inside the braces, in any locale', () => {
+    /*
+     * The placeholder convention here is `{{name}}`, and the plural mechanism fills it by name. About thirty-five values per file wrote
+     * `{{ name }}` instead: both spellings interpolate in Transloco's own transpiler, so nothing ever failed, and that is the reason for the
+     * gate - two spellings of one thing are read by two kinds of code (a regex that fills params, a spec that compares parameter sets, a
+     * translator pasting between files), and the next reader that is written for one spelling misses the other without a sound.
+     * Derived over every value of every locale, never a list of keys.
+     */
+    const offenders: string[] = [];
+    let scanned = 0;
+    for (const loc of LOCALES) {
+      for (const [key, value] of Object.entries(dictionary(loc))) {
+        if (typeof value !== 'string') continue;
+        scanned++;
+        const spaced = value.match(/\{\{\s+[^{}]*\}\}|\{\{[^{}]*\s+\}\}/g);
+        if (spaced) offenders.push(`${loc}: ${key} → ${spaced.join(' ')}`);
+      }
+    }
+    expect(scanned, 'a floor, so a loader that returned nothing cannot pass this by scanning nothing').toBeGreaterThan(3000);
+    expect(offenders, `${offenders.length} values carry a spaced placeholder - write {{name}}:\n  ${offenders.slice(0, 60).join('\n  ')}`).toEqual([]);
+  });
+
   it('de and pl interpolate exactly the parameters en does', () => {
     /*
      * A translation that drops or renames a `{{param}}` renders without the number the English shows, and
@@ -222,7 +302,7 @@ describe('i18n key coverage', () => {
       typeof v === 'string'
         ? [...new Set([...v.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map(m => m[1]))].sort().join(',')
         : '';
-    const others = { de: load('de'), pl: load('pl') };
+    const others = { de: dictionary('de'), pl: dictionary('pl') };
     const mismatched: string[] = [];
     let withParams = 0;
     for (const [key, value] of Object.entries(en)) {

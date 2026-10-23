@@ -108,3 +108,62 @@ describe('translations that contain markup', () => {
     }
   });
 });
+
+/**
+ * ## The tags an innerHTML-bound value carries are en's, exactly, in every locale (Q-573, security lens S1)
+ *
+ * A value bound with `[innerHTML]` is markup, so what a translator writes in it is code the page renders. The three-way agreement above
+ * is only "does it still carry SOME tag"; a German or Polish rewrite of `mediaProcessing.embedding.reindexWarning` that adds an `<a>`, an
+ * `<img>` or one more `<b>`, or drops a closing tag, passes it and changes what the page renders. Angular's sanitizer strips what is
+ * dangerous, not what is unintended. The rule is the plain one: the multiset of tags in the de and pl value equals en's.
+ *
+ * Derived, never listed: the keys are those a source line binds next to `innerHTML`, read out of the sources, and the tag set is read
+ * out of the values. A floor on both, so a changed binding spelling cannot pass by finding none.
+ */
+const TAG = /<\/?[a-z][a-z0-9-]*(?:\s[^<>]*)?\/?>/gi;
+
+/** The tags of a value as a sorted, lower-cased list: `<b>` and `</b>` are two entries, and attributes are kept (an added `href` is an added behaviour). */
+const tagSet = value => (String(value).match(TAG) ?? []).map(t => t.replace(/\s+/g, ' ').toLowerCase()).sort();
+
+/** Every key a client source line binds next to `innerHTML` that en defines. */
+function innerHtmlBoundKeys() {
+  const found = new Set();
+  for (const file of files) {
+    for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+      if (!line.includes('innerHTML')) continue;
+      for (const m of line.matchAll(/'([a-zA-Z][\w-]*(?:\.[\w-]+)+)'/g)) if (m[1] in translations['en']) found.add(m[1]);
+    }
+  }
+  return [...found].sort();
+}
+
+describe('an innerHTML-bound value carries the tags en has, exactly, in every locale', () => {
+  const keys = innerHtmlBoundKeys();
+
+  it('finds the innerHTML-bound keys, and most of them carry markup (a floor)', () => {
+    assert.ok(keys.length >= 5, `expected several innerHTML-bound keys, found ${keys.length}: ${keys}`);
+    assert.ok(keys.filter(k => tagSet(translations['en'][k]).length > 0).length >= 5, 'expected the bound keys to carry en markup');
+  });
+
+  it('reads tags the way the rule means: attributes and closing tags count', () => {
+    assert.deepEqual(tagSet('a <b>x</b> y'), ['</b>', '<b>']);
+    assert.notDeepEqual(tagSet('a <b>x</b>'), tagSet('a <b>x</b> <i>y</i>'));
+    assert.notDeepEqual(tagSet('<b>x</b>'), tagSet('<b>x'));
+    assert.notDeepEqual(tagSet('<a href="https://a.example">x</a>'), tagSet('<a>x</a>'));
+    assert.deepEqual(tagSet('1 < 2 and 3 > 2'), []);
+  });
+
+  it('de and pl carry exactly the tags en does in each of them', () => {
+    const wrong = [];
+    for (const key of keys) {
+      const want = tagSet(translations['en'][key]);
+      for (const l of LOCALES.slice(1)) {
+        const v = translations[l][key];
+        if (v === undefined) continue;  // a missing key is the i18n coverage gate's job
+        const got = tagSet(v);
+        if (JSON.stringify(got) !== JSON.stringify(want)) wrong.push(`${l}: ${key} has [${got.join(' ')}], en has [${want.join(' ')}]`);
+      }
+    }
+    assert.deepEqual(wrong, [], 'an innerHTML-bound value renders tags en does not have (or lacks ones it has):\n' + wrong.join('\n'));
+  });
+});

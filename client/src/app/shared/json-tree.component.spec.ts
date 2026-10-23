@@ -12,11 +12,24 @@
  */
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect } from 'vitest';
+import { TranslocoService } from '@jsverse/transloco';
 import { JsonTreeComponent } from './json-tree.component';
+import { dictionary } from '../testing/i18n-dictionary';
+import { getTranslocoModule } from '../testing/transloco-testing';
 
-function mount(value: unknown, openTo = 1) {
+/** Real dictionaries: what a closed container says beside its size is a VALUE of the dictionary, and echoed keys cannot show it. */
+function mount(value: unknown, openTo = 1, language: 'en' | 'pl' = 'en') {
   TestBed.resetTestingModule();
-  TestBed.configureTestingModule({ imports: [JsonTreeComponent] });
+  TestBed.configureTestingModule({
+    imports: [
+      JsonTreeComponent,
+      getTranslocoModule({
+        langs: { en: dictionary('en'), pl: dictionary('pl') },
+        translocoConfig: { availableLangs: ['en', 'pl'], defaultLang: 'en' },
+      }),
+    ],
+  });
+  TestBed.inject(TranslocoService).setActiveLang(language);
   const fixture = TestBed.createComponent(JsonTreeComponent);
   fixture.componentRef.setInput('value', value);
   fixture.componentRef.setInput('openTo', openTo);
@@ -58,15 +71,36 @@ describe('a collapsed container costs one row', () => {
 });
 
 describe('what a row says about itself', () => {
-  it('names the size in the unit of the container', () => {
+  // The size is a counted phrase ("3 items"), so it goes through the plural mechanism and is read where the reader reads it: the
+  // rendered row. It used to be `{{ r.size }} {{ label(r) }}` with English 'item'/'items'/'key'/'keys' hard-coded in the component, so
+  // a Polish reader saw English nouns on a Polish page, and Polish's three plural forms were out of reach.
+  const sizes = (fixture: { nativeElement: unknown }): string[] =>
+    [...(fixture.nativeElement as HTMLElement).querySelectorAll('.jt-size')].map(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim());
+
+  it('en: names the size in the unit of the container, and one element is not "1 items"', () => {
     const fixture = mount({ list: [1, 2, 3], one: [1], bag: { x: 1, y: 2 }, single: { x: 1 } }, 1);
-    const c = fixture.componentInstance;
-    const row = (key: string) => c.rows().find(r => r.key === key)!;
-    expect(c.label(row('list'))).toBe('items');
-    expect(c.label(row('one')), 'one element is not "1 items"').toBe('item');
-    expect(c.label(row('bag'))).toBe('keys');
-    expect(c.label(row('single'))).toBe('key');
+    expect(sizes(fixture)).toEqual(['3 items', '1 item', '2 keys', '1 key']);
   });
+
+  const rendered = (value: unknown) => sizes(mount({ c: value }, 1, 'pl'))[0]!;
+  const noun = (text: string) => text.replace(/^\d+\s+/, '');
+  for (const [label, make] of [
+    ['array (item)', (n: number) => Array.from({ length: n }, (_, i) => i)],
+    ['object (key)', (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, i]))],
+  ] as const) {
+    it(`pl: the size of an ${label} renders through the Polish plural forms`, () => {
+      const one = rendered(make(1));
+      const few = rendered(make(2));
+      const many = rendered(make(5));
+      expect(one, `${label}: the count leads the phrase`).toMatch(/^1\s+\S/);
+      expect(few).toMatch(/^2\s+\S/);
+      expect(many).toMatch(/^5\s+\S/);
+      // One word per category, not one word for every count: Polish has one, few and many.
+      expect(new Set([noun(one), noun(few), noun(many)]).size, `${label}: pl one/few/many read ${JSON.stringify([one, few, many])}`).toBe(3);
+      // And not the English noun the component used to hard-code.
+      for (const text of [one, few, many]) expect(text, `${label}: English noun on a Polish page`).not.toMatch(/\b(items?|keys?)\b/);
+    });
+  }
 
   it('quotes a string and leaves everything else bare, so the types are readable', () => {
     const fixture = mount({ s: 'x', n: 4, b: false, z: null }, 2);
