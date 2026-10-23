@@ -206,6 +206,7 @@ node scripts/test-times.mjs --help                # every flag and variable, pri
 |---|---|
 | `YTHRIL_TEST_RUNS_URL` | The Ythril instance to record to, for `test-times.mjs` and for `trade.mjs --record` / `--history`. `https`, or `http` to `127.0.0.1`, `localhost` or `[::1]`. |
 | `YTHRIL_TEST_RUNS_TOKEN` | A token that may write chrono entries in the space the scripts record to. Never printed, never stored, never in a payload, and never handed to the `gh` and `git` children of `trade.mjs`. |
+| `YTHRIL_TEST_RUNS_LOCK_WAIT_MS` | How long a recorder waits for the record lock (one per repository, in the git common dir), in milliseconds; a positive integer, default 120000. Both `test-times.mjs` and `trade.mjs --record` honour it. |
 | `GH_TOKEN` | A token that may read this repository's Actions runs and artifacts, for `--record-ci` and `--rewrite`. |
 | `GITHUB_API_URL` | The Actions API base. Defaults to the public GitHub API. |
 | `YTHRIL_TEST_RUNS_LISTING_WAIT_MS` | For `--record-ci <runId>`: how long, in milliseconds, the listing is read again for a run it does not hold yet before the pass fails. A positive integer; default `180000`. |
@@ -316,16 +317,20 @@ can fix there, and refused in CI unless it is expected.**
   instance `YTHRIL_TEST_RUNS_URL` names, in `y-proj-ythril`, keyed `properties.recordKey` = `trade:<n>`; the refs of one bundle
   (`bundle-106-a0`, `bundle-106-a`) are one record. Every figure is a JSON number (failures, timeouts and unresolved failures
   are counts; minutes are rounded to two decimals); the entry's `startsAt` is the first counted run's creation and `endsAt`
-  the last completion of a counted run. It reads with the limit it is given (`--limit`, default 500) and raises it until the
-  listing no longer fills it, up to 5000, then refuses naming `--limit`. A re-record replaces the stored record, writing every
-  field again, only when its run ids contain every run id the stored record holds (the listing shows the latest runs only);
-  otherwise it **keeps** the stored record and says it holds runs the listing no longer shows.
-  - **Refused, named, with nothing sent:** an unknown cut-over, a bundle with no counted run after it, and a bundle with a run
-    that is `unread-budget`, `unplaced` or `missing-field` (its figures would be partial). One refused bundle stops the whole
-    call; the others are not written either.
+  the last completion of a counted run. It reads with the limit it is given (`--limit`, default 500) and, when that listing fills
+  the limit, reads once more at 5000 (two reads at most); a listing that fills 5000 is refused naming `--limit`. A re-record
+  replaces the stored record, writing every field again (an optional field the new record lacks is deleted, not kept), only when
+  its run ids contain every run id the stored record holds (the listing shows the latest runs only); otherwise it **keeps** the
+  stored record and says it holds runs the listing no longer shows.
+  - **Refused, named, with nothing sent:** an unknown cut-over, a bundle with no counted run after it, a bundle with a run that
+    is `unread-budget`, `unplaced` or `missing-field` (its figures would be partial), and a bundle whose number the listing
+    spells two ways (`bundle-106` and `bundle-0106`: one bundle, two sets of figures, so the refusal names both). A number is read
+    under every spelling when any spelling is asked for. One refused bundle stops the whole call; the others are not written either.
   - **Exit 2, never 0, when a recording did not happen:** a bad argument (`--record` with no ref, with `--line`, a ref that is no
     bundle: refused before any `gh` call), `YTHRIL_TEST_RUNS_URL` or `YTHRIL_TEST_RUNS_TOKEN` unset, `GITHUB_ACTIONS` or `CI`
-    set (CI never holds the token), a refused bundle, or a write the instance refused. 0 is a record written or kept.
+    set (CI never holds the token), a refused bundle, a write the instance refused, or the record lock still held by another
+    recorder when `YTHRIL_TEST_RUNS_LOCK_WAIT_MS` (default 120000) runs out (nothing was written; run it again). 0 is a record
+    written or kept.
   - **The type is declared once, by hand, before the first `--record`:** `node scripts/trade.mjs --type-schema` prints the
     `schema_update` arguments (the `Trade` type with every field, one year of retention, embeddings suppressed, the server's
     default chrono types beside it, merge mode); send them with `schema_update` on `y-proj-ythril` and read the type back with
@@ -333,9 +338,14 @@ can fix there, and refused in CI unless it is expected.**
     place a spec lives; a gate holds every spec it registers to what the server's validator accepts.
   - **`node scripts/trade.mjs --history`** reads the `Trade` records back and prints the totals over time: the failure rate as the
     sum of `afterFailures` over the sum of `afterCounted` across records (not a mean of per-record rates), and the mean saved,
-    cost, net and calendar minutes per bundle, over the records with at least one counted run.
+    cost, net and calendar minutes per bundle, over the records with at least one counted run. It needs
+    `YTHRIL_TEST_RUNS_URL` and `YTHRIL_TEST_RUNS_TOKEN` (exit 2 naming the one that is unset), is refused under `GITHUB_ACTIONS` or
+    `CI` (the token is not there; the line says a read is refused), and refuses, printing no figure, when the instance holds more
+    `Trade` records than the 500 it read: a total over part of the history would read as the whole. `--type-schema` prints
+    indented JSON, as `test-times.mjs --type-schema` does.
   - **One writer per repository.** The lock around find-plus-write lives in the git common dir, so two worktrees share it (it was
-    in `test-results/` and each checkout held its own); trade takes it only for the write, after the reading.
+    in `test-results/` and each checkout held its own); trade takes it only for the write, after the reading. Both recorders wait
+    for it up to `YTHRIL_TEST_RUNS_LOCK_WAIT_MS`; test-times keeps its payload on disk when the lock cannot be placed or waited for.
   - **The children get a clean environment.** `gh` and `git` are started with `testChildEnv()`, so the recorder's token is not
     handed to them.
 - **Locally**, Windows-only skips and the like stay skips; the refusal is CI's.

@@ -18,11 +18,12 @@
  * field was written from another.
  */
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { stepNameRunning } from '../../scripts/_shared/ci-run-reader.mjs';
+import { RECORD_LOCK_NAME } from '../../scripts/_shared/record-lock.mjs';
 import { cleanEnv } from './test-times-harness.mjs';
 
 export const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
@@ -80,7 +81,7 @@ export const greenRuns = (firstId, ref, starts) => starts.map((from, i) => {
 });
 
 /** The fixture file the preload reads, for `runs`. */
-function fixtureOf(runs, { cutover, descends, unplaceable, budgetEndsAfterApiCalls }) {
+function fixtureOf(runs, { cutover, descends, unplaceable, budgetEndsAfterApiCalls, commonDir }) {
   const name = dbStepName();
   const jobs = {};
   for (const r of runs) {
@@ -92,7 +93,7 @@ function fixtureOf(runs, { cutover, descends, unplaceable, budgetEndsAfterApiCal
   }
   const listing = [...runs].sort((a, b) => b.created.localeCompare(a.created))
     .map(r => ({ databaseId: r.id, headBranch: r.ref, headSha: r.sha, createdAt: r.created, attempt: r.attempts.length }));
-  return { listing, jobs, cutover, descends, unplaceable, budgetEndsAfterApiCalls };
+  return { listing, jobs, cutover, descends, unplaceable, budgetEndsAfterApiCalls, commonDir };
 }
 
 /**
@@ -103,14 +104,20 @@ function fixtureOf(runs, { cutover, descends, unplaceable, budgetEndsAfterApiCal
  *
  * @param {string[]} args
  * @param {{ runs?: object[], cutover?: string|null, descends?: string[], unplaceable?: string[], budgetEndsAfterApiCalls?: number,
- *   server?: { url: string, token: string }, env?: Record<string, string|undefined>, timeoutMs?: number }} [o]
- *   `cutover` defaults to {@link SHAS}`.cutover`, and `descends` to the one head that ran after it.
+ *   server?: { url: string, token: string }, env?: Record<string, string|undefined>, timeoutMs?: number, holdLock?: boolean }} [o]
+ *   `cutover` defaults to {@link SHAS}`.cutover`, and `descends` to the one head that ran after it. The record lock lives in a
+ *   scratch dir the preload answers `git rev-parse --git-common-dir` with, never in the real repository's `.git`: `holdLock` puts a
+ *   live holder's lock there before the run, and the result's `lockLeft` says whether the run left a lock file behind.
  */
-export async function runTrade(args, { runs = BUNDLE_130, cutover = SHAS.cutover, descends = [SHAS.after], unplaceable = [], budgetEndsAfterApiCalls, server, env = {}, timeoutMs = 60_000 } = {}) {
+export async function runTrade(args, { runs = BUNDLE_130, cutover = SHAS.cutover, descends = [SHAS.after], unplaceable = [], budgetEndsAfterApiCalls, server, env = {}, timeoutMs = 60_000, holdLock = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'trade-record-'));
   const fixture = join(dir, 'fixture.json');
   const log = join(dir, 'calls.jsonl');
-  writeFileSync(fixture, JSON.stringify(fixtureOf(runs, { cutover, descends, unplaceable, budgetEndsAfterApiCalls })));
+  const commonDir = join(dir, 'git-common');
+  const lock = join(commonDir, RECORD_LOCK_NAME);
+  mkdirSync(commonDir);
+  if (holdLock) writeFileSync(lock, JSON.stringify({ pid: process.pid })); // this process is alive: its lock is not stale
+  writeFileSync(fixture, JSON.stringify(fixtureOf(runs, { cutover, descends, unplaceable, budgetEndsAfterApiCalls, commonDir })));
   writeFileSync(log, '');
   const given = { ...(server ? { YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token } : {}), ...env };
   const childEnv = cleanEnv({ FAKE_GH_GIT_FIXTURE: fixture, FAKE_GH_GIT_LOG: log, ...given });
@@ -127,7 +134,7 @@ export async function runTrade(args, { runs = BUNDLE_130, cutover = SHAS.cutover
       child.on('close', code => {
         clearTimeout(timer);
         const calls = existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) : [];
-        resolveRun({ code, stdout, stderr, calls });
+        resolveRun({ code, stdout, stderr, calls, lockLeft: !holdLock && existsSync(lock) });
       });
     });
   } finally {

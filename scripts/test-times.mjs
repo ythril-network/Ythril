@@ -92,7 +92,8 @@ import { assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
 import {
   TEST_RUN_SPEC, TEST_RUN_SCHEMA, TEST_RUN_RETENTION_DAYS, telemetryTypeDeclaration, checkTelemetryProperties, upsertTelemetryRecord,
 } from './_shared/telemetry-record.mjs';
-import { withRecordLock } from './_shared/record-lock.mjs';
+import { withRecordLock, recordLockPath, lockWaitMs, LOCK_WAIT_ENV, LOCK_WAIT_MS } from './_shared/record-lock.mjs';
+import { newestBy } from './_shared/newest-by.mjs';
 import { recordDestination, refuseRecordingUnderCi } from './_shared/record-destination.mjs';
 import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
 import { readCappedBody } from './_shared/capped-body.mjs';
@@ -438,14 +439,7 @@ function buildPayload({ source, runId, attempt, job, suite, summary, commit, bra
 
 // ---- writing to the instance --------------------------------------------------------------------------------------
 
-/**
- * A comparator that puts the larger value of `field` first (ISO times compare as text). The one newest-first order of this
- * script's rows: a record's `createdAt`, a run summary's `startsAt`. Its ascending twin is the same comparator with its
- * arguments swapped, never a second spelling of the comparison.
- */
-const newestBy = (field) => (a, b) => (a[field] < b[field] ? 1 : a[field] > b[field] ? -1 : 0);
-
-const newestFirst = newestBy('createdAt');
+// The one newest-first order of this script's rows (a run summary's `startsAt`) is `_shared/newest-by.mjs`'s, shared with the recorder.
 const newestStartFirst = newestBy('startsAt');
 
 /**
@@ -607,6 +601,12 @@ async function recordLocal() {
 /** Record payloads under the lock (or keep them); a recording problem is never a failure. */
 async function recordPayloads(payloads) {
   const dest = destination();
+  // A lock that cannot be placed (git cannot name the common dir it lives in, or its wait variable is not a number) is a lock problem like one held too long: the
+  // payloads are kept, not dropped with a line that says "not recorded" and leaves nothing on disk.
+  try { recordLockPath(); lockWaitMs(); } catch (err) {
+    for (const p of payloads) keepPayload(p, firstLine(err));
+    return 0;
+  }
   let locked;
   try { locked = await recordUnderLock(payloads, dest); } catch (err) {
     console.log(`test-times: not recorded: ${firstLine(err)}`);
@@ -1345,6 +1345,9 @@ environment (read, never printed):
                            yet before the pass fails; a positive integer, default ${DEFAULT_LISTING_WAIT_MS}
   ${LISTING_INTERVAL_ENV}
                            the pause, in ms, between two of those reads; a positive integer, default ${DEFAULT_LISTING_INTERVAL_MS}
+  ${LOCK_WAIT_ENV}
+                           how long, in ms, a recorder waits for the record lock (one per repository, held by another recorder);
+                           a positive integer, default ${LOCK_WAIT_MS / 1000} s. Shared with scripts/trade.mjs --record
 
 Recording is refused when GITHUB_ACTIONS or CI is set: CI never holds the write token.
 `;

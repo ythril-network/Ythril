@@ -13,13 +13,15 @@
  * ## The contract this file pins
  *
  * `recordLockPath(cwd = process.cwd())` returns an absolute path in the git common dir of the repository `cwd` is in, the same
- * from every worktree of it. (`withRecordLock(fn, { cwd, waitMs })` is the lock itself and is held by the recorders' own tests.)
+ * from every worktree of it. `withRecordLock(fn, { cwd, waitMs })` is the lock itself: it resolves `null` when the lock stays held
+ * past the wait (default `YTHRIL_TEST_RUNS_LOCK_WAIT_MS`, a positive whole number or a refusal naming it), releases only a lock
+ * that still names this process, and leaves no signal or exit handler on the process once the function has finished.
  *
  * Run: node --test testing/standalone/record-lock-is-one-per-repository-not-per-worktree.test.js
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { makeScratchRepo } from '../_shared/scratch-git-repo.mjs';
@@ -70,5 +72,58 @@ describe('the record lock is one per repository', () => {
   it('a call with no argument asks about the working directory this process runs in', () => {
     assert.equal(lockPathOf(), lockPathOf(process.cwd()));
     assert.equal(resolve(lockPathOf()), lockPathOf(), 'the path is absolute and normalised');
+  });
+
+  const lockOf = () => {
+    assert.equal(typeof mod?.withRecordLock, 'function', 'the module does not export withRecordLock');
+    return { withLock: mod.withRecordLock, file: lockPathOf(main.dir) };
+  };
+  const listeners = () => ['SIGINT', 'SIGTERM', 'exit'].map(e => process.listenerCount(e));
+
+  it('is taken for the length of the function and released after it, with no signal or exit handler left on the process', async () => {
+    const { withLock, file } = lockOf();
+    const before = listeners();
+    const answer = await withLock(async () => { assert.ok(existsSync(file), 'held while the function runs'); return 42; }, { cwd: main.dir });
+    assert.equal(answer, 42);
+    assert.ok(!existsSync(file), 'released');
+    assert.deepEqual(listeners(), before, 'a handler of the finished call stays on the process: it would unlink a lock this call no longer owns, and exit the process on a signal');
+  });
+
+  it('releases only a lock that still names this process: another recorder\'s lock is not deleted', async () => {
+    const { withLock, file } = lockOf();
+    await withLock(async () => { writeFileSync(file, JSON.stringify({ pid: process.pid + 1 })); }, { cwd: main.dir });
+    try {
+      assert.ok(existsSync(file), 'the lock another recorder took was deleted by this call\'s release');
+      assert.equal(JSON.parse(readFileSync(file, 'utf8')).pid, process.pid + 1);
+    } finally { rmSync(file, { force: true }); }
+  });
+
+  it('a lock held by a live process past the wait resolves null, without running the function, and leaves that lock alone', async () => {
+    const { withLock, file } = lockOf();
+    writeFileSync(file, JSON.stringify({ pid: process.pid }));
+    try {
+      let ran = false;
+      const answer = await withLock(async () => { ran = true; return 1; }, { cwd: main.dir, waitMs: 200 });
+      assert.equal(answer, null);
+      assert.equal(ran, false);
+      assert.ok(existsSync(file), 'the holder\'s lock is not this call\'s to remove');
+    } finally { rmSync(file, { force: true }); }
+  });
+
+  it('the wait is YTHRIL_TEST_RUNS_LOCK_WAIT_MS when the call gives none, and a value that is no positive whole number is refused naming it', async () => {
+    const { withLock, file } = lockOf();
+    const saved = process.env.YTHRIL_TEST_RUNS_LOCK_WAIT_MS;
+    writeFileSync(file, JSON.stringify({ pid: process.pid }));
+    try {
+      process.env.YTHRIL_TEST_RUNS_LOCK_WAIT_MS = '200';
+      assert.equal(await withLock(async () => 1, { cwd: main.dir }), null, 'held past the 200 ms the variable names');
+      for (const bad of ['soon', '0', '-5', '1.5', '1e3']) {
+        process.env.YTHRIL_TEST_RUNS_LOCK_WAIT_MS = bad;
+        await assert.rejects(() => withLock(async () => 1, { cwd: main.dir }), /YTHRIL_TEST_RUNS_LOCK_WAIT_MS/, bad);
+      }
+    } finally {
+      if (saved === undefined) delete process.env.YTHRIL_TEST_RUNS_LOCK_WAIT_MS; else process.env.YTHRIL_TEST_RUNS_LOCK_WAIT_MS = saved;
+      rmSync(file, { force: true });
+    }
   });
 });

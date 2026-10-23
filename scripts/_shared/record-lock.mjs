@@ -31,8 +31,20 @@ export const LOCK_WAIT_MS = 120_000;
 export const LOCK_STALE_MS = 15 * 60_000;
 export const LOCK_UNREADABLE_MS = 30_000;
 
+/** The variable that sets how long a recorder waits for the lock, in milliseconds (both recorders; default {@link LOCK_WAIT_MS}). */
+export const LOCK_WAIT_ENV = 'YTHRIL_TEST_RUNS_LOCK_WAIT_MS';
+
+/** The wait: the variable's value, or the default when it is unset. A value that is no positive whole number throws, naming the variable. */
+export function lockWaitMs(env = process.env) {
+  const raw = env[LOCK_WAIT_ENV];
+  if (raw === undefined || raw === '') return LOCK_WAIT_MS;
+  if (!/^[1-9]\d*$/.test(raw)) throw new Error(`${LOCK_WAIT_ENV} must be a positive whole number of milliseconds, not ${JSON.stringify(raw)}`);
+  return Number(raw);
+}
+
 /** The file name inside the git common dir. */
-const LOCK_NAME = 'ythril-record.lock';
+export const RECORD_LOCK_NAME = 'ythril-record.lock';
+const LOCK_NAME = RECORD_LOCK_NAME;
 
 /**
  * The lock file of the repository `cwd` is in: an absolute path in its git common dir, the same from every worktree of it.
@@ -84,12 +96,24 @@ function tryLock(file) {
  * @param {{ cwd?: string, waitMs?: number }} [options]
  * @returns {Promise<T|null>}
  */
-export async function withRecordLock(fn, { cwd = process.cwd(), waitMs = LOCK_WAIT_MS } = {}) {
+export async function withRecordLock(fn, { cwd = process.cwd(), waitMs = lockWaitMs() } = {}) {
   const file = recordLockPath(cwd);
   const held = await holdsWithin(() => tryLock(file), waitMs, 100, { what: 'the record lock to be free' });
   if (!held) return null;
-  const release = () => { try { unlinkSync(file); } catch { /* already gone */ } };
+  // Release only a lock that still names THIS process: one broken as stale and taken again by another recorder is not ours to delete.
+  const release = () => {
+    try { if (JSON.parse(readFileSync(file, 'utf8')).pid === process.pid) unlinkSync(file); } catch { /* already gone, or not ours */ }
+  };
+  const onSignal = () => { release(); process.exit(1); };
   process.once('exit', release);
-  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { release(); process.exit(1); });
-  try { return await fn(); } finally { release(); process.removeListener('exit', release); }
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+  // Every handler this call put on the process comes off in the finally: one left behind would, in a process that records more
+  // than once, run for a lock it no longer holds and end the process on a signal that arrived long after the work was done.
+  try { return await fn(); } finally {
+    release();
+    process.removeListener('exit', release);
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
+  }
 }
