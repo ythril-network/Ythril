@@ -28,7 +28,8 @@
  * 2. **A second record for the same run.** The identity is {@link recordKey}, `source:runId:attempt:job:suite`. The
  *    recorder FINDS by `properties.recordKey`, then updates by id or inserts: it cannot supply its own id, because
  *    `save_chrono` ignores one that names nothing. Two recorders at once would race the find and the insert, so
- *    there is one writer per machine (`test-results/.record.lock`), and every write collapses duplicates of its key
+ *    there is one writer per repository (a lock in the git common dir, so every worktree shares it: `_shared/record-lock.mjs`),
+ *    and every write collapses duplicates of its key
  *    to the newest.
  * 3. **A "passed" that was not.** `outcome` and `scope` are derived from what the run left: the JSONL set for a node
  *    suite (a file without its sentinel, with a wrong event count or a last line cut mid-object is `incomplete`, never
@@ -84,18 +85,22 @@
  * Run the tests: `node --test testing/standalone/test-times-*.test.js`
  */
 import { inflateRawSync, crc32 } from 'node:zlib';
-import { readFileSync, readdirSync, writeFileSync, appendFileSync, mkdirSync, existsSync, unlinkSync, openSync, closeSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, appendFileSync, mkdirSync, existsSync, unlinkSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { createYthrilApi, assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
+import { assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
+import {
+  TEST_RUN_SPEC, TEST_RUN_SCHEMA, TEST_RUN_RETENTION_DAYS, telemetryTypeDeclaration, checkTelemetryProperties, upsertTelemetryRecord,
+} from './_shared/telemetry-record.mjs';
+import { withRecordLock } from './_shared/record-lock.mjs';
+import { recordDestination, refuseRecordingUnderCi } from './_shared/record-destination.mjs';
 import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
 import { readCappedBody } from './_shared/capped-body.mjs';
 import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
-import { readTimingLog, TIMING_RESULTS_FOLDER, TIMING_SCOPES } from '../testing/_shared/timing-reporter.mjs';
+import { readTimingLog, TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
 import { maskText } from './_shared/mask-text.mjs';
-import { holdsWithin, waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
-import { ciSignal } from '../testing/_shared/running-under-ci.mjs';
+import { waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
 import { CLIENT_RESULTS, parseClientReport, readClientReport } from './_shared/client-results.mjs';
 import { isCount, storedPath, measurementsText } from './_shared/measurements.mjs';
@@ -108,8 +113,8 @@ export { maskText };
 
 export const REPO = 'ythril-network/Ythril';
 export const WORKFLOW_PATH = CI_WORKFLOW;
-export const SPACE = 'y-proj-ythril';
-export const CHRONO_TYPE = 'Test-Run';
+export const SPACE = TEST_RUN_SPEC.space;
+export const CHRONO_TYPE = TEST_RUN_SPEC.type;
 export const FORMAT_VERSION = 1;
 
 /** Runs `--record-ci` examines in one walk. */
@@ -118,86 +123,28 @@ export const BACKFILL_RUNS = 30;
 /** Relative to the working directory: the recorder reads the checkout it is run in. */
 const RESULTS_DIR = TIMING_RESULTS_FOLDER;
 const UNRECORDED_DIR = join(RESULTS_DIR, 'unrecorded');
-const LOCK_FILE = join(RESULTS_DIR, '.record.lock');
 
 /**
- * The properties of one `Test-Run` entry: the ONE description of a record. The recorder builds its object from this
- * list (a key outside it is a bug, not a property), and the chrono type declared on the instance is generated from
- * it, so the writer and the declaration cannot disagree about a field.
- *
- * `ms` is the sum of the files' own durations; `wallMs` is the clock time of the run or job (a node suite's span from its
- * results' sentinel, the client's from its report: its start to the end of its last file); the two differ whenever files
- * overlap. A node file's duration has its module load inside it; a CLIENT file's is vitest's own, from its start to its
- * end, and leaves out collection and setup, so a client figure is not comparable with a node one.
+ * The properties of one `Test-Run` entry (`TEST_RUN_SCHEMA`), how long one is kept, and the declaration that is sent to the
+ * instance are `scripts/_shared/telemetry-record.mjs`'s: the ONE description of a record, shared with the `Trade` type. They
+ * stay importable from here for the callers that took them from the recorder. The recorder builds its object from the list (a
+ * key outside it is a bug, not a property), and the chrono type declared on the instance is generated from it, so the writer
+ * and the declaration cannot disagree about a field.
  */
-export const TEST_RUN_SCHEMA = Object.freeze({
-  recordKey: { type: 'string', required: true, doc: '`source:runId:attempt:job:suite`, `:` and `%` escaped inside a part. The identity: a second recording finds this one.' },
-  formatVersion: { type: 'number', required: true, doc: 'The version of this list; a reader skips a record of a version it does not know.' },
-  source: { type: 'string', required: true, values: ['ci', 'local'], doc: 'Where the run happened.' },
-  commit: { type: 'string', required: true, doc: 'The full commit sha the run tested.' },
-  branch: { type: 'string', required: true, doc: 'The branch: the run object\'s for CI, git\'s for a local run.' },
-  runId: { type: 'string', required: true, doc: 'The Actions run id as text, or `local-<start>-<commit7>`.' },
-  attempt: { type: 'number', required: true, doc: 'The run attempt (1 for a local run).' },
-  job: { type: 'string', required: true, doc: 'The CI job that produced the results (the id its artifact name carries), or `local`.' },
-  suite: { type: 'string', required: true, doc: 'The suite the results belong to: a node suite\'s name, or `client` for the client\'s vitest run.' },
-  ms: { type: 'number', required: true, doc: 'The sum of the files\' own durations, in milliseconds. A node file\'s includes its module load; a client file\'s is vitest\'s own run time for it and excludes collection and setup.' },
-  wallMs: { type: 'number', required: false, doc: 'The clock time of the run or job, in milliseconds, when its own results say it: a node suite\'s sentinel span, the client report\'s start to the end of its last file. Absent when they do not.' },
-  files: { type: 'number', required: true, doc: 'Test files that reported.' },
-  tests: { type: 'number', required: true, doc: 'Tests, skipped suites and failures attributed to a hook or a file (for the client, a file that failed without a failed test, and a test that never reached a verdict, count here).' },
-  passed: { type: 'number', required: true, doc: 'Tests that passed.' },
-  failed: { type: 'number', required: true, doc: 'Failures, each counted once.' },
-  cancelled: { type: 'number', required: true, doc: 'Tests cancelled by their parent.' },
-  skipped: { type: 'number', required: true, doc: 'Tests and suites skipped.' },
-  todo: { type: 'number', required: true, doc: 'Tests marked todo.' },
-  outcome: { type: 'string', required: true, values: ['passed', 'failed', 'cancelled', 'incomplete'], doc: '`incomplete` when the results cannot be vouched for (no sentinel, wrong count, cut line; for the client a test that never reached a verdict, or a runner that failed with no failure counted).' },
-  scope: { type: 'string', required: true, values: [...TIMING_SCOPES], doc: 'What the runner covered. Baselines are drawn from `full` only.' },
-  layout: { type: 'string', required: true, values: ['local', 'ci-serial-v1', 'ci-parallel-v2'], doc: 'A label for the shape of the workflow or machine: `ci-parallel-v2` when the run left results of more than one test job, `ci-serial-v1` when it left one. Not a key to compare records by: records written before the label was derived this way all say `ci-serial-v1`.' },
-  dirty: { type: 'boolean', required: true, doc: 'The working tree had uncommitted changes (always false for CI).' },
-  measurements: { type: 'string', required: true, doc: 'JSON: every file\'s ms, tests, skips and failures, and the slowest tests; `none` when the run had no usable artifact.' },
-  measurementsChars: { type: 'number', required: false, doc: 'The length of `measurements`, so a reader can ask for it whole.' },
-});
-
-/** How long a `Test-Run` entry is kept on the instance, in days: the retention `--type-schema` declares. */
-export const TEST_RUN_RETENTION_DAYS = 365;
-
-/** The chrono types a space has before it declares its own; declaring one without them closes the space to them. */
-const DEFAULT_CHRONO_TYPES = Object.freeze(['event', 'deadline', 'plan', 'prediction', 'milestone']);
+export { TEST_RUN_SCHEMA, TEST_RUN_RETENTION_DAYS };
 
 /**
  * The arguments of the `schema_update` call that declares the `Test-Run` chrono type on {@link SPACE}, generated from
  * {@link TEST_RUN_SCHEMA}: the writer and the declaration cannot disagree about a field, and the retention the guide
  * promises exists only because this was sent. Printed by `--type-schema`.
  */
-export function testRunTypeDeclaration() {
-  const propertySchemas = {};
-  for (const [key, f] of Object.entries(TEST_RUN_SCHEMA)) {
-    propertySchemas[key] = { type: f.type, ...(f.values ? { enum: [...f.values] } : {}), ...(f.required ? { required: true } : {}), description: f.doc };
-  }
-  const chrono = Object.fromEntries(DEFAULT_CHRONO_TYPES.map(t => [t, {}]));
-  chrono[CHRONO_TYPE] = {
-    description: 'One suite of one test run (local or CI), written by scripts/test-times.mjs. Found by date and filter, never by meaning: embeddings are suppressed. A passed date means nothing here. Kept one year.',
-    suppressEmbeddings: true,
-    whenDuePasses: 'nothing',
-    retention: { days: TEST_RUN_RETENTION_DAYS },
-    propertySchemas,
-  };
-  return { space: SPACE, typeSchemas: { chrono }, typeSchemasMode: 'merge' };
-}
+export const testRunTypeDeclaration = () => telemetryTypeDeclaration(TEST_RUN_SPEC);
 
 /** `maxChars` asked of `filter` for a page that excludes `measurements`. */
 const PAGE_MAX_CHARS = 1_000_000;
 
 function assertConforms(properties) {
-  for (const [key, value] of Object.entries(properties)) {
-    const field = TEST_RUN_SCHEMA[key];
-    if (!field) throw new Error(`test-times: ${key} is not a Test-Run property`);
-    if (typeof value !== field.type) throw new Error(`test-times: ${key} must be a ${field.type}`);
-    if (field.values && !field.values.includes(value)) throw new Error(`test-times: ${key} must be one of ${field.values.join(', ')}`);
-  }
-  for (const [key, field] of Object.entries(TEST_RUN_SCHEMA)) {
-    if (field.required && properties[key] === undefined) throw new Error(`test-times: ${key} is required`);
-  }
-  return properties;
+  try { return checkTelemetryProperties(TEST_RUN_SPEC, properties); } catch (err) { throw new Error(`test-times: ${err.message}`); }
 }
 
 // ---- who may be read ----------------------------------------------------------------------------------------------
@@ -501,30 +448,11 @@ const newestBy = (field) => (a, b) => (a[field] < b[field] ? 1 : a[field] > b[fi
 const newestFirst = newestBy('createdAt');
 const newestStartFirst = newestBy('startsAt');
 
-/** The entries holding `key`, newest first. The server's predicate is not trusted: a row that lacks the key is not one. */
-async function findByKey(api, key) {
-  const answer = await api.call('filter', {
-    space: SPACE, collection: 'chrono', filter: { type: CHRONO_TYPE, 'properties.recordKey': key },
-    projection: { 'properties.measurements': 0 }, sort: 'createdAt', dir: 'desc', limit: 100, maxChars: PAGE_MAX_CHARS,
-  });
-  const rows = answer?.data?.results;
-  if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
-  return rows.filter(r => r?.type === CHRONO_TYPE && r?.properties?.recordKey === key && typeof r._id === 'string').sort(newestFirst);
-}
-
 /**
- * Write one record: find by key, collapse duplicates to the newest, update it by id; insert when there is none.
- * Embedding is suppressed on the write itself as well as by the type: a run is found by date and filter, never by
- * meaning, and a 100 KB string is never sent to the embedder even before the type is declared.
+ * Write one record: find by key, collapse duplicates to the newest, update it by id; insert when there is none: the shared upsert
+ * (`_shared/telemetry-record.mjs`) for a `Test-Run`, which always replaces. Throws what the api throws.
  */
-async function recordPayload(api, payload) {
-  const rows = await findByKey(api, payload.properties.recordKey);
-  if (!rows.length) return api.call('save_chrono', { ...payload, suppressEmbeddings: true, checkDuplicates: false });
-  const [keep, ...duplicates] = rows;
-  for (const d of duplicates) await api.call('delete_chrono', { space: SPACE, id: d._id });
-  const { space, type: _type, ...rest } = payload;
-  return api.call('update_chrono', { space, id: keep._id, ...rest, suppressEmbeddings: true });
-}
+const recordPayload = (api, payload) => upsertTelemetryRecord(api, TEST_RUN_SPEC, payload);
 
 /**
  * The record keys the instance already holds for one CI run. The question the stop rule asks is "is this run recorded
@@ -543,50 +471,7 @@ async function recordedKeysOfRun(api, runId) {
     && typeof r?.properties?.recordKey === 'string').map(r => r.properties.recordKey));
 }
 
-// ---- one writer per machine ---------------------------------------------------------------------------------------
-
-const LOCK_WAIT_MS = 120_000;
-const LOCK_STALE_MS = 15 * 60_000;
-const LOCK_UNREADABLE_MS = 30_000;
-
-function lockIsStale() {
-  let text;
-  try { text = readFileSync(LOCK_FILE, 'utf8'); } catch { return true; } // gone while we looked
-  let pid;
-  try { pid = JSON.parse(text).pid; } catch { pid = undefined; }
-  let ageMs = Infinity;
-  try { ageMs = Date.now() - statSync(LOCK_FILE).mtimeMs; } catch { return true; }
-  if (!Number.isInteger(pid)) return ageMs > LOCK_UNREADABLE_MS; // a writer between create and write is not dead
-  try { process.kill(pid, 0); } catch (err) { if (err.code === 'ESRCH') return true; }
-  return ageMs > LOCK_STALE_MS;
-}
-
-/** Take the lock if it is free or its holder is dead. */
-function tryLock() {
-  mkdirSync(RESULTS_DIR, { recursive: true });
-  try {
-    const fd = openSync(LOCK_FILE, 'wx');
-    try { writeFileSync(fd, JSON.stringify({ pid: process.pid })); } finally { closeSync(fd); }
-    return true;
-  } catch (err) {
-    if (err.code !== 'EEXIST') throw err;
-    if (lockIsStale()) { try { unlinkSync(LOCK_FILE); } catch { /* a racing recorder took it first */ } }
-    return false;
-  }
-}
-
-/**
- * Run `fn` as the only recorder on this machine. A recorder killed while holding the lock does not wedge the next:
- * a dead holder's lock is broken. Resolves `null` when the lock could not be had within the wait.
- */
-async function withRecordLock(fn) {
-  const held = await holdsWithin(tryLock, LOCK_WAIT_MS, 100, { what: 'the record lock to be free' });
-  if (!held) return null;
-  const release = () => { try { unlinkSync(LOCK_FILE); } catch { /* already gone */ } };
-  process.once('exit', release);
-  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { release(); process.exit(1); });
-  try { return await fn(); } finally { release(); process.removeListener('exit', release); }
-}
+// ---- one writer per repository: `scripts/_shared/record-lock.mjs` ------------------------------------------------
 
 // ---- --record -----------------------------------------------------------------------------------------------------
 
@@ -594,23 +479,13 @@ const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['
 
 /**
  * Under CI no recording is done: CI never holds the write token, and a token found there is a leak to refuse. The code is 2,
- * not the 1 of an ordinary failure, so a caller can tell "refused for where it ran" from "it ran and failed".
+ * not the 1 of an ordinary failure, so a caller can tell "refused for where it ran" from "it ran and failed". The refusal and
+ * the destination are `_shared/record-destination.mjs`'s, shared with trade.
  */
-function refuseUnderCi(flag) {
-  const named = ciSignal();
-  if (!named) return null;
-  console.error(`test-times: ${flag} is refused when ${named} is set: CI never holds the token that writes records, so nothing is sent`);
-  return 2;
-}
+const refuseUnderCi = (flag) => refuseRecordingUnderCi('test-times', flag);
 
 /** The destination, or the reason there is none. */
-function destination() {
-  const url = process.env.YTHRIL_TEST_RUNS_URL;
-  const token = process.env.YTHRIL_TEST_RUNS_TOKEN;
-  if (!url) return { why: 'YTHRIL_TEST_RUNS_URL unset' };
-  if (!token) return { why: 'YTHRIL_TEST_RUNS_TOKEN unset' };
-  try { return { api: createYthrilApi({ url, token }), shownUrl: url.replace(/\/+$/, '') }; } catch (err) { return { why: err.message }; }
-}
+const destination = () => recordDestination();
 
 /**
  * The first line of what a thrown value says (or of a string): the one way this script puts a failure on a line. Not the
@@ -737,7 +612,7 @@ async function recordPayloads(payloads) {
     console.log(`test-times: not recorded: ${firstLine(err)}`);
     return 0;
   }
-  if (locked === null) for (const p of payloads) keepPayload(p, 'another recorder holds test-results/.record.lock');
+  if (locked === null) for (const p of payloads) keepPayload(p, 'another recorder holds the record lock (in the git common dir)');
   return 0;
 }
 
@@ -1115,7 +990,7 @@ async function recordCi({ rewriteKey, runId } = {}) {
     }
     console.log(`test-times: recorded ${recorded} record(s) from ${runs.length + (walkedApart ? 1 : 0)} run(s)`);
   });
-  if (locked === null) { console.error('test-times: another recorder holds test-results/.record.lock'); return 1; }
+  if (locked === null) { console.error('test-times: another recorder holds the record lock (in the git common dir)'); return 1; }
   return exit;
 }
 
