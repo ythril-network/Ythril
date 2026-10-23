@@ -39,10 +39,12 @@
  */
 import type { Document } from 'mongodb';
 import { col } from '../db/mongo.js';
+import { indexNamesOf } from '../db/index-names.js';
 import { spaceCollection, SPACE_COLLECTIONS, type SpacePart } from '../db/space-collection.js';
 import { log, peerText } from '../util/log.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
+import { warnOnce } from '../util/warn-once.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { SEQ_KEYSET_INDEXES } from '../util/seq-keyset.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
@@ -54,7 +56,7 @@ import { FORK_INDEXES } from '../sync/upsert-plan.js';
 import { TTL_COLLECTIONS } from '../brain/ttl.js';
 import { MEDIA_JOB_INDEXES } from '../files/media/job-queue.js';
 import { EMBED_JOB_INDEXES } from '../brain/embed-queue.js';
-import { FILE_TOMBSTONE_INDEXES } from '../files/tombstones.js';
+import { FILE_TOMBSTONE_INDEXES, FILE_TOMBSTONE_PART } from '../files/tombstones.js';
 
 /** What a failed build of an index does where it can stop something. See the module header. */
 export type SpaceIndexPolicy = 'throw' | 'report' | 'best-effort';
@@ -175,7 +177,7 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
   ...MEDIA_JOB_INDEXES.map(keys => plain('mediaJobs', keys)),
   ...EMBED_JOB_INDEXES.map(keys => plain('embedJobs', keys)),
   // The file tombstones' settle, move-marker, per-path and paged questions (bundle-30 I16, bundle-51), declared in `files/tombstones.ts`.
-  ...FILE_TOMBSTONE_INDEXES.map(ix => plain('fileTombstones', ix.keys, ix.options)),
+  ...FILE_TOMBSTONE_INDEXES.map(ix => plain(FILE_TOMBSTONE_PART, ix.keys, ix.options)),
   /*
    * The lexical half of hybrid search (`brain/lexical-search.ts`), on `matchedText` ONLY: the exact pre-embedding string, so the
    * lexical channel reads precisely the text the vector channel embedded. MongoDB allows ONE text index per collection, so this
@@ -244,32 +246,72 @@ export async function buildSpaceIndexesAtInit(spaceId: string, isNew: (part: Spa
     } catch (err) {
       if (ix.policy === 'throw') throw new SpaceIndexNotBuilt(spaceId, ix, err);
       if (ix.policy === 'report') reportSpaceFailure(SPACE_INDEX_STEP, spaceId, err, { unit: spaceIndexUnit(ix), when: 'next index pass' });
-      else log.warn(`Space '${peerText(spaceId)}': ${peerText(spaceIndexUnit(ix))} not built${ix.withoutIt ? ` - ${peerText(ix.withoutIt)}` : ''} (${peerText(err)})`);
+      else bestEffortMissing(spaceId, ix, err);
       outcomes.push({ index: ix, status: 'failed' });
+      continue;
     }
+    if (ix.policy === 'best-effort') bestEffortStands(spaceId, ix);
   }
   return outcomes;
 }
 
+/** The best-effort indexes said missing, by space and index: said once while missing, and again after one stood and went. */
+const bestEffortSaid = warnOnce<string>();
+const bestEffortKey = (spaceId: string, ix: SpaceIndex): string => `${spaceId}\u0000${ix.part}\u0000${spaceIndexName(ix)}`;
+
+/**
+ * Say a `best-effort` index that was not built: a warning naming the space and the index and what the space does without it, once
+ * while it stays missing. Never a space failure, wherever it is built (`initSpace` or the background pass): the space works without
+ * it, so a counted failure at every boot would be an alarm about a decision. A store that stopped answering is not hidden by this:
+ * the next index of the run meets it and is judged by its own policy (or by the walk).
+ */
+function bestEffortMissing(spaceId: string, ix: SpaceIndex, err: unknown): void {
+  bestEffortSaid(bestEffortKey(spaceId, ix), () => log.warn(`Space '${peerText(spaceId)}': ${peerText(spaceIndexUnit(ix))} not built`
+    + `${ix.withoutIt ? ` - ${peerText(ix.withoutIt)}` : ''} (${peerText(err)})`));
+}
+
+/** A best-effort index stood: the next time it is missing is news. */
+function bestEffortStands(spaceId: string, ix: SpaceIndex): void {
+  bestEffortSaid.forget(bestEffortKey(spaceId, ix));
+}
+
 /**
  * Build `indexes` on one space, each its own unit (`eachUnitOfSpace`): a failure is said with the index named and the rest are
- * built; a store that stopped answering ends the run. Inside a walk of this space it is the walk's unit loop and step.
+ * built; a store that stopped answering ends the run. Inside a walk of this space it is the walk's unit loop and step. A
+ * `best-effort` index that is not built is not a unit failure: it is said once as a warning ({@link bestEffortMissing}).
  */
 export function buildSpaceIndexUnits(
   spaceId: string, indexes: readonly SpaceIndex[], hooks: { onBuilt?: (ix: SpaceIndex, keyset: KeysetBuild | undefined) => void; onKeysetBuild?: () => void } = {},
 ): Promise<{ failed: { unit: string; reason: string }[] }> {
   return eachUnitOfSpace(spaceId, SPACE_INDEX_STEP, indexes, async (ix) => {
-    const keyset = await buildSpaceIndex(spaceId, ix, { ...(hooks.onKeysetBuild ? { onKeysetBuild: hooks.onKeysetBuild } : {}) });
+    let keyset: KeysetBuild | undefined;
+    try {
+      keyset = await buildSpaceIndex(spaceId, ix, { ...(hooks.onKeysetBuild ? { onKeysetBuild: hooks.onKeysetBuild } : {}) });
+    } catch (err) {
+      if (ix.policy !== 'best-effort') throw err;
+      bestEffortMissing(spaceId, ix, err);
+      return;
+    }
+    if (ix.policy === 'best-effort') bestEffortStands(spaceId, ix);
     hooks.onBuilt?.(ix, keyset);
   }, spaceIndexUnit);
 }
 
 /**
- * The TTL sweep's indexes on one space ({@link SWEEP_INDEXES}), each its own unit. Run by the sweep every tick until they stand and
- * by a retention change; answers which did not.
+ * The TTL sweep's indexes on one space ({@link SWEEP_INDEXES}) that are not there now, each built as its own unit; answers which
+ * did not build. Run by the sweep at every tick and by a retention change.
+ *
+ * It LOOKS before it builds - one `listIndexes` per collection the sweep indexes, and only a missing index is built - so it is cheap
+ * enough to ask every tick of every space, and nothing remembers that a space "had" them. A remembered answer is what this
+ * prevents: a restore drops and creates every collection of a space that stays configured, and when its sweep builds then fail
+ * (policy `report`, so the restore completes) a space remembered as indexed was never looked at again until the next boot.
  */
-export function ensureTtlIndexes(spaceId: string): Promise<{ failed: { unit: string; reason: string }[] }> {
-  return buildSpaceIndexUnits(spaceId, SWEEP_INDEXES);
+export async function ensureTtlIndexes(spaceId: string): Promise<{ failed: { unit: string; reason: string }[] }> {
+  const present = new Map<SpacePart, readonly string[]>();
+  for (const part of new Set(SWEEP_INDEXES.map(ix => ix.part))) present.set(part, await indexNamesOf(spaceCollection(spaceId, part)));
+  const missing = SWEEP_INDEXES.filter(ix => !(present.get(ix.part) ?? []).includes(spaceIndexName(ix)));
+  if (missing.length === 0) return { failed: [] };
+  return buildSpaceIndexUnits(spaceId, missing);
 }
 
 /**

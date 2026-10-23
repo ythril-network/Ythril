@@ -117,4 +117,30 @@ describe('a failing space index is contained and named (real MongoDB)', { skip }
     }
     assert.deepEqual(findings, [], `the background pass over one refused index: ${findings.join('; ')}`);
   });
+
+  // Added by the bundle-101 pre-ship lens (L11): a best-effort index is best effort in the background pass too. The pass ran every
+  // index as a unit, so a store that cannot build the text index reported a COUNTED space failure for it at every boot, while the
+  // declaration says the space works without it. The rule: a refused best-effort index is a warning naming the space and the index,
+  // said once while it stays refused (a second pass says nothing), and never the pass's space-failure line.
+  it('the background pass warns once about a refused best-effort index and reports no space failure for it', T, async () => {
+    const declared = await requireSpaceIndexDeclaration(assert);
+    const bestEffort = declared.filter(e => e.policy === 'best-effort');
+    assert.ok(bestEffort.length >= 1, 'the declaration holds no best-effort index');
+    const findings = [];
+    for (const e of bestEffort) {
+      await dropSpaceIndexes(db, 'walked');
+      fault.fail(`walked_${e.suffix}`, e.spec.name, refusal);
+      const first = (await logLinesDuring(() => ensureQueryIndexes())).lines;
+      const second = (await logLinesDuring(() => ensureQueryIndexes())).lines;
+      const fired = fault.fired();
+      fault.clear();
+      if (fired < 2) { findings.push(`${e.id}: the two passes did not both try it (${fired})`); continue; }
+      const failureLine = (lines) => lines.some(l => /failed for space 'walked'/.test(l) && l.includes(e.spec.name));
+      if (failureLine(first) || failureLine(second)) findings.push(`${e.id}: reported as a space failure of the pass`);
+      if (!named(first, 'walked', e.spec.name)) findings.push(`${e.id}: no warning names the space and the index`);
+      if (named(second, 'walked', e.spec.name)) findings.push(`${e.id}: warned again by the next pass while nothing changed`);
+    }
+    await ensureQueryIndexes();
+    assert.deepEqual(findings, [], `a refused best-effort index in the background pass: ${findings.join('; ')}`);
+  });
 });

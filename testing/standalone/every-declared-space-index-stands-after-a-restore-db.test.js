@@ -169,4 +169,40 @@ describe('every declared space index stands after a restore, and a unique one th
     }
     assert.deepEqual(findings, [], `a restore over a refused unique index: ${findings.join('; ')}`);
   });
+
+  // Added by the bundle-101 pre-ship lens (L4): the TTL sweep retries its indexes every tick "until they stand", and remembered a
+  // space once they had. A restore keeps the space configured and drops every collection; when its TTL builds then fail (policy
+  // `report`, so the restore completes), a remembered space was never looked at again until the next boot. The rule: after a restore
+  // that left a space without a sweep index, the sweep's next tick builds it, whatever an earlier tick concluded.
+  it('a restore that left a sweep index unbuilt has it rebuilt by the next sweep tick, after an earlier tick found it standing', T, async () => {
+    const { ensureSweepIndexes } = await import('../../server/dist/brain/ttl-sweep.js');
+    const { SWEEP_INDEXES, spaceIndexName } = await import('../../server/dist/spaces/space-indexes.js');
+    const { SPACE_COLLECTIONS } = await import('../../server/dist/db/space-collection.js');
+    assert.ok(SWEEP_INDEXES.length >= 3, 'the declaration holds too few sweep indexes');
+    await ensureSweepIndexes();   // the tick that finds every space's sweep indexes standing
+    const refusal = await storeIndexRefusal(db);
+    const fault = failIndexBuild(Object.getPrototypeOf(db.collection('x')));
+    const findings = [];
+    try {
+      for (const ix of SWEEP_INDEXES) {
+        resetRunnerForTest(mods.runner); clearActEntries(mods.loader);
+        const suffix = SPACE_COLLECTIONS[ix.part];
+        const name = spaceIndexName(ix);
+        const backup = await takeBackup(SUITE, `sweep-${suffix}-${name}-${Date.now()}`);
+        fault.fail(`broken_${suffix}`, name, refusal);
+        await restoreAsActs(mods, { backupId: backup.id });
+        const results = await settleRestoreActs(mods.runner, mods.loader);
+        const fired = fault.fired();
+        fault.clear();
+        if (fired === 0) { findings.push(`${suffix}:${name}: the restore never built it`); continue; }
+        if (results.some(r => r.ok !== true)) { findings.push(`${suffix}:${name}: the restore did not complete over a refused sweep index`); continue; }
+        if ((await indexesOfSpace(db, 'broken')).has(indexId(suffix, name))) { findings.push(`${suffix}:${name}: standing although its build was refused`); continue; }
+        await ensureSweepIndexes();
+        if (!(await indexesOfSpace(db, 'broken')).has(indexId(suffix, name))) findings.push(`${suffix}:${name}: the next sweep tick did not rebuild it`);
+      }
+    } finally {
+      fault.restore();
+    }
+    assert.deepEqual(findings, [], `a sweep index a restore left unbuilt: ${findings.join('; ')}`);
+  });
 });

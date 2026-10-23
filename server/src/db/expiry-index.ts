@@ -13,7 +13,7 @@
  * - **A failure is logged naming the collection**, never swallowed: a missing TTL index is invisible until the
  *   collection is the largest in the instance.
  *
- * Not `brain/ttl.ts` `ensureTtlIndex`: that one indexes the per-space `_expireAt` fields the TTL SWEEP queries,
+ * Not `spaces/space-indexes.ts` `ensureTtlIndexes`: that one indexes the per-space `_expireAt` fields the TTL SWEEP queries,
  * with no `expireAfterSeconds`, because those records are deleted through the normal delete path and never by
  * MongoDB. A different question.
  */

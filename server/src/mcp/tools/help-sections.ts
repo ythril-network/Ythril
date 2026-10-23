@@ -103,8 +103,9 @@ is deliveredBy (the peer that delivered a record) or an edge's write guard
 (_functionalGuard). There is no parameter for them because there is nothing to
 switch off: a projection that names one drops it ({embedding: 1} and {_id: 1}
 both answer _id alone), every list path projects them out before the documents
-leave the database, and a filter that names one directly is refused, naming the
-field; only {field: {$exists: true}} is accepted on it. If you have been looking
+leave the database, and a filter that names one as a field key or a "$field" path
+is refused, naming the field; only {field: {$exists: true}} is accepted on it.
+($$ROOT, $$CURRENT, $getField, $objectToArray and $jsonSchema are not refused yet.) If you have been looking
 for that flag, this is why you could not find it.
 
 What you CAN control, and where:

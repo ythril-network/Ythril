@@ -166,8 +166,10 @@ function isLoneExists(val: unknown, op: string): boolean {
  *  - a `"$<field>[.x]"` path inside `$expr` (a `$literal` operand is a value, not a path).
  *
  * Left alone on purpose: a literal string operand outside `$expr`, a key relative to an `$elemMatch` element, an
- * embedded-document equality, and a field that only shares a prefix (`embeddingModel`). Expression routes that do not
- * name the field (`$$ROOT`, `$getField`) stay open — parked as `D-58`; what they reach is the vector and a peer id.
+ * embedded-document equality, and a field that only shares a prefix (`embeddingModel`). Routes that reach a field
+ * without a field key or a "$field" path stay open - `$$ROOT`/`$$CURRENT` paths, `$getField`, `$objectToArray` and
+ * `$jsonSchema` (its `properties`/`required` name the field) - parked as `D-58`; what they reach is the vector and a
+ * peer id.
  */
 function refuseWithheldPredicate(doc: unknown): void {
   if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return;

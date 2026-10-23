@@ -616,8 +616,8 @@ line carries the count and the first few ids — `TTL sweep: facts delete failed
 interrupted file move, a failed repair of what a deleted file left behind and a failed index check are named
 `TTL sweep: settling file tombstones`, `TTL sweep: finishing interrupted file moves`,
 `TTL sweep: repairing rows a deleted file left` and `TTL sweep: indexes`. The count of records that did not delete is `ythril_housekeeping_records_failed_total`.
-The sweep's own indexes are checked at the start of every cycle until they stand on each space, so a space that lost
-them (a failed build, or a restore before this release) has them back within one cycle; while a space has not got
+The sweep's own indexes are checked at the start of every cycle on every space and any that is missing is built, so a
+space that lost them (a failed build, or a restore) has them back within one cycle; while a space has not got
 them, `TTL sweep: space '<id>' is swept without index ttl_expireAt on facts, …` is said once.
 
 **The same sweep finishes a file move that was interrupted.** A rename or move carries the file first and its records
@@ -683,9 +683,12 @@ Lines of other jobs follow the same shape; the ones whose wording is worth knowi
   <collection>)`, one line per index, with every other index still built. Which index is missing says what it costs:
   `_functionalGuard_1 on edges` is the lock that stops two writers working at the same moment from storing two edges
   under a one-per-subject label (the rule still refuses a second edge written after the first, and this line is the
-  only sign of it); `ttl_…` keeps the retention sweep from reading every record; `lexical_text` (said as a warning
-  instead) is the keyword half of search, which falls back to meaning alone. A unique index that cannot be built stops
-  the space being set up (`space init`) or restored instead.
+  only sign of it); `ttl_…` keeps the retention sweep from reading every record. `lexical_text`, the keyword half of
+  search, is never one of these lines: when it cannot be built the server says so once as a warning (`Space '<id>':
+  index lexical_text on <collection> not built - hybrid search falls back to vector-only for it`), at set-up and in the
+  background pass alike, and search falls back to meaning alone. The edge identity and link indexes, which refuse
+  the same edge or link stored twice, stop the space being set up (`space init`) or restored instead when they cannot
+  be built.
 - `Edge indexes failed for space '<id>' (guard index) (count: N): … — retried at once`: duplicate locks stopped the
   build of that lock index; the surplus locks were cleared and the build tried again.
 - `Functional guard heal failed for space '<id>' (<edge id>): … — retried at once`: a write found a leftover lock on an

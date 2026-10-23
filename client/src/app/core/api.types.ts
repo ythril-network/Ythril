@@ -977,6 +977,12 @@ export interface ContradictionRecord {
   resolvedBy?: string;
   /** What the resolve that closed it could not do as asked (a refused link, a record gone): kept on the finding. */
   notes?: ContradictionResolveNote[];
+  /**
+   * A resolve has claimed this pair and not closed it: in flight, or stopped part-way. While it stands every OTHER choice is
+   * refused `409 resolvedOtherwise`; the same choice finishes it, a dismiss or reopen releases it, and after ten minutes
+   * another choice may take it over.
+   */
+  resolving?: { resolution: 'edited' | 'linked' | 'superseded'; winner?: 'a' | 'b'; at: string };
   detectedAt: string;
   updatedAt: string;
 }

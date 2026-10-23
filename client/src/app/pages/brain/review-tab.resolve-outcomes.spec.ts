@@ -74,6 +74,9 @@ const con = (over: Record<string, unknown> = {}) => ({
   status: 'open', detectedAt: '2026-01-01', updatedAt: '2026-01-01', ...over,
 });
 
+/** The text of the last `setup`'s view, after a change detection. */
+let rendered: () => string = () => '';
+
 function setup(lang: Lang, conApi: Record<string, unknown>) {
   const toasts: string[] = [];
   const push = (m: string) => { toasts.push(m); return 0; };
@@ -99,6 +102,7 @@ function setup(lang: Lang, conApi: Record<string, unknown>) {
   c.sub.set('contradictions');
   c.loadContradictions();
   toasts.length = 0;
+  rendered = () => { f.detectChanges(); return (f.nativeElement as HTMLElement).textContent ?? ''; };
   return { c, toasts };
 }
 
@@ -176,5 +180,26 @@ describe('ReviewTabComponent: what a resolve tells the reviewer', () => {
         expect(otherwise, 'the code did not pick the key').not.toBe(internal);
       });
     }
+  });
+
+  /*
+   * L3 (pre-ship lens): a claim nobody finished made the card look open while every other choice was refused `409`. The card
+   * says the pair is being resolved, and which side the claim keeps, from one key in every language.
+   */
+  it('a card whose pair is being resolved says so, from one key in en, de and pl, naming the side kept', () => {
+    const claimed = () => of({ contradictions: [con({ resolving: { resolution: 'superseded', winner: 'a', at: '2026-10-23T10:00:00.000Z' } })], nliConfigured: true });
+    const text: Record<Lang, string> = {} as Record<Lang, string>;
+    for (const lang of LANGS) {
+      setup(lang, { listContradictions: claimed });
+      text[lang] = rendered();
+    }
+    const plain = (() => { setup('en', {}); return rendered(); })();
+    const keysOf = (lang: Lang) => Object.entries(DICT[lang])
+      .filter(([, v]) => typeof v === 'string' && v.replace(/\{\{[^}]*\}\}/g, '').trim().length >= 8)
+      .filter(([, v]) => text[lang].includes(v.split('{{')[0]!.trim()) && !plain.includes(v.split('{{')[0]!.trim()))
+      .map(([k]) => k);
+    const shared = keysOf('en').filter(k => keysOf('de').includes(k) && keysOf('pl').includes(k));
+    expect(shared.length, `no key says the pair is being resolved in all of en/de/pl: ${JSON.stringify(text.en)}`).toBeGreaterThan(0);
+    expect(text.en, 'a placeholder was left unfilled').not.toMatch(/\{\{/);
   });
 });

@@ -13,7 +13,12 @@
  *  - a record of the pair that is gone reached the edge writer, which refuses a dangling end — the same `500`;
  *  - a store failure part-way left a half-done resolve with no word of what was written, and a retry — or a second reviewer —
  *    could pick the OTHER winner, and the space then held two `supersedes` edges pointing opposite ways;
- *  - resolving the same choice twice re-retired the loser, moving its `seq` and `updatedAt` for a write that changed nothing.
+ *  - resolving the same choice twice re-retired the loser, moving its `seq` and `updatedAt` for a write that changed nothing;
+ *  - two resolves of the SAME choice at once: the slower one's close missed the claim the faster one had removed, and it was
+ *    told `409 resolvedOtherwise` naming its own choice (pre-ship lens L2);
+ *  - a claim nobody finished (a crash, a `503` never retried) pinned its choice for ever: every other choice was `409` and the
+ *    card looked open. A claim is now on the wire, released by dismiss and reopen, and taken over once older than its bound —
+ *    with the abandoned choice's edge and mark undone, so the pair still never holds two opposite judgements (L3).
  *
  * ## What is held
  *
@@ -48,6 +53,12 @@ const SPACES = {
   'mark-fails': {},
   'opposite-race': {},
   twice: {},
+  'same-race': {},
+  'dismiss-releases': {},
+  'reopen-releases': {},
+  'stale-claim': {},
+  'fresh-claim': {},
+  'claim-on-wire': {},
 };
 const space = (name) => `q442-${name}`;
 
@@ -231,5 +242,76 @@ describe('a contradiction resolve keeps the judgement and converges', { skip }, 
     assert.equal(after2.seq, after1.seq, `the second resolve re-retired the loser: seq ${after1.seq} -> ${after2.seq}`);
     assert.equal(after2.updatedAt, after1.updatedAt, 'the second resolve moved the loser\'s updatedAt');
     assert.equal((await edgesBetween(sp, ids)).length, 1, 'resolving twice left more than one edge');
+  });
+
+  it('two resolves picking the SAME winner at once: both answer 200, and one edge (L2)', { timeout: 60_000 }, async () => {
+    const { sp, coll, ids, candidateId } = await seedPair('same-race', 'fact');
+    const answers = await Promise.all([resolve(candidateId, 'a'), resolve(candidateId, 'a')]);
+    assert.deepEqual(answers.map(r => r.code), [200, 200], `two same-choice resolves were answered ${answers.map(r => r.code)}: ${JSON.stringify(answers.map(r => r.body))}`);
+    assert.equal((await edgesBetween(sp, ids)).length, 1, 'two same-choice resolves left more than one edge');
+    assert.equal((await record(sp, coll, ids.b))?.superseded, true, 'the loser is not marked');
+    assert.equal((await candidate(sp, candidateId)).status, 'resolved');
+  });
+
+  describe('a claim nobody finishes does not pin the choice for ever (L3)', () => {
+    /** Put a claim for `winner` on the candidate, taken `ageMs` ago, as a resolve that stopped after the claim leaves it. */
+    const claim = (sp, candidateId, winner, ageMs, status = 'open') => door.coll(sp, 'contradiction_candidates').updateOne({ _id: candidateId },
+      { $set: { status, resolving: { resolution: 'superseded', winner, at: new Date(Date.now() - ageMs).toISOString() } } });
+
+    it('the claim is on the wire, so a reviewer can see the pair is being resolved', { timeout: 60_000 }, async () => {
+      const { sp, candidateId } = await seedPair('claim-on-wire', 'fact');
+      await claim(sp, candidateId, 'a', 0);
+      const res = await callRouteAfterAuth(router, 'get', '/', { query: { space: sp, status: 'open' }, authToken: ADMIN_TOKEN });
+      assert.equal(res.code, 200, JSON.stringify(res.body));
+      const row = res.body.contradictions.find(c => c.id === candidateId);
+      assert.equal(row?.resolving?.resolution, 'superseded', `the open row does not carry its claim: ${JSON.stringify(row)}`);
+      assert.equal(row.resolving.winner, 'a');
+      assert.equal(typeof row.resolving.at, 'string', 'the claim does not say when it was taken');
+    });
+
+    it('a fresh claim of another choice is still refused 409', { timeout: 60_000 }, async () => {
+      const { sp, candidateId } = await seedPair('fresh-claim', 'chrono');
+      await claim(sp, candidateId, 'a', 0);
+      const res = await resolve(candidateId, 'b');
+      assert.equal(res.code, 409, `a fresh claim was taken over: ${res.code} ${JSON.stringify(res.body)}`);
+    });
+
+    it('a claim older than the bound is taken over by another choice, and the abandoned choice\'s edge and mark go with it', { timeout: 60_000 }, async () => {
+      const { RESOLVE_CLAIM_STALE_MS } = await import('../../server/dist/api/contradictions.js');
+      assert.equal(typeof RESOLVE_CLAIM_STALE_MS, 'number', 'the stale bound is not exported');
+      const { sp, coll, ids, candidateId } = await seedPair('stale-claim', 'fact');
+      // What the abandoned resolve (keep a) had written before it stopped: its edge and its mark.
+      await door.coll(sp, 'edges').insertOne(build.edge(sp, 'stale-claim-abandoned', 40, { from: ids.a, to: ids.b, label: LABEL }));
+      await door.coll(sp, coll).updateOne({ _id: ids.b }, { $set: { superseded: true } });
+      await claim(sp, candidateId, 'a', RESOLVE_CLAIM_STALE_MS + 60_000);
+      const res = await resolve(candidateId, 'b');
+      assert.equal(res.code, 200, `a stale claim was not taken over: ${res.code} ${JSON.stringify(res.body)}`);
+      const edges = await edgesBetween(sp, ids);
+      assert.deepEqual(edges.map(e => [e.from, e.to]), [[ids.b, ids.a]], 'the space does not hold exactly the standing choice\'s edge');
+      const flags = await Promise.all([ids.a, ids.b].map(id => record(sp, coll, id).then(d => d?.superseded === true)));
+      assert.deepEqual(flags, [true, false], 'the marks are not the standing choice\'s: the abandoned loser is still marked, or the new one is not');
+      const cand = await candidate(sp, candidateId);
+      assert.equal(cand.supersededId, ids.a);
+      assert.equal(cand.resolving, undefined, 'the closed candidate still carries a claim');
+    });
+
+    it('dismissing releases a claim', { timeout: 60_000 }, async () => {
+      const { sp, candidateId } = await seedPair('dismiss-releases', 'fact');
+      await claim(sp, candidateId, 'a', 0);
+      const res = await callRouteAfterAuth(router, 'post', '/:id/dismiss', { params: { id: candidateId }, authToken: ADMIN_TOKEN });
+      assert.equal(res.code, 200, JSON.stringify(res.body));
+      assert.equal((await candidate(sp, candidateId)).resolving, undefined, 'the dismissed candidate still carries the claim');
+    });
+
+    it('reopening releases a claim, and the other choice can then be taken', { timeout: 60_000 }, async () => {
+      const { sp, ids, candidateId } = await seedPair('reopen-releases', 'fact');
+      await claim(sp, candidateId, 'a', 0, 'dismissed');
+      const res = await callRouteAfterAuth(router, 'post', '/:id/reopen', { params: { id: candidateId }, authToken: ADMIN_TOKEN });
+      assert.equal(res.code, 200, JSON.stringify(res.body));
+      assert.equal((await candidate(sp, candidateId)).resolving, undefined, 'the reopened candidate still carries the claim');
+      const other = await resolve(candidateId, 'b');
+      assert.equal(other.code, 200, `the released candidate refused another choice: ${other.code} ${JSON.stringify(other.body)}`);
+      assert.deepEqual((await edgesBetween(sp, ids)).map(e => [e.from, e.to]), [[ids.b, ids.a]]);
+    });
   });
 });

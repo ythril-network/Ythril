@@ -2121,6 +2121,14 @@ export interface ContradictionChoice {
 }
 
 /**
+ * A choice a resolve has claimed, and WHEN (ISO). The time is what lets a claim nobody finished (a crash, a `503` never
+ * retried) be taken over once it is older than `RESOLVE_CLAIM_STALE_MS`, instead of pinning its choice for ever.
+ */
+export interface ContradictionClaim extends ContradictionChoice {
+  at: string;
+}
+
+/**
  * One outcome of a contradiction resolve that a reviewer must not be left to assume (`Q-442`). Flat, so a client renders
  * it in its own words by `code`, with `label` and `rule` as placeholders, and shows `detail`, the server's sentence, only
  * as a disclosure.
@@ -2192,7 +2200,7 @@ export interface ContradictionCandidateDoc {
    * candidate. It is what makes a second resolve with a DIFFERENT choice a `409` rather than a second, opposite
    * `supersedes` edge, and what a retry of the same choice after a failure part-way converges on.
    */
-  resolving?: ContradictionChoice;
+  resolving?: ContradictionClaim;
   /** What the resolve that closed this candidate could not do as asked, by code: kept, so the resolved list says it too. */
   notes?: ContradictionResolveNote[];
   /** Same sticky-dismissal contract as duplicates — see `decideDismissed`. */

@@ -82,3 +82,22 @@ export async function retireRecord(
   const updated = await write(spaceId, id, { [RECORD_SUPERSEDED_FIELD]: true }, undefined, webhook);
   return updated != null;
 }
+
+/**
+ * Take the mark off one record, through its own writer — the inverse of {@link retireRecord}, for the same reasons (seq,
+ * audit, webhook). Its one caller is a contradiction resolve that overrules an abandoned opposite choice of the same pair,
+ * whose loser is the record the standing choice keeps (`Q-442` L3). Returns whether a record was found and written.
+ */
+export async function reinstateRecord(
+  spaceId: string,
+  type: KnowledgeType,
+  id: string,
+  webhook?: { tokenId?: string; tokenLabel?: string },
+): Promise<boolean> {
+  const write = WRITERS.get(type);
+  if (!write) return false;
+  // `false` rather than a removal: the writers' `deleteFields` reaches only description, tags and properties, and every
+  // reader of the mark asks for `true`.
+  const updated = await write(spaceId, id, { [RECORD_SUPERSEDED_FIELD]: false }, undefined, webhook);
+  return updated != null;
+}

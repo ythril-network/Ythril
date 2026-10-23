@@ -137,7 +137,8 @@ sticky dismissal — because the Review tab presents both under one vocabulary.
 | `POST` | `/api/contradictions/scan?space=<id>` | `dataQuality` write + MFA | Run the sweep now, over the spaces where the token holds `dataQuality` write. Answers `{ scannedSpaces, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted, failedSpaces }`: `nliStalled: true` if it stopped because the judge was unavailable, and `failedSpaces` as [below](#a-scan-that-could-not-scan-a-space). |
 
 A candidate is `{ id, spaceId, type, aId, aSummary, bId, bSummary, basis, confidence, fields?, truncated?,
-status, resolution?, supersededId?, resolvedBy?, notes?, detectedAt, updatedAt }`.
+status, resolution?, supersededId?, resolvedBy?, notes?, resolving?, detectedAt, updatedAt }`. `resolving`
+(`{ resolution, winner?, at }`) is a resolve's claim that has not closed — see below.
 
 **`truncated: true` means the judge probably did not read the whole record.** Encoder NLI models cap at ~512
 tokens; a record whose text runs to thousands of characters is judged on its opening paragraphs, and the
@@ -207,7 +208,13 @@ POST /api/contradictions/:id/resolve
   finding before anything else is written, so a second resolve that picks the other winner — a retry that
   changed its mind, or a second reviewer at the same moment — is refused having written nothing, and the
   space can never hold two `supersedes` edges pointing opposite ways. The body names the choice that stands
-  (`resolution`, `winner`). The same applies to `edited`/`linked` on a finding resolved another way.
+  (`resolution`, `winner`). The same applies to `edited`/`linked` on a finding resolved another way. Two
+  resolves of the SAME choice at once both answer `200`.
+- **A claim nobody finishes does not pin the choice.** While a claim stands the finding carries `resolving`
+  (`{ resolution, winner?, at }`) on `GET /api/contradictions`. The same choice finishes it; `dismiss` and
+  `reopen` release it; and once it is older than ten minutes another choice may take it over — that resolve
+  first deletes the abandoned choice's `supersedes` edge and takes its mark off the record now kept (unless
+  another record's `supersedes` edge explains that mark).
 - **A store failure part-way is a `503` that says what was written.** It is retryable (`Retry-After`) and
   carries `written: { edge, markedRecord, closed }`; retrying the same choice finishes the rest without a
   second edge. Earlier releases said nothing of what had landed.

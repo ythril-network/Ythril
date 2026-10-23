@@ -393,8 +393,10 @@ projects it out before the document leaves the database. If you have been huntin
 this is why you could not find one. **`deliveredBy` and an edge's write guard (`_functionalGuard`) are withheld the
 same way**: the first names the peer that delivered a record, the second is this instance's own lock on a functional
 label's subject, so no read, webhook or live-view event carries either, and a `projection` that names one is not
-honoured. **A filter cannot read them either**: a predicate naming a withheld field directly is a `400` naming it,
-and only `{"<field>": {"$exists": true}}` (or `false`) is accepted on one.
+honoured. **A filter that names one is refused**: a predicate naming a withheld field as a field key, or as a
+`"$field"` path inside `$expr`, is a `400` naming it, and only `{"<field>": {"$exists": true}}` (or `false`) is
+accepted on one. Expression routes that reach a field without a field key (`$$ROOT`, `$$CURRENT`, `$getField`,
+`$objectToArray`, `$jsonSchema`) are not refused yet.
 
 > **On 3.1.0 or earlier** the per-collection list routes returned every record's vector — use
 > `POST /api/filter` with a projection for any bulk read there.

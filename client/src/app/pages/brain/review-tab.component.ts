@@ -394,6 +394,9 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
                 @if (c.resolution === 'superseded' && c.resolvedBy) {
                   <div class="superseded-note">{{ 'review.contradictions.decidedBy' | transloco: { who: c.resolvedBy } }}</div>
                 }
+                @if (c.resolving) {
+                  <div class="superseded-note">{{ resolvingText(c) }}</div>
+                }
                 <!-- What the resolve could not do as asked, in the reviewer's words; the server's sentence is the disclosure. -->
                 @for (n of c.notes ?? []; track n.code) {
                   <details class="superseded-note resolve-note">
@@ -650,6 +653,18 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   private resolveFailed(e: unknown): void {
     this.conBusy.set(null);
     this.toast.error(refusalText(this.transloco, e as Parameters<typeof refusalText>[1], 'review.contradictions.resolveError', RESOLVE_REFUSALS));
+  }
+
+  /**
+   * A card whose pair a resolve has claimed and not closed (L3): which choice stands, named by the button that makes it, and
+   * what the reviewer can do — the same choice finishes it, a dismiss releases it. Without it the card looked open while
+   * every other choice was refused.
+   */
+  resolvingText(c: ContradictionRecord): string {
+    const r = c.resolving;
+    if (!r) return '';
+    const action = r.resolution === 'superseded' ? (r.winner === 'b' ? 'keepB' : 'keepA') : r.resolution;
+    return this.transloco.translate('review.contradictions.resolving', { choice: this.transloco.translate(`review.contradictions.action.${action}`) });
   }
 
   /** One outcome of a resolve in the reviewer's words: its code's key with its placeholders, or the server's sentence for a code this client does not know. */
