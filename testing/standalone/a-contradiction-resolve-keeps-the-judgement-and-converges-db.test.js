@@ -63,7 +63,8 @@ const SPACES = {
   'hand-set': {},
   'slow-original': {},
   'resolved-again': {},
-  'dep-mark': {},
+  'dep-edge': {},
+  'dep-pair': {},
   'dismiss-resolved': {},
   'late-landing': {},
   'reclaim-dismiss': {},
@@ -421,29 +422,42 @@ describe('a contradiction resolve keeps the judgement and converges', { skip }, 
     };
     const isClose = (m, args) => m === 'updateOne' && JSON.stringify(args[1] ?? {}).includes('"status":"resolved"');
 
-    it('a recorded mark another pair has since come to depend on is not lifted, and the note says it was kept', { timeout: 60_000 }, async () => {
-      const seeded = await seedPair('dep-mark', 'fact');
-      const { sp, coll, ids, candidateId } = seeded;
-      // C1 (keep a) marked b and was abandoned, having recorded the mark.
-      await door.coll(sp, coll).updateOne({ _id: ids.b }, { $set: { superseded: true } });
-      await claim(sp, candidateId, 'a', await staleMs(), 'open', { markedId: ids.b });
-      // A second pair (c, b) is resolved keeping c: it finds b marked, records nothing, and draws c -> b.
-      await door.coll(sp, coll).insertOne(build.fact(sp, 'dep-mark-c', 30));
-      const c2 = 'dep-mark-c:dep-mark-b';
-      await door.coll(sp, 'contradiction_candidates').insertOne({
-        _id: c2, spaceId: sp, type: 'fact', aId: 'dep-mark-c', aSummary: 'C', aSeq: 30, bId: ids.b, bSummary: 'B', bSeq: 11,
-        basis: 'nli', confidence: 0.9, status: 'open', detectedAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+    /*
+     * A recorded mark another pair has come to rely on, by ONE dependency each (round 6): either alone must keep the mark, so
+     * each branch of the check in `undoClaim` is held by a case of its own — a case seeding both passed with either deleted.
+     */
+    const DEPENDENCIES = [
+      {
+        name: 'dep-edge', what: 'another record\'s supersedes edge points at it',
+        seed: async ({ sp, ids }) => door.coll(sp, 'edges').insertOne(build.edge(sp, 'dep-edge-other', 40, { from: 'dep-edge-c', to: ids.b, label: LABEL })),
+      },
+      {
+        name: 'dep-pair', what: 'another resolved finding names it as its loser',
+        seed: async ({ sp, ids }) => door.coll(sp, 'contradiction_candidates').insertOne({
+          _id: 'dep-pair-c:dep-pair-b', spaceId: sp, type: 'fact', aId: 'dep-pair-c', aSummary: 'C', aSeq: 30, bId: ids.b, bSummary: 'B', bSeq: 11,
+          basis: 'nli', confidence: 0.9, status: 'resolved', resolution: 'superseded', supersededId: ids.b,
+          detectedAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+        }),
+      },
+    ];
+    for (const dep of DEPENDENCIES) {
+      it(`a recorded mark is kept when ${dep.what}, and a markKept note says so`, { timeout: 60_000 }, async () => {
+        const seeded = await seedPair(dep.name, 'fact');
+        const { sp, coll, ids, candidateId } = seeded;
+        // C1 (keep a) marked b and was abandoned, having recorded the mark.
+        await door.coll(sp, coll).updateOne({ _id: ids.b }, { $set: { superseded: true } });
+        await claim(sp, candidateId, 'a', await staleMs(), 'open', { markedId: ids.b });
+        await dep.seed(seeded);
+        // C1 is taken over: b's mark is relied on elsewhere, and stays.
+        const res = await callRouteAfterAuth(router, 'post', '/:id/resolve', { params: { id: candidateId }, body: { resolution: 'edited' }, authToken: ADMIN_TOKEN });
+        assert.equal(res.code, 200, JSON.stringify(res.body));
+        assert.equal((await record(sp, coll, ids.b))?.superseded, true, `the takeover lifted a mark relied on because ${dep.what}`);
+        // A kept mark is its own note (round 5): `oppositeChoiceUndone` says something was taken back, and here nothing was.
+        const note = (res.body.notes ?? []).find(n => n.code === 'markKept');
+        assert.ok(note && /kept/.test(note.detail), `the answer does not carry a markKept note: ${JSON.stringify(res.body)}`);
+        assert.ok(!codes(res.body).includes('oppositeChoiceUndone'), `nothing was undone, yet the answer says oppositeChoiceUndone: ${JSON.stringify(res.body)}`);
       });
-      assert.equal((await resolve(c2, 'a')).code, 200);
-      // C1 is taken over: b's mark is now the second pair's too, and stays.
-      const res = await callRouteAfterAuth(router, 'post', '/:id/resolve', { params: { id: candidateId }, body: { resolution: 'edited' }, authToken: ADMIN_TOKEN });
-      assert.equal(res.code, 200, JSON.stringify(res.body));
-      assert.equal((await record(sp, coll, ids.b))?.superseded, true, 'the takeover lifted a mark another resolved pair depends on');
-      // A kept mark is its own note (round 5): `oppositeChoiceUndone` says something was taken back, and here nothing was.
-      const note = (res.body.notes ?? []).find(n => n.code === 'markKept');
-      assert.ok(note && /kept/.test(note.detail), `the answer does not carry a markKept note: ${JSON.stringify(res.body)}`);
-      assert.ok(!codes(res.body).includes('oppositeChoiceUndone'), `nothing was undone, yet the answer says oppositeChoiceUndone: ${JSON.stringify(res.body)}`);
-    });
+    }
 
     it('a takeover clears an effect the overtaken request landed late, just before it closes', { timeout: 60_000 }, async () => {
       const seeded = await seedPair('late-landing', 'fact');

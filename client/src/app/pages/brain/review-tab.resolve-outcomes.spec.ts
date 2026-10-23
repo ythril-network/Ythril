@@ -53,7 +53,7 @@ const NOTES: Note[] = [
   { code: 'loserGone', detail: DETAIL },
   // A pair of edges (a scanner configured to cover them): no edge can join two edges, and the judgement is kept.
   { code: 'edgePairUnlinkable', detail: DETAIL },
-  // An unfinished resolve of the pair was undone first: exactly the edge it drew and the mark it set.
+  // An unfinished resolve of the pair had something it wrote taken back: its edge, its mark, or both (`detail` says which).
   { code: 'oppositeChoiceUndone', detail: DETAIL },
   // A mark the unfinished resolve set was kept, because another resolved pair relies on it.
   { code: 'markKept', detail: DETAIL },
