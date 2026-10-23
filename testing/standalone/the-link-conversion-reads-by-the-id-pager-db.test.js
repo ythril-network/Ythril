@@ -21,7 +21,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import ts from 'typescript';
+import { ts, parseSource } from '../_shared/syntax-tree.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { REPO_ROOT } from './_sources.mjs';
@@ -35,7 +35,7 @@ const E1 = 'aaaaaaaa-0000-4000-8000-0000000000e1';
 
 /** `const PAGE = <n>` of the conversion, read from its syntax tree: the figure the case must cross. */
 function pageOfConversion() {
-  const sf = ts.createSourceFile(CONVERSION, readFileSync(join(REPO_ROOT, CONVERSION), 'utf8'), ts.ScriptTarget.Latest, true);
+  const sf = parseSource(CONVERSION, readFileSync(join(REPO_ROOT, CONVERSION), 'utf8'));
   let page;
   const visit = (n) => {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'PAGE' && n.initializer && ts.isNumericLiteral(n.initializer)) {

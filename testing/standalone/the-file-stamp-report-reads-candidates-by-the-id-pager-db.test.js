@@ -23,7 +23,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import ts from 'typescript';
+import { ts, parseSource } from '../_shared/syntax-tree.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openStampDoor } from './_file-stamp-door.mjs';
@@ -58,7 +58,7 @@ describe('a truncated answer\'s cursor is the last row it lists', { skip }, () =
 
 /** The function declaration `name` in `file`, parsed (syntax only: comments are trivia and never match). */
 function functionNamed(file, name) {
-  const sf = ts.createSourceFile(file, readFileSync(join(REPO_ROOT, file), 'utf8'), ts.ScriptTarget.Latest, true);
+  const sf = parseSource(file, readFileSync(join(REPO_ROOT, file), 'utf8'));
   let found;
   const visit = (n) => { if (ts.isFunctionDeclaration(n) && n.name?.text === name) found = n; else ts.forEachChild(n, visit); };
   visit(sf);

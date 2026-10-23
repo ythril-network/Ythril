@@ -31,7 +31,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import ts from 'typescript';
+import { ts, parseSource } from '../_shared/syntax-tree.mjs';
 import { idKeysetShapes } from './_id-keyset-shapes.mjs';
 import { serverProgram } from '../_shared/server-program.mjs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
@@ -57,7 +57,7 @@ function checkedSnippet(code) {
   const name = 'snippet.ts';
   const options = { noLib: true, noResolve: true, target: ts.ScriptTarget.ES2022, strict: true };
   const host = ts.createCompilerHost(options);
-  const sf = ts.createSourceFile(name, code, ts.ScriptTarget.ES2022, true);
+  const sf = parseSource(name, code);
   host.getSourceFile = (f) => (f === name ? sf : undefined);
   host.fileExists = (f) => f === name;
   host.readFile = (f) => (f === name ? code : undefined);
@@ -65,7 +65,7 @@ function checkedSnippet(code) {
   return idKeysetShapes(program.getSourceFile(name), program.getTypeChecker());
 }
 /** A snippet by syntax alone, as `scripts/` is read. */
-const syntaxSnippet = (code) => idKeysetShapes(ts.createSourceFile('snippet.mjs', code, ts.ScriptTarget.Latest, true));
+const syntaxSnippet = (code) => idKeysetShapes(parseSource('snippet.mjs', code));
 const shapesOf = (found) => found.map(f => f.shape);
 
 describe('the shapes of an _id keyset, on literal snippets', () => {
@@ -127,7 +127,7 @@ function findings() {
   for (const sf of serverSources()) for (const f of idKeysetShapes(sf, checker)) out.push({ file: repoPath(sf.fileName), ...f });
   const scripts = trackedSources('scripts', { ext: ['.mjs', '.js', '.cjs', '.ts'], floor: SCRIPTS_FLOOR });
   for (const file of scripts) {
-    const sf = ts.createSourceFile(file, readFileSync(join(REPO_ROOT, file), 'utf8'), ts.ScriptTarget.Latest, true);
+    const sf = parseSource(file, readFileSync(join(REPO_ROOT, file), 'utf8'));
     for (const f of idKeysetShapes(sf)) out.push({ file, ...f });
   }
   return { out, scripts: scripts.length };
