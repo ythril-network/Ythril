@@ -211,10 +211,16 @@ POST /api/contradictions/:id/resolve
   (`resolution`, `winner`). The same applies to `edited`/`linked` on a finding resolved another way. Two
   resolves of the SAME choice at once both answer `200`.
 - **A claim nobody finishes does not pin the choice.** While a claim stands the finding carries `resolving`
-  (`{ resolution, winner?, at }`) on `GET /api/contradictions`. The same choice finishes it; `dismiss` and
-  `reopen` release it; and once it is older than ten minutes another choice may take it over — that resolve
-  first deletes the abandoned choice's `supersedes` edge and takes its mark off the record now kept (unless
-  another record's `supersedes` edge explains that mark).
+  (`{ resolution, winner?, at, wrote? }`) on `GET /api/contradictions`. The claim records what its resolve
+  writes, just before each write: `wrote.edgeId` (the `supersedes` edge it draws) and `wrote.markedId` (the
+  record it marks). The same choice finishes it; `dismiss` and `reopen` release it; and once it is older than
+  ten minutes any other choice (`superseded`, `edited` or `linked`) may take it over. A release or takeover
+  undoes **exactly what the claim recorded** — that edge deleted, that mark lifted — and says so in a note
+  (`oppositeChoiceUndone`; on a takeover also in `written.undone`). Nothing a claim did not record is ever
+  touched: a mark set by hand or by another pair, or an edge drawn by hand, stays. A slow resolver whose claim
+  was taken over stops at its next write, undoes what it wrote, and answers `409` with `written`.
+- **A resolve of a finding already resolved the same way writes nothing.** It answers `200` from what the
+  finding recorded.
 - **A store failure part-way is a `503` that says what was written.** It is retryable (`Retry-After`) and
   carries `written: { edge, markedRecord, closed }`; retrying the same choice finishes the rest without a
   second edge. Earlier releases said nothing of what had landed.
@@ -236,6 +242,7 @@ shows them too. `note` (one string, the details joined) is still returned for an
 | `winnerGone` | The record kept no longer exists. | No edge; the loser is marked; the finding closed. |
 | `loserGone` | The record judged stale no longer exists. | No edge, nothing marked (`markedRecord: false`); the finding closed. |
 | `edgePairUnlinkable` | The pair are edges (a scanner configured to cover them), and an edge cannot be the endpoint of an edge. | The loser is marked and the finding closed. |
+| `oppositeChoiceUndone` | An unfinished resolve of this pair — taken over as stale, or released by `dismiss` or `reopen` — was undone first; `detail` names the edge deleted and the record whose mark was lifted. | Only what that claim recorded was undone; the resolve (or dismiss, reopen) then went on as asked. |
 
 A store failure is never reported as a note: a refusal is the space's rules speaking, and a failure is the
 `503` above.

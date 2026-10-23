@@ -85,8 +85,8 @@ export async function retireRecord(
 
 /**
  * Take the mark off one record, through its own writer — the inverse of {@link retireRecord}, for the same reasons (seq,
- * audit, webhook). Its one caller is a contradiction resolve that overrules an abandoned opposite choice of the same pair,
- * whose loser is the record the standing choice keeps (`Q-442` L3). Returns whether a record was found and written.
+ * audit, webhook). Its one caller is a contradiction resolve undoing the mark an unfinished resolve RECORDED it set (`Q-442`
+ * L3) — never a mark it did not record. Returns whether a record was found and written.
  */
 export async function reinstateRecord(
   spaceId: string,

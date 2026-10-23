@@ -809,8 +809,10 @@ ago resolved as **Keep A** — the second choice is refused and nothing changes:
 stands. Clicking the same choice again is harmless.
 
 A card that says it is **being resolved** has a decision in progress — or one that stopped part-way. Choose the
-same side again to finish it, or **Dismiss** to release it; after ten minutes the other side can be chosen too,
-and the stopped decision's link and mark are undone.
+same side again to finish it, or **Dismiss** to release it; after ten minutes any other decision can be taken
+too. Releasing or overriding a stopped decision undoes exactly the link it drew and the mark it set — nothing
+else, so a mark you set by hand or a link you drew yourself stays — and the message after it says what was
+undone.
 
 Before deciding, use **Show both in full** on the card: the two lines you see are summaries, which is enough
 to triage a pair and rarely enough to judge one.
