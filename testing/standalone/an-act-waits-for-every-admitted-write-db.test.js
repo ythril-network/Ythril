@@ -66,11 +66,12 @@ describe('a wipe waits for every write admitted before it, and no such write sur
     try {
       const parked = park.arm(`${S}_${collection}`, { when: (m) => method === undefined || m === method });
       const writing = run().then(() => null, (err) => err);
-      // Past the writer's check, at its store write — in a bounded run of round trips, so a write that never reaches the store fails the row.
-      let reached = false;
-      void parked.reached.then(() => { reached = true; });
-      for (let i = 0; i < 400 && !reached; i++) await door.mongo.getDb().command({ ping: 1 });
-      assert.ok(reached, `${name} never reached its store write on ${S}_${collection}${method ? ` (${method})` : ''}: ${(await Promise.race([writing, null]))?.message ?? 'still running'}`);
+      // Past the writer's check, at its store write. Whichever comes first decides it: the parked write, or the writer settling without
+      // reaching it (a write that never reaches the store fails the row). A count of round trips here made the row a race against the
+      // writer's own reads, which a loaded CI store lost (bundle-101 Full run: 'still running' after 400 pings).
+      const first = await Promise.race([parked.reached.then(() => 'reached'), writing.then((err) => ({ err }))]);
+      const reached = first === 'reached';
+      assert.ok(reached, `${name} never reached its store write on ${S}_${collection}${method ? ` (${method})` : ''}: ${first?.err?.message ?? 'it settled without writing'}`);
       const { entry } = register();
       let actDone = false;
       const act = runner.runSpaceAct(entry.id).then((r) => { actDone = true; return r; });
