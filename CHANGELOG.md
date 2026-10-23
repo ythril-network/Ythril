@@ -110,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | While either stands the instance is in maintenance (an instance admin passes on every path; the web client loads for anyone; `{ active, manual, heldBy }`) and a backup is `409` | Read `heldBy` |
 | Audit `data.restore` and `data.migrate` are now `….requested`; a set's end is a row of its own | Update audit queries |
 | A 5.x build never finishes a `restore` or `migrate` act | Let them end before rolling back |
-| A contradiction resolve against the standing choice is `409` `resolvedOtherwise` (was `200`, overwriting); answers always have `notes` | Branch on `code`; re-read the candidate |
+| A contradiction resolve against the standing choice is `409` `resolvedOtherwise` (was `200`, overwriting); answers carry `notes`; dismissing a resolved one is `409` `alreadyResolved` | Branch on `code`; re-read it |
 | An unclosed resolve shows as `resolving`; after 10 minutes another choice takes it over, undoing what it recorded | Finish with the same choice, or dismiss |
 | A `filter` or `recall` predicate on a withheld field (`embedding`, `deliveredBy`, the write guard) other than `$exists` is `400` | Use `$exists` only |
 | A projection of withheld fields only (`{embedding: 1}`) answers `{_id}`, was every field | Project the fields you read |
@@ -186,21 +186,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Configuration:** Own `config.json` writes no longer reload the instance; after shutdown begins no schedule is armed.
+- **Configuration:** Own `config.json` writes never reload the instance; after shutdown begins no schedule is armed.
 - **Errors:** An error naming only `maxTimeMS` is not a missed deadline (no retryable `503`); a missing `mongot`-named reference stays `400`; a write the store could not finish answers `503 retryable`; a timed-out transaction leaves no document locked.
 - **Sync:** A chrono `type` outside the space's vocabulary is still stored on pull (a push answers `unknownType`). Two peers pushing different text for one fact at one seq keep both (a fork), the divergent copy with its own `createdAt` and `updatedAt`.
 - **Sync:** Strict-linkage violations are recorded for every landed edge and link on every door, once per dangling end after a pull or push is whole. A push no longer waits for it; a part-way pull checks what landed.
 - **Sync:** A file deletion reaches every peer once: its tombstone is sent once per path after the file is gone, never pruned unsent, and survives a wipe or a peer that sent the bytes first.
-- **Sync:** A stalled write can no longer stop a space's replication (it ends within the write bound): gauge `ythril_seq_horizon_oldest_hold_seconds`, warning `seq horizon held <age>s …`.
+- **Sync:** A stalled write cannot stop a space's replication (it ends within the write bound): gauge `ythril_seq_horizon_oldest_hold_seconds`, warning `seq horizon held <age>s …`.
 - **Sync:** A peer passes on all its deletions of a kind beyond 1000, by pull and push. A page holding one id twice stores the highest seq; a stale tombstone is deleted only once its superseding record landed.
 - **Sync:** Pulled records and entities pushed to `POST /api/sync/entities` are embedded (re-embed earlier pulls once: `POST /api/spaces/:id/reembed`); a counter left behind answers a push `500` and sets `counterBehind: true` on an import.
 - **Sync:** Every push door moves the seq counter past every seq received before answering. A peer's edit no longer erases this instance's vector and retention stamps. A pull counts a file under a decomposed (NFD) name once and touches its bytes in place.
 - **Sync:** A duplicate link in a push is `skipped`; a refused document gets one warning per page naming ids and reason. A database fault writing a pulled page is not `PEER UNREACHABLE`: it holds that family's position and refetches.
 - **Sync:** A driver argument error drops only its own document (`rejected`; a single route `400`). A merge-dropped duplicate edge's or re-keyed link's tombstone carries `originalSeq`.
-- **Sync:** A tombstone page whose elements are all refused no longer holds a peer's position for good, nor a refused element's seq move it; a tombstone `instanceId` over 256 characters is refused.
+- **Sync:** A tombstone page of refused elements no longer holds a peer's position for good, nor a refused element's seq move it; a tombstone `instanceId` over 256 characters is refused.
 - **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since is kept. An admin restore removes a file description, source, property, tag or mark its backup lacks (`keysRemoved`).
 - **Files:** A peer's file, pushed or pulled, is processed by this instance's rules (converted, chunked, media); a new version replaces old passages; a failed record write leaves no new file unless the database was down.
-- **Files:** A pushed file's later description and tag edits are no longer skipped; arriving bytes revive a soft-deleted path with this instance's retention; a metadata arrival no longer overwrites a newer copy.
+- **Files:** A pushed file's later description and tag edits are never skipped; arriving bytes revive a soft-deleted path with this instance's retention; a metadata arrival no longer overwrites a newer copy.
 - **Files:** Processing status or a peer file's move no longer changes `updatedAt` (a false Merkle divergence); changed media over a `complete` file is analysed again. A re-upload with metadata takes one seq; a no-op write none.
 - **Files:** A soft-deleted file's record keeps no description, vector, chunk or face, and is removed one file retention window after its deletion; with no window it stays.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered, never over a row's own description or tags; a wrong-typed key or any `parentFileId` is discarded and counted refused.
@@ -216,15 +216,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Records:** A bulk edge whose end is a `$ref` to a fact or chrono entry stores that record's kind. A chrono entry rewritten through its `id` re-embeds its content, and an edge stores the property default its label's schema defines.
 - **Embedding:** A record or file this instance suppresses (flag, type or space) keeps no vector from a peer's update or file bytes; a record retired from search gets none when rewritten without the flag.
 - **Embedding:** Suppression turned on by a network or a saved type schema removes stored vectors, files included, at once and at every start.
-- **Embedding:** An embed job no longer writes a vector over a record changed meanwhile. A reindex embeds the same text as the original write; `reembed` no longer gives a passage, face crop or converted copy a vector of its path.
+- **Embedding:** An embed job never writes a vector over a record changed meanwhile. A reindex embeds the same text as the original write; `reembed` no longer gives a passage, face crop or converted copy a vector of its path.
 - **Schemas:** `POST /api/notify` accepts `meta_change_pending`: a schema-change round reaches peers (was `400`). `GET /api/schema-library` answers `usageCounts`; the dry-run reports checked-of-total per collection and pages.
 - **Schemas:** `PATCH` and `schema_update` store `meta.stampSkew` and `whenDuePasses` (one was refused, one dropped); a library `PATCH` no longer drops `suppressEmbeddings`, `endpoints` and `functional`.
-- **Spaces:** A space that cannot be initialised no longer stops start-up or a reload for the others: logged once, retried at the next reload; index: `building`, then `ready`/`failed`.
+- **Spaces:** A space that cannot be initialised no longer stops start-up or a reload of others: logged once, retried at the next reload; index: `building`, then `ready`/`failed`.
 - **Spaces:** Deleting a space no longer loses a race with the media worker (`ENOTEMPTY`), nor does one unfinished delete make later renames and deletes answer `500 "… is still pending"`.
 - **Tokens:** A completed network handshake revokes the peer tokens it replaces, on both sides and for club pairings, and start-up drops unused leftovers.
 - **Networks:** Every door opening a vote round answers it as the vote list shows; a joiner past its deadline loses its credential next sweep.
 - **Networks:** A vote round ends at its deadline unattended (a job expires it each minute); a peer's round past its deadline, past 72 hours or concluded here is never adopted.
-- **Housekeeping:** An error or hang in one space no longer stops a background job for the others. New `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` (default 240 s) ends each of their database operations.
+- **Housekeeping:** An error or hang in one space no longer stops a background job for others. New `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` (default 240 s) ends each of their database operations.
 - **Housekeeping:** A pass ends early when the database does not answer or 3 spaces in a row time out; a timed-out space is passed over 60 s, doubling to 300 s. Undeletable: `ythril_housekeeping_records_failed_total`.
 - **Housekeeping:** A reindex run not resumed at start is retried every few seconds; one whose sweeper died is taken over once its lease expires.
 - **Housekeeping:** Duplicate and contradiction scans report a lookup failure and move past a record that keeps failing; their review lists page past 500. An automerge a space refuses is reported once per pair.

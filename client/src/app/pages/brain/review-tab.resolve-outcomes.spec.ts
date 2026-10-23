@@ -55,6 +55,8 @@ const NOTES: Note[] = [
   { code: 'edgePairUnlinkable', detail: DETAIL },
   // An unfinished resolve of the pair was undone first: exactly the edge it drew and the mark it set.
   { code: 'oppositeChoiceUndone', detail: DETAIL },
+  // A mark the unfinished resolve set was kept, because another resolved pair relies on it.
+  { code: 'markKept', detail: DETAIL },
 ];
 const placeholdersOf = (note: Record<string, string>) => Object.keys(note).filter(k => k !== 'code' && k !== 'detail');
 
@@ -78,6 +80,8 @@ const con = (over: Record<string, unknown> = {}) => ({
 
 /** The text of the last `setup`'s view, after a change detection. */
 let rendered: () => string = () => '';
+/** The labels of the last `setup`'s buttons, after a change detection. */
+let buttons: () => string[] = () => [];
 
 function setup(lang: Lang, conApi: Record<string, unknown>) {
   const toasts: string[] = [];
@@ -105,6 +109,7 @@ function setup(lang: Lang, conApi: Record<string, unknown>) {
   c.loadContradictions();
   toasts.length = 0;
   rendered = () => { f.detectChanges(); return (f.nativeElement as HTMLElement).textContent ?? ''; };
+  buttons = () => { f.detectChanges(); return [...(f.nativeElement as HTMLElement).querySelectorAll('button')].map(b => b.textContent?.trim() ?? ''); };
   return { c, toasts };
 }
 
@@ -203,5 +208,46 @@ describe('ReviewTabComponent: what a resolve tells the reviewer', () => {
     const shared = keysOf('en').filter(k => keysOf('de').includes(k) && keysOf('pl').includes(k));
     expect(shared.length, `no key says the pair is being resolved in all of en/de/pl: ${JSON.stringify(text.en)}`).toBeGreaterThan(0);
     expect(text.en, 'a placeholder was left unfilled').not.toMatch(/\{\{/);
+  });
+
+  /*
+   * Round 5: the resolved card said "the superseded record is kept and marked" when the loser was gone and nothing was marked
+   * (`loserGone`), and a resolved card must not offer Dismiss (the server refuses it, `409 alreadyResolved`).
+   */
+  const resolvedCard = (notes: Note[]) => () => of({ contradictions: [con({
+    status: 'resolved', resolution: 'superseded', supersededId: 'b', resolvedBy: 'reviewer-x', notes,
+  })], nliConfigured: true });
+
+  it('a resolved card whose loser was gone does not say the superseded record is marked, in en, de or pl', () => {
+    for (const lang of LANGS) {
+      setup(lang, { listContradictions: resolvedCard([{ code: 'loserGone', detail: DETAIL }]) });
+      const text = rendered();
+      const marked = DICT[lang]['review.contradictions.decidedBy']!.split('{{who}}')[1]!.trim();
+      expect(text, `${lang}: the card claims a mark that was never set`).not.toContain(marked);
+      expect(text, `${lang}: the card no longer names who decided`).toContain('reviewer-x');
+    }
+  });
+
+  it('a resolved card whose loser was marked still says so', () => {
+    setup('en', { listContradictions: resolvedCard([]) });
+    expect(rendered()).toContain(DICT.en['review.contradictions.decidedBy']!.split('{{who}}')[1]!.trim());
+  });
+
+  it('a dismiss refused 409 alreadyResolved (a race with a resolve) is said from a key, in en, de and pl', () => {
+    for (const lang of LANGS) {
+      const { c, toasts } = setup(lang, { dismissContradiction: () => throwError(() => new HttpErrorResponse({ status: 409, error: { code: 'alreadyResolved', error: 'SERVER-SENTENCE' } })) });
+      c.dismissContradiction(c.conRows()[0]);
+      expect(toasts.length, JSON.stringify(toasts)).toBe(1);
+      expect(toasts[0], `${lang}: the server's sentence was toasted`).not.toContain('SERVER-SENTENCE');
+      expect(keysRenderedIn(lang, toasts[0]!, {}).length, `${lang}: the toast is not the text of any key: ${toasts[0]}`).toBeGreaterThan(0);
+      expect(toasts[0], `${lang}: still the generic dismiss error`).not.toBe(DICT[lang]['duplicates.dismissError']);
+    }
+  });
+
+  it('a resolved card does not offer Dismiss', () => {
+    setup('en', { listContradictions: resolvedCard([]) });
+    const labels = buttons();
+    expect(labels.length, 'the card rendered no buttons at all: the check would pass vacuously').toBeGreaterThan(0);
+    expect(labels, JSON.stringify(labels)).not.toContain(DICT.en['duplicates.dismiss']);
   });
 });

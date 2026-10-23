@@ -2143,11 +2143,12 @@ export interface ContradictionClaim extends ContradictionChoice {
  *   `winnerGone`          the record the reviewer kept no longer exists, so no edge was drawn from it
  *   `loserGone`           the record the reviewer judged stale no longer exists: nothing to mark and no edge
  *   `edgePairUnlinkable`  the pair are edges, and an edge cannot be the endpoint of an edge
- *   `oppositeChoiceUndone` an unfinished resolve of the pair (taken over as stale, or released by a dismiss or reopen) was
- *                         undone: exactly the edge it drew and the mark it set, named in `detail`
+ *   `oppositeChoiceUndone` an unfinished resolve of the pair (taken over as stale, or released by a dismiss or reopen) had
+ *                         something it wrote taken back — its edge deleted, its mark lifted; `detail` names which
+ *   `markKept`            a mark that unfinished resolve set was KEPT, because another resolved pair relies on it
  */
 export interface ContradictionResolveNote {
-  code: 'linkRefused' | 'winnerGone' | 'loserGone' | 'edgePairUnlinkable' | 'oppositeChoiceUndone';
+  code: 'linkRefused' | 'winnerGone' | 'loserGone' | 'edgePairUnlinkable' | 'oppositeChoiceUndone' | 'markKept';
   detail: string;
   /** The edge label the refused link carried. */
   label?: string;

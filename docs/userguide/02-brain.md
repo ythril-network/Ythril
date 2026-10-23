@@ -791,7 +791,9 @@ property differently), while a **Model verdict** shows an entailment model's jud
 That distinction is the point — "these disagree on `port`" is a fact, "a model thinks these disagree" is an
 opinion. Contradictions are never merged: both records are real and which one is wrong is your call, so you
 either **dismiss** it (sticky, like a duplicate dismissal), mark it **resolved by edit** after correcting a
-record, **link** the two as a contradiction, or pick a winner with **Keep A** / **Keep B**.
+record, **link** the two as a contradiction, or pick a winner with **Keep A** / **Keep B**. A resolved pair has no
+**Dismiss**: the decision stands, with its link and mark, and a dismiss that races a resolve is refused with a message
+saying the pair was already resolved.
 
 **Keep A / Keep B** is usually what you actually mean: *this one is right, that one is stale*. It records who
 decided, marks the losing record itself as superseded, and draws the `supersedes` link from the winner to it.

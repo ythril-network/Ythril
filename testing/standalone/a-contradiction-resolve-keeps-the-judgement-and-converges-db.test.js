@@ -64,6 +64,7 @@ const SPACES = {
   'slow-original': {},
   'resolved-again': {},
   'dep-mark': {},
+  'dismiss-resolved': {},
   'late-landing': {},
   'reclaim-dismiss': {},
   'functional-wrote': { meta: STRICT({ functional: true }) },
@@ -388,6 +389,19 @@ describe('a contradiction resolve keeps the judgement and converges', { skip }, 
       assert.equal(again.body.markedRecord, true, JSON.stringify(again.body));
     });
 
+    it('a resolved candidate cannot be dismissed: 409 alreadyResolved naming the resolution, and it stays resolved', { timeout: 60_000 }, async () => {
+      const { sp, coll, ids, candidateId } = await seedPair('dismiss-resolved', 'fact');
+      assert.equal((await resolve(candidateId, 'a')).code, 200);
+      const res = await callRouteAfterAuth(router, 'post', '/:id/dismiss', { params: { id: candidateId }, authToken: ADMIN_TOKEN });
+      assert.equal(res.code, 409, `a resolved candidate was dismissed: ${res.code} ${JSON.stringify(res.body)}`);
+      assert.equal(res.body.code, 'alreadyResolved', JSON.stringify(res.body));
+      assert.match(res.body.error, /superseded/, `the refusal does not name the resolution: ${JSON.stringify(res.body)}`);
+      const cand = await candidate(sp, candidateId);
+      assert.equal(cand.status, 'resolved', 'the refused dismiss changed the candidate');
+      assert.equal(cand.dismissedContentHash, undefined, 'the refused dismiss stamped a content hash');
+      assert.equal((await record(sp, coll, ids.b))?.superseded, true, 'the refused dismiss lifted the mark');
+    });
+
     it('reopening releases a claim, and the other choice can then be taken', { timeout: 60_000 }, async () => {
       const { sp, ids, candidateId } = await seedPair('reopen-releases', 'fact');
       await claim(sp, candidateId, 'a', 0, 'dismissed');
@@ -425,8 +439,10 @@ describe('a contradiction resolve keeps the judgement and converges', { skip }, 
       const res = await callRouteAfterAuth(router, 'post', '/:id/resolve', { params: { id: candidateId }, body: { resolution: 'edited' }, authToken: ADMIN_TOKEN });
       assert.equal(res.code, 200, JSON.stringify(res.body));
       assert.equal((await record(sp, coll, ids.b))?.superseded, true, 'the takeover lifted a mark another resolved pair depends on');
-      const note = (res.body.notes ?? []).find(n => n.code === 'oppositeChoiceUndone');
-      assert.ok(note && /kept/.test(note.detail), `the note does not say the mark was kept: ${JSON.stringify(res.body)}`);
+      // A kept mark is its own note (round 5): `oppositeChoiceUndone` says something was taken back, and here nothing was.
+      const note = (res.body.notes ?? []).find(n => n.code === 'markKept');
+      assert.ok(note && /kept/.test(note.detail), `the answer does not carry a markKept note: ${JSON.stringify(res.body)}`);
+      assert.ok(!codes(res.body).includes('oppositeChoiceUndone'), `nothing was undone, yet the answer says oppositeChoiceUndone: ${JSON.stringify(res.body)}`);
     });
 
     it('a takeover clears an effect the overtaken request landed late, just before it closes', { timeout: 60_000 }, async () => {

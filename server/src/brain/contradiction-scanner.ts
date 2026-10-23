@@ -187,25 +187,33 @@ export function unjudgedNeighbours<T extends { _id: string }>(
 export async function evalRecord(
   spaceId: string, type: DupeScanType, recordId: string, pass: Pass, threshold: number,
   alreadyJudged?: Set<string>,
+  /**
+   * The neighbour search. The real `findSimilar` always — a test hands one that answers as it does on a store with no vector
+   * search, which is the only reason this is a parameter.
+   */
+  similar: typeof findSimilar = findSimilar,
 ): Promise<RecordOutcomeSummary> {
   let found = 0;
   let judgeStalled = false;
   let judged = 0;
   let modelCalls = 0;
   try {
-    const { source, results } = await findSimilar(
+    const { source, results } = await similar(
       spaceId, recordId, type as RecallKnowledgeType, TOPK, [type as RecallKnowledgeType], threshold);
     const sameType = results.filter(m => m.type === type);
 
-    // For a type whose claims include stored columns (chrono's `status`), read them from the COLLECTION
-    // rather than from the recall result — `RecallChrono.status` is derived from the clock, so judging on
-    // it would produce a candidate whose verdict changes overnight while both records sit untouched.
-    // One round trip covers the seed and all its neighbours.
-    const stored = extraClaimFields(type).length > 0
-      ? await fetchStructuredClaims(spaceId, type, [source._id, ...sameType.map(m => m._id)])
-      : null;
+    // The claims of EVERY type are read from the COLLECTION, for the seed and all its neighbours in one round trip, never
+    // from the recall result:
+    //  - the seed is `findSimilar`'s `source`, built by `getEntryEmbedding` with a projection that has no `properties`, so a
+    //    fact or entity seed judged on it carried no claims and the structured pass could never find a fact or entity
+    //    conflict (bundle-101 verify drive: two facts differing only in `port`, similarity 0.99, gave 0 candidates);
+    //  - a chrono's stored columns (`status`) are claims too, and `RecallChrono.status` is derived from the clock, so judging
+    //    on it would produce a candidate whose verdict changes overnight while both records sit untouched.
+    // The read is best-effort (an empty map when it fails); a neighbour then falls back to the claims its recall result
+    // carries, as before, and the seed has none — an unjudged pair, which the next sweep settles.
+    const stored = await fetchStructuredClaims(spaceId, type, [source._id, ...sameType.map(m => m._id)]);
     const claimsOf = (r: RecallResult): ClaimMap | undefined =>
-      stored ? stored.get(r._id) : r.properties;
+      stored.has(r._id) ? stored.get(r._id) : (extraClaimFields(type).length > 0 ? undefined : r.properties);
 
     const a = toJudgeable(source, claimsOf(source));
     // One pair, one judgement per sweep — see `unjudgedNeighbours`.
