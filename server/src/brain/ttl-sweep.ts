@@ -38,7 +38,9 @@ import { NotFoundError } from '../util/errors.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { defaultSpaceFailureReporter, walkVerdict, type SpaceFailureReporter } from '../util/space-failure.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
-import { TTL_COLLECTIONS, ensureTtlIndex } from './ttl.js';
+import { TTL_COLLECTIONS } from './ttl.js';
+import { ensureTtlIndexes } from '../spaces/space-indexes.js';
+import { warnOnce } from '../util/warn-once.js';
 import { deleteFact } from './fact.js';
 import { deleteEntity } from './entities.js';
 import { deleteEdge } from './edges.js';
@@ -360,7 +362,7 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
 
   // Rows flagged deleted by a release before the flag write stripped them still hold what the bytes made (Q-418). The
   // repair is query-defined and keeps no marker — a stripped row leaves the query — so once there is nothing left to do
-  // it costs one read of the sparse `deletedAt` index per space per cycle (`ensureTtlIndex`), never a scan of the files;
+  // it costs one read of the sparse `deletedAt` index per space per cycle (`ttl_deletedAt`, `SWEEP_INDEXES`), never a scan of the files;
   // and a space that fails is passed over rather than stopping the ones behind it.
   await eachSpace(STRIP_STEP, configuredSpaces(), async space => {
     strippedRows += await stripFlaggedRowsOnce(space.id, SWEEP_BATCH);
@@ -378,26 +380,50 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   return total;
 }
 
+/** The spaces whose sweep indexes ({@link ensureTtlIndexes}) stood at a tick: not built again until the space is gone. */
+const sweepIndexed = new Set<string>();
+/** Said once per space while its sweep reads are unindexed, and again if that comes back after it stood. */
+const unindexedOnce = warnOnce<string>();
+
 /**
- * Ensure the `_expireAt` sweep index exists on every non-proxy space, so the sweep query is indexed
- * regardless of whether a record's expiry came from the space-wide default (index also ensured at
- * setting-change time) or a per-record `ttlDays`. Idempotent; a failing space is said and the walk goes on.
+ * Build the sweep's indexes (`SWEEP_INDEXES` of the per-space declaration) on every space where they have not stood yet: run at
+ * every tick, before the sweep, until each space's stand, so a space whose build failed (or that a restore left without them) is
+ * indexed again within a cycle and not at the next boot. A space created now and a restored one get them from `initSpace`; an
+ * existing one from the background pass; this is the retry. While a space has not got them it is said once (its sweep reads
+ * scan the collection, which is slow and still correct); each failed index is said through the walk with the index named.
  *
- * `ensureTtlIndex`'s `createIndex` is deliberately not bounded by the housekeeping figure: an index build scales with the data
- * in the collection, so a figure sized for a read or a single write would end a legitimate build and leave the sweep unindexed.
+ * The builds are deliberately not bounded by the housekeeping figure: an index build scales with the data in the collection, so a
+ * figure sized for a read or a single write would end a legitimate build and leave the sweep unindexed.
  */
 async function ensureSweepIndexes(): Promise<void> {
-  await eachSpace(INDEX_STEP, configuredSpaces(), space => ensureTtlIndex(space.id));
+  const configured = configuredSpaces();
+  const ids = new Set(configured.map(s => s.id));
+  for (const id of sweepIndexed) if (!ids.has(id)) sweepIndexed.delete(id);
+  const owed = configured.filter(s => !sweepIndexed.has(s.id));
+  if (owed.length === 0) return;
+  await eachSpace(INDEX_STEP, owed, async (space) => {
+    const { failed } = await ensureTtlIndexes(space.id);
+    if (failed.length === 0) {
+      sweepIndexed.add(space.id);
+      unindexedOnce.forget(space.id);
+      return;
+    }
+    unindexedOnce(space.id, () => log.warn(`TTL sweep: space '${peerText(space.id)}' is swept without ${peerList(failed.map(f => f.unit))}: `
+      + 'its sweep reads scan the collection until the index is built, which is tried again every cycle'));
+  });
 }
 
-const sweepJob = intervalJob('TTL sweep', SWEEP_INTERVAL_MS, () => sweepExpired());
+/** One cycle: the sweep's indexes where they are owed, then the sweep. */
+const sweepJob = intervalJob('TTL sweep', SWEEP_INTERVAL_MS, async () => {
+  await ensureSweepIndexes();
+  return sweepExpired();
+});
 
 /** Start the background TTL sweep. Call once during startup. */
 export function startTtlSweep(): void {
   if (sweepJob.armed) return;
   // From the config now, so the gauge never reads a false 0 ("no scan owed") during the first interval, before any pass has run.
   publishLeakedRowScansOwed(new Date());
-  void ensureSweepIndexes().catch(err => log.warn(`TTL sweep: ensuring the sweep indexes: ${peerText(err)}`));
   sweepJob.start();
   log.debug('TTL sweep worker started');
 }

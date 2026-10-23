@@ -202,24 +202,25 @@ describe('one accept rule: isNewerCopy', () => {
 });
 
 describe('the fork caps\' index is declared once', () => {
+  // Restated by Q-445 (bundle-101): this read `lifecycle.ts` and `ensure-query-indexes.ts` for a loop over FORK_INDEXES and a
+  // `createIndex(ix.keys…)` each, which held only while each build site named its indexes by hand. Both now run the ONE per-space
+  // declaration (`spaces/space-indexes.ts`, gate `every-per-space-index-build-reads-the-declaration`), so the rule is that every
+  // FORK_INDEXES entry is declared there, on facts, with its keys and its sparseness read from the entry, and boot-safe so
+  // `initSpace` builds it at every boot (the background pass builds every declared entry).
   it('initSpace and ensureQueryIndexes both create FORK_INDEXES, and nobody spells the index', async () => {
     // Dup pass: `{ forkOf: 1 }, { sparse: true }` was written in both. Seen red by mutation, restored by hand: the
     // literal put back in ensure-query-indexes.ts.
-    const { readFileSync } = await import('node:fs');
     const { stripComments } = await import('./_strip-comments.mjs');
     const { readTrackedSources } = await import('./_sources.mjs');
-    // The RULE is "every FORK_INDEXES entry is created from the one list", not one loop shape: a `for (const ix of FORK_INDEXES)`
-    // and a `...FORK_INDEXES.map(ix => ...)` / `.forEach` both iterate the list (bundle-53 G21 moved the second site into the
-    // walk's unit list). What must hold either way: the list is iterated, and the index created is read from the entry's
-    // `keys` — a site that iterates the list and then spells its own keys would still be a second declaration.
-    const iterates = /\bfor \(const (\w+) of FORK_INDEXES\)|\bFORK_INDEXES\.(?:map|forEach)\(\s*\(?(\w+)\)?\s*=>/;
-    for (const f of ['server/src/spaces/lifecycle.ts', 'server/src/spaces/ensure-query-indexes.ts']) {
-      const src = stripComments(readFileSync(f, 'utf8'));
-      const m = iterates.exec(src);
-      assert.ok(m, `${f} no longer creates FORK_INDEXES`);
-      const entry = m[1] ?? m[2];
-      assert.match(src.slice(m.index), new RegExp(`createIndex\\(\\s*${entry}\\.keys\\b`),
-        `${f} iterates FORK_INDEXES but does not create the index from the entry's keys`);
+    const { requireSpaceIndexDeclaration } = await import('./_space-index-declaration.mjs');
+    const { FORK_INDEXES } = await import('../../server/dist/sync/upsert-plan.js');
+    assert.ok(FORK_INDEXES.length >= 1, 'FORK_INDEXES read as empty');
+    const declared = await requireSpaceIndexDeclaration(assert);
+    for (const ix of FORK_INDEXES) {
+      const e = declared.find(d => d.suffix === 'facts' && JSON.stringify(d.raw.keys) === JSON.stringify(ix.keys));
+      assert.ok(e, `${JSON.stringify(ix.keys)} of FORK_INDEXES is not declared on facts`);
+      assert.equal(e.spec.sparse, ix.sparse === true, `${JSON.stringify(ix.keys)} is declared with another sparseness than FORK_INDEXES says`);
+      assert.equal(e.bootSafe, true, `${JSON.stringify(ix.keys)} is not built at every boot`);
     }
     const spelled = readTrackedSources('server/src', { ext: ['.ts'], floor: 200, specs: false, untracked: true })
       .filter(s => /createIndex\(\s*\{\s*forkOf\b/.test(stripComments(s.text))).map(s => s.file);

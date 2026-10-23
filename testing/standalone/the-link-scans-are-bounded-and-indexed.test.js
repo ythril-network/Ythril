@@ -146,9 +146,11 @@ describe('the collection every link scan reads is indexed', () => {
      * 5.0 moved the reads onto the `links` collection, so the indexes are its own — and the rule is the
      * same one: they are DECLARED once and asked for by everything that creates them.
      */
-    const life = src('server/src/spaces/lifecycle.ts');
+    // Restated by Q-445 (bundle-101): this read `lifecycle.ts`, which no longer names any index; the one per-space declaration
+    // (`spaces/space-indexes.ts`), which `initSpace`, the background pass and a restore all build, is what must take the set.
+    const life = src('server/src/spaces/space-indexes.ts');
     assert.match(life, /LINK_INDEXES/,
-      'lifecycle writes its link indexes out instead of taking the declared set, so the backfill and the '
+      'the per-space declaration writes its link indexes out instead of taking the declared set, so the backfill and the '
       + 'creation can ask for different things');
     // The floor: a loop over an empty declaration satisfies the assertion above and indexes nothing.
     assert.ok(LINK_INDEXES.length >= 2,
@@ -171,7 +173,13 @@ describe('the collection every link scan reads is indexed', () => {
       'the identity index is not unique, so two peers noticing the same connection can fork it');
   });
 
-  it('and EXISTING spaces get them too, not just new ones', () => {
+  /*
+   * Restated by Q-445 (bundle-101): this read `ensure-query-indexes.ts` for `LINK_INDEXES` and a hand-written
+   * `createIndex(ix.keys…)` on the links collection, which held only while the pass named its indexes by hand. Every per-space
+   * index is now declared once (`spaces/space-indexes.ts`) and the pass builds the WHOLE declaration, so the rule is that every
+   * LINK_INDEXES entry is declared on links with its keys and uniqueness, and that the pass builds the declaration.
+   */
+  it('and EXISTING spaces get them too, not just new ones', async () => {
     /*
      * The half that bites twice, and 5.0 made it worse before it made it better. `initSpace` runs for a
      * space NEW to the config, so an index added there reaches nobody who already runs the product — and
@@ -179,12 +187,17 @@ describe('the collection every link scan reads is indexed', () => {
      * collection and no indexes at all. The spaces with the most links to read are the ones that would
      * have had none.
      */
+    const { requireSpaceIndexDeclaration } = await import('./_space-index-declaration.mjs');
+    const declared = await requireSpaceIndexDeclaration(assert);
+    for (const ix of LINK_INDEXES) {
+      const e = declared.find(d => d.suffix === 'links' && JSON.stringify(d.raw.keys) === JSON.stringify(ix.keys));
+      assert.ok(e, `${JSON.stringify(ix.keys)} of LINK_INDEXES is not declared on the links collection, so no build creates it`);
+      assert.equal(e.spec.unique, ix.unique === true, `${JSON.stringify(ix.keys)} is declared with another uniqueness than LINK_INDEXES says`);
+    }
     const ensure = src('server/src/spaces/ensure-query-indexes.ts');
-    assert.match(ensure, /LINK_INDEXES/,
-      'the backfill writes its own index list, so a link index added at creation reaches every NEW space '
+    assert.match(ensure, /buildSpaceIndexUnits\(space\.id, SPACE_INDEXES\b/,
+      'the backfill does not build the whole declaration, so a link index added at creation reaches every NEW space '
       + 'and no existing one — which is the failure this case exists for');
-    assert.match(ensure, /spaceCollection\(space\.id, 'links'\)\)\.createIndex\(ix\.keys/,
-      'the backfill must create each declared index on the links collection itself');
   });
   it('the backfill still reports how many calls it issued', () => {
     // A boot step that returns nothing cannot be asserted to have run, and a silent no-op looks identical to

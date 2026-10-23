@@ -98,18 +98,25 @@ describe('the compound entity index is not mistaken for coverage', { skip }, () 
 });
 
 describe('the declaration exists where new AND existing spaces will get it', () => {
+  // Restated by Q-445 (bundle-101): this read `lifecycle.ts` for four hand-written `<coll>.createIndex({ type: 1 })` calls and
+  // `ensure-query-indexes.ts` for a fifth, which is exactly what `every-per-space-index-build-reads-the-declaration` now forbids:
+  // every per-space index is declared once (`spaces/space-indexes.ts`), `initSpace` builds its boot-safe entries at every boot and
+  // the background pass builds every entry. So the rule is that the four collections each declare `{ type: 1 }`, boot-safe, and the
+  // pass walks the configured spaces over the whole declaration.
   it('initSpace creates it, and a boot pass covers spaces that already exist', async () => {
     const { readFileSync } = await import('node:fs');
     const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
-    const lifecycle = strip(readFileSync('server/src/spaces/lifecycle.ts', 'utf8'));
-    for (const coll of ['memoriesColl', 'entitiesColl', 'edgesColl', 'chronoColl']) {
-      assert.match(lifecycle, new RegExp(`${coll}\\.createIndex\\(\\{ type: 1 \\}\\)`),
-        `${coll} must declare the type index for newly created spaces`);
+    const { requireSpaceIndexDeclaration } = await import('./_space-index-declaration.mjs');
+    const declared = await requireSpaceIndexDeclaration(assert);
+    for (const coll of COLLECTIONS) {
+      const e = declared.find(d => d.suffix === coll && JSON.stringify(d.spec.key) === JSON.stringify({ type: 1 }));
+      assert.ok(e, `${coll} must declare the type index, or a new space is built without it`);
+      assert.equal(e.bootSafe, true, `${coll}'s type index is not built at every boot`);
     }
     // `initSpace` runs for NEW spaces only (`!oldSpaceIds.has(...)` in app.ts), so without this pass the index
     // would reach the changelog and never an operator's existing database.
     const ensure = strip(readFileSync('server/src/spaces/ensure-query-indexes.ts', 'utf8'));
-    assert.match(ensure, /createIndex\(\{ type: 1 \}\)/);
+    assert.match(ensure, /buildSpaceIndexUnits\(space\.id, SPACE_INDEXES\b/, 'the pass does not build the whole declaration');
     assert.match(ensure, /eachSpace\(QUERY_INDEXES_STEP, configuredSpaces\(\)/, 'the pass walks the configured spaces, every one of which owns collections');
     assert.match(strip(readFileSync('server/src/bootstrap.ts', 'utf8')), /ensureQueryIndexes\(\)/,
       'the boot step must actually be called');

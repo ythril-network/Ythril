@@ -1,5 +1,5 @@
 /**
- * One projection grammar, two places that apply it.
+ * One projection grammar, every place that applies it, and the one rule none of them may break.
  *
  * ## Why this is a leaf module
  *
@@ -16,20 +16,33 @@
  * what a projection MEANS.
  *
  * This module is that agreement: inclusion-versus-exclusion, `_id`'s special case, dotted paths, and the one
- * rule that is not negotiable — **the embedding vector can never be projected back IN**. `query.ts` keeps
- * building a Mongo projection and now derives it from here, so a change to the grammar cannot reach one door
- * and not the other.
+ * rule that is not negotiable — **a withheld field can never be projected back IN**.
  *
- * ## Inclusion and exclusion cannot mix, and that is Mongo's rule rather than ours
+ * ## The withheld step (`Q-446`, `Q-357`)
  *
- * MongoDB refuses a projection that both includes and excludes (except for `_id`), so `query` has always had
- * to pick a mode from what the caller sent. Recall has no such constraint technically — but a projection that
- * behaved differently on the two doors would be worse than one that is merely restricted, so the same rule
- * applies to both. The mode is decided by the non-`_id` fields, exactly as `mergeEmbeddingExclusion` decided
- * it before this module existed.
+ * `NEVER_RETURNED_FIELDS` names what no read returns: the vector, `deliveredBy` and the write guard. A
+ * projection is the one parameter a caller can use to ask for a field by name, so it is where that promise
+ * is kept, once, for every door:
+ *
+ *  - a key whose FIRST path segment is a withheld field is dropped (never refused), in either mode;
+ *  - an exclusion — and no projection at all — excludes every withheld field;
+ *  - an inclusion left with no paths after the drop answers `_id` alone, so `{embedding: 1}`,
+ *    `{_id: 0, embedding: 1}` and `{_id: 1}` all answer `{_id}` on every applier.
+ *
+ * What it prevents: the vector rule used to be the only one here, and the write guard had a hand-written copy
+ * for one more field (`withoutWriteGuard`) while `deliveredBy` had none — so every `filter` answered the peer
+ * that delivered each record, and `{embedding: 1}` became `{}`, the store's "every field". One list, read from
+ * `recall-shape.ts`, means a fourth withheld field is covered by being named there.
+ *
+ * ## The mode is decided once
+ *
+ * MongoDB refuses a projection that both includes and excludes (except for `_id`), so the mode comes from the
+ * non-`_id` keys when there are any; a sole `_id` decides it by its own value (`{_id: 1}` is an inclusion of
+ * `_id`, `{_id: 0}` an exclusion of it). `{_id: 1, description: 0}` is an exclusion. Every applier below reads
+ * the mode from `normaliseProjection`, so none can read it differently.
  */
 
-import { WRITE_GUARD_FIELDS } from '../sync/local-only-fields.js';
+import { NEVER_RETURNED_FIELDS } from './recall-shape.js';
 
 /** Which way a projection reads, and the paths it names, pre-split on `.` so no applier re-parses. */
 export interface NormalisedProjection {
@@ -40,18 +53,26 @@ export interface NormalisedProjection {
   /** `_id` is kept in inclusion mode unless the caller explicitly said `_id: 0`, matching Mongo. */
   keepId: boolean;
   /**
-   * The caller wrote `_id: 1` themselves.
+   * `_id: 1` belongs in the Mongo form: the caller wrote it, or an inclusion has nothing else to include.
    *
-   * Behaviourally redundant — Mongo includes `_id` unless told otherwise — but the emitted Mongo projection
-   * is pinned by a gate, and silently dropping a key the caller sent would change a documented artefact for
-   * no gain. Echoing it back keeps `mergeEmbeddingExclusion` byte-identical to what it produced before this
-   * module existed.
+   * Behaviourally redundant beside other included paths — Mongo includes `_id` unless told otherwise — and
+   * load-bearing when there are none, because an empty Mongo projection reads as "every field".
    */
   idExplicit: boolean;
 }
 
-/** A field the caller can never have, whatever they ask for. */
-export const NEVER_PROJECTABLE = 'embedding';
+/**
+ * The fields a caller can never have, whatever they ask for — `NEVER_RETURNED_FIELDS`, not a second list.
+ * Kept under its old name because it is the name this module's rule has always been read by.
+ */
+export const NEVER_PROJECTABLE: readonly string[] = NEVER_RETURNED_FIELDS;
+
+const WITHHELD: ReadonlySet<string> = new Set(NEVER_PROJECTABLE);
+
+/** Is this projection key (or predicate path) a withheld field or a path into one? Whole first segment only. */
+export function isWithheldPath(key: string): boolean {
+  return WITHHELD.has(key.split('.')[0]!);
+}
 
 const truthy = (v: unknown) => v === 1 || v === true || v === '1';
 
@@ -60,7 +81,8 @@ const truthy = (v: unknown) => v === 1 || v === true || v === '1';
  *
  * `undefined` for an absent or empty projection, so a caller can tell "project nothing" from "project
  * everything" — the difference matters, because applying an empty inclusion projection would return records
- * holding only `_id`, and that is not what an omitted parameter means.
+ * holding only `_id`, and that is not what an omitted parameter means. Every applier withholds on that branch
+ * too.
  */
 export function normaliseProjection(
   projection?: Record<string, unknown> | null,
@@ -68,72 +90,50 @@ export function normaliseProjection(
   if (!projection || Object.keys(projection).length === 0) return undefined;
 
   const entries = Object.entries(projection);
-  // The mode comes from the non-_id fields, because `_id: 0` is legal alongside an inclusion list.
-  const include = entries.some(([k, v]) => k !== '_id' && truthy(v));
+  const nonId = entries.filter(([k]) => k !== '_id');
+  // The mode comes from the non-_id keys (a withheld one included: `{embedding: 1}` is an inclusion that ends
+  // up naming nothing), and from `_id` itself only when it is the sole key.
+  const include = nonId.length > 0 ? nonId.some(([, v]) => truthy(v)) : truthy(projection['_id']);
 
   const paths: string[][] = [];
-  let keepId = true;
-  let idExplicit = false;
-  for (const [key, value] of entries) {
-    if (key === '_id') {
-      // `_id: 0` drops it in either mode. `_id: 1` is the default, so it needs no path of its own.
-      if (!truthy(value)) keepId = false; else idExplicit = true;
-      continue;
-    }
-    // In inclusion mode the vector is silently dropped rather than refused: a caller asking for it has made
-    // a mistake we can correct without failing their read, and refusing would be a new 400 on a parameter
-    // that has always accepted it.
-    if (key === NEVER_PROJECTABLE) continue;
+  for (const [key, value] of nonId) {
+    // A withheld field is dropped rather than refused: a caller asking for it has made a mistake we can correct
+    // without failing their read, and refusing would be a new 400 on a parameter that has always accepted it.
+    if (isWithheldPath(key)) continue;
     if (include !== truthy(value)) continue; // a mixed projection: honour the mode, ignore the stragglers
     paths.push(key.split('.'));
   }
+
+  const idSent = '_id' in projection;
+  let keepId = !idSent || truthy(projection['_id']);
+  let idExplicit = idSent && truthy(projection['_id']);
+  // An inclusion with nothing left to include answers the id, whatever `_id` said — never "every field".
+  if (include && paths.length === 0) { keepId = true; idExplicit = true; }
   return { include, paths, keepId, idExplicit };
 }
 
 /**
- * The Mongo projection for a normalised one — what `query` hands the driver.
+ * The Mongo projection for a normalised one — what a store read hands the driver.
  *
  * Kept here rather than in `query.ts` so the Mongo form and the in-memory form are derived from ONE reading
- * of the caller's intent. They were never going to disagree while there was only one of them; this is the
- * commit that creates the second.
+ * of the caller's intent.
  */
 export function toMongoProjection(norm: NormalisedProjection | undefined): Record<string, 0 | 1> {
-  if (!norm) return { [NEVER_PROJECTABLE]: 0 };
   const out: Record<string, 0 | 1> = {};
+  if (!norm) {
+    for (const f of NEVER_PROJECTABLE) out[f] = 0;
+    return out;
+  }
   for (const p of norm.paths) out[p.join('.')] = norm.include ? 1 : 0;
   if (norm.include) {
+    // An inclusion already omits every withheld field: none of them can be among its paths.
     if (!norm.keepId) out['_id'] = 0;
     else if (norm.idExplicit) out['_id'] = 1;
   } else {
-    // An exclusion projection must still drop the vector, and `_id: 0` is the one inclusion Mongo allows here.
-    out[NEVER_PROJECTABLE] = 0;
+    // An exclusion must still drop every withheld field, and `_id: 0` is the one inclusion Mongo allows here.
+    for (const f of NEVER_PROJECTABLE) out[f] = 0;
     if (!norm.keepId) out['_id'] = 0;
   }
-  return out;
-}
-
-/**
- * A Mongo projection that also withholds this instance's write guard (`Q-439`) — what a read that hands a caller's
- * projection to the driver applies last, because an INCLUSION projection reaches any stored field it names.
- *
- * ## What it prevents
- *
- * `_functionalGuard` is withheld from every answer (`NEVER_RETURNED_FIELDS`), but a `filter` with
- * `projection: { _functionalGuard: 1 }` asks the store for the field by name and gets it. The vector has its own rule for
- * that (`NEVER_PROJECTABLE`); the guard is a second field with the same promise, and it is kept apart so the vector's
- * projection stays byte for byte what it was.
- *
- *  - an exclusion (or no projection) gains `field: 0`;
- *  - an inclusion loses the field. When that leaves nothing to include the answer is the id alone — `{}` would be a
- *    projection of NOTHING, which the store reads as "every field", the opposite of what was asked.
- */
-export function withoutWriteGuard(projection: Record<string, 0 | 1>): Record<string, 0 | 1> {
-  const out = { ...projection };
-  const include = Object.entries(projection).some(([k, v]) => k !== '_id' && v === 1);
-  for (const f of WRITE_GUARD_FIELDS) {
-    if (include) delete out[f]; else out[f] = 0;
-  }
-  if (include && !Object.keys(out).some(k => k !== '_id')) out['_id'] = 1;
   return out;
 }
 
@@ -176,6 +176,9 @@ function deletePath(dst: Record<string, unknown>, path: string[]): void {
  * audit outcome, and `stripContentIfAsked` already carries the same note for the same reason. Projecting in
  * place would change what those saw.
  *
+ * Every withheld field is removed on every branch, the no-projection one included, so a caller of this function
+ * does not also have to remember to strip them.
+ *
  * An absent path is simply absent from the output, matching Mongo: asking for a field a record does not have
  * is not an error and does not produce a null.
  */
@@ -186,7 +189,7 @@ export function applyProjection<T extends object>(
   const src = record as unknown as Record<string, unknown>;
   if (!norm) {
     const out = { ...src };
-    delete out[NEVER_PROJECTABLE];
+    for (const f of NEVER_PROJECTABLE) delete out[f];
     return out;
   }
 
@@ -201,10 +204,54 @@ export function applyProjection<T extends object>(
   }
 
   // Exclusion: a shallow copy is not enough, because a dotted path reaches into a nested object that would
-  // otherwise be shared with the caller's own record and mutated by the delete below.
-  const out = structuredClone(src) as Record<string, unknown>;
+  // otherwise be shared with the caller's own record and mutated by the delete below. The withheld fields go
+  // first, so a vector is never cloned only to be dropped.
+  const visible = { ...src };
+  for (const f of NEVER_PROJECTABLE) delete visible[f];
+  const out = structuredClone(visible) as Record<string, unknown>;
   for (const p of norm.paths) deletePath(out, p);
-  delete out[NEVER_PROJECTABLE];
   if (!norm.keepId) delete out['_id'];
   return out;
+}
+
+/**
+ * The store projection a MERGE across members reads with, and the keys to take off the merged rows again (`Q-446` R8).
+ *
+ * ## What it prevents
+ *
+ * A personal view with more than one member is read a window per member and merged by the requested order over the
+ * rows as the store returned them. A row missing an order key sorts last, so a projection that left an order key out
+ * (`{fact: 1}`, `{seq: 0}`, `{_id: 0}`) merged the members by whatever keys were left, and answered a page in an order
+ * nobody asked for, with a 200. So, for the merge only:
+ *
+ *  - in inclusion mode every order key and `_id` is added to the read;
+ *  - in exclusion mode a caller's exclusion of an order key or of `_id` is lifted;
+ *  - a key whose first segment a caller path SHARES (`type.x` under `sort: type`) is left alone, and the merge orders
+ *    by the caller's value of that segment — widening the caller's path would answer more than was asked.
+ *
+ * `strip` names what was added, and the caller deletes those keys from every merged row BEFORE anything else reads
+ * the page (decorations, the byte budget), so the answer is exactly what the projection asked for.
+ */
+export function projectionForOrderedMerge(
+  projection: Record<string, unknown> | undefined,
+  orderKeys: readonly string[],
+): { read: Record<string, 0 | 1> | undefined; strip: string[] } {
+  const norm = normaliseProjection(projection);
+  if (!norm) return { read: undefined, strip: [] };
+  const keys = [...new Set([...orderKeys, '_id'])];
+  const shared = (k: string) => norm.paths.some(p => p[0] === k && p.length > 1);
+  const strip: string[] = [];
+  let paths = norm.paths;
+  let keepId = norm.keepId;
+  for (const k of keys) {
+    if (shared(k)) continue;
+    if (k === '_id') {
+      if (!keepId) { keepId = true; strip.push(k); }
+      continue;
+    }
+    const named = paths.some(p => p.length === 1 && p[0] === k);
+    if (norm.include && !named) { paths = [...paths, [k]]; strip.push(k); }
+    if (!norm.include && named) { paths = paths.filter(p => !(p.length === 1 && p[0] === k)); strip.push(k); }
+  }
+  return { read: toMongoProjection({ ...norm, paths, keepId, idExplicit: norm.idExplicit && keepId }), strip };
 }

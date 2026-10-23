@@ -9,7 +9,7 @@
 import { col } from '../db/mongo.js';
 import { BUDGET_REQUEST_FIELDS } from './result-budget.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types.js';
-import { normaliseProjection, toMongoProjection, withoutWriteGuard } from './projection.js';
+import { normaliseProjection, toMongoProjection } from './projection.js';
 import { sanitizeFilter, type CallerCheckedFilter } from './filter-sanitizer.js';
 import { CONVENIENCE_KEYS } from './list-conveniences.js';
 import { UNSUPPORTED_PAGE_PARAMS } from '../util/pagination.js';
@@ -389,12 +389,10 @@ export async function queryBrain(
     //
     // A floor of 1 so a computed 0 cannot mean "no rows"; the ceiling is the callers' business and is documented there.
     .limit(Math.max(1, Math.floor(limit)))
-    // The embedding vector is never returned. This is MERGED with the caller's
-    // projection rather than applied as a second `.project()` — a second call
-    // replaces the first in the MongoDB driver, which previously discarded the
-    // caller's projection entirely.
-    // The write guard (`_functionalGuard`) is withheld the same way: a projection that names it is not honoured (`withoutWriteGuard`).
-    .project(withoutWriteGuard(mergeEmbeddingExclusion(projection)) as Record<string, never>);
+    // No withheld field is returned (`NEVER_RETURNED_FIELDS`: the vector, `deliveredBy`, the write guard). This is
+    // MERGED with the caller's projection rather than applied as a second `.project()` — a second call replaces the
+    // first in the MongoDB driver, which previously discarded the caller's projection entirely.
+    .project(mergeEmbeddingExclusion(projection) as Record<string, never>);
   if (!read) return cursor.toArray();
   const { rows, cut } = await readWithinBound(cursor, read.bound);
   if (cut) read.onCut();
@@ -427,25 +425,21 @@ export async function countBrain(
 }
 
 /**
- * Merge the mandatory `embedding` exclusion with a caller-supplied projection.
+ * The store projection of a caller's projection: the caller's fields, and never a withheld one (`Q-446`).
  *
- * MongoDB forbids mixing inclusion and exclusion (except for `_id`), so we
- * cannot blindly add `embedding: 0` to an inclusion projection:
- *  - No projection → `{ embedding: 0 }`.
- *  - Inclusion projection (`{ field: 1 }`) → embedding is already excluded by
- *    omission; we just strip any explicit `embedding: 1` so the vector can never
- *    be opted back in.
- *  - Exclusion projection (`{ field: 0 }`) → add `embedding: 0`.
+ * MongoDB forbids mixing inclusion and exclusion (except for `_id`), so the withheld fields
+ * (`NEVER_RETURNED_FIELDS`) cannot simply be appended as `field: 0` to whatever arrived:
+ *  - no projection, or an exclusion → every withheld field gains `field: 0`;
+ *  - an inclusion → a withheld field (or a path into one) is dropped rather than honoured, and an inclusion
+ *    left with nothing is `{_id: 1}` — never `{}`, which the store reads as "every field".
+ *
+ * The name is older than the rule: it said "embedding" while the vector was the only withheld field, and the
+ * tests that pin the store form import it by that name.
  */
 export function mergeEmbeddingExclusion(
   projection?: Record<string, unknown>,
 ): Record<string, 0 | 1> {
-  // The reading of the caller's intent moved to `brain/projection.ts` when `recall` gained a projection of
-  // its own, so that both doors decide inclusion-versus-exclusion, `_id`'s special case and dotted paths the
-  // same way. This function keeps its name and its contract — a Mongo projection with the vector excluded —
-  // because it has callers, and because the Mongo form is genuinely this file's business.
-  //
-  // The rule that is not negotiable and is now enforced in one place: an explicit `embedding: 1` is stripped
-  // rather than honoured, so the vector cannot be projected back in from either door.
+  // The reading of the caller's intent and the withheld step live in `brain/projection.ts`, so every door — this
+  // store read, recall's in-memory projection, the graph walks — decides them the same way.
   return toMongoProjection(normaliseProjection(projection));
 }

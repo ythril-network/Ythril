@@ -390,9 +390,11 @@ converge on the one edge.
 asks for it.** `POST /api/filter` merges a mandatory exclusion into whatever projection you send and strips an
 explicit `"embedding": 1` out of it, so the vector cannot be opted back in; every read of a record collection
 projects it out before the document leaves the database. If you have been hunting for a flag to switch it off,
-this is why you could not find one. **An edge's write guard (`_functionalGuard`) is withheld the same way**: it is
-this instance's own lock on a functional label's subject, so no read, webhook or live-view event carries it, and a
-`projection` that names it is not honoured.
+this is why you could not find one. **`deliveredBy` and an edge's write guard (`_functionalGuard`) are withheld the
+same way**: the first names the peer that delivered a record, the second is this instance's own lock on a functional
+label's subject, so no read, webhook or live-view event carries either, and a `projection` that names one is not
+honoured. **A filter cannot read them either**: a predicate naming a withheld field directly is a `400` naming it,
+and only `{"<field>": {"$exists": true}}` (or `false`) is accepted on one.
 
 > **On 3.1.0 or earlier** the per-collection list routes returned every record's vector — use
 > `POST /api/filter` with a projection for any bulk read there.
@@ -544,8 +546,12 @@ POST /api/filter
 ```
 
 > **A reviewer resolving a contradiction writes this for you.** `POST /api/contradictions/:id/resolve` with
-> `resolution: "superseded"` marks the losing record and draws the `supersedes` edge, for every pair kind.
-> The response carries `markedRecord` so you can tell the mark landed.
+> `resolution: "superseded"` marks the losing record and draws the `supersedes` edge, for every pair kind that
+> can be an edge endpoint. The response carries `markedRecord` so you can tell the mark landed. **The mark does
+> not depend on the edge:** when the space's edge schema refuses the `supersedes` edge (a functional label, an
+> endpoint rule), the loser is still marked and the finding closed, and `notes` says `linkRefused`; a retry of
+> the same choice converges, and a different winner is `409 resolvedOtherwise` — see
+> [Contradictions](14-duplicates-and-webhooks.md#notes--what-the-resolve-could-not-do-as-asked).
 
 ### Partial Update with deleteFields
 

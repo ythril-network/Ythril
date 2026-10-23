@@ -52,22 +52,25 @@ function planStages(explain) {
 describe('media job queue indexes — against a real MongoDB', { skip }, () => {
   before(async () => {
     mongo = await openTestMongo('jobindexes');
-    let ensureMediaJobIndexes;
-    ({ stalledJobFilter, MEDIA_JOB_INDEXES, ensureMediaJobIndexes } =
+    ({ stalledJobFilter, MEDIA_JOB_INDEXES } =
       await import('../../server/dist/files/media/job-queue.js'));
     jobs = mongo.col(`${SPACE}_media_jobs`);
 
     // The PRODUCT's own creation call, not a copy of its key patterns. A test that builds its own indexes
     // and then asserts a query plan proves the patterns work and says nothing about whether anything
     // creates them. Calling `initSpace` instead would want a full config, a space record and a vector index.
+    // Restated by Q-445 (bundle-101): `ensureMediaJobIndexes` is gone; the product builds the job indexes from the one per-space
+    // declaration (`spaces/space-indexes.ts`), so this builds the declaration's media-jobs entries through its own builder.
     assert.ok(Array.isArray(MEDIA_JOB_INDEXES) && MEDIA_JOB_INDEXES.length >= 2,
       'the product must still declare its job indexes');
-    await ensureMediaJobIndexes(SPACE);
+    const { SPACE_INDEXES, buildSpaceIndexUnits } = await import('../../server/dist/spaces/space-indexes.js');
+    const { failed } = await buildSpaceIndexUnits(SPACE, SPACE_INDEXES.filter(ix => ix.part === 'mediaJobs'));
+    assert.deepEqual(failed, [], 'the declared media job indexes did not build');
     const built = await jobs.indexes();
     for (const keys of MEDIA_JOB_INDEXES) {
       const wanted = JSON.stringify(keys);
       const found = built.find(ix => JSON.stringify(ix.key) === wanted);
-      assert.ok(found, `ensureMediaJobIndexes did not create ${wanted}`);
+      assert.ok(found, `the declaration did not create ${wanted}`);
       createdNames.push(found.name);
     }
 
@@ -133,13 +136,21 @@ describe('media job queue indexes — against a real MongoDB', { skip }, () => {
     for (const keys of MEDIA_JOB_INDEXES) await jobs.createIndex(keys);
   });
 
-  it('space initialisation is what calls it — the wiring, not just the function', async () => {
+  it('every job index is in the per-space declaration, boot-safe — the wiring, not just the function', async () => {
     // The suite above builds indexes through `ensureMediaJobIndexes`, so it would keep passing if nothing
-    // ever called that on a real boot. `initSpace` is the caller, and it wants a config, a space record and
-    // a vector index, so the wiring is checked at the source rather than by booting a space.
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync('server/src/spaces/lifecycle.ts', 'utf8');
-    assert.match(src, /await ensureMediaJobIndexes\(spaceId\)/,
-      'initSpace must create the job indexes, or an existing instance never gets them');
+    // ever built them on a real boot. Restated by Q-445 (bundle-101): it read `lifecycle.ts` for the call,
+    // which held only while `initSpace` named every builder by hand. What builds a space's indexes is now the
+    // one declaration (`spaces/space-indexes.ts`), which `initSpace`, the background pass and a restore all
+    // run, so the rule is that every job index is declared on the media jobs collection and built at every
+    // boot (an existing instance gets it), with the keys `MEDIA_JOB_INDEXES` holds.
+    const { requireSpaceIndexDeclaration } = await import('./_space-index-declaration.mjs');
+    const declared = (await requireSpaceIndexDeclaration(assert)).filter(e => e.suffix === 'media_jobs');
+    const findings = [];
+    for (const keys of MEDIA_JOB_INDEXES) {
+      const e = declared.find(d => JSON.stringify(d.spec.key) === JSON.stringify(keys));
+      if (!e) findings.push(`${JSON.stringify(keys)} is not declared on media_jobs`);
+      else if (e.bootSafe !== true) findings.push(`${JSON.stringify(keys)} is not boot-safe, so an existing instance gets it only from the background pass`);
+    }
+    assert.deepEqual(findings, [], findings.join('; '));
   });
 });

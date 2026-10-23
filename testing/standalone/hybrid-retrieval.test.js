@@ -20,6 +20,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readGuide, readSplit } from './_docs.mjs';
 import { readFileSync } from 'node:fs';
+import { requireSpaceIndexDeclaration } from './_space-index-declaration.mjs';
 
 let rrfFuse, RRF_K, hybridSearchEnabled, mergeRecallResults;
 
@@ -199,11 +200,26 @@ describe('the source keeps its contracts', () => {
       'the local reproduction must be checked against the engine on every query');
   });
 
-  it('the text index is on matchedText — the same text the vector channel embedded', () => {
-    const life = readFileSync(new URL('../../server/src/spaces/lifecycle.ts', import.meta.url), 'utf8');
-    assert.ok(life.includes("{ matchedText: 'text' }"),
-      'indexing display fields instead would make records findable through text that is not in their vector');
-    assert.ok(life.includes('lexical_text'), 'the index needs a stable name so it can be replaced later');
+  // Restated by Q-445 (bundle-101): it read `lifecycle.ts` for the two strings, which held only while `initSpace` built the index
+  // by hand. The rule is about the INDEX, so it reads the one declaration of every per-space index, for every collection the
+  // vector channel embeds (`VECTOR_INDEXED_COLLECTIONS`, the set the lexical channel reads), and the policy that keeps a refused
+  // text index from failing a space.
+  it('the text index is on matchedText — the same text the vector channel embedded', async () => {
+    const declared = await requireSpaceIndexDeclaration(assert);
+    const { VECTOR_INDEXED_COLLECTIONS } = await import('../../server/dist/spaces/vector-index.js');
+    assert.ok(VECTOR_INDEXED_COLLECTIONS.length >= 2, 'VECTOR_INDEXED_COLLECTIONS read as empty');
+    const findings = [];
+    for (const suffix of VECTOR_INDEXED_COLLECTIONS) {
+      const text = declared.filter(e => e.suffix === suffix && Object.values(e.spec.key).includes('text'));
+      if (text.length !== 1) { findings.push(`${suffix}: ${text.length} declared text indexes (MongoDB allows one)`); continue; }
+      const [e] = text;
+      if (JSON.stringify(e.spec.key) !== JSON.stringify({ matchedText: 'text' })) {
+        findings.push(`${suffix}: the text index is on ${JSON.stringify(e.spec.key)}, not matchedText alone — indexing display fields would make records findable through text that is not in their vector`);
+      }
+      if (e.spec.name !== 'lexical_text') findings.push(`${suffix}: the text index is named ${e.spec.name}, not lexical_text — it needs a stable name so it can be replaced later`);
+      if (e.policy !== 'best-effort') findings.push(`${suffix}: the text index's policy is ${e.policy}, not best-effort — a refused text index must not stop a space initialising`);
+    }
+    assert.deepEqual(findings, [], findings.join('; '));
   });
 });
 

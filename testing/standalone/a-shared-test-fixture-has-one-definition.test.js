@@ -83,6 +83,11 @@ const ROWS = [
     home: 'testing/_shared/test-times-harness.mjs',
     all: [/\brun_attempt:\s*1\b/],
   },
+  {
+    behaviour: 'one failure verdict for a REST route handler and the tool dispatch, compared door against door',
+    home: 'testing/_shared/route-and-tool-doors.mjs',
+    all: [/res\.body\?\.ok\s*===\s*false/, /isError\s*===\s*true/],
+  },
 ];
 
 /** This file holds the spellings it looks for (in its self-test), so it is the one file the scan leaves out. */

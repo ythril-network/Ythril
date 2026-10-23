@@ -260,15 +260,17 @@ every file it names is present, every line can be read (and decrypted, for an en
 - a restart resumes the acts where they stand, and the holds with them.
 
 **What each space's act does.** It checks the backup again for its space (the files can change on disk), drops the space's
-collections and creates them again, empty, with every index (the unique ones included, so a duplicate the backup holds is
-refused when it is loaded), loads the backup's records, raises the space's sequence counter to at least every seq this
-instance handed out before (a peer never meets a new write under a seq it has already seen), checks the edge identity and
-guard indexes, and starts the vector index builds. When the act completes, the space forgets its **receive marks** in every
+collections and creates them again, empty, with every index the space declares (the unique ones included, so a duplicate
+the backup holds is refused when it is loaded; the retention sweep's too), loads the backup's records, raises the space's
+sequence counter to at least every seq this instance handed out before (a peer never meets a new write under a seq it has
+already seen), checks that every unique index stands, and starts the vector index builds. When the act completes, the space forgets its **receive marks** in every
 network that carries it: how far it had read each peer, and where its re-reads of a peer's tombstones and file metadata stood.
 The peers therefore send again what reached this instance after the backup. The marks of what this instance **sent** are kept
 ([which marks, and why](../sync-protocol.md#the-per-space-marks-and-what-a-restore-does-to-them)).
 
-**A failure.** A store that is down or does not answer is retried: the space is `owed` with a `retryAt`. A backup that is no
+**A failure.** A store that is down or does not answer is retried: the space is `owed` with a `retryAt`. So is a unique
+index that does not stand after the load, named in the server log: the space stays held rather than taking writes no unique
+index refuses. A backup that is no
 longer whole, or that holds records one of the space's unique indexes refuses, is not retried: the space shows
 `needsAbandon: true` and stays held until an operator [abandons the restore](#post-apiadmindatarestoreabandon).
 
@@ -339,7 +341,7 @@ restore itself.
 | `spaces[].retryAt` | When an owed act is tried again |
 | `spaces[].needsAbandon` | `true`: the failure is the backup's, so retrying cannot help; [abandon](#post-apiadmindatarestoreabandon) |
 | `spaces[].vectorIndexes` | `rebuilding` (the builds started and are warming up) or `failed` (they could not start; the space was still restored) |
-| `spaces[].edgeIndexes` | `{ "failed": [] }`: the edge identity and guard indexes stand. One that cannot be built fails the act instead |
+| `spaces[].edgeIndexes` | `{ "failed": [] }`: every unique index the space declares stood after the restore (the edge identity and write guard, the link pair). One that cannot be built fails the act instead, retryably: the space stays `owed` and held with a `retryAt`, and the server log names the index |
 | `spaces[].files` | What the restore found of the space's files against its restored records: `{ "checked": true, "classes": { <class>: { "count", "paths" } } }`, a class with no file absent, or `{ "checked": false, "reasonCode", "limitMs", "reason" }` when the check could not run. Present on a `done` space of a restore only (a migrate's rows carry none) |
 
 **`files` in detail.** The classes: `missing_row` (bytes on disk no live record names), `stale_row` (a live record whose `sha256`

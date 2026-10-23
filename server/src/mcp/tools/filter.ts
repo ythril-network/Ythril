@@ -19,6 +19,7 @@
 import { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../../config/types.js';
 import { REFUSED_OPERATORS, REGEX_OPERATORS } from '../../brain/filter-sanitizer.js';
+import { NEVER_RETURNED_FIELDS } from '../../brain/recall-shape.js';
 import { resolveBudget, applyBudget, budgetFields, type BudgetRequest, defaultBudgetChars, carriagesFor } from '../../brain/result-budget.js';
 import {
   queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
@@ -31,6 +32,7 @@ import { decorateMemberRows, decoratePage, resolvePredicate, PAGE_DECORATION_SCH
 import { withoutListDiagnostics } from '../../brain/read-projection.js';
 import { readSpacesOfCallAcross } from '../../spaces/read-scope.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
+import { projectionForOrderedMerge } from '../../brain/projection.js';
 import { resolveEntityIdsByName } from '../../brain/entities.js';
 import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
@@ -41,11 +43,13 @@ export const queryTool: ToolHandler = {
     + 'A FILE THE OPERATOR DELETED IS STILL READABLE HERE, AND ONLY HERE. Where the instance keeps a record of deleted files, that record carries `deletedAt` and this door answers with it — on purpose, because every other way to it is closed: it is out of the file listing, out of every file count, out of `recall` and `similar`, not a graph node and not a link target. Ask for `deletedAt: {"$exists": false}` on `files` to see only the files the space has.\n\n'
     + 'It also reaches records `recall` cannot: a record retired from semantic ranking has no vector, and this reads the collection.\n\n'
     + 'PAY FOR THE FIELDS YOU BRANCH ON, AND NOTHING ELSE: `projection` is the field-selection lever, and '
-    + 'this is the only tool that has one. The embedding vector is never returned by anything here and '
-    + 'cannot be asked for, so there is no flag to hunt for — what costs you is the record BODIES, and a '
+    + 'this is the only tool that has one. The embedding vector, the peer that delivered a record and an edge\'s write '
+    + 'guard are never returned by anything here and cannot be asked for, so there is no flag to hunt for — what costs '
+    + 'you is the record BODIES, and a '
     + 'projection of the four fields you actually read turns a page of them into something small.\n\n'
     + 'THE RESPONSE:\n'
-    + '• `results` — the matching documents, `embedding` always stripped. Ordered seq/updatedAt/createdAt descending unless you pass `sort`.\n'
+    + '• `results` — the matching documents, with ' + NEVER_RETURNED_FIELDS.join(', ')
+    + ' always stripped. Ordered seq/updatedAt/createdAt descending unless you pass `sort`.\n'
     + '• `count` — how many rows are in THIS page. `total` — how many satisfy the filter overall. They differ whenever `limit` bit, and that difference is the only signal that there is more to page through.\n'
     + '• `limit`, `skip` — echoed back, so a pager can carry on without keeping its own state.\n\n'
     + 'A count with no rows is a BUG, not an empty page: `results` is carried in both `content` and `structuredContent`, and a client that reads only one of them gets the whole answer either way. Before 3.1 the rows were in `content` alone, so a client preferring `structuredContent` saw {"count":15,"total":40} and not a single row — reported independently by the canary operator and reproduced here. If you ever see a positive `count` with nothing in it, the instance predates that fix.',
@@ -77,11 +81,11 @@ export const queryTool: ToolHandler = {
               type: 'object',
               // Built from the sets that ENFORCE it (Q-118): this said "only these operators are allowed" over a list
               // nothing enforced, while every query operator but the JavaScript ones was accepted.
-              description: `MongoDB filter document. Every MongoDB query operator is accepted except the ones that run JavaScript in the database, which are refused: ${[...REFUSED_OPERATORS].join(', ')}. Nesting is capped at depth 8. Every regex the filter would run — ${[...REGEX_OPERATORS].join(', ')}, the last three inside $expr — must be a literal string pattern (not a field path or an expression), length-limited, and is rejected if it risks catastrophic backtracking; $options is allowed only alongside $regex and only with flags i, m, s, x. Results are ordered seq/updatedAt/createdAt descending — there is no sort parameter, but 'skip' pages through that order.`,
+              description: `MongoDB filter document. Every MongoDB query operator is accepted except the ones that run JavaScript in the database, which are refused: ${[...REFUSED_OPERATORS].join(', ')}. A predicate that names a field no read returns (${NEVER_RETURNED_FIELDS.join(', ')}) directly — as a field key, at the top level or inside $and/$or/$nor, or as a "$field" path inside $expr — is refused, naming the field, because matching on it would read it one row at a time; only {field: {$exists: true|false}} is accepted on one. Nesting is capped at depth 8. Every regex the filter would run — ${[...REGEX_OPERATORS].join(', ')}, the last three inside $expr — must be a literal string pattern (not a field path or an expression), length-limited, and is rejected if it risks catastrophic backtracking; $options is allowed only alongside $regex and only with flags i, m, s, x. Results are ordered seq/updatedAt/createdAt descending — there is no sort parameter, but 'skip' pages through that order.`,
             },
             projection: {
               type: 'object',
-              description: 'Fields to include (1) or exclude (0). The `embedding` field is always excluded and cannot be re-included, and a field a read never sends (the write guard of an edge, `_functionalGuard`) cannot be asked for by name. Worth using rather than skipping: a bare query over a dozen records with full bodies is the cheapest way to overrun a token budget, and a projection of the four fields you actually branch on turns that into a page you can read.',
+              description: 'Fields to include (1) or exclude (0); the non-`_id` keys decide which, and `_id` alone decides it only when it is the only key, so `{_id: 1}` answers each row\'s `_id` and nothing else. A field no read sends (the vector `embedding`, `deliveredBy`, an edge\'s write guard `_functionalGuard`) is dropped from a projection that names it, never honoured: an inclusion left with nothing to include answers `_id` alone. Worth using rather than skipping: a bare query over a dozen records with full bodies is the cheapest way to overrun a token budget, and a projection of the four fields you actually branch on turns that into a page you can read.',
             },
             /*
              * `minimum` and NO `maximum`, and the asymmetry is deliberate. The MCP dispatcher enforces this
@@ -251,6 +255,11 @@ export const queryTool: ToolHandler = {
     const read = members.length === 1
       ? { bound: { chars: queryBudget.chars, bytes: queryBudget.bytes }, onCut: () => { readCut = true; } }
       : undefined;
+    // A merge across members orders the rows it READ, so it reads the order keys and `_id` whatever the projection says,
+    // and takes them off again before anything else sees the page (`Q-446` R8). One member needs no merge and reads as asked.
+    const merge = members.length > 1
+      ? projectionForOrderedMerge(projection, Object.keys(order))
+      : { read: projection, strip: [] as string[] };
     const page = await pageAcrossMembers({
       members,
       limit,
@@ -258,9 +267,10 @@ export const queryTool: ToolHandler = {
       ceiling: PROXY_PAGE_CEILING,
       compare: compareBySort(order),
       readMember: async (mid, lim, sk) => decorateMemberRows(coll, mid,
-        (await queryBrain(mid, coll, await filterFor(mid), projection, lim, maxTimeMS, sk, order, read)) as Array<Record<string, unknown>>),
+        (await queryBrain(mid, coll, await filterFor(mid), merge.read, lim, maxTimeMS, sk, order, read)) as Array<Record<string, unknown>>),
     });
     if (!page.ok) throw new Error(page.error);
+    if (merge.strip.length > 0) for (const row of page.rows as Array<Record<string, unknown>>) for (const k of merge.strip) delete row[k];
     /*
      * The same two DECORATIONS the REST door applies, through the same module: an edge's endpoint names,
      * and a file's job step progress (joined per member above, before the page is merged). They were on

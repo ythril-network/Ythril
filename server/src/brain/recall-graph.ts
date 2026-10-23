@@ -39,7 +39,7 @@
  */
 import type { EntityDoc } from '../config/types.js';
 import { type SeedTraverseNeighbor, type TraverseHopEdge, type TraverseHopRecord } from './recall-seed-traversal.js';
-import { RECALL_RECORD_DIAGNOSTICS, NEVER_RETURNED_FIELDS } from './recall-shape.js';
+import { RECALL_RECORD_DIAGNOSTICS } from './recall-shape.js';
 import { applyProjection, type NormalisedProjection } from './projection.js';
 
 /**
@@ -200,14 +200,15 @@ export function mapGraphNodes<T>(
       // like any other rather than an envelope key that survives everything.
       edges: n.edges.map(e => {
         const stripped = orient(stripDiag(e, includeDiagnostics) as unknown as Record<string, unknown>, nodeId);
-        return (projection ? applyProjection(stripped, projection) : stripped) as unknown as GraphHopEdge;
+        return applyProjection(stripped, projection) as unknown as GraphHopEdge;
       }),
       // The node goes through the caller's shaping FIRST and is stripped after, so this holds whether the
       // door passes the document through (REST) or maps it to its own record shape (MCP). Stripping an
       // allowlisted record is a no-op, which is the correct outcome rather than a wasted branch.
       node: (() => {
         const shaped = stripDiag(shapeNode(n.node) as unknown as object, includeDiagnostics);
-        return (projection ? applyProjection(shaped, projection) : shaped) as T;
+        // Always applied: with no projection it is the step that withholds `NEVER_RETURNED_FIELDS` (`Q-446`).
+        return applyProjection(shaped, projection) as T;
       })(),
       paths: n.paths,
       ...(children ? { _graph: children } : {}),
@@ -217,15 +218,14 @@ export function mapGraphNodes<T>(
 
 /** One record, diagnostics removed unless asked for. Copies — the tree is also handed to the spill writer. */
 function stripDiag<T extends object>(doc: T, include: boolean): T {
-  // `NEVER_RETURNED_FIELDS` is dropped on BOTH branches — `includeDiagnostics` restores diagnostics,
-  // never the vector, and an early return here would have made it an opt-in to a 768-float array.
+  // Diagnostics only. The withheld fields (`NEVER_RETURNED_FIELDS`) are `applyProjection`'s, which every node and
+  // edge goes through after this with or without a projection (`Q-446`) — one place withholds them, not two.
   const out = { ...doc } as Record<string, unknown>;
   // `RECALL_RECORD_DIAGNOSTICS`, not the old union that also held the three ranking scores. Nothing observable
   // changes HERE — a traversed node was never ranked, so it never had a `lexicalScore` to strip — but naming
   // the record set is what stops this line silently becoming the one place that still hides an ordering score
   // if a future change ever attaches one to a node.
-  const drop = include ? NEVER_RETURNED_FIELDS : [...RECALL_RECORD_DIAGNOSTICS, ...NEVER_RETURNED_FIELDS];
-  for (const k of drop) delete out[k];
+  if (!include) for (const k of RECALL_RECORD_DIAGNOSTICS) delete out[k];
   return out as T;
 }
 

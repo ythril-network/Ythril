@@ -152,7 +152,8 @@ export function embedJobId(recordType: BrainEmbedRecordType, recordId: string): 
  * The indexes `<space>_embed_jobs` needs, declared where the queries live.
  *
  * Same two shapes as the media queue and for the same reasons: `status` leads because every query pins
- * it to one value, and the sort key comes last so it is satisfied by the index rather than in memory.
+ * it to one value, and the sort key comes last so it is satisfied by the index rather than in memory. Built from the per-space
+ * declaration (`spaces/space-indexes.ts`), which reads this list.
  */
 export const EMBED_JOB_INDEXES: Array<Record<string, 1>> = [
   // claimNextEmbedJob: { status, priority, claimableAfter } sorted by createdAt. The fresh pass pins all three to
@@ -165,11 +166,6 @@ export const EMBED_JOB_INDEXES: Array<Record<string, 1>> = [
   // reviveFailedEmbedJobs: { status: 'failed', revivedForVersion != running }.
   { status: 1, revivedForVersion: 1 },
 ];
-
-/** Idempotent — safe on every boot for every space, including spaces that predate this queue. */
-export async function ensureEmbedJobIndexes(spaceId: string): Promise<void> {
-  for (const keys of EMBED_JOB_INDEXES) await jobs(spaceId).createIndex(keys);
-}
 
 /**
  * Announce that a record needs embedding.

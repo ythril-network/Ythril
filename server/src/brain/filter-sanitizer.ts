@@ -39,6 +39,7 @@
  */
 import { hasReDoSRisk, MAX_PATTERN_LENGTH } from '../util/redos.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
+import { isWithheldPath } from './projection.js';
 
 /**
  * The operators a filter may NOT use — a denylist, which is the opposite of how this started and needs its
@@ -134,6 +135,77 @@ export function unsafeFilterKey(key: string): string | null {
     : null;
 }
 
+/**
+ * The refusal for a predicate that names a withheld field (`Q-446` item 5). One sentence, one place, so both grammars
+ * and both doors answer identically — beside {@link unsafeFilterKey} for the same reason.
+ */
+export function withheldFieldRefusal(path: string): string {
+  return `Filter field '${path}' is not allowed: no read returns it, and a predicate on it would read its value one `
+    + `match at a time. Only an existence test is accepted on it: {"${path}": {"$exists": true}} or false.`;
+}
+
+/** `{$exists: …}` and nothing else — the one bit a predicate may ask of a withheld field (R10). */
+function isLoneExists(val: unknown, op: string): boolean {
+  if (val === null || typeof val !== 'object' || Array.isArray(val)) return false;
+  const keys = Object.keys(val as Record<string, unknown>);
+  return keys.length === 1 && keys[0] === op;
+}
+
+/**
+ * Refuse a predicate that reads a withheld field (`NEVER_RETURNED_FIELDS`) by NAMING it.
+ *
+ * ## What it prevents
+ *
+ * A projection withholds the vector, `deliveredBy` and the write guard from every answer, and a predicate could still
+ * read them: `{deliveredBy: 'peer-a'}` answers one row or none, so the peer that delivered a record was readable one
+ * bit at a time, and `$size` or a range on the vector the same. This is NOT a field allowlist — the module's own rule
+ * above stands — it refuses the withheld fields only, where a predicate names them directly:
+ *
+ *  - a key at FIELD position (the top level, and inside `$and` / `$or` / `$nor`) whose first segment is withheld, with
+ *    any value but a lone `{$exists: …}`;
+ *  - a `"$<field>[.x]"` path inside `$expr` (a `$literal` operand is a value, not a path).
+ *
+ * Left alone on purpose: a literal string operand outside `$expr`, a key relative to an `$elemMatch` element, an
+ * embedded-document equality, and a field that only shares a prefix (`embeddingModel`). Expression routes that do not
+ * name the field (`$$ROOT`, `$getField`) stay open — parked as `D-58`; what they reach is the vector and a peer id.
+ */
+function refuseWithheldPredicate(doc: unknown): void {
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return;
+  for (const [key, val] of Object.entries(doc as Record<string, unknown>)) {
+    if (key === '$and' || key === '$or' || key === '$nor') {
+      if (Array.isArray(val)) for (const clause of val) refuseWithheldPredicate(clause);
+      continue;
+    }
+    if (key === '$expr') { refuseWithheldExpression(val); continue; }
+    if (key.startsWith('$')) continue;
+    if (isWithheldPath(key) && !isLoneExists(val, '$exists')) throw new Error(withheldFieldRefusal(key));
+  }
+}
+
+/** The `$expr` half: a field path naming a withheld field, at any depth of the expression. */
+function refuseWithheldExpression(expr: unknown): void {
+  if (typeof expr === 'string') {
+    if (expr.startsWith('$') && !expr.startsWith('$$') && isWithheldPath(expr.slice(1))) {
+      throw new Error(withheldFieldRefusal(expr.slice(1)));
+    }
+    return;
+  }
+  if (Array.isArray(expr)) { for (const x of expr) refuseWithheldExpression(x); return; }
+  if (expr === null || typeof expr !== 'object' || expr instanceof Date) return;
+  for (const [key, val] of Object.entries(expr as Record<string, unknown>)) {
+    if (key === '$literal') continue;
+    refuseWithheldExpression(val);
+  }
+}
+
+/**
+ * The operator-object grammar's half of the same rule, worded by the same sentence: `{field: {exists: …}}` is the
+ * one form accepted on a withheld field. Returns the refusal, or `null`.
+ */
+export function withheldExpressionKey(key: string, op: unknown): string | null {
+  return isWithheldPath(key) && !isLoneExists(op, 'exists') ? withheldFieldRefusal(key) : null;
+}
+
 /** Valid MongoDB regex flags (i=case-insensitive, m=multiline, s=dotAll, x=extended). */
 const VALID_OPTIONS_RE = /^[imsx]+$/;
 
@@ -211,6 +283,8 @@ export function sanitizeFilter(filter: unknown, depth = 0): unknown {
         throw new Error("'$options' must be a string of valid regex flags (i, m, s, x)");
       }
     }
+    // Once, over the whole caller filter, after the walk has bounded its depth: positions are relative to the top.
+    if (depth === 0) refuseWithheldPredicate(out);
     return out;
   }
   return filter;

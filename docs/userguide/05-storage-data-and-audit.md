@@ -284,9 +284,13 @@ Once you confirm, the request is accepted at once and the work runs in the backg
 1. The instance enters maintenance mode, and every space stops taking writes until its own part of the restore is done. You,
    as an administrator, keep working, and can write to a space that is done while others are still running; everyone else
    waits until the last space is done. The page shows how many spaces are done, and why any is waiting.
-2. Each space's data is replaced with the backup's, its indexes are built again (the search indexes, and the ones that
-   stop the same edge, or two edges under a one-per-subject label, being stored twice by writers working at the same
-   moment), and its sequence counter is kept above every number this instance already handed out.
+2. Each space's data is replaced with the backup's, and **every index the space has is built again**: the search
+   indexes, the ones that keep the retention sweep from reading every record of a collection, and the unique ones that
+   stop the same edge, the same link, or two edges under a one-per-subject label, being stored twice by writers working
+   at the same moment. Its sequence counter is kept above every number this instance already handed out. A unique index
+   that cannot be built stops that space's part of the restore: the space keeps refusing writes, the server log names the
+   index that failed, and the space is tried again on its own. An index that only makes reads faster and cannot be built is named in
+   the server log, and the space is restored without it until it is built.
 3. Each space asks its peers again for what reached this instance after the backup was taken: the peers send it back.
 4. When the last space is done, maintenance ends. A restart in the middle resumes where it stopped.
 
@@ -612,6 +616,9 @@ line carries the count and the first few ids — `TTL sweep: facts delete failed
 interrupted file move, a failed repair of what a deleted file left behind and a failed index check are named
 `TTL sweep: settling file tombstones`, `TTL sweep: finishing interrupted file moves`,
 `TTL sweep: repairing rows a deleted file left` and `TTL sweep: indexes`. The count of records that did not delete is `ythril_housekeeping_records_failed_total`.
+The sweep's own indexes are checked at the start of every cycle until they stand on each space, so a space that lost
+them (a failed build, or a restore before this release) has them back within one cycle; while a space has not got
+them, `TTL sweep: space '<id>' is swept without index ttl_expireAt on facts, …` is said once.
 
 **The same sweep finishes a file move that was interrupted.** A rename or move carries the file first and its records
 after, and a database outage or restart between the two leaves the records at the old path until something finishes
@@ -670,13 +677,17 @@ Lines of other jobs follow the same shape; the ones whose wording is worth knowi
   keeps its last value while any space could not be read, rather than showing a count that is too low.
 - `Link conversion failed for space '<id>': … — retried next boot` and `Link array drop failed for space '<id>' (…): …
   — retried next boot`.
-- `Edge indexes failed for space '<id>' (guard index | identity index): … — retried next index pass` (the identity
-  index after a restore: `next boot`): the index that
-  stops two writers working at the same moment from storing two edges under a one-per-subject label (or the same edge
-  twice) could not be built, when a space was set up, by the background index pass or after a restore. The space works, and the rule still refuses a second edge written
-  after the first; what is missing is protection against two at the same instant, and this line is the only sign of it.
-  When duplicate locks stopped the build the line carries `(count: N)` and ends `retried at once`: the surplus locks
-  were cleared and the build tried again.
+- `Space indexes failed for space '<id>' (index <name> on <collection>): … — retried next index pass`: an index of
+  that space could not be built when it was set up, and the space works without it until the background index pass
+  builds it. The same failure in the background pass is said as `query indexes failed for space '<id>' (index <name> on
+  <collection>)`, one line per index, with every other index still built. Which index is missing says what it costs:
+  `_functionalGuard_1 on edges` is the lock that stops two writers working at the same moment from storing two edges
+  under a one-per-subject label (the rule still refuses a second edge written after the first, and this line is the
+  only sign of it); `ttl_…` keeps the retention sweep from reading every record; `lexical_text` (said as a warning
+  instead) is the keyword half of search, which falls back to meaning alone. A unique index that cannot be built stops
+  the space being set up (`space init`) or restored instead.
+- `Edge indexes failed for space '<id>' (guard index) (count: N): … — retried at once`: duplicate locks stopped the
+  build of that lock index; the surplus locks were cleared and the build tried again.
 - `Functional guard heal failed for space '<id>' (<edge id>): … — retried at once`: a write found a leftover lock on an
   edge that names another subject than the one it is under, cleared it and went on. Nothing was refused. When the
   store does not answer while it looks, the line ends `retried next write`.

@@ -5,7 +5,7 @@
  * lowers it either to a Mongo filter (post-vector-search) or to a native $vectorSearch prefilter.
  */
 
-import { unsafeFilterKey } from './filter-sanitizer.js';
+import { unsafeFilterKey, withheldExpressionKey } from './filter-sanitizer.js';
 
 // ── Prefiltered recall ────────────────────────────────────────────────────
 
@@ -89,9 +89,12 @@ export const ALLOWED_FILTER_KEY_PREFIXES =
  * where that sanitizer lives; this is the floor under it, so the hole cannot reopen by a classifier change.
  */
 export function validateFilterExpression(filter: FilterExpression): string | null {
-  for (const key of Object.keys(filter)) {
+  for (const [key, op] of Object.entries(filter)) {
     const unsafe = unsafeFilterKey(key);
     if (unsafe) return unsafe;
+    // A withheld field (`NEVER_RETURNED_FIELDS`) is refused in this grammar as in the raw one, in the same words.
+    const withheld = withheldExpressionKey(key, op);
+    if (withheld) return withheld;
     if (key.startsWith('$')) {
       return `Filter key '${key}' is not allowed in the operator-object grammar. Write the whole filter as `
         + 'raw MongoDB instead — mixing the two is refused rather than guessed at.';

@@ -975,8 +975,27 @@ export interface ContradictionRecord {
   supersededId?: string;
   /** Who settled it, as the token's name. A judgement call needs an attributable decider. */
   resolvedBy?: string;
+  /** What the resolve that closed it could not do as asked (a refused link, a record gone): kept on the finding. */
+  notes?: ContradictionResolveNote[];
   detectedAt: string;
   updatedAt: string;
+}
+
+/**
+ * One outcome of a contradiction resolve a reviewer must not be left to assume (`Q-442`). The client says it in its own
+ * words, from the key for `code` with `label` and `rule` filled in; `detail` is the server's English sentence, shown only
+ * as a disclosure under it. A code this client does not know falls back to `detail`.
+ *
+ *   `linkRefused`         the space's edge schema refused the `supersedes` link; the decision was kept and the loser marked
+ *   `winnerGone`          the record kept no longer exists, so no link was drawn
+ *   `loserGone`           the record judged stale no longer exists: nothing marked, no link
+ *   `edgePairUnlinkable`  the pair are edges, which cannot be the ends of an edge
+ */
+export interface ContradictionResolveNote {
+  code: string;
+  detail: string;
+  label?: string;
+  rule?: string;
 }
 
 export interface DuplicateRecord {

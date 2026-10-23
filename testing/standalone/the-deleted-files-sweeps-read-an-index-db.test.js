@@ -11,7 +11,7 @@
  * captions and faces included — on every space, every five minutes, to find usually nothing. The repair's own comment
  * called that "one bounded read".
  *
- * The sweep's indexes are ensured by `ensureTtlIndex` (`brain/ttl.ts`), which already gives chrono's content-redaction
+ * The sweep's indexes are ensured by `ensureTtlIndexes` (`spaces/space-indexes.ts`, `SWEEP_INDEXES`), which already gives chrono's content-redaction
  * query its own sparse index for exactly this reason; `deletedAt` is the files twin.
  *
  * ## How
@@ -58,8 +58,10 @@ describe('the deleted files\' sweep queries read an index (real MongoDB)', { ski
       docs.push({ _id: `gone/${i}.md`, path: `gone/${i}.md`, sha256: 'b'.repeat(64), seq: LIVE + i + 1, deletedAt: '2026-01-01T00:00:00.000Z' });
     }
     await files().insertMany(docs);
-    const { ensureTtlIndex } = await import('../../server/dist/brain/ttl.js');
-    await ensureTtlIndex(SPACE);
+    // Restated by Q-445 (bundle-101): `brain/ttl.ts` `ensureTtlIndex` is gone; the sweep's indexes are the per-space declaration's
+    // `SWEEP_INDEXES`, built by `ensureTtlIndexes` (the TTL sweep's and a retention change's builder).
+    const { ensureTtlIndexes } = await import('../../server/dist/spaces/space-indexes.js');
+    assert.deepEqual((await ensureTtlIndexes(SPACE)).failed, [], 'the sweep indexes did not build');
   });
   after(async () => { await closeTestMongo(); });
 

@@ -720,7 +720,9 @@ record comes back with its body, rather than needing a `query` per collection ov
 
 - **The walk's envelope always survives.** `_id`, `depth` and `kind` on a node; `_id`, `from`, `to` and `label`
   on an edge. A projection cannot remove them, because they are how the answer hangs together.
-- **The vector never comes back**, and `matchedText`/`embeddingModel`/`seq` only with `includeDiagnostics`.
+- **A field no read returns never comes back** — the vector, `deliveredBy`, an edge's write guard — and
+  `matchedText`/`embeddingModel`/`seq` only with `includeDiagnostics`. A projection naming one drops it, so
+  `{"_id": 1}` (or `{"embedding": 1}`) is the lean answer: an inclusion with nothing left to include.
 - **An edge's `properties` come with it**, which is where a conditional edge keeps its instruction and
   predicate.
 - **A link-derived edge** (`chrono.entityIds` and the like) has no stored document and is returned as it was;

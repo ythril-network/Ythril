@@ -1,6 +1,7 @@
 import { Component, inject, signal, computed, OnInit, OnChanges, SimpleChanges, Input, Output, EventEmitter } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DuplicateRecord, ContradictionRecord, CompletenessCheck } from '../../core/api.types';
+import { DuplicateRecord, ContradictionRecord, CompletenessCheck, type ContradictionResolveNote } from '../../core/api.types';
+import { translatedOrEmpty } from '../../core/translated-text';
 import { DuplicatesApi } from '../../core/duplicates-api.service';
 import { ContradictionsApi } from '../../core/contradictions-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
@@ -18,6 +19,9 @@ import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { refusalText } from '../../core/refusal-text';
 import { MergeRefusals } from './merge-refusals';
+
+/** The family a failed contradiction resolve's `code` is said under (`resolvedOtherwise`, and the codes every family carries). */
+const RESOLVE_REFUSALS = 'review.contradictions.refusal';
 
 @Component({
   selector: 'app-review-tab',
@@ -81,6 +85,7 @@ import { MergeRefusals } from './merge-refusals';
       color: var(--text-secondary); font-family: var(--font-mono, monospace); max-height: 260px; overflow: auto; }
     .rec-full .rec-err { font-size: 11px; color: var(--danger); }
     .superseded-note { font-size: 11px; color: var(--text-muted); }
+    .resolve-note summary { cursor: pointer; }
     .kept-badge { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
     .kept-badge.win { color: var(--success); }
     .kept-badge.lose { color: var(--text-muted); }
@@ -389,6 +394,13 @@ import { MergeRefusals } from './merge-refusals';
                 @if (c.resolution === 'superseded' && c.resolvedBy) {
                   <div class="superseded-note">{{ 'review.contradictions.decidedBy' | transloco: { who: c.resolvedBy } }}</div>
                 }
+                <!-- What the resolve could not do as asked, in the reviewer's words; the server's sentence is the disclosure. -->
+                @for (n of c.notes ?? []; track n.code) {
+                  <details class="superseded-note resolve-note">
+                    <summary>{{ resolveNoteText(n) }}</summary>
+                    {{ n.detail }}
+                  </details>
+                }
 
                 <div class="dup-actions">
                   @if (c.status === 'dismissed') {
@@ -626,8 +638,23 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     this.conBusy.set(c.id);
     this.contradictionsApi.resolveContradiction(c.id, resolution).subscribe({
       next: () => { this.conBusy.set(null); this.loadContradictions(); },
-      error: () => { this.conBusy.set(null); this.toast.error(this.transloco.translate('duplicates.dismissError')); },
+      error: (e) => this.resolveFailed(e),
     });
+  }
+
+  /**
+   * A failed resolve, said by the answer's `code` under the resolve's own family (`Q-442`): `resolvedOtherwise` (someone settled
+   * it differently first) reads differently from a fault. It used to be `duplicates.dismissError` for every failure, a sentence
+   * about a dismiss, for a request that was not one.
+   */
+  private resolveFailed(e: unknown): void {
+    this.conBusy.set(null);
+    this.toast.error(refusalText(this.transloco, e as Parameters<typeof refusalText>[1], 'review.contradictions.resolveError', RESOLVE_REFUSALS));
+  }
+
+  /** One outcome of a resolve in the reviewer's words: its code's key with its placeholders, or the server's sentence for a code this client does not know. */
+  resolveNoteText(n: ContradictionResolveNote): string {
+    return translatedOrEmpty(this.transloco, `review.contradictions.note.${n.code}`, { label: n.label ?? '', rule: n.rule ?? '' }) || n.detail;
   }
 
   // ── Keep A / Keep B ────────────────────────────────────────────────────────────────────────────────────
@@ -649,19 +676,20 @@ export class ReviewTabComponent implements OnInit, OnChanges {
       next: (r) => {
         this.conBusy.set(null);
         /*
-         * This branch used to announce that no edge had been drawn, for a pair that was not two entities.
-         * 5.0 draws the edge for every pair kind, so that message could only ever have been a lie, and it
-         * is replaced rather than deleted: the same place now surfaces the one outcome a reviewer must not
-         * be left to assume.
+         * Success stays silent; what a reviewer must not be left to assume is said, in ONE toast listing every
+         * outcome (`Q-442`): each note in the reviewer's language from its code — a link the space's rules
+         * refused, a record of the pair that is gone. Never the server's English `note`.
          *
-         * `markedRecord: false` means the decision was stored and the LOSING RECORD was not marked — so
-         * the next search still returns both claims looking equally current, which is the state the whole
-         * feature exists to end. Success stays silent; only this is worth a reviewer's attention.
+         * `markedRecord: false` with no note means the decision was stored and the LOSING RECORD was not
+         * marked — so the next search still returns both claims looking equally current, which is the state
+         * the whole feature exists to end. A note (a loser that is gone) already says why, so it is not said twice.
          */
-        if (r.note) this.toast.info(r.note); else if (r.resolution === 'superseded' && r.markedRecord === false) this.toast.error(this.transloco.translate('review.contradictions.notMarked'));
+        const notes = r.notes ?? [];
+        if (notes.length > 0) this.toast.info(notes.map(n => this.resolveNoteText(n)).join(' '));
+        else if (r.resolution === 'superseded' && r.markedRecord === false) this.toast.error(this.transloco.translate('review.contradictions.notMarked'));
         this.loadContradictions();
       },
-      error: () => { this.conBusy.set(null); this.toast.error(this.transloco.translate('duplicates.dismissError')); },
+      error: (e) => this.resolveFailed(e),
     });
   }
 

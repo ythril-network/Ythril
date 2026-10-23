@@ -137,7 +137,7 @@ sticky dismissal — because the Review tab presents both under one vocabulary.
 | `POST` | `/api/contradictions/scan?space=<id>` | `dataQuality` write + MFA | Run the sweep now, over the spaces where the token holds `dataQuality` write. Answers `{ scannedSpaces, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted, failedSpaces }`: `nliStalled: true` if it stopped because the judge was unavailable, and `failedSpaces` as [below](#a-scan-that-could-not-scan-a-space). |
 
 A candidate is `{ id, spaceId, type, aId, aSummary, bId, bSummary, basis, confidence, fields?, truncated?,
-status, resolution?, supersededId?, resolvedBy?, detectedAt, updatedAt }`.
+status, resolution?, supersededId?, resolvedBy?, notes?, detectedAt, updatedAt }`.
 
 **`truncated: true` means the judge probably did not read the whole record.** Encoder NLI models cap at ~512
 tokens; a record whose text runs to thousands of characters is judged on its opening paragraphs, and the
@@ -188,7 +188,9 @@ POST /api/contradictions/:id/resolve
     "status": "resolved", "resolution": "superseded",
     "supersededId": "<the b record>",         // the one judged out of date
     "resolvedBy": "ops-automation",           // the token's NAME, never the token
-    "edge": { "id": "…", "from": "<a>", "to": "<b>", "label": "supersedes" }
+    "edge": { "id": "…", "from": "<a>", "to": "<b>", "label": "supersedes" },
+    "markedRecord": true,
+    "notes": []                               // what it could not do as asked, by code — see below
   }
 ```
 
@@ -198,13 +200,38 @@ POST /api/contradictions/:id/resolve
   `supersedes` edge pointing at it, and the finding names it in `supersededId`.
 - **`winner` is required and never guessed.** Omitting it is a `400`, and so is sending it with any other
   resolution. Guessing which record a reviewer meant to keep is the one mistake this endpoint must not make.
-- **Repeating the call is safe.** An edge's identity is `(from, to, label)`, so resolving the same pair twice
-  lands on the same edge rather than accumulating duplicates.
-- **Facts, entities, chrono entries and files all get the edge now.** It used to be drawn for entity pairs
-  only, on the ground that an edge between two facts would be stored and never walked; the walk follows an
-  edge to a fact, chrono entry or file since 5.0. **A pair of EDGES is the one exception**, because an edge
-  cannot be the endpoint of an edge — `note` says so, and it appears in no other case. Branch on `edge` in
-  the response if your automation depends on the link.
+- **Repeating the SAME choice is safe, and converges.** An edge's identity is `(from, to, label)`, so
+  resolving the same pair twice lands on the same edge rather than accumulating duplicates, and a loser that
+  already carries the mark is not written again (its `seq` and `updatedAt` do not move).
+- **A DIFFERENT choice is refused: `409`, `code: "resolvedOtherwise"`.** The choice is recorded on the
+  finding before anything else is written, so a second resolve that picks the other winner — a retry that
+  changed its mind, or a second reviewer at the same moment — is refused having written nothing, and the
+  space can never hold two `supersedes` edges pointing opposite ways. The body names the choice that stands
+  (`resolution`, `winner`). The same applies to `edited`/`linked` on a finding resolved another way.
+- **A store failure part-way is a `503` that says what was written.** It is retryable (`Retry-After`) and
+  carries `written: { edge, markedRecord, closed }`; retrying the same choice finishes the rest without a
+  second edge. Earlier releases said nothing of what had landed.
+- **Facts, entities, chrono entries and files all get the edge.** The walk follows an edge to a fact, chrono
+  entry or file since 5.0. Branch on `edge` in the response if your automation depends on the link: when it
+  is absent, `notes` says why.
+
+#### `notes` — what the resolve could not do as asked
+
+**The reviewer's judgement is kept even when the link cannot be drawn.** The loser is marked and the finding
+closed, and `notes` lists, one entry per outcome, what did not happen. Each note is flat:
+`{ code, detail, label?, rule? }` — branch on `code`; `detail` is the server's English sentence; `label` and
+`rule` fill a client's own wording. The notes are kept on the finding, so `GET /api/contradictions?status=resolved`
+shows them too. `note` (one string, the details joined) is still returned for an older client.
+
+| `code` | Means | What still happened |
+|---|---|---|
+| `linkRefused` | The space's edge schema refused the `supersedes` edge — a `functional` label that already has a target, an `endpoints` rule the pair does not meet. `label` is the edge label, `rule` the rule(s) that refused it. | The loser is marked and the finding closed. Earlier releases answered this `500`, with the loser already marked and the finding still open. |
+| `winnerGone` | The record kept no longer exists. | No edge; the loser is marked; the finding closed. |
+| `loserGone` | The record judged stale no longer exists. | No edge, nothing marked (`markedRecord: false`); the finding closed. |
+| `edgePairUnlinkable` | The pair are edges (a scanner configured to cover them), and an edge cannot be the endpoint of an edge. | The loser is marked and the finding closed. |
+
+A store failure is never reported as a note: a refusal is the space's rules speaking, and a failure is the
+`503` above.
 
 - **The LOSING RECORD is marked, which is the part that reaches retrieval.** Before 5.0 `supersededId` was
   written onto the review finding and nowhere else, so resolving a contradiction changed nothing about what
@@ -220,7 +247,7 @@ POST /api/contradictions/:id/resolve
   It keeps its vector and keeps ranking — see
   [Marking a record as no longer true](04f-write-semantics.md#marking-a-record-as-no-longer-true).
 
-`supersededId` and `resolvedBy` are also returned on the candidate by `GET /api/contradictions`, so a later
+`supersededId`, `resolvedBy` and `notes` are also returned on the candidate by `GET /api/contradictions`, so a later
 reviewer can see who settled it and which side they judged stale without reading the audit log.
 
 **`nliStalled`** is surfaced rather than swallowed: a sweep that stopped because the NLI judge was

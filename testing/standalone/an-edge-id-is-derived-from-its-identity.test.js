@@ -137,8 +137,10 @@ describe('the creation path uses it', () => {
      * change while the rule it stood for was more true than before, so the rule is now compared directly and
      * neither side can move alone.
      */
-    const lifecycle = src('server/src/spaces/lifecycle.ts');
-    const idx = lifecycle.match(/createIndex\(\{([^}]*)\}, \{ unique: true \}\)/);
+    // Re-anchored by Q-445 (bundle-101): the index is declared in the one per-space declaration (`spaces/space-indexes.ts`), which
+    // every builder reads, and no longer written as a `createIndex` call in `lifecycle.ts`.
+    const lifecycle = src('server/src/spaces/space-indexes.ts');
+    const idx = lifecycle.match(/plain\('edges', \{([^}]*)\}, \{ unique: true \}\)/);
     assert.ok(idx, 'the unique index on the edges collection was not found — re-anchor this gate');
     const indexed = [...idx[1].matchAll(/(\w+):\s*1/g)].map(m => m[1]);
     assert.ok(indexed.length >= 3, `only ${indexed.length} fields in the unique index`);

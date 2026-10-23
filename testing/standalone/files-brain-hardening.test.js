@@ -34,6 +34,9 @@ const { assembleChunks, uploadId, storeChunk } =
   await import('../../server/dist/files/chunks.js');
 const { applyResolutions } = await import('../../server/dist/brain/merge.js');
 const { mergeEmbeddingExclusion } = await import('../../server/dist/brain/query.js');
+// Q-446: L5 named the vector alone; the withheld set is read from the build so each case covers every member.
+const { NEVER_RETURNED_FIELDS } = await import('../../server/dist/brain/recall-shape.js');
+const WITHHELD_EXCLUSION = Object.fromEntries(NEVER_RETURNED_FIELDS.map(f => [f, 0]));
 
 const SPACE = 'fbtest';
 
@@ -212,9 +215,12 @@ describe('L4 — applyResolutions rejects prototype-polluting keys', () => {
 // ── L5 — projection merge ────────────────────────────────────────────────────
 
 describe('L5 — mergeEmbeddingExclusion preserves the caller projection', () => {
-  it('no projection → excludes embedding only', () => {
-    assert.deepEqual(mergeEmbeddingExclusion(undefined), { embedding: 0 });
-    assert.deepEqual(mergeEmbeddingExclusion({}), { embedding: 0 });
+  // Q-446: was "excludes embedding only" — `{embedding: 0}` pinned as the whole exclusion, the shape that let
+  // `deliveredBy` and the write guard through. Now: no projection excludes every withheld field and nothing else.
+  it('no projection → excludes every withheld field, and only those', () => {
+    assert.ok(NEVER_RETURNED_FIELDS.length >= 3, 'the withheld set read from the build is too small to mean anything');
+    assert.deepEqual(mergeEmbeddingExclusion(undefined), WITHHELD_EXCLUSION);
+    assert.deepEqual(mergeEmbeddingExclusion({}), WITHHELD_EXCLUSION);
   });
 
   it('inclusion projection is preserved (embedding excluded by omission)', () => {
@@ -223,15 +229,19 @@ describe('L5 — mergeEmbeddingExclusion preserves the caller projection', () =>
     assert.ok(!('embedding' in out) || out.embedding === 0);
   });
 
-  it('exclusion projection keeps the caller fields AND adds embedding: 0', () => {
+  // Q-446: was "adds embedding: 0". Now: the caller's exclusions plus every withheld field.
+  it('exclusion projection keeps the caller fields AND adds every withheld field: 0', () => {
     const out = mergeEmbeddingExclusion({ createdAt: 0 });
-    assert.deepEqual(out, { createdAt: 0, embedding: 0 });
+    assert.deepEqual(out, { createdAt: 0, ...WITHHELD_EXCLUSION });
   });
 
-  it('an explicit embedding inclusion is stripped (vector can never leak)', () => {
-    const out = mergeEmbeddingExclusion({ fact: 1, embedding: 1 });
-    assert.equal(out.embedding, undefined, 'embedding must not be included even if requested');
-    assert.equal(out.fact, 1);
+  // Q-446: was the vector alone. Now: an explicit inclusion of any withheld field is stripped.
+  it('an explicit inclusion of a withheld field is stripped (none can ever leak)', () => {
+    for (const f of NEVER_RETURNED_FIELDS) {
+      const out = mergeEmbeddingExclusion({ fact: 1, [f]: 1 });
+      assert.equal(out[f], undefined, `${f} must not be included even if requested`);
+      assert.equal(out.fact, 1);
+    }
   });
 
   it('_id exclusion alongside inclusion is respected', () => {

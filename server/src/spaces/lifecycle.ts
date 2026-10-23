@@ -31,15 +31,11 @@ import { removeTree } from '../files/remove-tree.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { forgetMerkleLeaves } from '../brain/merkle.js';
 import { forgetSpaceShape } from '../brain/space-shape.js';
-import { cancelEveryJobOfSpace, ensureMediaJobIndexes } from '../files/media/job-queue.js';
-import { ensureEmbedJobIndexes } from '../brain/embed-queue.js';
-import { ensureFileTombstoneIndexes, forgetFileTombstonesOf } from '../files/tombstones.js';
+import { cancelEveryJobOfSpace } from '../files/media/job-queue.js';
+import { dropReplacedFileTombstoneIndexes, forgetFileTombstonesOf } from '../files/tombstones.js';
 import { forgetPathKeyedCache } from '../files/path-keyed-cache.js';
 import { retireEmbedWorkOfRemovedRows } from '../files/file-embed-work.js';
-import { LINK_INDEXES } from '../brain/link-adjacency.js';
-import { createKeysetIndexesFor } from './keyset-indexes.js';
-import { ensureEdgeGuardIndex, edgeIndexFailure } from './edge-guard-index.js';
-import { FORK_INDEXES } from '../sync/upsert-plan.js';
+import { buildSpaceIndexesAtInit } from './space-indexes.js';
 import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -52,16 +48,16 @@ import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
 
 /**
- * The edges' identity index: unique over `(from, to, label, fromKind, toKind)`, the guarantee `edgeIdFor` derives an id from.
+ * Create a space's collections and indexes, and check what a boot checks of it. Runs for EVERY space at EVERY boot, before the
+ * server listens, for a space created now, and for a restored one (whose collections were all dropped first, so each is created now).
  *
- * One function because two doors build it: `initSpace`, and the online restore, which DROPS every collection before it reloads
- * it and so leaves the edges with no unique index at all until the next boot — two edges of one identity can be stored in that
- * window. Idempotent. The reason each field is in the key is stated where `initSpace` calls it.
+ * The indexes are the declaration's (`spaces/space-indexes.ts`, `buildSpaceIndexesAtInit`): every boot-safe index, and every other
+ * one on a collection created just now - a not-boot-safe index on an existing collection is the background pass's
+ * (`ensureQueryIndexes`), because its build reads the whole collection. A failed build follows the index's policy: the identity
+ * index, the link pair and the plain indexes stop the space initialising, the write guard and the TTL indexes are said and
+ * skipped, the text index is a warning. The steps that are not builds stay here, in their order: the legacy prefixed indexes and
+ * the superseded edge identity are dropped before the declaration runs, the replaced file tombstone index after it.
  */
-export async function ensureEdgeIdentityIndex(spaceId: string): Promise<void> {
-  await getDb().collection(spaceCollection(spaceId, 'edges')).createIndex({ from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 }, { unique: true });
-}
-
 export async function initSpace(
   spaceId: string,
   opts: { waitForVectorReady?: boolean } = {},
@@ -98,13 +94,12 @@ export async function initSpace(
   // (`{tags:1}` not `{spaceId:1, tags:1}`); `dropLegacyPrefixedIndexes` removes any old
   // `spaceId`-leading index left over from before the migration. It is idempotent: after the first
   // boot rebuilds them, no `spaceId`-leading index remains, so the drop loop finds nothing and the
-  // `createIndex` calls are no-ops. (The former standalone entity-unique-index migration is folded
+  // builds are no-ops. (The former standalone entity-unique-index migration is folded
   // in here — a stale `spaceId_1_name_1_type_1` unique index simply gets dropped like any other.)
   const memoriesColl = db.collection(spaceCollection(spaceId, 'facts'));
   const entitiesColl = db.collection(spaceCollection(spaceId, 'entities'));
   const edgesColl = db.collection(spaceCollection(spaceId, 'edges'));
   const chronoColl = db.collection(spaceCollection(spaceId, 'chrono'));
-  const linksColl = db.collection(spaceCollection(spaceId, 'links'));
   const tombstonesColl = db.collection(spaceCollection(spaceId, 'tombstones'));
   const conflictsColl = db.collection(spaceCollection(spaceId, 'conflicts'));
   const dupeColl = db.collection(spaceCollection(spaceId, 'dupeCandidates'));
@@ -117,151 +112,17 @@ export async function initSpace(
     dropLegacyPrefixedIndexes(tombstonesColl), dropLegacyPrefixedIndexes(conflictsColl),
     dropLegacyPrefixedIndexes(dupeColl), dropLegacyPrefixedIndexes(contraColl),
     dropLegacyPrefixedIndexes(filesColl),
-    // Before the createIndex below: the old three-field unique index would otherwise sit beside the widened
-    // one and keep refusing the rows it exists to allow. See `dropSupersededEdgeIdentityIndex`.
+    // Before the identity build below. See `dropSupersededEdgeIdentityIndex`.
     dropSupersededEdgeIdentityIndex(edgesColl),
   ]);
 
-  // The seq-keyset indexes (`SEQ_KEYSET_INDEXES`) are NOT created here for a collection that already exists: this runs for every
-  // space at every boot, before the server listens, so a compound over a large collection would be a boot that does not finish.
-  // A collection created just now gets them; an existing one gets them from the background pass (`ensureQueryIndexes`).
-  await createKeysetIndexesFor(spaceId, part => createdNow.has(spaceCollection(spaceId, part)));
-  await memoriesColl.createIndex({ tags: 1 });
-  // The fork caps' indexes (`FORK_INDEXES`, `sync/upsert-plan.ts`) — the same list `ensureQueryIndexes` creates.
-  for (const ix of FORK_INDEXES) await memoriesColl.createIndex(ix.keys, { sparse: ix.sparse });
-  // `{ type: 1 }` on all four record collections. MEASURED, not assumed: every list endpoint exposes a `type`
-  // filter and `total` counts with it, and `explain()` on a live instance returned COLLSCAN for
-  // `{type: …}` on facts, entities, edges and chrono. Entities looked covered by `{ name: 1, type: 1 }` and
-  // are not — `type` is not a prefix of it, so that index cannot serve a query on `type` alone.
-  //
-  // Quality-neutral by construction: the same documents come back in the same order, the counts are identical,
-  // and only the plan changes. This is the cheapest load reduction available on the read path.
-  await memoriesColl.createIndex({ type: 1 });
-  await entitiesColl.createIndex({ name: 1, type: 1 });
-  await entitiesColl.createIndex({ type: 1 });
-  /*
-   * Unique within the (already per-space) collection — the leading constant `spaceId` distinguished no
-   * documents, so dropping it preserved the identical guarantee.
-   *
-   * `fromKind` and `toKind` joined the key in M-3. Each collection assigns its own UUIDs, so a fact and an
-   * entity may hold the same id: `(X, Y, mentions)` with Y an entity and the same triplet with Y a fact are
-   * two relationships, and `edgeIdFor` derives two ids for them. Without the kinds here the index would refuse
-   * the second as a duplicate — an id that is free and a row that cannot be stored, which is the identity
-   * expressed two ways and disagreeing.
-   *
-   * Safe on an existing collection: an entity endpoint stores NOTHING (`storedEdgeKind` normalises `'entity'`
-   * to absent), Mongo indexes a missing field as null, and every edge written before M-1 keys as `(from, to,
-   * label, null, null)` — exactly what a new ordinary edge keys as. So the guarantee for the ordinary case is
-   * unchanged and only the widened cases become storable.
-   */
-  await ensureEdgeIdentityIndex(spaceId);
-  // The guard index of a strict functional label (`Q-439`), here only for an edges collection created just now: the build
-  // reads every edge, and this runs for every space at every boot before the server listens, so on an existing collection it
-  // is the background pass's (`ensureQueryIndexes`), like the keyset indexes above. Until it exists a race is not refused,
-  // which the planner's count still is. Its own guarded try: a space whose markers cannot be indexed is a space without a
-  // race guard, which is said (and counted), and must never be a space that does not initialise.
-  if (createdNow.has(spaceCollection(spaceId, 'edges'))) {
-    try {
-      await ensureEdgeGuardIndex(spaceId);
-    } catch (err) {
-      edgeIndexFailure(spaceId, 'guard index', err, 'next index pass');
-    }
-  }
-  // The compound index above serves `from` through its prefix but leaves `to` unindexed, so any
-  // "which entities does the graph touch" question scanned the whole collection on the inbound half.
-  // Completeness' unlinked-entity join asks it per entity; traversal asks it per hop.
-  await edgesColl.createIndex({ to: 1 });
-  await edgesColl.createIndex({ type: 1 });
-  await chronoColl.createIndex({ startsAt: 1 });
-  await chronoColl.createIndex({ status: 1 });
-  await chronoColl.createIndex({ type: 1 });
-  /*
-   * Link records (`M-2`), and every one of these answers a question that would otherwise be a scan.
-   *
-   * **The unique index is the deduplication**, and it is why a link needs no conflict resolution at all. A
-   * link is `(from, fromKind, to, toKind)` and nothing else — no label, no content — so two peers that both
-   * notice the same connection have written the same fact. With a deterministic id they collide on `_id`;
-   * with this index they collide even if an id is ever generated some other way. Either way the second write
-   * is a duplicate rather than a fork, which is what lets the ingest path drop fork resolution entirely.
-   *
-   * Both directions are indexed separately because both are asked. From a record: what does this concern.
-   * From an entity: what concerns this — the backlink scan that blocks a delete, once per candidate.
-   *
-   * The sync page's index (`seq`, `_id`) is the keyset index, created above for every collection that has one.
-   */
-  for (const ix of LINK_INDEXES) await linksColl.createIndex(ix.keys, ix.unique ? { unique: true } : {});
-  await conflictsColl.createIndex({ detectedAt: -1 });
-  // Serves the list query: equality on `status` (now the leading field) + sort by (score desc,
-  // detectedAt desc).
-  await dupeColl.createIndex({ status: 1, score: -1, detectedAt: -1 });
-  // Mirrors the Review list's query exactly: filter on status, then sort by confidence and recency
-  // (`api/contradictions.ts` — `.sort({ confidence: -1, detectedAt: -1 })`). Without it that endpoint was a
-  // collection scan plus an in-memory sort on every load, because this collection had no indexes at all.
-  await contraColl.createIndex({ status: 1, confidence: -1, detectedAt: -1 });
-  // The type filter in the Review tab narrows on this, and the per-type wipe below deletes by it.
-  await contraColl.createIndex({ type: 1 });
-  await filesColl.createIndex({ tags: 1 });
-  await filesColl.createIndex({ updatedAt: -1 });
-  // Chunk records point at their file through `parentFileId`. Both the chunk-grouping reads and
-  // completeness' "was this file ever chunked" join go through it.
-  await filesColl.createIndex({ parentFileId: 1 });
-  // The face gallery reads the LABELLED faces' ids to complete its search (Q-102, `gallerySearch`). Partial, so it
-  // indexes the few labelled faces and none of the unlabelled crowd — or any record that is not a face at all.
-  await filesColl.createIndex({ faceEntityId: 1 }, { partialFilterExpression: { faceEntityId: { $exists: true } } });
-
-  // ── The media job queue: the most-polled collection in the product, and it had no index at all ──
-  //
-  // Nine collections above get indexes and this one did not, while the worker asks it a question **every
-  // second**. Three queries carry all of the traffic:
-  //
-  //   claimNextJob      { status, $or:[claimableAfter …] }  sort { createdAt: 1 }   — per space, per tick
-  //   resetStalledJobs  { status, progressAt < cutoff }      sort { claimedAt: 1 }   — per space, per sweep
-  //   the /metrics collectors                                                        — four reads per scrape
-  //
-  // Every one of them was a collection scan followed by an in-memory sort. And the collection is not
-  // transient: `completeJob` sets `status: 'complete'` and nothing prunes it, so it holds one document per
-  // file ever uploaded. The scan therefore grows with the AGE of the instance, not with its backlog — a
-  // queue with nothing in it costs more to poll every month it stays up.
-  //
-  // Local, non-synced state (job records do not replicate), so a boot-time idempotent create is the right
-  // shape here rather than a self-healing read path.
-  // The key patterns are declared next to the queries they serve, in job-queue.ts, and created by its own
-  // function — so this cannot drift from them and the database-level test exercises the same call.
-  /*
-   * ONE INDEX PER LINK CLASS USED TO BE CREATED HERE, on the record's own array field. 5.0 removed the six
-   * arrays, so there is no record field for a link scan to read: a walk asks the `links` collection, whose
-   * `from` and `to` indexes are created with it.
-   *
-   * The lesson is kept because the shape recurs. It was three hand-placed `{ entityIds: 1 }` calls, and a
-   * link is a (collection, FIELD) pair — so when `M-2` gave a chrono entry `memoryIds` and a file
-   * `memoryIds` and `chronoIds`, three classes had no index at all and nothing reported it. An unindexed
-   * scan returns the correct answer, slowly, and only visibly on a space large enough to feel it.
-   */
-
-  await ensureMediaJobIndexes(spaceId);
-  await ensureEmbedJobIndexes(spaceId);
-  // The file tombstones' settle and move-marker questions (bundle-30 I16), created by the module that owns them.
-  await ensureFileTombstoneIndexes(spaceId);
-
-  // Lexical retrieval index — the BM25-family half of hybrid search (`brain/lexical-search.ts`).
-  //
-  // On `matchedText` ONLY, on purpose: it is the exact pre-embedding source string, so the lexical
-  // channel reads precisely the text the vector channel embedded. Indexing display fields instead would
-  // let a record be findable through text that was never part of its vector.
-  //
-  // MongoDB allows exactly ONE text index per collection, so this field choice is load-bearing — a later
-  // feature wanting a different field set collides with it rather than adding to it.
-  //
-  // Best-effort: an existing collection may already carry a differently-shaped text index from a future
-  // change, and a failure here must not stop a space initialising. Retrieval degrades to vector-only on
-  // its own when the index is absent.
-  for (const collName of VECTOR_INDEXED_COLLECTIONS) {
-    try {
-      await col(`${spaceId}_${collName}`).createIndex({ matchedText: 'text' }, { name: 'lexical_text' });
-    } catch (err) {
-      log.warn(`Space '${peerText(spaceId)}': lexical text index on ${collName} not created — hybrid search will fall back to vector-only for it (${peerText(err)})`);
-    }
-  }
+  // Every declared index (`spaces/space-indexes.ts`): the boot-safe ones on every collection, the rest on a collection created just
+  // now. Before the build, above: the legacy prefixed indexes and the superseded edge identity are gone, or the old three-field
+  // unique index would sit beside the widened one and keep refusing the rows it exists to allow. The media job queue, the most
+  // polled collection in the product, is in it: its indexes are declared beside its queries (`files/media/job-queue.ts`).
+  await buildSpaceIndexesAtInit(spaceId, part => createdNow.has(spaceCollection(spaceId, part)));
+  // After it: the file tombstone index a later release replaced, maintained on every pending write for nothing.
+  await dropReplacedFileTombstoneIndexes(spaceId);
 
   // Vector search indexes (Atlas Local / Atlas) — only on the collections that hold a record (Q-165): a
   // populated collection's are created or validated here, an empty one's are dropped, which is also how an

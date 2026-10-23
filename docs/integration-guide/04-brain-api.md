@@ -495,8 +495,8 @@ reasoning, and the `$in` form for a set of ids, are in
 **Response** `200`: `results` holds the full `FactDoc` (same shape as the write response).
 
 > **What a stored record carries beyond the fields you wrote.** A read by id or a list returns the
-> document as stored, minus the embedding vector — which, as everywhere else, is never returned
-> and cannot be requested. Three of the remaining fields are the system's rather than yours:
+> document as stored, minus the embedding vector, `deliveredBy` and an edge's write guard — which, as
+> everywhere else, are never returned and cannot be requested by projection or read by a filter. Three of the remaining fields are the system's rather than yours:
 >
 > | field | what it is |
 > |---|---|

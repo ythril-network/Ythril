@@ -12,15 +12,16 @@
  *    built by spreading the stored row with only the vector blanked, so the retention stamp and the delivery stamp went out
  *    with it. `eventEntryOf` is the one function that builds it, and the edge writers call it.
  *  - a `filter` whose `projection` names the guard. An inclusion projection reaches any stored field it names, and the
- *    list of withheld fields only governs the exclusion the read adds itself. `withoutWriteGuard` is applied to the
- *    projection the store is handed.
+ *    list of withheld fields only governs the exclusion the read adds itself. The store projection of a caller's
+ *    projection (`mergeEmbeddingExclusion`, Q-446) withholds every `NEVER_RETURNED_FIELDS` member, the guard among them;
+ *    the guard-only copy `withoutWriteGuard` that used to wrap it is what Q-446 removes.
  *  - an export, which streams the stored rows: `WRITE_GUARD_FIELDS` is in its projection beside the derived fields.
  *
  * ## What this holds, and why none of it is a list
  *
  *  - `eventEntryOf` removes EVERY member of `LOCAL_ONLY_FIELDS` — read from the module, floored — and keeps every other key.
- *  - `withoutWriteGuard` leaves no inclusion that names a `WRITE_GUARD_FIELDS` member, never produces an empty projection (the
- *    store reads `{}` as "every field"), and adds the exclusion when the caller named none.
+ *  - the store projection of a caller's projection leaves no inclusion that names a `WRITE_GUARD_FIELDS` member, never
+ *    produces an empty projection (the store reads `{}` as "every field"), and adds the exclusion when the caller named none.
  *  - EVERY `emitWebhookEvent` in `server/src` — the one function that is a webhook and a live-view event, whatever record kind
  *    it tells — builds its entry through `eventEntryOf`, or carries no stored row (an id, a path, a counter), or is a named
  *    exemption with its reason. The calls are derived from the tracked source with a floor, so an emit added next year is held to it.
@@ -35,7 +36,9 @@ import { readFileSync } from 'node:fs';
 import { readTrackedSources } from './_sources.mjs';
 
 const { eventEntryOf } = await import('../../server/dist/brain/read-projection.js');
-const { withoutWriteGuard } = await import('../../server/dist/brain/projection.js');
+// The store projection of a CALLER's projection (Q-446). This file used to hold `withoutWriteGuard` — a guard-only pass over
+// an already-built Mongo projection — which pinned the defect's shape: one hand-written copy per withheld field.
+const { mergeEmbeddingExclusion } = await import('../../server/dist/brain/query.js');
 const { LOCAL_ONLY_FIELDS, WRITE_GUARD_FIELDS, DERIVED_LOCAL_FIELDS, NOT_CARRIED_BY_BACKUP } = await import('../../server/dist/sync/local-only-fields.js');
 
 const withoutComments = (t) => t.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -165,24 +168,32 @@ describe('a caller\'s projection cannot ask the store for the write guard', () =
   const GUARDS = [...WRITE_GUARD_FIELDS];
   it('has a write guard to hold the projection to', () => assert.ok(GUARDS.length >= 1));
 
+  /*
+   * Q-446: these three asked `withoutWriteGuard`, a pass applied to a Mongo projection already built by
+   * `mergeEmbeddingExclusion` — a second, guard-only copy of the withheld rule. They now ask the one store projection
+   * of the CALLER's projection, so the guard is withheld by the same step that withholds the vector and `deliveredBy`.
+   */
   it('an exclusion, or none at all, gains the exclusion of every guard', () => {
-    for (const given of [{}, { embedding: 0 }, { description: 0, embedding: 0 }]) {
-      const out = withoutWriteGuard(given);
+    // Was: `withoutWriteGuard` over `{}`, `{embedding: 0}`, `{description: 0, embedding: 0}` (Mongo forms). Now: the caller's own forms.
+    for (const given of [undefined, {}, { description: 0 }, { _id: 0 }, { _id: 1, description: 0 }]) {
+      const out = mergeEmbeddingExclusion(given);
       for (const g of GUARDS) assert.equal(out[g], 0, `${JSON.stringify(given)} does not withhold ${g}: ${JSON.stringify(out)}`);
-      for (const [k, v] of Object.entries(given)) assert.equal(out[k], v, `${k} was changed`);
+      for (const [k, v] of Object.entries(given ?? {})) if (k !== '_id' || v === 0) assert.equal(out[k], v, `${k} was changed`);
     }
   });
 
   it('an inclusion loses every guard it names and keeps the rest', () => {
+    // Was: `withoutWriteGuard({label: 1, g: 1})`. Now: the caller's projection read straight to the store form.
     for (const g of GUARDS) {
-      assert.deepEqual(withoutWriteGuard({ label: 1, [g]: 1 }), { label: 1 });
+      assert.deepEqual(mergeEmbeddingExclusion({ label: 1, [g]: 1 }), { label: 1 });
     }
   });
 
   it('an inclusion that names ONLY a guard is the id alone, never an empty projection (which the store reads as every field)', () => {
+    // Was: the same two shapes through `withoutWriteGuard`. Now: through the store projection of the caller's projection.
     for (const g of GUARDS) {
-      assert.deepEqual(withoutWriteGuard({ [g]: 1 }), { _id: 1 });
-      assert.deepEqual(withoutWriteGuard({ _id: 0, [g]: 1 }), { _id: 1 });
+      assert.deepEqual(mergeEmbeddingExclusion({ [g]: 1 }), { _id: 1 });
+      assert.deepEqual(mergeEmbeddingExclusion({ _id: 0, [g]: 1 }), { _id: 1 });
     }
   });
 });

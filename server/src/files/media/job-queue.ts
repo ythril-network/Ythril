@@ -33,7 +33,8 @@ const MAX_ATTEMPTS = 3;
 /**
  * The indexes `<space>_media_jobs` needs, declared where the queries live.
  *
- * `initSpace` creates them; the database-level test creates them from THIS list and then asserts the winning
+ * The per-space declaration (`spaces/space-indexes.ts`) reads them, so `initSpace`, the background pass and a restore build them;
+ * the database-level test builds them through that declaration and then asserts the winning
  * plan for the real queries. One source, so a test cannot pass against indexes the product does not build —
  * which is exactly what happens when a test declares its own copy of a schema.
  *
@@ -49,20 +50,6 @@ export const MEDIA_JOB_INDEXES: Array<Record<string, 1>> = [
   // metric collectors take per space per scrape.
   { status: 1, progressAt: 1 },
 ];
-
-/**
- * Create the job-queue indexes for one space. Idempotent — an existing index of the same shape is a no-op,
- * which is what makes this safe to run on every boot for every space, including spaces that predate it.
- *
- * Exported so `initSpace` has one call to make and the database-level test can exercise the REAL creation
- * path. A test that builds its own indexes and then asserts a query plan proves that the KEY PATTERNS work;
- * it says nothing about whether the product ever creates them.
- */
-export async function ensureMediaJobIndexes(spaceId: string): Promise<void> {
-  for (const keys of MEDIA_JOB_INDEXES) {
-    await jobCollection(spaceId).createIndex(keys);
-  }
-}
 
 /**
  * Exponential backoff schedule (in ms) keyed by next attempt number.

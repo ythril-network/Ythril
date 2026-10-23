@@ -13,7 +13,8 @@
  * one, byte for byte — nobody who does not ask pays for the bodies.
  *
  * What a projection can never do, on this door as on every other read door:
- *  - return the vector — `embedding` is stripped before the projection sees the record;
+ *  - return a withheld field (`NEVER_RETURNED_FIELDS`: the vector, `deliveredBy`, the write guard) — the
+ *    projection drops it, and `{_id: 1}` is the lean answer rather than every field;
  *  - return the diagnostics unless `includeDiagnostics` asked for them;
  *  - remove the walk's own envelope: `_id`, `depth`, `kind` on a node and `_id`, `from`, `to`, `label` on an
  *    edge. Those say how the answer hangs together; a projection that could drop `from` would return an edge
@@ -24,7 +25,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { collectionForRefKind } from './entity-refs.js';
 import { applyProjection, type NormalisedProjection } from './projection.js';
-import { RECALL_RECORD_DIAGNOSTICS, NEVER_RETURNED_FIELDS } from './recall-shape.js';
+import { RECALL_RECORD_DIAGNOSTICS } from './recall-shape.js';
 import type { TraverseResult, TraverseNode } from './edges.js';
 import type { TraverseEdge } from './traverse-subgraph.js';
 import type { RefKind } from '../config/types-knowledge.js';
@@ -33,11 +34,14 @@ type Doc = Record<string, unknown>;
 /** A stored record as the driver returns it: every one of them has a string `_id` in this product. */
 type IdDoc = { _id: string; [k: string]: unknown };
 
-/** Diagnostics off unless asked; the vector off always. The same rule `recall-graph.ts` applies to its walk. */
+/**
+ * Diagnostics off unless asked — the same rule `recall-graph.ts` applies to its walk. The withheld fields
+ * (`NEVER_RETURNED_FIELDS`) are not this function's: `applyProjection`, which every body goes through, withholds
+ * them on every branch (`Q-446`).
+ */
 function stripFields(doc: Doc, includeDiagnostics: boolean): Doc {
   const out = { ...doc };
-  const drop = includeDiagnostics ? NEVER_RETURNED_FIELDS : [...RECALL_RECORD_DIAGNOSTICS, ...NEVER_RETURNED_FIELDS];
-  for (const k of drop) delete out[k];
+  if (!includeDiagnostics) for (const k of RECALL_RECORD_DIAGNOSTICS) delete out[k];
   return out;
 }
 

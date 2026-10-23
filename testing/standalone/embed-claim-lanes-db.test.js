@@ -141,7 +141,9 @@ describe('embed queue lanes (real MongoDB)', { skip }, () => {
 
   it('the fresh-claim query of every lane is index-ordered, with no SORT stage', async () => {
     const SPACE = 'alpha';
-    await queue.ensureEmbedJobIndexes(SPACE);
+    // Restated by Q-445 (bundle-101): `ensureEmbedJobIndexes` is gone; the embed job indexes are built from the per-space declaration.
+    const { SPACE_INDEXES, buildSpaceIndexUnits } = await import('../../server/dist/spaces/space-indexes.js');
+    assert.deepEqual((await buildSpaceIndexUnits(SPACE, SPACE_INDEXES.filter(ix => ix.part === 'embedJobs'))).failed, []);
     // Ballast, so the planner has a real choice to make, and one job per lane so every lane's pass runs.
     for (let i = 0; i < 300; i++) await seed(SPACE, `ballast-${i}`, 2, at(100 + i));
     await jobs(SPACE).updateMany({ recordId: /^ballast-/ }, { $set: { status: 'failed' } });

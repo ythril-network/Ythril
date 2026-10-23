@@ -80,7 +80,8 @@ const COLS = ['facts', 'entities', 'edges', 'chrono', 'files'];
  *     two instances holding different data report themselves IDENTICAL, which is worse than not replicating,
  *     because it reports agreement.
  *   - `sync/engine.ts`'s `payloadKey` is a four-member union; files cross the wire by another path.
- *   - `spaces/ensure-query-indexes.ts`'s `TYPE_FILTERED` is the four that have a `type` field to filter on.
+ *   - `spaces/space-indexes.ts`'s type indexes are the four that have a `type` field to filter on (moved there from
+ *     `ensure-query-indexes.ts`'s `TYPE_FILTERED` by Q-445, bundle-101, with every per-space index).
  *   - `metrics/registry.ts` pre-declares gauge labels for four.
  *
  * **A gate that only sees the complete list passes exactly the sites the next member breaks.** So four.
@@ -198,7 +199,7 @@ describe('a collection list derives from the one tuple, or declares itself a sub
     for (const f of [
       'server/src/spaces/vector-index.ts',
       'client/src/app/pages/brain/brain-tabs.ts',
-      'server/src/spaces/ensure-query-indexes.ts',
+      'server/src/spaces/space-indexes.ts',
       'server/src/metrics/registry.ts',
     ]) {
       assert.match(readFileSync(f, 'utf8'), DECLARED_SUBSET,

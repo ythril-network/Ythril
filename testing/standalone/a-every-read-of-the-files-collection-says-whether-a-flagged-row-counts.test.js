@@ -95,7 +95,8 @@ const EXEMPT = {
   'server/src/spaces/lifecycle.ts:initSpace': 'creates the space\'s collections and indexes and samples a fact for the embedding model; reads no file for any caller',
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': 'walks the typed record collections (`KnowledgeType`: entity, fact, edge, chrono — a file is none of them) to stamp a retention window; names a suffix, never the files collection',
   'server/src/spaces/rename.ts:moveSpaceData': 'moves a whole space\'s collections to a new id: every row, flagged included, goes',
-  'server/src/spaces/ensure-query-indexes.ts:ensureQueryIndexes': 'builds indexes on the collections; hands out a handle and reads no row for a caller',
+  // `ensure-query-indexes.ts:ensureQueryIndexes` came off with Q-445 (bundle-101): it names no collection now, the per-space
+  // declaration (`spaces/space-indexes.ts`) does, by part.
   'server/src/util/seq.ts:highestStoredSeq': 'reconciles the space counter against the highest stored seq of any row; a flagged row\'s seq still counts',
   'server/src/sync/delivered-by-backfill.ts:stampCollection': 'the one-time stamp of who delivered rows held before `deliveredBy` existed: it must visit every row, flagged or not',
   // ── it must SEE the flagged row, because the flag is what it decides on
