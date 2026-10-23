@@ -32,6 +32,7 @@
   "webhooks.status.active": "Aktiv",
   "webhooks.status.failing": "Fehlerhaft",
   "webhooks.nextProbe": "nächste Prüfung {{time}}",
+  "webhooks.probeDue": "Prüfung fällig",
   "webhooks.summary.endpoints": "Endpunkte",
   "webhooks.summary.failing": "Fehlerhaft",
   "webhooks.summary.disabled": "Deaktiviert",

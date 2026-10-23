@@ -197,6 +197,20 @@ describe('4. the claim schedules the next probe by backoffDelayMs(probeAttempts,
     }
   });
 
+  it('a row whose probeAttempts is not a count (null, -1, a string) is claimed as the row it is, and its count starts again at 1 (round 2, F3)', () => {
+    // A claim filter that does not match the row the claim read leaves that row first in the due order for ever: every try reads it
+    // and claims nothing, and no other failing subscription is probed again.
+    for (const bad of [null, -1, 'x']) {
+      const row = failingRow('w1', { probeAttempts: bad, nextProbeAt: asStored(NOW.getTime() - 1, '') });
+      const { filter, update } = store.probeClaim(row, NOW);
+      assert.ok(matchesFilter(row, filter), `probeAttempts ${JSON.stringify(bad)}: the claim does not take the row it read, so that row is read first and never claimed`);
+      assert.equal(update.$set?.probeAttempts, 1, `probeAttempts ${JSON.stringify(bad)}: the claim does not start the count again (an $inc of a non-number fails in the store)`);
+      assert.equal(update.$inc?.probeAttempts, undefined, `probeAttempts ${JSON.stringify(bad)}: the claim $incs a value that is not a count`);
+      const wait = msOf(update.$set.nextProbeAt) - NOW.getTime();
+      assert.ok(wait >= BASE_MS / 2 && wait <= BASE_MS, `probeAttempts ${JSON.stringify(bad)}: scheduled ${wait} ms on, not as a first attempt`);
+    }
+  });
+
   it('at the cap a failing subscription is probed every 30 to 60 minutes, for ever', () => {
     assert.equal(typeof store.probeClaim, 'function', 'webhooks/store.ts exports no probeClaim(row, now)');
     const waits = Array.from({ length: 50 }, () => {
@@ -298,6 +312,20 @@ describe('7. the status lines are said once, by the write that changed the row',
     assert.equal(r.events.filter(e => e === `failing ${id}`).length, 4, `fixture: four exhausted schedules (events: ${r.events.join(' | ')})`);
     const said = getLogLines(500).filter(l => l.includes(id) && /marked as failing/.test(l));
     assert.equal(said.length, 1, `${said.length} "marked as failing" lines for one flip of four exhausted schedules: ${said.join(' | ')}`);
+  });
+
+  it('a probe answered after its subscription changed (disabled, URL changed) is counted as superseded, not as neither outcome (round 2, F6)', async () => {
+    const before = dispatcher.webhookProbeCounts();
+    assert.equal(typeof before.superseded, 'number', 'ythril_webhook_probes_total has no superseded outcome: an answered probe whose recovery matched nothing is counted nowhere');
+    const id = uniq('sup');
+    const r = rig({ probes: [{ id, url: urlOf(id) }], subs: { [id]: failingRow(id) }, recovered: async () => false });
+    r.worker.job.start();
+    await r.fire();
+    assert.equal(r.state.probes.length, 1, `a due failing subscription was not probed (events: ${r.events.join(' | ')})`);
+    const after = dispatcher.webhookProbeCounts();
+    assert.equal(after.superseded - before.superseded, 1, 'an answered probe whose recovery write matched nothing was not counted superseded');
+    assert.equal(after.recovered - before.recovered, 0);
+    assert.equal(after.failed - before.failed, 0);
   });
 
   it('"recovered" is said once, by the recovery write that changed the row, and not by one that matched nothing', async () => {

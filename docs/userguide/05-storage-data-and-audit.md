@@ -722,7 +722,7 @@ look at the database and at how much that job has to do.
 
 Webhooks send signed HTTP notifications to external systems when events occur. Manage them from **Settings → Webhooks** (admin token + MFA required).
 
-The page lists every webhook with its endpoint, event/space filters, and a status badge: **active**, **failing** (its endpoint kept refusing deliveries), or **disabled** (switched off by you). A failing webhook also shows its count of failures and when it is next probed ("next probe" and a time in your date format). From there you can:
+The page lists every webhook with its endpoint, event/space filters, and a status badge: **active**, **failing** (its endpoint kept refusing deliveries), or **disabled** (switched off by you). A failing webhook also shows its count of failures and when it is next probed ("next probe" and a time in your date format, or "probe due" when that time has passed). From there you can:
 
 - **Add / Edit** — set the HTTPS endpoint URL and a signing secret (at least 8 characters), choose which events and spaces to subscribe to (leave "all" selected for everything), and enable or disable it. The secret is write-only: it is never shown again, so on edit you leave the field blank to keep the current one. Saving a failing webhook with **Enabled** ticked makes it active again with its failure count at 0.
 - **Test** — send a `test.ping` event to confirm the endpoint is reachable. A failing webhook whose endpoint answers the test is active again at once.

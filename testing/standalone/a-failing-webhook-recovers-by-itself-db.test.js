@@ -283,4 +283,58 @@ describe('a failing webhook recovers by itself (Q-477)', { skip }, () => {
       assert.equal(await scraped('ythril_webhooks_failing'), 2, 'the failing gauge is not read at scrape time: it reports the value it was last set to');
     });
   });
+
+  // ── Round 2 (lens findings on bdd271ee) ─────────────────────────────────────────────────────────────────────────────
+
+  describe('16. a success resets a failure another instance counted (F2)', () => {
+    it('instance A, whose copy shows the subscription active with no failures, still resets a failure instance B counted a moment ago', async () => {
+      const { id } = await store.createWebhook({ url: 'https://example.invalid/reset', secret: 'reset-secret-0123456789' });
+      // A reads the subscription now: its copy says active, count 0, and stays trusted for CACHE_TTL_MS.
+      assert.ok((await store.getMatchingWebhooks('entity.created', 'any')).some(s => s.id === id), 'fixture: A does not see the active subscription');
+      await storeB.markWebhookFailure(id);
+      assert.equal((await rowOf(id)).consecutiveFailures, 1, 'fixture: B did not count its failure');
+      await store.markWebhookSuccess(id);
+      // The check runs after the success, off the delivery's time: within a moment, never "at the next success".
+      const reset = await holdsWithin(async () => (await rowOf(id)).consecutiveFailures === 0, 3_000, 25);
+      assert.ok(reset,
+        'a delivery success on A did not reset the failure B counted: A trusted its copy (active, 0) and wrote nothing, so the count survives the success');
+    });
+  });
+
+  describe('17. one malformed row does not stop the probes (F3)', () => {
+    it('a failing row with probeAttempts null, due first, does not keep a good row from being probed', async () => {
+      const bad = await failingWebhook('badattempts');
+      await mongo.col(WEBHOOKS).updateOne({ id: bad.id }, { $set: { probeAttempts: null, nextProbeAt: '2000-01-01T00:00:00.000Z' } });
+      const good = await failingWebhook('goodattempts');
+      await mongo.col(WEBHOOKS).updateOne({ id: good.id }, { $set: { probeAttempts: 0, nextProbeAt: '2001-01-01T00:00:00.000Z' } });
+      const { deps, state } = probeDeps({ deliverProbe: async () => failed, now: () => T0 });
+      await tick(deps, state, () => state.probes.some(p => p.id === good.id), 5_000);
+      assert.ok(state.probes.some(p => p.id === good.id),
+        `the good failing subscription was never probed (probed: ${JSON.stringify(state.probes.map(p => p.id))}): a row whose probeAttempts is null is read first and never claimed`);
+      const badRow = await rowOf(bad.id);
+      assert.equal(badRow.probeAttempts, 1, 'the malformed row was not claimed with its count started again');
+    });
+  });
+
+  describe('18. two instances racing for one due probe: exactly one claims it (F4)', () => {
+    it('both read the due row; the second claim, computed from that same read, matches nothing, even on a clock past the first claim\'s schedule', async () => {
+      const { id } = await failingWebhook('race');
+      // The interleaving a race produces, made deterministic: both instances have read the row before either writes.
+      const read = await mongo.col(WEBHOOKS).findOne({ id });
+      const claimA = store.probeClaim(read, new Date(T0));
+      const claimB = storeB.probeClaim(read, new Date(T0 + 2 * 3_600_000));   // B's tick runs later, still holding the read
+      const a = await mongo.col(WEBHOOKS).updateOne(claimA.filter, claimA.update);
+      const b = await mongo.col(WEBHOOKS).updateOne(claimB.filter, claimB.update);
+      assert.equal(a.modifiedCount, 1, 'fixture: the first claim did not take the due row');
+      assert.equal(b.modifiedCount, 0, 'a second instance claimed the probe the first had claimed: two probes go out for one schedule');
+      assert.equal((await rowOf(id)).probeAttempts, 1);
+    });
+
+    it('two instances claiming at once send one probe', async () => {
+      const { id } = await failingWebhook('race2');
+      const results = await Promise.all([store.claimDueProbe(new Date(T0)), storeB.claimDueProbe(new Date(T0))]);
+      assert.equal(results.filter(r => r?.id === id).length, 1, `${results.filter(r => r?.id === id).length} claims of one due probe`);
+      assert.equal((await rowOf(id)).probeAttempts, 1);
+    });
+  });
 });

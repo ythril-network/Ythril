@@ -346,9 +346,13 @@ export function probePayload(at: Date = new Date()): WebhookEventPayload {
   return testPingPayload({ probe: true, message: 'Probe of a failing webhook subscription by Ythril' }, {}, at);
 }
 
-/** The tally behind `ythril_webhook_probes_total{outcome}`: a probe that recovered its subscription, and one the sink refused. */
-const probeOutcomes = { recovered: 0, failed: 0 };
-export function webhookProbeCounts(): Readonly<{ recovered: number; failed: number }> {
+/**
+ * The tally behind `ythril_webhook_probes_total{outcome}`: a probe that recovered its subscription, one the sink refused, and one the sink
+ * answered whose recovery matched nothing (`superseded`: the subscription was disabled, its URL changed or it was recovered otherwise
+ * while the probe was in flight). Every probe sent is counted under exactly one.
+ */
+const probeOutcomes = { recovered: 0, failed: 0, superseded: 0 };
+export function webhookProbeCounts(): Readonly<{ recovered: number; failed: number; superseded: number }> {
   return { ...probeOutcomes };
 }
 
@@ -393,6 +397,8 @@ async function probeOne(
   if (await recover(id, sub.url)) {
     probeOutcomes.recovered++;
     log.info(`Webhook ${peerText(id)} recovered: its probe was answered, so it takes deliveries again (on probation: one more exhausted retry schedule marks it failing)`);
+  } else {
+    probeOutcomes.superseded++;
   }
 }
 
