@@ -330,6 +330,13 @@ across the space. **The question sits beside two cards — a JSON filter and a J
 those three are what decide *what* is searched; everything below them decides how much comes back and in
 what shape.
 
+**Three fields are never shown, whatever the two cards say:** the embedding vector, the instance a record arrived
+from (`deliveredBy`) and an edge's write guard (`_functionalGuard`). They belong to this instance, not to the
+record. A projection that names one simply leaves it out — `{"embedding": 1}` and `{"_id": 1}` both answer each
+record's id and nothing else — and a filter that names one directly (`{"deliveredBy": "…"}`, or `"$embedding"`
+inside `$expr`) is refused with a message naming the field, in the Semantic Search and the Filter mode alike.
+The one test a filter may make of them is whether they exist: `{"embedding": {"$exists": true}}` still works.
+
 **A search that matches nothing says so.** If you see "no records matched", the search ran and the space
 holds nothing that fits — try a broader question, fewer filters, or a lower minimum score. An error message
 means something different: the search did not finish, so it found nothing because it never looked.
@@ -452,7 +459,7 @@ the same answer. Two uses, and the second is the reason it is there:
   a second time — the panel and the preview call the same code, so a request you can see is a request you can
   send. If one of the two JSON boxes above is not a valid object it says so and shows nothing, rather than
   leaving the last good request on screen.
-- **Filter** — a JSON object of extra field constraints, validated before the search runs. Every record that satisfies the filter competes for the results, however far down the meaning ranking it sits — a filtered search never quietly misses a match, and if one could not be completed the answer says so. The filter accepts any field, and **raw MongoDB** — `$or`, `$and`, `$in`, `$regex` and the comparisons — for conditions the simple form cannot express, such as *"status is open OR kind is ask"*. Filters on `tags`, `type`, `name`, `status`, `label` and on properties the space schema declares are fast; any other filter reads through the matching records first, so on a large space declare the properties you filter on often. The answer's filter path says which: `prefilter` (fast) or `exhaustive` (slower, still complete).
+- **Filter** — a JSON object of extra field constraints, validated before the search runs. Every record that satisfies the filter competes for the results, however far down the meaning ranking it sits — a filtered search never quietly misses a match, and if one could not be completed the answer says so. The filter accepts any field, and **raw MongoDB** — `$or`, `$and`, `$in`, `$regex` and the comparisons — for conditions the simple form cannot express, such as *"status is open OR kind is ask"*. Filters on `tags`, `type`, `name`, `status`, `label` and on properties the space schema declares are fast; any other filter reads through the matching records first, so on a large space declare the properties you filter on often. The answer's filter path says which: `prefilter` (fast) or `exhaustive` (slower, still complete). The three fields no search shows (the vector, `deliveredBy`, the write guard) are the exception: a filter naming one is refused, except to ask whether it exists.
 - **Graph hops** — follow the knowledge graph outward from each match, 0–5 hops. Connected entities come back **grouped under the match that reached them**, each carrying the relationship that connects it and every route back to the match, so you can ask "what surrounds this answer" in one search and still see which answer it surrounds. The result count stays the number of matches. Leave it at 0 for an ordinary search; deep values on a densely connected space are slow, so narrow the matches with a filter or tags first.
 
   **You can narrow the walk**, and once the hops are above 0 the controls for it appear beside them:
@@ -600,7 +607,8 @@ replacement would make it unsayable.
 
 **The Review tab writes both for you.** When you settle a contradiction by picking a winner
 (**Review → Contradictions → Resolve**), the losing record is marked superseded and the supersedes link is
-drawn — for facts, entities, chrono entries and edges alike — so the next search returns the loser labelled.
+drawn — for facts, entities and chrono entries alike — so the next search returns the loser labelled. A pair
+of edges is marked too, but no link can join two edges, and the card says so.
 
 **A marked record is labelled everywhere it is listed** — an amber **superseded** pill beside it in search
 results and in the Facts, Entities, Edges and Chrono tabs. Hover it for the one-line reminder that the
@@ -789,6 +797,16 @@ record, **link** the two as a contradiction, or pick a winner with **Keep A** / 
 decided, marks the losing record itself as superseded, and draws the `supersedes` link from the winner to it.
 **Nothing is deleted.** The superseded record stays exactly where it was and still turns up in search, now
 labelled, because it was true once and that history is often the reason you were looking.
+
+**Your decision is kept even when the link cannot be drawn.** If the space's schema refuses the `supersedes`
+link — it is declared functional and the record you kept already supersedes another, or its endpoint rule does
+not allow these records — the losing record is still marked and the card closes. One message lists everything
+that did not happen as asked: the refused link (naming the rule), or a record of the pair that was deleted in
+the meantime. The resolved card keeps the same lines; open one to read the server's exact reason.
+
+If someone else resolved the same pair a different way first — or you clicked **Keep B** on a card a moment
+ago resolved as **Keep A** — the second choice is refused and nothing changes: reload to see the decision that
+stands. Clicking the same choice again is harmless.
 
 Before deciding, use **Show both in full** on the card: the two lines you see are summaries, which is enough
 to triage a pair and rarely enough to judge one.

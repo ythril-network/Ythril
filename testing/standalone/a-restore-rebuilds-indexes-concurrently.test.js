@@ -64,9 +64,18 @@ describe('the restore route', () => {
     assert.ok(at > 0 && body.includes('startRestore('), 'the restore handler moved or no longer registers its acts; re-point this gate');
   });
 
+  // Restated by Q-445 (bundle-101): the index half was two builder names, `ensureEdgeIdentityIndex(` and `ensureEdgeGuardIndex(`,
+  // which named the edges' indexes and no other. Every per-space index is now built from one declaration
+  // (`spaces/space-indexes.ts`), so the index work a request must not do is every function that module exports (read from it,
+  // with a floor), any `createIndex` / `createIndexes` call, `initSpace`, and the two edge builders still named.
   it('answers 202 once the acts are registered, and does no per-space data or index work in the request', () => {
     assert.match(body, /status\(202\)/, 'the restore route no longer answers 202 at registration: the request waits for the work again');
-    for (const work of ['restoreDatabase(', 'reconcileSpaceSearchIndexes(', 'ensureEdgeIdentityIndex(', 'ensureEdgeGuardIndex(', 'initSpace(']) {
+    let declaration = '';
+    try { declaration = blankComments(readFileSync('server/src/spaces/space-indexes.ts', 'utf8')); } catch { /* asserted below */ }
+    const builders = [...declaration.matchAll(/^export\s+(?:async\s+)?function\s+(\w+)/gm)].map(m => `${m[1]}(`);
+    assert.ok(builders.length >= 1, 'spaces/space-indexes.ts exports no function: the per-space index builders cannot be read');
+    for (const work of ['restoreDatabase(', 'reconcileSpaceSearchIndexes(', 'ensureEdgeIdentityIndex(', 'ensureEdgeGuardIndex(', 'initSpace(',
+      '.createIndex(', '.createIndexes(', ...builders]) {
       assert.ok(!body.includes(work), `the restore request does ${work.slice(0, -1)} itself: its time grows with every space again`);
     }
   });

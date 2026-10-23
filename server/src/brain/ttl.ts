@@ -5,15 +5,13 @@
  * write, or the space's `recordTtlDays` auto-TTL. The sweep (`ttl-sweep.ts`) later deletes lapsed
  * records through the normal delete functions, so each deletion tombstones and propagates over sync —
  * correct in synced spaces (a raw MongoDB TTL index deletes below the app and the record would be
- * re-pulled from a peer). The `_expireAt` index just keeps the sweep query cheap.
+ * re-pulled from a peer). The `_expireAt` index just keeps the sweep query cheap; it and the other sweep indexes are declared
+ * with every per-space index (`spaces/space-indexes.ts`, `SWEEP_INDEXES`).
  */
-import { col } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
-import { log, peerText } from '../util/log.js';
 import { recordExpiry, recordContentExpiry, type RetentionSpace } from './chrono-retention.js';
 import type { KnowledgeType, TtlBucket } from '../config/types.js';
 import { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION } from '../config/types.js';
-import { spaceCollection } from '../db/space-collection.js';
 export { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION };
 export type { BrainCollection } from '../config/types.js';
 
@@ -185,30 +183,4 @@ export function effectiveType(
   if (typeof next === 'string') return next;
   const current = existing[field];
   return typeof current === 'string' ? current : undefined;
-}
-
-/** Ensure the (plain, non-TTL) `_expireAt` index that keeps the sweep query cheap. */
-export async function ensureTtlIndex(spaceId: string): Promise<void> {
-  await Promise.all(TTL_COLLECTIONS.map(async (c) => {
-    try {
-      await col(`${spaceId}_${c}`).createIndex({ _expireAt: 1 }, { name: 'ttl_expireAt', sparse: true });
-    } catch (err) {
-      log.warn(`ensureTtlIndex ${peerText(spaceId)}_${c}: ${peerText(err)}`);
-    }
-  }));
-  // Chrono only: the content-redaction pass has its own sweep query, and without an index it would scan the
-  // whole collection every five minutes on a space that never uses the feature.
-  try {
-    await col(spaceCollection(spaceId, 'chrono')).createIndex({ _contentExpireAt: 1 }, { name: 'ttl_contentExpireAt', sparse: true });
-  } catch (err) {
-    log.warn(`ensureTtlIndex ${peerText(spaceCollection(spaceId, 'chrono'))} content: ${peerText(err)}`);
-  }
-  // Files only, for the same reason: the flagged-row repair (`stripFlaggedRowsOnce`) and the purge of deleted files'
-  // audit records (`flaggedPage`) both ask `deletedAt: { $exists: true }` of every space every cycle. Sparse, so it
-  // indexes the deleted files' records and nothing else — on a space that never deletes, an empty index.
-  try {
-    await col(spaceCollection(spaceId, 'files')).createIndex({ deletedAt: 1 }, { name: 'ttl_deletedAt', sparse: true });
-  } catch (err) {
-    log.warn(`ensureTtlIndex ${peerText(spaceCollection(spaceId, 'files'))} deletedAt: ${peerText(err)}`);
-  }
 }

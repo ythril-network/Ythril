@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { readEveryPage } from './read-every-page';
-import type { ContradictionRecord } from './api.types';
+import type { ContradictionRecord, ContradictionResolveNote } from './api.types';
 
 /**
  * What a resolve call reports back.
@@ -12,14 +12,18 @@ import type { ContradictionRecord } from './api.types';
  * until 5.0 it was not true: the decision went onto the review finding and nowhere a search could see it, so
  * a reviewer settled a contradiction and both claims kept coming back ranked together.
  *
- * `note` NARROWED rather than went away. It used to mean "this pair is not two entities, so no edge" — for
- * facts and chrono entries, which is most of them. The server draws the edge for every kind that CAN be an
- * endpoint now, and `REF_KINDS` is where that is decided: an edge is not among them, because an edge
- * between two edges is nothing a walk could follow. So a pair of EDGES is the one case left, reachable only
- * on an instance that configured the scanner to cover them.
+ * `notes` (`Q-442`) are the outcomes a reviewer must not be left to assume, one per code: the `supersedes`
+ * link refused by the space's own rules (the decision is KEPT and the loser marked, D-25), a record of the
+ * pair that is gone, a pair of edges that no edge can join. The review tab says each in the reviewer's
+ * language from its code; the server's `detail` is a disclosure, never the toast.
  *
- * Shown to the reviewer verbatim, not through a translation key. There is one such sentence, the server
- * owns its wording, and a key here would be a second place for it to be wrong.
+ * `note` is the notes' sentences in one string, kept for a client older than `notes`. It used to be the one
+ * server sentence the card toasted verbatim, which is how a German reviewer was told in English.
+ *
+ * A failed resolve carries a `code` too: `409 resolvedOtherwise` when the finding is already being resolved,
+ * or was resolved, with a different choice (nothing was written by the refused request), and a `503` with
+ * `written: {edge, markedRecord, closed}` when the store failed part-way, which a retry of the same choice
+ * finishes without a second edge.
  */
 export interface ResolveResult {
   status: string;
@@ -28,6 +32,7 @@ export interface ResolveResult {
   supersededId?: string;
   markedRecord?: boolean;
   edge?: { id: string; from: string; to: string; label: string };
+  notes?: ContradictionResolveNote[];
   note?: string;
 }
 
@@ -64,8 +69,8 @@ export class ContradictionsApi {
   }
 
   /**
-   * The reviewer picked a winner: the other record is marked superseded, and for an entity pair the server
-   * draws the `supersedes` edge.
+   * The reviewer picked a winner: the other record is marked superseded, and the server draws the
+   * `supersedes` edge when the space's rules let it (`notes` says when they did not).
    *
    * Separate from `resolveContradiction` on purpose. The two calls hit one endpoint, but they are different
    * decisions — this one names a loser and can change the graph, and folding it into a `resolution` argument

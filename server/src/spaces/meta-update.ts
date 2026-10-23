@@ -35,7 +35,7 @@ import type { SpaceConfig, SpaceMeta, DocExtractionMode, NetworkConfig } from '.
 import { normalizeDocExtractionMode } from '../config/types.js';
 import { getConfig, saveConfig, getDocumentProcessingConfig } from '../config/loader.js';
 import { updateSpace, refuseRemovedDescription, unknownWriteFieldsMode } from './spaces.js';
-import { ensureTtlIndex } from '../brain/ttl.js';
+import { ensureTtlIndexes } from './space-indexes.js';
 import { proposedMetaFields } from '../sync/meta-round-merge.js';
 import { membersBehindNewKeys, type MemberSkew } from '../sync/meta-skew.js';
 import { visibleNetworks } from '../auth/network-rights.js';
@@ -485,7 +485,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // `hasRecordTtl` gates the write so a CLEAR is applied rather than skipped as if the field were absent.
   if (plan.hasRecordTtl) {
     updateSpace(id, { recordTtlDays: plan.recordTtlDays });
-    if (plan.recordTtlDays !== undefined) void ensureTtlIndex(id).catch(err => log.warn(`ensureTtlIndex ${peerText(id)}: ${peerText(err)}`));
+    // The sweep's indexes (the declaration's `SWEEP_INDEXES`): each failed one is said with the index named, and the sweep tries again.
+    if (plan.recordTtlDays !== undefined) void ensureTtlIndexes(id).catch(err => log.warn(`TTL sweep indexes of space '${peerText(id)}': ${peerText(err)}`));
   }
 
   // `M-2`: the conversion marker. Local like the two above and applied here for the same reason plus one of

@@ -17,10 +17,13 @@
  *   one config write (`registerSpaceActSet`). From that write every space is held (writes refused, exchanges held) and the instance is in
  *   maintenance (`maintenance.ts`), and both last until the last act ends.
  * - **The body** ({@link restoreSpace}), per space, inside the runner's bound: the backup is checked again for this space (it can change on
- *   disk), the counter floor is taken after the drain, the space's collections are dropped and created again with every index (on empty
- *   collections, so the unique indexes refuse a duplicate the backup holds at the insert), the backup's records are loaded, the counter is
- *   written to at least the floor, and the vector indexes are reconciled. A broken backup or a duplicate is an INPUT failure: not retried,
- *   the space stays held until an operator abandons (`POST /api/admin/data/restore/abandon`, `spaces/act-set-abandon.ts`). A store outage is retried.
+ *   disk), the counter floor is taken after the drain, the space's collections are dropped and created again with every declared index
+ *   (`spaces/space-indexes.ts`, the TTL ones included: every collection is created now, so the ones not built at boot are built too; on
+ *   empty collections, so the unique indexes refuse a duplicate the backup holds at the insert), the backup's records are loaded, the
+ *   counter is written to at least the floor, every declared UNIQUE index is asserted to stand, and the vector indexes are reconciled. A
+ *   broken backup or a duplicate is an INPUT failure: not retried, the space stays held until an operator abandons
+ *   (`POST /api/admin/data/restore/abandon`, `spaces/act-set-abandon.ts`). A store outage, and a unique index that does not stand (named in
+ *   the failure), are retried.
  * - **The file report** ({@link filesReportOfSpace}) closes the body, still under the hold: a backup carries the database and not the bytes under
  *   `<DATA_ROOT>/files`, so the restored rows describe the backup's moment over the bytes of THIS one. Each space's files are read against its
  *   rows (`files/disk-against-rows.ts`, the classifier the pull shares) and the space's report says which no longer match, by class. It reports
@@ -41,11 +44,11 @@
 import { getDb, reportDatabaseReplaced } from './mongo.js';
 import { backupIsWhole, backupLoader, backupRecords, BackupNotWhole, type BackupCollection } from './restore.js';
 import { backupDirOf } from './backup-location.js';
-import { parseSpaceCollection, spaceCollection } from './space-collection.js';
+import { parseSpaceCollection } from './space-collection.js';
 import { isDuplicateKey } from './write-errors.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
-import { initSpace, ensureEdgeIdentityIndex } from '../spaces/lifecycle.js';
-import { ensureEdgeGuardIndex } from '../spaces/edge-guard-index.js';
+import { initSpace } from '../spaces/lifecycle.js';
+import { assertUniqueIndexesStand } from '../spaces/space-indexes.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 import {
@@ -292,13 +295,10 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
   const target = Math.max(floor, await backupCounterOf(dir, counters, spaceId), await seqFloor(spaceId));
   await bumpSeq(spaceId, target);
 
-  // The edges' unique indexes stand before the hold lifts (`Q-439`, `Q-445`): built on the empty collection above, asserted here.
-  try {
-    await ensureEdgeIdentityIndex(spaceId);
-    await ensureEdgeGuardIndex(spaceId);
-  } catch (err) {
-    throw inputFailure(err, spaceCollection(spaceId, 'edges')) ?? err;
-  }
+  // Every declared unique index stands before the hold lifts (`Q-439`, `Q-445`): built on the empty collections above, asserted
+  // here. One that does not is a plain error naming it - not an input failure: the act stays owed, the space held, and it is
+  // tried again.
+  await assertUniqueIndexesStand(spaceId);
 
   // The vector indexes of each collection that now holds a record (`Q-165`); a failure is reported, never a failed restore.
   let vectorIndexes: 'rebuilding' | 'failed';
@@ -312,6 +312,8 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
 
   // The files against the restored rows: last, so nothing after it can fail the body (a retry drops and loads the space again).
   const files = await filesReportOfSpace(ctx, spaceId);
+  // `edgeIndexes: { failed: [] }` says every declared unique index stood on the restored space: one that did not failed the act
+  // above, so a completed restore never names one. Kept under its name for the callers that read it.
   return { report: { edgeIndexes: { failed: [] }, vectorIndexes, files } };
 }
 

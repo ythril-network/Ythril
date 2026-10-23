@@ -90,16 +90,23 @@ describe('every build reads the declaration', () => {
     assert.doesNotMatch(body, /\bpartialFilterExpression\b/, 'ensureEdgeGuardIndex spells the partial filter itself');
   });
 
-  it('initSpace and the ensureQueryIndexes pass both build the index through ensureEdgeGuardIndex', () => {
-    const life = FILES.find(f => f.file === 'server/src/spaces/lifecycle.ts');
-    const ensure = FILES.find(f => f.file === 'server/src/spaces/ensure-query-indexes.ts');
-    assert.ok(life && ensure, 'lifecycle.ts or ensure-query-indexes.ts is gone: re-point this gate');
-    const sites = [
-      ['initSpace', bodyOf(life.src, 'initSpace', 'initSpace')],
-      ['ensureQueryIndexes', bodyOf(ensure.src, 'ensureQueryIndexes', 'ensureQueryIndexes')],
-    ];
-    const missing = sites.filter(([, body]) => !/\bensureEdgeGuardIndex\(/.test(body)).map(([name]) => name);
-    assert.deepEqual(missing, [], 'these build sites do not call ensureEdgeGuardIndex, so the index is missing from the space they build');
+  // Restated by Q-445 (bundle-101): this read `initSpace` and `ensureQueryIndexes` for a call each, which held only while every
+  // build site named its builders by hand. `initSpace`, the background pass and the restore now all run the ONE per-space
+  // declaration (`spaces/space-indexes.ts`), so the rule is that the declaration holds the guard with the options of
+  // `EDGE_GUARD_INDEXES` (not a second spelling of them) and builds it through `ensureEdgeGuardIndex`, the builder that thins
+  // duplicate markers. That each of the three runs the declaration is the -db suites' (`every-declared-space-index-stands-after-a-restore-db`,
+  // `a-failing-space-index-is-contained-and-named-db`).
+  it('the per-space declaration holds the guard with the declared options and builds it through ensureEdgeGuardIndex', async () => {
+    const { loadSpaceIndexDeclaration } = await import('./_space-index-declaration.mjs');
+    const d = await loadSpaceIndexDeclaration();
+    assert.ok(!d.missing, d.missing);
+    const guard = d.entries.filter(e => e.suffix === 'edges' && Object.keys(e.raw.keys).join() === MARKER);
+    assert.equal(guard.length, 1, `the per-space declaration holds ${guard.length} entries keyed on ${MARKER}`);
+    assert.deepEqual({ keys: guard[0].raw.keys, options: guard[0].raw.options }, { keys: declared[0].keys, options: declared[0].options },
+      'the per-space declaration spells the guard index differently from EDGE_GUARD_INDEXES');
+    const home = FILES.find(f => f.file === 'server/src/spaces/space-indexes.ts');
+    assert.ok(home && /\bensureEdgeGuardIndex\b/.test(home.src),
+      'spaces/space-indexes.ts does not build the guard through ensureEdgeGuardIndex, so a duplicate marker fails the build instead of being thinned');
   });
 
   it('no createIndex anywhere in server/src names the marker, and no partial filter on it is written outside the declaration', () => {

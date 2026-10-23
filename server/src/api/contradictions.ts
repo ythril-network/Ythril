@@ -14,10 +14,12 @@ import { findWhereTokenMay } from '../auth/find-where-token-may.js';
  *
  * Resolution is also different. Duplicates merge; contradictions do not — two records that disagree are
  * both real, and which one is wrong is a judgement call. So `resolve` records HOW it was settled
- * (`edited` — someone corrected a record; `linked` — a contradicts/supersedes edge was drawn instead) and
- * leaves the records themselves to the normal edit paths.
+ * (`edited` — someone corrected a record; `linked` — a contradicts/supersedes edge was drawn instead;
+ * `superseded` — the reviewer kept one side, see the resolve route) and leaves the records themselves to the
+ * normal edit paths.
  */
 import { Router } from 'express';
+import type express from 'express';
 import { requireAuth, denyReadOnly, requireAuthMfa } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
@@ -25,15 +27,21 @@ import { pairContentHash } from '../brain/dupe-scanner.js';
 import { scanSpace, SCAN_STEP } from '../brain/contradiction-scanner.js';
 import { scanSpacesInRequest } from '../brain/scan-spaces-in-request.js';
 import { nliConfigured } from '../brain/nli-client.js';
-import { upsertEdge } from '../brain/edges.js';
+import { upsertEdge, EdgeSchemaViolation } from '../brain/edges.js';
 import { retireRecord, canBeRetired } from '../brain/retire-record.js';
+import { RECORD_SUPERSEDED_FIELD } from '../brain/record-flag.js';
+import { WriteConflict } from '../brain/write-plan/types.js';
+import { COLLECTION } from '../brain/embed-record.js';
+import { readStoredById } from '../db/read-by-id.js';
+import { notFlaggedIfFile } from '../files/live-file-row.js';
+import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import { isRefKind } from '../config/types-knowledge.js';
 import { webhookToken } from './brain/_shared.js';
-import type { ContradictionCandidateDoc } from '../config/types.js';
+import type { ContradictionCandidateDoc, ContradictionChoice, ContradictionResolveNote } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { pageMemberList } from '../brain/list-page.js';
 import { defaultBudgetChars } from '../brain/result-budget.js';
-import { sendCaughtFailure } from './send-failure.js';
+import { sendCaughtFailure, sendStoreFailure } from './send-failure.js';
 
 export const contradictionsRouter = Router();
 
@@ -78,6 +86,8 @@ function toRecord(c: ContradictionCandidateDoc) {
     // but nobody reading the Review tab is reading the audit log.
     ...(c.resolvedBy ? { resolvedBy: c.resolvedBy } : {}),
     ...(c.supersededId ? { supersededId: c.supersededId } : {}),
+    // What the resolve could not do as asked (`Q-442`): a reviewer reading the resolved list later sees the refused link too.
+    ...(c.notes?.length ? { notes: c.notes } : {}),
     detectedAt: c.detectedAt,
     updatedAt: c.updatedAt,
   };
@@ -178,12 +188,31 @@ contradictionsRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadO
 // The reviewer's most common actual decision is "this one is right, that one is stale", and neither `edited`
 // nor `linked` expresses it: `edited` says a record was corrected (it was not), `linked` says the reviewer
 // drew an edge by hand somewhere else. So `superseded` records the judgement AND acts on it — naming the
-// loser on the finding, and, for an entity pair, drawing the `supersedes` edge the reviewer would otherwise
-// have to draw themselves.
+// loser on the finding, marking the loser itself, and drawing the `supersedes` edge the reviewer would
+// otherwise have to draw themselves.
 //
 // **Nothing is deleted or absorbed.** That is the line between this and a duplicate merge: a duplicate merge
 // is lossless because the two records are the same thing, and a contradiction is not — the loser is a real
 // record that was true, or was believed, and its history is the point.
+//
+// ── The judgement is kept, and a resolve converges (`Q-442`) ─────────────────────────────────────────────────
+//
+// The steps are: read the pair, CLAIM the candidate for this choice, draw the edge, mark the loser, close.
+//
+//  - **A link the space's rules refuse does not undo the judgement** (D-25, the owner's decision). A functional
+//    `supersedes` that already has a target, or an endpoint rule the pair does not meet, is the edge writer's
+//    `EdgeSchemaViolation`: the loser is still marked, the candidate still closed, and the answer says
+//    `linkRefused`. It used to throw out of the route as a `500` with the loser already marked.
+//  - **A record of the pair that is gone skips the link and says which** (`winnerGone`, `loserGone`), rather
+//    than reaching the edge writer, which refuses a dangling end.
+//  - **The claim is written before the first effect**, under a status guard: a second resolve with a DIFFERENT
+//    choice — a retry that changed its mind, a second reviewer — is refused `409 resolvedOtherwise` before it
+//    writes anything, so the space can never hold two `supersedes` edges pointing opposite ways. The SAME
+//    choice converges: the edge is keyed on (from, to, label), and an already-marked loser is not re-marked
+//    (re-marking moves its `seq` and `updatedAt` for a write that changed nothing).
+//  - **A store failure part-way is a `503` that says what was written** (`written: {edge, markedRecord, closed}`),
+//    so the caller knows the retry is safe and what it will finish. Nothing else is caught: a refusal is a
+//    refusal and a fault is a fault.
 contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const id = req.params['id'] as string;
@@ -203,102 +232,181 @@ contradictionsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyRead
       res.status(400).json({ error: "`winner` applies only to resolution 'superseded'" });
       return;
     }
+    const choice: ContradictionChoice = resolution === 'superseded'
+      ? { resolution, winner: body.winner as 'a' | 'b' } : { resolution };
 
     const found = await findWhereTokenMay<ContradictionCandidateDoc>(req.authToken?.rights, 'dataQuality', 'write', 'contradictionCandidates', id);
-    if (found) {
-      const { doc, spaceId } = found;
-      const coll = collectionFor(spaceId);
+    if (!found) { res.status(404).json({ error: 'Contradiction candidate not found' }); return; }
+    await resolveCandidate(req, res, found.doc, found.spaceId, choice);
+  } catch (err) {
+    sendCaughtFailure(res, RESOLVE_WHERE, err);
+  }
+});
 
-      const set: Partial<ContradictionCandidateDoc> = {
-        status: 'resolved', resolution, updatedAt: new Date().toISOString(),
-      };
-      // The token's NAME, never the token. Absent when the token is unnamed rather than stored as ''.
-      if (req.authToken?.name) set.resolvedBy = req.authToken.name;
+const RESOLVE_WHERE = 'POST /api/contradictions/:id/resolve';
 
-      let edge: { id: string; from: string; to: string; label: string } | null = null;
-      // Whether the LOSER itself was marked. Reported rather than assumed: a reviewer whose decision was
-      // recorded on the queue and nowhere else is the defect this endpoint just stopped having, and a
-      // response that claimed the mark unconditionally would hide its return.
-      let markedRecord = false;
-      let edgeSkipped: string | undefined;
+/** What a resolve has written so far: the `503` for a failure part-way carries it, so a caller knows what its retry finishes. */
+interface Written { edge: boolean; markedRecord: boolean; closed: boolean }
 
-      if (resolution === 'superseded') {
-        const winnerId = body.winner === 'a' ? doc.aId : doc.bId;
-        const loserId = body.winner === 'a' ? doc.bId : doc.aId;
-        set.supersededId = loserId;
+/**
+ * The candidates this choice may claim: one nobody has claimed, or one already claimed — resolving or resolved — by the SAME
+ * choice. A resolved candidate from before the claim existed carries no `resolving`, so its choice is read from what it
+ * recorded (`resolution`, and the loser as `supersededId`).
+ */
+function claimableBy(id: string, choice: ContradictionChoice, loserId: string | undefined): Record<string, unknown> {
+  return {
+    _id: id,
+    $or: [
+      { status: { $ne: 'resolved' }, resolving: { $exists: false } },
+      sameClaim(choice),
+      { status: 'resolved', resolution: choice.resolution, supersededId: loserId ?? null },
+    ],
+  };
+}
 
-        /*
-         * THE MARK GOES ON THE RECORD, and until `Q-35` it did not go anywhere a reader could see.
-         *
-         * `supersededId` above names the loser on the CANDIDATE document, which is the review queue's own
-         * bookkeeping — no retrieval path reads it. So a reviewer could settle a contradiction and change
-         * nothing at all about what the next recall answered: both claims came back, ranked together, with
-         * nothing to choose between them. Measured on a live instance 2026-09-19.
-         *
-         * The loser keeps its vector and keeps ranking — see `RECORD_SUPERSEDED_FIELD`. Hiding it would
-         * answer *"where does Ada work?"* by making *"where did Ada work?"* unanswerable.
-         */
-        if (canBeRetired(doc.type)) {
-          markedRecord = await retireRecord(spaceId, doc.type, loserId, webhookToken(req));
-        }
+/** The candidate's claim is this choice. `null` matches an absent winner, which is how `edited` and `linked` are stored. */
+const sameClaim = (choice: ContradictionChoice) => ({ 'resolving.resolution': choice.resolution, 'resolving.winner': choice.winner ?? null });
 
-        /*
-         * from → to reads "winner supersedes loser". `upsertEdge` is keyed on (from, to, label), so
-         * resolving the same pair twice lands on the same edge instead of accumulating duplicates.
-         *
-         * DRAWN FOR EVERY PAIR KIND SINCE 5.0, and this branch used to refuse for anything but an entity
-         * pair, on the ground that *"an edge in Ythril connects ENTITIES"* and a fact→fact edge would be
-         * the accepted-dead-edge an integrator reported. That was true when it was written and stopped
-         * being true when the walk started following an edge to a fact, chrono entry or file — which is
-         * the whole of what makes the edge half of this worth drawing.
-         *
-         * Re-measured before the refusal was removed, with a control: the same probe with the edge write
-         * failing reached 1 node from the newer fact, and with the edge stored reached 2. The earlier
-         * measurement that said otherwise started its walk at the ENTITY both facts hang off, where each
-         * is reached by a LINK — and a linked record is a leaf that does not expand, so no edge between
-         * them could ever have appeared. One mechanism checked, both concluded about.
-         */
-        /*
-         * WHICH kinds can be an endpoint is `REF_KINDS`, read rather than restated. It holds `entity`,
-         * `fact`, `chrono` and `file` — an EDGE is not among them, and cannot be: an edge between two edges
-         * has no meaning the traversal could follow. The scanner's defaults are facts, entities and chrono
-         * entries, but `contradictions.types` is configurable, so an edge pair reaches here and a
-         * hard-coded `doc.type as RefKind` would hand `upsertEdge` a kind it refuses — a 500 for a request
-         * that is perfectly legitimate.
-         *
-         * Omitting the kinds means both ends are entities, which is what every pre-5.0 caller meant.
-         */
+/** Refuse a resolve whose choice differs from the one the candidate is already resolving or resolved by: `409 resolvedOtherwise`. */
+async function answerResolvedOtherwise(res: express.Response, spaceId: string, id: string, written?: Written): Promise<void> {
+  const now = await collectionFor(spaceId).findOne(asFilter<ContradictionCandidateDoc>({ _id: id }));
+  if (!now) { res.status(404).json({ error: 'Contradiction candidate not found' }); return; }
+  const taken = now.resolving ?? { resolution: now.resolution, ...(now.supersededId ? { winner: now.supersededId === now.aId ? 'b' : 'a' } : {}) };
+  res.status(409).json({
+    error: `this contradiction is already ${now.resolving ? 'being resolved' : 'resolved'} otherwise (as '${taken.resolution}'`
+      + `${taken.winner ? `, keeping ${taken.winner}` : ''}); nothing was written by this request`,
+    code: 'resolvedOtherwise', retryable: false, resolution: taken.resolution,
+    ...(taken.winner ? { winner: taken.winner } : {}),
+    ...(written ? { written } : {}),
+  });
+}
+
+/**
+ * Answer a failure on the store's side part-way through a resolve: the store's own answer (status, `Retry-After`, body) with
+ * `written` added. A `WriteConflict` — another write kept moving a record — is the same condition for this caller: nothing it
+ * did was wrong and a retry converges. Anything else is not answered here (`false`), and reaches `sendCaughtFailure`.
+ */
+function sendPartWayFailure(res: express.Response, err: unknown, written: Written): boolean {
+  const answer: StoreFailureAnswer | null = storeFailureAnswer(err, RESOLVE_WHERE)
+    ?? (err instanceof WriteConflict ? { status: 503, retryAfterSeconds: 5, body: { error: err.message, retryable: true } } : null);
+  if (!answer) return false;
+  sendStoreFailure(res, answer, { ...answer.body, written });
+  return true;
+}
+
+/** The refused link, as a note: the label it carried and the rules that refused it, in the validator's words. */
+function linkRefusedNote(err: EdgeSchemaViolation): ContradictionResolveNote {
+  const rules = [...new Set(err.check.introduced.concat(err.check.all).map(v => v.field))];
+  return {
+    code: 'linkRefused', label: SUPERSEDES_LABEL, rule: rules.join(', '),
+    detail: `no edge drawn: the space's edge schema refused '${SUPERSEDES_LABEL}' (${err.check.message}); the decision was kept and the record marked`,
+  };
+}
+
+async function resolveCandidate(
+  req: express.Request, res: express.Response, doc: ContradictionCandidateDoc, spaceId: string, choice: ContradictionChoice,
+): Promise<void> {
+  const coll = collectionFor(spaceId);
+  const superseding = choice.resolution === 'superseded';
+  const winnerId = choice.winner === 'a' ? doc.aId : doc.bId;
+  const loserId = choice.winner === 'a' ? doc.bId : doc.aId;
+
+  // 1. The pair as stored now: whether each end exists, and whether the loser already carries the mark. A soft-deleted
+  //    file's row is gone for this question, as it is for the edge writer's own existence check.
+  const stored = superseding
+    ? await readStoredById<{ _id: string; superseded?: boolean }>(spaceCollection(spaceId, COLLECTION[doc.type]),
+      [winnerId, loserId], { [RECORD_SUPERSEDED_FIELD]: 1 }, { filter: notFlaggedIfFile(doc.type) })
+    : new Map<string, { _id: string; superseded?: boolean }>();
+
+  // 2. The claim, before the first effect: a different choice is refused here, having written nothing.
+  const claimed = await coll.updateOne(
+    asFilter<ContradictionCandidateDoc>(claimableBy(doc._id, choice, superseding ? loserId : undefined)),
+    asUpdate<ContradictionCandidateDoc>({ $set: { resolving: choice, updatedAt: new Date().toISOString() } }),
+  );
+  if (claimed.matchedCount === 0) { await answerResolvedOtherwise(res, spaceId, doc._id); return; }
+
+  const written: Written = { edge: false, markedRecord: false, closed: false };
+  const notes: ContradictionResolveNote[] = [];
+  let edge: { id: string; from: string; to: string; label: string } | null = null;
+  try {
+    if (superseding) {
+      const winner = stored.get(winnerId);
+      const loser = stored.get(loserId);
+      if (!winner) notes.push({ code: 'winnerGone', detail: `no edge drawn: the record kept, '${winnerId}', no longer exists` });
+      if (!loser) notes.push({ code: 'loserGone', detail: `nothing marked and no edge drawn: the record judged stale, '${loserId}', no longer exists` });
+
+      /*
+       * 3. The edge. from → to reads "winner supersedes loser", and `upsertEdge` is keyed on (from, to, label), so
+       * resolving the same choice again lands on the same edge.
+       *
+       * DRAWN FOR EVERY PAIR KIND SINCE 5.0, because the walk follows an edge to a fact, chrono entry or file — which is
+       * the whole of what makes the edge half of this worth drawing. WHICH kinds can be an endpoint is `REF_KINDS`, read
+       * rather than restated: an EDGE is not among them, and cannot be. The scanner's defaults are facts, entities and
+       * chrono entries, but `contradictions.types` is configurable, so an edge pair reaches here; it keeps the judgement
+       * and says why there is no link (`edgePairUnlinkable`). Omitting the kinds means both ends are entities.
+       *
+       * Only the writer's own refusal is caught: a store failure, a lost race (`WriteConflict`) or a held space is not a
+       * refusal, and taking one for `linkRefused` would close the candidate on a link that could have been drawn.
+       */
+      if (winner && loser) {
         if (isRefKind(doc.type)) {
           const kind = doc.type === 'entity' ? undefined : doc.type;
-          const e = await upsertEdge(spaceId, winnerId, loserId, SUPERSEDES_LABEL,
-            undefined, undefined, undefined, undefined, undefined, webhookToken(req),
-            undefined, { fromKind: kind, toKind: kind });
-          edge = { id: e._id, from: e.from, to: e.to, label: e.label };
+          try {
+            const e = await upsertEdge(spaceId, winnerId, loserId, SUPERSEDES_LABEL,
+              undefined, undefined, undefined, undefined, undefined, webhookToken(req),
+              undefined, { fromKind: kind, toKind: kind });
+            edge = { id: e._id, from: e.from, to: e.to, label: e.label };
+            written.edge = true;
+          } catch (err) {
+            if (!(err instanceof EdgeSchemaViolation)) throw err;
+            notes.push(linkRefusedNote(err));
+          }
         } else {
-          // The judgement is kept — it is the reviewer's and it is worth having — and the response SAYS the
-          // link was not drawn. Silently recording a resolution the caller believes changed the graph is
-          // the failure this endpoint has always been written to avoid.
-          edgeSkipped = `no edge drawn: an edge cannot be the endpoint of an edge, and this pair is of type '${doc.type}'`;
+          notes.push({ code: 'edgePairUnlinkable', detail: `no edge drawn: an edge cannot be the endpoint of an edge, and this pair is of type '${doc.type}'` });
         }
       }
 
-      await coll.updateOne(asFilter<ContradictionCandidateDoc>({ _id: id }),
-        asUpdate<ContradictionCandidateDoc>({ $set: set }));
-      res.json({
-        status: 'resolved', resolution,
-        ...(set.resolvedBy ? { resolvedBy: set.resolvedBy } : {}),
-        ...(set.supersededId ? { supersededId: set.supersededId } : {}),
-        ...(edge ? { edge } : {}),
-        ...(resolution === 'superseded' ? { markedRecord } : {}),
-        ...(edgeSkipped ? { note: edgeSkipped } : {}),
-      });
-      return;
+      /*
+       * 4. THE MARK GOES ON THE RECORD (`Q-35`). `supersededId` names the loser on the CANDIDATE, which no retrieval path
+       * reads, so a resolve that stopped there changed nothing the next recall answered. The loser keeps its vector and
+       * keeps ranking — see `RECORD_SUPERSEDED_FIELD`. A loser already marked is not written again.
+       */
+      if (loser && canBeRetired(doc.type)) {
+        written.markedRecord = loser.superseded === true || await retireRecord(spaceId, doc.type, loserId, webhookToken(req));
+      }
     }
-    res.status(404).json({ error: 'Contradiction candidate not found' });
+
+    // 5. Close, under the claim: a candidate whose claim was taken over since is not closed by this request.
+    const set: Partial<ContradictionCandidateDoc> = {
+      status: 'resolved', resolution: choice.resolution, updatedAt: new Date().toISOString(),
+      ...(superseding ? { supersededId: loserId } : {}),
+      ...(notes.length > 0 ? { notes } : {}),
+    };
+    // The token's NAME, never the token. Absent when the token is unnamed rather than stored as ''.
+    if (req.authToken?.name) set.resolvedBy = req.authToken.name;
+    const closed = await coll.updateOne(
+      asFilter<ContradictionCandidateDoc>({ _id: doc._id, ...sameClaim(choice) }),
+      asUpdate<ContradictionCandidateDoc>({ $set: set, $unset: { resolving: '', ...(notes.length > 0 ? {} : { notes: '' }) } }),
+    );
+    if (closed.matchedCount === 0) { await answerResolvedOtherwise(res, spaceId, doc._id, written); return; }
+    written.closed = true;
+
+    res.json({
+      status: 'resolved', resolution: choice.resolution,
+      ...(set.resolvedBy ? { resolvedBy: set.resolvedBy } : {}),
+      ...(set.supersededId ? { supersededId: set.supersededId } : {}),
+      ...(edge ? { edge } : {}),
+      // Whether the LOSER itself carries the mark. Reported rather than assumed: a decision recorded on the queue and
+      // nowhere else is the defect `Q-35` ended, and a response that claimed the mark unconditionally would hide its return.
+      ...(superseding ? { markedRecord: written.markedRecord } : {}),
+      notes,
+      // The notes' sentences as one string, for a client older than `notes`.
+      ...(notes.length > 0 ? { note: notes.map(n => n.detail).join('; ') } : {}),
+    });
   } catch (err) {
-    sendCaughtFailure(res, `POST /api/contradictions/:id/resolve`, err);
+    if (!sendPartWayFailure(res, err, written)) throw err;
   }
-});
+}
 
 // POST /api/contradictions/scan?space=<id> — run the sweep now instead of waiting for the schedule.
 // Admin + MFA, like the duplicate scan: it is a model-spending operation over a whole space.

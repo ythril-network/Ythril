@@ -273,9 +273,15 @@ describe('the feature is reachable and wired', () => {
     assert.doesNotMatch(red, /recordExpiry\(space, 'chrono', r\.type, Date\.now\(\)/);
   });
 
-  it('the content-expiry sweep query is indexed', () => {
-    const ttl = readFileSync(join(ROOT, 'server/src/brain/ttl.ts'), 'utf8');
-    assert.match(ttl, /createIndex\(\{ _contentExpireAt: 1 \}/);
+  // Restated by Q-445 (bundle-101): this read `brain/ttl.ts` for a hand-written `createIndex({ _contentExpireAt: 1 }`, which the
+  // gate `every-per-space-index-build-reads-the-declaration` now forbids. The rule is that the per-space declaration holds the
+  // index on chrono as one of the TTL sweep's indexes, so the sweep, a restore and the background pass build it.
+  it('the content-expiry sweep query is indexed', async () => {
+    const { requireSpaceIndexDeclaration } = await import('./_space-index-declaration.mjs');
+    const declared = await requireSpaceIndexDeclaration(assert);
+    const e = declared.find(d => d.suffix === 'chrono' && JSON.stringify(d.raw.keys) === JSON.stringify({ _contentExpireAt: 1 }));
+    assert.ok(e, 'no index on chrono serves the content-expiry sweep query');
+    assert.equal(e.raw.sweep, true, 'the content-expiry index is not one of the TTL sweep\'s indexes, so the sweep never retries it');
   });
 
   it('the retired per-space map is gone, not merely unused', () => {

@@ -775,7 +775,7 @@ identity another edge already holds answers `409 edge_identity_taken`. What this
 space stores the second edge (`warn` reports it), and an edge that arrives from a sync peer, a merge or an import is
 stored and reported, never refused — so a subject can still hold two, and `validate-schema` lists them. The
 guarantee is in place from a new space's set-up, and for a space that existed before the upgrade once the background
-index pass has reached it; a space where it could not be built says so (the `Edge indexes` step in
+index pass has reached it; a space where it could not be built says so (`index _functionalGuard_1 on edges` under the `Space indexes` or `query indexes` step in
 [Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and is tried again by the next index pass,
 and until then a race there behaves as it did before.
 

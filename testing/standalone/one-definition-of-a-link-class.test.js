@@ -245,8 +245,8 @@ describe('no reader re-derives a link class', () => {
     'server/src/brain/merge.ts':
       'A RE-KEY. When two entities become one, every link naming the absorbed id has to be rewritten to '
       + 'name the survivor — an update over rows, not a question about a record.',
-    'server/src/spaces/lifecycle.ts':
-      'CREATION. It makes the collection and its indexes when a space is made; there is nothing to read.',
+    // `spaces/lifecycle.ts` (CREATION) came off this list with Q-445 (bundle-101): it no longer opens the links collection, whose
+    // indexes are built from the per-space declaration (`spaces/space-indexes.ts`), which names the collection by its part only.
   }));
 
   it('nobody outside the module opens the LINKS collection to ask what a record links to', () => {

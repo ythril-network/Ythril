@@ -2114,6 +2114,32 @@ export interface SpaceCounterDoc {
  * it is re-examined later. Writing an "unjudged" row would be worse than useless: it would look like a
  * reviewed-and-clean pair to every query that filters on status.
  */
+/** How a reviewer settles a contradiction: the resolution, and for `superseded` the side kept. */
+export interface ContradictionChoice {
+  resolution: 'edited' | 'linked' | 'superseded';
+  winner?: 'a' | 'b';
+}
+
+/**
+ * One outcome of a contradiction resolve that a reviewer must not be left to assume (`Q-442`). Flat, so a client renders
+ * it in its own words by `code`, with `label` and `rule` as placeholders, and shows `detail`, the server's sentence, only
+ * as a disclosure.
+ *
+ *   `linkRefused`         the space's own rules refused the `supersedes` edge (a functional label, an endpoint rule); the
+ *                         judgement is kept anyway (D-25): the loser is marked and the candidate closed
+ *   `winnerGone`          the record the reviewer kept no longer exists, so no edge was drawn from it
+ *   `loserGone`           the record the reviewer judged stale no longer exists: nothing to mark and no edge
+ *   `edgePairUnlinkable`  the pair are edges, and an edge cannot be the endpoint of an edge
+ */
+export interface ContradictionResolveNote {
+  code: 'linkRefused' | 'winnerGone' | 'loserGone' | 'edgePairUnlinkable';
+  detail: string;
+  /** The edge label the refused link carried. */
+  label?: string;
+  /** The rule(s) of the space's edge schema that refused it, as the validator names them (`functional`, `fromType`, ...). */
+  rule?: string;
+}
+
 export interface ContradictionCandidateDoc {
   _id: string;            // canonical `${aId}:${bId}` with aId < bId
   spaceId: string;
@@ -2145,7 +2171,8 @@ export interface ContradictionCandidateDoc {
    *   `edited`      a record was corrected.
    *   `linked`      a contradicts/supersedes edge was drawn by hand instead of changing either record.
    *   `superseded`  the reviewer picked a winner. Distinct from `linked` because the SYSTEM acted on it:
-   *                 `supersededId` names the loser, and for an entity pair a `supersedes` edge was drawn.
+   *                 `supersededId` names the loser, and a `supersedes` edge is drawn when the space's rules let it
+   *                 be (`notes` says when they did not).
    *                 Not a merge — neither record is deleted or absorbed; both are still real, and one is now
    *                 marked as having been overtaken by the other.
    */
@@ -2160,6 +2187,14 @@ export interface ContradictionCandidateDoc {
    * too, but a reviewer reading the Review tab is not reading the audit log.
    */
   resolvedBy?: string;
+  /**
+   * The choice a resolve in flight has taken (`Q-442`), written before its first effect and removed when it closes the
+   * candidate. It is what makes a second resolve with a DIFFERENT choice a `409` rather than a second, opposite
+   * `supersedes` edge, and what a retry of the same choice after a failure part-way converges on.
+   */
+  resolving?: ContradictionChoice;
+  /** What the resolve that closed this candidate could not do as asked, by code: kept, so the resolved list says it too. */
+  notes?: ContradictionResolveNote[];
   /** Same sticky-dismissal contract as duplicates — see `decideDismissed`. */
   dismissedContentHash?: string;
   detectedAt: string;

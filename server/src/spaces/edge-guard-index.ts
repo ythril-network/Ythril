@@ -11,9 +11,14 @@
  * they live in the declaration next to the keys and no build site writes them by hand (`LINK_INDEXES` is built as
  * `createIndex(ix.keys, ix.unique ? { unique: true } : {})` at two sites: the keys shared, the options spelled twice).
  *
- * The sites that build it are `initSpace` (a space at boot and at creation), the `ensureQueryIndexes` unit (a space whose
- * collection existed before the index did) and the online restore (which drops every collection and so every index). Each
- * calls {@link ensureEdgeGuardIndex}.
+ * The per-space declaration (`spaces/space-indexes.ts`) holds it with these options and builds it through
+ * {@link ensureEdgeGuardIndex}, so every builder of a space's indexes does: `initSpace` (an edges collection created now - the
+ * build reads every edge, so it is not boot-safe), the background pass (a space whose collection existed before the index did)
+ * and the online restore (which drops every collection and so every index, and then requires every unique index to stand).
+ *
+ * **A restored edge arrives without its marker, by design** (`Q-439`, `sync/arrivals.ts`: the marker is local state, never
+ * restored). So after a restore the guard covers a subject once its edge is rewritten; until then a race under the label is
+ * refused by the planner's write-time count, not by this index.
  *
  * ## A build that fails, and what the caller is told
  *
@@ -26,21 +31,23 @@
  * - **Anything else** (a store that refused the command, one that stopped answering, an option conflict with an index already
  *   there): it propagates. It is not "a duplicate", and treating it as one would answer a failing build as a built index.
  *
- * It never swallows a failure itself: the caller says it ({@link edgeIndexFailure}), because only the caller knows whether the
- * space is initialising (never to be stopped by this) or being restored (whose answer names it).
+ * It never swallows a failure itself: the declaration's policy for it (`report`) says it where a space initialises, the background
+ * pass names it as one of its units, and a restore fails, naming it, and is tried again.
  */
 import type { CreateIndexesOptions } from 'mongodb';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { isDuplicateKeyOnly } from '../db/write-errors.js';
 import { declareStep } from '../util/housekeeping-signals.js';
-import { peerText } from '../util/log.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { guardNamesItsEdge } from '../brain/functional-subject.js';
 import { clearStaleWriteGuard } from '../brain/write-plan/commit.js';
 import type { EdgeDoc } from '../config/types.js';
 
-/** The step a failed edge index build is counted and said under (`ythril_housekeeping_space_failures_total{step}`). */
+/**
+ * The step a build that thinned surplus write guards is counted and said under (`ythril_housekeeping_space_failures_total{step}`).
+ * A build that FAILED is said under the declaration's own step (`Space indexes`) or the background pass's.
+ */
 export const EDGE_INDEX_STEP = declareStep('Edge indexes');
 
 /** An index of the edges collection: its keys and the options it is built with, both read by the one builder. */
@@ -107,16 +114,4 @@ export async function ensureEdgeGuardIndex(spaceId: string): Promise<void> {
       await edges.createIndex(ix.keys, ix.options);
     }
   }
-}
-
-/**
- * Say a failed edge index build, once per window, through the housekeeping reporter; returns the words for a caller that also
- * answers with it (the online restore). Never throws, so it is safe in a `catch`.
- *
- * @param unit which index: `guard index` or `identity index`.
- * @param when when it is tried again, in the line's words.
- */
-export function edgeIndexFailure(spaceId: string, unit: string, err: unknown, when: string): string {
-  reportSpaceFailure(EDGE_INDEX_STEP, spaceId, err, { unit, when });
-  return `${unit}: ${peerText(err)}`;
 }

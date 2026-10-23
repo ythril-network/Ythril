@@ -92,7 +92,7 @@ has the index from its first write. Two things an integrator can see:
 writers.** A space created after the upgrade gets the index when it is set up. An existing edges collection gets it from
 the background index pass after start-up, as the keyset indexes do, because building it reads every edge and start-up
 must not wait on that; until the pass reaches a space, a race there behaves as it did before. A space whose build fails
-is said in the log (the `Edge indexes` step, see
+is said in the log (`index _functionalGuard_1 on edges` under the `Space indexes` or `query indexes` step, see
 [Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and works anyway, with the build tried
 again by the next index pass. Once it
 exists, the second of two concurrent writers under a `functional` label in a `strict` space is refused like a sequential
@@ -104,8 +104,10 @@ one. Four things an integrator can see:
 - **`POST /api/spaces/:id/validate-schema` answers a new key, `staleGuards`**, beside `violations`, which is unchanged.
 - **A relabel onto an identity another edge holds answers `409 edge_identity_taken`** on the in-place path too, where it
   answered `500`.
-- **A restore rebuilds the edge indexes before a space's hold lifts**, and `GET /api/admin/data/restore` reports each space's
-  `edgeIndexes` (a build that fails now fails that space's restore act instead of being reported beside a finished restore).
+- **A restore rebuilds every index of a space before its hold lifts**, the retention sweep's included, and
+  `GET /api/admin/data/restore` reports each space's `edgeIndexes`: `{ "failed": [] }` means every unique index of the space
+  (the edge identity and write guard, the link pair) stood. One that does not fails that space's restore act, naming the
+  index, and the act is retried with the space held, instead of being reported beside a finished restore.
   A puller that predates it keeps its older mode, and still stops at a run of more than `limit` tombstones at one seq until it
   upgrades.
 
@@ -292,7 +294,8 @@ See [Admin API](12a-data-management-api.md#post-apiadmindatarestore) for the who
 
 - **`POST /api/admin/data/restore` answers `202`** `{ restoreId, backupId, spaces, emptied, leftOut }` (it answered `200` with
   the index results once the restore had run). Poll the new `GET /api/admin/data/restore` until `state` is not `running`; the
-  per-space index results (`edgeIndexes`, `vectorIndexes`) are there now. A restore whose backup cannot be read is released with
+  per-space index results (`edgeIndexes`, `vectorIndexes`) are there now; `edgeIndexes: { "failed": [] }` says every unique
+  index of the space stood (one that did not fails the act, retryably). A restore whose backup cannot be read is released with
   `POST /api/admin/data/restore/abandon`.
 - **A restore makes every space equal to the backup.** A space created after the backup is emptied, a backup naming a space this
   instance no longer serves is refused (`400 backup_names_unserved_spaces`) unless `leaveOut` names it, and a broken backup is

@@ -40,6 +40,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import {
   unitAt, queryAxis, startStubEmbedder, createSpaceCollections, insertAll, waitUntilServing,
 } from './_vector-harness.mjs';
+import { routeHandler, viaRest as restDoor, viaMcp as mcpDoor } from '../_shared/route-and-tool-doors.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -68,28 +69,11 @@ const fileRow = (id, deg, extra = {}) => ({
 });
 
 /** The REST route's own handler for `POST <path>`, past rate limit and auth. */
-function restHandler(router, routePath) {
-  const layer = router.stack.find(l => l.route?.path === routePath && l.route.methods.post);
-  assert.ok(layer, `no POST ${routePath} on the search router — re-anchor this test`);
-  return layer.route.stack.at(-1).handle;
-}
+const restHandler = (router, routePath) => routeHandler(router, routePath);
 
-async function viaRest(handler, body) {
-  const req = { method: 'POST', params: {}, query: {}, body, ip: '127.0.0.1', get: () => undefined, headers: {},
-    authToken: { id: 't', name: 'test', rights: ADMIN } };
-  const res = { code: 200, body: undefined, headersSent: false,
-    status(c) { this.code = c; return this; }, setHeader() { return this; },
-    json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } };
-  await handler(req, res);
-  return { status: res.code, body: res.body };
-}
-
-async function viaMcp(name, args) {
-  const out = await callTool({ name, args,
-    caller: { rights: ADMIN, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId: 't', tokenLabel: 't' } });
-  const text = (out.result.content ?? []).map(c => c.text ?? '').join('\n');
-  return { status: out.status, body: out.result.isError ? { error: text } : JSON.parse(text) };
-}
+/** Both doors, driven as admin through the shared drivers. */
+const viaRest = (handler, body) => restDoor(handler, body, { rights: ADMIN });
+const viaMcp = (name, args) => mcpDoor(callTool, name, args, { rights: ADMIN });
 
 const idsOf = (answer) => (answer.body?.results ?? []).map(r => String(r.record?._id ?? r._id));
 

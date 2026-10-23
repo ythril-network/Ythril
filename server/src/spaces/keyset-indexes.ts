@@ -5,11 +5,12 @@
  * ## Why two doors
  *
  * **`initSpace` runs for EVERY space at EVERY boot, before the server listens** (`index.ts`). A compound index built
- * there, on a collection that already holds a million records, is a boot that does not finish — so `initSpace` creates the
- * keyset indexes ONLY for a collection that did not exist yet ({@link createKeysetIndexesFor}), where the build is free,
- * and never creates the bare `{ seq: 1 }` again (it would put back, at every boot, an index the pass below removed).
- * A collection that EXISTS gets its compound from the background pass (`ensureQueryIndexes`, {@link buildKeysetIndex}),
- * after the server is up. Until then a keyset read behaves as it did before (`util/seq-keyset.ts`, the readiness note).
+ * there, on a collection that already holds a million records, is a boot that does not finish — so the per-space declaration
+ * (`spaces/space-indexes.ts`) marks them not boot-safe: `initSpace` builds them ONLY for a collection that did not exist yet,
+ * where the build is free, and never creates the bare `{ seq: 1 }` again (it would put back, at every boot, an index the pass
+ * below removed). A collection that EXISTS gets its compound from the background pass (`ensureQueryIndexes`). Both build it
+ * through {@link buildKeysetIndex}, which tells the readers it is there. Until then a keyset read behaves as it did before
+ * (`util/seq-keyset.ts`, the readiness note).
  *
  * ## The order, in one unit
  *
@@ -20,28 +21,9 @@
  * rollback is safe and leaves the compound behind, harmless.
  */
 import { col } from '../db/mongo.js';
-import { spaceCollection, type SpacePart } from '../db/space-collection.js';
+import { spaceCollection } from '../db/space-collection.js';
 import { dropIndexesIfPresent, indexNamesOf } from '../db/index-names.js';
-import { SEQ_KEYSET_INDEXES, bareKeysOf, indexNameOf, noteKeysetIndexes, type SeqKeysetIndex } from '../util/seq-keyset.js';
-
-/**
- * Create every keyset index of the collections a space has JUST created. Called by `initSpace` with the parts whose
- * collection did not exist before this boot: they are empty, so the build is instant and the compound is there from the
- * first write. A new collection has no bare index to replace, and none is created.
- */
-export async function createKeysetIndexesFor(spaceId: string, isNew: (part: SpacePart) => boolean): Promise<void> {
-  const touched = new Set<SpacePart>();
-  for (const ix of SEQ_KEYSET_INDEXES) {
-    if (!isNew(ix.part)) continue;
-    await col(spaceCollection(spaceId, ix.part)).createIndex({ ...ix.keys });
-    touched.add(ix.part);
-  }
-  // A reader waits for the compound, and these collections have it: say so, rather than let their first read look.
-  for (const part of touched) {
-    const collName = spaceCollection(spaceId, part);
-    noteKeysetIndexes(collName, await indexNamesOf(collName));
-  }
-}
+import { bareKeysOf, indexNameOf, noteKeysetIndexes, type SeqKeysetIndex } from '../util/seq-keyset.js';
 
 /** What one `buildKeysetIndex` did, for the pass's log. */
 export interface KeysetBuild { built: boolean; droppedBare: boolean }

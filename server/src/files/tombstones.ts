@@ -175,18 +175,17 @@ export const FILE_TOMBSTONE_INDEXES = [
 ] as const;
 
 /**
- * Create {@link FILE_TOMBSTONE_INDEXES} for one space. Idempotent, so `initSpace` runs it for a new space and the boot
- * pass (`ensureQueryIndexes`) for every space initialisation does not revisit — here, because the lifecycle is what
- * knows which questions it asks the collection (the marker's own are `move-markers.ts`'s, and the indexes serve both).
+ * Drop the file tombstone indexes a later release replaced ({@link REPLACED_FILE_TOMBSTONE_INDEXES}). {@link FILE_TOMBSTONE_INDEXES}
+ * themselves are built from the per-space declaration (`spaces/space-indexes.ts`), by `initSpace` and the background pass; this is
+ * the step beside them that is not a build, run by the same two. Local state, so there is nothing to migrate but the index: the
+ * one a question no longer asks is maintained on every pending write for nothing. Dropped only when listed
+ * (`dropIndexesIfPresent`, the one way a replaced index goes).
  */
-export async function ensureFileTombstoneIndexes(spaceId: string): Promise<void> {
-  for (const ix of FILE_TOMBSTONE_INDEXES) await tombstonesOf(spaceId).createIndex(ix.keys, ix.options);
-  // Local state, so there is nothing to migrate but the index: the one a question no longer asks is maintained on every
-  // pending write for nothing. Dropped only when listed (`dropIndexesIfPresent`, the one way a replaced index goes).
+export async function dropReplacedFileTombstoneIndexes(spaceId: string): Promise<void> {
   await dropFileTombstoneIndexesIfPresent(spaceId, REPLACED_FILE_TOMBSTONE_INDEXES);
 }
 
-/** The indexes a later release replaced, by name: dropped by {@link ensureFileTombstoneIndexes}. */
+/** The indexes a later release replaced, by name: dropped by {@link dropReplacedFileTombstoneIndexes}. */
 const REPLACED_FILE_TOMBSTONE_INDEXES = ['pending_1_deletedAt_1'] as const;
 
 /**

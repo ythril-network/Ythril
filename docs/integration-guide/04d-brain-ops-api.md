@@ -592,8 +592,8 @@ read them from `data` instead.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `collection` | ✅ | One of: `facts`, `entities`, `edges`, `chrono`, `files`, `links` |
-| `filter` | — | Query filter object (defaults to `{}`) |
-| `projection` | — | Projection object (`1` include / `0` exclude). A field a read never sends cannot be asked for by name: the vector and an edge's write guard are withheld, and an inclusion naming only withheld fields answers the `_id` alone |
+| `filter` | — | Query filter object (defaults to `{}`). A predicate that names a field no read returns (`embedding`, `deliveredBy`, `_functionalGuard`) directly — as a field key, at the top level or inside `$and`/`$or`/`$nor`, or as a `"$field"` path inside `$expr` — is a `400` naming the field, the same words on both doors; only `{"<field>": {"$exists": true}}` (or `false`) is accepted on it |
+| `projection` | — | Projection object (`1` include / `0` exclude). The non-`_id` keys decide the mode, and `_id` decides it only when it is the only key, so `{"_id": 1}` answers each row's `_id` alone. A field a read never sends cannot be asked for by name: the vector, `deliveredBy` and an edge's write guard are withheld from every answer, absent projection included, and an inclusion naming only withheld fields answers the `_id` alone |
 | `limit` | — | Max rows, default `200` and NOT capped. What bounds an answer instead: the byte budget (`maxChars`/`maxBytes`) trims it and returns `nextSkip`, `maxTimeMS` bounds the query's duration, and through a personal view over more than one member a `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
 | `skip` | — | Rows to discard before the page (default `0`) — see below |
 | `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for newest-first. `links` sorts by `createdAt`, `updatedAt`, `from` and `to`; a link has no name, title or type of its own.|
