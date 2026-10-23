@@ -392,7 +392,8 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
                 </div>
 
                 @if (c.resolution === 'superseded' && c.resolvedBy) {
-                  <div class="superseded-note">{{ 'review.contradictions.decidedBy' | transloco: { who: c.resolvedBy } }}</div>
+                  <!-- "kept and marked" only when a mark was set: a loser that was gone (loserGone) was not marked. -->
+                  <div class="superseded-note">{{ (loserWasGone(c) ? 'review.contradictions.decidedByOnly' : 'review.contradictions.decidedBy') | transloco: { who: c.resolvedBy } }}</div>
                 }
                 @if (c.resolving) {
                   <div class="superseded-note">{{ resolvingText(c) }}</div>
@@ -625,7 +626,8 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     this.conBusy.set(c.id);
     this.contradictionsApi.dismissContradiction(c.id).subscribe({
       next: () => { this.conBusy.set(null); this.loadContradictions(); },
-      error: () => { this.conBusy.set(null); this.toast.error(this.transloco.translate('duplicates.dismissError')); },
+      // A dismiss that lost a race with a resolve is refused `409 alreadyResolved`, said by its code in the resolve's family.
+      error: (e) => { this.conBusy.set(null); this.toast.error(refusalText(this.transloco, e as Parameters<typeof refusalText>[1], 'duplicates.dismissError', RESOLVE_REFUSALS)); },
     });
   }
 
@@ -660,6 +662,11 @@ export class ReviewTabComponent implements OnInit, OnChanges {
    * what the reviewer can do — the same choice finishes it, a dismiss releases it. Without it the card looked open while
    * every other choice was refused.
    */
+  /** The resolve found the record judged stale already gone, so nothing was marked: the card must not say it was. */
+  loserWasGone(c: ContradictionRecord): boolean {
+    return (c.notes ?? []).some(n => n.code === 'loserGone');
+  }
+
   resolvingText(c: ContradictionRecord): string {
     const r = c.resolving;
     if (!r) return '';

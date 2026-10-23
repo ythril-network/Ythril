@@ -143,6 +143,11 @@ contradictionsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => 
 // POST /api/contradictions/:id/dismiss — reviewed, not a real disagreement.
 // Captures the pair's content fingerprint so a later re-embed / re-sync / index rebuild (which bump seq
 // without changing content) will NOT resurface it, while a real edit to either record will.
+//
+// A RESOLVED candidate is refused `409 alreadyResolved` (round 5, coordinator's decision): dismissing one left it `dismissed`
+// with its resolution, its `supersededId`, the edge and the mark all standing, and a reopen then showed it open with the old
+// badges. The refusal is in the update's own filter (`status: {$ne: 'resolved'}`), not a read before it, so a dismiss racing a
+// resolve's close cannot land on the resolved document.
 contradictionsRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   try {
     const id = req.params['id'] as string;
@@ -152,12 +157,24 @@ contradictionsRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyRead
       const coll = collectionFor(spaceId);
       const dismissedContentHash = await pairContentHash(spaceId, doc.type, doc.aId, doc.bId);
       const released = await coll.findOneAndUpdate(
-        asFilter<ContradictionCandidateDoc>({ _id: id }),
+        asFilter<ContradictionCandidateDoc>({ _id: id, status: { $ne: 'resolved' } }),
         // A dismiss releases a resolve's claim (L3): the pair is judged no disagreement, so no choice about it stands, and
         // what the claim recorded it wrote is undone.
         asUpdate<ContradictionCandidateDoc>({ $set: { status: 'dismissed', dismissedContentHash, updatedAt: new Date().toISOString() }, $unset: { resolving: '' } }),
         { returnDocument: 'before' },
       ) as ContradictionCandidateDoc | null;
+      if (!released) {
+        const now = await coll.findOne(asFilter<ContradictionCandidateDoc>({ _id: id }), { projection: { status: 1, resolution: 1 } });
+        if (now?.status === 'resolved') {
+          res.status(409).json({
+            error: `this contradiction is already resolved (as '${now.resolution}'); a resolved finding cannot be dismissed`,
+            code: 'alreadyResolved', retryable: false, resolution: now.resolution,
+          });
+          return;
+        }
+        res.status(404).json({ error: 'Contradiction candidate not found' });
+        return;
+      }
       const notes = await releaseClaim(req, spaceId, released);
       res.json({ status: 'dismissed', ...(notes.length > 0 ? { notes } : {}) });
       return;
@@ -356,14 +373,24 @@ type Undone = ClaimWrote & { markKept?: string };
 /** Fold a second run of the undo into the first: whatever either took back. */
 const undoneEither = (a: Undone | undefined, b: Undone | undefined): Undone | undefined => (a || b ? { ...a, ...b } : undefined);
 
-/** The undo of an unfinished resolve, as a note naming what it took back, and what it kept. */
-function undoneNote(undone: Undone): ContradictionResolveNote {
-  const parts = [
+/**
+ * The undo of an unfinished resolve, as notes — one code per thing that is TRUE, because a client says each code in its own
+ * words and those words must hold in every case the code is sent (round 5):
+ *   `oppositeChoiceUndone`  something it wrote was taken back (its edge deleted, its mark lifted — `detail` says which);
+ *   `markKept`              a mark it set was KEPT, because another resolved pair relies on it.
+ * Either, both or none.
+ */
+function undoneNotes(undone: Undone | undefined): ContradictionResolveNote[] {
+  if (!undone) return [];
+  const took = [
     undone.edgeId ? `its edge '${undone.edgeId}' was deleted` : '',
     undone.markedId ? `the mark on '${undone.markedId}' was lifted` : '',
-    undone.markKept ? `the mark on '${undone.markKept}' was kept, because another pair's resolve depends on it` : '',
   ].filter(Boolean);
-  return { code: 'oppositeChoiceUndone', detail: `an unfinished resolve of this pair was undone first: ${parts.join(' and ')}` };
+  return [
+    ...(took.length > 0 ? [{ code: 'oppositeChoiceUndone' as const, detail: `an unfinished resolve of this pair was undone first: ${took.join(' and ')}` }] : []),
+    ...(undone.markKept ? [{ code: 'markKept' as const,
+      detail: `an unfinished resolve of this pair had marked '${undone.markKept}'; the mark was kept, because another pair's resolve depends on it` }] : []),
+  ];
 }
 
 /** Refuse a resolve whose choice differs from the one the candidate is already resolving or resolved by: `409 resolvedOtherwise`. */
@@ -569,7 +596,7 @@ async function resolveCandidate(
      *    reading "not there" (step 3, step 4) and writing it is recorded as this claim's, and a later undo of the claim takes it.
      */
     if (tookOver) written.undone = undoneEither(written.undone, await undoClaim(req, spaceId, doc, prior.wrote));
-    if (written.undone) notes.unshift(undoneNote(written.undone));
+    notes.unshift(...undoneNotes(written.undone));
 
     // 5. Close, under the claim: a candidate whose claim was taken over since is not closed by this request. A candidate
     //    another request of the SAME choice closed first is closed again, idempotently: that race is not a conflict (L2).
@@ -623,7 +650,7 @@ async function resolveCandidate(
  */
 async function releaseClaim(req: express.Request, spaceId: string, released: ContradictionCandidateDoc | null): Promise<ContradictionResolveNote[]> {
   const undone = released?.resolving ? await undoClaim(req, spaceId, released, released.resolving.wrote) : undefined;
-  return undone ? [undoneNote(undone)] : [];
+  return undoneNotes(undone);
 }
 
 // POST /api/contradictions/scan?space=<id> — run the sweep now instead of waiting for the schedule.

@@ -131,7 +131,7 @@ sticky dismissal — because the Review tab presents both under one vocabulary.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/contradictions?status=open&space=<id>&limit=100&skip=0` | any token (space-scoped) | List candidates, one page, paged exactly as duplicates are. `status` = `open` (default), `dismissed`, `resolved`, or `all`. |
-| `POST` | `/api/contradictions/:id/dismiss` | non-read-only | Reviewed / not a real disagreement. Content-gated exactly like a duplicate dismissal. |
+| `POST` | `/api/contradictions/:id/dismiss` | non-read-only | Reviewed / not a real disagreement. Content-gated exactly like a duplicate dismissal. A **resolved** finding is refused `409` `{ code: "alreadyResolved", resolution }` and left as it is (its edge and mark stand); `404` when there is no such finding. Releases an unfinished resolve's claim and answers its `notes` (below). |
 | `POST` | `/api/contradictions/:id/reopen` | non-read-only | Bring a **dismissed** pair back onto the open list. `404` if it is not currently dismissed. |
 | `POST` | `/api/contradictions/:id/resolve` | non-read-only | Body `{ "resolution": "edited" \| "linked" \| "superseded" }`. Records HOW a human settled it. `superseded` also needs `"winner": "a" \| "b"` — see below. |
 | `POST` | `/api/contradictions/scan?space=<id>` | `dataQuality` write + MFA | Run the sweep now, over the spaces where the token holds `dataQuality` write. Answers `{ scannedSpaces, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted, failedSpaces }`: `nliStalled: true` if it stopped because the judge was unavailable, and `failedSpaces` as [below](#a-scan-that-could-not-scan-a-space). |
@@ -219,7 +219,7 @@ POST /api/contradictions/:id/resolve
   (`oppositeChoiceUndone`; on a takeover also in `written.undone`). Nothing a claim did not record is ever
   touched: a mark set by hand or by another pair, or an edge drawn by hand, stays — and so does a mark the claim
   recorded that another pair has since come to rely on (another `supersedes` edge points at the record, or
-  another resolved finding names it as its loser): the note says it was kept (`written.undone.markKept`). A
+  another resolved finding names it as its loser): a `markKept` note says so (`written.undone.markKept`). A
   slow resolver whose claim was taken over stops at its next write, undoes what it wrote, and answers `409`
   with `written`; the takeover runs its undo once more just before it closes, so an effect the slow resolver
   landed late is cleared too.
@@ -246,7 +246,8 @@ shows them too. `note` (one string, the details joined) is still returned for an
 | `winnerGone` | The record kept no longer exists. | No edge; the loser is marked; the finding closed. |
 | `loserGone` | The record judged stale no longer exists. | No edge, nothing marked (`markedRecord: false`); the finding closed. |
 | `edgePairUnlinkable` | The pair are edges (a scanner configured to cover them), and an edge cannot be the endpoint of an edge. | The loser is marked and the finding closed. |
-| `oppositeChoiceUndone` | An unfinished resolve of this pair — taken over as stale, or released by `dismiss` or `reopen` — was undone first; `detail` names the edge deleted and the record whose mark was lifted — or kept, when another pair relies on it. | Only what that claim recorded was undone; the resolve (or dismiss, reopen) then went on as asked. |
+| `oppositeChoiceUndone` | An unfinished resolve of this pair — taken over as stale, or released by `dismiss` or `reopen` — had something it wrote taken back; `detail` names the edge deleted and the record whose mark was lifted. | Only what that claim recorded was undone; the resolve (or dismiss, reopen) then went on as asked. |
+| `markKept` | That unfinished resolve had marked a record that another resolved pair now relies on (another `supersedes` edge points at it, or another resolved finding names it as its loser), so the mark was kept; `detail` names the record. | The mark stands; the rest went on as asked. Sent alone, or beside `oppositeChoiceUndone` when an edge was still deleted. |
 
 A store failure is never reported as a note: a refusal is the space's rules speaking, and a failure is the
 `503` above.
