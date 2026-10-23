@@ -2367,6 +2367,7 @@
   "review.contradictions.note.loserGone": "Entscheidung gespeichert, aber der als überholt beurteilte Eintrag existiert nicht mehr: nichts wurde markiert und keine Verknüpfung gezogen.",
   "review.contradictions.note.edgePairUnlinkable": "Entscheidung gespeichert und der überholte Eintrag markiert; keine Verknüpfung gezogen, weil beide Einträge Kanten sind und eine Kante keine Kanten verbinden kann.",
   "review.contradictions.resolveError": "Dieser Widerspruch konnte nicht aufgelöst werden.",
+  "review.contradictions.resolving": "Wird aufgelöst als \"{{choice}}\". Bleibt dies stehen, wurde die Auflösung unterbrochen: Wählen Sie dasselbe erneut, um sie abzuschließen, oder verwerfen Sie den Eintrag, um sie freizugeben.",
   "review.contradictions.refusal.resolvedOtherwise": "Dieser Widerspruch wurde bereits anders aufgelöst, von Ihnen oder jemand anderem. Nichts wurde geändert — laden Sie neu, um die geltende Entscheidung zu sehen.",
   "review.contradictions.refusal.space_being_deleted": "Dieser Space wird gerade gelöscht und kann nicht mehr geändert werden. Es wurde nichts geändert.",
   "review.contradictions.refusal.space_being_wiped": "Dieser Space wird gerade geleert; versuchen Sie es nach Abschluss des Leerens erneut.",

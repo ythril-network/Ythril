@@ -27,8 +27,8 @@ import { pairContentHash } from '../brain/dupe-scanner.js';
 import { scanSpace, SCAN_STEP } from '../brain/contradiction-scanner.js';
 import { scanSpacesInRequest } from '../brain/scan-spaces-in-request.js';
 import { nliConfigured } from '../brain/nli-client.js';
-import { upsertEdge, EdgeSchemaViolation } from '../brain/edges.js';
-import { retireRecord, canBeRetired } from '../brain/retire-record.js';
+import { upsertEdge, deleteEdge, EdgeSchemaViolation } from '../brain/edges.js';
+import { retireRecord, reinstateRecord, canBeRetired } from '../brain/retire-record.js';
 import { RECORD_SUPERSEDED_FIELD } from '../brain/record-flag.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { COLLECTION } from '../brain/embed-record.js';
@@ -88,6 +88,9 @@ function toRecord(c: ContradictionCandidateDoc) {
     ...(c.supersededId ? { supersededId: c.supersededId } : {}),
     // What the resolve could not do as asked (`Q-442`): a reviewer reading the resolved list later sees the refused link too.
     ...(c.notes?.length ? { notes: c.notes } : {}),
+    // A resolve that has claimed this pair and not closed it — in flight, or abandoned (L3). Without it the card looks open
+    // while every other choice is refused `409`.
+    ...(c.resolving ? { resolving: c.resolving } : {}),
     detectedAt: c.detectedAt,
     updatedAt: c.updatedAt,
   };
@@ -149,7 +152,8 @@ contradictionsRouter.post('/:id/dismiss', globalRateLimit, requireAuth, denyRead
       const dismissedContentHash = await pairContentHash(spaceId, doc.type, doc.aId, doc.bId);
       await coll.updateOne(
         asFilter<ContradictionCandidateDoc>({ _id: id }),
-        asUpdate<ContradictionCandidateDoc>({ $set: { status: 'dismissed', dismissedContentHash, updatedAt: new Date().toISOString() } }),
+        // A dismiss releases a resolve's claim (L3): the pair is judged no disagreement, so no choice about it stands.
+        asUpdate<ContradictionCandidateDoc>({ $set: { status: 'dismissed', dismissedContentHash, updatedAt: new Date().toISOString() }, $unset: { resolving: '' } }),
       );
       res.json({ status: 'dismissed' });
       return;
@@ -168,7 +172,8 @@ contradictionsRouter.post('/:id/reopen', globalRateLimit, requireAuth, denyReadO
     for (const spaceId of spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write')) {
       const r = await collectionFor(spaceId).updateOne(
         asFilter<ContradictionCandidateDoc>({ _id: id, status: 'dismissed' }),
-        asUpdate<ContradictionCandidateDoc>({ $set: { status: 'open', updatedAt: new Date().toISOString() }, $unset: { dismissedContentHash: '' } }),
+        // A reopen releases any claim too (L3): the pair comes back to be judged afresh.
+        asUpdate<ContradictionCandidateDoc>({ $set: { status: 'open', updatedAt: new Date().toISOString() }, $unset: { dismissedContentHash: '', resolving: '' } }),
       );
       if (r.matchedCount > 0) { res.json({ status: 'open' }); return; }
     }
@@ -249,23 +254,38 @@ const RESOLVE_WHERE = 'POST /api/contradictions/:id/resolve';
 interface Written { edge: boolean; markedRecord: boolean; closed: boolean }
 
 /**
- * The candidates this choice may claim: one nobody has claimed, or one already claimed — resolving or resolved — by the SAME
- * choice. A resolved candidate from before the claim existed carries no `resolving`, so its choice is read from what it
- * recorded (`resolution`, and the loser as `supersededId`).
+ * How old a claim must be before another choice may take it over (L3). A resolve is a handful of writes, each bounded by the
+ * store's own deadline, so a claim this old belongs to a request that crashed or a `503` nobody retried — not one in flight.
+ * Ten minutes rather than the write bound itself, because taking over a claim that IS in flight is the race the claim exists
+ * to prevent.
+ */
+export const RESOLVE_CLAIM_STALE_MS = 10 * 60_000;
+
+/**
+ * The candidates this choice may claim: one nobody has claimed, one already claimed — resolving or resolved — by the SAME
+ * choice, or one whose claim is older than {@link RESOLVE_CLAIM_STALE_MS} and not closed. A resolved candidate from before
+ * the claim existed carries no `resolving`, so its choice is read from what it recorded (`sameResolved`).
  */
 function claimableBy(id: string, choice: ContradictionChoice, loserId: string | undefined): Record<string, unknown> {
+  const staleBefore = new Date(Date.now() - RESOLVE_CLAIM_STALE_MS).toISOString();
   return {
     _id: id,
     $or: [
       { status: { $ne: 'resolved' }, resolving: { $exists: false } },
       sameClaim(choice),
-      { status: 'resolved', resolution: choice.resolution, supersededId: loserId ?? null },
+      sameResolved(choice, loserId),
+      // `$not: {$gte}` also takes a claim with no time on it, which only an unreleased build wrote.
+      { status: { $ne: 'resolved' }, 'resolving.at': { $not: { $gte: staleBefore } } },
     ],
   };
 }
 
 /** The candidate's claim is this choice. `null` matches an absent winner, which is how `edited` and `linked` are stored. */
 const sameClaim = (choice: ContradictionChoice) => ({ 'resolving.resolution': choice.resolution, 'resolving.winner': choice.winner ?? null });
+
+/** The candidate is already closed by this choice: its resolution, and for `superseded` the same loser. */
+const sameResolved = (choice: ContradictionChoice, loserId: string | undefined) =>
+  ({ status: 'resolved', resolution: choice.resolution, supersededId: loserId ?? null });
 
 /** Refuse a resolve whose choice differs from the one the candidate is already resolving or resolved by: `409 resolvedOtherwise`. */
 async function answerResolvedOtherwise(res: express.Response, spaceId: string, id: string, written?: Written): Promise<void> {
@@ -274,7 +294,8 @@ async function answerResolvedOtherwise(res: express.Response, spaceId: string, i
   const taken = now.resolving ?? { resolution: now.resolution, ...(now.supersededId ? { winner: now.supersededId === now.aId ? 'b' : 'a' } : {}) };
   res.status(409).json({
     error: `this contradiction is already ${now.resolving ? 'being resolved' : 'resolved'} otherwise (as '${taken.resolution}'`
-      + `${taken.winner ? `, keeping ${taken.winner}` : ''}); nothing was written by this request`,
+      + `${taken.winner ? `, keeping ${taken.winner}` : ''}); `
+      + (written ? 'what this request wrote before its claim was taken over is in `written`' : 'nothing was written by this request'),
     code: 'resolvedOtherwise', retryable: false, resolution: taken.resolution,
     ...(taken.winner ? { winner: taken.winner } : {}),
     ...(written ? { written } : {}),
@@ -303,6 +324,30 @@ function linkRefusedNote(err: EdgeSchemaViolation): ContradictionResolveNote {
   };
 }
 
+/**
+ * Undo what the OPPOSITE choice about this pair left behind, before the standing choice writes (L3): its `supersedes` edge
+ * (loser → winner) and its mark on the record now kept.
+ *
+ * Only an abandoned claim can have left them — a fresh or closed claim of the other choice refuses this request at the claim —
+ * once it was taken over as stale, or released by a dismiss or reopen. Without this the space held both judgements: two
+ * opposite edges, and both records marked superseded.
+ *
+ * The mark is taken off only when no OTHER record's `supersedes` edge points at the kept record: a mark that another
+ * resolve or a hand-drawn edge explains is not this pair's to undo. A mark with no edge behind it from either (a link the
+ * schema refused) is taken off — the one case this cannot tell apart from another pair's refused link, stated rather than hidden.
+ */
+async function overruleOppositeChoice(
+  req: express.Request, spaceId: string, type: ContradictionCandidateDoc['type'], winnerId: string, loserId: string, winnerMarked: boolean,
+): Promise<void> {
+  const edges = col<{ _id: string; from: string; to: string; label: string }>(spaceCollection(spaceId, 'edges'));
+  const opposite = await edges.find(asFilter<{ _id: string }>({ from: loserId, to: winnerId, label: SUPERSEDES_LABEL }),
+    { projection: { _id: 1 } }).toArray();
+  for (const e of opposite) await deleteEdge(spaceId, e._id, webhookToken(req));
+  if (!winnerMarked || !canBeRetired(type)) return;
+  const explained = await edges.countDocuments(asFilter<{ _id: string }>({ to: winnerId, label: SUPERSEDES_LABEL, from: { $ne: loserId } }), { limit: 1 });
+  if (explained === 0) await reinstateRecord(spaceId, type, winnerId, webhookToken(req));
+}
+
 async function resolveCandidate(
   req: express.Request, res: express.Response, doc: ContradictionCandidateDoc, spaceId: string, choice: ContradictionChoice,
 ): Promise<void> {
@@ -321,7 +366,7 @@ async function resolveCandidate(
   // 2. The claim, before the first effect: a different choice is refused here, having written nothing.
   const claimed = await coll.updateOne(
     asFilter<ContradictionCandidateDoc>(claimableBy(doc._id, choice, superseding ? loserId : undefined)),
-    asUpdate<ContradictionCandidateDoc>({ $set: { resolving: choice, updatedAt: new Date().toISOString() } }),
+    asUpdate<ContradictionCandidateDoc>({ $set: { resolving: { ...choice, at: new Date().toISOString() }, updatedAt: new Date().toISOString() } }),
   );
   if (claimed.matchedCount === 0) { await answerResolvedOtherwise(res, spaceId, doc._id); return; }
 
@@ -348,6 +393,10 @@ async function resolveCandidate(
        * Only the writer's own refusal is caught: a store failure, a lost race (`WriteConflict`) or a held space is not a
        * refusal, and taking one for `linkRefused` would close the candidate on a link that could have been drawn.
        */
+      // The claim can have been taken over from an abandoned opposite choice, or released by a dismiss or reopen after one
+      // wrote: its edge and mark are undone first, so the pair never holds two opposite judgements (L3).
+      if (winner && loser) await overruleOppositeChoice(req, spaceId, doc.type, winnerId, loserId, winner.superseded === true);
+
       if (winner && loser) {
         if (isRefKind(doc.type)) {
           const kind = doc.type === 'entity' ? undefined : doc.type;
@@ -376,7 +425,8 @@ async function resolveCandidate(
       }
     }
 
-    // 5. Close, under the claim: a candidate whose claim was taken over since is not closed by this request.
+    // 5. Close, under the claim: a candidate whose claim was taken over since is not closed by this request. A candidate
+    //    another request of the SAME choice closed first is closed again, idempotently: that race is not a conflict (L2).
     const set: Partial<ContradictionCandidateDoc> = {
       status: 'resolved', resolution: choice.resolution, updatedAt: new Date().toISOString(),
       ...(superseding ? { supersededId: loserId } : {}),
@@ -385,7 +435,7 @@ async function resolveCandidate(
     // The token's NAME, never the token. Absent when the token is unnamed rather than stored as ''.
     if (req.authToken?.name) set.resolvedBy = req.authToken.name;
     const closed = await coll.updateOne(
-      asFilter<ContradictionCandidateDoc>({ _id: doc._id, ...sameClaim(choice) }),
+      asFilter<ContradictionCandidateDoc>({ _id: doc._id, $or: [sameClaim(choice), sameResolved(choice, superseding ? loserId : undefined)] }),
       asUpdate<ContradictionCandidateDoc>({ $set: set, $unset: { resolving: '', ...(notes.length > 0 ? {} : { notes: '' }) } }),
     );
     if (closed.matchedCount === 0) { await answerResolvedOtherwise(res, spaceId, doc._id, written); return; }

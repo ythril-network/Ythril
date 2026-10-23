@@ -19,7 +19,8 @@
  * Not refused: `{f: {$exists: <bool>}}` at field position (one bit, and `reindex-contract` and
  * `recall-filter-grammar` rely on it — R10), a literal string operand that merely looks like a path, a key relative
  * to an `$elemMatch` element, an embedded-document equality, and a field that only SHARES a prefix (`embeddingModel`).
- * Expression routes (`$$ROOT`, `$getField`) are parked as D-58 and deliberately not asserted either way here.
+ * The routes parked as D-58 - `$$ROOT`/`$$CURRENT` paths, `$getField`, `$objectToArray` and `$jsonSchema` - are
+ * deliberately not asserted either way here.
  *
  * Run: node --test testing/standalone/a-predicate-cannot-read-a-withheld-field.test.js
  * (requires a prior `npm run build:server`)

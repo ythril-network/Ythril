@@ -2367,6 +2367,7 @@
   "review.contradictions.note.loserGone": "Decision kept, but the record you judged stale no longer exists: nothing was marked and no link was drawn.",
   "review.contradictions.note.edgePairUnlinkable": "Decision kept and the stale record marked; no link was drawn, because these two records are edges and an edge cannot link edges.",
   "review.contradictions.resolveError": "Could not resolve this contradiction.",
+  "review.contradictions.resolving": "Being resolved as \"{{choice}}\". If this stays, that resolve stopped part-way: choose the same again to finish it, or dismiss to release it.",
   "review.contradictions.refusal.resolvedOtherwise": "This contradiction was already resolved differently, by you or someone else. Nothing was changed — reload to see the decision that stands.",
   "review.contradictions.refusal.space_being_deleted": "This space is being deleted, so it can no longer be changed. Nothing was changed.",
   "review.contradictions.refusal.space_being_wiped": "This space is being wiped; try again when the wipe has finished.",

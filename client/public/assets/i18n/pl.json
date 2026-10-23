@@ -2367,6 +2367,7 @@
   "review.contradictions.note.loserGone": "Decyzja zapisana, ale rekord uznany za nieaktualny już nie istnieje: niczego nie oznaczono i nie utworzono powiązania.",
   "review.contradictions.note.edgePairUnlinkable": "Decyzja zapisana, a nieaktualny rekord oznaczony; nie utworzono powiązania, bo oba rekordy są krawędziami, a krawędź nie może łączyć krawędzi.",
   "review.contradictions.resolveError": "Nie udało się rozstrzygnąć tej sprzeczności.",
+  "review.contradictions.resolving": "W trakcie rozstrzygania jako \"{{choice}}\". Jeśli to nie znika, rozstrzyganie zostało przerwane: wybierz to samo ponownie, aby je dokończyć, albo odrzuć, aby je zwolnić.",
   "review.contradictions.refusal.resolvedOtherwise": "Ta sprzeczność została już rozstrzygnięta inaczej, przez ciebie lub kogoś innego. Nic nie zmieniono — odśwież, aby zobaczyć obowiązującą decyzję.",
   "review.contradictions.refusal.space_being_deleted": "Ta przestrzeń jest właśnie usuwana, więc nie można już w niej niczego zmienić. Nic nie zostało zmienione.",
   "review.contradictions.refusal.space_being_wiped": "Ta przestrzeń jest właśnie opróżniana; spróbuj ponownie po zakończeniu opróżniania.",

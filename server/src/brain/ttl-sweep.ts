@@ -380,31 +380,25 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   return total;
 }
 
-/** The spaces whose sweep indexes ({@link ensureTtlIndexes}) stood at a tick: not built again until the space is gone. */
-const sweepIndexed = new Set<string>();
 /** Said once per space while its sweep reads are unindexed, and again if that comes back after it stood. */
 const unindexedOnce = warnOnce<string>();
 
 /**
- * Build the sweep's indexes (`SWEEP_INDEXES` of the per-space declaration) on every space where they have not stood yet: run at
- * every tick, before the sweep, until each space's stand, so a space whose build failed (or that a restore left without them) is
- * indexed again within a cycle and not at the next boot. A space created now and a restored one get them from `initSpace`; an
- * existing one from the background pass; this is the retry. While a space has not got them it is said once (its sweep reads
- * scan the collection, which is slow and still correct); each failed index is said through the walk with the index named.
+ * Make sure every space has the sweep's indexes (`SWEEP_INDEXES` of the per-space declaration): run at every tick, before the sweep.
+ * Each tick LOOKS (`ensureTtlIndexes` lists each indexed collection's indexes and builds only what is missing), and nothing is
+ * remembered between ticks, so a space whose build failed - or that a restore left without them, which drops and creates every
+ * collection of a space that stays configured - is indexed again within a cycle and not at the next boot. A space created now and a
+ * restored one get them from `initSpace`; an existing one from the background pass; this is the retry. While a space has not got
+ * them it is said once (its sweep reads scan the collection, which is slow and still correct); each failed index is said through
+ * the walk with the index named.
  *
  * The builds are deliberately not bounded by the housekeeping figure: an index build scales with the data in the collection, so a
  * figure sized for a read or a single write would end a legitimate build and leave the sweep unindexed.
  */
-async function ensureSweepIndexes(): Promise<void> {
-  const configured = configuredSpaces();
-  const ids = new Set(configured.map(s => s.id));
-  for (const id of sweepIndexed) if (!ids.has(id)) sweepIndexed.delete(id);
-  const owed = configured.filter(s => !sweepIndexed.has(s.id));
-  if (owed.length === 0) return;
-  await eachSpace(INDEX_STEP, owed, async (space) => {
+export async function ensureSweepIndexes(): Promise<void> {
+  await eachSpace(INDEX_STEP, configuredSpaces(), async (space) => {
     const { failed } = await ensureTtlIndexes(space.id);
     if (failed.length === 0) {
-      sweepIndexed.add(space.id);
       unindexedOnce.forget(space.id);
       return;
     }

@@ -120,7 +120,7 @@ import { whatBecameOfPath } from './move-marker-reads.js';
 import { ActNotRecorded } from './act-answers.js';
 import { moveKey, parentOfSidecar } from './moved-paths.js';
 import {
-  ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
+  ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, FILE_TOMBSTONE_PART, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
   type MoveMarker, type PrunableRow, type StoredFileTombstone,
 } from './tombstone-store.js';
 import { admitSpaceWrite, assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
@@ -151,12 +151,14 @@ export const fileTombstoneStaleBefore = (now: Date): string => new Date(now.getT
  * The indexes the routine questions asked of a space's file tombstones need (bundle-30 I16, preship-4 P4-6). Each
  * entry says which question it serves; add one only with the question that needs it.
  *
- * Without them both were collection scans, on a collection a space with an offline peer never prunes.
+ * Without them both were collection scans, on a collection a space with an offline peer never prunes. Built from the per-space
+ * declaration (`spaces/space-indexes.ts`) on {@link FILE_TOMBSTONE_PART}, the store's name for the collection.
  */
+export { FILE_TOMBSTONE_PART };
 export const FILE_TOMBSTONE_INDEXES = [
   // The settle: `{ pending: true, settleAt <= t }` sorted by `settleAt` (bundle-71, Q-352: the clock the settle moves, which
   // is not the clock the one-per-path rule reads). Partial, so it holds only the pending few. It replaces `{ pending, deletedAt }`,
-  // which `ensureFileTombstoneIndexes` drops ({@link REPLACED_FILE_TOMBSTONE_INDEXES}).
+  // which `dropReplacedFileTombstoneIndexes` drops ({@link REPLACED_FILE_TOMBSTONE_INDEXES}).
   { keys: { pending: 1, settleAt: 1 }, options: { partialFilterExpression: { pending: { $exists: true } } } },
   // A move's marker: `moveMarkerOf`, `settleBegunMove` and `forgetFinishedMove`, once or more per move. Sparse: only a
   // move's tombstones carry it, and only until the move is finished.

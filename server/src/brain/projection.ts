@@ -65,7 +65,7 @@ export interface NormalisedProjection {
  * The fields a caller can never have, whatever they ask for — `NEVER_RETURNED_FIELDS`, not a second list.
  * Kept under its old name because it is the name this module's rule has always been read by.
  */
-export const NEVER_PROJECTABLE: readonly string[] = NEVER_RETURNED_FIELDS;
+const NEVER_PROJECTABLE: readonly string[] = NEVER_RETURNED_FIELDS;
 
 const WITHHELD: ReadonlySet<string> = new Set(NEVER_PROJECTABLE);
 

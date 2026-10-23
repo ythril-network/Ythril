@@ -808,6 +808,10 @@ If someone else resolved the same pair a different way first — or you clicked 
 ago resolved as **Keep A** — the second choice is refused and nothing changes: reload to see the decision that
 stands. Clicking the same choice again is harmless.
 
+A card that says it is **being resolved** has a decision in progress — or one that stopped part-way. Choose the
+same side again to finish it, or **Dismiss** to release it; after ten minutes the other side can be chosen too,
+and the stopped decision's link and mark are undone.
+
 Before deciding, use **Show both in full** on the card: the two lines you see are summaries, which is enough
 to triage a pair and rarely enough to judge one.
 

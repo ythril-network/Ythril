@@ -23,7 +23,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import type { FileTombstoneDoc } from '../config/types.js';
-import { spaceCollection } from '../db/space-collection.js';
+import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { dropIndexesIfPresent } from '../db/index-names.js';
 import { inChunks } from '../util/chunks.js';
 import { isoKeysetFilters, isoKeysetSort, tieThenRange, type IsoPosition } from '../util/seq-keyset.js';
@@ -91,9 +91,19 @@ export function tombstonesOf(spaceId: string) {
 }
 
 /**
+ * The collection's part, as `spaceCollection` takes it, for a module that must name the collection without opening it. This module's
+ * own calls spell the literal on purpose: the write-site and reader derivations of the gates resolve `tombstonesOf` to a literal
+ * part, and a constant there reads to them as a computed collection. The per-space index declaration
+ * (`spaces/space-indexes.ts`) declares the lifecycle's `FILE_TOMBSTONE_INDEXES` on it through `tombstones.ts`, which re-exports it,
+ * so the declaration builds the indexes without naming the collection itself.
+ */
+export const FILE_TOMBSTONE_PART = 'fileTombstones' satisfies SpacePart;
+
+/**
  * Drop the indexes of the space's file tombstones that a later release replaced, by name — only those listed
  * (`dropIndexesIfPresent`, the one way a replaced index goes). Here because this module is the one that names the collection;
- * which indexes it should carry, and which it replaced, is the lifecycle's (`ensureFileTombstoneIndexes`, in `tombstones.ts`).
+ * which indexes it should carry, and which it replaced, is the lifecycle's (`FILE_TOMBSTONE_INDEXES` and
+ * `dropReplacedFileTombstoneIndexes`, in `tombstones.ts`).
  */
 export const dropFileTombstoneIndexesIfPresent = (spaceId: string, names: readonly string[]) =>
   dropIndexesIfPresent(spaceCollection(spaceId, 'fileTombstones'), names);
