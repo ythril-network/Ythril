@@ -25,12 +25,14 @@ import { ciSignal } from '../../testing/_shared/running-under-ci.mjs';
  *
  * @param {string} prefix  the script's name, `test-times` or `trade`
  * @param {string} flag    the flag being refused, `--record`
+ * @param {string} [reason]  what is true here: the default says a WRITE is refused; a flag that only READS says so (a sentence
+ *   about writing a record under a command that reads one is a false line a person acts on)
  * @returns {2|null}
  */
-export function refuseRecordingUnderCi(prefix, flag) {
+export function refuseRecordingUnderCi(prefix, flag, reason = 'CI never holds the token that writes records, so nothing is sent') {
   const named = ciSignal();
   if (!named) return null;
-  console.error(`${prefix}: ${flag} is refused when ${named} is set: CI never holds the token that writes records, so nothing is sent`);
+  console.error(`${prefix}: ${flag} is refused when ${named} is set: ${reason}`);
   return 2;
 }
 

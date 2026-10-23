@@ -72,12 +72,18 @@
  * - **A re-record replaces** the stored record only when its run ids contain every run id the stored one holds: the listing shows
  *   the latest runs only, so an older run that has dropped off would otherwise be erased from the record. Otherwise the stored
  *   record is KEPT, and the line says it holds runs the listing no longer shows. Every field is written every time.
- * - **The listing is read until it no longer fills its limit,** from `--limit` up to {@link RECORD_LIMIT_CEILING}, doubling; past
- *   the ceiling it is refused naming `--limit`, because a record made from a cut listing is wrong.
+ * - **The listing is read at `--limit`, and once more at {@link RECORD_LIMIT_CEILING} when that filled it:** two reads at most, not
+ *   one per doubling. A listing that fills the ceiling is refused naming `--limit`, because a record made from a cut listing is wrong.
+ * - **A bundle's number is one bundle in any spelling:** `bundle-106` asked for reads the runs of `bundle-0106` too, and a listing
+ *   that holds both spellings is refused naming both (their figures cannot be told apart).
  * - **Exit codes:** 0 recorded or kept; 2 for a bad argument, an unset destination, CI (`GITHUB_ACTIONS` / `CI`: CI never holds
- *   the token), a refused bundle, a failed write, or any failed read. Never 0 for a recording that did not happen.
+ *   the token), a refused bundle, a failed write, a record lock still held when its wait runs out
+ *   (`YTHRIL_TEST_RUNS_LOCK_WAIT_MS`, default two minutes; nothing was written), or any failed read. Never 0 for a recording that
+ *   did not happen.
  * - **`--history`** reads the `Trade` records back: failure rate as sum(afterFailures) over sum(afterCounted) across records (not
- *   a mean of per-record rates), and the mean saved, cost and net per bundle, over the records with a counted run.
+ *   a mean of per-record rates), and the mean saved, cost and net per bundle, over the records with a counted run. It needs
+ *   `YTHRIL_TEST_RUNS_URL` / `_TOKEN`, is refused under CI (the token is not there), and refuses when the instance holds more
+ *   `Trade` records than it read. `--type-schema` prints indented JSON.
  * - **`gh` and `git` are started with `testChildEnv()`,** so the recorder's token is never handed to them.
  */
 import { execFileSync } from 'node:child_process';
@@ -103,6 +109,7 @@ const USAGE = [
   '       node scripts/trade.mjs --history                          the recorded trade over time',
   '       node scripts/trade.mjs --type-schema                      the schema_update arguments that declare the Trade type',
   '  (N a whole number from 1, default 500; a ref is full-run/<name>; the modes cannot be combined)',
+  '  YTHRIL_TEST_RUNS_LOCK_WAIT_MS: how long --record waits for the record lock, in ms (a positive integer, default 120000)',
 ].join('\n');
 
 // ────────────────────────────────────────────────────── the pure part ──────────────────────────────────────────────────────
@@ -116,6 +123,13 @@ export function bundleOf(ref) {
   const m = /^full-run\/(?:bundle-|b)(\d+)(?:[-.][\w.-]*)?$/.exec(ref);
   return m ? m[1] : null;
 }
+
+/**
+ * A bundle's number as the one spelling a comparison or a record key uses: `0106` and `106` are one bundle. Every place that asks
+ * "is this the bundle that was asked for" compares through it (the runs to read, the record's runs, its key), so a run pushed to
+ * `full-run/bundle-0106` is read when `bundle-106` is asked for, and the two spellings meet in the refusal instead of being missed.
+ */
+export const keyNumber = (bundle) => String(Number(bundle));
 
 /** A `--line` ref: `full-run/<name>` with word characters, dots and dashes. Throws on anything else, before any `gh` call. */
 export function checkLineRef(ref, flag = '--line') {
@@ -415,7 +429,8 @@ export function placeWithin(isAncestor, { deadline, now = Date.now }) {
 }
 
 /**
- * Reads the attempts of every run `wanted` asks for (all, when `wanted` is null), checking the budget before every attempt's `gh`
+ * Reads the attempts of every run `wanted` asks for (all, when `wanted` is null; `wanted` holds bundle keys, {@link keyNumber}, so
+ * both spellings of a number are read), checking the budget before every attempt's `gh`
  * call. A run the budget ended before or between its attempts is returned with `unread: 'budget'` and NO attempts (a part-read run
  * would count as one that never failed in the attempts it was not asked for) and its id is listed in `unread`. A probe is kept
  * unread for the report to name, unless a bundle was asked for.
@@ -430,7 +445,7 @@ export async function readRuns({ listing, wanted, stepName, deadline, now = Date
     const base = { id: r.databaseId, ref: r.headBranch, headSha: r.headSha, createdAt: r.createdAt, attempts: [] };
     const bundle = bundleOf(r.headBranch);
     if (bundle === null) { if (!wanted) runs.push(base); continue; } // a probe: named by the report, never read
-    if (wanted && !wanted.has(bundle)) continue;
+    if (wanted && !wanted.has(keyNumber(bundle))) continue;
     if (!Number.isInteger(r.attempt)) { runs.push(base); continue; }
     try {
       const read = await runAttemptsJobs(r.databaseId, r.attempt, { gh, beforeAttempt });
@@ -446,8 +461,6 @@ export async function readRuns({ listing, wanted, stepName, deadline, now = Date
 
 // ───────────────────────────────────────────────────── recording a bundle ────────────────────────────────────────────────────
 
-/** A bundle's number as the key of its record: `0106` and `106` are one bundle. */
-const keyNumber = (bundle) => String(Number(bundle));
 const round2 = (x) => Math.round(x * 100) / 100;
 const KINDS_THAT_MAKE_FIGURES_PARTIAL = ['unread-budget', 'unplaced', 'missing-field'];
 
@@ -457,7 +470,8 @@ const KINDS_THAT_MAKE_FIGURES_PARTIAL = ['unread-budget', 'unplaced', 'missing-f
  * A bundle is refused, never recorded wrong, when the cut-over is unknown (every run would read as "before"); when it has no
  * counted run after the cut-over (a record of nothing); when a run of it is `unread-budget`, `unplaced` or `missing-field` (its
  * figures would be partial); or when its number is spelled two ways in the listing (`bundle-106` and `bundle-0106` are two
- * entries of the report, and one record).
+ * entries of the report, and one record, so their figures cannot be told apart). The runs of every spelling were read when ANY
+ * spelling was asked for, so the refusal fires whenever the listing holds two, not only when both were asked.
  *
  * @param {{ report: ReturnType<typeof tradeReport>, runs: object[], cutoverSha: string|null, bundles: string[] }} input
  * @returns {{ payloads: object[], refusals: string[] }}  each refusal is one line naming the bundle and the reason
@@ -530,7 +544,7 @@ async function recordPayloads({ payloads, dest }) {
 
 /** `--history`: the records read back, summed (a rate is failures over runs across records, never a mean of rates). */
 async function printHistory() {
-  const refused = refuseRecordingUnderCi('trade', '--history');
+  const refused = refuseRecordingUnderCi('trade', '--history', 'CI never holds the token that reads the records, so nothing is read');
   if (refused) return refused;
   const dest = recordDestination();
   if (dest.why) { console.error(`trade: ${dest.why}`); return 2; }
@@ -558,8 +572,8 @@ async function printHistory() {
 }
 
 /**
- * The listing of push runs of `full-run.yml`. For a report it is read once and refused when it fills `limit`. For `--record` the
- * limit starts at `limit` and doubles, up to {@link RECORD_LIMIT_CEILING}, until the listing no longer fills it; one that fills the
+ * The listing of push runs of `full-run.yml`. For a report it is read once and refused when it fills `limit`. For `--record` it is
+ * read at `limit`, and when that fills, once more at {@link RECORD_LIMIT_CEILING} (two reads at most); a listing that fills the
  * ceiling is refused naming `--limit`.
  */
 function readListing({ limit, growing, gh = ghJson }) {
@@ -568,11 +582,14 @@ function readListing({ limit, growing, gh = ghJson }) {
     '--json', 'databaseId,headBranch,headSha,createdAt,attempt',
   ]);
   if (!growing) return checkListing(read(limit), limit);
-  for (let n = Math.min(limit, RECORD_LIMIT_CEILING); ; n = Math.min(n * 2, RECORD_LIMIT_CEILING)) {
-    const listing = read(n);
-    if (listing.length < n) return listing;
-    if (n >= RECORD_LIMIT_CEILING) throw new Error(`the listing still fills ${n} runs, the most --record reads (a --limit above ${RECORD_LIMIT_CEILING} is read as ${RECORD_LIMIT_CEILING}): older runs would be cut, and a record made from a cut listing is wrong`);
-  }
+  const first = Math.min(limit, RECORD_LIMIT_CEILING);
+  const listing = read(first);
+  if (listing.length < first) return listing;
+  // The first read filled its limit, so older runs were cut. Read ONCE more, at the ceiling: a listing is the same bytes at any
+  // width, and a step-by-step growth would read the whole history again at every step.
+  const wide = first < RECORD_LIMIT_CEILING ? read(RECORD_LIMIT_CEILING) : listing;
+  if (wide.length >= RECORD_LIMIT_CEILING) throw new Error(`the listing still fills ${RECORD_LIMIT_CEILING} runs, the most --record reads (a --limit above ${RECORD_LIMIT_CEILING} is read as ${RECORD_LIMIT_CEILING}): older runs would be cut, and a record made from a cut listing is wrong`);
+  return wide;
 }
 
 async function main(argv, { now = Date.now } = {}) {
@@ -582,7 +599,7 @@ async function main(argv, { now = Date.now } = {}) {
     return 2;
   }
   const { limit, lines: lineRefs, record: recordRefs } = options;
-  if (options.typeSchema) { console.log(JSON.stringify(telemetryTypeDeclaration(TRADE_SPEC))); return 0; }
+  if (options.typeSchema) { console.log(JSON.stringify(telemetryTypeDeclaration(TRADE_SPEC), null, 2)); return 0; }
   if (options.history) return printHistory();
   let dest = null;
   if (recordRefs.length) {
@@ -596,7 +613,7 @@ async function main(argv, { now = Date.now } = {}) {
     const stepName = stepNameRunning(/npm run test:standalone:db/);
     // The first external call: a missing or logged-out gh stops here, before anything is printed from nothing.
     const listing = readListing({ limit, growing: recordRefs.length > 0 });
-    const wanted = lineRefs.length || recordRefs.length ? new Set([...lineRefs, ...recordRefs].map(bundleOf)) : null;
+    const wanted = lineRefs.length || recordRefs.length ? new Set([...lineRefs, ...recordRefs].map(ref => keyNumber(bundleOf(ref)))) : null;
 
     const { runs, unread } = await readRuns({ listing, wanted, stepName, deadline, now });
 

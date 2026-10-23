@@ -20,6 +20,9 @@
  *   script's ten-minute budget without waiting for it.
  * - `FAKE_GH_GIT_LOG` the path the calls are appended to, one JSON object per line: `{ file, args, inherited, envNames }`.
  *   `envNames` is the names of the environment the child would get: the `env` option when one was given, else this process's.
+ * - `commonDir`, when the fixture has the key, answers `git rev-parse --git-common-dir` (the record lock lives there): a path, so a
+ *   test never takes the real repository's lock, or null, which fails as git does outside a repository. Absent: the real git.
+ *   Each logged call also says `answeredBy: 'fixture' | 'real'`.
  * - A `gh` question the fixture does not know is thrown, naming it; a `git` question it does not know goes to the real git.
  */
 import { createRequire, syncBuiltinESMExports } from 'node:module';
@@ -37,9 +40,23 @@ let skewMs = 0;
 let attemptReads = 0;
 Date.now = () => realNow() + skewMs;
 
+/** `git rev-parse --git-common-dir`: where the record lock lives. The fixture answers it (a scratch dir, or a failure when null). */
+const isCommonDirQuestion = (file, args) => file === 'git' && args[0] === 'rev-parse' && args[1] === '--git-common-dir' && 'commonDir' in fixture;
+
+/** Whether the fixture answers this call (everything else goes to the real program). */
+function answeredByFixture(file, args) {
+  if (file === 'gh') return true;
+  if (file !== 'git') return false;
+  return isCommonDirQuestion(file, args) || (args[0] === 'log' && args.includes('origin/main')) || (args[0] === 'merge-base' && args[1] === '--is-ancestor');
+}
+
 function fake(file, args = [], options = {}) {
   const env = options?.env;
-  appendFileSync(logPath, `${JSON.stringify({ file, args, inherited: env === undefined, envNames: Object.keys(env ?? process.env) })}\n`);
+  appendFileSync(logPath, `${JSON.stringify({ file, args, inherited: env === undefined, envNames: Object.keys(env ?? process.env), answeredBy: answeredByFixture(file, args) ? 'fixture' : 'real' })}\n`);
+  if (isCommonDirQuestion(file, args)) {
+    if (fixture.commonDir === null) throw Object.assign(new Error('fatal: not a git repository (or any of the parent directories): .git'), { status: 128, stderr: 'fatal: not a git repository' });
+    return `${fixture.commonDir}\n`;
+  }
   if (file === 'gh') {
     if (args[0] === 'run' && args[1] === 'list') {
       const limit = Number(args[args.indexOf('-L') + 1]);

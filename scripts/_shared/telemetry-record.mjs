@@ -15,7 +15,8 @@
  *   {@link upsertTelemetryRecord} finds by type AND key, and refuses to treat a row of another type as a hit.
  * - **A replace that keeps a stale field.** `update_chrono` MERGES `properties`, so a field the new payload leaves out keeps its
  *   old value and the record then says two things about two moments. The payload is written whole, every time: it must carry
- *   every required field ({@link checkTelemetryProperties}), and an update names them all.
+ *   every required field ({@link checkTelemetryProperties}), an update names them all, and an OPTIONAL field the payload lacks is
+ *   deleted by the same update (`deleteFields`), so nothing of the replaced record survives that the new one did not say.
  * - **A second record for one key.** Duplicates of a key collapse to the newest.
  * - **A type that cannot be declared, or that disagrees with the writer.** The declaration is generated from the same spec the
  *   writer is checked against ({@link telemetryTypeDeclaration}); a field with a type the server has no word for (an array, a
@@ -34,6 +35,7 @@
  * runs without `npm ci`).
  */
 import { YthrilApiError } from './ythril-api.mjs';
+import { newestBy } from './newest-by.mjs';
 import { TIMING_SCOPES } from '../../testing/_shared/timing-reporter.mjs';
 
 export const TELEMETRY_SPACE = 'y-proj-ythril';
@@ -207,7 +209,7 @@ export async function findTelemetryRecords(api, spec, key) {
   const rows = answer?.data?.results;
   if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
   return rows.filter(r => r?.type === spec.type && r?.properties?.recordKey === key && typeof r._id === 'string')
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+    .sort(newestBy('createdAt'));
 }
 
 /**
@@ -234,7 +236,10 @@ export async function upsertTelemetryRecord(api, spec, payload, { replaceWhen = 
   const [keep, ...duplicates] = rows;
   if (!replaceWhen(keep.properties ?? {}, payload.properties)) return 'kept';
   for (const d of duplicates) await api.call('delete_chrono', { space: spec.space, id: d._id });
-  await api.call('update_chrono', { space: spec.space, id: keep._id, ...rest, suppressEmbeddings: true });
+  // `update_chrono` merges `properties`: an OPTIONAL field this payload lacks would keep the value of the record it replaces, so it
+  // is named in `deleteFields`. A field the payload carries is written; every required one is carried ({@link checkTelemetryProperties}).
+  const absent = Object.keys(spec.schema).filter(k => !spec.schema[k].required && payload.properties[k] === undefined).map(k => `properties.${k}`);
+  await api.call('update_chrono', { space: spec.space, id: keep._id, ...rest, ...(absent.length ? { deleteFields: absent } : {}), suppressEmbeddings: true });
   return 'replaced';
 }
 

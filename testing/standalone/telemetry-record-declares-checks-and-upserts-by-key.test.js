@@ -36,7 +36,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { startFakeYthril, FAKE_SPACE } from '../_shared/fake-ythril-tool-server.mjs';
-import { createYthrilApi } from '../../scripts/_shared/ythril-api.mjs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { REPO_ROOT } from './_sources.mjs';
+import { stripComments } from './_strip-comments.mjs';
+import { createYthrilApi, YthrilApiError } from '../../scripts/_shared/ythril-api.mjs';
 import { testRunTypeDeclaration } from '../../scripts/test-times.mjs';
 import { TypeSchemasZ } from '../../server/dist/spaces/body-schemas.js';
 import { getAllowedChronoTypes } from '../../server/dist/spaces/schema-validation.js';
@@ -192,6 +196,97 @@ describe('upserting one record by type and key', () => {
       assert.ok(!JSON.stringify(outcomes).includes(server.token), 'a token in an outcome is a token in a log');
       assert.equal(server.store.length, 0);
     });
+  });
+});
+
+describe('a replace leaves no field of the old record behind, optional ones included', () => {
+  const optionalOf = (spec) => Object.keys(spec.schema).filter(k => !spec.schema[k].required);
+
+  it('an optional field the new payload lacks is deleted by the update (the merge would keep its old value)', async () => {
+    await withInstance(async ({ server, api }) => {
+      const { upsertTelemetryRecords } = module_();
+      const spec = specOf('Test-Run');
+      const optional = optionalOf(spec);
+      assert.ok(optional.length >= 2, 'Test-Run has optional fields (wallMs, measurementsChars): the test needs them');
+      await upsertTelemetryRecords(api, spec, [payloadOf(spec, 'k:1', 1)]);
+      for (const k of optional) assert.ok(k in server.store[0].properties, `${k} was written the first time`);
+      const without = payloadOf(spec, 'k:1', 2);
+      for (const k of optional) delete without.properties[k];
+      const outcomes = await upsertTelemetryRecords(api, spec, [without]);
+      assert.deepEqual(outcomes.map(o => o.outcome), ['replaced']);
+      for (const k of optional) assert.ok(!(k in server.store[0].properties), `${k} kept the value of the record it replaced`);
+      assert.deepEqual([...server.callsTo('update_chrono')[0].args.deleteFields].sort(), optional.map(k => `properties.${k}`).sort());
+      assert.deepEqual(server.store[0].properties, without.properties);
+    });
+  });
+
+  it('a payload that carries them all deletes nothing, and a type with no optional field sends no deleteFields', async () => {
+    await withInstance(async ({ server, api }) => {
+      const { upsertTelemetryRecords } = module_();
+      for (const type of ['Test-Run', 'Trade']) {
+        const spec = specOf(type);
+        await upsertTelemetryRecords(api, spec, [payloadOf(spec, `${type}:1`, 1)]);
+        await upsertTelemetryRecords(api, spec, [payloadOf(spec, `${type}:1`, 2)]);
+      }
+      for (const c of server.callsTo('update_chrono')) assert.ok(!c.args.deleteFields || c.args.deleteFields.length === 0, JSON.stringify(c.args.deleteFields));
+    });
+  });
+});
+
+describe('a batch goes on after one record fails, and stops when every later call would fail the same way', () => {
+  const stubApi = (error) => ({ calls: 0, async call() { this.calls += 1; throw error; } });
+  const two = () => { const spec = specOf('Trade'); return { spec, payloads: [payloadOf(spec, 'trade:1'), payloadOf(spec, 'trade:2')] }; };
+
+  for (const [what, error] of [
+    ['a 401 (the token is refused)', new YthrilApiError('filter: HTTP 401', { status: 401, tool: 'filter' })],
+    ['a 403', new YthrilApiError('filter: HTTP 403', { status: 403, tool: 'filter' })],
+    ['no status at all (the instance is not there)', new YthrilApiError('filter: request failed (ECONNREFUSED)', { tool: 'filter' })],
+  ]) {
+    it(`stops at ${what}: the rest are failed with the same reason, unsent`, async () => {
+      const { spec, payloads } = two();
+      const api = stubApi(error);
+      const outcomes = await module_().upsertTelemetryRecords(api, spec, payloads);
+      assert.deepEqual(outcomes.map(o => [o.key, o.outcome]), [['trade:1', 'failed'], ['trade:2', 'failed']]);
+      assert.equal(outcomes[1].error, outcomes[0].error);
+      assert.equal(api.calls, 1, 'the second record was never sent');
+    });
+  }
+
+  it('goes on after a 500 (that record\'s failure only)', async () => {
+    const { spec, payloads } = two();
+    const api = stubApi(new YthrilApiError('filter: HTTP 500', { status: 500, tool: 'filter' }));
+    const outcomes = await module_().upsertTelemetryRecords(api, spec, payloads);
+    assert.deepEqual(outcomes.map(o => o.outcome), ['failed', 'failed']);
+    assert.equal(api.calls, 2, 'each record was tried');
+  });
+});
+
+describe('duplicates of a key collapse to the newest, for a Trade record', () => {
+  it('updates the newest, deletes the two older, leaves one', async () => {
+    await withInstance(async ({ server, api }) => {
+      const spec = specOf('Trade');
+      const old = server.seed({ type: 'Trade', title: 'old', createdAt: '2020-01-01T00:00:00.000Z', properties: { recordKey: 'trade:9' } });
+      const middle = server.seed({ type: 'Trade', title: 'middle', createdAt: '2021-01-01T00:00:00.000Z', properties: { recordKey: 'trade:9' } });
+      const newest = server.seed({ type: 'Trade', title: 'newest', createdAt: '2099-01-01T00:00:00.000Z', properties: { recordKey: 'trade:9' } });
+      const outcomes = await module_().upsertTelemetryRecords(api, spec, [payloadOf(spec, 'trade:9')]);
+      assert.deepEqual(outcomes.map(o => o.outcome), ['replaced']);
+      assert.equal(server.store.length, 1);
+      assert.equal(server.store[0]._id, newest._id);
+      assert.deepEqual(new Set(server.callsTo('delete_chrono').map(c => c.args.id)), new Set([old._id, middle._id]));
+      assert.equal(server.callsTo('update_chrono')[0].args.id, newest._id);
+    });
+  });
+});
+
+describe('the newest-first comparator is written once', () => {
+  it('exactly one script spells it, and it is the shared module both recorders import', () => {
+    const files = [...readdirSync(join(REPO_ROOT, 'scripts')).filter(f => f.endsWith('.mjs')).map(f => `scripts/${f}`),
+      ...readdirSync(join(REPO_ROOT, 'scripts', '_shared')).filter(f => f.endsWith('.mjs')).map(f => `scripts/_shared/${f}`)];
+    assert.ok(files.length >= 20, `${files.length} scripts read: the scan is blind`);
+    const spelling = /\b\w+(?:\.\w+|\[\w+\])\s*<\s*\w+(?:\.\w+|\[\w+\])\s*\?\s*1\s*:/;
+    const spellers = files.filter(f => spelling.test(stripComments(readFileSync(join(REPO_ROOT, f), 'utf8'))));
+    assert.deepEqual(spellers, ['scripts/_shared/newest-by.mjs']);
+    assert.match(readFileSync(join(REPO_ROOT, 'scripts/_shared/newest-by.mjs'), 'utf8'), /export const newestBy\b/);
   });
 });
 

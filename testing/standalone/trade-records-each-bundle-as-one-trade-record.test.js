@@ -405,3 +405,113 @@ describe('--history sums over records, it does not average their rates', () => {
     });
   });
 });
+
+describe('a bundle number spelled two ways is ONE bundle: asked for by one spelling, read under both', () => {
+  it('asked as bundle-106, the runs pushed to bundle-0106 are read and recorded under trade:106', async () => {
+    await withServer(async (server) => {
+      const runs = greenRuns(5001, 'full-run/bundle-0106', ['10:00:00']);
+      const r = await record(server, ['--record', 'full-run/bundle-106'], { runs });
+      assert.equal(r.code, 0, everything(r));
+      assert.equal(trades(server).length, 1, everything(r));
+      assert.equal(trades(server)[0].properties.recordKey, 'trade:106');
+      assert.equal(trades(server)[0].properties.afterCounted, 1, 'the run on the other spelling was read, not skipped');
+      assert.equal(trades(server)[0].properties.refs, 'full-run/bundle-0106');
+    });
+  });
+
+  const BOTH = [...greenRuns(5101, 'full-run/bundle-106', ['10:00:00']), ...greenRuns(5102, 'full-run/bundle-0106', ['11:00:00'])];
+  for (const [what, args] of [
+    ['asked as bundle-106 while the listing holds both spellings', ['--record', 'full-run/bundle-106']],
+    ['asked as both spellings', ['--record', 'full-run/bundle-106', 'full-run/bundle-0106']],
+  ]) {
+    it(`${what}: refused, naming both spellings, with nothing sent (one record could not hold two bundles' figures)`, async () => {
+      await withServer(async (server) => {
+        const r = await record(server, args, { runs: BOTH });
+        assert.equal(r.code, 2, everything(r));
+        assert.match(r.stderr, /^trade: refused bundle 106: .*spelled two ways/m, everything(r));
+        assert.match(r.stderr, /\b0106\b/);
+        assert.deepEqual(server.calls, []);
+      });
+    });
+  }
+});
+
+describe('the listing is read once more at the ceiling, not once per doubling', () => {
+  it('--limit 1 over a seven-run history: two reads, the second at the ceiling, and every run recorded', async () => {
+    await withServer(async (server) => {
+      const r = await record(server, ['--record', REF_130, '--limit', '1']);
+      assert.equal(r.code, 0, everything(r));
+      const limits = r.calls.filter(c => c.file === 'gh' && c.args[0] === 'run' && c.args[1] === 'list').map(c => Number(c.args[c.args.indexOf('-L') + 1]));
+      assert.deepEqual(limits, [1, trade.RECORD_LIMIT_CEILING], 'one read at the limit, one at the ceiling');
+      assert.equal(trades(server)[0].properties.runIds, BUNDLE_130_FIGURES.runIds);
+    });
+  });
+});
+
+describe('the record lock', () => {
+  it('lives in the git common dir the run is told about, is released, and the real repository\'s is never taken by a test', async () => {
+    await withServer(async (server) => {
+      const r = await record(server);
+      assert.equal(r.code, 0, everything(r));
+      const asked = r.calls.filter(c => c.file === 'git' && c.args[0] === 'rev-parse' && c.args[1] === '--git-common-dir');
+      assert.ok(asked.length >= 1, 'the lock path was asked of git');
+      for (const c of asked) assert.equal(c.answeredBy, 'fixture', 'a test run took the real repository\'s lock');
+      assert.equal(r.lockLeft, false, 'a lock file was left behind');
+    });
+  });
+
+  it('a lock that stays held past the wait is exit 2, nothing written, and the line names the lock', async () => {
+    await withServer(async (server) => {
+      const r = await record(server, ['--record', REF_130], { holdLock: true, env: { YTHRIL_TEST_RUNS_LOCK_WAIT_MS: '300' }, timeoutMs: 20_000 });
+      assert.equal(r.code, 2, everything(r));
+      assert.match(r.stderr, /^trade: [^\n]*record lock/m, everything(r));
+      assert.deepEqual(server.calls, [], 'nothing was found or written under a lock that was not held');
+      assert.equal(trades(server).length, 0);
+    });
+  });
+
+  it('a wait that is not a positive whole number is refused naming the variable', async () => {
+    await withServer(async (server) => {
+      const r = await record(server, ['--record', REF_130], { env: { YTHRIL_TEST_RUNS_LOCK_WAIT_MS: 'soon' }, timeoutMs: 20_000 });
+      assert.equal(r.code, 2, everything(r));
+      assert.match(r.stderr, /YTHRIL_TEST_RUNS_LOCK_WAIT_MS/);
+      assert.deepEqual(server.calls, []);
+    });
+  });
+});
+
+describe('--history refuses what it cannot read whole', () => {
+  it('when the instance holds more Trade records than were read', async () => {
+    await withServer(async (server) => {
+      server.respond = (call) => (call.tool === 'filter' ? { status: 200, body: { ok: true, text: '', data: { collection: 'chrono', results: [], count: 0, total: 600, limit: 500, skip: 0 } } } : undefined);
+      const r = await runTrade(['--history'], { server });
+      assert.equal(r.code, 2, everything(r));
+      assert.match(r.stderr, /^trade: [^\n]*600 Trade records/m, everything(r));
+      assert.doesNotMatch(r.stdout, /Failure rate/, 'no figure is printed from a part of the history');
+    });
+  });
+
+  it('under CI, saying it is a READ that is refused (the recording sentence would be false here)', async () => {
+    await withServer(async (server) => {
+      const r = await runTrade(['--history'], { server, env: { GITHUB_ACTIONS: 'true' } });
+      assert.equal(r.code, 2, everything(r));
+      assert.match(r.stderr, /^trade: --history is refused when GITHUB_ACTIONS is set/m, everything(r));
+      assert.doesNotMatch(r.stderr, /writes records|nothing is sent/);
+      assert.deepEqual(server.calls, []);
+    });
+  });
+
+  it('without a destination: exit 2 naming the variable', async () => {
+    const r = await runTrade(['--history'], {});
+    assert.equal(r.code, 2, everything(r));
+    assert.match(r.stderr, /^trade: [^\n]*YTHRIL_TEST_RUNS_URL/m, everything(r));
+  });
+});
+
+describe('--type-schema prints indented JSON, as test-times does', () => {
+  it('one format: two-space indent and a closing newline', async () => {
+    const r = await runTrade(['--type-schema']);
+    assert.equal(r.code, 0, everything(r));
+    assert.equal(r.stdout, `${JSON.stringify(JSON.parse(r.stdout), null, 2)}\n`);
+  });
+});
