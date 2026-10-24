@@ -123,10 +123,11 @@ function heldBy(claim: JobClaim): Record<string, unknown> {
  * already gone. Writing the job makes the database serialise the two — a revocation that lands first leaves this
  * filter matching nothing; one that lands second waits for the commit, and then finds the results in place.
  *
- * **A write that takes seqs holds the horizon** (`opts.seqHolder`, the holder's registered name): the transaction then runs through
- * `inHeldTransaction` (`brain/held-transaction.ts`), the one way a transaction that takes seqs is run, so a seq-paged reader of the
- * space does not pass a number whose row has not committed. Without it the transaction holds none: the fence is a counter on a job
- * row, which no seq-paged reader waits for.
+ * **A write that stamps a position holds the floor** (`opts.positionHolder`, the holder's registered name): the transaction then runs through
+ * `inHeldTransaction` (`brain/held-transaction.ts`), the one way a transaction that stamps positions is run, so a position-paged reader of the
+ * space does not pass a position whose row has not committed. Without it the transaction holds none: the fence is a counter on a job
+ * row, which no position-paged reader waits for. (Of this module's callers only the derived description stamps one; the derived rows
+ * themselves are local, carry no position, and are never paged.)
  *
  * A write refused by a conflict is retried by `withTransaction` from the top, so `writes` must be safe to run twice:
  * delete what it is about to insert rather than rely on the insert being the first. The transaction is ended by a bound
@@ -137,7 +138,7 @@ export async function writeUnderClaim<T>(
   spaceId: string,
   claim: JobClaim,
   writes: (session: ClientSession) => Promise<T>,
-  opts: { seqHolder?: string } = {},
+  opts: { positionHolder?: string } = {},
 ): Promise<T> {
   const fenced = async (session: ClientSession): Promise<T> => {
     const held = await col<MediaJobDoc>(spaceCollection(spaceId, 'mediaJobs')).updateOne(
@@ -147,9 +148,9 @@ export async function writeUnderClaim<T>(
     return await writes(session);
   };
   const bound = { boundMs: leasedWriteBoundMs() };
-  return opts.seqHolder === undefined
+  return opts.positionHolder === undefined
     ? inBoundedTransaction(fenced, bound)
-    : inHeldTransaction(spaceId, opts.seqHolder, fenced, bound);
+    : inHeldTransaction(spaceId, opts.positionHolder, fenced, bound);
 }
 
 /**

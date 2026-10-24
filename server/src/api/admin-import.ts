@@ -66,7 +66,6 @@ import { watchArrivals, recordedOf, sayRecorded, type RecordedFamilies } from '.
 import { isNewerCopy } from '../sync/upsert-plan.js';
 import { writeArrivals, arrivalId, arrivalRefusal, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
 import { PageStoppedError } from '../sync/page-stopped.js';
-import { CounterBehindError } from '../sync/counter-after-page.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
@@ -119,12 +118,6 @@ export interface ImportTypeResult {
    * what the backup does not say. Counts the keys the replaced rows held, not the keys the backup lacks. Present only when any were.
    */
   keysRemoved?: number;
-  /**
-   * The family's records were stored, and this instance's seq counter could not be moved past them (`Q-224`): the
-   * next local write may sort below a restored record. Present only when it happened; run the import again (a
-   * restore replaces, so it is idempotent) and it moves the counter.
-   */
-  counterBehind?: true;
   /**
    * Records restored over a tombstone this instance holds — a peer holding the same tombstone deletes them again.
    * The first `NAMED_IN_SUMMARY` ids; `restoredOverTombstoneTotal` is how many there were.
@@ -203,10 +196,9 @@ async function importInto(spaceId: string, payload: Record<string, unknown>): Pr
       out = await writeArrivals(spaceId, t, RECORD_TYPE_OF[t], docs, { restore: true });
     } catch (err) {
       log.warn(`Import into space '${peerText(spaceId)}': ${t} could not be written: ${logSafe(String(err))}`);
-      // `Q-224`: the writer always says what it had done when it stopped — a record write that failed part-way, or
-      // a counter it could not move past what it restored. What it vouches for is reported as landed.
+      // `Q-224`: the writer always says what it had done when it stopped — a record write that failed part-way.
+      // What it vouches for is reported as landed.
       const partial = err instanceof PageStoppedError ? err.partial : undefined;
-      if (err instanceof CounterBehindError) result.counterBehind = true;
       if (!partial) {
         // Nothing of the family is vouched for, so every document is named.
         result.refused = docs.slice(0, NAMED_IN_SUMMARY).map(d => ({ _id: peerText(arrivalId(d)), reason: familyFailed(err) }));

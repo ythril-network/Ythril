@@ -25,17 +25,15 @@
  *     refusal) is replaced by the version the page accepted before it, so the outcome stays the sequential one. A
  *     winner the write found DIVERGED from a same-seq copy stored meanwhile is planned again and forks (`Q-232`).
  *     A stale tombstone is deleted only once its record has LANDED.
- *  4. **Bump** the counter over every plausible seq RECEIVED, awaited, whatever became of the write. The writer
- *     bumps over every document it is HANDED; this bump exists only for the ones the planner never hands it —
- *     tombstoned, already current, an unknown chrono type, a fork refused at its cap. The counter follows the
- *     peer's clock, and a bump over only what landed leaves it behind exactly where a re-created record is then
- *     refused. The write's own error wins over the bump's (`Q-224`).
- *  5. **Forks**, last: a fork is a LOCAL write and takes a local seq, allocated from a counter that is already past
- *     everything this page carried — so it sorts above the arrival that caused it. It keeps the divergent copy's
- *     `createdAt` and `updatedAt`: the fork holds what the other peer wrote, when it wrote it, and "now" would give
- *     it a fresh retention window and make two receivers store two documents under one derived fork id. The seq
- *     hold covers the fork write alone; its embed jobs are queued after the hold is released. A fork write that
- *     fails for the store's reasons fails the page (a push answers 500/503, a pull holds its watermark).
+ *  4. **No counter moves.** An arrival never raises the space's version counter (D-19 B, Q-241): a peer's version is the peer's, kept
+ *     as it arrived, and the stamp of a local write over it is computed from the record it replaces (`util/version-stamp.ts`).
+ *     A page's records take their positions in the writer, one block per chunk.
+ *  5. **Forks**, last: a fork is a LOCAL write and takes a local version, stamped above the record it forks from (the stored
+ *     copy), so it sorts above the arrival that caused it — and a parent at the ceiling refuses its fork (`rejected`). It keeps
+ *     the divergent copy's `createdAt` and `updatedAt`: the fork holds what the other peer wrote, when it wrote it, and "now"
+ *     would give it a fresh retention window and make two receivers store two documents under one derived fork id. It lands as
+ *     an arrival (its own position); its embed jobs are queued after. A fork write that fails for the store's reasons fails the
+ *     page (a push answers 500/503, a pull holds its watermark).
  *  6. **Report**: the forks dropped at their cap are named once per page (the sender moves past them), and every
  *     landed edge and link is checked for strict linkage — on every door (it was the single edge route's and the
  *     batch's links only).
@@ -58,9 +56,8 @@
 import { getAllowedChronoTypes } from '../spaces/schema-validation.js';
 import { getConfig } from '../config/loader.js';
 import { log, peerList, peerText } from '../util/log.js';
-import { withAllocatedSeqs } from '../util/seq.js';
+import { versionsForRows } from '../util/version-stamp.js';
 import { withinWriteBound } from '../db/write-bound.js';
-import { advanceCounterPast } from './counter-after-page.js';
 import { TOMBSTONE_TYPE_OF } from '../config/types.js';
 import { MAX_FORK_DEPTH } from '../api/sync/_shared.js';
 import type { LinkageCheck } from './linkage-check.js';
@@ -125,7 +122,6 @@ export async function acceptArrivingPage(
     const where = `sync ${door} from ${peer}`;
     const results = {} as Record<PayloadKey, AcceptedFamily>;
     const sound = {} as Record<PayloadKey, Array<{ index: number; doc: Arrived }>>;
-    let maxReceived = 0;
 
     // ── 1. validate ─────────────────────────────────────────────────────────────────────────────────────────
     for (const { payloadKey: key } of REPLICATED_FAMILIES) {
@@ -135,10 +131,7 @@ export async function acceptArrivingPage(
       results[key] = res;
       const { admitted, refused } = admitArrivals(key, docs);
       for (const r of refused) { res.reasons[r.index] = r.reason; res.invalid[r.index] = r.invalid; }
-      for (const a of admitted) {
-        res.docs[a.index] = a.doc as Arrived;
-        if (a.doc.seq > maxReceived) maxReceived = a.doc.seq;
-      }
+      for (const a of admitted) res.docs[a.index] = a.doc as Arrived;
       sound[key] = admitted.map(a => ({ index: a.index, doc: a.doc as Arrived }));
       warnArrivalsNotStored(where, spaceId, key, 'refused', refused.map((r): ArrivalRefusal => ({ _id: r._id, reason: r.reason })));
       // A repeated id is a sender's bug or a page that overlapped itself; the plan decides its copies in order and
@@ -260,23 +253,30 @@ export async function acceptArrivingPage(
       sayRecorded({ spaceId, source: door, peer, families });
       for (const [key, docs] of recorded) results[key].summary = summarise(new Map([[key, docs]]));
     };
-    const behind = await advanceCounterPast(spaceId, maxReceived, where);
     if (failure) { say(); throw failure.err; }
-    if (behind) { say(); throw behind; }
 
     // ── 5. forks ─────────────────────────────────────────────────────────────────────────────────────────────
     try {
       if (forks.length > 0) {
         // A fork is a new record under an id nothing holds, so there is no copy it replaces; looked at before it is written like any other.
         const forkWatch = await watchArrivals(spaceId, 'facts', forks.map(f => f.doc), door);
+        // A fork is a LOCAL version of a divergent copy, stamped above the record it forks from (the stored copy, at the arriving seq):
+        // `versionsForRows` over the parents, so a parent at the ceiling refuses its fork (answered `rejected`, Q-241 doneWhen 2) and the
+        // other forks of the page land. The copy lands as an arrival (`writePage`), which takes its own position.
+        const stamps = await versionsForRows(spaceId, forks.map(f => String(f.doc['forkOf'] ?? f.doc._id)), { parts: ['facts'] });
+        const live = forks.flatMap((f, k) => { const s = stamps[k]!; return 'refused' in s ? [] : [{ f, version: s.version }]; });
         let forkOut: ArrivalOutcome | undefined;
-        await withAllocatedSeqs(spaceId, forks.length, async (first) => {
+        if (live.length > 0) {
           // The divergent copy's own createdAt and updatedAt, never "now" — see step 5 of the module docblock.
-          forkOut = await writePage(spaceId, 'facts', forks.map((f, k) => ({ ...f.doc, seq: first + k })),
+          forkOut = await writePage(spaceId, 'facts', live.map(({ f, version }) => ({ ...f.doc, seq: version })),
             { from: peer, deliveredBy, deferEnqueue: true });
-        }, `sync.${door}.fork`);
+        }
         await forkOut?.enqueue();
-        const failed = new Set([...(forkOut?.refused.map(r => r._id) ?? []), ...(forkOut?.duplicates ?? [])]);
+        const liveIds = new Set(live.map(l => l.f.doc._id));
+        const failed = new Set([
+          ...forks.map(f => f.doc._id).filter(id => !liveIds.has(id)),
+          ...(forkOut?.refused.map(r => r._id) ?? []), ...(forkOut?.duplicates ?? []),
+        ]);
         for (const f of forks) {
           if (!failed.has(f.doc._id)) continue;
           results[f.key].verdicts[f.index] = 'rejected';

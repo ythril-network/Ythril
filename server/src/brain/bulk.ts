@@ -98,7 +98,7 @@ export interface BulkWriteTrust {
  * derived from `introduced` alone (what the item did, not what the record already had). A caller that handles the refusal reads the
  * same object here as from `POST /entities`, and does not parse a sentence to find which of its fields to fix.
  */
-export interface BulkError { type: string; index: number; reason: string; violation?: BulkViolation; written?: WrittenRecord }
+export interface BulkError { type: string; index: number; reason: string; violation?: BulkViolation; written?: WrittenRecord; /** The wire code of a refusal that has one (`record_version_at_ceiling`), as the single-record doors answer it. */ code?: string }
 
 /** A schema refusal as a batch row carries it (`SchemaViolationError.toRowViolation`). */
 export type BulkViolation = Record<string, unknown>;
@@ -815,7 +815,7 @@ function batchRun(
     if (e.inline && e.counted !== null) e.inline.recordLanded = o.ok;
     if (!o.ok) {
       e.result = { ok: false, reason: o.reason, ...(violation ? { violation } : {}) };
-      const row: BulkError = { type: e.type, index: e.index, reason: o.reason, ...(violation ? { violation } : {}) };
+      const row: BulkError = { type: e.type, index: e.index, reason: o.reason, ...(violation ? { violation } : {}), ...(o.code !== undefined ? { code: o.code } : {}) };
       out.errors.push(row);
       if (e.counted === null) e.inline?.failed.push(row);
       if (e.key) refs.fail(e.key, o.reason, violation);

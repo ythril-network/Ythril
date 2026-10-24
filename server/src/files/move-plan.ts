@@ -43,6 +43,7 @@ import { walkUpFileChains, walkUpParentChains } from './ancestry.js';
 import { fileLinkSourcesOf } from '../brain/link-adjacency.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { rekeyedRow } from '../sync/local-only-fields.js';
+import type { LocalLanding } from '../sync/record-position-stream.js';
 import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
 import { jobIdsOwnedBy } from './media/job-queue.js';
 import { cacheEntryBytesOf } from './path-keyed-cache.js';
@@ -96,17 +97,24 @@ export interface MovePlan {
  * of the old path's sync agreement), its `path` the new id, its parent and its converted-Markdown pointer re-rooted by the SAME rule
  * as its id. The pointer is set here, by the row that holds it, so the move writes none by a scan on a field that has no index.
  * Everything else, the `seq`, the author and the stored `updatedAt`, is the stored row's: this write stamps no version, so it must not
- * move the timestamp read beside the version.
+ * move the timestamp read beside the version. It does stamp a POSITION (`landing`, the move's own `withLandingStamp` patch: the row's own
+ * version, a fresh position and written here): the row is a record under a new id, and a copy that kept the old row's position would sit below
+ * every peer's mark and never be offered. A row with no version (a pre-4.0 file row) is given none: it was never served and still is not.
  *
  * `unplaced` are the sidecar paths (at the source) whose bytes could not be placed because something else stands at their destination
  * (`MovePlan.unplacedSidecars`): a pointer at one of them is NOT carried, because it would name the occupant's text as the file's own.
  */
-export function rebuiltFileRow(row: FileMetaDoc, to: string, src: string, dst: string, unplaced: readonly string[] = []): FileMetaDoc {
+export function rebuiltFileRow(
+  row: FileMetaDoc, to: string, src: string, dst: string, unplaced: readonly string[] = [], landing?: LocalLanding,
+): FileMetaDoc {
   const parent = row.parentFileId === undefined ? undefined : idAfterMove(row.parentFileId, src, dst);
   const converted = row.convertedFileId === undefined ? undefined : idAfterMove(row.convertedFileId, src, dst);
   const patch: Pick<FileMetaDoc, '_id' | 'path'> & Partial<Pick<FileMetaDoc, 'parentFileId' | 'convertedFileId'>> = { _id: to, path: to };
   if (parent !== undefined) patch['parentFileId'] = parent;
   if (converted !== undefined) patch['convertedFileId'] = converted;
+  // The move's landing (its own version, a fresh position, written here) is part of what the row is re-keyed WITH: `rekeyedRow` drops the old row's and keeps
+  // the patch's own.
+  if (landing) Object.assign(patch, landing);
   const rebuilt = rekeyedRow(row, patch) as FileMetaDoc;
   if (row.convertedFileId !== undefined && unplaced.some(u => isAtOrUnder(row.convertedFileId!, u))) delete rebuilt.convertedFileId;
   return rebuilt;

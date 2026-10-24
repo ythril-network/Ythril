@@ -111,7 +111,11 @@ import { spaceCollection } from '../db/space-collection.js';
 import { DetachedWork } from '../util/detached-work.js';
 import { inChunks } from '../util/chunks.js';
 import { encodeIsoCursor, ISO_READ_START, type IsoPosition } from '../util/seq-keyset.js';
-import { HorizonHolds, heldWhile } from '../util/horizon-holds.js';
+import {
+  createPositionStream, withPositionHeld as holdPositionOn, settledPositionCap as capOf, nextUnheldPosition, lowestOpenPosition,
+  oldestPositionHoldSeconds, type PositionStream,
+} from '../util/position-clock.js';
+import { highestStored } from '../util/index-top.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
 import { withinWriteBound } from '../db/write-bound.js';
@@ -230,110 +234,61 @@ export async function positionLegacyFileTombstones(spaceId: string): Promise<num
  * while an earlier stamp's write was still in flight carried the acknowledgement over a row no peer had been sent, and the
  * prune took it: the deleted file came back from the one peer that held it.
  *
- * It is the seq horizon's defect for an instant, and it has the seq horizon's cure (`util/horizon-holds.ts`): the stamp and
- * its hold are taken in ONE step ({@link withPositionHeld}), the write runs inside the hold, and every reader that compares a
- * position — a page, the prune — is capped below the lowest open one ({@link settledPositionCap}).
+ * It is the record stream's defect for an instant, and it has its cure, which is ONE module's (`util/position-clock.ts`, the clock extracted
+ * from this file when the records needed it): the stamp and its hold are taken in ONE step ({@link withPositionHeld}), the write runs inside
+ * the hold, and every reader that compares a position — a page, the prune — is capped below the lowest open one
+ * ({@link settledPositionCap}). What is THIS module's is the stream: milliseconds as an ISO instant, one stamp per call shared by
+ * a slice of rows, a seed from the highest published `positionAt`, and — unlike the records' — a seed that cannot be read stamps from the wall
+ * clock alone, once it has said so, because the failure the doors answer for a store that is down is the write's own.
  */
 
-/** The position hold: open stamps, per space. Its lines and its gauge (`ythril_file_tombstone_oldest_hold_seconds`) say so. */
-const positionHolds: HorizonHolds<string> = new HorizonHolds<string>({
-  noun: 'file tombstone position', floorKey: 'at', floorName: 'position', readers: 'every page and prune of the space\'s file tombstones',
+/**
+ * THE file-tombstone stream. Its lines and its gauge (`ythril_file_tombstone_oldest_hold_seconds`) say `file tombstone position`.
+ *
+ * The seed reads the highest `positionAt` stored (the `{ positionAt, _id }` index, read backwards) through the store's own accessor, so a restart with
+ * the wall clock behind what an earlier run handed out cannot stamp below a position a peer has acknowledged.
+ */
+const fileTombstonePositions: PositionStream<string> = createPositionStream({
+  name: 'file tombstone position',
+  unit: 'milliseconds',
+  seed: async (spaceId) => Math.max(0, Date.parse(await highestStored<string>([tombstonesOf(spaceId)], 'positionAt', { $exists: true }) ?? '') || 0),
+  wording: { noun: 'file tombstone position', floorKey: 'at', floorName: 'position', readers: 'every page and prune of the space\'s file tombstones' },
+  // A seed that could not be read is never the write's failure: it puts a READ before the write, and the failure the doors answer for a store
+  // that is down is the write's (`a-store-failure-answers-alike-on-every-door-db`, as for {@link readFileRows}). The write that follows meets
+  // the same fault. The stamp then comes from the wall clock alone — the restart guarantee is the seed's, and a store that answers the write
+  // but not the seed a moment before is the stated limit of it — and the seed is not remembered, so the next caller reads it again.
+  onSeedFailure: {
+    policy: 'wall-clock',
+    report: (err, spaceId) => {
+      if (classifyReadFailure(err).status < 500) {
+        log.warn(`file tombstone clock for ${peerText(spaceId)} could not be seeded from the stored positions: ${peerText(err)}`);
+      }
+    },
+  },
 });
 
 /** The lowest stamp of an open position hold of `spaceId`, or undefined when none is open: what a page is capped below. For tests. */
 export function lowestUncommittedPosition(spaceId: string): string | undefined {
-  return positionHolds.lowest(spaceId);
+  return lowestOpenPosition(fileTombstonePositions, spaceId);
 }
 
 /** How long the oldest open position hold of `spaceId` has been held, in seconds — 0 when none. For the gauge. */
 export function oldestPositionHoldAgeSeconds(spaceId: string): number {
-  return positionHolds.oldestAgeSeconds(spaceId);
+  return oldestPositionHoldSeconds(fileTombstonePositions, spaceId);
 }
 
-/** This instance's clock for one space: the last instant it handed out, in epoch milliseconds. */
-interface PositionClock { last: number }
-const clocks = new Map<string, Promise<PositionClock>>();
+/** Take a stamp of the file stream and run `write` holding it: ONE stamp per call, shared by a slice of rows (`util/position-clock.ts`). */
+const withPositionHeld = <T>(spaceId: string, write: (stamp: string) => Promise<T>, holder: string): Promise<T> =>
+  holdPositionOn(fileTombstonePositions, spaceId, write, holder);
 
 /**
- * The space's clock, seeded ONCE from the highest position stored (the `{ positionAt, _id }` index, read backwards) — as the seq
- * horizon seeds `maxSeen` from what is stored — so a restart with the wall clock behind what an earlier run handed out cannot stamp
- * below a position a peer has acknowledged. A seed that fails is not remembered: the next caller reads again.
- */
-function clockOf(spaceId: string): Promise<PositionClock> {
-  let clock = clocks.get(spaceId);
-  if (!clock) {
-    clock = tombstonesOf(spaceId)
-      .find(asFilter<StoredFileTombstone>({ positionAt: { $exists: true } }), { projection: { positionAt: 1 } })
-      .sort({ positionAt: -1, _id: -1 }).limit(1).toArray()
-      .then(([top]) => ({ last: Math.max(0, Date.parse(top?.positionAt ?? '') || 0) }));
-    clocks.set(spaceId, clock);
-    clock.catch(() => { if (clocks.get(spaceId) === clock) clocks.delete(spaceId); });
-  }
-  return clock;
-}
-
-/**
- * The clock for a WRITE. A seed that could not be read is never the write's failure: it puts a READ before the write, and the
- * failure the doors answer for a store that is down is the write's (`a-store-failure-answers-alike-on-every-door-db`, as for
- * {@link readFileRows}). The write that follows meets the same fault. The stamp then comes from the wall clock alone — the
- * restart guarantee is the seed's, and a store that answers the write but not the seed a moment before is the stated limit of it
- * — and the seed is not remembered, so the next caller reads it again.
- */
-async function clockForWrite(spaceId: string): Promise<PositionClock> {
-  try {
-    return await clockOf(spaceId);
-  } catch (err) {
-    if (classifyReadFailure(err).status < 500) {
-      log.warn(`file tombstone clock for ${peerText(spaceId)} could not be seeded from the stored positions: ${peerText(err)}`);
-    }
-    return { last: 0 };
-  }
-}
-
-/**
- * The next instant the space's clock WOULD hand out (epoch milliseconds), without handing it: the wall clock, or one millisecond past
- * the last handed out when the wall clock has not moved (or went back). The one formula of "what comes next" — {@link tick} takes
- * it and {@link settledPositionCap} reads it, so a cap can never be above a stamp taken after it by one spelling disagreeing.
- */
-const nextInstant = (clock: PositionClock): number => Math.max(Date.now(), clock.last + 1);
-
-/**
- * Hand out the next instant of the space's clock. Never equal to an earlier one, so two stamps of one space always order.
- * Synchronous: a hold is registered in the same tick that takes the stamp.
- */
-function tick(clock: PositionClock): string {
-  clock.last = nextInstant(clock);
-  return new Date(clock.last).toISOString();
-}
-
-/**
- * Take a stamp from the space's clock and run `write` holding it — registered in the same tick, so no reader can be handed a
- * position above `stamp` between the two — and release when the write ENDS, whichever way, inside the write bound
- * ({@link heldWhile}). ONE stamp per call: a slice of rows shares it, so positions never run ahead of the wall clock by more
- * than a few milliseconds however many rows are written.
- *
- * `write` should be the position-writing operation and nothing else: everything awaited inside it holds every page and prune of
- * the space below the stamp.
- */
-async function withPositionHeld<T>(spaceId: string, write: (stamp: string) => Promise<T>, holder: string): Promise<T> {
-  positionHolds.requireHolder(holder);
-  const clock = await clockForWrite(spaceId);
-  const stamp = tick(clock);
-  const hold = positionHolds.enter(spaceId, stamp, holder);
-  return heldWhile(positionHolds, spaceId, hold, () => write(stamp));
-}
-
-/**
- * The position strictly below which a page or a prune of the space may read: the lowest stamp whose write has not settled, or —
- * with none open — the next instant the clock would hand out, COMPUTED and never stored (a read must not move the clock, and any
- * stamp taken later is at or above this). THE one way a reader of `positionAt` is capped: a reader that bounds itself by a clock
- * read of its own reads straight through an open hold (`a-file-tombstone-position-is-read-through-one-cap` holds every reader to it).
- * Async because the clock is seeded from the store once, so a restart cannot cap below a position already handed out.
+ * The position strictly below which a page or a prune of the space may read: the clock's one cap (`settledPositionCap`, `util/position-clock.ts`)
+ * for the file stream, which is this module's and so is the one argument it does not take. THE one way a reader of `positionAt` is capped: a
+ * reader that bounds itself by a clock read of its own reads straight through an open hold
+ * (`a-file-tombstone-position-is-read-through-one-cap` holds every reader to it).
  */
 export async function settledPositionCap(spaceId: string): Promise<string> {
-  const clock = await clockOf(spaceId);
-  // Read after the await, in one tick with the hold registry: a hold entered while the seed was out is below this answer or equal to it.
-  return positionHolds.lowest(spaceId) ?? new Date(nextInstant(clock)).toISOString();
+  return capOf(fileTombstonePositions, spaceId);
 }
 
 // ── A wipe is not undone by a publish in flight (Q-406) ────────────────────────────────────────────────────────────
@@ -607,7 +562,7 @@ export async function writePendingFileTombstones(
   // `settleAt` is a TIMER, read against the wall clock by the settle, so it is the wall clock and never the position clock: that
   // one is seeded from the highest stored position and never goes back, and a pending row stamped from it while it was ahead of
   // the wall was not settled, and so not published to peers, until the wall caught up.
-  const now = tick(await clockForWrite(spaceId));
+  const now = await nextUnheldPosition(fileTombstonePositions, spaceId);
   const settleAt = new Date().toISOString();
   const marker = move ? { move: markerDocOf(move) } : {};
   // What the act knows of what it is about to erase, read ONCE for every path (one `$in` per chunk): who is acting, and the

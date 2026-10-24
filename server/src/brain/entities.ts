@@ -2,8 +2,8 @@ import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
-import { withSeq } from '../util/seq.js';
-import { writeTombstone } from './tombstones.js';
+import { writeAtReadVersion } from './write-at-read-version.js';
+import { writeTombstone, stampTombstones } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
@@ -206,7 +206,7 @@ export async function updateEntityById(
     { projection: NEVER_RETURNED_PROJECTION }) as EntityDoc | null;
   if (!existing) return null;
 
-  // The seq is taken AT the write (`withSeq` below), not here (`Q-196`).
+  // The version is stamped and the position taken AT the write (`writeAtReadVersion` below), not here (`Q-196`).
   const now = new Date().toISOString();
   const $set: Record<string, unknown> = { updatedAt: now };
   const $unset: Record<string, unknown> = {};
@@ -279,12 +279,12 @@ export async function updateEntityById(
   // previously succeeded is now rejected.
   let seq = 0;
   // ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
-  const beforeWrite = await admitSpaceWrite(spaceId, 'entities', () => withSeq(spaceId, (s) => {
-    seq = s;
-    const updateOp: Record<string, unknown> = { $set: { ...$set, seq } };
+  const beforeWrite = await admitSpaceWrite(spaceId, 'entities', () => writeAtReadVersion<EntityDoc>(spaceId, 'entities', id, ifMatchSeq, (at) => {
+    seq = at.version;
+    const updateOp: Record<string, unknown> = { $set: { ...$set, ...at.patch } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
     return collection.findOneAndUpdate(
-      asFilter<EntityDoc>(writeFilterFor(id, ifMatchSeq)),
+      asFilter<EntityDoc>(writeFilterFor(id, { readSeq: at.readSeq, ifMatchSeq })),
       asUpdate<EntityDoc>(updateOp),
       { returnDocument: 'before' },
     );
@@ -363,6 +363,10 @@ export async function deleteEntity(
   assertSpaceTakesWrites(spaceId, 'entities');
   const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
     .findOne(asFilter<EntityDoc>({ _id: entityId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
+  // The tombstone's version is taken BEFORE the record goes: an entity whose version is at the ceiling cannot be deleted by this
+  // instance, and that refusal must leave the record where it is (`record_version_at_ceiling`).
+  const tombstone = { _id: entityId, type: 'entity' as const, originalSeq: existing?.seq };
+  const versions = await stampTombstones(spaceId, [tombstone]);
   // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and cascades are admitted writers of their own.
   const result = await admitSpaceWrite(spaceId, 'entities', () => col<EntityDoc>(spaceCollection(spaceId, 'entities')).deleteOne({
     _id: entityId,
@@ -375,7 +379,7 @@ export async function deleteEntity(
   // that 404s.
   await retireEmbedJob(spaceId, 'entity', entityId);
 
-  await writeTombstone(spaceId, { _id: entityId, type: 'entity', originalSeq: existing?.seq });
+  await writeTombstone(spaceId, tombstone, versions);
   // Erasure has to reach the biometric copy too — see unlabelFacesForEntities.
   await unlabelFacesForEntities(spaceId, [entityId]);
   if (actor) emitWebhookEvent({ event: 'entity.deleted', spaceId, entry: { _id: entityId }, ...actor });

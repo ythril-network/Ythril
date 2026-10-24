@@ -56,14 +56,14 @@
  *     per-document fallback, which would only spend the hold's time on the same stall. **A driver argument error
  *     raised on one document's own write** is that document's refusal (`isArgumentErrorOfOneWrite`) — unless it is
  *     the bound's (a defect of ours), or every document of the chunk raised it (the call's, not theirs).
- *  8. **The counter, then the queue**, in a `finally` per chunk: the counter over what the chunk received
- *     (awaited, `advanceCounterPast`), and only then the batched embed enqueue of what landed, by the RECEIVER's
- *     suppression. The bump is the only thing that makes an arrival visible to a seq-paged reader; nothing here
- *     notes a seq on its own, so a local write can never take a seq below an arrival a reader was already
- *     handed. **Each step runs whatever the one before it did** (`Q-224`): a counter that cannot move is logged
- *     and stops the page after the chunk's records are booked and queued; the write's own error, and its
- *     `partial`, always win; and a counter left behind with nothing else wrong throws `CounterBehindError`, which
- *     carries `partial` too.
+ *  8. **The landing, then the queue.** Every chunk takes ONE block of positions under the hold (`withLandingStamp`,
+ *     `sync/record-position-stream.ts`) and writes its documents with them: a position is where the record sits in THIS
+ *     instance's stream, taken here whatever the sender's version was (the version is the issuer's, kept as it arrived). A
+ *     reader is handed a position only once its write has settled, so an arrival is visible the way a local write is. An
+ *     arrival never moves the space's version counter (D-19 B): a peer's version can neither raise this instance's own
+ *     stamps nor strand them above the ceiling (Q-241), and a local edit of an arrival is stamped above it by the version
+ *     formula (`util/version-stamp.ts`). Then, in a `finally` per chunk, the batched embed enqueue of what landed, by the
+ *     RECEIVER's suppression. The write's own error, and its `partial`, always win.
  *
  * ## The record type is an explicit argument
  *
@@ -84,7 +84,7 @@ import {
   bulkWriteFailures, DUPLICATE_KEY, isDuplicateKey, isDocumentRefusal, isDocumentRefusalCode, writeErrorCode, isArgumentErrorOfOneWrite,
 } from '../db/write-errors.js';
 import { isSeqImplausible } from '../util/seq.js';
-import { advanceCounterPast, CounterBehindError } from './counter-after-page.js';
+import { withLandingStamp, arrivalRow, type ArrivalLanding } from './record-position-stream.js';
 import { PageStoppedError } from './page-stopped.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
 import { isUnsatisfiableWriteConcern } from '../db/store-condition.js';
@@ -92,7 +92,7 @@ import { inOneCommandChunks, operationBytes } from '../db/one-command.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
-import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, NOT_CARRIED_BY_BACKUP, WRITE_GUARD_FIELDS, carriedFields, stampOfArrival } from './local-only-fields.js';
+import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, NOT_CARRIED_BY_BACKUP, WRITE_GUARD_FIELDS, WRITTEN_HERE, carriedFields, stampOfArrival } from './local-only-fields.js';
 import { retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
@@ -187,7 +187,7 @@ export interface ArrivalOutcome {
    * is not counted.
    */
   keysRemoved: number;
-  /** The highest plausible seq received — what the counter has been bumped to at least. */
+  /** The highest plausible seq received. Informational: an arrival never moves the version counter. */
   maxReceived: number;
   /** Queue the landed records' embeddings, when `deferEnqueue` held it back; a no-op otherwise. */
   enqueue: () => Promise<void>;
@@ -286,6 +286,9 @@ function prepared(raw: Doc, family: BrainCollection, restore: boolean): Doc {
   // The derived half and this instance's write guard: never a peer's and never a backup's (`NOT_CARRIED_BY_BACKUP`); a restored
   // edge arrives unmarked (`Q-439`).
   for (const f of NOT_CARRIED_BY_BACKUP) delete doc[f];
+  // Stamped afresh by this landing, whatever door brought it: the written-here bit joins the record tier for a database's raw restore, but
+  // an import or a peer never takes it from the document (the landing's patch is the only source, `withLandingStamp`).
+  delete doc[WRITTEN_HERE];
   for (const f of RESTORED_LOCAL_FIELDS) {
     if (!restore) { delete doc[f]; continue; }
     // JSON turned a stamp into text; stored as text it never compares with a Date and the sweep never fires.
@@ -343,15 +346,22 @@ function guardCarry(doc: Doc, field: string): unknown {
  * Read-free, and race-free against an embed worker writing a vector between a read and this write.
  *
  * `deliveredBy` is the fourth operand, after what was carried: the stamp of THIS delivery wins over the stored one. A
- * restore passes the backup's own (`''` when it carried none): what it replaced is never what it keeps.
+ * restore passes the backup's own (`''` when it carried none): what it replaced is never what it keeps. The landing (the position
+ * this arrival took and the version it is for) is the last: it describes THIS landing and is never the replaced copy's.
  */
 function replacementFor(
-  doc: Doc, defaults: Doc, carried: ReadonlySet<string>, deliveredBy: string, guarded: ReadonlySet<string> = new Set(),
+  doc: Doc, defaults: Doc, carried: ReadonlySet<string>, deliveredBy: string, landing: ArrivalLanding, guarded: ReadonlySet<string> = new Set(),
 ): unknown[] {
   // `guarded`: the carried fields that are write guards, kept only while the record's subject is unchanged.
   const kept = Object.fromEntries([...carried].map(f => [f, guarded.has(f) ? guardCarry(doc, f) : `$${f}`]));
-  return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, kept, { $literal: doc }, { $literal: { deliveredBy } }] } }];
+  return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, kept, { $literal: doc }, { $literal: { deliveredBy } }, { $literal: landing }] } }];
 }
+
+/**
+ * A landing the update holds BY REFERENCE: sized with the right bytes and none of the right value, before its chunk's block of positions is
+ * taken, then set in place (`Object.assign`) once it is — so the update is built once per document, measured and written through the one memo.
+ */
+type MutableLanding = { pos: number; posAtSeq: number };
 
 const storeRefusal = (err: unknown): string =>
   `the store refused it (${writeErrorCode(err) !== undefined ? `error code ${writeErrorCode(err)}` : 'no error code'})`;
@@ -463,20 +473,28 @@ export async function writeArrivals(
     })
     : new Map<string, number>();
   const filterOf = (d: Doc): Record<string, unknown> => (restore ? { _id: d._id } : seqGuard(d._id, d.seq));
-  const updateOf = (d: Doc): unknown => {
+  const updateOf = (d: Doc, landing: MutableLanding): unknown => {
     const quiet = suppressed.has(d._id);
     const stamps = defaults.get(d._id) ?? ({} as Doc);
-    if (family === 'files') return fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet, deliveredBy: opts.deliveredBy ?? '' });
+    if (family === 'files') return fileMetaUpdate(d, { defaults: stamps, restore, suppressed: quiet, deliveredBy: opts.deliveredBy ?? '', landing });
     const carried = carriedFields({ restore, suppressed: quiet });
     // A write guard (`_functionalGuard`, an edge's) crosses only while `from` and `label` are the stored ones: carry-if-unchanged.
     const guarded = new Set([...carried].filter(f => WRITE_GUARD_FIELDS.has(f)));
-    return replacementFor(d, stamps, carried, stampOfArrival({ restore, doc: d, deliveredBy: opts.deliveredBy }), guarded);
+    return replacementFor(d, stamps, carried, stampOfArrival({ restore, doc: d, deliveredBy: opts.deliveredBy }), landing, guarded);
+  };
+  // The landing each document's update holds by reference: a stand-in while the page is measured, the chunk's own positions once its
+  // `withLandingStamp` has taken them (set in place, below), so the memo below is still the only place an update is built.
+  const landingOf = new Map<string, MutableLanding>();
+  const landingRef = (d: Doc): MutableLanding => {
+    let landing = landingOf.get(d._id);
+    if (!landing) { landing = { pos: Number.MAX_SAFE_INTEGER, posAtSeq: Number.MAX_SAFE_INTEGER }; landingOf.set(d._id, landing); }
+    return landing;
   };
   // Built ONCE per document: the update is a copy of the document, read for its size when the page is sliced and again to
   // write it (and once more for a document written on its own after a bulk failure). An id is unique in `toWrite`.
   const updates = new Map<string, unknown>();
   const updateFor = (d: Doc): unknown => {
-    if (!updates.has(d._id)) updates.set(d._id, updateOf(d));
+    if (!updates.has(d._id)) updates.set(d._id, updateOf(d, landingRef(d)));
     return updates.get(d._id);
   };
 
@@ -487,15 +505,6 @@ export async function writeArrivals(
     const e = new ArrivalWriteError(spaceId, family, err);
     e.partial = out;
     return e;
-  };
-  let bumped = 0;
-  /** A counter that could not be moved past what was received: the page is not finished (`Q-224`). */
-  let behind: CounterBehindError | null = null;
-  /** Never throws: a failure is logged by the helper and kept, so the steps after it still run. */
-  const bump = async (top: number): Promise<void> => {
-    if (top <= bumped || behind) return;
-    behind = await advanceCounterPast(spaceId, top, where);
-    if (!behind) bumped = top;
   };
   // A chunk is ONE wire command (`db/one-command.ts`): a bulk write the driver splits is several commands with a deadline
   // of their own each, and the write bound ends a call by the first one's. By bytes as well as by count, because a page
@@ -549,52 +558,57 @@ export async function writeArrivals(
       return true;
     };
     try {
-      if (fillOnly) {
-        for (const d of chunk) {
-          try {
-            const r = await fillFileMetaFromStray(spaceId, d);
-            if (r === 'merged') out.updated.push(d._id);
-            else if (r === 'complete') out.complete.push(d._id);
-            else if (r === 'newer') out.newerLocal.push(d._id);
-            else out.unstored.push(d._id);
-          } catch (err) {
-            classify(d, err);
-          }
-        }
-      } else {
-        try {
-          const r = await coll.bulkWrite(asBulk<Doc>(chunk.map(d => ({
-            updateOne: { filter: filterOf(d), update: updateFor(d), upsert: true },
-          }))), { ordered: false });
-          for (const id of upsertedIdsOf(r)) inserted.add(String(id));
-          landed.push(...chunk);
-        } catch (err) {
-          // A bound ended the write: nothing says which documents landed, and asking each one again would only
-          // spend the hold's time on more of the same stall. The page fails whole, to be offered again. So does a write
-          // concern the deployment can never meet (Q-343), and BEFORE the document-refusal reading below: it is the
-          // deployment's, so asking each document would only repeat it, and a code the refusal list shares (2, on a
-          // standalone) would refuse documents that are fine.
-          if (isWriteTimeout(err) || isUnsatisfiableWriteConcern(err)) throw stopped(err);
-          for (const id of upsertedIdsOf(err)) inserted.add(String(id));
-          const failures = bulkWriteFailures(err);
-          if (!failures || failures.some(f => chunk[f.index] === undefined)) {
-            // No per-operation shape: nothing says which documents landed, so ask each one.
-            await oneByOne(chunk, writeOne);
-          } else {
-            const failedAt = new Map(failures.map(f => [f.index, f.code]));
-            chunk.forEach((d, k) => { if (!failedAt.has(k)) landed.push(d); });
-            const retry: Doc[] = [];
-            for (const [k, code] of failedAt) {
-              const d = chunk[k]!;
-              if (code === DUPLICATE_KEY) dupes.push(d);
-              else if (isDocumentRefusalCode(code)) retry.push(d);
-              else throw stopped(err);
+      // The chunk's block of positions, held below every position-paged reader until the chunk's writes have settled. Only the WRITES are
+      // inside: the read-back of a duplicate is not, because everything awaited under the hold holds every reader of the space.
+      await withLandingStamp(spaceId, chunk.map(d => arrivalRow(d.seq ?? 0)), async (patches) => {
+        chunk.forEach((d, k) => Object.assign(landingRef(d), patches[k]!));
+        if (fillOnly) {
+          for (const d of chunk) {
+            try {
+              const r = await fillFileMetaFromStray(spaceId, d, landingRef(d));
+              if (r === 'merged') out.updated.push(d._id);
+              else if (r === 'complete') out.complete.push(d._id);
+              else if (r === 'newer') out.newerLocal.push(d._id);
+              else out.unstored.push(d._id);
+            } catch (err) {
+              classify(d, err);
             }
-            // Retried ONCE alone: a document the store refuses refuses again, and is then refused by id.
-            await oneByOne(retry, writeOne);
+          }
+        } else {
+          try {
+            const r = await coll.bulkWrite(asBulk<Doc>(chunk.map(d => ({
+              updateOne: { filter: filterOf(d), update: updateFor(d), upsert: true },
+            }))), { ordered: false });
+            for (const id of upsertedIdsOf(r)) inserted.add(String(id));
+            landed.push(...chunk);
+          } catch (err) {
+            // A bound ended the write: nothing says which documents landed, and asking each one again would only
+            // spend the hold's time on more of the same stall. The page fails whole, to be offered again. So does a write
+            // concern the deployment can never meet (Q-343), and BEFORE the document-refusal reading below: it is the
+            // deployment's, so asking each document would only repeat it, and a code the refusal list shares (2, on a
+            // standalone) would refuse documents that are fine.
+            if (isWriteTimeout(err) || isUnsatisfiableWriteConcern(err)) throw stopped(err);
+            for (const id of upsertedIdsOf(err)) inserted.add(String(id));
+            const failures = bulkWriteFailures(err);
+            if (!failures || failures.some(f => chunk[f.index] === undefined)) {
+              // No per-operation shape: nothing says which documents landed, so ask each one.
+              await oneByOne(chunk, writeOne);
+            } else {
+              const failedAt = new Map(failures.map(f => [f.index, f.code]));
+              chunk.forEach((d, k) => { if (!failedAt.has(k)) landed.push(d); });
+              const retry: Doc[] = [];
+              for (const [k, code] of failedAt) {
+                const d = chunk[k]!;
+                if (code === DUPLICATE_KEY) dupes.push(d);
+                else if (isDocumentRefusalCode(code)) retry.push(d);
+                else throw stopped(err);
+              }
+              // Retried ONCE alone: a document the store refuses refuses again, and is then refused by id.
+              await oneByOne(retry, writeOne);
+            }
           }
         }
-      }
+      }, `sync.arrive.${family}`);
       if (dupes.length > 0) {
         // Read back: a stored copy AT the planned seq is this version, landed — unless its content differs, which is
         // a divergence (`Q-232`); one above it was written meanwhile and is kept ("skipped"); anything else collided
@@ -614,11 +628,7 @@ export async function writeArrivals(
       leaveWriteUnit();
       // The chunk is written (or the page stopped): its updates are not read again, and `updateFor` built every one of them
       // up front to size the page — kept to the end, a page would be held twice over (round V, S6).
-      for (const d of chunk) updates.delete(d._id);
-      // The counter over what this chunk RECEIVED, awaited, and only then the queue — see the module docblock.
-      // Each step runs whatever the one before it did (`Q-224`): a bump that threw from here used to skip the
-      // bookkeeping and the queue, so records that LANDED were never queued and the write's own error was lost.
-      await bump(Math.max(0, ...chunk.map(d => d.seq ?? 0)));
+      for (const d of chunk) { updates.delete(d._id); landingOf.delete(d._id); }
       for (const d of landed) (inserted.has(d._id) ? out.inserted : out.updated).push(d._id);
       queued.push(...landed);
       if (!opts.deferEnqueue) {
@@ -627,11 +637,7 @@ export async function writeArrivals(
           + 'they are stored, and a reindex queues them'));
       }
     }
-    // The counter could not be moved past this chunk: the page stops here, what landed is booked and queued.
-    if (behind) break;
   }
-  // What was received and not written (collapsed, derived) still moves the counter: it is the peer's clock.
-  await bump(out.maxReceived);
   // A NEWER version of a file supersedes the tombstones held for its path (Q-229) — only once it has landed, so a write
   // that failed keeps the deletion. A restore replaces whatever is stored and judges nothing by a tombstone.
   // Except onto a row this instance FLAGGED (`deletedAt`, `Q-257`): the merge does not clear the flag, so that row is still
@@ -657,13 +663,6 @@ export async function writeArrivals(
     [...new Set(out.collapsed)]);
   warnArrivalsNotStored(where, spaceId, family, 'not applied: a uniquely-indexed duplicate of a record held '
     + 'here under another id (the local copy is kept)', out.duplicates);
-  // A counter left behind what was received fails the call, carrying what landed: the push answers 500, the pull
-  // holds its watermark, the import reports what it restored AND that the counter is behind.
-  const counter = behind as CounterBehindError | null;
-  if (counter) {
-    counter.partial = out;
-    throw counter;
-  }
   return out;
 }
 

@@ -1,8 +1,8 @@
 import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
-import { withSeq } from '../util/seq.js';
-import { writeTombstone } from './tombstones.js';
+import { writeAtReadVersion } from './write-at-read-version.js';
+import { writeTombstone, stampTombstones } from './tombstones.js';
 import { listReadMaxMs } from './tag-filter.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
@@ -164,7 +164,7 @@ export async function updateChrono(
     ...(updates.linkFacts !== undefined ? { fact: updates.linkFacts } : {}),
   });
 
-  // The seq is taken AT the write (`withSeq` below), not here (`Q-196`).
+  // The version is stamped and the position taken AT the write (`writeAtReadVersion` below), not here (`Q-196`).
   const now = new Date().toISOString();
   const $set: Record<string, unknown> = { updatedAt: now };
   const $unset: Record<string, unknown> = {};
@@ -253,12 +253,12 @@ export async function updateChrono(
   // previously succeeded is now rejected.
   // The store write is ONE admitted and counted unit, from its own check (`admitSpaceWrite`): an act registered while this update was being
   // prepared refuses it, and one registered after waits for it.
-  const beforeWrite = await admitSpaceWrite(spaceId, 'chrono', () => withSeq(spaceId, (seq) => {
-    $set['seq'] = seq;
-    const updateOp: Record<string, unknown> = { $set };
+  const beforeWrite = await admitSpaceWrite(spaceId, 'chrono', () => writeAtReadVersion<ChronoEntry>(spaceId, 'chrono', id, ifMatchSeq, (at) => {
+    $set['seq'] = at.version;
+    const updateOp: Record<string, unknown> = { $set: { ...$set, ...at.patch } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
     return col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOneAndUpdate(
-      asFilter<ChronoEntry>(writeFilterFor(id, ifMatchSeq)),
+      asFilter<ChronoEntry>(writeFilterFor(id, { readSeq: at.readSeq, ifMatchSeq })),
       asUpdate<ChronoEntry>(updateOp),
       { returnDocument: 'before' },
     );
@@ -587,6 +587,10 @@ export async function deleteChrono(
   assertSpaceTakesWrites(spaceId, 'chrono');
   const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: chronoId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
+  // The tombstone's version is taken BEFORE the record goes: an entry whose version is at the ceiling cannot be deleted by this
+  // instance, and that refusal must leave the record where it is (`record_version_at_ceiling`).
+  const tombstone = { _id: chronoId, type: 'chrono' as const, originalSeq: existing?.seq };
+  const versions = await stampTombstones(spaceId, [tombstone]);
   // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and link cascade are admitted writers of their own.
   const result = await admitSpaceWrite(spaceId, 'chrono', () => col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).deleteOne({
     _id: chronoId,
@@ -599,7 +603,7 @@ export async function deleteChrono(
   // that 404s.
   await retireEmbedJob(spaceId, 'chrono', chronoId);
 
-  await writeTombstone(spaceId, { _id: chronoId, type: 'chrono', originalSeq: existing?.seq });
+  await writeTombstone(spaceId, tombstone, versions);
   // The cascade — see `removeLinksFrom`. Links pointing AT this entry belong to the readers' slice.
   await removeLinksFrom(spaceId, chronoId, 'chrono');
   if (actor) emitWebhookEvent({ event: 'chrono.deleted', spaceId, entry: { _id: chronoId }, ...actor });

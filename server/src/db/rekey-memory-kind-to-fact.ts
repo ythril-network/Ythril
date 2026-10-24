@@ -56,6 +56,7 @@ import { getDb } from './mongo.js';
 import { log } from '../util/log.js';
 import { edgeIdFor } from '../brain/edge-id.js';
 import { linkIdFor } from '../brain/links.js';
+import { rekeyedRow } from '../sync/local-only-fields.js';
 import type { RefKind } from '../config/types-knowledge.js';
 
 /**
@@ -137,7 +138,11 @@ export async function rekeyMemoryKindToFact(): Promise<KindRekeyOutcome> {
 
       // Insert BEFORE delete: a crash between the two leaves a duplicate a re-run reports, where the other
       // order would leave the connection gone with nothing left to report it.
-      await coll.insertOne({ ...row, _id: newId, fromKind, toKind });
+      // `rekeyedRow`, like every copy of a record to a new id: the old row's position, `writtenHere`, delivery stamp and sync base describe the OLD
+      // row, and are not carried (bundle-81, amendment 29). The row keeps its version (the content did not change), and takes no position here:
+      // the first carry gives a row with a version and no position the identity band (`pos := seq`), below every mark a peer holds, so nothing is offered
+      // that every instance has not already converged on.
+      await coll.insertOne(rekeyedRow(row, { _id: newId, fromKind, toKind }) as unknown as KindedRow);
       await coll.deleteOne({ _id: row._id });
       out.moved[name] = (out.moved[name] ?? 0) + 1;
     }

@@ -63,7 +63,10 @@ import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { FILE_HASH_PROJECTION } from '../brain/merkle.js';
 import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
 import { NOT_A_FLAGGED_ROW } from './live-file-row.js';
-import { withSeqWhen } from '../util/seq.js';
+import { versionsFor, type VersionAllocation } from '../util/version-stamp.js';
+import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
+import { atReadSeq } from '../db/at-read-seq.js';
+import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
 import { warnOnce } from '../util/warn-once.js';
 import { log, peerText } from '../util/log.js';
 import { deliveredByAPeer, notDeliveredByAPeer } from '../sync/delivered-by.js';
@@ -491,6 +494,9 @@ export async function markFileProcessing(spaceId: string, claim: JobClaim, state
  */
 const saidPeerDelivered = warnOnce<string>();
 
+/** The skip of a derived description onto a file whose version is at the ceiling: once per space, so a space of them is one line. */
+const saidAtCeiling = warnOnce<string>();
+
 /**
  * Store a description DERIVED from a file's bytes, only where the operator has not written one — decided by the
  * DATABASE, in one operation. The one derived write of a field the hash sees.
@@ -523,9 +529,9 @@ const saidPeerDelivered = warnOnce<string>();
  * ## Under the run's claim, and what that costs
  *
  * The write is the run's, so it is made in the transaction that is the claim fence (`media/lease.ts`): a run that lost its claim to a delete
- * and a re-upload of the path describes nothing and gets `JobLeaseLostError`. The transaction takes a seq, so it runs through
- * `inHeldTransaction` with the holder `file.describe` (`seqHolder`): the horizon stays held until the commit. The allocation's own
- * `$inc` is outside the session, so a transaction that rolls back or is retried burns a number — a gap, which nothing pages over
+ * and a re-upload of the path describes nothing and gets `JobLeaseLostError`. The transaction stamps a version and a position, so it runs through
+ * `inHeldTransaction` with the holder `file.describe` (`positionHolder`): the floor stays held until the commit. The stamp's own counter
+ * update is outside the session, so a transaction that rolls back or is retried burns a number — a gap, which nothing pages over
  * wrongly; only a REUSED number would.
  */
 export async function setDerivedDescriptionIfUnset(
@@ -580,46 +586,55 @@ export async function setDerivedDescriptionIfUnset(
   const writable = asFilter<FileMetaDoc>({ ...thisRow, $and: [noDescription, ours] } as never);
 
   /*
-   * ANSWERED BEFORE A NUMBER IS TAKEN (`withSeqWhen`). Every one of this write's declines is routine — a person's
-   * description is there, the row is another instance's, there is no row, the row is flagged — and the allocator moves
-   * the counter before the write runs, so each decline used to leave the space counter naming a seq no record holds.
+   * ANSWERED BEFORE A VERSION IS TAKEN. Every one of this write's declines is routine — a person's description is
+   * there, the row is another instance's, there is no row, the row is flagged — and a stamp moves the counter before the
+   * write runs, so each decline would leave the space counter naming a version no record holds.
    *
-   * The read asks whether a number is worth taking; the WRITE asks the same filter again, which is what decides the
+   * The read asks whether a version is worth taking; the WRITE asks the same filter again, which is what decides the
    * race a person's description can win in between.
    */
   return writeUnderClaim(spaceId, claim, async (session) => {
-    const r = await withSeqWhen(
-      spaceId,
-      async () => {
-        const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-        if (await files.findOne(writable, { projection: { _id: 1 }, session }) !== null) return true;
-        /*
-         * One decline is SAID, the one the narrowing above introduced: an author-less row a peer delivered. Every other
-         * decline existed before and is routine; this one turns an old peer-delivered file into one that stays
-         * description-less on this instance with nothing to read, so an operator wondering why needs the line. Asked
-         * only on a decline, of the same parts, so it cannot describe a different row from the one the write refused.
-         */
-        const peerDelivered = asFilter<FileMetaDoc>(
-          { ...thisRow, $and: [noDescription, { ...unauthored, ...deliveredByAPeer(self) }] } as never,
-        );
-        // `deliveredBy` is local-only (`sync/local-only-fields.ts`), so `FileMetaDoc` does not declare it.
-        const theirs = await files.findOne(peerDelivered, { projection: { _id: 1, deliveredBy: 1 }, session }) as { deliveredBy?: unknown } | null;
-        if (theirs) {
-          saidPeerDelivered(`${spaceId}\u0000${_id}`, () => log.warn(
-            `No derived description for ${peerText(spaceId)}/${peerText(filePath)}: it has no author and was delivered by `
-            + `peer ${peerText(theirs.deliveredBy)}, so it is the publisher's to describe, not this instance's. The `
-            + `publisher's own description arrives by sync; a person can still write one here.`,
-          ));
-        }
-        return false;
-      },
-      (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(writable, asUpdate<FileMetaDoc>({
-        // `P-32`: an authored write, so it advances the space counter and pages to a peer.
-        $set: { description, updatedAt: new Date().toISOString(), seq, ...(descriptionSource ? { descriptionSource } : {}) },
+    const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+    if (await files.findOne(writable, { projection: { _id: 1 }, session }) === null) {
+      /*
+       * One decline is SAID, the one the narrowing above introduced: an author-less row a peer delivered. Every other
+       * decline existed before and is routine; this one turns an old peer-delivered file into one that stays
+       * description-less on this instance with nothing to read, so an operator wondering why needs the line. Asked
+       * only on a decline, of the same parts, so it cannot describe a different row from the one the write refused.
+       */
+      const peerDelivered = asFilter<FileMetaDoc>(
+        { ...thisRow, $and: [noDescription, { ...unauthored, ...deliveredByAPeer(self) }] } as never,
+      );
+      // `deliveredBy` is local-only (`sync/local-only-fields.ts`), so `FileMetaDoc` does not declare it.
+      const theirs = await files.findOne(peerDelivered, { projection: { _id: 1, deliveredBy: 1 }, session }) as { deliveredBy?: unknown } | null;
+      if (theirs) {
+        saidPeerDelivered(`${spaceId}\u0000${_id}`, () => log.warn(
+          `No derived description for ${peerText(spaceId)}/${peerText(filePath)}: it has no author and was delivered by `
+          + `peer ${peerText(theirs.deliveredBy)}, so it is the publisher's to describe, not this instance's. The `
+          + `publisher's own description arrives by sync; a person can still write one here.`,
+        ));
+      }
+      return false;
+    }
+    let stamp: VersionAllocation;
+    try {
+      [stamp] = await versionsFor(spaceId, [_id], { parts: ['files'], session }) as [VersionAllocation];
+    } catch (err) {
+      // A housekeeping write: a row whose version is at the ceiling is skipped (counted by the stamp, said once per space), never a failure of the run.
+      if (!(err instanceof RecordVersionAtCeiling)) throw err;
+      saidAtCeiling(spaceId, () => log.warn(
+        `No derived description for ${peerText(spaceId)}/${peerText(filePath)}: the file's version is already at the highest number sync accepts, `
+        + 'so this instance can no longer change it; the instance that wrote it can.',
+      ));
+      return false;
+    }
+    // `P-32`: an authored write, so it takes a version and a position and pages to a peer. It lands only on the version the stamp read.
+    const r = await withLandingStamp(spaceId, [localRow(stamp.version)], ([patch]) => files.updateOne(
+      asFilter<FileMetaDoc>({ $and: [writable, atReadSeq(_id, stamp.readSeq)] } as never),
+      asUpdate<FileMetaDoc>({
+        $set: { description, updatedAt: new Date().toISOString(), ...patch!, ...(descriptionSource ? { descriptionSource } : {}) },
         ...(descriptionSource ? {} : { $unset: { descriptionSource: '' } }),
-      }), { session }),
-      'file.describe',
-    );
-    return (r?.modifiedCount ?? 0) > 0;
-  }, { seqHolder: 'file.describe' });
+      }), { session }), 'file.describe');
+    return r.modifiedCount > 0;
+  }, { positionHolder: 'file.describe' });
 }

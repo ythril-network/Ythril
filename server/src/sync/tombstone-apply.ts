@@ -34,19 +34,11 @@
  *     delete per target collection, ground and issuer (the issuer ground's bound names it) — a page costs the same
  *     whatever its size. Each delete carries the bound of the ground that authorised it (`deleteBound`), so a verdict
  *     gone stale between the read and the write deletes nothing.
- *  6. **The counter**, after the write whatever became of it, awaited, over every ADMITTED seq (a tombstone
- *     refused on authorship still tells us where that peer's clock is). A counter that could not move fails the
- *     call when nothing else did (`CounterBehindError`, `sync/counter-after-page.ts` — the one post-step every page
- *     door ends with); under an apply error it is logged and the apply error
- *     is the one thrown. Why a tombstone moves the counter at all, in `bumpSeq`'s own words — "future local writes
- *     always get a seq higher than any document received from this peer":
- *
- *       a busy peer (counter 5001) deletes a record            -> tombstone, seq 5001
- *       a quiet peer (counter 300) receives it                 -> counter stays 300
- *       the quiet peer re-creates that record with the same id -> local seq 301
- *       it pushes back                                         -> refused as `tombstoned`, with a 200
- *
- *     Awaited before any answer (`Q-198`), so a sender is never told a page landed while the counter is behind it.
+ *  6. **No counter moves.** A tombstone keeps its issuer's version (`seq`) and an arrival never raises the space's version counter
+ *     (D-19 B): a planted tombstone at the ceiling would otherwise drag every later local stamp up to it (Q-241). What the old counter
+ *     bump was for — a quiet peer re-creating a record a busy peer deleted, at a version below the deletion, refused by every relay —
+ *     is the stamp's own term now: a local write is stamped above every tombstone this instance holds for the id, capped
+ *     (`util/version-stamp.ts`). A tombstone that is STORED takes its position as it lands (`withLandingStamp`), as a record does.
  *
  * An entity this apply deletes has its face labels removed (`unlabelFacesForEntities`, `Q-395`): the descriptor belongs
  * to the file and stays, the claim of whose face it is goes with the person.
@@ -63,7 +55,7 @@ import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { TombstoneDoc } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
-import { advanceCounterPast } from './counter-after-page.js';
+import { withLandingStamp, arrivalRow } from './record-position-stream.js';
 import { log, logSafe, peerList, peerText, refusalOfParse } from '../util/log.js';
 import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
 import { recordDecline, sayDeclines, saidDeletions } from './decline-report.js';
@@ -86,7 +78,9 @@ const TombstoneShape = z.object({
   type: z.enum(TOMBSTONE_TYPES),
   spaceId: z.string(),
   deletedAt: z.string(),
-  instanceId: z.string().max(MAX_ISSUER),
+  // A blank issuer is no issuer: the codebase reads an empty one as "issuer-less", which governs every author (`upsert-plan.ts`'s `issuer && …`,
+  // `deletion-authority.ts`'s `['', null]`), so `''` and `' '` are refused here, alone, rather than stored and trusted (bundle-81, decision 1).
+  instanceId: z.string().trim().min(1).max(MAX_ISSUER),
   seq: z.number(),
   originalSeq: z.number().optional(),
 });
@@ -237,16 +231,19 @@ export async function applyPeerTombstones(
         // by each operation. So the bulk is sliced to stay ONE wire command (`db/one-command.ts`): the driver would split a
         // larger one, and a second command carries a deadline of its own after the bound has answered the sender.
         const tombstones = col<TombstoneDoc>(spaceCollection(localSpaceId, 'tombstones'));
-        const ops = store.map(({ t, via }) => ({
-          updateOne: {
-            filter: { _id: t._id },
-            // `storedVia` is set whether or not the row existed: a deletion held before this delivery (an earlier one that
-            // stood on no ground, or the same one re-sent) must carry the upstream it is now relayed for.
-            update: via === undefined ? { $setOnInsert: t } : { $setOnInsert: t, $set: { storedVia: via } },
-            upsert: true,
-          },
-        }));
-        await writeInOneCommands(ops, (slice, { ordered }) => tombstones.bulkWrite(asBulk<TombstoneDoc>(slice), { ordered }), { ordered: false });
+        // One block of positions for the page's stored tombstones, held below every position-paged reader until the write has settled.
+        await withLandingStamp(localSpaceId, store.map(({ t }) => arrivalRow(t.seq)), async (landings) => {
+          const ops = store.map(({ t, via }, i) => ({
+            updateOne: {
+              filter: { _id: t._id },
+              // `storedVia` is set whether or not the row existed: a deletion held before this delivery (an earlier one that
+              // stood on no ground, or the same one re-sent) must carry the upstream it is now relayed for.
+              update: via === undefined ? { $setOnInsert: { ...t, ...landings[i]! } } : { $setOnInsert: { ...t, ...landings[i]! }, $set: { storedVia: via } },
+              upsert: true,
+            },
+          }));
+          await writeInOneCommands(ops, (slice, { ordered }) => tombstones.bulkWrite(asBulk<TombstoneDoc>(slice), { ordered }), { ordered: false });
+        }, 'sync.tombstone.apply');
       }
       for (const d of deletes) {
         const coll = col<{ _id: string }>(spaceCollection(localSpaceId, TOMBSTONE_COLLECTION[d.type]));
@@ -275,14 +272,10 @@ export async function applyPeerTombstones(
     failure = err;
   }
 
-  // Step 6, after the write whatever became of it: a page that half-landed must not leave the counter behind it.
-  // The apply's own failure is the one thrown; a counter left behind fails the call only when nothing else did.
-  const behind = await advanceCounterPast(localSpaceId, out.maxSeq, where);
   warnArrivalsNotStored(where, localSpaceId, 'tombstone', 'refused', out.refused);
   // A standing decline is the same ones every cycle: said once per (peer, space, reason) window, counted every time.
   sayDeclines(where, localSpaceId, 'tombstone', delivery, ledger.declinedBy);
   if (failed) throw failure;
-  if (behind) throw behind;
   return out;
 }
 

@@ -79,7 +79,8 @@ import { moveTiming } from './move-timing.js';
 import { runMoveOnce } from './move-flight.js';
 import { StaleRekeyPlan, rekeyRows } from './rekey-rows.js';
 import { readStoredById } from '../db/read-by-id.js';
-import { inBoundedTransaction } from '../db/bounded-transaction.js';
+import { inHeldTransaction } from '../brain/held-transaction.js';
+import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
 import { isDuplicateKey } from '../db/write-errors.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { NotFoundError } from '../util/errors.js';
@@ -144,15 +145,24 @@ async function carryBatch(spaceId: string, plan: MovePlan, batch: MoveBatch, hel
   };
   let jobsMoved = 0;
   if (moves.length > 0 || batch.jobIds.length > 0) {
-    jobsMoved = await inBoundedTransaction(async (session) => {
+    // Under the position floor (`inHeldTransaction`): the rows are rebuilt with a fresh position, and a position written inside a session has
+    // not committed when its write returns, so no reader may be handed one above it until the transaction has.
+    jobsMoved = await inHeldTransaction(spaceId, 'file.move', async (session) => {
       if (moves.length > 0) {
-        await rekeyRows<FileMetaDoc>(filesColl, session, {
-          moves,
-          rebuild: (row, to) => rebuiltFileRow(row, to, src, dst, plan.unplacedSidecars),
-          // A row at a new id that the plan did not name appeared since it was made: the plan is stale, and is made again.
-          refuse: (to) => new StaleRekeyPlan(`a row appeared at '${to}' since the batch was planned`),
-          replacements: { replaced: batch.replaced, flagged: batch.flagged },
-        });
+        // Each moved row keeps its own version and takes a fresh position: read here, in the session, so what is stamped is the version the
+        // rebuild reads (one snapshot). A row with no version is given no position.
+        const versions = await readStoredById<{ seq?: number }>(filesColl, moves.map(m => m.from), { seq: 1 }, { session });
+        const stamped = moves.filter(m => typeof versions.get(m.from)?.seq === 'number');
+        await withLandingStamp(spaceId, stamped.map(m => localRow(versions.get(m.from)!.seq!)), async (patches) => {
+          const landingTo = new Map(stamped.map((m, i) => [m.to, patches[i]!] as const));
+          await rekeyRows<FileMetaDoc>(filesColl, session, {
+            moves,
+            rebuild: (row, to) => rebuiltFileRow(row, to, src, dst, plan.unplacedSidecars, landingTo.get(to)),
+            // A row at a new id that the plan did not name appeared since it was made: the plan is stale, and is made again.
+            refuse: (to) => new StaleRekeyPlan(`a row appeared at '${to}' since the batch was planned`),
+            replacements: { replaced: batch.replaced, flagged: batch.flagged },
+          });
+        }, 'file.move');
         // The hash cache entries of the moved rows, in the same transaction: the rows and their entries commit together.
         await carryPathKeyedCache(spaceId, session, moves);
       }

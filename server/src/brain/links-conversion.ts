@@ -29,7 +29,9 @@
  * network-wide, so a marker there would announce one instance's finished conversion as everybody's.
  */
 import { col, asFilter } from '../db/mongo.js';
-import { withSeq } from '../util/seq.js';
+import { versionsFor, type VersionAllocation } from '../util/version-stamp.js';
+import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
+import { atReadSeq } from '../db/at-read-seq.js';
 import { getConfig } from '../config/loader.js';
 import { updateSpace } from '../spaces/spaces.js';
 import { reconcileLinksForDocument, documentLinkProjection, LINK_BEARING_COLLECTIONS } from './links.js';
@@ -113,10 +115,13 @@ export async function stampFileMetaSeqs(spaceId: string): Promise<number> {
       { projection: { _id: 1 } },
     ) as { _id: string } | null;
     if (!doc) break;
-    // One seq PER RECORD. A shared seq at a page boundary would leave the rest of that group unreachable,
-    // because the cursor continues from the last item with `seq > since` and would step straight over them.
-    await withSeq(spaceId, (seq) => col(spaceCollection(spaceId, 'files')).updateOne(
-      asFilter({ _id: doc._id }), { $set: { seq } } as never,
+    // One version and one position PER RECORD (a shared position at a page boundary would leave the rest of that group unreachable). The row
+    // carried none, so its stamp is the formula's with nothing held; it lands only while it still carries none (`atReadSeq`, the stamp's own
+    // read), so a version a concurrent writer gave it meanwhile is never overwritten by this one.
+    const id = doc._id;
+    const [stamp] = await versionsFor(spaceId, [id], { parts: ['files'] }) as [VersionAllocation];
+    await withLandingStamp(spaceId, [localRow(stamp.version)], ([landing]) => col(spaceCollection(spaceId, 'files')).updateOne(
+      asFilter(atReadSeq(id, stamp.readSeq)), { $set: { ...landing! } } as never,
     ), 'file.stamp-seq');
     stamped++;
   }

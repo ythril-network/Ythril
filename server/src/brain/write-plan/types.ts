@@ -111,4 +111,9 @@ export class WriteConflict extends Error {
 export type CommitOutcome =
   /** `linksAdded`: link rows the reconcile created for this record — what a batch reports as connections. */
   | { readonly ok: true; readonly seq: number; readonly linksAdded?: number }
-  | { readonly ok: false; readonly reason: string; readonly stale?: boolean };
+  /**
+   * `code`: a refusal that has a wire code of its own — `record_version_at_ceiling` (the record's version is at the highest number sync
+   * accepts, so this instance cannot change it). A batch carries it on the item's row; a single-record door throws it
+   * (`planAndCommitOne`) so REST answers `409` and MCP the same code and sentence.
+   */
+  | { readonly ok: false; readonly reason: string; readonly stale?: boolean; readonly code?: string };

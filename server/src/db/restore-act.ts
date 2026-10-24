@@ -56,7 +56,8 @@ import {
   SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from '../spaces/space-act-runner.js';
 import type { SpaceActKind, SpaceActSet } from '../config/types.js';
-import { seqFloor, bumpSeq } from '../util/seq.js';
+import { currentSeq } from '../util/seq.js';
+import { highestVersionBelowCap, raiseVersionTo } from '../util/version-stamp.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { RESTORE_ABANDONED_OPERATION, RESTORE_COMPLETED_OPERATION } from '../audit/act-set-operations.js';
 import { log, peerText } from '../util/log.js';
@@ -273,8 +274,9 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
   try { manifest = await backupIsWhole(dir, { only: n => mine(n) || n === COUNTERS }); }
   catch (err) { throw inputFailure(err) ?? err; }
 
-  // The floor, after the drain: no write of this space is in flight now, so no seq above it can still be handed out.
-  const floor = await seqFloor(spaceId);
+  // The floor, after the drain: no write of this space is in flight now, so no version above it can still be handed out. The counter and the
+  // highest version stored at or below the cap (`highestVersionBelowCap`); a version a record holds above the cap is never the counter's.
+  const floor = Math.max(await currentSeq(spaceId), await highestVersionBelowCap(spaceId));
 
   const db = getDb();
   const present = (await db.listCollections({}, { nameOnly: true }).toArray()).map(c => c.name).filter(mine);
@@ -290,10 +292,11 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
     catch (err) { throw inputFailure(err, c.name) ?? err; }
   }
 
-  // The counter: at least the floor, the backup's own counter and every seq now stored.
+  // The counter: at least the floor, the backup's own counter and every version now stored (never above the cap: `raiseVersionTo`, which also
+  // records the version this build has seen and keeps every other field of the counter doc).
   const counters = manifest.collections.find(c => c.name === COUNTERS);
-  const target = Math.max(floor, await backupCounterOf(dir, counters, spaceId), await seqFloor(spaceId));
-  await bumpSeq(spaceId, target);
+  const target = Math.max(floor, await backupCounterOf(dir, counters, spaceId), await highestVersionBelowCap(spaceId));
+  await raiseVersionTo(spaceId, target);
 
   // Every declared unique index stands before the hold lifts (`Q-439`, `Q-445`): built on the empty collections above, asserted
   // here. One that does not is a plain error naming it - not an input failure: the act stays owed, the space held, and it is

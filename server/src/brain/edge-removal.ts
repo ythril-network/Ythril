@@ -11,7 +11,7 @@
  *
  * ## What it guarantees, and the order
  *
- *  1. **A chunk is ONE transaction under the seq horizon hold** (`inHeldTransaction`): the stored seqs read by id, one
+ *  1. **A chunk is ONE transaction under the record-position floor** (`inHeldTransaction`): the stored seqs read by id, one
  *     delete, and the tombstones (`writeTombstones`, each carrying the deleted edge's `seq` as `originalSeq`) land
  *     together or not at all. A commit whose reply was lost is read back inside the hold.
  *  2. **After each chunk committed, never inside it:** one batched `retireEmbedJobs` — the record is gone, so its job
