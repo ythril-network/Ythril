@@ -25,6 +25,7 @@ import { TranslocoService } from '@jsverse/transloco';
 import { PluralText } from '../../core/plural-text.service';
 import { firstValueFrom } from 'rxjs';
 import { refusalText, type RefusalSource } from '../../core/refusal-text';
+import { formatList } from '../../core/list-format';
 import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
 import { RetypeConfirmService } from '../../core/retype-confirm.service';
 import { RefusalAlertComponent } from '../../shared/refusal-alert.component';
@@ -238,7 +239,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                           <!-- a personal view never writes: no delete -->
                         } @else if (recordList.confirmDeleteId() === ent._id) {
                           <span class="inline-confirm">
-                            Delete?
+                            {{ 'brain.entities.inlineConfirmDelete' | transloco }}
                             <button class="btn btn-sm btn-danger" (click)="deleteEntity(ent._id)">{{ 'common.yes' | transloco }}</button>
                             <button class="btn btn-sm btn-secondary" (click)="cancelDelete()">{{ 'common.no' | transloco }}</button>
                           </span>
@@ -492,6 +493,17 @@ export class EntitiesTabComponent extends RecordTabBase {
       // A refusal that already carries the fresh preview (a stale token) saves the round trip.
       const preview = e.error?.preview
         ?? await firstValueFrom(this.brainApi.cascadePreview(this.spaceId(), id));
+      // A cascade removes EDGES only (server: brain/entity-delete-cascade.ts). A fact, chrono entry or file that names the entity is a
+      // record of its own, so the server refuses the cascade; offering it anyway reopened the same dialog on every confirm, and nothing
+      // was ever deleted. Say which records are in the way instead.
+      const records = preview.removes.filter(r => r.type !== 'edge');
+      if (records.length > 0) {
+        const counts = new Map<string, number>();
+        for (const r of records) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
+        const list = formatList([...counts].map(([type, n]) => this.cascadeCount(type, n)), this.transloco.getActiveLang());
+        this.recordList.deleteError.set(this.transloco.translate('brain.cascade.blockedByRecords', { list }));
+        return;
+      }
       if (await this.confirmCascade(preview)) await this.tryDelete(id, preview.token);
     }
   }

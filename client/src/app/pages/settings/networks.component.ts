@@ -172,7 +172,7 @@ import { PluralPipe } from '../../core/plural.pipe';
         <div class="network-card">
           <div class="network-card-header" (click)="toggleNetwork(net.id)">
             <span class="network-name">{{ net.label }}</span>
-            <span class="badge" [ngClass]="typeBadge(net.type)">{{ net.type }}</span>
+            <span class="badge" [ngClass]="typeBadge(net.type)">{{ typeLabel(net.type) }}</span>
             @if (net.myRole; as r) {
               <span class="badge badge-role" [attr.aria-label]="'networks.role.ariaLabel' | transloco">{{ ('networks.role.' + r.role) | transloco }}</span>
               @if (roleCountText(r); as text) {
@@ -685,6 +685,18 @@ export class NetworksComponent implements OnInit {
   }
   readonly remoteOf = remoteOf;
   readonly memberGroups = memberGroups;
+
+  /** The network's type as a word in the reader's language; an id this client does not know is shown as it is. */
+  typeLabel(type: string): string {
+    switch (type) {
+      case 'closed': return this.transloco.translate('networks.typeShort.closed');
+      case 'democratic': return this.transloco.translate('networks.typeShort.democratic');
+      case 'club': return this.transloco.translate('networks.typeShort.club');
+      case 'braintree': return this.transloco.translate('networks.typeShort.braintree');
+      case 'pubsub': return this.transloco.translate('networks.typeShort.pubsub');
+      default: return type;
+    }
+  }
 
   typeBadge(type: string): string {
     const map: Record<string, string> = {
