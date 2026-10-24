@@ -155,10 +155,6 @@ file bytes) — and the import puts them back. What to expect from a restore:
   tightened must still restore. In a space whose validation is **warn** or **strict**, the answer lists the first 50
   such records by id with the field and reason (never the value) and says how many there were in all; **off** reports
   none.
-- **A family marked `counterBehind` was restored, and needs the import run once more.** It means the records were
-  stored but the space's sequence counter could not be moved past them, so the next edit made here could be taken
-  for older than a restored record by a peer. Running the same import again is safe — it replaces — and moves the
-  counter.
 - File previews and passages are rebuilt from the file itself, so they are not part of the export.
 - **The file bytes are not part of it, and an import gives no report on them.** A file's record comes back without its
   size and hash, so the import does not say which files on disk no longer match their records. A whole [restore](#restore)
@@ -459,16 +455,22 @@ line, escaped, after the message.
 
 **Every line an API request's own work produces carries that request's id**, shown in square brackets after the level. It is the same id the response returned in its `X-Request-Id` header, so when somebody reports a failing call and quotes the id, searching for it here finds every line that request produced — the refusal, and anything a background step logged on its way. Lines that belong to no request (startup, the auto-delete sweep, the background storage measurement) carry no id, which is what keeps a search for a real one from matching them. That holds for a job a request happened to start, too: the auto-delete sweep begun by the first-run setup, or a scheduled scan a configuration reload re-arms, never logs under that request's id.
 
-**`seq horizon held …` names a write that held up replication.** While a write is being stored it holds a place
-in its space's sequence, and every peer pulling that space is served nothing past that place until the write
+**`record position held …` names a write that held up replication.** While a write is being stored it holds the position it took for
+its record, and every peer pulling that space is served nothing past that position until the write
 ends. A write that took longer than half its limit (`YTHRIL_HOLD_DEADLINE_MS`) is named once while it is still
-open — `seq horizon held 23.0s and still open: space=… seq=… holder=…` — and again when it ends:
-`seq horizon held 45.1s space=… seq=… holder=… ended=timeout`. `holder` says which kind of write it was
+open — `record position held 23.0s and still open: space=… pos=… holder=…` — and again when it ends:
+`record position held 45.1s space=… pos=… holder=… ended=timeout`. `holder` says which kind of write it was
 (`fact.update`, `sync.push.fork`, `entity.merge`, …); `ended=` says how it ended: `ok` (slow, but it finished),
 `timeout` (the database did not complete it in time, so it was stopped and the caller told to retry) or `error`.
 One such line now and then is a slow moment; the same space appearing repeatedly is a lock or a stalled
-database connection to look into. The gauge `ythril_seq_horizon_oldest_hold_seconds` shows the same thing as a
+database connection to look into. The gauge `ythril_record_position_oldest_hold_seconds` shows the same thing as a
 number per space.
+
+**An instance whose clock reads before 2005-09-05 refuses every edit** with `503` `positions_clock_unusable`: each record this instance stores
+is given the time it was stored as its place in this instance's own order, and a clock set before that date cannot give one. Reading and
+syncing carry on and the server's readiness is unchanged; correct the clock and the next edit goes through. The gauge
+`ythril_position_clock_unusable` is `1` while the refusal stands. (`503` `positions_seed_unavailable` is the same refusal for the moment the
+database cannot be asked where this instance's order stands; it goes by itself once the database answers.)
 
 **`file tombstone position held …` names a deletion that held up the deletions after it.** While the record of a
 file's deletion is being stored, peers are sent no deletion of that space placed after it, so none can be skipped.

@@ -336,9 +336,17 @@ Notes:
 
 - **The header is optional.** Omit it and the write proceeds unconditionally.
 - **All four record types**, on the `PATCH` route: `facts`, `entities`, `edges`, `chrono`.
-- **`seq` is on every record** and is returned by every read. Treat it as an **opaque token**: it is a
-  per-space counter, not a per-record version, so consecutive writes to one record will not give you
-  `1, 2, 3`. Echo back what you read and do not reason about the gaps.
+- **`seq` is on every record** and is returned by every read. It is the record's **version**: a local write stores
+  a `seq` above the one it read for the record, and above any deletion this instance holds for its id, so the version
+  of one record only goes up on one instance. It is drawn from a per-space counter, so consecutive writes to one
+  record will not give you `1, 2, 3`: echo back what you read, compare, and do not reason about the gaps.
+- **A write without `If-Match` is conditional all the same, on the version it read.** If the stored version moved between its
+  read and its store (a peer's copy arrived), it reads the record again and writes above what it now finds, up to three
+  times; after the third miss it answers the `412` above. With `If-Match` there is one try: the version you named.
+- **A version above the ceiling is refused, never wrapped.** A record whose next version would pass
+  2^50 minus 2^40 is `409` `record_version_at_ceiling` on REST and MCP alike, with nothing written:
+  `{ "error": "…", "code": "record_version_at_ceiling", "id": "<the record>" }`. A merge that would stamp such a record is refused
+  whole, and a bulk row answers the same `code` on its own row.
 - Bare (`41`), quoted (`"41"`) and weak (`W/"41"`) forms are all accepted, as is `*`, which asks only that
   the record still exist.
 - **A value that is not a `seq` — `If-Match: abc` — is a `400`, never ignored.** Silently dropping an
@@ -397,6 +405,10 @@ honoured. **A filter that names one is refused**: a predicate naming a withheld 
 `"$field"` path inside `$expr`, is a `400` naming it, and only `{"<field>": {"$exists": true}}` (or `false`) is
 accepted on one. Expression routes that reach a field without a field key (`$$ROOT`, `$$CURRENT`, `$getField`,
 `$objectToArray`, `$jsonSchema`) are not refused yet.
+
+The same goes for a record's landing fields: `pos` and `posAtSeq` (where this instance stored it, and the version that position was
+taken for) and `writtenHere` (whether this instance wrote it). They are this instance's own and are never returned or projected; a list may be
+ordered by `pos` (the default list order is landing order), and no answer carries it.
 
 > **On 3.1.0 or earlier** the per-collection list routes returned every record's vector — use
 > `POST /api/filter` with a projection for any bulk read there.

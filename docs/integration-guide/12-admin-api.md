@@ -113,7 +113,9 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   exported data is model-independent; the import re-embeds. So is an edge's write guard (`_functionalGuard`): this
   instance's own lock on a functional label's subject, never a backup's to carry.
 - The record's own local state is kept: the retention stamps (`_expireAt`, `_contentExpireAt`), a file's
-  `syncBase` and who delivered the record (`deliveredBy`). JSON writes the stamps as ISO strings; the import turns
+  `syncBase`, who delivered the record (`deliveredBy`) and whether this instance wrote its current version
+  (`writtenHere`). The record's landing position (`pos`, `posAtSeq`) is not kept: a restore takes a fresh one, so it
+  is not exported, and a tombstone's own local fields (`storedVia`, `issuedHere`, `pos`, `posAtSeq`) are this instance's alone. JSON writes the stamps as ISO strings; the import turns
   them back into dates.
 - Binary file content is **not** included — only file metadata. Use the Files API to download actual files.
 
@@ -187,7 +189,6 @@ Per family, alongside the counts, and each present only when it has something to
 | `derived` | how many file chunks and face records were left out because this instance derives them from the blob |
 | `flagsKept` | files only: how many restored rows kept the `deletedAt` flag their export carried (files this instance had soft-deleted, brought back as the audit records they were rather than as live rows with no bytes). Present only when any did |
 | `keysRemoved` | files only: how many authored keys (a description, its source, the properties, the tags, a suppression mark) the restored rows lost because their export row lacks them. It counts the keys the replaced rows held, so a key a row never had is not counted. Present only when any were removed |
-| `counterBehind` | `true` when the family's records were stored and this instance's seq counter could not be moved past them: the next local write may take a seq below a restored record. What was stored is still counted in `inserted`/`updated`. **Run the import again** — a restore replaces, so it is safe, and the re-run moves the counter |
 | `restoredOverTombstone` | ids of records restored over a deletion this instance holds **and that deletion would still apply to** (judged by the same [deletion rule](../sync-protocol.md#tombstone-deletion-authorisation) sync uses: the issuer wrote the record, or this instance's upstream delivered it) — a peer holding the same tombstone will delete them again on the next sync. **The first 10**; `restoredOverTombstoneTotal` is how many there were |
 | `schemaViolations` | documents stored carrying something the space's schema does not accept that the copy they replaced lacked (below); `schemaViolationsTotal` and, past 50, `schemaViolationsTruncated: true` |
 

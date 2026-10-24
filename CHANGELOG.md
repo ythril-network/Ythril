@@ -127,6 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Server:** `docker:wipe` records the instance and rebuilds it at its commit, refusing to delete data; `docker:compact` restarts it.
 - **UI:** The Schema tab gains a Rules editor and **Validate**; record forms mark undeclared keys.
 - **MCP:** `save_entity`, `save_chrono` and `save_edge` take `waitForEmbedding`, as REST does.
+- **Writes:** `seq` is a record's version: an edit stores a higher one only if its read version is current. Over the ceiling: `409` `record_version_at_ceiling`. Clock before 2005: `503` `positions_clock_unusable`.
 
 ### Changed
 
@@ -134,8 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Errors:** An unmeetable write concern (`w` above `1` on a standalone) carries `code` and `codeName` and may have applied its write: read the record before repeating; a sync receiver stops the page.
 - **Errors:** Pool checkouts time out only where `waitQueueTimeoutMS` is in `MONGO_URI`. A failed space rename answers its code (`ENOENT`), not the data path.
 - **Database:** New `YTHRIL_WRITE_TIMEOUT_MS` (default 30 s per write) and `YTHRIL_HOLD_DEADLINE_MS` (45 s per hold); both refuse `0`. A `MONGO_URI` `timeoutMS` does not apply to them; boot warns once on a `socketTimeoutMS` below the write bound.
-- **Database:** Boot logs one INFO line, `MongoDB client options: …`, a changed string takes a restart. An operation in flight when the database stops answering ends with a retryable `503` (`0` means no bound; `loadBalanced`: selection only). The compose healthcheck waits out the first boot.
-- **Database:** The first connection retries more kinds of "not up yet"; bad credentials fail at once. A late search service (`mongot`) is picked up by a background retry; a waiting space stays `building`, with `indexWaiting` and `indexWaitingSince` on `GET /api/spaces`.
+- **Database:** Boot logs one INFO line, `MongoDB client options: …`, a changed string takes a restart. An operation in flight when the database stops answering ends with a retryable `503` (`0`: no bound; `loadBalanced`: selection only). The compose healthcheck waits out the first boot.
+- **Database:** The first connection retries more kinds of "not up yet"; bad credentials fail at once. A late `mongot` is picked up by a retry; a waiting space stays `building` (`indexWaiting`, `indexWaitingSince` on `GET /api/spaces`).
 - **Database:** `indexStatus: "failed"` now means only a build that failed or timed out; an alert on it stops firing on a late service. `INDEX_READY_TIMEOUT_MS` starts when indexes are confirmed. `GET /ready` shares one probe.
 - **Database:** A collection's vector index exists only while it holds a record: dropped `SEARCH_INDEX_DROP_DELAY_MS` (`60000`) after its last goes, and at boot for empty ones; search answers empty (`empty: true` in `pipeline-status`).
 - **Server:** `space.reload_added` is written after initialisation with its real status. A refused manual reload moves `ythril_config_reload_failed_total` and holds `ythril_config_reload_pending`; a successful reload clears the gauge.
@@ -151,6 +152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A link under another id for linked endpoints is `skipped`. A space's Merkle root is not re-read when nothing changed: `GET /api/sync/merkle` and `merkle: true` cycles are far cheaper; root date: `computedAt`.
 - **Sync:** Each space gets a `(seq, _id)` index per record collection, built in the background on first start (paging stays tie-safe, slower). Each record stores its delivering peer (`deliveredBy`: local, never sent or shown).
 - **Sync:** New `ythril_sync_tombstones_applied_total`, `ythril_sync_tombstones_declined_total` and gauge `ythril_sync_tombstone_rereads_owed`. New `ythril_sync_file_arrivals_total{door,outcome}` counts file arrivals.
+- **Sync:** Records take a local landing position (`pos`); arrivals no longer move the seq counter.
 - **Sync:** A subscriber that left a pub/sub space gets `423` `space_declined` once; the publisher stops sending it; sync history lists it `declined`, not held. A tombstone of a type the receiver does not know still answers `400`; the sender resends once upgraded.
 - **Embedding:** The bundled model runs in a supervised child process: embedding cannot block the server, nor a native fault take it down; it exits after 10 idle minutes.
 - **Embedding:** `mem_limit` or a pod memory limit counts both processes. The child holds no secrets. A lost process is replaced after a growing delay; a record killing it three times is `failed`, the crash in its `lastError`.
@@ -192,17 +194,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A chrono `type` outside the space's vocabulary is still stored on pull (a push answers `unknownType`). Two peers pushing different text for one fact at one seq keep both (a fork), the divergent copy keeping its `createdAt` and `updatedAt`.
 - **Sync:** Strict-linkage violations are recorded for every landed edge and link, on every door, once per dangling end after a pull or push is whole. A push no longer waits for it; a part-way pull checks what landed.
 - **Sync:** A file deletion reaches every peer once: its tombstone is sent once per path once the file is gone, never pruned unsent, and survives a wipe or a peer that sent the bytes first.
-- **Sync:** A stalled write cannot stop a space's replication (it ends within the write bound): gauge `ythril_seq_horizon_oldest_hold_seconds`, warning `seq horizon held <age>s …`.
+- **Sync:** A stalled write cannot stop replication (the write bound ends it): gauge `ythril_record_position_oldest_hold_seconds`, warning `record position held …`. Pulled records and pushed entities are embedded (re-embed earlier pulls once: `POST /api/spaces/:id/reembed`).
 - **Sync:** A peer passes on all its deletions of a kind beyond 1000, by pull and push. A page holding one id twice stores the highest seq; a stale tombstone is deleted only once its superseding record landed.
-- **Sync:** Pulled records and entities pushed to `POST /api/sync/entities` are embedded (re-embed earlier pulls once: `POST /api/spaces/:id/reembed`); a counter left behind answers a push `500` and sets `counterBehind: true` on an import.
-- **Sync:** Every push door moves the seq counter past every seq received before answering. A peer's edit no longer erases this instance's vector and retention stamps. A pull counts a file under a decomposed (NFD) name once, touching its bytes in place.
+- **Sync:** A peer's edit no longer erases this instance's vector and retention stamps. A pull counts a file under a decomposed (NFD) name once, touching its bytes in place.
 - **Sync:** A duplicate link in a push is `skipped`; a refused document gets one warning per page naming ids and reason. A database fault writing a pulled page is not `PEER UNREACHABLE`: it holds the family's position and refetches.
 - **Sync:** A driver argument error drops only its own document (`rejected`; a single route `400`). A merge-dropped duplicate edge's or re-keyed link's tombstone carries `originalSeq`.
 - **Sync:** A tombstone page of refused elements no longer holds a peer's position for good, nor a refused element's seq move it; a tombstone `instanceId` over 256 characters is refused.
 - **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since is kept. An admin restore removes a file description, source, property, tag or mark its backup lacks (`keysRemoved`).
 - **Files:** A peer's file, pushed or pulled, is processed by this instance's rules (converted, chunked, media); a new version replaces old passages; a failed record write leaves no new file unless the database was down.
 - **Files:** A pushed file's later description and tag edits apply; arriving bytes revive a soft-deleted path with this instance's retention; a metadata arrival no longer overwrites a newer copy.
-- **Files:** Changed media over a `complete` file is analysed again. A re-upload with metadata takes one seq; a no-op write none. A soft-deleted file's record keeps no description, vector, chunk or face, and is removed one file retention window after deletion; with no window it stays.
+- **Files:** Changed media over a `complete` file is analysed again. A re-upload with metadata takes one seq; a no-op write none. A soft-deleted file keeps no description, vector, chunk or face; its record goes one file retention window after deletion, or stays with no window.
 - **Files:** File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` is recovered, never over a row's own description or tags; a wrong-typed key or any `parentFileId` is discarded and counted refused.
 - **Files:** Moving a file or folder leaves nothing at its old path, even mid-processing, and carries chunks, sidecars, queued jobs and links (`PATCH /api/files/:spaceId`, `move_file`); a retried move completes only a move it began.
 - **Files:** Each record ends wholly at its old or new path; a case-only rename moves its record; a directory delete is audited with `kind: "directory"`. Every delete door completes a file whose bytes are gone.
@@ -224,10 +225,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tokens:** A completed network handshake revokes the peer tokens it replaces, on both sides and for club pairings, and start-up drops unused leftovers.
 - **Networks:** Every door opening a vote round answers it as the vote list shows; a joiner past its deadline loses its credential next sweep.
 - **Networks:** A vote round ends at its deadline unattended (a job checks each minute); a peer's round past its deadline, past 72 hours or concluded here is never adopted.
-- **Housekeeping:** An error or hang in one space no longer stops a background job for others. New `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` (default 240 s) ends each database operation. A reindex run not resumed at start retries every few seconds; a dead sweeper's run is taken over at lease expiry.
+- **Housekeeping:** A failing or hung space no longer stops a background job for others. New `YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS` (default 240 s) ends each database operation. An unresumed reindex retries every few seconds; a dead sweeper's run is taken over at lease expiry.
 - **Housekeeping:** A pass ends early when the database does not answer or 3 spaces in a row time out; a timed-out space is passed over 60 s, doubling to 300 s. Undeletable: `ythril_housekeeping_records_failed_total`.
 - **Housekeeping:** Duplicate and contradiction scans report a lookup failure and move past a record that keeps failing; their lists page past 500. An automerge a space refuses is reported once per pair.
-- **Server:** A background job no longer logs under the request id that armed it. An unknown tool answers `404`. The notify event store holds at most 1 MiB; its event list pages and says when cut. Own `config.json` writes never reload the instance; no schedule is armed after shutdown begins.
+- **Server:** Background jobs no longer log under the arming request's id. An unknown tool answers `404`. The notify event store holds 1 MiB at most; its event list pages and says when cut. Own `config.json` writes never reload the instance; no schedule arms after shutdown begins.
 - **Database:** Pushed, pulled and store-side bulks write in chunks of at most 99 999 operations and 16 MiB; a duplicate key then a timeout answers `503`, not `400`. The `MONGO_URI` user must be able to list and end its own operations.
 - **Database:** A write answered `503` "timed out, retry" can no longer land after the answer: the server's deadline ends it, with a 500 ms backstop.
 - **Database:** `POST /api/admin/data/config/test` answers an unreachable host `200` with `{ "ok": false, "error": … }`. A large entity merge no longer prints `MaxListenersExceededWarning`.
