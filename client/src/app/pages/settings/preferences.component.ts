@@ -39,6 +39,8 @@ import { browserTimeZone, DATE_STYLES, DATE_ZONES, formatInstant, type DateStyle
       background: var(--nav-active-dim);
       color: var(--text-primary);
     }
+    /* Asked for, words still loading: the page has not switched yet, so the button says it is on its way. */
+    .lang-btn.switching { border-style: dashed; border-color: var(--accent); color: var(--text-primary); cursor: progress; }
 
     /* Date and time (Q-146). Two radio groups rather than selects: each option shows what it looks like, and a
        choice between three formats is easier to make by seeing them than by reading their names. */
@@ -61,6 +63,7 @@ import { browserTimeZone, DATE_STYLES, DATE_ZONES, formatInstant, type DateStyle
             <button
               class="lang-btn"
               [class.active]="activeLang() === lang.code" [attr.aria-current]="activeLang() === lang.code ? 'true' : null"
+              [class.switching]="switchingTo() === lang.code" [attr.aria-busy]="switchingTo() === lang.code ? 'true' : null"
               (click)="setLang(lang.code)">
               {{ lang.label }}
             </button>
@@ -108,8 +111,13 @@ export class PreferencesComponent {
   private transloco = inject(TranslocoService);
   protected readonly dates = inject(DateFormatService);
 
+  private readonly active = inject(ActiveLanguage);
+
   /** The language the page is shown in. After a failed load that is the fallback, and so is the highlighted button here. */
-  readonly activeLang = inject(ActiveLanguage).language;
+  readonly activeLang = this.active.language;
+
+  /** The language a click asked for whose words are still loading: its button shows the wait until the page switches. */
+  switchingTo(): string | null { return this.active.switchingTo(); }
 
   readonly languages = [
     { code: 'en', label: 'English' },

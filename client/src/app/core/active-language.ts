@@ -49,6 +49,17 @@ export class ActiveLanguage {
     return this.loaded(this.language());
   });
 
+  /**
+   * The language a switch is waiting for: asked for, its words not here yet. Null when no switch is pending, and again once the words
+   * arrive or the load fails and transloco falls back. A control that starts a switch reads this to show the wait, because `language`
+   * keeps the old value until the words land and the click would otherwise show nothing at all.
+   */
+  readonly switchingTo = computed<string | null>(() => {
+    this.revision(); // a dependency, not a value: every request, load and failure moves it
+    const requested = this.requested();
+    return requested && requested !== this.language() ? requested : null;
+  });
+
   constructor() {
     const destroyed = inject(DestroyRef);
     this.transloco.langChanges$.pipe(takeUntilDestroyed(destroyed)).subscribe(lang => this.follow(lang));
