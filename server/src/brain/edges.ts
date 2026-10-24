@@ -2,7 +2,7 @@ import { type RecordFlags } from './record-flag.js';
 import { rekeyEdge, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
-import { withSeq } from '../util/seq.js';
+import { writeAtReadVersion } from './write-at-read-version.js';
 import { inHeldTransaction } from './held-transaction.js';
 import { removeEdges } from './edge-removal.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
@@ -230,8 +230,8 @@ export async function updateEdgeById(
     { projection: NEVER_RETURNED_PROJECTION }) as EdgeDoc | null;
   if (!existing) return null;
 
-  // The seq is taken AT the write (`withSeq` below), not here: everything awaited between allocation and
-  // write holds every seq-paged reader of the space (`Q-196`).
+  // The version is stamped and the position taken AT the write (`writeAtReadVersion` below), not here: everything awaited between the
+  // position and the write holds every position-paged reader of the space (`Q-196`).
   const now = new Date().toISOString();
   const $set: Record<string, unknown> = { updatedAt: now };
   const $unset: Record<string, unknown> = {};
@@ -427,12 +427,12 @@ export async function updateEdgeById(
   }
   let seq = 0;
   // Admitted and counted from its own check (`admitSpaceWrite`), each time it is attempted; a relabel that moved the edge was counted by `rekeyEdges`.
-  const writeInPlace = () => admitSpaceWrite(spaceId, 'edges', () => withSeq(spaceId, (s) => {
-    seq = s;
-    const updateOp: Record<string, unknown> = { $set: { ...$set, seq } };
+  const writeInPlace = () => admitSpaceWrite(spaceId, 'edges', () => writeAtReadVersion<EdgeDoc>(spaceId, 'edges', id, ifMatchSeq, (at) => {
+    seq = at.version;
+    const updateOp: Record<string, unknown> = { $set: { ...$set, ...at.patch } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
     return collection.findOneAndUpdate(
-      asFilter<EdgeDoc>(writeFilterFor(id, ifMatchSeq)),
+      asFilter<EdgeDoc>(writeFilterFor(id, { readSeq: at.readSeq, ifMatchSeq })),
       asUpdate<EdgeDoc>(updateOp),
       { returnDocument: 'before' },
     );

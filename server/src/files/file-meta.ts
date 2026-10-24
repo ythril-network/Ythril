@@ -19,7 +19,10 @@ import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { readRowsById, READ_CHUNK } from '../db/read-by-id.js';
 import { eachIdPage } from '../db/id-keyset-page.js';
 import { reconcileLinks, assertDesiredLinks } from '../brain/links.js';
-import { withSeq } from '../util/seq.js';
+import { versionsFor, type VersionAllocation } from '../util/version-stamp.js';
+import { withLandingStamp, localRow, type LocalLanding } from '../sync/record-position-stream.js';
+import { writeAtReadVersion } from '../brain/write-at-read-version.js';
+import { writeFilterFor } from '../brain/write-precondition.js';
 import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
@@ -110,16 +113,20 @@ export async function upsertFileMeta(
       if (expireAt) $set['_expireAt'] = expireAt; else $unset['_expireAt'] = '';
     }
     // Each branch's store write is ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
-    await admitSpaceWrite(spaceId, 'files', () => withSeq(spaceId, (seq) => col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-      asFilter<FileMetaDoc>({ _id: normalised }),
-      asUpdate<FileMetaDoc>({ $set: { ...$set, seq }, $unset }),
-    ), 'file.upsert'));
+    await admitSpaceWrite(spaceId, 'files', () => writeAtReadVersion(spaceId, 'files', normalised, undefined, async (at) => {
+      const res = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+        asFilter<FileMetaDoc>(writeFilterFor(normalised, { readSeq: at.readSeq })),
+        asUpdate<FileMetaDoc>({ $set: { ...$set, ...at.patch }, $unset }),
+      );
+      return res.matchedCount > 0 ? res : null;
+    }, 'file.upsert'));
   } else {
     // A per-record ttlDays wins; otherwise the space's `file` retention bucket applies. Files have their OWN
     // bucket rather than sharing one with a knowledge collection: they are the largest and most obviously
     // disposable of the five, and they have no type, so the schema tier cannot reach them.
     const expireAt = expiryForCreate(spaceId, opts.ttlDays, { collection: 'file' });
-    await admitSpaceWrite(spaceId, 'files', () => withSeq(spaceId, (seq) => {
+    const [stamp] = await versionsFor(spaceId, [normalised], { parts: ['files'] }) as [VersionAllocation];
+    await admitSpaceWrite(spaceId, 'files', () => withLandingStamp(spaceId, [localRow(stamp.version)], ([landing]) => {
       const doc: FileMetaDoc = {
         _id: normalised,
         spaceId,
@@ -132,7 +139,7 @@ export async function upsertFileMeta(
         sizeBytes,
         ...(opts.sha256 !== undefined ? { sha256: opts.sha256 } : {}),
         author: authorRef(),
-        seq,
+        ...landing!,
         ...(expireAt ? { _expireAt: expireAt } : {}),
       };
       return col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(doc));
@@ -370,17 +377,23 @@ export async function updateFileMeta(
   const authored = linksGiven
     || [...Object.keys($set), ...Object.keys($unset)].some(k => k !== 'updatedAt' && !isLocalFileField(k));
   if (!authored) delete $set['updatedAt'];
-  const write = (seq?: number) => {
-    const set = seq === undefined ? $set : { ...$set, seq };
+  /** The one update, `landing` the stamp of an authored write (and its read version, which the filter names) or absent for a local-fields write. */
+  const write = async (landing?: { patch: LocalLanding; readSeq: number | null }) => {
+    const set = landing === undefined ? $set : { ...$set, ...landing.patch };
     const update = {
       ...(Object.keys(set).length > 0 ? { $set: set } : {}),
       ...(Object.keys($unset).length > 0 ? { $unset } : {}),
     };
-    return Object.keys(update).length === 0 ? Promise.resolve() : col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-      .updateOne(asFilter<FileMetaDoc>({ _id: normalised }), asUpdate<FileMetaDoc>(update)).then(() => undefined);
+    if (Object.keys(update).length === 0) return null;
+    // A local-fields write stamps nothing and so names no version; an authored one lands only on the version its stamp read.
+    const filter = landing === undefined ? { _id: normalised } : writeFilterFor(normalised, { readSeq: landing.readSeq });
+    const res = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(asFilter<FileMetaDoc>(filter), asUpdate<FileMetaDoc>(update));
+    return res.matchedCount > 0 ? res : null;
   };
   // ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
-  await admitSpaceWrite(spaceId, 'files', () => (authored ? withSeq(spaceId, write, 'file.update') : write()));
+  await admitSpaceWrite(spaceId, 'files', () => (authored
+    ? writeAtReadVersion(spaceId, 'files', normalised, undefined, (at) => write({ patch: at.patch, readSeq: at.readSeq }), 'file.update')
+    : write()));
 
   // ONE enqueue, unconditionally, after the write. Not gated on which fields moved: any such condition
   // could only be computed from the read above, which is the stale value this change exists to stop using.

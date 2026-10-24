@@ -6,7 +6,7 @@
  * order `PLAN_KINDS` states, a stage is:
  *
  *  1. **one seq block and one `bulkWrite`** — the block is allocated immediately before the write that carries
- *     it (`withAllocatedSeqs`), so the seq-paged readers' horizon is held for one round trip, not for a batch;
+ *     it (`withLandingStamp`), so the position-paged readers are held below the block for one round trip, not for a batch;
  *  2. **what landed**, read back when the write could not say: a per-operation failure maps to its item, an
  *     ambiguous one (a dropped connection) is settled by reading the minted ids, and a converge whose record moved
  *     since it was planned is reported STALE rather than overwritten (`expectSeq` is in the update's filter);
@@ -30,7 +30,8 @@
  */
 import { col, asFilter, asBulk, asUpdate } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { withAllocatedSeqs } from '../../util/seq.js';
+import { versionsFor, versionsForRows, type VersionAllocation } from '../../util/version-stamp.js';
+import { withLandingStamp, localRow, type LocalLanding } from '../../sync/record-position-stream.js';
 import { inChunks } from '../../util/chunks.js';
 import { readStoredById, READ_CHUNK } from '../../db/read-by-id.js';
 import { mapLimit } from '../../util/map-limit.js';
@@ -38,10 +39,10 @@ import { log, peerText } from '../../util/log.js';
 import { bulkWriteFailures, phraseWriteFailure, onlyDuplicateKeys, DUPLICATE_KEY } from '../../db/write-errors.js';
 import { FUNCTIONAL_GUARD, UNSET_GUARD } from '../../sync/local-only-fields.js';
 import { isWriteTimeout } from '../../db/write-timeout.js';
-import { writeFilterFor } from '../write-precondition.js';
+import { writeFilterFor, RecordVersionAtCeiling, RECORD_VERSION_AT_CEILING } from '../write-precondition.js';
 import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { linkIdFor } from '../link-id.js';
-import { writeTombstones } from '../tombstones.js';
+import { removeWithTombstones } from '../tombstones.js';
 import type { AuthorRef, EdgeDoc, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
@@ -100,19 +101,34 @@ export async function commitPlans(spaceId: string, plans: readonly WritePlan[]):
 
 /** One kind's block write. Returns the indexes whose record landed; sets every index's outcome. */
 async function writeStage(
-  spaceId: string, kind: PlanKind, plans: readonly WritePlan[], ready: readonly number[],
+  spaceId: string, kind: PlanKind, plans: readonly WritePlan[], candidates: readonly number[],
   outcomes: Array<CommitOutcome | undefined>, somethingLanded: boolean,
 ): Promise<number[]> {
   const coll = col<{ _id: string; seq?: number }>(spaceCollection(spaceId, PLAN_KINDS[kind].collection));
-  let first = 0;
+  // The rows that take a version: every candidate but a record whose own version is at the ceiling (refused alone, below).
+  let ready: readonly number[] = candidates;
+  let stamps: readonly VersionAllocation[] = [];
   let failures: ReturnType<typeof bulkWriteFailures> = null;
   let ambiguous = false;
   let matched = 0;
   try {
-    await withAllocatedSeqs(spaceId, ready.length, async (block) => {
-      first = block;
+    // Versions first, then the position block and the write under its hold (`withLandingStamp`): a version needs no hold, a position does.
+    const rows = await versionsForRows(spaceId, candidates.map(i => plans[i]!.id), { parts: [PLAN_KINDS[kind].collection] });
+    const live: number[] = [];
+    const liveStamps: VersionAllocation[] = [];
+    candidates.forEach((i, k) => {
+      const row = rows[k]!;
+      if ('refused' in row) {
+        // The record's version is at the highest number sync accepts: this item is refused with its code, the other rows land.
+        outcomes[i] = { ok: false, reason: new RecordVersionAtCeiling(row.id).message, code: RECORD_VERSION_AT_CEILING };
+      } else { live.push(i); liveStamps.push(row); }
+    });
+    ready = live;
+    stamps = liveStamps;
+    if (live.length === 0) return [];
+    await withLandingStamp(spaceId, stamps.map(s => localRow(s.version)), async (patches) => {
       try {
-        const res = await coll.bulkWrite(asBulk(ready.map((i, k) => opFor(plans[i]!, block + k))), { ordered: false });
+        const res = await coll.bulkWrite(asBulk(ready.map((i, k) => opFor(plans[i]!, stamps[k]!, patches[k]!))), { ordered: false });
         matched = res.matchedCount;
       } catch (err) {
         /*
@@ -137,14 +153,14 @@ async function writeStage(
       }
     }, `write.${kind}`);
   } catch (err) {
-    // The seq block itself failed, or its write timed out: nothing of this stage is known to be written.
+    // The versions or the position block failed, or the write timed out: nothing of this stage is known to be written.
     if (!somethingLanded) throw err;
     for (const i of ready) outcomes[i] = { ok: false, reason: phraseWriteFailure(undefined) };
     log.warn(`write commit: the ${kind} stage for '${peerText(spaceId)}' could not start after earlier stages landed: ${peerText(String(err))}`);
     return [];
   }
 
-  const seqOf = (k: number) => first + k;
+  const seqOf = (k: number) => stamps[k]!.version;
   const failedAt = new Map<number, number | undefined>();
   for (const f of (failures ?? []) as Array<{ index: number; code: number | undefined }>) failedAt.set(f.index, f.code);
 
@@ -204,13 +220,13 @@ export async function clearStaleWriteGuard(
   } catch (err) { if (isSpaceNotWritable(err)) return false; throw err; }
 }
 
-/** The driver operation for one plan, stamped with its seq. */
-function opFor(plan: WritePlan, seq: number): object {
-  if (plan.op === 'insert') return { insertOne: { document: { ...plan.doc, seq } } };
-  // A converge lands only on the version it planned against; any other plan, unconditionally — the one filter
-  // every update writes through (`writeFilterFor`, over `atReadSeq`).
-  const filter = writeFilterFor(plan.id, plan.expectSeq);
-  const update: Record<string, unknown> = { $set: { ...plan.set, seq } };
+/** The driver operation for one plan, stamped with its landing (`seq`, `pos`, `posAtSeq`, `writtenHere`). */
+function opFor(plan: WritePlan, stamp: VersionAllocation, landing: LocalLanding): object {
+  if (plan.op === 'insert') return { insertOne: { document: { ...plan.doc, ...landing } } };
+  // A converge lands only on the version it planned against AND the version its stamp read (`writeFilterFor`, over `atReadSeq`: a record
+  // that moved between the plan and the stamp is stale, and so is one that moved between the stamp and the write).
+  const filter = writeFilterFor(plan.id, { readSeq: stamp.readSeq, ifMatchSeq: plan.expectSeq });
+  const update: Record<string, unknown> = { $set: { ...plan.set, ...landing } };
   if (plan.unset && Object.keys(plan.unset).length > 0) update['$unset'] = plan.unset;
   return { updateOne: { filter, update } };
 }
@@ -334,18 +350,20 @@ export async function reconcileLinkRows(
   // The removals and the additions are ONE admitted and counted unit (`admitSpaceWrite`): the additions CREATE link rows.
   await admitSpaceWrite(spaceId, 'links', async () => {
     if (removals.length > 0) {
-      // The rows go, then their tombstones — one seq block taken at their write, each carrying the row's seq.
-      await linksColl.deleteMany(asFilter<LinkDoc>({ _id: { $in: removals }, spaceId }));
-      await writeTombstones(spaceId, removals.map(_id => ({ _id, type: 'link', deletedAt: now, originalSeq: seqOfExisting.get(_id) })));
+      // The rows go, then their tombstones — stamped first (a link at the ceiling refuses the removal whole) and each carrying the row's seq.
+      await removeWithTombstones(spaceId, 'links',
+        removals.map(_id => ({ _id, type: 'link' as const, deletedAt: now, originalSeq: seqOfExisting.get(_id) })), { filter: { spaceId } });
     }
     if (additions.length > 0) {
-      await withAllocatedSeqs(spaceId, additions.length, async (first) => {
+      // Each row's version above any tombstone held for its id (a re-created link clears the one that retired it, below).
+      const versions = await versionsFor(spaceId, additions.map(a => a._id), { parts: ['links'] });
+      await withLandingStamp(spaceId, versions.map(v => localRow(v.version)), async (patches) => {
         await linksColl.bulkWrite(asBulk(additions.map(({ _id, r, to, toKind }, i) => ({
           replaceOne: {
             filter: { _id, spaceId },
             replacement: {
               _id, spaceId, from: r.from, fromKind: r.fromKind, to, toKind, author: r.author,
-              createdAt: now, updatedAt: now, seq: first + i,
+              createdAt: now, updatedAt: now, ...patches[i]!,
             } satisfies LinkDoc,
             upsert: true,
           },

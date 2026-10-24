@@ -13,22 +13,24 @@
  * ## Why delete-and-insert is safe here
  *
  * The old id and the new id are different documents, so the delete and the insert never touch the same row.
- * What matters is the seq:
+ * What matters is the version (`seq`) each is stamped with, and the position each lands at (bundle-81):
  *
  * - The **tombstone** propagates through `/api/sync/tombstones`, which applies no `originalSeq` filter. That
  *   filter belongs to the tombstone STUBS appended to the docs stream and is a dedup for that stream, not the
  *   delete channel — so a peer learns of the delete whatever its cursor.
- * - The **insert** takes its seq AFTER the tombstone's. A peer that pulls the tombstone and stops has advanced
+ * - The **insert** lands AFTER the tombstone, in position. A peer that pulls the tombstone and stops has advanced
  *   its cursor past the delete; with the insert above that cursor it picks the edge up on the next pull, and
  *   the window is a sync cycle. Below it, the peer would keep only the delete — the one ordering that loses
- *   the edge, and the reason both seqs are taken explicitly here rather than reused.
+ *   the edge. The tombstones are written (and take their positions) first, then the inserts take theirs.
+ * - The **versions** are stamped before anything is written, tombstones first (`stampTombstones`) and the inserts
+ *   knowing them (`known`): an insert onto an id another move is vacating is stamped above the tombstone written for it.
  *
- * A peer applying the incoming edge skips it when `tombstone.seq >= incoming.seq`. A fresh seq is always above
- * any tombstone, so an edge later re-keyed BACK onto a previous id is re-created rather than suppressed by the
+ * A peer applying the incoming edge skips it when `tombstone.seq >= incoming.seq`. The insert's version is always above
+ * any tombstone held for its id, so an edge later re-keyed BACK onto a previous id is re-created rather than suppressed by the
  * tombstone the first re-key left behind.
  *
- * **The file move is not the model for the seq and the tombstones.** It re-keys with no tombstone and no new seq (its rows
- * keep the seq they had, and a path's deletion is told to peers by a FILE tombstone). Copying that here would leave every peer
+ * **The file move is not the model for the versions and the tombstones.** It re-keys with no tombstone and no new version (its rows
+ * keep the seq they had and take a fresh position, and a path's deletion is told to peers by a FILE tombstone). Copying that here would leave every peer
  * holding the edge under its old id for ever, beside the new one. What the two share is the destination guard
  * (`assertNewIdsFree`, `files/rekey-rows.ts`) and nothing else.
  *
@@ -40,14 +42,15 @@
  */
 import { col, asDoc } from '../db/mongo.js';
 import type { ClientSession } from 'mongodb';
-import { withAllocatedSeqs } from '../util/seq.js';
+import { versionsFor } from '../util/version-stamp.js';
+import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { assertNewIdsFree } from '../files/rekey-rows.js';
 import { getConfig } from '../config/loader.js';
 import { edgeIdFor } from './edge-id.js';
 import { withoutVector } from './read-projection.js';
 import type { EdgeDoc } from '../config/types.js';
-import { removeWithTombstones } from './tombstones.js';
+import { removeWithTombstones, stampTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { rekeyedRow, FUNCTIONAL_GUARD } from '../sync/local-only-fields.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
@@ -233,40 +236,44 @@ export async function rekeyEdges(
   }, session ? { session } : {});
 
   const now = new Date().toISOString();
-  const n = moving.length;
-  // One block of 2n, taken in THIS ORDER — see the module docblock. Every tombstone gets a seq below every
-  // insert; reversing them is the one ordering that loses an edge on a peer.
+  // The versions of the whole re-key, taken BEFORE anything is written (a move that would stamp above the ceiling is refused here, with the
+  // transaction aborted and nothing half moved), in THIS ORDER — see the module docblock: every tombstone below every insert, because the
+  // inserts are stamped knowing the tombstone versions (`known`). A move onto an id another move is vacating is the case it holds.
+  const tombstones = moving.map(m => ({ _id: m.existing._id, type: 'edge' as const, deletedAt: now, originalSeq: m.existing.seq }));
+  const tombVersions = await stampTombstones(spaceId, tombstones, session ? { session } : {});
+  const tombAt = new Map(tombVersions.map(v => [v.id, v.version] as const));
+  const insertVersions = await versionsFor(spaceId, moving.map(m => m.newId), { parts: ['edges'], known: tombAt, ...(session ? { session } : {}) });
   // The re-key (the old rows' removal, their tombstones and the inserts) is ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
-  const written = await admitSpaceWrite(spaceId, 'edges', () => withAllocatedSeqs(spaceId, 2 * n, async (tombSeq) => {
-    const insertSeq = tombSeq + n;
+  const written = await admitSpaceWrite(spaceId, 'edges', async () => {
     const opts = session ? { session } : {};
 
-    // The old rows go, their tombstones at `tombSeq…` — the block's lower half (`removeWithTombstones`).
-    await removeWithTombstones(spaceId, 'edges',
-      moving.map(m => ({ _id: m.existing._id, type: 'edge' as const, deletedAt: now, originalSeq: m.existing.seq })),
-      { session, firstSeq: tombSeq });
+    // The old rows go, then their tombstones (`removeWithTombstones`), stamped and positioned before the inserts.
+    await removeWithTombstones(spaceId, 'edges', tombstones, { session, versions: tombVersions });
 
     // The stored document carried forward, not rebuilt: `createdAt`, `author`, `tags`, `description` and
     // `properties` describe the relationship, and the relationship did not change — only which entities it
     // connects, or what it is called. Rebuilding would reset an edge's provenance on every entity merge.
-    const stored = moving.map(({ existing, newId, from, to, label }, i) => {
-      // `rekeyedRow`: a row under a NEW id is a record written here, so it is stamped as nobody's delivery — the
-      // upstream that delivered the OLD row has no claim on what this instance made of it (`sync/local-only-fields.ts`).
-      const doc = rekeyedRow({ ...existing, ...alsoSet }, { _id: newId, from, to, label, updatedAt: now, seq: insertSeq + i }) as unknown as EdgeDoc;
-      // The write guard (`Q-439`), AFTER the drop `rekeyedRow` made: the OLD marker named the old `(from, label)` and is gone, and
-      // a move onto a label that is functional in a strict space is stamped for its NEW one. Never through `alsoSet`, which the
-      // drop would erase too. A merge passes no guard: it reports a functional breach and must never fail on the guard.
-      if (functionalGuard !== undefined) doc[FUNCTIONAL_GUARD] = functionalGuard;
-      // BEFORE the write, never on the copy that is returned. Removing them from the response alone is what made
-      // a GET immediately contradict the 200 that created the row.
-      for (const key of alsoUnset) delete (doc as unknown as Record<string, unknown>)[key];
-      return doc;
-    });
-    for (const chunk of inChunks(stored, ROWS_PER_BULK_COMMAND)) {
-      await coll.insertMany(chunk.map(d => asDoc<EdgeDoc>(d)), { ordered: true, ...opts });
-    }
-    return stored;
-  }, 'edge.rekey'));
+    return withLandingStamp(spaceId, insertVersions.map(v => localRow(v.version)), async (patches) => {
+      const stored = moving.map(({ existing, newId, from, to, label }, i) => {
+        // `rekeyedRow`: a row under a NEW id is a record written here, so it is stamped as nobody's delivery — the
+        // upstream that delivered the OLD row has no claim on what this instance made of it (`sync/local-only-fields.ts`) — and it carries
+        // none of the old row's position: the landing's own (`patches[i]`: version, position, written here) is the patch.
+        const doc = rekeyedRow({ ...existing, ...alsoSet }, { _id: newId, from, to, label, updatedAt: now, ...patches[i]! }) as unknown as EdgeDoc;
+        // The write guard (`Q-439`), AFTER the drop `rekeyedRow` made: the OLD marker named the old `(from, label)` and is gone, and
+        // a move onto a label that is functional in a strict space is stamped for its NEW one. Never through `alsoSet`, which the
+        // drop would erase too. A merge passes no guard: it reports a functional breach and must never fail on the guard.
+        if (functionalGuard !== undefined) doc[FUNCTIONAL_GUARD] = functionalGuard;
+        // BEFORE the write, never on the copy that is returned. Removing them from the response alone is what made
+        // a GET immediately contradict the 200 that created the row.
+        for (const key of alsoUnset) delete (doc as unknown as Record<string, unknown>)[key];
+        return doc;
+      });
+      for (const chunk of inChunks(stored, ROWS_PER_BULK_COMMAND)) {
+        await coll.insertMany(chunk.map(d => asDoc<EdgeDoc>(d)), { ordered: true, ...opts });
+      }
+      return stored;
+    }, 'edge.rekey');
+  });
 
   /*
    * INSERTED with its vector, RETURNED without one.

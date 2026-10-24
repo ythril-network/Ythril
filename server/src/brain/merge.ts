@@ -11,7 +11,8 @@
 
 import type { ClientSession } from 'mongodb';
 import { col, asFilter, asUpdate, asBulk } from '../db/mongo.js';
-import { withSeq, withAllocatedSeqs } from '../util/seq.js';
+import { versionsFor } from '../util/version-stamp.js';
+import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
 import { writeInOneCommands } from '../db/one-command.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { inHeldTransaction } from './held-transaction.js';
@@ -37,7 +38,7 @@ import { recordViewOf } from './record-view.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { eventEntryOf } from './read-projection.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
-import { writeTombstone, removeWithTombstones } from './tombstones.js';
+import { writeTombstone, removeWithTombstones, stampTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
 import { SubjectEdges } from './functional-subject.js';
@@ -501,8 +502,8 @@ function mergeRefusedMessage(survivorId: string, absorbedId: string, spaceId: st
 
 /**
  * The most records ONE merge relinks: the absorbed entity's edges, the links that name it, and the face labels on
- * it (`Q-107` part 3a). A merge relinks all of them in one transaction under the seq horizon hold, so its size is
- * both a transaction the store has to hold and a time every seq-paged reader of the space waits.
+ * it (`Q-107` part 3a). A merge relinks all of them in one transaction under the record-position floor, so its size is
+ * both a transaction the store has to hold and a time every position-paged reader of the space waits.
  *
  * SET FROM MEASUREMENT, never chosen: `testing/bench/merge-hub-in-one-transaction.mjs` merges hubs of growing size
  * with a full-size vector on every edge (a re-key carries it), on the test store the compose file defines. The bound
@@ -678,7 +679,7 @@ interface MergeWrite {
 /**
  * Execute the merge: relink edges, links and face labels, drop an absorbed edge whose relinked identity a survivor
  * edge holds, apply the resolved properties to the survivor, delete the absorbed entity — ONE transaction under the
- * seq horizon hold (`inHeldTransaction`), each class of record one bulk write with one seq block.
+ * position floor (`inHeldTransaction`), each class of record one bulk write stamped one version and one position per row.
  *
  * Before the hold, in this order and for these reasons: the bound (`MERGE_MAX_RELINKS`, counted, so a hub is refused before its
  * edges are read and before anything is evaluated); the schema check (pure — a refusal writes nothing, not
@@ -846,6 +847,13 @@ async function relinkAndAbsorb(
   // the whole merge, so an act standing for the space refuses it and an act registered mid-merge waits for it.
   const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
+  // The two versions this merge always takes — the survivor's update and the absorbed entity's tombstone — are taken FIRST, before anything is
+  // written: a merge touching a record whose version is at the ceiling is refused whole (`record_version_at_ceiling`), and the refusal
+  // aborts the transaction with nothing half merged. The rest are taken as the merge reaches them, inside the same transaction.
+  const [survivorVersion] = await versionsFor(spaceId, [survivor._id], { parts: ['entities'], session });
+  const absorbedTombstone = { _id: absorbed._id, type: 'entity' as const, deletedAt: now, originalSeq: absorbed.seq };
+  const absorbedVersions = await stampTombstones(spaceId, [absorbedTombstone], { session });
+
   // ── 1. Relink edges ──────────────────────────────────────────────────
   // WITH their vectors: a re-key carries the stored document across, embedding included (`rekeyEdges`). The ids
   // first, then the documents by id in chunks: inside the transaction a read must come back in one batch
@@ -905,8 +913,9 @@ async function relinkAndAbsorb(
     // A hub's count is the store's, so the write is sliced to one command each (`db/one-command.ts`), inside the one hold.
     // `ordered: true` here and at the two writes below: they run in the merge's transaction, which the server aborts at the
     // first error, so going on to the next slice would only send it into a dead transaction and bury the real failure.
-    await withAllocatedSeqs(spaceId, inPlace.length, (first) => writeInOneCommands(inPlace.map((r, i) => {
-      const updates: Record<string, unknown> = { updatedAt: now, seq: first + i };
+    const inPlaceVersions = await versionsFor(spaceId, inPlace.map(r => r.edge._id), { parts: ['edges'], session });
+    await withLandingStamp(spaceId, inPlaceVersions.map(v => localRow(v.version)), (patches) => writeInOneCommands(inPlace.map((r, i) => {
+      const updates: Record<string, unknown> = { updatedAt: now, ...patches[i]! };
       if (r.edge.from === absorbed._id) updates['from'] = survivor._id;
       if (r.edge.to === absorbed._id) updates['to'] = survivor._id;
       return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: UNSET_GUARD } } };
@@ -935,8 +944,9 @@ async function relinkAndAbsorb(
     .find(relinkFilters(spaceId, absorbed._id).faces, { session, projection: { _id: 1 } })
     .toArray() as Array<Pick<FileMetaDoc, '_id'>>;
   if (affectedFiles.length > 0) {
-    await withAllocatedSeqs(spaceId, affectedFiles.length, (first) => writeInOneCommands(affectedFiles.map((f, i) => ({
-      updateOne: { filter: { _id: f._id }, update: { $set: { faceEntityId: survivor._id, updatedAt: now, seq: first + i } } },
+    const fileVersions = await versionsFor(spaceId, affectedFiles.map(f => f._id), { parts: ['files'], session });
+    await withLandingStamp(spaceId, fileVersions.map(v => localRow(v.version)), (patches) => writeInOneCommands(affectedFiles.map((f, i) => ({
+      updateOne: { filter: { _id: f._id }, update: { $set: { faceEntityId: survivor._id, updatedAt: now, ...patches[i]! } } },
     })), (slice, { ordered }) => fileColl.bulkWrite(asBulk<FileMetaDoc>(slice), { ordered, session }), { ordered: true }), 'entity.merge.file');
   }
 
@@ -966,11 +976,13 @@ async function relinkAndAbsorb(
       linkMoves.map(({ link }) => ({ _id: link._id, type: 'link' as const, deletedAt: now, originalSeq: link.seq })),
       { session, filter: { spaceId } });
     if (fresh.length > 0) {
-      await withAllocatedSeqs(spaceId, fresh.length, (first) => writeInOneCommands(fresh.map(({ link, newId }, i) => ({
+      // Stamped after the tombstones above, so every new row's version is above every tombstone's (the re-key's order, `edge-rekey.ts`).
+      const linkVersions = await versionsFor(spaceId, fresh.map(m => m.newId), { parts: ['links'], session });
+      await withLandingStamp(spaceId, linkVersions.map(v => localRow(v.version)), (patches) => writeInOneCommands(fresh.map(({ link, newId }, i) => ({
         replaceOne: {
           filter: { _id: newId, spaceId },
-          // `rekeyedRow`: a link under a NEW id is a record this instance wrote, stamped as nobody's delivery.
-          replacement: rekeyedRow(link, { _id: newId, to: survivor._id, updatedAt: now, seq: first + i }),
+          // `rekeyedRow`: a link under a NEW id is a record this instance wrote, stamped as nobody's delivery, with none of the old row's position.
+          replacement: rekeyedRow(link, { _id: newId, to: survivor._id, updatedAt: now, ...patches[i]! }),
           upsert: true,
         },
       })), (slice, { ordered }) => linkColl.bulkWrite(asBulk<LinkDoc>(slice), { ordered, session }), { ordered: true }), 'entity.merge.link');
@@ -979,12 +991,12 @@ async function relinkAndAbsorb(
 
   // ── 4. Update the survivor, delete the absorbed entity + its tombstone ──
   const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
-  const seq = await withSeq(spaceId, async (s) => {
-    await entityColl.updateOne(asFilter<EntityDoc>({ _id: survivor._id }), asUpdate<EntityDoc>({ $set: { ...set, seq: s } }), { session });
-    return s;
+  const seq = await withLandingStamp(spaceId, [localRow(survivorVersion!.version)], async ([patch]) => {
+    await entityColl.updateOne(asFilter<EntityDoc>({ _id: survivor._id }), asUpdate<EntityDoc>({ $set: { ...set, ...patch! } }), { session });
+    return patch!.seq;
   }, 'entity.merge.survivor');
   await entityColl.deleteOne(asFilter<EntityDoc>({ _id: absorbed._id, spaceId }), { session });
-  await writeTombstone(spaceId, { _id: absorbed._id, type: 'entity', deletedAt: now, originalSeq: absorbed.seq }, session);
+  await writeTombstone(spaceId, absorbedTombstone, absorbedVersions, session);
 
   return {
     seq,

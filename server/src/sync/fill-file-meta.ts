@@ -38,6 +38,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { authorRef } from '../config/author.js';
 import { fileMetaUpdate, embedArrivedFiles } from './file-meta-write.js';
 import { seqGuard } from './upsert-plan.js';
+import type { ArrivalLanding } from './record-position-stream.js';
 import { MACHINE_MADE_SOURCES } from '../files/derived-fields.js';
 import type { FileMetaDoc } from '../config/types.js';
 
@@ -80,8 +81,12 @@ function fillUpdate(incoming: Incoming): object[] | null {
   return Object.keys(set).length > 0 ? [{ $set: set }] : null;
 }
 
-/** Recover one stray record onto its file row. See the module docblock for the rule. */
-export async function fillFileMetaFromStray(spaceId: string, incoming: Incoming): Promise<StrayFileMetaOutcome> {
+/**
+ * Recover one stray record onto its file row. See the module docblock for the rule. `landing` is the position the writer's chunk took
+ * for this record: a peer-written row it merges over is a landing (a newer version arrives and takes its place in this instance's stream); the
+ * fill of a row this instance made is not (no version arrives, and the row's place in the stream is the one it has).
+ */
+export async function fillFileMetaFromStray(spaceId: string, incoming: Incoming, landing: ArrivalLanding): Promise<StrayFileMetaOutcome> {
   return withinWriteBound(async () => {
     const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
     const receiverMade = {
@@ -100,7 +105,7 @@ export async function fillFileMetaFromStray(spaceId: string, incoming: Incoming)
     if (typeof incoming.seq === 'number') {
       const r = await files.updateOne(
         asFilter<FileMetaDoc>(seqGuard(incoming._id, incoming.seq) as never),
-        fileMetaUpdate(incoming) as never,
+        fileMetaUpdate(incoming, { landing }) as never,
         { upsert: false },
       );
       if (r.matchedCount > 0) {

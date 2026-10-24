@@ -8,7 +8,7 @@
 import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js';
 import { type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
-import { withSeq } from '../util/seq.js';
+import { writeAtReadVersion } from './write-at-read-version.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
@@ -20,7 +20,7 @@ import { mergePropertiesOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { FactDoc } from '../config/types.js';
-import { writeTombstone } from './tombstones.js';
+import { writeTombstone, stampTombstones } from './tombstones.js';
 import type { SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { listReadMaxMs } from './tag-filter.js';
@@ -130,7 +130,7 @@ export async function updateFact(
     await assertDesiredLinks(spaceId, 'fact', { entity: updates.linkEntities });
   }
 
-  // The seq is taken AT the write (`withSeq` below), not here (`Q-196`).
+  // The version is stamped and the position taken AT the write (`writeAtReadVersion` below), not here (`Q-196`).
   const now = new Date().toISOString();
   const $set: Record<string, unknown> = { updatedAt: now };
   const $unset: Record<string, unknown> = {};
@@ -213,12 +213,13 @@ export async function updateFact(
   // enforces it, because `seq` goes in this filter — see `write-precondition.ts` for why the check has to
   // live here rather than in a comparison made before the embed call above.
   // ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
-  const before = await admitSpaceWrite(spaceId, 'facts', () => withSeq(spaceId, (seq) => {
-    $set['seq'] = seq;
-    const updateOp: Record<string, unknown> = { $set };
+  const before = await admitSpaceWrite(spaceId, 'facts', () => writeAtReadVersion<FactDoc>(spaceId, 'facts', memoryId, ifMatchSeq, (at) => {
+    $set['seq'] = at.version;
+    // The stamp's own fields ride in the write, not in `$set`: `result` below is built from `$set` and must not carry a position.
+    const updateOp: Record<string, unknown> = { $set: { ...$set, ...at.patch } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
     return col<FactDoc>(spaceCollection(spaceId, 'facts')).findOneAndUpdate(
-      asFilter<FactDoc>(writeFilterFor(memoryId, ifMatchSeq)),
+      asFilter<FactDoc>(writeFilterFor(memoryId, { readSeq: at.readSeq, ifMatchSeq })),
       asUpdate<FactDoc>(updateOp),
       { returnDocument: 'before' },
     );
@@ -269,6 +270,10 @@ export async function deleteFact(
   assertSpaceTakesWrites(spaceId, 'facts');
   const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
+  // The tombstone's version is taken BEFORE the record goes: a fact whose version is at the ceiling cannot be deleted by this instance,
+  // and that refusal must leave the record where it is (`record_version_at_ceiling`).
+  const tombstone = { _id: memoryId, type: 'fact' as const, originalSeq: existing?.seq };
+  const versions = await stampTombstones(spaceId, [tombstone]);
   // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and link cascade are admitted writers of their own.
   const result = await admitSpaceWrite(spaceId, 'facts', () => col<FactDoc>(spaceCollection(spaceId, 'facts')).deleteOne({
     _id: memoryId,
@@ -281,7 +286,7 @@ export async function deleteFact(
   // that 404s.
   await retireEmbedJob(spaceId, 'fact', memoryId);
 
-  await writeTombstone(spaceId, { _id: memoryId, type: 'fact', originalSeq: existing?.seq });
+  await writeTombstone(spaceId, tombstone, versions);
   // The cascade. A deleted fact's links describe a connection whose SUBJECT no longer exists, and nothing
   // else would ever remove them — the reconcile hook only runs on a write to the record that is now gone.
   // Links pointing AT this fact are a different question and belong to the readers' slice: removing them
