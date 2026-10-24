@@ -42,8 +42,8 @@ let entities;
 let chrono;
 
 /** Insert a raw entity doc — bypassing upsert/embedding, which is the read/sort path under test. */
-async function insertEntity(_id, name, type, createdAt) {
-  await entities.insertOne({ _id, spaceId: SPACE, name, type, createdAt, seq: 1 });
+async function insertEntity(_id, name, type, createdAt, pos) {
+  await entities.insertOne({ _id, spaceId: SPACE, name, type, createdAt, seq: 1, ...(pos === undefined ? {} : { pos, posAtSeq: 1 }) });
 }
 
 /** Walk every page of a sorted listEntities and concatenate — the full ordered set. */
@@ -89,22 +89,33 @@ describe('brain list sort — against a real MongoDB', { skip }, () => {
 
   // Insertion order is deliberately NOT alphabetical and NOT createdAt order, so a page-only sort
   // (or no sort at all) is visibly distinguishable from a real full-set sort.
+  // Each row also carries the position it LANDED at (bundle-81: `pos`), in an order that is neither insertion order nor createdAt order,
+  // so a list that ignores landing order cannot pass by accident.
   async function seedFive() {
-    await insertEntity('id-banana', 'banana', 'fruit', '2026-03-02T00:00:00.000Z');
-    await insertEntity('id-apple', 'apple', 'fruit', '2026-03-05T00:00:00.000Z');
-    await insertEntity('id-cherry', 'cherry', 'fruit', '2026-03-01T00:00:00.000Z');
-    await insertEntity('id-date', 'date', 'fruit', '2026-03-04T00:00:00.000Z');
-    await insertEntity('id-elder', 'elderberry', 'fruit', '2026-03-03T00:00:00.000Z');
+    await insertEntity('id-banana', 'banana', 'fruit', '2026-03-02T00:00:00.000Z', 3_000);
+    await insertEntity('id-apple', 'apple', 'fruit', '2026-03-05T00:00:00.000Z', 1_000);
+    await insertEntity('id-cherry', 'cherry', 'fruit', '2026-03-01T00:00:00.000Z', 5_000);
+    await insertEntity('id-date', 'date', 'fruit', '2026-03-04T00:00:00.000Z', 2_000);
+    await insertEntity('id-elder', 'elderberry', 'fruit', '2026-03-03T00:00:00.000Z', 4_000);
   }
 
-  it('CHARACTERIZATION: no sort preserves natural (insertion) order — no existing caller shifts', async () => {
+  it('no sort answers LANDING order — the position each row landed at here, newest first, `_id` breaking a tie (bundle-81 decision 20)', async () => {
     await seedFive();
     const got = await listEntities(SPACE, {}, 50, 0);
     assert.deepEqual(
       got.map(e => String(e._id)),
-      ['id-banana', 'id-apple', 'id-cherry', 'id-date', 'id-elder'],
-      'without a sort arg the list must return docs in insertion order, exactly as before this change',
+      ['id-cherry', 'id-elder', 'id-banana', 'id-date', 'id-apple'],
+      'without a sort arg the list must return rows by `pos` descending: what landed here most recently first, neither insertion order nor createdAt order',
     );
+    assert.ok(got.every(e => !('pos' in e) || typeof e.pos === 'number'), 'the fixture lost its positions');
+  });
+
+  it('landing order breaks a tie in position by _id, descending, and puts a row with no position last', async () => {
+    await insertEntity('id-a', 'a', 'x', '2026-04-01T00:00:00.000Z', 7_000);
+    await insertEntity('id-b', 'b', 'x', '2026-04-02T00:00:00.000Z', 7_000);
+    await insertEntity('id-none', 'none', 'x', '2026-04-03T00:00:00.000Z');
+    const got = await listEntities(SPACE, {}, 50, 0);
+    assert.deepEqual(got.map(e => String(e._id)), ['id-b', 'id-a', 'id-none']);
   });
 
   it('sorts by name asc across a PAGE BOUNDARY — the full set, not just the visible page', async () => {
@@ -139,18 +150,18 @@ describe('brain list sort — against a real MongoDB', { skip }, () => {
     assert.deepEqual(ids, ['id-01', 'id-02', 'id-03', 'id-04'], 'tie order must follow _id asc');
   });
 
-  it('listChrono: default order is createdAt desc (unchanged); an explicit title sort reorders', async () => {
-    const mk = (id, title, createdAt) => chrono.insertOne({
+  it('listChrono: default order is LANDING order, not createdAt desc; an explicit title sort reorders', async () => {
+    const mk = (id, title, createdAt, pos) => chrono.insertOne({
       _id: id, spaceId: SPACE, title, type: 'event', status: 'completed',
-      startsAt: createdAt, tags: [], createdAt,
+      startsAt: createdAt, tags: [], createdAt, seq: 1, pos, posAtSeq: 1,
     });
-    await mk('c-mid', 'Middle', '2026-05-02T00:00:00.000Z');
-    await mk('c-new', 'Alpha', '2026-05-03T00:00:00.000Z');
-    await mk('c-old', 'Zeta', '2026-05-01T00:00:00.000Z');
+    await mk('c-mid', 'Middle', '2026-05-02T00:00:00.000Z', 200);
+    await mk('c-new', 'Alpha', '2026-05-03T00:00:00.000Z', 100);
+    await mk('c-old', 'Zeta', '2026-05-01T00:00:00.000Z', 300);
 
     const def = await listChrono(SPACE, {}, 50, 0);
-    assert.deepEqual(def.map(e => String(e._id)), ['c-new', 'c-mid', 'c-old'],
-      'default chrono order must remain createdAt desc');
+    assert.deepEqual(def.map(e => String(e._id)), ['c-old', 'c-mid', 'c-new'],
+      'default chrono order must be `pos` descending: the entry that landed last first, whatever its createdAt');
 
     const byTitle = await listChrono(SPACE, {}, 50, 0, { field: 'title', dir: 1 });
     assert.deepEqual(byTitle.map(e => String(e._id)), ['c-new', 'c-mid', 'c-old'],
