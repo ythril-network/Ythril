@@ -112,7 +112,7 @@ describe('the first carry offers exactly the 5.6 set', { skip }, () => {
     await owed.tick();
     // The positive control: a record written after the carry, at a clock position, authored here.
     await door.coll(S, 'facts').insertOne({ ...mine('post', 61), pos: CLOCK_BAND + 1, posAtSeq: 61, writtenHere: true });
-    await door.bumpSeq(S, 61);
+    await door.raiseVersionTo(S, 61);
     await door.sync();
     const sent = door.state.pushedRecords.filter(d => d.key === 'facts').map(d => d._id).sort();
     assert.deepEqual(sent, ['a40', 'a50', 'post'], 'the push offered other than what 5.6 offers above the mark (ties at it included) plus the record written after the carry');

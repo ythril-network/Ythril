@@ -1,21 +1,21 @@
 /**
- * A seq hold that stalls is VISIBLE: its age is a gauge while it is held, and the hold logs a line when it ends
- * (`Q-200`, bundle-30 plan §A6).
+ * A record-position hold that stalls is VISIBLE: its age is a gauge while it is held, and the hold logs a line when it ends
+ * (`Q-200`, bundle-30 plan §A6; the hold moved from the seq to the landing position in bundle-81, and the file keeps its name).
  *
  * ## The defect
  *
  * A hold whose write does not settle stops replication of its space (`Q-213`, and
  * `a-write-inside-a-seq-hold-always-ends-db` holds the bound that ends it). Until it ends, nothing says so: the
- * in-flight registry in `util/seq.ts` keeps counts only — no holder, no start time — so no metric can report its
+ * in-flight registry kept counts only — no holder, no start time — so no metric could report its
  * age and no line names it. The operator sees peers reporting empty pages and every cycle succeeding.
  *
  * ## The rule this file holds
  *
- *  1. **While a hold is open, `ythril_seq_horizon_oldest_hold_seconds{space}` reports its age**; once the space
+ *  1. **While a hold is open, `ythril_record_position_oldest_hold_seconds{space}` reports its age**; once the space
  *     holds nothing, the series reads 0. The gauge is POISONED (-1) before the stall, so a gauge nobody wrote
  *     cannot pass by reading a plausible zero.
  *  2. **A hold that ended after `HOLD_WARN_MS` logs, at release, one line**:
- *     `seq horizon held <age>s space=<id> seq=<n> holder=<h> ended=<ok|timeout|error>` — read from the server's
+ *     `record position held <age>s space=<id> pos=<n> holder=<h> ended=<ok|timeout|error>` — read from the server's
  *     own log ring (`subscribeLogLines`), so a line written anywhere else does not count.
  *
  * The watchdog's warn-while-held line (plan §A6, "warned once by a watchdog started with the scheduler") is NOT
@@ -43,7 +43,7 @@ const skip = await mongoSkipReason();
 
 const P = 'holdreport';
 const F = 'bbbbbbbb-0000-4000-8000-0000000000f2';
-const GAUGE = 'ythril_seq_horizon_oldest_hold_seconds';
+const GAUGE = 'ythril_record_position_oldest_hold_seconds';
 const BOUND = { writeTimeoutMs: 2000, holdDeadlineMs: 2000 };
 /** Half the deadline, as the plan defines `HOLD_WARN_MS`: the hold must outlive it for the release line to be owed. */
 const WARN_MS = BOUND.holdDeadlineMs / 2;
@@ -61,12 +61,14 @@ async function gaugeFor(register, space) {
   return values.find(v => v.labels?.space === space)?.value;
 }
 
-describe('a stalled seq hold is reported', { skip }, () => {
+describe('a stalled record-position hold is reported', { skip }, () => {
   let restoreBound = () => {};
 
   before(async () => {
     door = await openPushDoor({ suite: 'holdreport', spaces: [{ id: P, label: P, folders: [], meta: { suppressEmbeddings: true } }] });
-    const seq = await import('../../server/dist/util/seq.js');
+    const clock = await import('../../server/dist/util/position-clock.js');
+    const { recordPositions } = await import('../../server/dist/sync/record-position-stream.js');
+    const lowest = () => clock.lowestOpenPosition(recordPositions, P);
     const { register } = await import('../../server/dist/metrics/registry.js');
     const { subscribeLogLines } = await import('../../server/dist/util/log.js');
     const fact = await import('../../server/dist/brain/fact.js');
@@ -82,8 +84,8 @@ describe('a stalled seq hold is reported', { skip }, () => {
     try {
       let done = false;
       const op = Promise.resolve().then(() => fact.updateFact(P, F, { fact: 'stalled edit' })).finally(() => { done = true; });
-      await eventually(() => done || seq.lowestUncommittedSeq(P) !== undefined, 5000);
-      seen.heldAt = seq.lowestUncommittedSeq(P);
+      await eventually(() => done || lowest() !== undefined, 5000);
+      seen.heldAt = lowest();
       // Past the warn age, still inside the bound: the hold is open and old enough to owe a report.
       await elapse(WARN_MS + 300, 'ttl elapses: the hold must outlive its warn age while still inside the bound');
       seen.during = await gaugeFor(register, P);
@@ -97,7 +99,7 @@ describe('a stalled seq hold is reported', { skip }, () => {
   });
   after(async () => { restoreBound(); await door?.close(); });
 
-  it('fixture: the update stalled inside a seq hold', () => {
+  it('fixture: the update stalled inside a record-position hold', () => {
     assert.equal(typeof seen.heldAt, 'number', 'the fact update never entered its hold — re-anchor the stall');
   });
 
@@ -107,19 +109,19 @@ describe('a stalled seq hold is reported', { skip }, () => {
 
   it(`while the hold is open, ${GAUGE}{space} reports its age`, () => {
     assert.equal(seen.gaugeMissing, false, `no metric named ${GAUGE} is registered — an operator cannot see a stalled hold`);
-    assert.notEqual(seen.during, POISON, `the gauge still holds the poison ${POISON}: nothing wrote it while the hold on seq ${seen.heldAt} was open`);
+    assert.notEqual(seen.during, POISON, `the gauge still holds the poison ${POISON}: nothing wrote it while the hold on position ${seen.heldAt} was open`);
     assert.ok(typeof seen.during === 'number' && seen.during >= WARN_MS / 1000,
       `the gauge read ${seen.during} for a hold open ${WARN_MS + 300} ms`);
   });
 
-  it('a hold that outlived the warn age logs one line when it ends, naming space, seq, holder and how it ended', () => {
-    const re = new RegExp(`seq horizon held (\\d+(?:\\.\\d+)?)s space=${P} seq=(\\d+) holder=(\\S+) ended=(ok|timeout|error)`);
+  it('a hold that outlived the warn age logs one line when it ends, naming space, position, holder and how it ended', () => {
+    const re = new RegExp(`record position held (\\d+(?:\\.\\d+)?)s space=${P} pos=(\\d+) holder=(\\S+) ended=(ok|timeout|error)`);
     const hits = seen.lines.map(l => re.exec(l)).filter(Boolean);
     assert.equal(hits.length, 1,
-      `expected one release line for the stalled hold on seq ${seen.heldAt} (the write ${seen.res?.settled ? `ended after ${seen.res.elapsedMs} ms` : 'never ended'}); `
+      `expected one release line for the stalled hold on position ${seen.heldAt} (the write ${seen.res?.settled ? `ended after ${seen.res.elapsedMs} ms` : 'never ended'}); `
       + `the log ring held ${seen.lines.length} line(s): ${JSON.stringify(seen.lines.slice(-5))}`);
     const [, age, s, holder, ended] = hits[0];
-    assert.equal(Number(s), seen.heldAt, 'the line names another seq than the one held');
+    assert.equal(Number(s), seen.heldAt, 'the line names another position than the one held');
     assert.ok(Number(age) >= WARN_MS / 1000, `the line reports an age of ${age}s for a hold open past ${WARN_MS} ms`);
     assert.ok(holder && holder !== 'undefined', 'the line does not name its holder');
     assert.equal(ended, 'timeout', 'the bound ended this hold, and the line must say so');

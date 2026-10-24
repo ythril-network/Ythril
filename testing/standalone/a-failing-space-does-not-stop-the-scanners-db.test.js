@@ -92,8 +92,8 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
     const available = await door.mongo.checkVectorSearchAvailability();
     assert.equal(available.available, true, 'the harness Mongo has no $vectorSearch: the scanners return before reading anything, so every case below would pass for no reason');
     ({ StoreTimeout } = await import('../../server/dist/db/write-timeout.js'));
-    const { bumpSeq } = await import('../../server/dist/util/seq.js');
-    for (const space of ALL) await bumpSeq(space, 20);
+    const { raiseVersionTo } = await import('../../server/dist/util/version-stamp.js');
+    for (const space of ALL) await raiseVersionTo(space, 20);
     restoreBound = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
     proto = Object.getPrototypeOf(door.mongo.col('probe'));
     realFindOne = proto.findOne;

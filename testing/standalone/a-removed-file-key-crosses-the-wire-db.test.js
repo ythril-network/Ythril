@@ -127,7 +127,7 @@ const wireOfFiles = () => door.state.pushedRecords
 async function publish(row, { version } = {}) {
   door.configure({ direction: 'push', ...(version === undefined ? {} : { memberExtra: { version } }) });
   await door.mongo.col(`${S}_files`).insertOne({ ...row, author: { ...ME } });
-  await door.bumpSeq(S, row.seq);
+  await door.raiseVersionTo(S, row.seq);
   await door.sync();
   return wireOfFiles().filter(d => d._id === row._id);
 }

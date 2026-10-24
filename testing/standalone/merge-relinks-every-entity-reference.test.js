@@ -268,10 +268,11 @@ describe('executeMerge relinks every collection that can reference an entity', (
   it('bumps seq on every relinked record, so the change replicates', () => {
     // A relink that does not advance `seq` is invisible to sync: a peer would keep the old link forever, and
     // the dangling reference would come back on the next pull.
-    // An allocation is `withSeq(spaceId` / `withAllocatedSeqs(spaceId` since `Q-196` — the write rides inside it.
-    const relinkBlocks = (merge.match(/\bwith(?:Seq|AllocatedSeqs)\(\s*spaceId\b/g) ?? []).length;
+    // A stamped write is `withLandingStamp(spaceId` since bundle-81 (it was `withSeq` / `withAllocatedSeqs`, Q-196) — the write rides inside it, and
+    // each takes a version per row from `versionsFor` just before it.
+    const relinkBlocks = (merge.match(/\bwithLandingStamp\(\s*spaceId\b/g) ?? []).length;
     assert.ok(relinkBlocks >= 4,
-      `only ${relinkBlocks} seq allocations — each relinked collection plus the survivor needs its own`);
+      `only ${relinkBlocks} stamped writes — each relinked collection plus the survivor needs its own`);
   });
 
   it('dedupes after relinking, so a record linked to BOTH does not hold the survivor twice', () => {
@@ -302,7 +303,7 @@ describe('executeMerge relinks every collection that can reference an entity', (
     assert.match(writer, /const fresh = linkMoves\.filter\(m => !held\.has\(m\.newId\)\)/,
       'a link whose re-keyed id the survivor already holds is not filtered out, so the absorbed row overwrites the '
       + 'survivor\'s and hands its authorship to whoever wrote the absorbed one');
-    assert.match(writer, /withAllocatedSeqs\(spaceId, fresh\.length,[\s\S]*?fresh\.map\(/,
-      'the links are written from the full move list rather than from `fresh`, so the dedupe filters nothing');
+    assert.match(writer, /versionsFor\(spaceId, fresh\.map\([\s\S]*?withLandingStamp\(spaceId, linkVersions\.map\([\s\S]*?fresh\.map\(/,
+      'the links are stamped and written from the full move list rather than from `fresh`, so the dedupe filters nothing');
   });
 });

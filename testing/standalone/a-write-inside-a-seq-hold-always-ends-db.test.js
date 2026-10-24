@@ -1,12 +1,13 @@
 /**
- * A write inside a seq hold always ENDS — within the write bound, on every holder — and when it ends the hold is
- * released, so a seq-paged pull moves past it (`Q-213`, bundle-30 plan §A).
+ * A write inside a record-position hold always ENDS — within the write bound, on every holder — and when it ends the hold is
+ * released, so a position-paged pull moves past it (`Q-213`, bundle-30 plan §A; re-aimed at the landing position by bundle-81).
+ * (The file keeps its name from when the hold was on the seq.)
  *
  * ## The defect
  *
- * `withAllocatedSeqs` and `withSeqHorizonHeld` (`util/seq.ts`) register a floor that every seq-paged reader of the
- * space stops below — the pull routes, the push loop, the tombstone pages, the scanners — and release it in a
- * `finally` when the write settles. Nothing bounds the write. A write that never settles (a document lock held by
+ * `withLandingStamp` and the transaction's floor (`withPositionHeld` and `withPositionFloorHeld`, `util/position-clock.ts`) register a floor that
+ * every position-paged reader of the space stops below — the pull routes, the push loop, the tombstone pages, the scanners — and release
+ * it in a `finally` when the write settles. Nothing bounds the write. A write that never settles (a document lock held by
  * another session, a stalled socket, `withTransaction` retrying a conflict for its default 120 s) holds the floor
  * for as long as it waits, and every peer pulling that space is served nothing above it: replication of the space
  * stops, while every cycle reports success over an empty page.
@@ -20,21 +21,20 @@
  *
  * ## The holders — derived, never listed
  *
- * Every top-level function in `server/src` (outside `util/seq.ts`) that calls `withPositionHeld` (the file tombstones'
- * position instance of the same primitive, `util/horizon-holds.ts`; bundle-71) or `withAllocatedSeqs`,
- * `withSeqHorizonHeld` or `withSeq`. Each derived holder needs a case below; a holder added next year without one
+ * Every top-level function in `server/src` (outside the two modules that DEFINE the record stream's entry points,
+ * `util/position-clock.ts` and `sync/record-position-stream.ts`) that calls `withLandingStamp` (the record stream's), `withPositionFloorHeld`
+ * (a transaction's) or `withPositionHeld` (the file tombstones' position instance of the same primitive, `util/horizon-holds.ts`; bundle-71).
+ * Each derived holder needs a case below; a holder added next year without one
  * fails the coverage test instead of going unchecked. A call outside any top-level function is reported as such,
  * so it cannot be missed either.
  *
  * ## The stall is REAL (`_write-faults.mjs`)
  *
  * Another session's open transaction holds a document lock, measured by the bundle-30 design probe (P1) to keep a
- * plain write waiting for as long as the transaction lives. For most holders the locked document is the space's
- * counter row: the `$inc` of every allocation waits on it, and it runs with the floor ALREADY registered
- * (`hold(s, floor)` precedes it in `withAllocatedSeqs`) — so a bound that covers only the callback and not the
- * allocation leaves this test red, correctly: that allocation holds the horizon exactly as long. The fork push
- * locks the fork's own id instead, because the door bumps the counter BEFORE its hold and that bump is not inside
- * any hold.
+ * plain write waiting for as long as the transaction lives. The locked document is one the write INSIDE the hold waits for
+ * (`_seq-hold-cases.mjs` says why it is not the counter row any more): a write takes its version first, outside any hold, so a lock on
+ * the counter stalls an allocation that holds nothing — which is its own case at the end of this file: it ends within the bound and
+ * the horizon is never held.
  *
  * ## The bound is test-settable
  *
@@ -56,7 +56,7 @@ import { stripComments } from './_strip-comments.mjs';
 import { topLevelFunctionSpans } from './_call-graph.mjs';
 import { lineBefore } from './_structural-window.mjs';
 import { holdDocumentLock, holdCounterLock, settleWithin, eventually, setWriteBoundForTest } from './_write-faults.mjs';
-import { holderCases, loadHolderModules, seedHolderSpace, heldSeqAllocated, F } from './_seq-hold-cases.mjs';
+import { holderCases, loadHolderModules, seedHolderSpace, heldPositionTaken, F } from './_seq-hold-cases.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -70,19 +70,20 @@ const CAP_MS = BOUND.holdDeadlineMs + SLACK_MS;
 /** How long a case may take to REACH its stall (the hold registered) before the fixture is called broken. */
 const ENTER_MS = 5000;
 
-// ── The derivation: every holder of a seq hold ───────────────────────────────────────────────────────────────
-// The entry points of the shared hold primitive (`util/horizon-holds.ts`'s `heldWhile`): the seq instance's three and the
-// file-tombstone position instance's one (bundle-71, Q-346). A function that calls one of them holds a horizon, and is owed a case.
-// `withSeqWhen` is listed BEFORE `withSeq`, and the order is the point: alternation is tried left to right, so with
-// `withSeq` first the regex matches those seven characters and then demands a `(` that `When(` is not — and a holder
-// that takes its number only once its condition is answered (bundle-89) would be invisible to the whole rule.
-const PRIMITIVE = /\b(withAllocatedSeqs|withSeqHorizonHeld|withSeqWhen|withSeq|withPositionHeld)\s*\(/g;
+// ── The derivation: every holder of a record-position hold ───────────────────────────────────────────────────
+// The entry points of the shared hold primitive (`util/horizon-holds.ts`'s `heldWhile`): the record stream's two (`withLandingStamp`, a write's
+// own block, and `withPositionFloorHeld`, a transaction's) and the file-tombstone position instance's one (bundle-71, Q-346). A function that
+// calls one of them holds a horizon, and is owed a case. `withPositionFloorHeld` is found inside `inHeldTransaction` (the one function that
+// calls it), so the transaction's callers are held through that one holder and are not derived again.
+const PRIMITIVE = /\b(withLandingStamp|withPositionFloorHeld|withPositionHeld)\s*\(/g;
+/** The modules that DEFINE the entry points: what they call is the primitive itself, which holds nothing of its own. */
+const DEFINING = new Set(['server/src/util/position-clock.ts', 'server/src/sync/record-position-stream.ts']);
 /** A match that is the DEFINITION of the entry point (`function withPositionHeld(`), which holds nothing itself. */
 const isDefinition = (src, index) => /\bfunction$/.test(lineBefore(src, index, 'a holder match', { orEmpty: true }));
 function holders() {
   const out = new Map();
   for (const file of trackedSources('server/src', { floor: 100 })) {
-    if (file.replace(/\\/g, '/') === 'server/src/util/seq.ts') continue;
+    if (DEFINING.has(file.replace(/\\/g, '/'))) continue;
     const src = stripComments(readFileSync(file, 'utf8'));
     const spans = [...topLevelFunctionSpans(src)];
     for (const m of src.matchAll(new RegExp(PRIMITIVE.source, 'g'))) {
@@ -96,7 +97,9 @@ function holders() {
 }
 const HOLDERS = holders();
 
-let door, seq, mods;
+let door, mods;
+/** The lowest record position a write of `space` holds right now (synchronous: the modules are loaded in `before`). */
+const lowestHeldRecordPositionNow = (space) => mods.clock.lowestOpenPosition(mods.recordStream.recordPositions, space);
 /** Filled by `before`; the cases (`_seq-hold-cases.mjs`) read it when they run. */
 const ctx = {};
 const CASES = holderCases(ctx, S);
@@ -113,11 +116,10 @@ async function stalled(space, c) {
   try {
     let done = false;
     const op = Promise.resolve().then(run).finally(() => { done = true; });
-    // Which instance of the hold the case is about: the file tombstones' position (`positionHold`), or the seq horizon.
-    const lowest = c.positionHold ? () => mods.fileTombstones.lowestUncommittedPosition(space) : () => seq.lowestUncommittedSeq(space);
+    // Which instance of the hold the case is about: the file tombstones' position (`positionHold`), or the record stream's.
+    const lowest = c.positionHold ? () => mods.fileTombstones.lowestUncommittedPosition(space) : () => lowestHeldRecordPositionNow(space);
     const entered = await eventually(() => done || lowest() !== undefined, ENTER_MS);
-    // The floor, not an allocated seq, and that is enough: `heldAt` only goes into a message here, and most of these locks
-    // are on the counter row itself, so the allocation is exactly what never answers (`heldSeqAllocated` is for a case that ACTS on the seq).
+    // The floor, not a version, and that is enough: `heldAt` only goes into a message here (`heldPositionTaken` is for a case that ACTS on the position).
     const heldAt = lowest();
     const res = await settleWithin(op, CAP_MS);
     report = { entered: entered && heldAt !== undefined, heldAt, res, after: lowest() };
@@ -128,7 +130,7 @@ async function stalled(space, c) {
   return report;
 }
 
-describe('a write inside a seq hold always ends', { skip }, () => {
+describe('a write inside a record-position hold always ends', { skip }, () => {
   let seamError = null;
   let restoreBound = () => {};
 
@@ -136,7 +138,6 @@ describe('a write inside a seq hold always ends', { skip }, () => {
     // `completeLinkage`: the spaces' links are converted, as every space's are after its first boot — the cascade case
     // reads an entity's references through the link records, which refuse a space that was never converted.
     door = await openPushDoor({ suite: 'holdends', spaces: [S, R].map(id => ({ id, label: id, folders: [], completeLinkage: true, meta: { suppressEmbeddings: true } })) });
-    seq = await import('../../server/dist/util/seq.js');
     mods = await loadHolderModules();
     Object.assign(ctx, { door, mods });
     try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; }
@@ -145,13 +146,14 @@ describe('a write inside a seq hold always ends', { skip }, () => {
   beforeEach(async () => { await seedHolderSpace(door, S); });
 
   it('the derivation finds the holders, so an empty set cannot pass', () => {
-    assert.ok(HOLDERS.size >= 10, `only ${HOLDERS.size} holder(s) of a seq hold derived — the sweep is broken: ${[...HOLDERS.keys()]}`);
-    assert.ok([...HOLDERS.values()].flat().includes('withSeqHorizonHeld'), 'no transaction holder derived — re-anchor');
+    assert.ok(HOLDERS.size >= 10, `only ${HOLDERS.size} holder(s) of a record-position hold derived — the sweep is broken: ${[...HOLDERS.keys()]}`);
+    assert.ok([...HOLDERS.values()].flat().includes('withPositionFloorHeld'), 'no transaction holder derived — re-anchor');
+    assert.ok([...HOLDERS.values()].flat().includes('withLandingStamp'), 'no landing holder derived — re-anchor');
   });
 
   it('every derived holder has a stalled-write case', () => {
     const missing = [...HOLDERS.keys()].filter(k => !CASES[k]);
-    assert.deepEqual(missing, [], 'a seq holder with no case here is one nobody checked for a write that never ends');
+    assert.deepEqual(missing, [], 'a position holder with no case here is one nobody checked for a write that never ends');
     const stale = Object.keys(CASES).filter(k => !HOLDERS.has(k));
     assert.deepEqual(stale, [], 'a case for a holder that no longer holds — re-anchor it or remove it');
   });
@@ -164,12 +166,12 @@ describe('a write inside a seq hold always ends', { skip }, () => {
     for (const c of cases) {
       it(`${holder}: ${c.label} — ends within the bound and releases the hold`, { timeout: ENTER_MS + CAP_MS + 30_000 }, async () => {
         const r = await stalled(S, c);
-        assert.ok(r.entered, `fixture: ${c.label} never entered a seq hold (it ${r.res.settled ? `settled first: ${r.res.ok ? 'ok' : r.res.error?.message}` : 'hung outside one'}) — re-anchor the case`);
+        assert.ok(r.entered, `fixture: ${c.label} never entered a position hold (it ${r.res.settled ? `settled first: ${r.res.ok ? 'ok' : r.res.error?.message}` : 'hung outside one'}) — re-anchor the case`);
         assert.ok(r.res.settled,
-          `${c.label}: the write inside the hold on seq ${r.heldAt} was still waiting ${r.res.elapsedMs} ms later — no bound `
-          + `(${BOUND.holdDeadlineMs} ms) ended it, so every seq-paged pull of space '${S}' was held below seq ${r.heldAt} for as long as the lock lived`);
+          `${c.label}: the write inside the hold on position ${r.heldAt} was still waiting ${r.res.elapsedMs} ms later — no bound `
+          + `(${BOUND.holdDeadlineMs} ms) ended it, so every position-paged pull of space '${S}' was held below position ${r.heldAt} for as long as the lock lived`);
         assert.equal(r.after, undefined,
-          `${c.label}: the write ended after ${r.res.elapsedMs} ms but the hold on seq ${r.after} was not released — the horizon is stuck`);
+          `${c.label}: the write ended after ${r.res.elapsedMs} ms but the hold on position ${r.after} was not released — the horizon is stuck`);
       });
     }
   }
@@ -180,24 +182,49 @@ describe('a write inside a seq hold always ends', { skip }, () => {
     let report;
     try {
       const op = Promise.resolve().then(() => mods.fact.updateFact(R, F, { fact: 'stalled edit' }));
-      // The hold registers before the update's counter `$inc` is answered; the later save's own `$inc` must not be able to
-      // overtake it (the save would take the update's seq, and "committed above the held seq" would not be true).
-      const heldAt = await heldSeqAllocated(door, R, { ms: ENTER_MS });
+      // The hold is registered after the update's version is allocated; the later save takes its own position above the held one (the
+      // stream hands positions out in order), which is what "committed above the held position" needs.
+      const heldAt = await heldPositionTaken(door, R, { ms: ENTER_MS });
       await mods.fact.saveFact(R, 'committed above the stalled edit', [], [], undefined, undefined, 'note');
-      const later = await door.coll(R, 'facts').find({ seq: { $gt: heldAt } }).sort({ seq: -1 }).limit(1).next();
-      assert.ok(later, 'fixture: the later fact did not commit above the held seq');
-      const during = (await door.pull('/facts', { spaceId: R, sinceSeq: '0' })).items.map(i => i.seq);
-      assert.ok(during.every(s => s < heldAt), `the hold did not hold the pull: ${JSON.stringify(during)} with ${heldAt} held`);
+      const later = await door.coll(R, 'facts').find({ pos: { $gt: heldAt } }).sort({ pos: -1 }).limit(1).next();
+      assert.ok(later, 'fixture: the later fact did not commit above the held position');
+      const during = (await door.pull('/facts', { spaceId: R, afterPos: '0' })).items.map(i => i._id);
+      assert.ok(!during.includes(later._id), `the hold did not hold the pull: it served ${JSON.stringify(during)} with ${heldAt} held`);
       const res = await settleWithin(op, CAP_MS);
-      const after = (await door.pull('/facts', { spaceId: R, sinceSeq: '0' })).items.map(i => i.seq);
+      const after = (await door.pull('/facts', { spaceId: R, afterPos: '0' })).items.map(i => i._id);
       report = { res, heldAt, later, after };
     } finally {
       await lock.release();
     }
     if (!report.res.settled) await report.res.rest;
-    assert.ok(report.after.includes(report.later.seq),
-      `${report.res.elapsedMs} ms after a write stalled inside the hold on seq ${report.heldAt}, a pull of '${R}' still does not `
-      + `serve seq ${report.later.seq}, committed above it (served ${JSON.stringify(report.after)}). The bound `
+    assert.ok(report.after.includes(report.later._id),
+      `${report.res.elapsedMs} ms after a write stalled inside the hold on position ${report.heldAt}, a pull of '${R}' still does not `
+      + `serve ${report.later._id}, committed above it (served ${JSON.stringify(report.after)}). The bound `
       + `(${BOUND.holdDeadlineMs} ms) should have ended the stalled write and released the horizon.`);
+  });
+
+  // The other half of the bound: a write takes its VERSION before it holds a position, so a stalled allocation (the counter row locked)
+  // is outside every hold. It must still end within the bound — `versionsFor` runs inside `withinWriteBound` — and it must not have held
+  // the horizon on the way, or a stalled counter would stop replication as a stalled record write does.
+  it('a stalled version allocation (the counter row locked) ends within the bound and never holds the horizon', { timeout: ENTER_MS + CAP_MS + 30_000 }, async () => {
+    const lock = await holdCounterLock(door.mongo, S);
+    let report;
+    try {
+      let held = false;
+      const watch = setInterval(() => { if (lowestHeldRecordPositionNow(S) !== undefined) held = true; }, 5);
+      try {
+        const op = Promise.resolve().then(() => mods.fact.saveFact(S, 'a new fact', [], [], undefined, undefined, 'note'));
+        report = { res: await settleWithin(op, CAP_MS) };
+      } finally {
+        clearInterval(watch);
+      }
+      report.held = held;
+    } finally {
+      await lock.release();
+    }
+    if (!report.res.settled) await report.res.rest;
+    assert.ok(report.res.settled, `the allocation was still waiting ${report.res.elapsedMs} ms behind the counter lock — no bound ended it`);
+    assert.equal(report.res.ok, false, 'the save succeeded although its version allocation was stalled behind a lock: the stall was not on the allocation');
+    assert.equal(report.held, false, 'the stalled allocation held a record position: a write must take its version before it holds anything');
   });
 });

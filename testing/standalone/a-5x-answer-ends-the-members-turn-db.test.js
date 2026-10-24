@@ -70,14 +70,14 @@ const CASES = [
     name: 'a 5.x batch-upsert answer', direction: 'push', kind: 'pushed',
     seed: async () => {
       await door.coll(S, 'facts').insertOne(positioned(build.fact(S, 'fivex-batch', 30, { author: ME }), { writtenHere: true }));
-      await door.bumpSeq(S, 30);
+      await door.raiseVersionTo(S, 30);
     },
   },
   {
     name: 'a 5.x tombstone-POST answer', direction: 'push', kind: 'pushed',
     seed: async () => {
       await door.coll(S, 'tombstones').insertOne(positionedTombstone(S, 'fivex-tomb', 'fact', 30, { instanceId: door.instanceId, issuedHere: true }));
-      await door.bumpSeq(S, 30);
+      await door.raiseVersionTo(S, 30);
     },
   },
 ];

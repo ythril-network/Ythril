@@ -52,7 +52,7 @@ const AUTHOR = { instanceId: 'pinmerge-receiver', instanceLabel: 'Receiver' };
 const NUMBER_GOT_STRING = "expected type 'number', got 'string'";
 const STRING_GOT_NUMBER = "expected type 'string', got 'number'";
 
-let pins, ids, warnIds, handlers, bumpSeq;
+let pins, ids, warnIds, handlers, raiseVersionTo;
 
 /** The batch through each door, answering `{ status, errors, inserted, updated, text }` in one shape. */
 const BULK = {
@@ -70,7 +70,7 @@ const BULK = {
 describe('bulk rows and a merge refusal, as the doors answer them before bundle-23', { skip }, () => {
   before(async () => {
     pins = await openPinDoors({ suite: 'pinbulkmerge' });
-    ({ bumpSeq } = await import('../../server/dist/util/seq.js'));
+    ({ raiseVersionTo } = await import('../../server/dist/util/version-stamp.js'));
     const { entitiesRouter } = await import('../../server/dist/api/brain/entities.js');
     const { duplicatesRouter } = await import('../../server/dist/api/duplicates.js');
     handlers = {
@@ -114,7 +114,7 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
         it('an item that breaks one field while the record already broke another: the reason is the breaking fault only, the pre-existing one is not joined', async () => {
           const id = randomUUID();
           await pins.door.coll(STRICT, 'entities').insertOne({ _id: id, spaceId: STRICT, name: 'Bob', type: 'person', tags: [], properties: { age: 'old' }, seq: 50, author: AUTHOR, createdAt: T0, updatedAt: T0 });
-          await bumpSeq(STRICT, 50);
+          await raiseVersionTo(STRICT, 50);
           const out = await send(STRICT, { entities: [{ id, name: 'Bob', type: 'person', properties: { rank: 5 } }] });
           assert.equal(out.errors.length, 1, JSON.stringify(out.errors));
           const reasons = out.errors[0].reason.replace(/^schema_violation: /, '').split('; ').sort();
@@ -161,7 +161,7 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
       const [survivorId, absorbedId] = [randomUUID(), randomUUID()];
       const e = (_id, name, properties, seq) => ({ _id, spaceId: space, name, type, tags: [], properties, seq, author: AUTHOR, createdAt: T0, updatedAt: T0 });
       await pins.door.coll(space, 'entities').insertMany([e(survivorId, 'Survivor', survivorProps, 1), e(absorbedId, 'Absorbed', absorbedProps, 2)]);
-      await bumpSeq(space, 2);
+      await raiseVersionTo(space, 2);
       return { survivorId, absorbedId };
     }
 

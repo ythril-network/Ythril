@@ -74,7 +74,7 @@ async function seedFile(space, p, { author = ME, seq = SEQ_BEFORE, content = `by
     _id: p, spaceId: space, path: p, sizeBytes: content.length, tags: ['t'], author: { ...author },
     createdAt: T_OLD, updatedAt: T_OLD, seq,
   });
-  await door.bumpSeq(space, seq);
+  await door.raiseVersionTo(space, seq);
 }
 
 /** What the engine pushed to the fake peer for the files family of the space, ids only. */

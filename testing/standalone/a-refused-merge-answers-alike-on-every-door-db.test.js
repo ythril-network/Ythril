@@ -67,7 +67,7 @@ const STRICT = 'mergedoorsstrict';
 const AUTOMERGE = [{ minScore: 0.5, action: 'automerge', types: ['entity'] }];
 const DIMS = 768;
 
-let mongo, callTool, scanSpace, findSimilar, bumpSeq, log, ADMIN;
+let mongo, callTool, scanSpace, findSimilar, raiseVersionTo, log, ADMIN;
 const handlers = {};
 let tokenSerial = 0;
 
@@ -235,7 +235,7 @@ describe('a refused merge answers alike on every door', { skip }, () => {
     ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));
     ({ scanSpace } = await import('../../server/dist/brain/dupe-scanner.js'));
     ({ findSimilar } = await import('../../server/dist/brain/recall.js'));
-    ({ bumpSeq } = await import('../../server/dist/util/seq.js'));
+    ({ raiseVersionTo } = await import('../../server/dist/util/version-stamp.js'));
     ({ log } = await import('../../server/dist/util/log.js'));
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
@@ -257,7 +257,7 @@ describe('a refused merge answers alike on every door', { skip }, () => {
     const hub = await seedHub({ coll: coll(space), space, author: AUTHOR, edges: n - 2, links: 1, faces: 1,
       entityVector: vectorOf(DIMS), names: { survivor: 'North Hub', absorbed: 'South Hub' } });
     assert.equal(hub.relinks, n);
-    await bumpSeq(space, hub.maxSeq);
+    await raiseVersionTo(space, hub.maxSeq);
     return hub;
   }
 

@@ -71,5 +71,5 @@ export const positionedTombstone = (space, id, type, seq, extra = {}) => positio
 export async function seedRows(door, space, part, docs) {
   if (docs.length === 0) return;
   await door.coll(space, part).insertMany(docs.map(d => ({ ...d })), { ordered: false });
-  await door.bumpSeq(space, docs.reduce((m, d) => Math.max(m, d.seq), 0));
+  await door.raiseVersionTo(space, docs.reduce((m, d) => Math.max(m, d.seq), 0));
 }

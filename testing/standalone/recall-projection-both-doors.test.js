@@ -38,14 +38,14 @@ import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { MCP_SEARCH_FAMILY, doorSources } from '../_shared/search-doors.mjs';
 
-let normaliseProjection, applyProjection, toMongoProjection, NEVER_RETURNED_FIELDS;
+let normaliseProjection, applyProjection, toMongoProjection, WITHHELD_FROM_ANSWERS;
 let mapGraphNodes, graphNodeRecord, mergeEmbeddingExclusion;
 before(async () => {
   ({ normaliseProjection, applyProjection, toMongoProjection } =
     await import('../../server/dist/brain/projection.js'));
   // The withheld set, read from the build (Q-446): these cases named the vector alone, which pinned the shape of
   // the defect — `deliveredBy` and the write guard were the same promise and the projection kept neither.
-  ({ NEVER_RETURNED_FIELDS } = await import('../../server/dist/brain/recall-shape.js'));
+  ({ WITHHELD_FROM_ANSWERS } = await import('../../server/dist/brain/recall-shape.js'));
   ({ mapGraphNodes, graphNodeRecord } = await import('../../server/dist/brain/recall-graph.js'));
   ({ mergeEmbeddingExclusion } = await import('../../server/dist/brain/query.js'));
 });
@@ -87,7 +87,7 @@ describe('the grammar means one thing, whichever door reads it', () => {
       { name: 1, 'properties.status': 1 });
     // Q-446: these two pinned `{embedding: 0}` as the whole exclusion — the shape that let `deliveredBy` through.
     // The rule they assert now: an exclusion, and no projection at all, excludes EVERY withheld field.
-    const withheld = Object.fromEntries(NEVER_RETURNED_FIELDS.map(f => [f, 0]));
+    const withheld = Object.fromEntries(WITHHELD_FROM_ANSWERS.map(f => [f, 0]));
     assert.ok(Object.keys(withheld).length >= 3, 'the withheld set read from the build is too small to mean anything');
     assert.deepEqual(mergeEmbeddingExclusion({ description: 0 }), { description: 0, ...withheld });
     assert.deepEqual(mergeEmbeddingExclusion(), withheld);
@@ -110,11 +110,11 @@ describe('the grammar means one thing, whichever door reads it', () => {
  * see it. It now asks the same three questions of every withheld field, over a record that holds them all.
  */
 describe('no withheld field can be projected back in', () => {
-  const holding = () => ({ ...record(), ...Object.fromEntries(NEVER_RETURNED_FIELDS.map(f => [f, `withheld-${f}`])) });
+  const holding = () => ({ ...record(), ...Object.fromEntries(WITHHELD_FROM_ANSWERS.map(f => [f, `withheld-${f}`])) });
 
   it('an explicit `<withheld>: 1` is dropped rather than honoured', () => {
     // Was: `{name: 1, embedding: 1}` answers `{_id, name}`. Now: the same for each withheld field.
-    for (const f of NEVER_RETURNED_FIELDS) {
+    for (const f of WITHHELD_FROM_ANSWERS) {
       const out = applyProjection(holding(), normaliseProjection({ name: 1, [f]: 1 }));
       assert.equal(f in out, false,
         `a projection is the one parameter that could falsify "${f} is never returned"`);
@@ -125,12 +125,12 @@ describe('no withheld field can be projected back in', () => {
   it('and every one goes even when no projection was sent at all', () => {
     // Was: the vector is absent from an unprojected answer. Now: every withheld field is.
     const out = applyProjection(holding(), undefined);
-    for (const f of NEVER_RETURNED_FIELDS) assert.equal(f in out, false, `${f} survived an absent projection`);
+    for (const f of WITHHELD_FROM_ANSWERS) assert.equal(f in out, false, `${f} survived an absent projection`);
   });
 
   it('the Mongo form strips each from an inclusion projection too', () => {
     // Was: `embedding` is not a key of the inclusion. Now: no withheld field is.
-    for (const f of NEVER_RETURNED_FIELDS) {
+    for (const f of WITHHELD_FROM_ANSWERS) {
       assert.equal(f in mergeEmbeddingExclusion({ name: 1, [f]: 1 }), false, `${f} reaches the store projection`);
     }
   });

@@ -63,6 +63,12 @@ const LOCAL_VALUES = {
   // Q-439: an edge's write guard. Its value is the record's own subject key, filled in per record by `localFor`: the
   // arrival carries it only while it names the stored edge's from and label, so a made-up value is rightly dropped.
   _functionalGuard: 'per-record',
+  // Bundle-81: where THIS instance stored the stored copy (a position in the clock band, microseconds, and the version it was taken for) and
+  // that it wrote that copy itself. An arrival is neither carried nor dropped like the rest: it LANDS, so the replacing copy takes a fresh
+  // position for ITS version and is not written here (`LANDED`, below).
+  pos: 1_700_000_000_000_000,
+  posAtSeq: 5,
+  writtenHere: true,
 };
 
 /**
@@ -86,6 +92,12 @@ function localFor(doc) {
  * holds the stamp itself). Named here because "every local-only field survives" is otherwise false of exactly this one.
  */
 const RESTAMPED = new Set(['deliveredBy']);
+/**
+ * The local-only fields a landing stamps afresh (`isLandingStamped`, `sync/local-only-fields.ts`, read from the module in `before`): the stored
+ * copy's value does not survive the replace, by design — an arriving version lands at a NEW position taken for it (`posAtSeq` is its seq) and
+ * is not written here, so the stored copy's `writtenHere` must be gone. Named so that "every local-only field survives" is not claimed of them.
+ */
+let LANDED = () => false;
 /** The instance the push door authenticates (`PEER_TOKEN`): the deliverer the stamp must name. */
 const DELIVERER = 'push-door-peer';
 
@@ -110,7 +122,9 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
       networks: [{ id: NET, label: 'Aliased network', type: 'closed', spaces: [ALIAS_LOCAL],
         spaceMap: { [ALIAS_REMOTE]: ALIAS_LOCAL }, members: [], votingDeadlineHours: 24 }],
     });
-    ({ LOCAL_ONLY_FIELDS: LOCAL_ONLY } = await import('../../server/dist/sync/local-only-fields.js'));
+    const localOnly = await import('../../server/dist/sync/local-only-fields.js');
+    LOCAL_ONLY = localOnly.LOCAL_ONLY_FIELDS;
+    LANDED = localOnly.isLandingStamped;
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => { for (const s of [S, ALIAS_LOCAL, TTL]) await door.wipe(s); });
@@ -137,10 +151,15 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
           assert.equal(r.code, 200, JSON.stringify(r.body));
           const after = await door.coll(S, fam.coll).findOne({ _id: id });
           assert.equal(after.seq, 6, 'the newer copy did not land');
-          const lost = Object.keys(local).filter(f => !RESTAMPED.has(f) && JSON.stringify(after[f]) !== JSON.stringify(local[f]));
+          const lost = Object.keys(local).filter(f => !RESTAMPED.has(f) && !LANDED(f) && JSON.stringify(after[f]) !== JSON.stringify(local[f]));
           assert.deepEqual(lost, [],
             `${via} ${fam.key}: a peer's edit erased the receiver's own ${lost.join(', ')}. The retention stamps stop `
             + 'the record expiring here; the vector drops it out of search until it is re-embedded');
+          // What the arrival LANDS is its own: a position taken for the version that arrived (above the stored copy's: the clock only goes up), and no claim
+          // that this instance wrote it.
+          assert.ok(typeof after.pos === 'number' && after.pos > local.pos, `${via} ${fam.key}: the replacing copy took no fresh position (pos ${after.pos}, stored copy's ${local.pos})`);
+          assert.equal(after.posAtSeq, 6, `${via} ${fam.key}: the position was not taken for the arriving version (posAtSeq ${after.posAtSeq})`);
+          assert.ok(!('writtenHere' in after), `${via} ${fam.key}: a peer's copy was marked as written here`);
           // What the arrival re-stamps is the deliverer of THIS version, not the stored copy's.
           assert.equal(after.deliveredBy, DELIVERER,
             `${via} ${fam.key}: the newer copy was delivered by '${DELIVERER}' and the stored deliveredBy is ${JSON.stringify(after.deliveredBy)}`);

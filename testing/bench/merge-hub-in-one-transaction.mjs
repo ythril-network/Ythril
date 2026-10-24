@@ -65,7 +65,7 @@ try {
   (await import('../../server/dist/config/loader.js')).loadConfig();
   await (await import('../../server/dist/spaces/lifecycle.js')).initSpace(SPACE, { waitForVectorReady: false });
   const { executeMerge } = await import('../../server/dist/brain/merge.js');
-  const { bumpSeq } = await import('../../server/dist/util/seq.js');
+  const { raiseVersionTo } = await import('../../server/dist/util/version-stamp.js');
   const boundFile = boundInCode();
   const bound = boundFile
     ? (await import(`../../${boundFile.replace(/^server\/src\//, 'server/dist/').replace(/\.ts$/, '.js')}`)).MERGE_MAX_RELINKS
@@ -80,7 +80,7 @@ try {
     const seedStart = Date.now();
     const hub = await seedHub({ coll, space: SPACE, author: AUTHOR, edges: n - 2, links: 1, faces: 1, vectorDims: DIMS, seqFrom });
     seqFrom = hub.maxSeq + 1;
-    await bumpSeq(SPACE, hub.maxSeq);
+    await raiseVersionTo(SPACE, hub.maxSeq);
     const seededMs = Date.now() - seedStart;
 
     const survivor = await coll('entities').findOne({ _id: hub.survivorId });

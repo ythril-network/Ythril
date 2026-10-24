@@ -171,7 +171,7 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
     async function pushOnly(local) {
       await door.reset({ direction: 'push' });
       await door.coll(S, 'tombstones').insertMany(local.map(t => ({ ...t, instanceId: 'tspage-receiver' })));
-      await door.bumpSeq(S, local.reduce((m, t) => Math.max(m, t.seq), 0));
+      await door.raiseVersionTo(S, local.reduce((m, t) => Math.max(m, t.seq), 0));
       await door.sync();
       return new Set(door.state.received.map(t => t._id));
     }
@@ -197,7 +197,7 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
       await door.reset({ direction: 'push' });
       await door.coll(S, 'facts').insertOne(build.fact(S, 'mine', 100, { author: { instanceId: door.instanceId, instanceLabel: 'Receiver' } }));
       await door.coll(S, 'tombstones').insertMany(local.map(t => ({ ...t, instanceId: door.instanceId })));
-      await door.bumpSeq(S, 100);
+      await door.raiseVersionTo(S, 100);
       await door.sync();
       assert.ok(door.state.pushedRecords.some(r => r._id === 'mine'), 'the record was not pushed, so the watermark proves nothing');
       const lost = missing(local, new Set(door.state.received.map(t => t._id)));

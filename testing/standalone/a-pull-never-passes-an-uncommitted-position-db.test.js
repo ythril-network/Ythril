@@ -35,14 +35,15 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import { join } from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openB81cDoor } from './_b81c-door.mjs';
 import { parkPositionWrites } from './_b81c-park.mjs';
 import { peerToken, build } from './_push-door.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementFrom } from './_structural-window.mjs';
+import { REPO_ROOT, trackedSources } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 const HOLD_TIMEOUT = 30_000;
@@ -54,9 +55,8 @@ const ENT_A = U(1), ENT_B = U(2), FACT_1 = U(11), FACT_2 = U(12);
 function pagedRoutes() {
   const paged = /pageBySeq|pageByPosition|readAfterSeq\(|readAfterPosition\(|listTombstones\(/;
   const out = [];
-  for (const file of execFileSync('git', ['ls-files', 'server/src/api/sync'], { encoding: 'utf8', cwd: new URL('../../', import.meta.url) }).trim().split('\n')) {
-    if (!file.endsWith('.ts')) continue;
-    const src = stripComments(fs.readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8'));
+  for (const file of trackedSources(['server/src/api/sync'], { ext: ['.ts'], floor: 3 })) {
+    const src = stripComments(fs.readFileSync(join(REPO_ROOT, file), 'utf8'));
     for (const m of src.matchAll(/(\w+Router)\.get\(\s*'([^']+)'/g)) {
       if (m[2].includes(':')) continue;
       // The whole registration, by structure (braces and the statement's end), not up to the first semicolon.
@@ -146,7 +146,7 @@ describe('a pull never passes an uncommitted position', { skip }, () => {
   for (const route of ROUTES) {
     it(`GET ${route.path}: a page stops below a held write, then serves both once it settles`, { timeout: HOLD_TIMEOUT }, async () => {
       const c = CASES()[route.path];
-      if (!c) return; // reported by the coverage case above
+      assert.ok(c, `no held-write case for GET ${route.path} (the coverage case above names every such route)`);
       const hold = park.arm(`${c.space}_${c.coll}`);
       const firstWrite = c.first();
       const parked = await Promise.race([
@@ -224,10 +224,10 @@ describe('a pull never passes an uncommitted position', { skip }, () => {
 
   describe('every transaction that stamps a position is held (decision 30)', () => {
     it('the file-move transaction (files/move-cascade.ts) runs through inHeldTransaction, not a bare bounded transaction', () => {
-      const root = new URL('../../', import.meta.url);
+      // (the root of the repository is `REPO_ROOT`, `_sources.mjs`)
       // Derived: the files that call `rebuiltFileRow` (the function that stamps the moved rows), other than its own module.
-      const callers = execFileSync('git', ['grep', '-l', '-E', 'rebuiltFileRow\\(', '--', 'server/src'], { encoding: 'utf8', cwd: root })
-        .trim().split('\n').filter(f => f && f !== 'server/src/files/move-plan.ts');
+      const callers = trackedSources(['server/src'], { ext: ['.ts'] })
+        .filter(f => f.replaceAll('\\', '/') !== 'server/src/files/move-plan.ts' && /rebuiltFileRow\(/.test(fs.readFileSync(join(REPO_ROOT, f), 'utf8')));
       assert.ok(callers.length >= 1, 'no caller of rebuiltFileRow found: the derivation is broken');
       for (const f of callers) {
         const src = stripComments(fs.readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8'));

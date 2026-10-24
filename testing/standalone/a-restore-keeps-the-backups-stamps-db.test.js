@@ -74,7 +74,11 @@ describe('a restore keeps the backup\'s stamps, never the replaced copy\'s (Q-23
     // bundle-51: `deliveredBy` — who delivered the version this instance holds — is a record-tier field too: this
     // instance's own backup keeps it, and a restore never takes the replaced copy's. It is held on EVERY family (a link
     // has no retention but is delivered like the rest), below, rather than on the stamped ones the retention rows use.
-    assert.deepEqual([...RESTORED].sort(), ['_contentExpireAt', '_expireAt', 'deliveredBy', 'syncBase'],
+    // bundle-81: `writtenHere` — whether THIS instance wrote the record — joins the class, and is governed by the restore ACT's raw load of a backup
+    // (`db/restore-act.ts`, which keeps it as the backup had it). An admin IMPORT is not that: it is not a restore of positions, so it lands each row at a
+    // fresh position and stamps `writtenHere` afresh from the one predicate (`sync/written-here.ts`), never from the backup or the replaced copy — which is
+    // why no import row below carries a sentinel for it.
+    assert.deepEqual([...RESTORED].sort(), ['_contentExpireAt', '_expireAt', 'deliveredBy', 'syncBase', 'writtenHere'],
       'RESTORED_LOCAL_FIELDS changed — give the new field a sentinel here before trusting this file');
   });
 

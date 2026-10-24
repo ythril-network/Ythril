@@ -1,5 +1,5 @@
 /**
- * `heldSeqAllocated` (`_seq-hold-cases.mjs`) always ends: its failure message reads the space's counter, and that read waits for
+ * `heldPositionTaken` (`_seq-hold-cases.mjs`) always ends: its failure message reads the space's counter, and that read waits for
  * every counter write already started — which never settles while a counter-row lock holds one (round W, V10).
  *
  * ## What it prevents
@@ -16,20 +16,20 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { heldSeqAllocated, SEEDED_COUNTER } from './_seq-hold-cases.mjs';
+import { heldPositionTaken, SEEDED_COUNTER } from './_seq-hold-cases.mjs';
 
-/** What `heldSeqAllocated` settles with, or the string `HUNG` when it had not settled after `limitMs`. */
+/** What `heldPositionTaken` settles with, or the string `HUNG` when it had not settled after `limitMs`. */
 async function outcomeWithin(door, limitMs, opts) {
   let timer;
   const hung = new Promise(resolve => { timer = setTimeout(() => resolve('HUNG'), limitMs); });
   try {
-    return await Promise.race([heldSeqAllocated(door, 'a-space-with-no-hold', opts).then(seq => ({ seq }), error => ({ error })), hung]);
+    return await Promise.race([heldPositionTaken(door, 'a-space-with-no-hold', opts).then(seq => ({ seq }), error => ({ error })), hung]);
   } finally {
     clearTimeout(timer);
   }
 }
 
-describe('heldSeqAllocated never hangs', () => {
+describe('heldPositionTaken never hangs', () => {
   it('a counter write that never settles (a counter-row lock) ends the wait with its own error, not the runner\'s timeout', async () => {
     const door = { counter: () => new Promise(() => {}) };
     const outcome = await outcomeWithin(door, 10_000, { ms: 50 });

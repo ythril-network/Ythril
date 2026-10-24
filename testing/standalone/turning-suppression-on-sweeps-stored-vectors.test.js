@@ -179,7 +179,7 @@ describe('the sweep runs where the flag is written', () => {
     // model. Bumping seq for a local, underived change would replicate a no-op to every peer and re-send the
     // whole document for a field they never receive.
     const sweep = src('server/src/brain/suppression-sweep.ts');
-    assert.doesNotMatch(bodyOf(sweep, 'sweepSuppressedVectors'), /bumpSeq|nextSeq/,
+    assert.doesNotMatch(bodyOf(sweep, 'sweepSuppressedVectors'), /raiseVersionTo|nextSeq/,
       'the sweep must be local — stripping a vector is not a replicated change');
   });
 

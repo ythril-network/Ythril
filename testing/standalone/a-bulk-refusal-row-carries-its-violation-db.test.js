@@ -95,8 +95,8 @@ describe('a refused bulk item reports the one refusal body beside its reason', {
       it('an item that breaks one field while the record already broke another: the reason names only what the item introduced', async () => {
         const id = randomUUID();
         await door.coll(SPACE, 'entities').insertOne(entity(id, 'Bob', { age: 50 }, 1));
-        const { bumpSeq } = await import('../../server/dist/util/seq.js');
-        await bumpSeq(SPACE, 1);
+        const { raiseVersionTo } = await import('../../server/dist/util/version-stamp.js');
+        await raiseVersionTo(SPACE, 1);
         const errors = await send({ entities: [{ id, name: 'Bob', type: 'person', properties: { status: 'bogus' } }] });
         assert.equal(errors.length, 1, JSON.stringify(errors));
         const [row] = errors;
@@ -112,8 +112,8 @@ describe('a refused bulk item reports the one refusal body beside its reason', {
       it('a top-level edge refused by its edge schema is a row of the same shape', async () => {
         const [a, b] = [randomUUID(), randomUUID()];
         await door.coll(SPACE, 'entities').insertMany([entity(a, 'A', {}, 1), entity(b, 'B', {}, 2)]);
-        const { bumpSeq } = await import('../../server/dist/util/seq.js');
-        await bumpSeq(SPACE, 2);
+        const { raiseVersionTo } = await import('../../server/dist/util/version-stamp.js');
+        await raiseVersionTo(SPACE, 2);
         const errors = await send({ edges: [{ from: a, to: b, label: 'knows', properties: { since: 'long ago' } }] });
         assert.equal(errors.length, 1, JSON.stringify(errors));
         const [row] = errors;

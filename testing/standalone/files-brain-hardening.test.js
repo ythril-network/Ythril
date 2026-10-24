@@ -35,8 +35,8 @@ const { assembleChunks, uploadId, storeChunk } =
 const { applyResolutions } = await import('../../server/dist/brain/merge.js');
 const { mergeEmbeddingExclusion } = await import('../../server/dist/brain/query.js');
 // Q-446: L5 named the vector alone; the withheld set is read from the build so each case covers every member.
-const { NEVER_RETURNED_FIELDS } = await import('../../server/dist/brain/recall-shape.js');
-const WITHHELD_EXCLUSION = Object.fromEntries(NEVER_RETURNED_FIELDS.map(f => [f, 0]));
+const { WITHHELD_FROM_ANSWERS } = await import('../../server/dist/brain/recall-shape.js');
+const WITHHELD_EXCLUSION = Object.fromEntries(WITHHELD_FROM_ANSWERS.map(f => [f, 0]));
 
 const SPACE = 'fbtest';
 
@@ -218,7 +218,7 @@ describe('L5 — mergeEmbeddingExclusion preserves the caller projection', () =>
   // Q-446: was "excludes embedding only" — `{embedding: 0}` pinned as the whole exclusion, the shape that let
   // `deliveredBy` and the write guard through. Now: no projection excludes every withheld field and nothing else.
   it('no projection → excludes every withheld field, and only those', () => {
-    assert.ok(NEVER_RETURNED_FIELDS.length >= 3, 'the withheld set read from the build is too small to mean anything');
+    assert.ok(WITHHELD_FROM_ANSWERS.length >= 3, 'the withheld set read from the build is too small to mean anything');
     assert.deepEqual(mergeEmbeddingExclusion(undefined), WITHHELD_EXCLUSION);
     assert.deepEqual(mergeEmbeddingExclusion({}), WITHHELD_EXCLUSION);
   });
@@ -237,7 +237,7 @@ describe('L5 — mergeEmbeddingExclusion preserves the caller projection', () =>
 
   // Q-446: was the vector alone. Now: an explicit inclusion of any withheld field is stripped.
   it('an explicit inclusion of a withheld field is stripped (none can ever leak)', () => {
-    for (const f of NEVER_RETURNED_FIELDS) {
+    for (const f of WITHHELD_FROM_ANSWERS) {
       const out = mergeEmbeddingExclusion({ fact: 1, [f]: 1 });
       assert.equal(out[f], undefined, `${f} must not be included even if requested`);
       assert.equal(out.fact, 1);

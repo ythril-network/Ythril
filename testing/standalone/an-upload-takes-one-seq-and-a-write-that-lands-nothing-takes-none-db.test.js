@@ -1,6 +1,10 @@
 /**
  * One upload stamps ONE row seq, and the space counter moves only when a row is stamped (bundle-89, E1 / Q-424).
  *
+ * **Re-pointed by bundle-81, and the rules are unchanged.** `withAllocatedSeqs` and `withSeq` below are the history this file records: the stamp is
+ * `versionsFor` now (`util/version-stamp.ts`, one counter update per stamped row, none for a decline) and its hold is the landing position's
+ * (`withLandingStamp`, label `file.upsert`, `file.describe`, `file.update`). The two rules hold on the new code as they did on the old.
+ *
  * ## What the ticket said, and what the code does
  *
  * Q-424 reported that a re-upload of a file takes two seqs: a drive of upload, describe, re-upload moved the space

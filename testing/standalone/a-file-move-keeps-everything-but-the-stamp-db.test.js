@@ -69,7 +69,11 @@ async function put(id, over = {}) {
   return row;
 }
 /** Every key a move re-writes on purpose: the id and path (the move itself), the pointer to the converted Markdown (re-rooted with it), and the two it resets. */
-const MOVED_KEYS = ['_id', 'path', 'convertedFileId', 'deliveredBy', 'syncBase'];
+// Bundle-81: a move is a local write that lands its rows at a position of its own, so the moved row also carries a fresh landing (`pos`, `posAtSeq`
+// and `writtenHere`, read from the module that names them) while its `seq` stays the one it had — a move changes no version, and says so below.
+const { POSITION_FIELDS, WRITTEN_HERE } = await import('../../server/dist/sync/local-only-fields.js');
+const LANDING_KEYS = [...POSITION_FIELDS, WRITTEN_HERE];
+const MOVED_KEYS = ['_id', 'path', 'convertedFileId', 'deliveredBy', 'syncBase', ...LANDING_KEYS];
 const without = (doc, keys) => Object.fromEntries(Object.entries(doc).filter(([k]) => !keys.includes(k)));
 const linkTargets = async (id) => (await adjacency.linksStartingFrom(SPACE, [id])).map(r => `${r.toKind}:${r.to}`).sort();
 const move = (src, dst) => cascade.moveFileCascade(SPACE, src, dst);
@@ -120,6 +124,11 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
         'the move changed a field it does not own: it carries the row WHOLE — the authored half (author included), the vector, matchedText, processing state, retention stamp and the suppression flag');
       assert.equal(moved.convertedFileId, '_converted/docs/new/renamed.md.md', 'the pointer to the converted Markdown still names the old path');
       assert.equal(await files().countDocuments({}), 1);
+      // The version is carried (a move changes no version); the row LANDS here, at a position of its own, in the clock band, for the version it keeps.
+      assert.equal(moved.seq, before.seq, 'a move changed the row\'s version');
+      assert.ok(typeof moved.pos === 'number' && moved.pos > 2 ** 50, `the moved row took no landing position in the clock band: pos = ${moved.pos}`);
+      assert.equal(moved.posAtSeq, moved.seq, 'the moved row\'s position was not taken for the version it carries');
+      assert.equal(moved[WRITTEN_HERE], true, 'a move is this instance\'s own write');
     });
 
     it('resets the two fields that described the OLD identity: deliveredBy becomes the empty string (never absent) and syncBase is removed', async () => {

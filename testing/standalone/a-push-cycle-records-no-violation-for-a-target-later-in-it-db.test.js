@@ -51,7 +51,7 @@ async function seedLocal(byPart) {
     await door.mongo.col(`${S}_${part}`).insertMany(docs.map(d => ({ ...d })));
     for (const d of docs) top = Math.max(top, d.seq);
   }
-  await door.bumpSeq(S, top);
+  await door.raiseVersionTo(S, top);
 }
 
 /** One push cycle of the real engine, captured as the requests it sent: one `{ key, docs }` per batch-upsert body. */

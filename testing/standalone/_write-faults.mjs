@@ -130,7 +130,7 @@ export async function holdDocumentLock(mongo, collName, { filter, insert } = {})
 
 /**
  * Hold the lock on one space's counter row (`ythril_counters`). Every seq allocation of that space — the `$inc`
- * in `withAllocatedSeqs`, which runs with the horizon already held — and every counter bump then waits.
+ * in `versionsFor` (`util/version-stamp.ts`), which runs outside any hold for a record write and inside the floor of a transaction — and every counter raise then waits.
  * The row is created first when the space has none, since a missing row cannot be locked.
  */
 export async function holdCounterLock(mongo, spaceId) {

@@ -55,7 +55,7 @@ const AUTHOR = { instanceId: 'refusalaudit-receiver', instanceLabel: 'Receiver' 
 const T0 = '2026-09-01T00:00:00.000Z';
 const RECORD_WRITE_OPERATION = /^(entity|fact|edge|chrono)\.(create|update)$/;
 
-let door, MCP_TOOL_OPERATIONS, edgeIdFor, bumpSeq;
+let door, MCP_TOOL_OPERATIONS, edgeIdFor, raiseVersionTo;
 
 /** The stored records an update is aimed at, one per kind, each valid under the schema. */
 const IDS = { entity: randomUUID(), fact: randomUUID(), chrono: randomUUID(), edgeFrom: randomUUID(), edgeTo: randomUUID() };
@@ -70,7 +70,7 @@ async function seed() {
   await door.coll(SPACE, 'chrono').insertOne({ ...base, _id: IDS.chrono, title: 'Stored', type: 'event', startsAt: '2026-10-01T00:00:00.000Z', properties: {}, seq: 5 });
   await door.coll(SPACE, 'edges').insertOne({ ...base, _id: edgeIdFor(IDS.edgeFrom, IDS.edgeTo, 'knows'), from: IDS.edgeFrom, to: IDS.edgeTo,
     label: 'knows', properties: { since: 1 }, seq: 6 });
-  await bumpSeq(SPACE, 6);
+  await raiseVersionTo(SPACE, 6);
 }
 
 /** One schema-refused call per audited record-write tool. */
@@ -95,7 +95,7 @@ describe('callTool audits a write tool\'s refusal as REST audits its twin', { sk
     door = await openToolDoor({ suite: 'refusalaudit', spaces: [{ id: SPACE, label: SPACE, folders: [], meta: META }] });
     ({ MCP_TOOL_OPERATIONS } = await import('../../server/dist/mcp/audit-map.js'));
     ({ edgeIdFor } = await import('../../server/dist/brain/edge-id.js'));
-    ({ bumpSeq } = await import('../../server/dist/util/seq.js'));
+    ({ raiseVersionTo } = await import('../../server/dist/util/version-stamp.js'));
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => {
@@ -143,7 +143,7 @@ describe('callTool audits a write tool\'s refusal as REST audits its twin', { sk
         { ...base, _id: survivorId, name: 'N', properties: { age: 1 }, seq: 10 },
         { ...base, _id: absorbedId, name: 'S', properties: { age: 1, note: 'x' }, seq: 11 },
       ]);
-      await bumpSeq(SPACE, 11);
+      await raiseVersionTo(SPACE, 11);
       // The merge is refused by the schema, not by this test: a person without a numeric age cannot be the survivor.
       await door.coll(SPACE, 'entities').updateOne({ _id: survivorId }, { $set: { properties: { age: 1 } } });
       const out = await door.call('graph_merge', { space: SPACE, survivorId, absorbedId, resolutions: [{ key: 'age', resolution: 'fn:sum' }] });

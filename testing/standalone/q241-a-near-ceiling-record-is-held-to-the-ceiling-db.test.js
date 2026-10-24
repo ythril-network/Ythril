@@ -4,7 +4,7 @@
  *
  * ## The defect
  *
- * An arrival moves the space counter V (`bumpSeq`, clamped at `MAX_INGEST_SEQ`). So one peer record at `MAX_INGEST_SEQ` drags V to
+ * An arrival moves the space counter V (`raiseVersionTo`, clamped at `MAX_INGEST_SEQ`). So one peer record at `MAX_INGEST_SEQ` drags V to
  * the ceiling, and the next LOCAL create is stamped `MAX_INGEST_SEQ + 1`: above what every peer accepts (`isSeqImplausible`), so
  * every receiver refuses it, for ever, with nothing on this side saying so.
  *

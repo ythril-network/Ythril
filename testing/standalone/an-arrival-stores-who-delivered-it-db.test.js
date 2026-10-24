@@ -100,7 +100,7 @@ describe('an arrival stores who delivered it', { skip }, () => {
       it(`${fam.key}: no peer is ever served it`, async () => {
         const id = idFor(fam.key, 'served');
         await door.coll(S, fam.coll).insertOne({ ...make(fam.key, id, 3), deliveredBy: 'a-stamp-no-peer-may-see' });
-        await door.bumpSeq(S, 10);
+        await door.raiseVersionTo(S, 10);
         const body = await door.pull(`/${fam.key}`, { spaceId: S, sinceSeq: '0' });
         const served = body.items.filter(d => d._id === id);
         assert.equal(served.length, 1, `${fam.key}: the page did not serve the record, so the check proves nothing: ${JSON.stringify(body).slice(0, 200)}`);

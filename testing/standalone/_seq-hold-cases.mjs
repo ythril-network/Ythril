@@ -1,7 +1,8 @@
 /**
- * The stalled-write case of every holder of a seq hold — what to call, what to lock — and the fixture each case runs
+ * The stalled-write case of every holder of a record-position hold — what to call, what to lock — and the fixture each case runs
  * against: the table two -db tests walk, `a-write-inside-a-seq-hold-always-ends-db` (the write ends within the bound
  * and the hold is released) and `a-write-the-bound-ended-never-lands-db` (and then nothing it would have written lands).
+ * (The tests keep their names from before bundle-81, when the hold was on the seq; it is on the landing POSITION now, `util/position-clock.ts`.)
  *
  * ## Why a module
  *
@@ -9,12 +10,24 @@
  * cannot be imported (a test file runs its tests when it is loaded), so the second would copy it, and the copy that
  * drifts is the holder the rule silently stopped covering. One table, here.
  *
+ * ## Where a case stalls, and why it is a record lock and not the counter
+ *
+ * A write now takes its VERSION first (`versionsFor`: one `findOneAndUpdate` on the counter, bounded by the write bound and holding
+ * nothing) and only then holds its landing position (`withLandingStamp`) around the write itself. So a lock on the counter row stalls
+ * the allocation, OUTSIDE any hold; the stall a hold is owed a case for is on a document the write inside it waits for. Every case here
+ * locks one: a document the write updates, or an insert of the id it will create (an uncommitted insert makes the same-id write wait). A holder that
+ * takes its stamps INSIDE its transaction (a cascade chunk, a merge, a claim-fenced derived write) stalls on the counter row instead (`lock: 'counter'`),
+ * which there IS inside the position floor and is what the bound ends with its own timeout: a document lock inside a transaction is a write conflict
+ * the driver retries, which `a-bounded-transaction-ends-and-holds-no-horizon-db` holds to the bound without asking how the caller is answered.
+ * A stalled allocation is its own case, in `a-write-inside-a-seq-hold-always-ends-db`: it ends within the bound and holds no horizon.
+ *
  * ## What it does not do
  *
  * It does not derive the holders — `a-write-inside-a-seq-hold-always-ends-db` does, and fails when a derived holder has
  * no case here. Fixtures are literal on purpose: the derivation decides a case is owed, not this table.
  */
 import { build } from './_push-door.mjs';
+import { PEER_TOKEN } from './_push-door.mjs';
 import { holdForkLock, DIVERGENT } from './_stalled-write-doors.mjs';
 import { holdDocumentLock } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
@@ -43,55 +56,70 @@ export async function loadHolderModules() {
     cascade: await import('../../server/dist/brain/entity-delete-cascade.js'),
     tombstones: await import('../../server/dist/brain/tombstones.js'),
     commit: await import('../../server/dist/brain/write-plan/commit.js'),
+    linkId: await import('../../server/dist/brain/link-id.js'),
     fileMeta: await import('../../server/dist/files/file-meta.js'),
-    // The writers of what a file's bytes made, including the one seq holder among them (bundle-89).
+    files: await import('../../server/dist/files/files.js'),
+    moveCascade: await import('../../server/dist/files/move-cascade.js'),
+    // The writers of what a file's bytes made, including the one record-position holder among them (bundle-89).
     derivedFields: await import('../../server/dist/files/derived-fields.js'),
     // The file tombstones' module, whose position hold is the second instance of the horizon hold (`util/horizon-holds.ts`).
     fileTombstones: await import('../../server/dist/files/tombstones.js'),
+    // The record stream's hold, asked whether one is open (`lowestHeldRecordPosition`).
+    clock: await import('../../server/dist/util/position-clock.js'),
+    recordStream: await import('../../server/dist/sync/record-position-stream.js'),
   };
 }
 
 /**
+ * The lowest record position a write of `space` holds open right now, or undefined when none is: what every position-paged reader of the
+ * space is served nothing past (`settledPositionCap`). The question both hold tests ask to tell "the write is inside its hold" from "it is not".
+ */
+export async function lowestHeldRecordPosition(space) {
+  const clock = await import('../../server/dist/util/position-clock.js');
+  const { recordPositions } = await import('../../server/dist/sync/record-position-stream.js');
+  return clock.lowestOpenPosition(recordPositions, space);
+}
+
+/**
  * The value `seedHolderSpace` leaves the space's counter at: the highest seed record's seq. Exported so a case that has to
- * tell "the stalled write has been given its seq" from "nothing has been allocated yet" compares against the seed instead of
+ * tell "the stalled write has been given its version" from "nothing has been allocated yet" compares against the seed instead of
  * repeating the number.
  */
 export const SEEDED_COUNTER = 6;
 
 /**
- * The seq a stalled write holds, once the store has GIVEN it one: waits until the seq hold is registered AND the space's
- * counter has moved past `SEEDED_COUNTER`, then answers `lowestUncommittedSeq(space)`.
+ * The record position a stalled write holds, once the store has GIVEN it its version: waits until the hold is registered AND the
+ * space's counter has moved past `SEEDED_COUNTER`, then answers the lowest held position.
  *
  * ## What it prevents
  *
- * `withAllocatedSeqs` registers its hold BEFORE it sends the counter's `$inc` (the seq is unknown until the reply, so the
- * hold is a floor at `maxSeen + 1`). A fixture that treats "a hold exists" as "its seq is allocated" then acts on the
- * floor while the `$inc` is still in flight — and a second writer's `$inc` sent in that window (a later `saveFact`, to
- * show a pull passes the stalled write) can be applied FIRST, so the stalled write gets 8 and the later one 7, and the
- * premise "the later record is committed above the held seq" is false. Found by a probe under background Mongo load:
- * 9 of 50 iterations inverted; on a quiet machine the two commands are applied in send order and the case never failed.
+ * A fixture that treats "a hold exists" as "the write's version is allocated" acts while the allocation may still be in flight — and a
+ * second writer's allocation sent in that window (a later `saveFact`, to show a pull passes the stalled write) can be applied first, so
+ * the stalled write gets the later version and the premise "the later record is committed above the held one" is false. Found, as a
+ * seq hold, by a probe under background Mongo load: 9 of 50 iterations inverted; on a quiet machine the two commands are applied in
+ * send order and the case never failed. (A write takes its version BEFORE it holds a position now, so a registered hold already follows
+ * its allocation; the second half stays, because the fixture's claim is about the counter, not about the order the code happens to run.)
  *
- * Every case that reads the held seq to act on it goes through here, so none can forget the second half.
+ * Every case that reads the held position to act on it goes through here, so none can forget the second half.
  *
  * ## What it is for, and what it is not
  *
- * A stall that is NOT on the counter row (a document lock on the record: the fact, the fork), where the `$inc` completes
- * and the write behind it stalls — so the counter moving is the observable proof that the allocation was answered. A
- * counter-row lock (`lock: 'counter'`) stalls the `$inc` itself: the counter never moves past the seed and this waits for
- * nothing, so those cases keep reading the floor, which is all their messages use. Called for one anyway it still ENDS —
- * at its deadline, with a message that says its diagnosis did not answer (`waitFor` bounds every diagnosis itself, round X, W2), never at the runner's. It assumes ONE allocator in flight, as
- * the cases are: a second would make "the counter moved" ambiguous about whose allocation it was.
+ * A stall that is NOT on the counter row (a document lock on the record: the fact, the fork), where the allocation completes and the
+ * write behind it stalls — so the counter moving is the observable proof that the allocation was answered. A counter-row lock
+ * (`holdCounterLock`) stalls the allocation itself: the counter never moves past the seed and no hold is ever registered, so this waits for
+ * nothing. Called for one anyway it still ENDS — at its deadline, with a message that says its diagnosis did not answer (`waitFor`
+ * bounds every diagnosis itself, round X, W2), never at the runner's. It assumes ONE allocator in flight, as the cases are: a second
+ * would make "the counter moved" ambiguous about whose allocation it was.
  *
  * @param {{ counter: (space: string) => Promise<number> }} door  the push door (`openPushDoor`)
- * @returns {Promise<number>} the held seq; THROWS (naming what it saw) when the hold or the allocation never appeared
+ * @returns {Promise<number>} the held position; THROWS (naming what it saw) when the hold or the allocation never appeared
  */
-export async function heldSeqAllocated(door, space, { ms = 5000 } = {}) {
-  const seq = await import('../../server/dist/util/seq.js');
-  await waitFor(async () => seq.lowestUncommittedSeq(space) !== undefined && (await door.counter(space)) > SEEDED_COUNTER, ms, 5,
-    async () => `hold ${seq.lowestUncommittedSeq(space)}, counter ${await door.counter(space)} (seeded at ${SEEDED_COUNTER})`,
-    { what: `a seq hold on '${space}' whose allocation the store has answered` });
-  const held = seq.lowestUncommittedSeq(space);
-  if (held === undefined) throw new Error(`heldSeqAllocated: the hold on '${space}' ended before it could be read — the write was not stalled`);
+export async function heldPositionTaken(door, space, { ms = 5000 } = {}) {
+  await waitFor(async () => (await lowestHeldRecordPosition(space)) !== undefined && (await door.counter(space)) > SEEDED_COUNTER, ms, 5,
+    async () => `hold ${await lowestHeldRecordPosition(space)}, counter ${await door.counter(space)} (seeded at ${SEEDED_COUNTER})`,
+    { what: `a record position hold on '${space}' whose allocation the store has answered` });
+  const held = await lowestHeldRecordPosition(space);
+  if (held === undefined) throw new Error(`heldPositionTaken: the hold on '${space}' ended before it could be read — the write was not stalled`);
   return held;
 }
 
@@ -119,95 +147,125 @@ export async function seedHolderSpace(door, space) {
  * is owed, not this table.
  */
 /**
- * Every holder's stalled-write cases for `S`, keyed by holder: `{ label, lock, run }` with `lock` either `'counter'` (the
- * space's counter row) or a function returning the lock — and then `collection`, the one it holds. `ctx` is
- * `{ door, mods }` (and `fixture`, the door's fixture steps over the harness's own client, when its test has one), read when a case RUNS, so the table can be built when the tests are registered, before the door is open.
+ * One or more stalled runs per holder: `{ label, lock, collection, run }`, with `lock` a function returning the lock a write INSIDE the
+ * hold waits on and `collection` the one it holds. `ctx` is `{ door, mods }` (and `fixture`, the door's fixture steps over the harness's own
+ * client, when its test has one), read when a case RUNS, so the table can be built when the tests are registered, before the door is open.
+ * Fixtures are literal on purpose — the derivation decides a case is owed, not this table.
  */
 export function holderCases(ctx, S) {
+  const mongo = () => (ctx.fixture ?? ctx.door).mongo;
+  /** A lock on a document the write updates. */
+  const recordLock = (part, id) => () => holdDocumentLock(mongo(), `${S}_${part}`, { filter: { _id: id } });
+  /** A lock on the id a write is about to create: an uncommitted insert of it makes the same-id write wait. */
+  const idLock = (part, id, doc = {}) => () => holdDocumentLock(mongo(), `${S}_${part}`, { insert: { _id: id, spaceId: S, ...doc } });
   return {
-    // Re-anchored (bundle-30 §D, Q-204): the push's page accept moved to `sync/accept-page.ts` and serves the pull too;
-    // the case still drives it through the push door, which forks the same way.
-    'server/src/sync/accept-page.ts:acceptArrivingPage': [{
-      label: 'a pushed fact that forks: the fork write, inside its block hold',
+    // Re-anchored (bundle-81): the one writer of an arriving page is `writeArrivals`; the case still drives it through the push door,
+    // which forks the same way.
+    'server/src/sync/arrivals.ts:writeArrivals': [{
+      label: 'a pushed fact that forks: the fork write, inside its landing hold',
       collection: `${S}_facts`,
       // A fixture step: over `ctx.fixture`'s client when the experiment has one, so an option the server's client carries on purpose
       // does not end the lock.
-      lock: async () => holdForkLock((ctx.fixture ?? ctx.door).mongo, ctx.mods.plan, S, F),
+      lock: async () => holdForkLock(mongo(), ctx.mods.plan, S, F),
       run: () => ctx.door.push('/facts', build.fact(S, F, 3, { fact: DIVERGENT }), { spaceId: S }),
     }],
-    'server/src/brain/chrono.ts:updateChrono': [{
-      label: 'a chrono update', lock: 'counter',
-      run: () => ctx.mods.chrono.updateChrono(S, C, { title: 'changed' }),
+    // A peer's tombstone this instance keeps (a deletion it holds for a record it never had): its stored row lands under a hold too.
+    'server/src/sync/tombstone-apply.ts:applyPeerTombstones': [{
+      label: 'a peer\'s tombstone stored: its arrival landing, inside its hold',
+      collection: `${S}_tombstones`,
+      lock: idLock('tombstones', 'peer-deleted-fact', { type: 'fact', seq: 50 }),
+      run: () => ctx.door.push('/tombstones', { tombstones: [build.tombstone(S, 'peer-deleted-fact', 'fact', 50, { instanceId: PEER_TOKEN.peerInstanceId })] }, { spaceId: S }),
     }],
-    // Re-keyed (bundle-30, Q-107 part 3a): the re-key's block is in `rekeyEdges`, one implementation for one edge or a batch.
+    // Re-keyed (bundle-30, Q-107 part 3a): the re-key's block is in `rekeyEdges`, one implementation for one edge or a batch. Its writes
+    // are in the update's held transaction, so the case stalls the delete of the old edge.
     'server/src/brain/edge-rekey.ts:rekeyEdges': [{
-      label: 'an edge re-keyed by a label change (its block, inside the update\'s transaction)', lock: 'counter',
+      label: 'an edge re-keyed by a label change (its landing, inside the update\'s transaction)', collection: `${S}_edges`,
+      lock: recordLock('edges', ED),
       run: () => ctx.mods.edges.updateEdgeById(S, ED, { label: 'renamed' }),
     }],
-    // Re-anchored (bundle-30 §A4): the edge label change's transaction is `inHeldTransaction`'s hold now, so the
-    // derivation finds the holder there; driven through the edge label change, its first caller.
+    // The transaction's own floor hold (`withPositionFloorHeld`): a transaction holds the stream below its first position before it
+    // writes anything. Driven through its callers: an edge label change and one chunk of an entity cascade.
     'server/src/brain/held-transaction.ts:inHeldTransaction': [
-      { label: 'an edge label change: the transaction under the horizon hold', lock: 'counter',
+      { label: 'an edge label change: the transaction under the position floor', collection: `${S}_edges`, lock: recordLock('edges', ED),
         run: () => ctx.mods.edges.updateEdgeById(S, ED, { label: 'renamed_again' }) },
-      // Its second caller since bundle-30 §B3: one chunk of an entity cascade (delete + tombstones) per transaction.
-      { label: 'an entity cascade chunk: the transaction under the horizon hold', lock: 'counter',
+      { label: 'an entity cascade chunk: the transaction under the position floor', lock: 'counter',
         run: async () => ctx.mods.cascade.deleteEntityCascade(S, E1, (await ctx.mods.cascade.previewEntityCascade(S, E1)).token) },
     ],
-    'server/src/brain/edges.ts:updateEdgeById': [
-      { label: 'an edge updated in place', lock: 'counter',
-        run: () => ctx.mods.edges.updateEdgeById(S, ED, { tags: ['changed'] }) },
-    ],
-    'server/src/brain/entities.ts:updateEntityById': [{
-      label: 'an entity update', lock: 'counter',
-      run: () => ctx.mods.entities.updateEntityById(S, E1, { description: 'changed' }),
-    }],
-    'server/src/brain/fact.ts:updateFact': [{
-      label: 'a fact update', lock: 'counter',
-      run: () => ctx.mods.fact.updateFact(S, F, { fact: 'changed' }),
-    }],
     'server/src/brain/links-conversion.ts:stampFileMetaSeqs': [{
-      label: 'a legacy file record stamped with a seq', lock: 'counter',
+      label: 'a legacy file record stamped with a version and a position', collection: `${S}_files`, lock: recordLock('files', LEGACY_FILE),
       run: () => ctx.mods.conversion.stampFileMetaSeqs(S),
     }],
-    // Re-keyed (bundle-30 §A4/§B2): the merge runs in `inHeldTransaction`, and its seq blocks are taken in the
-    // transaction's callback, `relinkAndAbsorb`; driven through `executeMerge`, its one caller.
+    // The merge runs in `inHeldTransaction` and takes its stamps inside it, so the counter row is what stalls it inside the floor.
     'server/src/brain/merge.ts:relinkAndAbsorb': [{
-      label: 'a merge: the relink seq blocks, inside its held transaction', lock: 'counter',
+      label: 'a merge: its stamps, inside its held transaction', lock: 'counter',
       run: async () => ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
         await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {}),
     }],
-    // Re-keyed (bundle-30): `writeTombstone` is one tombstone through `writeTombstones`, whose block this is.
+    // `writeTombstone` is one tombstone through `writeTombstones`, whose landing this is.
     'server/src/brain/tombstones.ts:writeTombstones': [{
-      label: 'a tombstone write', lock: 'counter',
-      run: () => ctx.mods.tombstones.writeTombstone(S, { _id: 'deleted-fact', type: 'fact' }),
+      label: 'a tombstone write', collection: `${S}_tombstones`, lock: idLock('tombstones', 'deleted-fact', { type: 'fact' }),
+      run: async () => {
+        const t = { _id: 'deleted-fact', type: 'fact' };
+        await ctx.mods.tombstones.writeTombstone(S, t, await ctx.mods.tombstones.stampTombstones(S, [t]));
+      },
     }],
+    // Every update of a record in place is `writeAtReadVersion`'s: the read version, the compare-and-set and the landing hold in one place.
+    'server/src/brain/write-at-read-version.ts:writeAtReadVersion': [
+      { label: 'a fact update', collection: `${S}_facts`, lock: recordLock('facts', F),
+        run: () => ctx.mods.fact.updateFact(S, F, { fact: 'changed' }) },
+      { label: 'a chrono update', collection: `${S}_chrono`, lock: recordLock('chrono', C),
+        run: () => ctx.mods.chrono.updateChrono(S, C, { title: 'changed' }) },
+      { label: 'an entity update', collection: `${S}_entities`, lock: recordLock('entities', E1),
+        run: () => ctx.mods.entities.updateEntityById(S, E1, { description: 'changed' }) },
+      { label: 'an edge updated in place', collection: `${S}_edges`, lock: recordLock('edges', ED),
+        run: () => ctx.mods.edges.updateEdgeById(S, ED, { tags: ['changed'] }) },
+      { label: 'a file record updated', collection: `${S}_files`, lock: recordLock('files', HELD_FILE),
+        run: () => ctx.mods.fileMeta.updateFileMeta(S, HELD_FILE, { description: 'changed' }) },
+    ],
+    // A planned write is the commit's: an update of an existing record by id, and the rows of a link reconcile.
     'server/src/brain/write-plan/commit.ts:writeStage': [{
-      label: 'a planned create (save)', lock: 'counter',
-      run: () => ctx.mods.fact.saveFact(S, 'a new fact', [], [], undefined, undefined, 'note'),
+      label: 'a planned update (save by id)', collection: `${S}_entities`, lock: recordLock('entities', E1),
+      run: () => ctx.mods.entities.upsertEntity(S, 'One', 'thing', [], {}, 'rewritten', E1),
     }],
     'server/src/brain/write-plan/commit.ts:reconcileLinkRows': [{
-      label: 'link rows reconciled', lock: 'counter',
+      label: 'link rows reconciled (a new link row)', collection: `${S}_links`,
+      lock: () => idLock('links', ctx.mods.linkId.linkIdFor(F, 'fact', E1, 'entity'))(),
       run: () => ctx.mods.commit.reconcileLinkRows(S, [{ from: F, fromKind: 'fact', desired: { entity: [E1] }, author: AUTHOR, minted: true }]),
     }],
     'server/src/files/file-meta.ts:upsertFileMeta': [{
-      label: 'a file record created', lock: 'counter',
+      label: 'a file record created', collection: `${S}_files`, lock: idLock('files', 'new.md'),
       run: () => ctx.mods.fileMeta.upsertFileMeta(S, 'new.md', 10),
     }],
-    // In `files/derived-fields.ts` since bundle-89, with the other writers of what the bytes produced. It takes its
-    // number only once its conditions are answered (`withSeqWhen`), so the row it is pointed at must be writable — a
-    // decline would take no number at all and the hold this case is about would never be entered.
+    // In `files/derived-fields.ts` since bundle-89, with the other writers of what the bytes produced. It takes its version only once its
+    // conditions are answered, so the row it is pointed at must be writable — a decline would take no version and the hold this case is about would never be entered.
     'server/src/files/derived-fields.ts:setDerivedDescriptionIfUnset': [{
-      label: 'a derived file description', lock: 'counter',
+      label: 'a derived file description: its stamp, inside the held transaction of its claim', lock: 'counter',
       // The write is the run's, so it holds a claim (`_media-claim.mjs`): the claim's job document is part of the transaction.
       run: async () => ctx.mods.derivedFields.setDerivedDescriptionIfUnset(S, await seedClaim(S, HELD_FILE), HELD_FILE, 'derived'),
     }],
-    'server/src/files/file-meta.ts:updateFileMeta': [{
-      label: 'a file record updated', lock: 'counter',
-      run: () => ctx.mods.fileMeta.updateFileMeta(S, HELD_FILE, { description: 'changed' }),
+    // A file move's rows land in a held transaction, per batch (`carryBatch`): the destination's id is what the batch's insert waits for.
+    'server/src/files/move-cascade.ts:carryBatch': [{
+      label: 'a file move: its batch of moved rows, inside the move\'s held transaction', collection: `${S}_files`,
+      // A move whose rows are not carried when the bound ends is OWED, not failed: its bytes have moved, and its answer is `MoveStillOwed` (the next call or the
+      // sweep finishes it, `files/move-cascade.ts`). That is the designed answer, so the landing experiment reads it instead of the bound's plain timeout.
+      endedAs: /MoveStillOwed/,
+      // A move is several statements that each answer on their own clock before the carry (the rename of the bytes, the pending tombstones, the holds on its jobs).
+      // The two variants of the landing experiment put ONE odd clock on every statement (a client `timeoutMS` of 1500 ms; every command a lateness late), which ends
+      // the move before it reaches the stall or after it — not the question they ask. The base experiment reads this case.
+      baseOnly: true,
+      lock: async () => {
+        // The bytes and the row first (a move needs both), then the lock on the id the move creates.
+        // A move a stalled repetition left owed is remembered in this process by its pair of paths (`MoveStillOwed`), so every repetition moves a pair of its own.
+        const n = ctx.moveRun = (ctx.moveRun ?? 0) + 1;
+        await ctx.mods.files.writeFile(S, `move-src-${n}.md`, 'bytes to move');
+        await ctx.mods.fileMeta.upsertFileMeta(S, `move-src-${n}.md`, 13);
+        return holdDocumentLock(mongo(), `${S}_files`, { insert: { _id: `move-dst-${n}.md`, spaceId: S, path: `move-dst-${n}.md` } });
+      },
+      run: () => ctx.mods.moveCascade.moveFileCascade(S, `move-src-${ctx.moveRun}.md`, `move-dst-${ctx.moveRun}.md`),
     }],
     // The file tombstones' POSITION hold (bundle-71, Q-346): the second instance of the horizon hold. A tombstone has no seq,
     // so the stall is a document lock on the row the write waits for, and the hold is the module's own (`positionHold: true`
-    // — `lowestUncommittedPosition` answers whether one is open, where a seq hold is asked of `lowestUncommittedSeq`).
+    // — `lowestUncommittedPosition` answers whether one is open, where a record hold is asked of `lowestHeldRecordPosition`).
     'server/src/files/tombstones.ts:publishSlice': [{
       label: 'a file tombstone published: its position stamp, inside its hold', positionHold: true, collection: `${S}_file_tombstones`,
       lock: async () => {

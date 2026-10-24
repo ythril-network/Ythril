@@ -105,7 +105,9 @@ describe('the refusal keeps its classification', () => {
       // space act refused, or an act shutdown refused (bundle-106), answered as the REST sender answers it. `caught`: a failure no branch
       // above claimed (Q-458), answered by what it is (`answerForCaught`) — a fault of ours carries `{ retryable: false, code: 'internal' }`,
       // a file-system failure its `file_system_fault` — and a plain `Error` refusal (a `400`) none, which the spread's own condition keeps.
-      assert.match(r, /toStructured\(|storeSideFailure|connectionsNotWritten|identityTaken|fileAct|spaceClosed|caught\.status/,
+      // `stampRefusal`: the refusals of a local write's stamp (bundle-81) — `record_version_at_ceiling` (409) and a clock or a position seed that will not let one be
+      // taken (503) — answered by `writeRefusalAnswer` as the REST senders answer them, the body carried as the one the REST door sends.
+      assert.match(r, /toStructured\(|storeSideFailure|connectionsNotWritten|identityTaken|fileAct|spaceClosed|stampRefusal|caught\.status/,
         `a return carries structuredContent without a classification, so every unclassified error grows an `
         + `empty field: ${r.slice(0, 120)}`);
     }

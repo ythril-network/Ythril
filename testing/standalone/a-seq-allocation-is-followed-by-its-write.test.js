@@ -16,9 +16,11 @@
  * **For every seq allocation in the create/converge writers — `saveFact`, `upsertEntity`, `createChrono`,
  * `upsertEdge`, and every module under `server/src/brain/write-plan/` once it exists — the next `await` in the
  * source after the allocation is a record write** (`insertOne`/`insertMany`/`updateOne`/`updateMany`/
- * `replaceOne`/`bulkWrite`). An allocation is `withSeq(` or `withAllocatedSeqs(`, which take the write as a
- * callback, so the question is asked of the callback: everything it awaits is a record write. (`nextSeq`, the
- * bare allocator, is gone — it could not be released when its write settled — but is still recognised here.)
+ * `replaceOne`/`bulkWrite`). **Bundle-81 re-pointed it from the version to the position**: the allocation that holds
+ * every position-paged reader is `withLandingStamp(` (`sync/record-position-stream.ts`, which replaced `withSeq` and
+ * `withAllocatedSeqs`), which takes the write as a callback, so the question is asked of the callback: everything it awaits is a
+ * record write. The version stamp before it (`versionsFor`, `versionsForRows`) holds nothing — a version is compared, never paged
+ * by — so it is not an allocation in this sense and is read and awaited in planning, before the hold, as the rule below always wanted.
  *
  * Read textually, not per control path: a branch whose write comes later in the source than another branch's is
  * judged by the first one. That errs toward PASSING an interleaved converge/insert pair, never toward a false red,
@@ -65,14 +67,14 @@ const IS_RECORD_WRITE = /\.(?:insertOne|insertMany|updateOne|updateMany|replaceO
  * Each allocation in a subject, with what it awaits before (or instead of) its write.
  *
  * Two forms. `await nextSeq(` hands back a number, so the next `await` after it is the one judged. The
- * callback form — `withSeq(` / `withAllocatedSeqs(` — takes the write with it, so the judged text is the
+ * callback form — `withLandingStamp(` — takes the write with it, so the judged text is the
  * call itself: every `await` inside it must be a record write, and it must contain one (a callback that
  * returns the write un-awaited has no inner `await` at all, which is the shape the rule wants).
  */
 function allocationSites() {
   const sites = [];
   for (const { where, text } of subjects()) {
-    for (const m of text.matchAll(/\b(nextSeq|withAllocatedSeqs|withSeq)\s*\(/g)) {
+    for (const m of text.matchAll(/\b(nextSeq|withLandingStamp)\s*\(/g)) {
       const line = text.slice(0, m.index).split('\n').length;
       const site = `${where} (allocation on body line ${line})`;
       if (m[1] === 'nextSeq') {

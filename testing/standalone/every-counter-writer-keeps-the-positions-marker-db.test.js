@@ -14,19 +14,19 @@
  *
  * - **The writers:** every tracked `server/src` file (comments blanked) that names the counters collection (`ythril_counters`
  *   or a `COUNTERS` constant). Floor: 3 (`util/seq.ts`, `spaces/rename.ts`, `db/restore-act.ts` at 9a7ab3f7; the last writes
- *   through `bumpSeq`, so two of the three call a write method themselves).
+ *   through `raiseVersionTo`, so two of the three call a write method themselves).
  * - **The static rule:** among those files, `replaceOne(` and `findOneAndReplace(` are written only in `sync/positions-owed.ts`
  *   (which carries every marker field itself). A replacement is the one write shape that drops fields it does not name.
  * - **The runtime rule:** each writer a test can call is driven over a doc carrying `positionsOwed`, `positionsReadyAt` and
  *   `seqSeenBy6`, and the fields it does not own are read back. Drivers: the allocation (`withAllocatedSeqs`, or the plan's
- *   `versionsFor`), the raise (`bumpSeq`, or the plan's `raiseVersionTo`), and the move on a rename (`moveSpaceData` today,
+ *   `versionsFor`), the raise (`raiseVersionTo`, or the plan's `raiseVersionTo`), and the move on a rename (`moveSpaceData` today,
  *   `moveCounterDoc` planned). At least three must run: a driver that cannot be found fails rather than being skipped.
  *
  * ## Seen red
  *
  * Red on 9a7ab3f7: `spaces/rename.ts` replaces the counter doc (static rule) and `moveSpaceData` returns a counter with `seq`
  * and nothing else (runtime rule); `sync/positions-owed.ts` does not exist. Mutation for the newly covered part: make
- * `bumpSeq` build its update as a replacement and the allocation row names it. Restore by hand.
+ * `raiseVersionTo` build its update as a replacement and the allocation row names it. Restore by hand.
  *
  * Database prefix: `b81tE_`. Run: node --test testing/standalone/every-counter-writer-keeps-the-positions-marker-db.test.js
  * (requires a prior `npm run build` in server/)
@@ -52,7 +52,7 @@ const DRIVER_FLOOR = 3;
 const ran = [];
 const MARKERS = Object.freeze({ positionsOwed: 'repair', positionsReadyAt: '2026-10-01T00:00:00.000Z', seqSeenBy6: 41 });
 const codeOf = (file) => blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
-/** Files that name the counters collection: its writers, and the one that reads a backup's counter and writes through `bumpSeq`. */
+/** Files that name the counters collection: its writers, and the one that reads a backup's counter and writes through `raiseVersionTo`. */
 const writers = () => trackedSources('server/src', { floor: 200 }).filter(f => NAMES_COUNTERS.test(codeOf(f)));
 const writesDirectly = (f) => WRITES.test(codeOf(f));
 
@@ -104,7 +104,7 @@ describe('every writer of a counter doc keeps the marker fields', () => {
       await seed(space);
       const stamp = await import('../../server/dist/util/version-stamp.js').catch(() => null);
       if (stamp?.raiseVersionTo) await stamp.raiseVersionTo(space, 90);
-      else await (await import('../../server/dist/util/seq.js')).bumpSeq(space, 90);
+      else await (await import('../../server/dist/util/seq.js')).raiseVersionTo(space, 90);
       const doc = await counters().findOne({ _id: space });
       assert.ok(doc.seq >= 90, `fixture: the raise did not run (seq ${doc.seq})`);
       assert.equal(doc.positionsOwed, MARKERS.positionsOwed);

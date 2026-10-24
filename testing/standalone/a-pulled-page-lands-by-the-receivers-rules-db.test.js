@@ -10,8 +10,10 @@
  *     `record > schema > space` resolution — asserted as a truth table, not as one case.
  *  2. **A page holding the same `_id` twice stores the highest seq.** The page was written in arrival order by an
  *     unordered bulk write, so `[9, 3]` stored 3: an older version won over a newer one in the same page.
- *  3. **The seq counter is bumped per landed page, not once after the run.** The bump was after all six transfers
- *     and up to 50 pages each, so for the whole run a local write could take a seq below a record already stored.
+ *  3. **The seq counter is NOT moved by a landed page** (bundle-81, D-19 B; this rule read "bumped per landed page, not once after the run" — the bump was
+ *     after all six transfers and up to 50 pages each, so for the whole run a local write could take a seq below a record already stored). A seq is a version
+ *     now: a local write stamps above the version of the record it writes and above any deletion held for its id, never above a peer's clock, so a pulled
+ *     page that lifted the counter would only lift every later stamp of the space to wherever a peer chose.
  *  4. **A write fault that is not a duplicate holds the watermark and is reported as a record-write failure, not
  *     as an unreachable peer.** It escaped to the member-level catch, which counts it toward `PEER UNREACHABLE`
  *     and names the driver error and nothing else.
@@ -287,13 +289,14 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
       + 'arrival order instead of collapsing to the highest seq — or the collapse went unreported');
   });
 
-  it('the counter is at least the max landed seq after EACH page, not only after the run', async () => {
+  it('the counter is moved by no page: it is where it was when the second page is requested, and after the run', async () => {
     const fam = writtenFamilies().find(f => recordTypeOf[f.collection] === 'fact');
     assert.ok(fam, 'no facts family derived');
     served[S.pages] = { [fam.payloadKey]: [
       [fixture('fact', 'pg-1', 501), fixture('fact', 'pg-2', 502), fixture('fact', 'pg-3', 503)],
       [fixture('fact', 'pg-4', 504)],
     ] };
+    const before = await seqMod.currentSeq(S.pages);
     const seen = [];
     onServe = async (space, key, at) => {
       if (space === S.pages && key === fam.payloadKey && at === 1) seen.push(await seqMod.currentSeq(S.pages));
@@ -301,11 +304,10 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
     const out = await engine.runSyncForPeer(PEER);
     assert.equal(out.errors, 0, JSON.stringify(out));
     assert.equal(seen.length, 1, 'fixture check: the second page was never requested');
-    assert.ok(seen[0] >= 503,
-      `when the second page was requested the counter was ${seen[0]}, below the first page's landed max 503. `
-      + 'Until the run ends a local write can take a seq beneath a record already stored, which a peer that has '
-      + 'pulled past it never asks for.');
-    assert.ok(await seqMod.currentSeq(S.pages) >= 504, 'and after the run, at least the max of the run');
+    assert.equal(await coll(S.pages, fam.collection).countDocuments({ _id: { $in: ['pg-1', 'pg-2', 'pg-3', 'pg-4'] } }), 4, 'fixture check: the pages did not land');
+    assert.equal(seen[0], before,
+      `when the second page was requested the counter was ${seen[0]}, not the ${before} it stood at: the first page's landed seqs (to 503) moved it`);
+    assert.equal(await seqMod.currentSeq(S.pages), before, 'and after the run the counter is where it was: a pulled seq moved it');
   });
 
   it('a non-duplicate write fault holds the watermark and is a record-write failure, not an unreachable peer', async () => {

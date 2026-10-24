@@ -55,7 +55,7 @@ const META = {
 const BODY_KEYS = ['error', 'introduced', 'message', 'preExisting', 'violations'];
 const AUTHOR = { instanceId: 'mergebody-receiver', instanceLabel: 'Receiver' };
 
-let door, bumpSeq, entitiesRouter, duplicatesRouter, toolsRouter;
+let door, raiseVersionTo, entitiesRouter, duplicatesRouter, toolsRouter;
 
 /** Every caller of `mergeEntities` outside its module — the doors, from the source. */
 const mergeDoors = () => readTrackedSources('server/src', { untracked: true, floor: 300 })
@@ -68,7 +68,7 @@ async function seedPair() {
   await door.coll(SPACE, 'entities').insertMany([[survivorId, 'North', {}, 1], [absorbedId, 'South', { age: 11 }, 2]].map(([_id, name, properties, seq]) => ({
     _id, spaceId: SPACE, name, type: 'person', tags: [], properties, author: AUTHOR, createdAt: T0, updatedAt: T0, seq,
   })));
-  await bumpSeq(SPACE, 2);
+  await raiseVersionTo(SPACE, 2);
   return { survivorId, absorbedId };
 }
 
@@ -107,7 +107,7 @@ async function restGraphMerge({ survivorId, absorbedId }) {
 describe('a refused merge answers the one schema-refusal body on every merge door', { skip }, () => {
   before(async () => {
     door = await openToolDoor({ suite: 'mergebody', spaces: [{ id: SPACE, label: SPACE, folders: [], meta: META }] });
-    ({ bumpSeq } = await import('../../server/dist/util/seq.js'));
+    ({ raiseVersionTo } = await import('../../server/dist/util/version-stamp.js'));
     ({ entitiesRouter } = await import('../../server/dist/api/brain/entities.js'));
     ({ duplicatesRouter } = await import('../../server/dist/api/duplicates.js'));
     ({ toolsRouter } = await import('../../server/dist/api/tools.js'));
