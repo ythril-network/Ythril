@@ -185,7 +185,6 @@ describe('EntitiesTabComponent', () => {
       removes: [
         { type: 'edge', _id: 'x1', end: 'from' },
         { type: 'edge', _id: 'x2', end: 'to' },
-        { type: 'chrono', _id: 'c1' },
       ],
     } as CascadePreview));
     api.deleteEntity.mockReturnValueOnce(throwError(() => conflict({ error: 'has edges' })));
@@ -198,8 +197,35 @@ describe('EntitiesTabComponent', () => {
      */
     const msg = confirmDialog.confirm.mock.calls.at(-1)![0].message as string;
     expect(msg).toMatch(/2/);
-    expect(msg).toMatch(/1/);
     expect(msg).not.toMatch(/x1/);
+  });
+
+  /*
+   * A cascade removes EDGES only: the server refuses one whose preview holds a fact, a chrono entry or a file, because those are
+   * records of their own. Offering the cascade anyway reopened the same dialog on every confirm and deleted nothing (bundle-164's
+   * verify drive). The refusal names the records in the way and no dialog opens.
+   */
+  it('a delete blocked by records other than edges is refused with what is in the way, and no cascade is offered', async () => {
+    const fixture = make();
+    const c = fixture.componentInstance;
+    c.store.entities.set([{ _id: 'e1' } as Entity]);
+    api.cascadePreview.mockReturnValueOnce(of({
+      entityId: 'e1', token: 'tok-3',
+      removes: [
+        { type: 'edge', _id: 'x1', end: 'from' },
+        { type: 'fact', _id: 'f1' },
+        { type: 'chrono', _id: 'c1' },
+        { type: 'chrono', _id: 'c2' },
+      ],
+    } as CascadePreview));
+    api.deleteEntity.mockReturnValueOnce(throwError(() => conflict({ error: 'has references' })));
+
+    await c.deleteEntity('e1');
+
+    expect(confirmDialog.confirm).not.toHaveBeenCalled();
+    expect(api.deleteEntity).toHaveBeenCalledTimes(1);
+    expect(c.store.entities().map(e => e._id)).toEqual(['e1']);
+    expect(c.recordList.deleteError()).toContain('brain.cascade.blockedByRecords');
   });
 
   it('on confirm it repeats the DELETE with the token from the preview', async () => {

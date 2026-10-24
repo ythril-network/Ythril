@@ -63,6 +63,7 @@ describe('the import-conflict dialog escapes what the imported file named (secur
   it('an ordinary name is unchanged', async () => {
     const root = await openConflict('Service', 'entity');
     const body = [...root.querySelectorAll('p')].find(p => /already exists/.test(p.textContent ?? ''));
-    expect(body!.textContent).toContain('A type named Service already exists in entity.');
+    // The knowledge type is named as its tab names it, not by its English id (bundle-164 verify drive).
+    expect(body!.textContent).toContain('A type named Service already exists under Entities.');
   });
 });

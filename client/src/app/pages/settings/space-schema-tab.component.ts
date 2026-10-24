@@ -536,7 +536,18 @@ export class SpaceSchemaTabComponent implements OnInit {
    * and both names come from an IMPORTED file: the sanitizer keeps `<b>`, `<i>` and `<a>`, so unescaped they would render as markup.
    */
   protected conflictNames(conflict: { name: string; kt: string }): { name: string; kt: string } {
-    return { name: escapeHtml(conflict.name), kt: escapeHtml(conflict.kt) };
+    return { name: escapeHtml(conflict.name), kt: escapeHtml(this.kindLabel(conflict.kt)) };
+  }
+
+  /** The knowledge type as the reader's tab names it ("Entitäten", "Podmioty"), not its English id; an unknown id is shown as it is. */
+  private kindLabel(kt: string): string {
+    switch (kt) {
+      case 'entity': return this.transloco.translate('spaces.schema.tab.entities');
+      case 'edge': return this.transloco.translate('spaces.schema.tab.edges');
+      case 'fact': return this.transloco.translate('spaces.schema.tab.facts');
+      case 'chrono': return this.transloco.translate('spaces.schema.tab.chrono');
+      default: return kt;
+    }
   }
 
   showLibPickerDialog = signal(false);

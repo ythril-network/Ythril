@@ -178,7 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Import/Export:** The import drops file chunks, face records, byte-describing file keys and a restored file's old `embedding`, keeps the highest seq of a repeated id, and names records restored over a local deletion in `restoredOverTombstone`.
 - **UI:** **Settings → Preferences** has a **Date and time** card (**Automatic**, **ISO 8601** or **Day.month.year, 24-hour**; **local time** or **UTC**), kept in this browser.
 - **UI:** The Files page says why a rename, delete or new folder was refused; a refusal naming a remedy stays until dismissed and a server fault shows its request id.
-- **UI:** German and Polish sentences use each record kind's tab name: menu Räume → Spaces, tab Erinnerungen → Fakten, Polish Wspomnienia → Fakty, Akta → Pliki.
+- **UI:** German and Polish sentences use each kind's tab name (Räume → Spaces, Erinnerungen → Fakten, Wspomnienia → Fakty, Akta → Pliki).
 - **UI:** Settings → Spaces shows a space waiting for search as "Waiting for search service". The Graph view reads every page of `graph_traverse` and says when the walk stopped at its `limit`.
 - **Docs:** The hosting guide names `YTHRIL_MONGO_MEM_LIMIT` (default `4g`). Help gains a testing guide. The integration guide's tool tables come from code; an edge's `type` is free text.
 - **Backup:** A restore reports, per space, files no longer matching their records (the page, `GET /api/admin/data/restore`, the log), and repairs nothing ([guide](docs/integration-guide/12a-data-management-api.md)).
@@ -235,12 +235,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backup:** A restore holds each space until it equals the backup with every index (a failed unique one retries), never lowers its counter, resumes after a crash; peers resend what followed. A migration no longer comes back empty.
 - **Media:** A job holds its file by path and is complete only after its file is; ffmpeg stops after 10 minutes, audio at 5, video at 1000 keyframes; a killed job leaves no plaintext; `reprocessSyncedImages` off skips faces on pushed images too.
 - **Webhooks:** One subscription's retry backlog no longer delays another's; a failed retry-queue write counts by rows stored. A failing subscription is probed until it recovers; failures count atomically.
-- **UI:** The client never shows an answer older than the latest asked (graph depth, record tabs, record card). The Graph tab says why it is slow after 3 s and errors with Retry after 30 s. Help links no longer open dead tabs. Counts beside a word take their language's plural form.
+- **UI:** The client never shows an answer older than the latest asked (graph depth, record tabs, record card). The Graph tab says why it is slow after 3 s and errors with Retry after 30 s. Help links no longer open dead tabs. A count and its word agree in every language.
 - **CI:** `node scripts/test-times.mjs --record-ci <runId>` fails when the run is not listed in 3 minutes (`YTHRIL_TEST_RUNS_LISTING_WAIT_MS`). The keyset gate finds any seq ordering; the validator gate follows act bodies.
 
 ### Security
 
-- **Errors:** Every door answers a store failure with one fixed `503` message, never the driver's text naming internal hosts, ports or the store's address (two network `sync?wait=true` routes echoed it).
+- **Errors:** Every door answers a store failure with one fixed `503` message, never the driver's text (internal hosts, ports, the store's address; two `sync?wait=true` routes echoed it).
 - **Errors:** An unrecognised driver error answers `500` ("An internal database fault stopped this operation"), not `400` carrying its message; the database's own refusals stay `400`. Logged as `Store-side failure answered 503`.
 - **Server:** A log line is one line, each value cut (4096 characters, 100 per list) and escaped: a peer cannot forge a line or flood the log; redaction no longer takes quadratic time (5.6.x too).
 - **Server:** Values quoted back in answers are bounded and escaped: a reference refusal names its first five (256 characters each, then `…(+N more)`), `Unknown field(s)` / `unrecognized_keys` the first 10 keys.
@@ -252,7 +252,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A peer's file tombstone needs its issuer's or the upstream's authority (any admitted peer could); a relayed one keeps its issuer. A held one refuses a later copy only as a record tombstone would; a peer cannot block a path.
 - **Sync:** A pull no longer fetches a file past the space quota, stores nothing from a body that is not as declared, and takes back bytes no row names.
 - **Search:** No read answers `deliveredBy` or a write guard (`filter` did; `{embedding: 1}` returned every field), and a filter naming one by key or `"$field"` path is refused.
-- **UI:** The import-conflict dialog shows a type's name as text, not markup.
+- **UI:** Import conflicts show a type's name as text, its kind by tab name; a blocked entity delete names what to edit first.
 
 ## [5.6.9] — 2026-10-08
 
