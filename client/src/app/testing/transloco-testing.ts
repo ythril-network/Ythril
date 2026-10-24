@@ -1,4 +1,4 @@
-import { TranslocoTestingModule, TranslocoTestingOptions } from '@jsverse/transloco';
+import { TranslocoTestingModule, TranslocoTestingOptions, type Translation } from '@jsverse/transloco';
 
 /**
  * Transloco module for component specs.
@@ -17,8 +17,11 @@ import { TranslocoTestingModule, TranslocoTestingOptions } from '@jsverse/transl
  * implementation was right and the signature was wrong.
  */
 export type SpecTranslocoOptions = TranslocoTestingOptions & {
-  /** Per-language dictionaries, e.g. `{ en: { 'some.key': 'Rendered text' } }`. */
-  translation?: Record<string, Record<string, string>>;
+  /**
+   * Per-language dictionaries, e.g. `{ en: { 'some.key': 'Rendered text' } }` or the same as a tree, `{ en: { some: { key: 'Rendered text' } } }`.
+   * Transloco reads both; the type said only the flat form, so a spec that handed it a tree (the edit-path refusal spec of bundle-81) did not compile.
+   */
+  translation?: Record<string, Translation>;
 };
 
 export function getTranslocoModule(options: SpecTranslocoOptions = {}) {
