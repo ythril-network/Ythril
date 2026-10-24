@@ -22,6 +22,7 @@ import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { TimestampComponent } from '../../shared/timestamp.component';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { TranslocoService } from '@jsverse/transloco';
+import { PluralText } from '../../core/plural-text.service';
 import { firstValueFrom } from 'rxjs';
 import { refusalText, type RefusalSource } from '../../core/refusal-text';
 import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
@@ -275,6 +276,7 @@ export class EntitiesTabComponent extends RecordTabBase {
   private route = inject(ActivatedRoute);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+  private plural = inject(PluralText);
   private retype = inject(RetypeConfirmService);
 
   /**
@@ -503,11 +505,25 @@ export class EntitiesTabComponent extends RecordTabBase {
    * It also says what does NOT go, because that is the half people fear: an edge is removed, and the
    * record at the other end of it is not.
    */
+  /**
+   * "3 edges", "1 timeline entry": one counted line per kind, in the reader's plural form. Each kind names its base as a literal so the
+   * key-coverage gate can hold every locale to every plural category; a kind the server adds later shows its count and its name.
+   */
+  private cascadeCount(type: string, n: number): string {
+    switch (type) {
+      case 'edge': return this.plural.text('brain.cascade.kind.edge', n);
+      case 'fact': return this.plural.text('brain.cascade.kind.fact', n);
+      case 'chrono': return this.plural.text('brain.cascade.kind.chrono', n);
+      case 'file': return this.plural.text('brain.cascade.kind.file', n);
+      case 'face': return this.plural.text('brain.cascade.kind.face', n);
+      default: return `${n} ${type}`;
+    }
+  }
+
   private confirmCascade(preview: CascadePreview): Promise<boolean> {
     const counts = new Map<string, number>();
     for (const r of preview.removes) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
-    const lines = [...counts].map(([type, n]) =>
-      `  • ${n} ${this.transloco.translate(`brain.cascade.kind.${type}`, { count: n })}`);
+    const lines = [...counts].map(([type, n]) => `  • ${this.cascadeCount(type, n)}`);
 
     return this.confirmDialog.confirm({
       title: this.transloco.translate('brain.cascade.title'),
