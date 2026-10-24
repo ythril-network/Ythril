@@ -17,6 +17,7 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordTabBase } from './record-tab-base';
 import { SortableHeaderComponent } from './sortable-header.component';
+import { RecordOrderLineComponent } from './record-order-line.component';
 import { RecordSearchBarComponent } from './record-search-bar.component';
 import { toLocalDatetime } from './brain-format';
 import { BRAIN_CHIP_STYLES } from './brain-form.styles';
@@ -46,7 +47,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
   selector: 'app-chrono-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, RefusalAlertComponent, WriteWarningsComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, RefusalAlertComponent, WriteWarningsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -133,6 +134,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
               {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}
             </div>
           }
+          <app-record-order-line [sortField]="sortField()" [ranked]="!!store.chronoSearch().trim()" />
           <div class="table-wrapper" hscrollTop>
             <table>
               <thead>
