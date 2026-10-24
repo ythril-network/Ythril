@@ -18,7 +18,6 @@
  */
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent, StatusVariant } from '../../shared/status-pill.component';
 import { SkeletonLinesComponent } from '../../shared/skeleton-lines.component';
@@ -36,6 +35,7 @@ import { retentionSummary as summariseRetention, retentionTypeOverrides as reten
 import { CollectionTab } from './brain-tabs';
 import { ErModelPanelComponent } from './er-model-panel.component';
 import { ReindexNotesComponent } from './reindex-notes.component';
+import { PluralText } from '../../core/plural-text.service';
 
 @Component({
   selector: 'app-overview-tab',
@@ -653,15 +653,16 @@ export class OverviewTabComponent {
 
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "across N checks", in the plural form the reader's language uses for N. */
   protected checksOfText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.comp.of', count);
+    return this.plural.text('brain.overview.comp.of', count);
   }
 
   /** "Showing k of N failures.": the noun agrees with the total, which is what `count` carries. */
   protected failedMoreText(shown: number, total: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.queue.failedMore', total, { shown });
+    return this.plural.text('brain.overview.queue.failedMore', total, { shown });
   }
 
   /**
@@ -816,7 +817,7 @@ export class OverviewTabComponent {
     if (failed <= 0) return;
     const ok = await this.confirmDialog.confirm({
       title: this.transloco.translate('brain.overview.confirmRetryFailedTitle'),
-      message: pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.confirmRetryFailed', failed),
+      message: this.plural.text('brain.overview.confirmRetryFailed', failed),
       confirmLabel: this.transloco.translate('brain.overview.queue.retryFailed'),
     });
     if (!ok) return;

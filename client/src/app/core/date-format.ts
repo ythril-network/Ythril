@@ -26,6 +26,8 @@
  * the impure pipe, and constructing a `DateTimeFormat` is the expensive half of formatting.
  */
 
+import { cachedIntl } from './intl-cache';
+
 export type InstantValue = string | number | Date | null | undefined;
 
 export type DateStyle = 'auto' | 'iso' | 'dmy24';
@@ -91,21 +93,14 @@ export function parsePreference(raw: string | null): DatePreference {
   return { ...DEFAULT_DATE_PREFERENCE };
 }
 
-const cache = new Map<string, Intl.DateTimeFormat>();
-
 function formatter(locale: string, timeZone: string | undefined, shape: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
-  const key = `${locale}|${timeZone ?? ''}|${JSON.stringify(shape)}`;
-  let f = cache.get(key);
-  if (!f) {
-    try {
-      f = new Intl.DateTimeFormat(locale, { ...shape, ...(timeZone ? { timeZone } : {}) });
-    } catch {
-      // An unknown locale from a browser setting: English order rather than a thrown render.
-      f = new Intl.DateTimeFormat('en', { ...shape, ...(timeZone ? { timeZone } : {}) });
-    }
-    cache.set(key, f);
-  }
-  return f;
+  const options = { ...shape, ...(timeZone ? { timeZone } : {}) };
+  return cachedIntl(
+    `DateTimeFormat|${locale}|${timeZone ?? ''}|${JSON.stringify(shape)}`,
+    () => new Intl.DateTimeFormat(locale, options),
+    // An unknown locale from a browser setting: English order rather than a thrown render.
+    () => new Intl.DateTimeFormat('en', options),
+  );
 }
 
 const DATE: Intl.DateTimeFormatOptions = { year: 'numeric', month: '2-digit', day: '2-digit' };

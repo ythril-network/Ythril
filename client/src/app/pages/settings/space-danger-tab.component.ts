@@ -20,7 +20,6 @@ import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { refusalText, RefusalSource } from '../../core/refusal-text';
 import { DateFormatService } from '../../core/date-format.service';
 import { LiveAnnouncement } from '../../core/live-announcement';
@@ -28,6 +27,7 @@ import { pollUntil, type PollHandle } from '../../core/poll-until';
 import type { ActEntryView, SpaceActOutcome } from '../../core/space-act-outcome';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import { actKindKey, actRepeatHintKey, actRowView, actWhenText } from '../../core/space-act-view';
+import { PluralText } from '../../core/plural-text.service';
 
 /** How often a standing delete or wipe is asked after, while this tab is open. */
 const ACT_POLL_MS = 5000;
@@ -270,13 +270,14 @@ export class SpaceDangerTabComponent {
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** The embeddings backfill's two counted sentences, each in the plural form the reader's language uses for its count. */
   protected backfillDoneText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'spaces.dangerZone.embeddingsBackfillDone', count);
+    return this.plural.text('spaces.dangerZone.embeddingsBackfillDone', count);
   }
   protected backfillSkippedText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'spaces.dangerZone.embeddingsBackfillSkipped', count);
+    return this.plural.text('spaces.dangerZone.embeddingsBackfillSkipped', count);
   }
   private dates = inject(DateFormatService);
   protected readonly live = new LiveAnnouncement();

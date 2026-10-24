@@ -24,10 +24,10 @@
  */
 import { Component, ChangeDetectionStrategy, inject, input, output } from '@angular/core';
 import { InstantComponent } from '../../shared/instant.component';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import type { NetworkMember } from '../../core/api.types';
+import { PluralText } from '../../core/plural-text.service';
 
 @Component({
   selector: 'app-network-member-row',
@@ -113,12 +113,12 @@ import type { NetworkMember } from '../../core/api.types';
   `],
 })
 export class NetworkMemberRowComponent {
-  private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   readonly member = input.required<NetworkMember>();
   /** "N consecutive failed sync attempts since the last success", in the plural form the reader's language uses for N. */
   protected failingTitle(): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'networks.member.failingTitle', this.member().consecutiveFailures ?? 0);
+    return this.plural.text('networks.member.failingTitle', this.member().consecutiveFailures ?? 0);
   }
   /** Disables the remove button while the parent's request is in flight. */
   readonly removing = input(false);

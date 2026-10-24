@@ -27,3 +27,17 @@ export class DevMissingTranslationHandler implements TranslocoMissingHandler {
     return key;
   }
 }
+
+/** What has already been said through `warnOnceInDev`, by key, for the session. */
+const saidOnce = new Set<string>();
+
+/**
+ * One development-only console line per `key` for the session, the same discipline as the missing-key handler above: a problem in a
+ * counted sentence (a count that is not a number, a base with no form) is shown ONCE, not on every render of every row, and says nothing
+ * in production. The key names the problem and its subject (`plural-count:<base>`), so two problems on one base are two lines.
+ */
+export function warnOnceInDev(key: string, message: string): void {
+  if (!isDevMode() || saidOnce.has(key)) return;
+  saidOnce.add(key);
+  console.error(message);
+}

@@ -18,7 +18,11 @@ import { DateFormatService } from '../../core/date-format.service';
 function make() {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
-    imports: [PreferencesComponent, getTranslocoModule()],
+    // de is loaded too: the page's language follows ActiveLanguage, which switches only once a language's words are here (Q-574).
+    imports: [PreferencesComponent, getTranslocoModule({
+      langs: { en: {}, de: {} },
+      translocoConfig: { availableLangs: ['en', 'de'], defaultLang: 'en' },
+    })],
     // The template embeds <app-mfa/>, which calls AuthApi.getMfaStatus() on init.
     providers: [{ provide: AuthApi, useValue: { getMfaStatus: () => of({ enabled: false }) } }],
   });

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../../core/plural-text';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { PluralText } from '../../../core/plural-text.service';
 
 /**
  * "These pinned field names matched nothing, so they are not locked."
@@ -41,11 +41,11 @@ import { pluralText } from '../../../core/plural-text';
   `,
 })
 export class PinnedUnknownNoticeComponent {
-  private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "N pinned field names were not recognised ...", in the plural form the reader's language uses for N. */
   protected titleText(): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'mediaProcessing.pinnedUnknown.title', this.paths().length);
+    return this.plural.text('mediaProcessing.pinnedUnknown.title', this.paths().length);
   }
 
   /** The unrecognised entries, verbatim from the config response. Empty renders nothing at all. */

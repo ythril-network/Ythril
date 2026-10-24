@@ -20,7 +20,6 @@
  */
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../../core/plural-text';
 import { PhIconComponent } from '../../../shared/ph-icon.component';
 import { StatusPillComponent, StatusVariant } from '../../../shared/status-pill.component';
 import { HealthDotComponent } from './health-dot.component';
@@ -32,6 +31,7 @@ import { SpacesApi } from '../../../core/spaces-api.service';
 import { ToastService } from '../../../core/toast.service';
 import { ConfirmDialogService } from '../../../core/confirm-dialog.service';
 import { refusalText, RefusalSource } from '../../../core/refusal-text';
+import { PluralText } from '../../../core/plural-text.service';
 
 @Component({
   selector: 'app-tools-tab',
@@ -169,10 +169,11 @@ export class ToolsTabComponent {
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "N spaces claim a ready index ...", in the plural form the reader's language uses for N. */
   protected driftTitleText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'mediaProcessing.tools.driftTitle', count);
+    return this.plural.text('mediaProcessing.tools.driftTitle', count);
   }
 
   /** Space ids whose rebuild is in flight — drives the per-row spinner + disabled state. */

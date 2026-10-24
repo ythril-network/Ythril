@@ -1,10 +1,10 @@
 import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { FileExtract } from '../../core/api.types';
 import { FILE_EXTRACT_STYLES } from './file-manager.styles';
 import { msRange } from './file-format';
+import { PluralText } from '../../core/plural-text.service';
 
 /**
  * What retrieval actually sees for one file: its chunks, their provenance, and the converted markdown.
@@ -116,16 +116,16 @@ import { msRange } from './file-format';
   `,
 })
 export class FileExtractViewComponent {
-  private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "Showing k of N images.": the noun agrees with the total, which is what `count` carries. */
   protected imagesCutText(shown: number, total: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'files.extract.imagesCut', total, { shown });
+    return this.plural.text('files.extract.imagesCut', total, { shown });
   }
 
   /** "Showing the first k of N characters, in whole paragraphs." */
   protected truncatedAtText(shown: number, total: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'files.extract.truncatedAt', total, { shown });
+    return this.plural.text('files.extract.truncatedAt', total, { shown });
   }
 
   readonly extract = input<FileExtract | null>(null);

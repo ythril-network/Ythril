@@ -14,11 +14,11 @@ import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { refusalText } from '../../core/refusal-text';
 import { MergeRefusals } from './merge-refusals';
+import { PluralText } from '../../core/plural-text.service';
 
 /** The family a failed contradiction resolve's `code` is said under (`resolvedOtherwise`, and the codes every family carries). */
 const RESOLVE_REFUSALS = 'review.contradictions.refusal';
@@ -752,13 +752,14 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   private spacesApi = inject(SpacesApi);
   private brainApi = inject(BrainApi);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** The suggestions panel's two counted sentences, each in the plural form the reader's language uses for its count. */
   protected scoreLabelText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'review.suggestions.scoreLabel', count);
+    return this.plural.text('review.suggestions.scoreLabel', count);
   }
   protected passingText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'review.suggestions.passing', count);
+    return this.plural.text('review.suggestions.passing', count);
   }
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);

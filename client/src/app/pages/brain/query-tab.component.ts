@@ -6,7 +6,6 @@ import { recordOf } from './recall-hits';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { QueryCollection, QueryResult, RecallResult, RECORD_TYPES, BRAIN_COLLECTIONS } from '../../core/api.types';
 import { BrainApi } from '../../core/brain-api.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -20,6 +19,8 @@ import { SpillEndingComponent } from './spill-ending.component';
 import { ceilingFieldKeys } from '../../core/ceiling-advice';
 import { formatList } from '../../core/list-format';
 import { refusalText } from '../../core/refusal-text';
+import { PluralText } from '../../core/plural-text.service';
+import { PluralPipe } from '../../core/plural.pipe';
 
 /**
  * The brain page's Query tab — advanced (MongoDB-style) query + semantic recall.
@@ -35,7 +36,7 @@ import { refusalText } from '../../core/refusal-text';
   selector: 'app-query-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent, SupersededBadgeComponent, SpillEndingComponent, ResultOrderingComponent],
+  imports: [PluralPipe, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, RecallFormComponent, JsonTreeComponent, SupersededBadgeComponent, SpillEndingComponent, ResultOrderingComponent],
   styles: [`
     .query-panel {
       display: flex;
@@ -298,7 +299,7 @@ import { refusalText } from '../../core/refusal-text';
                 -->
                 <div class="query-answer">
                   <div class="query-answer-head">
-                    <span><strong>{{ recallGroups().length }}</strong> {{ 'brain.query.resultsCount' | transloco: { count: recallGroups().length } }}</span>
+                    <span><strong>{{ recallGroups().length | plural:'brain.query.resultsCount' }}</strong></span>
                     <!-- Grouping makes a topK of 10 look like 6, so the passage count is stated rather than
                          left for the reader to wonder about. Only shown when grouping actually happened. -->
                     @if (recallResults().length !== recallGroups().length) {
@@ -496,7 +497,7 @@ import { refusalText } from '../../core/refusal-text';
                 -->
                 <div class="query-answer">
                   <div class="query-answer-head">
-                    <span><strong>{{ res.count }}</strong> {{ 'brain.query.resultsFrom' | transloco: { count: res.count, collection: res.collection } }}</span>
+                    <span><strong>{{ res.count | plural:'brain.query.resultsFrom':{ collection: res.collection } }}</strong></span>
                     @if (res.results.length) {
                       <div class="query-answer-tools">
                         <button class="btn btn-ghost btn-sm" type="button" (click)="expandAllTrees()">{{ 'brain.query.expandAll' | transloco }}</button>
@@ -521,26 +522,27 @@ export class QueryTabComponent {
   private brainApi = inject(BrainApi);
   private store = inject(BrainStore);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** The counted sentences of this tab, each in the plural form the reader's language uses for its count. */
   protected truncatedTitleText(returned: number, count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.truncated.title', count, { returned });
+    return this.plural.text('brain.query.truncated.title', count, { returned });
   }
   protected leftOutTitleText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.leftOut.title', count);
+    return this.plural.text('brain.query.leftOut.title', count);
   }
   protected hopsText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.related.hops', count);
+    return this.plural.text('brain.query.related.hops', count);
   }
   protected passagesText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.passages', count);
+    return this.plural.text('brain.query.passages', count);
   }
   protected groupedPassagesText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.groupedPassages', count);
+    return this.plural.text('brain.query.groupedPassages', count);
   }
   /** The remainder download's label: how many matches the kept spill holds. */
   protected remainderLabel(): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.query.remainder.download', this.recallRemainder()?.matches ?? 0);
+    return this.plural.text('brain.query.remainder.download', this.recallRemainder()?.matches ?? 0);
   }
 
   readonly spaceId = input.required<string>();

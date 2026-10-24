@@ -1,10 +1,10 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input, signal, untracked } from '@angular/core';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
 import { refusalText } from '../../core/refusal-text';
 import { SpaceSettingsState } from './space-settings-state.service';
+import { PluralText } from '../../core/plural-text.service';
 
 type Clash = SchemaLayersView['clashes'][number];
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
@@ -103,10 +103,11 @@ export class SpaceSchemaLayersComponent {
   private api = inject(SchemaApi);
   private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "N clashes", in the plural form the reader's language uses for N. */
   protected clashesText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'spaces.schema.layers.clashes', count);
+    return this.plural.text('spaces.schema.layers.clashes', count);
   }
 
   /** Inside the settings dialog the view is the dialog's ONE copy (the Schema tab marks properties from it); on its own it is local. */

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { ActiveLanguage } from '../../core/active-language';
 import { formatList } from '../../core/list-format';
 import { listsEverySpace, type PersonalView } from '../../core/views-api.service';
 
@@ -32,9 +32,8 @@ import { listsEverySpace, type PersonalView } from '../../core/views-api.service
   `,
 })
 export class ViewReadsFromComponent {
-  private readonly transloco = inject(TranslocoService);
-  /** The language, as a signal, so a language switch re-words the list ("a and b" / "a und b"). */
-  private readonly lang = toSignal(this.transloco.langChanges$, { initialValue: this.transloco.getActiveLang() });
+  /** The page's language, as a signal, so a language switch re-words the list ("a and b" / "a und b"). */
+  private readonly lang = inject(ActiveLanguage).language;
 
   readonly view = input.required<PersonalView>();
 

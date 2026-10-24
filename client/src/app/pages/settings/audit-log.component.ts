@@ -6,13 +6,14 @@ import { AdminApi } from '../../core/admin-api.service';
 import { saveBlob } from '../../core/authenticated-download';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
 import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-strip.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { refusalText } from '../../core/refusal-text';
+import { PluralText } from '../../core/plural-text.service';
+import { PluralPipe } from '../../core/plural.pipe';
 
 @Component({
   selector: 'app-audit-log',
@@ -23,7 +24,7 @@ import { refusalText } from '../../core/refusal-text';
   // when state changes and skips the whole-tree sweep otherwise — this page renders up to a
   // 100-row table plus a live-streaming server log, both in the CD hot path.
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, StatusPillComponent, RelativeTimeComponent, SummaryStripComponent, ModalDirective, HscrollTopDirective],
+  imports: [PluralPipe, CommonModule, FormsModule, TranslocoPipe, StatusPillComponent, RelativeTimeComponent, SummaryStripComponent, ModalDirective, HscrollTopDirective],
   styles: [`
     .audit-toolbar {
       display: flex;
@@ -197,7 +198,7 @@ import { refusalText } from '../../core/refusal-text';
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
         <button class="btn btn-sm btn-secondary" (click)="loadServerLogs()">{{ 'auditLog.server.refreshButton' | transloco }}</button>
         <span style="flex:1;"></span>
-        <span style="font-size:12px; color:var(--text-muted);">{{ serverLogLines().length }} {{ 'auditLog.server.lines' | transloco }}@if (serverLogStreaming()) { &nbsp;· {{ 'auditLog.server.live' | transloco }} }</span>
+        <span style="font-size:12px; color:var(--text-muted);">{{ serverLogLines().length | plural:'auditLog.server.lines' }}@if (serverLogStreaming()) { &nbsp;· {{ 'auditLog.server.live' | transloco }} }</span>
       </div>
 
       @if (serverLogLoading()) {
@@ -426,10 +427,11 @@ export class AuditLogComponent implements OnInit, OnDestroy {
   private adminApi = inject(AdminApi);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "N entries total", in the plural form the reader's language uses for N. */
   protected totalText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'auditLog.pagination.total', count);
+    return this.plural.text('auditLog.pagination.total', count);
   }
 
   activeLogTab = signal<'audit' | 'server'>('audit');

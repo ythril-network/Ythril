@@ -1,6 +1,4 @@
 import { Component, DestroyRef, inject, signal, computed, OnInit } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { filter } from 'rxjs/operators';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AdminApi } from '../../core/admin-api.service';
@@ -14,10 +12,11 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { refusalText } from '../../core/refusal-text';
 import { LiveAnnouncement } from '../../core/live-announcement';
-import { pluralText } from '../../core/plural-text';
 import { pollUntil, type PollHandle } from '../../core/poll-until';
 import { reportOf, type MaintenanceState, type MigrateReport, type RestoreReport } from '../../core/admin-data.types';
 import { ActSetProgressComponent } from './act-set-progress.component';
+import { ActiveLanguage } from '../../core/active-language';
+import { PluralText } from '../../core/plural-text.service';
 
 type UriSource = 'env' | 'config' | 'default';
 
@@ -352,8 +351,8 @@ interface BackupConfig {
 export class DataComponent implements OnInit {
   private adminApi = inject(AdminApi);
   private transloco = inject(TranslocoService);
-  /** The active language as a signal: `getActiveLang()` is a plain read, so a computed() using it would not follow a switch. */
-  private readonly lang = toSignal(this.transloco.langChanges$, { initialValue: this.transloco.getActiveLang() });
+  private readonly plural = inject(PluralText);
+  private readonly activeLanguage = inject(ActiveLanguage);
   private confirmDialog = inject(ConfirmDialogService);
 
   uriSource = signal<UriSource | null>(null);
@@ -413,46 +412,19 @@ export class DataComponent implements OnInit {
   latestBackupId = computed(() => this.backups()[0]?.id ?? null);
 
   /**
-   * Flips whenever a translation file finishes loading.
+   * Operator overview strip: DB source, maintenance state, backup count, and the saved schedule.
    *
-   * `computed` memoises on its SIGNAL dependencies, and `transloco.translate()` is not one — it is a
-   * plain method call. So a computed that translates imperatively evaluates once during the first
-   * render, BEFORE the language file has resolved, gets the raw key back (Transloco logs
-   * "Missing translation key"), and then never re-runs to pick up the real string.
-   *
-   * That was not visible here only by luck: `backups()` and `backupConfig()` land after their HTTP
-   * calls, which happens to be after translations load, so the strip re-evaluated and looked correct.
-   * Remove or reorder those loads and the labels would read `data.summary.backups` permanently.
-   *
-   * Reading this signal inside the computed makes "translations arrived" a real dependency.
+   * `translate()` is a plain method and no dependency of a `computed`, which is why this reads `ActiveLanguage.wordsReady()` rather than
+   * translating on first evaluation. It was not visible here only by luck: `backups()` and `backupConfig()` land after their HTTP calls,
+   * which happens to be after the translations load, so the strip re-evaluated and looked correct. Remove or reorder those loads and the
+   * labels would read `data.summary.backups` permanently. The two checks that make it true (the load event, and the synchronous
+   * `getTranslation()` for a component mounted after the event) live in `core/active-language.ts`.
    */
-  private translationLoad = toSignal(
-    this.transloco.events$.pipe(filter(e => e.type === 'translationLoadSuccess')),
-    { initialValue: null },
-  );
-
-  /**
-   * Are translations actually available to `translate()` right now?
-   *
-   * Both halves are needed. `events$` does NOT replay, so a component mounted after the language file
-   * already loaded would never see the event and — if that were the only check — would render an empty
-   * strip forever, which is a worse bug than the one being fixed. `getTranslation()` is synchronous and
-   * covers exactly that case; the signal covers the first-load case and supplies the reactivity.
-   */
-  private translationsReady = computed<boolean>(() => {
-    this.translationLoad();   // dependency, not a value
-    // Ask whether the active language has been LOADED, not whether it has content. An empty-but-loaded
-    // dictionary is a legitimate state — the spec harness uses exactly that, and so would a minimal
-    // locale — and treating it as "not ready" would blank the strip permanently.
-    return this.transloco.getTranslation().has(this.lang());
-  });
-
-  /** Operator overview strip: DB source, maintenance state, backup count, and the saved schedule. */
   summaryItems = computed<SummaryItem[]>(() => {
     // Render nothing rather than translate too early. Calling `translate()` before the language file
     // resolves logs "Missing translation key" and bakes the raw key into the label; an empty strip for
     // one frame is honest, since the data behind it has not loaded either.
-    if (!this.translationsReady()) return [];
+    if (!this.activeLanguage.wordsReady()) return [];
     const t = (k: string) => this.transloco.translate(k);
     const items: SummaryItem[] = [];
     const src = this.uriSource();
@@ -546,10 +518,9 @@ export class DataComponent implements OnInit {
     const held = this.maintenanceHeldBy();
     const r = held === 'restore' ? this.restoreReport() : held === 'migrate' ? this.migrateReport() : null;
     if (r && r.state === 'running') {
-      const lang = this.transloco.getActiveLang();
       return held === 'restore'
-        ? pluralText(this.transloco, lang, 'data.maintenance.restoring', r.total, { done: r.done })
-        : pluralText(this.transloco, lang, 'data.maintenance.migrating', r.total, { done: r.done });
+        ? this.plural.text('data.maintenance.restoring', r.total, { done: r.done })
+        : this.plural.text('data.maintenance.migrating', r.total, { done: r.done });
     }
     return t(this.maintenanceActive() ? 'data.maintenance.active' : 'data.maintenance.inactive');
   }
@@ -749,7 +720,7 @@ export class DataComponent implements OnInit {
         this.restoringId.set(null);
         // The page may have closed while the request was out: nothing to say, and no poll to start that nothing would stop.
         if (this.destroyed) return;
-        this.restoreNotice.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'data.restore.accepted', started.spaces.length));
+        this.restoreNotice.set(this.plural.text('data.restore.accepted', started.spaces.length));
         // This page started it, so its outcome is shown even when the first report already says it ended.
         this.followedRestore.set(true);
         this.loadMaintenance();
@@ -1029,7 +1000,7 @@ export class DataComponent implements OnInit {
       next: started => {
         this.migrating.set(false);
         if (this.destroyed) return;
-        this.migrateNotice.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'data.migrate.accepted', started.spaces.length));
+        this.migrateNotice.set(this.plural.text('data.migrate.accepted', started.spaces.length));
         // This page started it, so its outcome is shown even when the first report already says it ended (a copy refused at once).
         this.followedMigrate.set(true);
         this.loadMaintenance();

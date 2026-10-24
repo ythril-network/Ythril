@@ -1,7 +1,8 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { MfaComponent } from './mfa.component';
 import { SettingsCardComponent } from '../../shared/settings-card.component';
+import { ActiveLanguage } from '../../core/active-language';
 import { DateFormatService } from '../../core/date-format.service';
 import { browserTimeZone, DATE_STYLES, DATE_ZONES, formatInstant, type DateStyle, type DateZone } from '../../core/date-format';
 
@@ -107,7 +108,8 @@ export class PreferencesComponent {
   private transloco = inject(TranslocoService);
   protected readonly dates = inject(DateFormatService);
 
-  activeLang = signal(this.transloco.getActiveLang());
+  /** The language the page is shown in. After a failed load that is the fallback, and so is the highlighted button here. */
+  readonly activeLang = inject(ActiveLanguage).language;
 
   readonly languages = [
     { code: 'en', label: 'English' },
@@ -132,7 +134,6 @@ export class PreferencesComponent {
 
   setLang(lang: string): void {
     this.transloco.setActiveLang(lang);
-    this.activeLang.set(lang);
     localStorage.setItem('lang', lang);
   }
 
