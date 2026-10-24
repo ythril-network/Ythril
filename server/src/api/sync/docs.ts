@@ -19,8 +19,10 @@ import { readAfterSeq, encodeSeqCursor } from '../../util/seq-keyset.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
+import { readAfterPosition } from '../../util/position-keyset.js';
+import { pageAnswer } from '../../sync/wire-answer.js';
 import { parseLimit } from '../../util/pagination.js';
-import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, BAD_SYNC_START, refusePeerSpace, refusePeerWrite, pushAllowed, withSchemaViolations } from './_shared.js';
+import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, syncPositionStart, isPositionRequest, BAD_SYNC_START, BAD_POSITION_START, refusePeerSpace, refusePeerWrite, pushAllowed, withSchemaViolations } from './_shared.js';
 import { boundedRows } from '../../brain/write-validation.js';
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
@@ -90,6 +92,20 @@ function pageBySeq<T extends { _id: string; seq: number }>(key: PayloadKey, tomb
       const { spaceId, networkId, sinceSeq, limit, cursor, full: fullParam } = req.query as Record<string, unknown>;
       if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
       if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
+
+      // A read by POSITION (`afterPos`, or a `p1.` cursor): the 6.0 page, below the settled cap, with no riders — a tombstone is an item of the
+      // same stream and is served by `GET /tombstones`. A request that names neither is the legacy seq read below, until the wire moves.
+      if (isPositionRequest(req.query as Record<string, unknown>)) {
+        const start = syncPositionStart(req.query as Record<string, unknown>);
+        if (start === undefined) { res.status(400).json({ error: BAD_POSITION_START }); return; }
+        const pageSize = parseLimit(limit, 100, 500);
+        const returnFull = fullParam === 'true';
+        const read = await readAfterPosition<T>(spaceId, collection, start, {
+          limit: pageSize + 1, extra: extraFilter, projection: returnFull ? LOCAL_ONLY_EXCLUSION : { _id: 1, seq: 1 },
+        });
+        res.json(pageAnswer(read, pageSize, returnFull && serve ? serve : undefined));
+        return;
+      }
 
       const sinceVal = syncReadStart(sinceSeq, cursor);
       if (sinceVal === undefined) { res.status(400).json({ error: BAD_SYNC_START }); return; }

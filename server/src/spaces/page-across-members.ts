@@ -39,6 +39,12 @@ export interface PageRequest<T> {
   skip: number;
   /** Max `skip + limit` for the MULTI-member case. Ignored when there is one member, which has no window. */
   ceiling: number;
+  /**
+   * What the merge takes off each row of the answer once it has ordered by it: the order keys a merge read added and the order-only
+   * fields (`projectionForOrderedMerge`'s `finish`, which includes `withoutOrderOnly`). Applied HERE, to the rows of the window, so a
+   * caller of the merge cannot hand a landing position to an answer by forgetting a line.
+   */
+  finish?: (row: T) => T;
 }
 
 export type PageResult<T> =
@@ -48,12 +54,13 @@ export type PageResult<T> =
 
 export async function pageAcrossMembers<T>(req: PageRequest<T>): Promise<PageResult<T>> {
   const { members, readMember, compare, limit, skip, ceiling } = req;
+  const finish = req.finish ?? ((row: T) => row);
 
   if (members.length === 0) return { ok: true, rows: [] };
 
   if (members.length === 1) {
     // No window and no slice: the database applies both bounds, so depth costs nothing extra and cannot truncate.
-    return { ok: true, rows: await readMember(members[0] as string, limit, skip) };
+    return { ok: true, rows: (await readMember(members[0] as string, limit, skip)).map(finish) };
   }
 
   const window = skip + limit;
@@ -67,5 +74,5 @@ export async function pageAcrossMembers<T>(req: PageRequest<T>): Promise<PageRes
 
   const merged: T[] = [];
   for (const mid of members) merged.push(...await readMember(mid, window, 0));
-  return { ok: true, rows: merged.sort(compare).slice(skip, skip + limit) };
+  return { ok: true, rows: merged.sort(compare).slice(skip, skip + limit).map(finish) };
 }

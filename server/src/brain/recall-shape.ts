@@ -24,7 +24,7 @@
  * own, not bolted onto a file move.
  */
 import type { RecallResult, RecallKnowledgeType } from './recall.js';
-import { WRITE_GUARD_FIELDS } from '../sync/local-only-fields.js';
+import { WRITE_GUARD_FIELDS, POSITION_FIELDS, WRITTEN_HERE } from '../sync/local-only-fields.js';
 
 /**
  * The fields a recall result carries for the SYSTEM rather than for the caller.
@@ -95,6 +95,23 @@ export const RECALL_RANKING_DIAGNOSTICS = ['lexicalScore', 'fusedScore', 'vector
  */
 
 /**
+ * The fields a read may use to ORDER rows and never hand to a caller (bundle-81, design rev 8 §2, decision 11, P26). Its one question:
+ * "which fields may a read use to order rows but never hand to a caller".
+ *
+ * `pos` is where a record landed on this instance: the default order of every Brain list (`LANDING_ORDER`), so a read sorts by it, and
+ * it is local state, so no answer carries it. A field in {@link NEVER_RETURNED_FIELDS} is stripped AT THE STORE READ (`brain/projection.ts`)
+ * and so never reaches the cross-space merge, which then sees it undefined on every row and silently orders by something else (P26: a
+ * wrong order with a 200, on MCP `filter` and on the REST list merge). A second class says which fields the merge may read.
+ *
+ *  - **A caller's projection can never name one** (`{ pos: 1 }` is dropped as `{ embedding: 1 }` is). The one path that admits it is
+ *    `projectionForOrderedMerge`, which adds the order-only keys the merge's sort names.
+ *  - **The strip after the merge is inside the merge** (`withoutOrderOnly`, `brain/read-projection.ts`, applied by the page's one merge function),
+ *    so no caller can hand `pos` to an answer by forgetting a line.
+ *  - **Disjoint from {@link NEVER_RETURNED_FIELDS}** (`an-order-only-field-orders-and-is-never-returned-db` holds it).
+ */
+export const ORDER_ONLY_FIELDS: readonly string[] = ['pos'];
+
+/**
  * Stripped always, restorable by nothing — deliberately NOT part of `RECALL_DIAGNOSTIC_FIELDS`.
  *
  * "The vector is never returned" is stated on both doors and in the guides, and it was very nearly false:
@@ -110,7 +127,19 @@ export const RECALL_RANKING_DIAGNOSTICS = ['lexicalScore', 'fusedScore', 'vector
  * copy that travelled (an export, a webhook) would name a subject under another instance's index. A reader that must see it —
  * the holder lookup and the stored-edge dry run — names it in its own explicit projection.
  */
-export const NEVER_RETURNED_FIELDS: readonly string[] = ['embedding', 'deliveredBy', ...WRITE_GUARD_FIELDS];
+export const NEVER_RETURNED_FIELDS: readonly string[] = [
+  'embedding', 'deliveredBy', ...WRITE_GUARD_FIELDS,
+  // The version a position was taken for, and whether this instance wrote the record (bundle-81, design rev 8 §2): local state nobody reads
+  // back. `writtenHere` for an author-less row is exactly "not delivered by a peer", the bit the filter sanitizer exists to withhold.
+  // `pos` is NOT here: it is the order-only class below, because a field named here never reaches a cross-space merge.
+  ...[...POSITION_FIELDS].filter(f => !ORDER_ONLY_FIELDS.includes(f)), WRITTEN_HERE,
+];
+
+/**
+ * Everything no ANSWER carries: {@link NEVER_RETURNED_FIELDS} and {@link ORDER_ONLY_FIELDS}. What a projection withholds, a strip removes,
+ * a predicate may not name and a spill must not carry; the two classes differ only in whether a MERGE may read the second to order.
+ */
+export const WITHHELD_FROM_ANSWERS: readonly string[] = [...NEVER_RETURNED_FIELDS, ...ORDER_ONLY_FIELDS];
 
 /**
  * The named fields that are actually present, or `{}` when the caller did not ask for them.
@@ -142,12 +171,12 @@ export function withoutDiagnostics<T extends object>(results: T[], include: bool
   // caller who wanted to know why it ranked there. The vector is still removed either way.
   if (include) return results.map(r => {
     const out = { ...r } as Record<string, unknown>;
-    for (const k of NEVER_RETURNED_FIELDS) delete out[k];
+    for (const k of WITHHELD_FROM_ANSWERS) delete out[k];
     return out as T;
   });
   return results.map(r => {
     const out = { ...r } as Record<string, unknown>;
-    for (const k of [...RECALL_RECORD_DIAGNOSTICS, ...NEVER_RETURNED_FIELDS]) delete out[k];
+    for (const k of [...RECALL_RECORD_DIAGNOSTICS, ...WITHHELD_FROM_ANSWERS]) delete out[k];
     return out as T;
   });
 }

@@ -17,6 +17,7 @@ import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { MAX_SYNC_SEQ } from '../../util/seq.js';
 import { decodeSeqCursor, parseSeqText, type SeqPosition } from '../../util/seq-keyset.js';
+import { decodePositionCursor, parsePositionText, POSITION_CURSOR_PREFIX, type PositionStart } from '../../util/position-keyset.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
 import { MACHINE_MADE_SOURCES } from '../../files/derived-fields.js';
@@ -286,6 +287,35 @@ export function syncReadStart(sinceSeq: unknown, cursor: unknown): SeqPosition |
   if (sinceSeq === undefined) return { seq: 0 };
   const seq = typeof sinceSeq === 'string' ? parseSeqText(sinceSeq) : undefined;
   return seq === undefined ? undefined : { seq };
+}
+
+/** The one refusal text for a position start a sync read cannot read. Fixed, so it never repeats what the caller sent. */
+export const BAD_POSITION_START = 'afterPos must be a whole number from 0 to 9007199254740991, and cursor one a previous page of this route returned';
+
+/**
+ * Is this a read by POSITION (6.0 paging): an `afterPos`, or a `p1.` cursor? A request that names neither is the legacy seq read, which
+ * the wire still answers until it moves to positions (`readAfterSeq`).
+ */
+export function isPositionRequest(query: Record<string, unknown>): boolean {
+  const cursor = query['cursor'];
+  return query['afterPos'] !== undefined || (typeof cursor === 'string' && cursor.startsWith(POSITION_CURSOR_PREFIX));
+}
+
+/**
+ * Where a position read starts, from the request: the `cursor` a previous page handed back when there is one, else `afterPos` (a whole
+ * number from 0 to `Number.MAX_SAFE_INTEGER`, its own parse and its own bound: `parseSeqText`'s `MAX_SYNC_SEQ` would refuse every clock-band
+ * position), else the start of the stream. `undefined` is a start that cannot be read, and the route answers `400` with {@link BAD_POSITION_START}:
+ * a refusal and not a default, as `syncReadStart`'s is, because a value that read as 0 would silently start over. A `sinceSeq` beside a position
+ * start is refused too: the two are numbers in different spaces.
+ */
+export function syncPositionStart(query: Record<string, unknown>): PositionStart | undefined {
+  if (query['sinceSeq'] !== undefined) return undefined;
+  const cursor = query['cursor'];
+  if (cursor !== undefined && cursor !== '') return decodePositionCursor(cursor);
+  const afterPos = query['afterPos'];
+  if (afterPos === undefined) return { pos: 0 };
+  const pos = typeof afterPos === 'string' ? parsePositionText(afterPos) : undefined;
+  return pos === undefined ? undefined : { pos };
 }
 
 // ── Space access guard ─────────────────────────────────────────────────────

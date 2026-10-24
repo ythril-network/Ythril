@@ -26,6 +26,8 @@ import { getConfig, saveConfigSoon } from '../config/loader.js';
 import { reachesSpace } from '../auth/space-reach.js';
 import type { Config, NetworkMember } from '../config/types.js';
 import { setMemberSpaceMark } from './member-space-mark.js';
+import { settledPositionCap } from '../util/position-clock.js';
+import { recordPositions } from './record-position-stream.js';
 
 /** The subset of a member this decision needs — so the pure part is testable without a config. */
 export interface ServedMember {
@@ -171,6 +173,31 @@ export function foldServedSeq(current: number | undefined, observed: number): nu
   if (!Number.isFinite(observed) || !Number.isInteger(observed) || observed <= 0) return null;
   if (current !== undefined && Number.isFinite(current) && current >= observed) return null;
   return observed;
+}
+
+/**
+ * The value a position mark this instance answers for may be recorded at: `min(value, settledPositionCap(records, spaceId))`, or `null` when
+ * there is nothing to record (a value that is not a positive whole number, or a stream whose seed could not be read).
+ *
+ * ## What it prevents (bundle-81, decision 4 and decision 34)
+ *
+ * The marks this instance answers for (`lastPosPushed`, `lastPosServed`) seed its position clock after a restart that lost its stored maximum
+ * (`sync/record-position-stream.ts`): positions continue above every number a peer holds in OUR stream. A mark that took a peer's number
+ * as sent — a puller's `afterPos` of 2^53 - 1 — would drive every later stamp to the ceiling, so each is cut at this instance's own settled cap
+ * for the space at the moment it is recorded, and that cut lives in ONE function that both mark writers (the served fold, the pushed mark) go
+ * through. A position can only ever be recorded as high as one this instance has handed out or is about to.
+ *
+ * The cap is async (the stream is seeded from the store once), so it is awaited INSIDE a `try`: a seed that cannot be read records nothing
+ * and NEVER throws, because the served fold runs on the tombstone pull's hot path and a throw there would turn a read the peer is owed into a
+ * `500`. The failed seed is not remembered (`util/position-clock.ts`), so the next call records the capped mark.
+ */
+export async function ownPositionMark(spaceId: string, value: number): Promise<number | null> {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) return null;
+  try {
+    return Math.min(value, await settledPositionCap(recordPositions, spaceId));
+  } catch {
+    return null;
+  }
 }
 
 /**

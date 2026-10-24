@@ -8,7 +8,8 @@ import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../../config/types.js';
 import { z } from 'zod';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { peerBoundTo } from '../../auth/peer-bound.js';
-import { listTombstones } from '../../brain/tombstones.js';
+import { listTombstones, listTombstonesAfterPosition } from '../../brain/tombstones.js';
+import { pageAnswer } from '../../sync/wire-answer.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { withinWriteBound } from '../../db/write-bound.js';
@@ -18,7 +19,7 @@ import {
 } from '../../files/tombstones.js';
 import { applyPeerFileTombstones } from '../../files/peer-tombstone-apply.js';
 
-import { refusePeerSpace, refusePeerWrite, pushAllowed, deliveryOfRequest, syncReadStart, BAD_SYNC_START } from './_shared.js';
+import { refusePeerSpace, refusePeerWrite, pushAllowed, deliveryOfRequest, syncReadStart, syncPositionStart, isPositionRequest, BAD_SYNC_START, BAD_POSITION_START } from './_shared.js';
 import { parseLimit } from '../../util/pagination.js';
 import { recordServedSeq } from '../../sync/served-watermark.js';
 import { completeThrough } from '../../sync/watermark.js';
@@ -57,6 +58,15 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
     const { spaceId, networkId, sinceSeq, cursor, limit } = req.query as Record<string, unknown>;
     if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
+
+    // A read by POSITION (`afterPos`, or a `p1.` cursor): the 6.0 page. Tombstones are items of the same stream as the records, served in
+    // `(pos, _id)` order below the settled cap, each carrying its type; the legacy seq read below stays until the wire moves.
+    if (isPositionRequest(req.query as Record<string, unknown>)) {
+      const start = syncPositionStart(req.query as Record<string, unknown>);
+      if (start === undefined) { res.status(400).json({ error: BAD_POSITION_START }); return; }
+      res.json(pageAnswer(await listTombstonesAfterPosition(spaceId, start, parseLimit(limit, 1000, 5000) + 1), parseLimit(limit, 1000, 5000)));
+      return;
+    }
 
     // One reading of the start and the size for every sync read (`Q-388`): see `syncReadStart`.
     const since = syncReadStart(sinceSeq, cursor);
