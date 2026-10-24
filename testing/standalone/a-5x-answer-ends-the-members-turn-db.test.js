@@ -55,7 +55,10 @@ const SENTINEL = 3;
 /** Every route a turn reaches only after its record transfer: the manifest, the file-tombstone stream and the byte routes. */
 const FILE_ROUTES = ['/api/sync/manifest', '/api/sync/file-tombstones', '/api/files/'];
 
-let door, proxy, snapshot, ME, networkView, syncCyclesTotal;
+let door, proxy, snapshot, ME, networkView, syncCyclesTotal, engine;
+
+/** One cycle of the whole network, as the scheduler runs it: the one that counts a member failure and a cycle status (`runSyncForPeer` counts neither). */
+const networkCycle = async () => { await engine.runSyncForNetwork(door.NET); await door.settled(); };
 
 /** What one case seeds, and the leg and mark it is about. */
 const CASES = [
@@ -92,6 +95,7 @@ describe('a 5.x answer ends the member\'s turn', { skip }, () => {
     door.member().url = proxy.url;
     snapshot = structuredClone(door.member());
     ME = { instanceId: door.instanceId, instanceLabel: 'Receiver' };
+    engine = await import('../../server/dist/sync/engine.js');
     ({ networkView } = await import('../../server/dist/networks/network-acts.js'));
     ({ syncCyclesTotal } = await import('../../server/dist/metrics/registry.js'));
   });
@@ -116,7 +120,7 @@ describe('a 5.x answer ends the member\'s turn', { skip }, () => {
         await fresh(c.direction);
         await c.seed();
         setMark(door, c.kind, S, SENTINEL);
-        await door.sync();
+        await networkCycle();
       }
       it('control: in the 6.0 shape the same cycle reaches the file routes', async () => {
         await controlCycle();
@@ -134,7 +138,7 @@ describe('a 5.x answer ends the member\'s turn', { skip }, () => {
         setMark(door, c.kind, S, SENTINEL);
         proxy.state.mode = '5.x';
         const refusedBefore = await refusedCycles();
-        await door.sync();
+        await networkCycle();
 
         const mark = readMark(door, c.kind, S);
         assert.ok(mark === SENTINEL, `the ${c.kind} mark is ${String(mark)}: a mark was written from an answer that says nothing about positions (it must be exactly ${SENTINEL})`);
