@@ -28,6 +28,7 @@ import { stripComments } from '../../testing/strip-comments';
 import { ReviewTabComponent } from './review-tab.component';
 import { DuplicatesApi } from '../../core/duplicates-api.service';
 import { ContradictionsApi } from '../../core/contradictions-api.service';
+import { ForksApi } from '../../core/forks-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { ToastService } from '../../core/toast.service';
@@ -73,6 +74,7 @@ function setup(merge: (id: string) => unknown) {
         mergeDuplicate: merge,
       } },
       { provide: ContradictionsApi, useValue: { listContradictions: () => of({ contradictions: [] }) } },
+      { provide: ForksApi, useValue: { listForks: () => of({ forks: [], skip: 0, limit: 25 }) } },
       { provide: ToastService, useValue: {
         error: (m: string) => toastErrors.push(m), success: (m: string) => toastOther.push(m), info: (m: string) => toastOther.push(m), show: (m: string) => toastOther.push(m),
       } },

@@ -13,6 +13,7 @@ import { getTranslocoModule } from '../../testing/transloco-testing';
 import { ReviewTabComponent } from './review-tab.component';
 import { DuplicatesApi } from '../../core/duplicates-api.service';
 import { ContradictionsApi } from '../../core/contradictions-api.service';
+import { ForksApi } from '../../core/forks-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { ToastService } from '../../core/toast.service';
@@ -56,6 +57,8 @@ function setup(
         keepSide: () => of({ status: 'resolved', resolution: 'superseded', supersededId: 'b', resolvedBy: 'Admin' }),
         ...conApi,
       } },
+      // The Forks section loads with the tab (bundle-81); these specs are about the other three, so it answers an empty list.
+      { provide: ForksApi, useValue: { listForks: () => of({ forks: [], skip: 0, limit: 25 }), resolveFork: () => of({}) } },
       { provide: ToastService, useValue: { error: (m: string) => toastErrors.push(m), success: () => {}, info: (m: string) => toastInfos.push(m), show: () => {} } },
       { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(confirmResult) } },
     ],
@@ -322,13 +325,15 @@ describe('ReviewTabComponent', () => {
   });
 
   describe('sub-tabs', () => {
-    it('offers Duplicates, Contradictions and Suggestions as real tabs, Duplicates first', () => {
+    it('offers Duplicates, Contradictions, Suggestions and Forks as real tabs, Duplicates first and Forks last', () => {
       const { f } = setup();
       const tabs = [...(f.nativeElement as HTMLElement).querySelectorAll('nav.tabs button[role="tab"]')];
-      expect(tabs.length).toBe(3);
+      expect(tabs.length).toBe(4);   // 3 until bundle-81 added the Forks tab
       expect(tabs[0].getAttribute('aria-selected')).toBe('true');   // lands on Duplicates
       expect(tabs[1].getAttribute('aria-selected')).toBe('false');
       expect(tabs[2].getAttribute('aria-selected')).toBe('false');
+      expect(tabs[3].getAttribute('aria-selected')).toBe('false');
+      expect(tabs[3].id).toBe('review-tab-forks');
     });
 
     it('switches panels, and the duplicates list is not rendered while Contradictions is shown', () => {
