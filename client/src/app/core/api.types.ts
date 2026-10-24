@@ -851,6 +851,21 @@ export interface Network {
    * see", never "none owed" (an empty array is "none owed").
    */
   owedSpaceActs?: OwedSpaceAct[];
+  /**
+   * The re-reads some member still owes this network, one entry per member and space (bundle-81, decision 39): `owed` is a space still to
+   * come, `catching` the space being read now. Served to instance administrators ONLY, beside `owedSpaceActs`: absent is "not yours to
+   * see", an empty array is "none owed".
+   */
+  rereadOwed?: RereadOwedEntry[];
+  /** What each of the network's spaces holds, in records, for the re-read estimate (decision 42). Administrators only, like `rereadOwed`. */
+  spaceRecordCounts?: Record<string, number>;
+}
+
+/** A member's re-read of one space of a network, as the administrator's view lists it. */
+export interface RereadOwedEntry {
+  instanceId: string;
+  space: string;
+  state: 'owed' | 'catching';
 }
 
 export interface NetworkMember {

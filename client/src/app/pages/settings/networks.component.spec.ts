@@ -460,4 +460,49 @@ describe('NetworksComponent (characterization)', () => {
       expect(votes.header()).toContain(K.ownYesCarriesNo);
     });
   });
+
+  /*
+   * Bundle-81 (decision 39): a re-read some member still owes. `rereadOwed` is the administrator's view of the owed marker, one entry per member
+   * and space; the card says it in the header, the Re-read section lists who owes which space, and the member's own row says whether it is
+   * owed or catching up. A reader's view carries none of it.
+   */
+  describe('the re-reads some member still owes a network (bundle-81)', () => {
+    function rendered(n: Network) {
+      make();
+      api.listNetworks.mockReturnValue(of({ networks: [n] }));
+      const fixture = TestBed.createComponent(NetworksComponent);
+      fixture.detectChanges();
+      fixture.componentInstance.toggleNetwork(n.id);
+      fixture.detectChanges();
+      return (fixture.nativeElement as HTMLElement);
+    }
+    const members = [
+      { instanceId: 'berlin-1111', label: 'Berlin', url: 'https://b.example', direction: 'both' as const },
+      { instanceId: 'gdansk-2222', label: 'Gdansk', url: 'https://g.example', direction: 'both' as const },
+    ];
+    const owing = () => net({ id: 'n1', type: 'closed', spaces: ['proj', 'notes'], members, spaceRecordCounts: { proj: 3, notes: 5 },
+      rereadOwed: [{ instanceId: 'berlin-1111', space: 'proj', state: 'catching' }, { instanceId: 'gdansk-2222', space: 'proj', state: 'owed' }],
+    } as unknown as Partial<Network>);
+
+    it('the header carries a pill, the section lists both members, and each member row says its own state', () => {
+      const el = rendered(owing());
+      expect(el.textContent).toContain('networks.reread.header');
+      const rows = Array.from(el.querySelectorAll('app-network-member-row'));
+      expect(rows.map(r => /networks\.reread\.member\.(catchingUp|owed)/.exec(r.textContent ?? '')?.[1])).toEqual(['catchingUp', 'owed']);
+      expect(Array.from(el.querySelectorAll('.peer-owed .who')).map(w => w.textContent)).toEqual(['Berlin', 'Gdansk']);
+    });
+
+    it('with nothing owed the card says so, offers the control, and shows no pill or member state', () => {
+      const el = rendered(net({ id: 'n1', type: 'closed', spaces: ['proj'], members, rereadOwed: [] } as unknown as Partial<Network>));
+      expect(el.textContent).not.toContain('networks.reread.header');
+      expect(el.textContent).not.toContain('networks.reread.member.');
+      expect(el.textContent).toContain('networks.reread.none');
+      expect(Array.from(el.querySelectorAll('button')).some(b => b.textContent?.includes('networks.reread.button'))).toBe(true);
+    });
+
+    it('a view without the administrator\'s fields shows no re-read section at all', () => {
+      const el = rendered(net({ id: 'n1', type: 'closed', spaces: ['proj'], members } as unknown as Partial<Network>));
+      expect(el.textContent).not.toContain('networks.reread.');
+    });
+  });
 });

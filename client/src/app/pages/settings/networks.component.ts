@@ -29,6 +29,8 @@ import { RecentDecisionsComponent } from './network-decisions.component';
 import { castNotice, castRefusalNotice, roundName, type CastNotice, type Translate } from './network-vote-cast';
 import { DateFormatService } from '../../core/date-format.service';
 import { NetworkOwedActsComponent } from './network-owed-acts.component';
+import { NetworkRereadSectionComponent } from './network-reread-section.component';
+import { rereadOwedMembers, rereadStateOf } from './network-reread-view';
 import { voteTally } from '../../core/vote-round-view';
 import { NetworkCreateDialogComponent } from './network-create-dialog.component';
 import { NetworkJoinDialogComponent } from './network-join-dialog.component';
@@ -38,7 +40,7 @@ import { PluralPipe } from '../../core/plural.pipe';
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [PluralPipe, CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent, NetworkOwedActsComponent],
+  imports: [PluralPipe, CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent, NetworkOwedActsComponent, NetworkRereadSectionComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -188,6 +190,9 @@ import { PluralPipe } from '../../core/plural.pipe';
             @if (net.owedSpaceActs?.length) {
               <app-status-pill variant="warn" [dot]="true">{{ 'networks.header.owedActs' | transloco: { count: net.owedSpaceActs!.length } }}</app-status-pill>
             }
+            @if (rereadOwedMembers(net) > 0) {
+              <app-status-pill variant="warn" [dot]="true">{{ 'networks.reread.header' | transloco }}</app-status-pill>
+            }
             <span style="flex:1;"></span>
             <span style="color:var(--text-muted); display:inline-flex;"><ph-icon [name]="expanded() === net.id ? 'caret-up' : 'caret-down'" [size]="14" /></span>
           </div>
@@ -291,6 +296,9 @@ import { PluralPipe } from '../../core/plural.pipe';
                 <app-network-add-space [network]="net" [spaces]="availableSpaces()" (added)="load()" />
               </div>
 
+              <!-- Re-read everything from peers: what is owed, and the control that starts one (bundle-81) -->
+              <app-network-reread-section [network]="net" (started)="load()" />
+
               <!-- Members, as this instance's role sees them (F-38.1) -->
               @for (group of memberGroups(net); track group.titleKey) {
                 <div class="section-title">{{ group.titleKey | transloco }}</div>
@@ -300,6 +308,7 @@ import { PluralPipe } from '../../core/plural.pipe';
                 @for (m of group.members; track m.instanceId) {
                   <app-network-member-row
                     [member]="m"
+                    [reread]="rereadStateOf(net, m.instanceId)"
                     [removable]="net.myRole?.role !== 'subscriber'"
                     [removing]="!!removingMember[net.id + ':' + m.instanceId]"
                     (remove)="removeMember(net, m.instanceId, m.label)" />
@@ -429,6 +438,8 @@ export class NetworksComponent implements OnInit {
   });
 
   readonly voteTally = voteTally;
+  readonly rereadStateOf = rereadStateOf;
+  readonly rereadOwedMembers = rereadOwedMembers;
   private readonly decisions = viewChildren(RecentDecisionsComponent);
   private readonly dates = inject(DateFormatService);
   private readonly t: Translate = (key, params) => this.transloco.translate(key, params);
