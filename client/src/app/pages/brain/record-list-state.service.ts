@@ -1,5 +1,6 @@
-import { Injectable, signal } from '@angular/core';
-import { httpErrorReason, type RefusalSource } from '../../core/refusal-text';
+import { Injectable, inject, signal } from '@angular/core';
+import { TranslocoService } from '@jsverse/transloco';
+import { httpErrorReason, refusalText, type RefusalSource } from '../../core/refusal-text';
 
 /**
  * Singleton interaction state shared by every record tab (memories/entities/edges/chrono/filemeta).
@@ -45,10 +46,24 @@ export class RecordListState {
    */
   deleteError = signal('');
 
-  /** The inline edit's save was refused: hold the answer itself, and its sentence for whoever wants a string. */
+  private readonly transloco = inject(TranslocoService);
+
+  /**
+   * The inline edit's save was refused: hold the answer itself, and its sentence for whoever wants a string.
+   *
+   * The sentence is TRANSLATED only when the body carries a `code` (bundle-81, decision 27): a coded refusal such as
+   * `record_version_at_ceiling` has words under `networks.refusal.*` in every language, so reading it through `httpErrorReason`
+   * would show the server's English to a German or Polish reader. The edit path also answers refusals that carry no code -
+   * a schema refusal, a `412` precondition failure, a body with no JSON at all - and those keep `httpErrorReason`'s text, byte
+   * for byte, so they read as they did before. A code the client has no words for still falls back to the server's own sentence.
+   */
   failEdit(failure: RefusalSource): void {
     this.editFailure.set(failure);
-    this.editError.set(httpErrorReason(failure) || String(failure.status ?? '') || 'error');
+    const code = failure.error?.code;
+    const plain = httpErrorReason(failure);
+    const coded = typeof code === 'string' && code !== '' && failure.status !== 412;
+    const sentence = coded ? refusalText(this.transloco, failure, '') || plain : plain;
+    this.editError.set(sentence || String(failure.status ?? '') || 'error');
   }
 
   clearEditFailure(): void {
