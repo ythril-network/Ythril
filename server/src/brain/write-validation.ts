@@ -55,6 +55,9 @@ import { isRuleRow, ruleReadsChanged } from '../spaces/schema-rules.js';
 import { mergeTags, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
 import { WriteConflict } from './write-plan/types.js';
+import { RecordVersionAtCeiling } from './write-precondition.js';
+import { PositionClockUnusable, PositionsSeedUnavailable } from '../util/errors.js';
+import { classifyReadFailure } from './store-failure.js';
 import { tallySchemaRefusal, type SchemaRefusalDoor, type SchemaRefusalOutcome } from './schema-refusal-tally.js';
 
 /**
@@ -415,15 +418,26 @@ export function connectionRefusalAnswer(
 /**
  * What a write that did not land answers when the cause is a refusal OR a conflict — the status, from ONE place.
  *
- * `connectionRefusalAnswer`'s two refusals, and a {@link WriteConflict} (another write kept moving the record; nothing was
- * written; retry) as `409`, `{ error }`. The app's error handler, `callTool`'s catch and `connectionsNotWrittenAnswer`
+ * `connectionRefusalAnswer`'s two refusals, a {@link WriteConflict} (another write kept moving the record; nothing was
+ * written; retry) as `409`, `{ error }`, and the three refusals of a local write's STAMP (bundle-81): a record whose version is at the
+ * ceiling (`409`, `{ error, code: 'record_version_at_ceiling', id }`: this instance can no longer change or delete it), a system clock
+ * before the first usable position instant and a position seed the store could not read (`503`, `{ error, code, retryable: true }`).
+ * The app's error handler, `callTool`'s catch, `sendCaughtFailure` and `connectionsNotWrittenAnswer`
  * each spelled this mapping, so a status changed in one was changed in two of three. A route that answers its own
- * conflict differently keeps calling `connectionRefusalAnswer`; this is the question the three SHARED mappers ask.
+ * conflict differently keeps calling `connectionRefusalAnswer`; this is the question the SHARED mappers ask.
  */
 export function writeRefusalAnswer(
   err: unknown, verb: 'create' | 'update',
 ): { status: number; body: Record<string, unknown> } | null {
   if (err instanceof WriteConflict) return { status: 409, body: { error: err.message } };
+  // One sentence and one code for both doors: REST answers this body, MCP carries it as `structuredContent` beside the same text.
+  if (err instanceof RecordVersionAtCeiling) return { status: 409, body: { error: err.message, code: err.code, id: err.id } };
+  if (err instanceof PositionClockUnusable) return { status: 503, body: { error: err.message, code: err.code, retryable: true } };
+  // A seed the STORE could not read is the store's failure, answered as every door answers one (`Retry-After`, the store's own sentence, its code): this
+  // refusal is only for a seed that failed for another reason. The chain is read as `storeFailureAnswer` reads it, so the two cannot disagree.
+  if (err instanceof PositionsSeedUnavailable && classifyReadFailure(err).status < 500) {
+    return { status: 503, body: { error: err.message, code: err.code, retryable: true } };
+  }
   return connectionRefusalAnswer(err, verb);
 }
 

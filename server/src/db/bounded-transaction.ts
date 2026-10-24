@@ -4,9 +4,9 @@
  * ## The question it answers
  *
  * *"Run these writes as one transaction, and be sure it ends when the write bound says so."* Nothing else: it holds
- * NO seq horizon. The bound and the horizon are two questions. A transaction that writes seq-carrying documents asks
- * the second one too, and puts the hold around this (`brain/held-transaction.ts`); a transaction that writes none (the
- * lease fence, `files/media/lease.ts`) must not stall every seq-paged reader of a space for as long as it runs.
+ * NO position horizon. The bound and the horizon are two questions. A transaction that writes seq-carrying documents asks
+ * the second one too, and puts the floor around this (`brain/held-transaction.ts`); a transaction that writes none (the
+ * lease fence, `files/media/lease.ts`) must not stall every position-paged reader of a space for as long as it runs.
  *
  * ## What it prevents
  *

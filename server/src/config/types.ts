@@ -1898,6 +1898,13 @@ export interface TombstoneDoc {
    * through (`tombSeqFor`) and is excluded from every row served or pushed (`listTombstones`). Tombstones are not hashed.
    */
   storedVia?: string;
+  /**
+   * LOCAL, never on the wire (`TOMBSTONE_LOCAL_FIELDS`): where this tombstone sits in this instance's record stream (`pos`) and the version
+   * that position was taken for (`posAtSeq`). A tombstone lands like a record — a local delete, a relayed deletion — so it is paged and acknowledged by
+   * position, and a relayed one is offered on to every peer even though its version (`seq`) is its issuer's.
+   */
+  pos?: number;
+  posAtSeq?: number;
 }
 
 /**
@@ -2089,7 +2096,10 @@ export interface LinkViolationDoc {
 
 export interface SpaceCounterDoc {
   _id: string;  // spaceId
+  /** The space's version counter `V` (`util/version-stamp.ts`): never above `VERSION_FLOOR_CAP`. Only ever raised. */
   seq: number;
+  /** The counter as the build that last wrote it saw it, written with it; what the re-upgrade detector compares (bundle-81 §3). */
+  seqSeenBy6?: number;
 }
 
 /**
