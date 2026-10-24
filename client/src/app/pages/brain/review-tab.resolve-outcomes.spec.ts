@@ -29,6 +29,7 @@ import { CLIENT_ROOT } from '../../testing/tracked-sources';
 import { ReviewTabComponent } from './review-tab.component';
 import { DuplicatesApi } from '../../core/duplicates-api.service';
 import { ContradictionsApi } from '../../core/contradictions-api.service';
+import { ForksApi } from '../../core/forks-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { ToastService } from '../../core/toast.service';
@@ -97,6 +98,7 @@ function setup(lang: Lang, conApi: Record<string, unknown>) {
         listContradictions: () => of({ contradictions: [con()], nliConfigured: true }),
         ...conApi,
       } },
+      { provide: ForksApi, useValue: { listForks: () => of({ forks: [], skip: 0, limit: 25 }) } },
       { provide: ToastService, useValue: { error: push, success: push, info: push, show: push } },
       { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(true) } },
     ],

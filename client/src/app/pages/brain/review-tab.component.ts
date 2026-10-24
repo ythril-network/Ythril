@@ -19,6 +19,8 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { refusalText } from '../../core/refusal-text';
 import { MergeRefusals } from './merge-refusals';
 import { PluralText } from '../../core/plural-text.service';
+import { ReviewForksPanelComponent } from './review-forks-panel.component';
+import { ReviewForksState } from './review-forks-state';
 
 /** The family a failed contradiction resolve's `code` is said under (`resolvedOtherwise`, and the codes every family carries). */
 const RESOLVE_REFUSALS = 'review.contradictions.refusal';
@@ -26,7 +28,8 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
 @Component({
   selector: 'app-review-tab',
   standalone: true,
-  imports: [FormsModule, PhIconComponent, TranslocoPipe, SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, ErrorStateComponent],
+  imports: [FormsModule, PhIconComponent, TranslocoPipe, SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, ErrorStateComponent, ReviewForksPanelComponent],
+  providers: [ReviewForksState],
   styles: [`
     .page-title { margin: 0 0 4px; font-size: 18px; }
     .intro { color: var(--text-muted); font-size: 13px; margin: 0 0 16px; }
@@ -135,7 +138,8 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
         <button class="tab" type="button" role="tab" [class.active]="sub() === t"
           [attr.aria-selected]="sub() === t" [attr.id]="'review-tab-' + t"
           [attr.aria-controls]="'review-panel-' + t" (click)="sub.set(t)">
-          {{ 'review.sub.' + t | transloco }}
+          {{ (t === 'forks' ? 'brain.review.forks.tab' : 'review.sub.' + t) | transloco }}
+          @if (t === 'forks' && (forksState.total() ?? 0) > 0) { <span class="badge badge-gray">{{ forksState.total() }}</span> }
         </button>
       }
     </nav>
@@ -448,6 +452,8 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
           </div>
         }
       </section>
+    } @else if (sub() === 'forks') {
+      <app-review-forks-panel [spaceId]="spaceId" [state]="forksState" />
     } @else {
     <section role="tabpanel" id="review-panel-duplicates" aria-labelledby="review-tab-duplicates">
     <p class="intro">{{ 'duplicates.intro' | transloco }}</p>
@@ -737,8 +743,10 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   }
 
   /** Sub-views of the space's record-QA queue. Ordered as a reviewer meets them. */
-  readonly SUBTABS = ['duplicates', 'contradictions', 'suggestions'] as const;
-  readonly sub = signal<'duplicates' | 'contradictions' | 'suggestions'>('duplicates');
+  readonly SUBTABS = ['duplicates', 'contradictions', 'suggestions', 'forks'] as const;
+  readonly sub = signal<'duplicates' | 'contradictions' | 'suggestions' | 'forks'>('duplicates');
+  /** The Forks section's rows, page and last refusal (bundle-81); provided per tab, read by the forks panel. */
+  protected readonly forksState = inject(ReviewForksState);
 
   /** The space's completeness tab jumps back into the Brain's own tabs; the shell owns that switch. */
   @Output() openTab = new EventEmitter<CollectionTab>();
@@ -812,7 +820,8 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     // Suggestions are not record findings — they are findings about the SCHEMA and the space, so a
     // record-type filter has nothing to narrow there. Showing it would imply the list is filtered when
     // it is not, which is the same lie as hiding an active filter.
-    this.sub() !== 'suggestions' && (this.availableTypes().length > 1 || this.typeFilter() !== 'all'));
+    // Forks are not duplicates or contradictions either: they are facts, and the filter's types come from the two lists it narrows.
+    this.sub() !== 'suggestions' && this.sub() !== 'forks' && (this.availableTypes().length > 1 || this.typeFilter() !== 'all'));
 
   // ── Suggestions (space completeness, part B) ─────────────────────────────────
   //
@@ -986,10 +995,10 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   scorePct(s: number): number { return Math.round(Math.min(Math.max(s, 0), 1) * 100); }
   scoreVariant(s: number): 'high' | 'mid' | 'low' { return s >= 0.95 ? 'high' : s >= 0.85 ? 'mid' : 'low'; }
 
-  ngOnInit(): void { if (!this.isView) { this.load(); this.loadContradictions(); this.loadCompleteness(); } }
+  ngOnInit(): void { if (!this.isView) { this.load(); this.loadContradictions(); this.loadCompleteness(); this.forksState.load(this.spaceId); } }
   /** Switching space in the Brain re-points this tab rather than leaving another space's pairs on screen. A view reads none of it. */
   ngOnChanges(ch: SimpleChanges): void {
-    if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.loadContradictions(); this.loadCompleteness(); }
+    if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.loadContradictions(); this.loadCompleteness(); this.forksState.load(this.spaceId); }
   }
 
   load(): void {

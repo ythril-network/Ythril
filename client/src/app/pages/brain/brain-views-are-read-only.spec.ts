@@ -19,6 +19,7 @@ import { VIEW_LENS } from '../../testing/personal-views';
 import { ReviewTabComponent } from './review-tab.component';
 import { DuplicatesApi } from '../../core/duplicates-api.service';
 import { ContradictionsApi } from '../../core/contradictions-api.service';
+import { ForksApi } from '../../core/forks-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { ToastService } from '../../core/toast.service';
@@ -111,6 +112,7 @@ describe('the review tab', () => {
       providers: [
         { provide: DuplicatesApi, useValue: { listDuplicates: () => { throw new Error('a view asked for duplicates'); } } },
         { provide: ContradictionsApi, useValue: { listContradictions: () => { throw new Error('a view asked for contradictions'); } } },
+        { provide: ForksApi, useValue: { listForks: () => { throw new Error('a view asked for forks'); } } },
         { provide: SpacesApi, useValue: { getCompleteness: () => { throw new Error('a view asked for completeness'); } } },
         { provide: BrainApi, useValue: {} },
         { provide: ToastService, useValue: {} },
