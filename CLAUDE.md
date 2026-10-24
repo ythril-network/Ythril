@@ -324,6 +324,8 @@ and `deliveredBy`) and never the derived half (`embedding`, `embeddingModel`, `m
 equivalence that makes it ONE list is the rule two sections above — a field that is hashed must replicate — read backwards: a field that must not
 replicate must not be hashed, or every cycle reports a divergence for a space where nothing is wrong.
 
+**Bundle-81 adds two more local classes and one answer rule, and this section names them.** A record's **landing position** — `pos` and `posAtSeq` (`POSITION_FIELDS`) — is where THIS instance stored it, in its own clock band, and the version the position was taken for: the number a pull pages by, so it is never a peer's, never hashed, never restored (a landing takes a fresh one) and never carried across a replace. `writtenHere` (in `RESTORED_LOCAL_FIELDS`) says this instance wrote the record's current version itself: a restore keeps it, an arrival does not. A **tombstone** has a local class of its own (`TOMBSTONE_LOCAL_FIELDS`): `storedVia`, `issuedHere`, `pos` and `posAtSeq` — how this instance came to hold the deletion, whether it issued it, and where it landed. And `pos` is the one **order-only** field (`ORDER_ONLY_FIELDS`, `brain/recall-shape.ts`): a read may order by it, and no answer returns it.
+
 **The third class is the write guard (`WRITE_GUARD_FIELDS`: `_functionalGuard`, Q-439).** It is local-only like the
 rest and a different thing: a lock in THIS instance's unique index, not a fact about the record. Never restored (a
 backup's copy could hold a second marker for a subject, or one for an edge since relabelled) and never derived (an

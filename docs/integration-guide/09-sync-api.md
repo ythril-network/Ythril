@@ -668,7 +668,7 @@ released only once the server operation is gone (its own deadline has passed, or
 from that space stop short of the stalled seq for at most the hold deadline, then continue. The promise above
 still holds throughout, because a hold is released only once its write can no longer land — a transaction whose commit
 answer is lost is read back while the hold is still held. On the serving instance the stall shows as the gauge
-`ythril_seq_horizon_oldest_hold_seconds` and a `seq horizon held …` line in its log.
+`ythril_record_position_oldest_hold_seconds` and a `record position held …` line in its log.
 
 ### File Sync Artifacts
 
@@ -783,6 +783,7 @@ must replicate, as it is.** The local-only fields are out: `embedding`, `embeddi
 derived by the local model, so peers running different models legitimately differ, and the retention stamps
 (`_expireAt`, `_contentExpireAt`), the sync base (`syncBase`), `deliveredBy` (which peer delivered the record, read by the deletion rule) and an edge's write guard (`_functionalGuard`, this instance's lock on a functional label's subject) are each instance's own — a peer's value is never adopted,
 in either direction, because the sweep that acts on it would then be following another operator's policy.
+Also out, and local to this instance: the landing position `pos` and `posAtSeq`, and `writtenHere` (this instance wrote the record's current version; a restore keeps it, an arrival never does). A tombstone's own local fields are `storedVia`, `issuedHere`, `pos` and `posAtSeq`; `pos` is also the one order-only field — a read may order by it and no answer returns it.
 `spaceId` is out too: it crosses the wire and the receiver rewrites it to its own id for the space, which under a
 `spaceMap` alias is not the sender's. Everything else is hashed, and everything else crosses the wire — a field
 in neither category means two peers can never agree about identical content. File leaves hash the file's
