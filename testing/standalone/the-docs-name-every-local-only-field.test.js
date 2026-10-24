@@ -26,6 +26,18 @@
  * A field counts as named when its LITERAL name appears in the doc: prose such as "the retention stamps" is how the older
  * sentences drifted, and is exactly what a reader cannot grep.
  *
+ * ## Bundle-81, decision 28: the classes are DERIVED, not named
+ *
+ * This file named three classes by hand (restored, derived, write guard) and stayed green with three more added: bundle-81 adds
+ * `POSITION_FIELDS` (`pos`, `posAtSeq`) and `TOMBSTONE_LOCAL_FIELDS` (`storedVia`, `issuedHere`, `pos`, `posAtSeq`) to
+ * `sync/local-only-fields.ts`, and `ORDER_ONLY_FIELDS` (`pos`) to `brain/recall-shape.ts` (design rev 8 §2, P48). The test now
+ * derives EVERY export of the module whose name ends in `_FIELDS` and is a set, asserts a floor on how many it found, holds that
+ * the two classes the plan adds are among them, and checks each class against each enumerating doc. A class added next year is
+ * owed its sentence the day it is exported. `ORDER_ONLY_FIELDS` lives in the answer-shape module and is read from there.
+ *
+ * Red on 9a7ab3f7 for the new part: `POSITION_FIELDS` and `TOMBSTONE_LOCAL_FIELDS` are not exported and `ORDER_ONLY_FIELDS` does
+ * not exist, so the derivation finds the five classes of today and none of the plan's.
+ *
  * ## Seen red
  *
  * Red on 9a4b41c6: `WRITE_GUARD_FIELDS` does not exist and no doc names `_functionalGuard`; and the restored and derived
@@ -44,6 +56,8 @@ import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 
 const DOC_FLOOR = 4;
+/** The classes the module exports today (restored, derived, write guard, the restored dates, the union): a floor on the derivation. */
+const CLASS_FLOOR = 5;
 
 let loaded;
 before(async () => { loaded = await loadDistModule('../../server/dist/sync/local-only-fields.js', import.meta.url); });
@@ -81,19 +95,38 @@ describe('the docs that enumerate the local-only fields name every field of the 
     }
   });
 
-  it('every enumerating doc names each RESTORED field (`_expireAt`, `_contentExpireAt`, `syncBase`, `deliveredBy`)', () => {
+  /** Every export of the module that is a set and is named `*_FIELDS`: the classes, derived, never listed here. */
+  const classes = () => {
+    const mod = needModule(loaded, ['RESTORED_LOCAL_FIELDS'], 'local-only fields');
+    return Object.entries(mod).filter(([name, v]) => /_FIELDS$/.test(name) && v instanceof Set);
+  };
+
+  it('the classes are derived from the module: at least the five it has today, and the two the plan adds are among them', () => {
+    const names = classes().map(([n]) => n);
+    assert.ok(names.length >= CLASS_FLOOR, `only ${names.length} \`*_FIELDS\` class(es) derived (${names.join(', ')}): the derivation is broken`);
+    for (const planned of ['POSITION_FIELDS', 'TOMBSTONE_LOCAL_FIELDS']) {
+      assert.ok(names.includes(planned),
+        `sync/local-only-fields.ts exports no ${planned} (derived: ${names.join(', ')}); the plan adds it (design rev 8 §2), and a field in a class nobody exports is a field no doc is owed`);
+    }
+  });
+
+  it('every enumerating doc names each field of EVERY derived class', () => {
     const { RESTORED_LOCAL_FIELDS } = needModule(loaded, ['RESTORED_LOCAL_FIELDS'], 'local-only fields');
-    assert.deepEqual(lacking(RESTORED_LOCAL_FIELDS, RESTORED_LOCAL_FIELDS), []);
+    const found = classes();
+    assert.ok(found.length >= CLASS_FLOOR, 'fixture: fewer classes than the floor, see the case above');
+    const behind = found.flatMap(([name, fields]) => {
+      assert.ok(fields.size >= 1, `${name} is empty: a loop over it checks nothing`);
+      return lacking(RESTORED_LOCAL_FIELDS, fields).map(l => `${name}: ${l}`);
+    });
+    assert.deepEqual(behind, []);
   });
 
-  it('every enumerating doc names each DERIVED field (`embedding`, `embeddingModel`, `matchedText`)', () => {
-    const { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } = needModule(loaded, ['RESTORED_LOCAL_FIELDS', 'DERIVED_LOCAL_FIELDS'], 'local-only fields');
-    assert.deepEqual(lacking(RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS), []);
-  });
-
-  it('every enumerating doc names each WRITE GUARD field (`_functionalGuard`)', () => {
-    const { RESTORED_LOCAL_FIELDS, WRITE_GUARD_FIELDS } = needModule(loaded, ['RESTORED_LOCAL_FIELDS', 'WRITE_GUARD_FIELDS'], 'local-only fields');
-    assert.ok(WRITE_GUARD_FIELDS.size >= 1, 'WRITE_GUARD_FIELDS is empty: a loop over it checks nothing');
-    assert.deepEqual(lacking(RESTORED_LOCAL_FIELDS, WRITE_GUARD_FIELDS), []);
+  it('every enumerating doc names each ORDER_ONLY field (brain/recall-shape.ts: a field a read may order on and never return)', async () => {
+    const shape = await loadDistModule('../../server/dist/brain/recall-shape.js', import.meta.url);
+    const mod = needModule(shape, ['ORDER_ONLY_FIELDS'], 'the order-only class');
+    const fields = [...mod.ORDER_ONLY_FIELDS];
+    assert.ok(fields.length >= 1, 'ORDER_ONLY_FIELDS is empty: a loop over it checks nothing');
+    const { RESTORED_LOCAL_FIELDS } = needModule(loaded, ['RESTORED_LOCAL_FIELDS'], 'local-only fields');
+    assert.deepEqual(lacking(RESTORED_LOCAL_FIELDS, fields), []);
   });
 });
