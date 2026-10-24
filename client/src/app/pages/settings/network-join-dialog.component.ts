@@ -9,6 +9,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { formatList } from '../../core/list-format';
+import { ActiveLanguage } from '../../core/active-language';
 import { retiredAmong } from '../../core/retired-space-ids';
 
 /**
@@ -159,6 +160,7 @@ import { retiredAmong } from '../../core/retired-space-ids';
 export class NetworkJoinDialogComponent {
   private networksApi = inject(NetworksApi);
   private transloco = inject(TranslocoService);
+  private readonly language = inject(ActiveLanguage).language;
 
   /** Local spaces (for collision detection). */
   readonly availableSpaces = input<Space[]>([]);
@@ -337,7 +339,7 @@ export class NetworkJoinDialogComponent {
 
   /** A list in the reader's language, not joined with a hard-coded comma. */
   private list(items: string[]): string {
-    return formatList(items, this.transloco.getActiveLang());
+    return formatList(items, this.language());
   }
 
   private executeJoin(): void {

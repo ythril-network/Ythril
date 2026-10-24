@@ -147,13 +147,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Records:** A merge relinks a hub in one transaction of few bulk writes. An entity delete with `cascadeToken` removes edges 500 per transaction with their tombstones, one `edge.deleted` webhook per edge after its chunk commits.
 - **Records:** A bulk write reads a batch once and writes one block per kind; items still see earlier items. An item on an unwritten one names that refusal; a `$ref` key used twice refuses the batch.
 - **Records:** A converge that loses a race is decided again against the current record; losing twice is `409` on a create door and an item error in a batch. `save_bulk` declares the `id` of fact and chrono items.
-- **Sync:** A fork's id derives from the parent's id, seq and text: a re-sent push upserts it. Documents past the 500-per-family cap and records the store refuses count in `rejected`.
+- **Sync:** A fork's id derives from the parent's id, seq and text: a re-sent push upserts it; an older receiver accepts an eleventh. Documents past the 500-per-family cap and records the store refuses count in `rejected`.
 - **Sync:** A link under another id for linked endpoints is `skipped`. A space's Merkle root is not re-read when nothing changed: `GET /api/sync/merkle` and `merkle: true` cycles are far cheaper; root date: `computedAt`.
 - **Sync:** Each space gets a `(seq, _id)` index per record collection, built in the background on first start (paging stays tie-safe, slower). Each record stores its delivering peer (`deliveredBy`: local, never sent or shown).
 - **Sync:** New `ythril_sync_tombstones_applied_total`, `ythril_sync_tombstones_declined_total` and gauge `ythril_sync_tombstone_rereads_owed`. New `ythril_sync_file_arrivals_total{door,outcome}` counts file arrivals.
 - **Sync:** A subscriber that left a pub/sub space gets `423` `space_declined` once; the publisher stops sending it; sync history lists it `declined`, not held. A tombstone of a type the receiver does not know still answers `400`; the sender resends once upgraded.
 - **Embedding:** The bundled model runs in a supervised child process: embedding cannot block the server, nor a native fault take it down; it exits after 10 idle minutes.
-- **Embedding:** `mem_limit` or a pod memory limit counts both processes. A lost process is replaced after a growing delay; a record killing it three times is `failed`, the crash in its `lastError`.
+- **Embedding:** `mem_limit` or a pod memory limit counts both processes. The child holds no secrets. A lost process is replaced after a growing delay; a record killing it three times is `failed`, the crash in its `lastError`.
 - **Embedding:** New `ythril_embed_wait_seconds`, `ythril_embed_process_restarts_total{reason}`, `ythril_embed_process_state`; `GET /api/admin/pipeline-status` gains `inference` and `state: "down"` on a sticky load failure.
 - **Embedding:** A recall query is embedded ahead of queued documents; `embedConcurrency` keeps its defaults (2 bundled, 8 external). A model that cannot load stays failed until it, an offline flag or the process restarts.
 - **Embedding:** `POST /api/brain/spaces/:id/reindex` and `space_reindex` record a run and return; every record is queued as a rebuild and the run survives a restart.
@@ -178,7 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Import/Export:** The import drops file chunks, face records, byte-describing file keys and a restored file's old `embedding`, keeps the highest seq of a repeated id, and names records restored over a local deletion in `restoredOverTombstone`.
 - **UI:** **Settings → Preferences** has a **Date and time** card (**Automatic**, **ISO 8601** or **Day.month.year, 24-hour**; **local time** or **UTC**), kept in this browser.
 - **UI:** The Files page says why a rename, delete or new folder was refused; a refusal naming a remedy stays until dismissed and a server fault shows its request id.
-- **UI:** German and Polish sentences use each kind's tab name (Räume → Spaces, Erinnerungen → Fakten, Wspomnienia → Fakty, Akta → Pliki).
+- **UI:** Sentences name each record kind by its tab (Räume → Spaces, Akta → Pliki).
 - **UI:** Settings → Spaces shows a space waiting for search as "Waiting for search service". The Graph view reads every page of `graph_traverse` and says when the walk stopped at its `limit`.
 - **Docs:** The hosting guide names `YTHRIL_MONGO_MEM_LIMIT` (default `4g`). Help gains a testing guide. The integration guide's tool tables come from code; an edge's `type` is free text.
 - **Backup:** A restore reports, per space, files no longer matching their records (the page, `GET /api/admin/data/restore`, the log), and repairs nothing ([guide](docs/integration-guide/12a-data-management-api.md)).
@@ -252,7 +252,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A peer's file tombstone needs its issuer's or the upstream's authority (any admitted peer could); a relayed one keeps its issuer. A held one refuses a later copy only as a record tombstone would; a peer cannot block a path.
 - **Sync:** A pull no longer fetches a file past the space quota, stores nothing from a body that is not as declared, and takes back bytes no row names.
 - **Search:** No read answers `deliveredBy` or a write guard (`filter` did; `{embedding: 1}` returned every field), and a filter naming one by key or `"$field"` path is refused.
-- **UI:** Import conflicts show a type's name as text, its kind by tab name; a blocked entity delete names what to edit first.
+- **UI:** Import conflicts show a type's name as text; a blocked entity delete names what to edit first.
 
 ## [5.6.9] — 2026-10-08
 
