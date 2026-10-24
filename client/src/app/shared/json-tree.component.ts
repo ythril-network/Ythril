@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PhIconComponent } from './ph-icon.component';
+import { PluralPipe } from '../core/plural.pipe';
 
 /** What a value is, for rendering. `null` is its own kind because `typeof null` is not useful here. */
 export type JsonKind = 'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
@@ -68,7 +69,7 @@ const entriesOf = (v: unknown, kind: JsonKind): Array<[string, unknown]> =>
   selector: 'app-json-tree',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, PhIconComponent],
+  imports: [CommonModule, PhIconComponent, PluralPipe],
   styles: [`
     :host {
       display: block;
@@ -154,7 +155,7 @@ const entriesOf = (v: unknown, kind: JsonKind): Array<[string, unknown]> =>
         <span class="jt-punct">{{ r.kind === 'array' ? '[' : '{' }}</span>
         @if (!r.open) {
           <span class="jt-punct">…{{ r.kind === 'array' ? ']' : '}' }}</span>
-          <span class="jt-size">{{ r.size }} {{ label(r) }}</span>
+          <span class="jt-size">@if (r.kind === 'array') { {{ r.size | plural:'jsonTree.item' }} } @else { {{ r.size | plural:'jsonTree.key' }} }</span>
         }
       } @else {
         <span [class]="'jt-' + r.kind">{{ r.text }}</span>
@@ -225,11 +226,6 @@ export class JsonTreeComponent {
     // but an EMPTY object or array should still draw itself, so only a truly absent value is "nothing".
     return this.value() === null || this.value() === undefined ? [] : out;
   });
-
-  label(r: JsonRow): string {
-    if (r.kind === 'array') return r.size === 1 ? 'item' : 'items';
-    return r.size === 1 ? 'key' : 'keys';
-  }
 
   toggle(r: JsonRow): void {
     const next = new Map(this.overrides());

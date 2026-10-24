@@ -22,7 +22,6 @@ import { SchemaApi } from '../../core/schema-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { ToastService } from '../../core/toast.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { PropSchemaTableComponent } from '../../shared/prop-schema-table.component';
@@ -35,6 +34,7 @@ import { refusalText } from '../../core/refusal-text';
 import { emptyTypeSchemaState, typeSchemaFromState, typeStateFromSchema, type TypeSchemaState } from '../settings/space-settings-state.service';
 import { RuleRowsComponent } from '../../shared/rule-rows.component';
 import { RULE_LIMITS } from '../../shared/rule-limits';
+import { PluralText } from '../../core/plural-text.service';
 
 // ── Local form state ────────────────────────────────────────────────────────
 
@@ -645,10 +645,11 @@ export class SchemaLibraryComponent implements OnInit {
   private schemaApi = inject(SchemaApi);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "This entry is linked in N space types ...", in the plural form the reader's language uses for N. */
   protected usagesWarningText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'schemaLib.delete.usagesWarning', count);
+    return this.plural.text('schemaLib.delete.usagesWarning', count);
   }
   private toast = inject(ToastService);
 
@@ -1165,10 +1166,9 @@ export class SchemaLibraryComponent implements OnInit {
         if (imported === 0) {
           this.toast.info(this.transloco.translate('schemaLib.import.noneImported'));
         } else if (group !== undefined) {
-          const lang = this.transloco.getActiveLang();
           this.toast.success(skipped > 0
-            ? pluralText(this.transloco, lang, 'schemaLib.import.spaceGroupedSkipped', imported, { group, skipped })
-            : pluralText(this.transloco, lang, 'schemaLib.import.spaceGrouped', imported, { group }));
+            ? this.plural.text('schemaLib.import.spaceGroupedSkipped', imported, { group, skipped })
+            : this.plural.text('schemaLib.import.spaceGrouped', imported, { group }));
         }
       } catch {
         this.toast.error(this.transloco.translate('schemaLib.import.parseFailed'));
@@ -1244,7 +1244,7 @@ export class SchemaLibraryComponent implements OnInit {
       finalize(() => this.applyGroupDialog.update(s => s ? { ...s, saving: false } : s)),
     ).subscribe({
       next: ({ count }) => {
-        const msg = pluralText(this.transloco, this.transloco.getActiveLang(), 'schemaLib.applyGroup.success', count);
+        const msg = this.plural.text('schemaLib.applyGroup.success', count);
         this.applyGroupDialog.update(s => s ? { ...s, result: msg } : s);
       },
       error: (err) => {

@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { EntitySearchComponent } from '../../shared/entity-search.component';
 import { Entity } from '../../core/api.types';
 import { GRAPH_TOOLBAR_STYLES } from './graph.styles';
+import { PluralText } from '../../core/plural-text.service';
 
 /**
  * The graph page's toolbar: pick a root, choose the depth and direction, toggle labels, fit and reset.
@@ -102,12 +102,12 @@ export class GraphToolbarComponent {
   /** Node and edge counts, or null when there is nothing traversed to count. */
   readonly stats = input<{ nodes: number; edges: number } | null>(null);
 
-  private transloco = inject(TranslocoService);
+
+  private readonly plural = inject(PluralText);
 
   /** "N nodes · M edges": each number takes the plural form its own count needs, so it is two sentences joined and not one. */
   protected statsText(s: { nodes: number; edges: number }): string {
-    const lang = this.transloco.getActiveLang();
-    return `${pluralText(this.transloco, lang, 'graph.stats.nodes', s.nodes)} · ${pluralText(this.transloco, lang, 'graph.stats.edges', s.edges)}`;
+    return `${this.plural.text('graph.stats.nodes', s.nodes)} · ${this.plural.text('graph.stats.edges', s.edges)}`;
   }
 
   /*

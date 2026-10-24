@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
 import { Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.types';
+import { PluralText } from '../../core/plural-text.service';
 import { roleCountText, remoteOf, memberGroups } from './network-role-view';
 import type { NetworkRole } from '../../core/network-role.types';
 import { NetworksApi } from '../../core/networks-api.service';
@@ -33,10 +34,11 @@ import { NetworkCreateDialogComponent } from './network-create-dialog.component'
 import { NetworkJoinDialogComponent } from './network-join-dialog.component';
 import { NetworkEnableWizardComponent } from './network-enable-wizard.component';
 import { refusalText } from '../../core/refusal-text';
+import { PluralPipe } from '../../core/plural.pipe';
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent, NetworkOwedActsComponent],
+  imports: [PluralPipe, CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent, NetworkOwedActsComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -177,10 +179,10 @@ import { refusalText } from '../../core/refusal-text';
                 <span class="badge badge-gray">{{ text }}</span>
               }
             } @else {
-              <span class="badge badge-gray">{{ net.members.length }} {{ net.members.length === 1 ? ('networks.memberBadge.singular' | transloco) : ('networks.memberBadge.plural' | transloco) }}</span>
+              <span class="badge badge-gray">{{ net.members.length | plural:'networks.memberBadge' }}</span>
             }
             @if (openVotes(net.id).length > 0) {
-              <app-status-pill variant="warn" [dot]="true">{{ openVotes(net.id).length }} {{ 'networks.header.pendingVote' | transloco }}</app-status-pill>
+              <app-status-pill variant="warn" [dot]="true">{{ openVotes(net.id).length | plural:'networks.header.pendingVote' }}</app-status-pill>
             }
             <!-- Deletions and wipes this instance still owes the network. Only an administrator is served the list, so a reader without it sees no pill. -->
             @if (net.owedSpaceActs?.length) {
@@ -262,7 +264,7 @@ import { refusalText } from '../../core/refusal-text';
                         @if (rec.errors?.length) {
                           <button class="btn-ghost btn btn-sm" style="font-size:11px;"
                             (click)="toggleHistoryErrors(rec._id)">
-                            {{ expandedError() === rec._id ? ('networks.network.syncHistory.hideErrors' | transloco) : (rec.errors!.length + ' ' + ('networks.network.syncHistory.errorCountSuffix' | transloco)) }}
+                            @if (expandedError() === rec._id) { {{ 'networks.network.syncHistory.hideErrors' | transloco }} } @else { {{ rec.errors!.length | plural:'networks.network.syncHistory.errorCount' }} }
                           </button>
                         }
                       </div>
@@ -364,6 +366,7 @@ export class NetworksComponent implements OnInit {
   private spacesApi = inject(SpacesApi);
   private adminApi = inject(AdminApi);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
 
@@ -678,7 +681,7 @@ export class NetworksComponent implements OnInit {
 
   // The role's presentation (F-38.1) lives in network-role-view.ts; the template calls it through these.
   roleCountText(r: NetworkRole): string | null {
-    return roleCountText(this.transloco, this.transloco.getActiveLang(), r);
+    return roleCountText(this.plural, r);
   }
   readonly remoteOf = remoteOf;
   readonly memberGroups = memberGroups;

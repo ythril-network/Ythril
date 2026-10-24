@@ -26,7 +26,6 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import { AuthenticatedDownload } from '../../core/authenticated-download';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
@@ -39,6 +38,7 @@ import { refusalText } from '../../core/refusal-text';
 import { EntityRefPicker } from '../brain/entity-ref-picker.service';
 import { BrainStore } from '../brain/brain-store.service';
 import { ModalDirective } from '../../shared/modal.directive';
+import { PluralText } from '../../core/plural-text.service';
 
 
 
@@ -284,6 +284,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   private download = inject(AuthenticatedDownload);
   private route = inject(ActivatedRoute);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private injector = inject(Injector);
@@ -803,7 +804,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
         title: this.transloco.translate('files.confirm.overwriteTitle'),
         message: clashes.length === 1
           ? this.transloco.translate('files.confirm.overwriteOne', { name: clashes[0] })
-          : pluralText(this.transloco, this.transloco.getActiveLang(), 'files.confirm.overwriteMany', clashes.length, { names: clashes.slice(0, 5).join(', ') }),
+          : this.plural.text('files.confirm.overwriteMany', clashes.length, { names: clashes.slice(0, 5).join(', ') }),
         confirmLabel: this.transloco.translate('files.confirm.overwriteConfirm'),
         danger: true,
       });

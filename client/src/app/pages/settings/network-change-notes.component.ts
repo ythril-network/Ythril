@@ -2,7 +2,6 @@ import { Component, inject, input, signal } from '@angular/core';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { InstantComponent } from '../../shared/instant.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { Network } from '../../core/api.types';
 import type { ChangeNote } from '../../core/change-note.types';
 import { NetworksApi } from '../../core/networks-api.service';
@@ -12,6 +11,7 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
 import { MarkdownRenderService } from '../../shared/markdown-render.service';
 import { refusalText } from '../../core/refusal-text';
+import { PluralText } from '../../core/plural-text.service';
 
 /** Roles with members BELOW them, so a note written here reaches somebody: a publisher, a tree root or inner node. */
 const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
@@ -98,10 +98,11 @@ export class NetworkChangeNotesComponent {
   private networksApi = inject(NetworksApi);
   private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "waiting for N members", in the plural form the reader's language uses for N. */
   protected pendingText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'networks.network.changeNotes.pending', count);
+    return this.plural.text('networks.network.changeNotes.pending', count);
   }
   private markdown = inject(MarkdownRenderService);
   private sanitizer = inject(DomSanitizer);

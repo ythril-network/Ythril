@@ -4,7 +4,7 @@
  * The formatting itself is `date-format.ts` and pure. This file is the reactive half, and it exists because the
  * reactive half is what the shared components got wrong: `RelativeTimeComponent` read the language with a plain
  * `getActiveLang()` inside a `computed`, so a switch to Deutsch never reached it (`Q-100`). Here the language is a
- * signal (from `langChanges$`), the preference is a signal, and anything that formats through `format()` inside a
+ * signal (`ActiveLanguage`), the preference is a signal, and anything that formats through `format()` inside a
  * template or a `computed` re-renders when either changes — no reload, no re-created component.
  *
  * Kept per BROWSER, in localStorage, beside the language (`'lang'`): this app has tokens, not user accounts, so there
@@ -12,8 +12,7 @@
  * access is guarded — a private window or blocked site data answers the default, never an exception on the page.
  */
 import { Injectable, Pipe, PipeTransform, computed, inject, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { TranslocoService } from '@jsverse/transloco';
+import { ActiveLanguage } from './active-language';
 import {
   DEFAULT_DATE_PREFERENCE, formatCalendarDate, formatInstant, formatRelativeTime, instantParts, isoOf, parsePreference,
   resolveAutoLocale, type DateFormatOptions, type DatePreference, type InstantValue, type InstantVariant,
@@ -27,13 +26,14 @@ function readStored(): DatePreference {
 
 @Injectable({ providedIn: 'root' })
 export class DateFormatService {
-  private readonly transloco = inject(TranslocoService);
+  private readonly active = inject(ActiveLanguage);
 
   private readonly _preference = signal<DatePreference>(readStored());
   /** What the viewer chose: the format and whether times are local or UTC. */
   readonly preference = this._preference.asReadonly();
 
-  private readonly language = toSignal(this.transloco.langChanges$, { initialValue: this.transloco.getActiveLang() });
+  /** The page's language, once its words are here (`ActiveLanguage`): a date must not format in German while the words are still English. */
+  private readonly language = this.active.language;
 
   /** The locale `auto` renders in — the browser's when it speaks the UI language, else the UI language (D-7). */
   readonly locale = computed(() => resolveAutoLocale(this.language() || 'en', browserLanguages()));

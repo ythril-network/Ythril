@@ -15,12 +15,10 @@
  * is applied per component instead.
  */
 import { Component, ChangeDetectionStrategy, Injector, inject, signal, ElementRef, ViewChild, OnInit, computed } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SchemaTypeNameComponent } from './schema-type-name.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
@@ -42,6 +40,8 @@ import { AuthApi } from '../../core/auth-api.service';
 import { describeWarnings, type RefusalRow } from '../../core/refusal-text';
 import { proposalFor } from './space-schema-layers.component';
 import { refusalText } from '../../core/refusal-text';
+import { PluralText } from '../../core/plural-text.service';
+import { escapeHtml } from '../../shared/escape-html';
 
 @Component({
   selector: 'app-space-schema-tab',
@@ -329,7 +329,7 @@ import { refusalText } from '../../core/refusal-text';
   <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:320;">
     <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:440px;max-width:96vw;" [appModal]="'spaces.schema.conflict.title' | transloco" (dismiss)="dismissImportConflict()" (click)="$event.stopPropagation()">
       <div style="font-weight:700;font-size:15px;margin-bottom:8px;">{{ 'spaces.schema.conflict.title' | transloco }}</div>
-      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;" [innerHTML]="'spaces.schema.conflict.body' | transloco: { name: conflict.name, kt: conflict.kt }"></p>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;" [innerHTML]="'spaces.schema.conflict.body' | transloco: conflictNames(conflict)"></p>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <button class="btn btn-secondary" type="button" (click)="resolveImportConflictOverride()">{{ 'spaces.schema.conflict.override' | transloco }}</button>
         @if (importConflict()!.allowAddAs) {
@@ -425,8 +425,7 @@ export class SpaceSchemaTabComponent implements OnInit {
   private schemaApi = inject(SchemaApi);
   private toast = inject(ToastService);
   private transloco = inject(TranslocoService);
-  /** The active language as a signal, so a computed() sentence follows a language switch. */
-  private readonly lang = toSignal(this.transloco.langChanges$, { initialValue: this.transloco.getActiveLang() });
+  private readonly plural = inject(PluralText);
   private spacesApi = inject(SpacesApi);
   private injector = inject(Injector);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -531,6 +530,14 @@ export class SpaceSchemaTabComponent implements OnInit {
   importConflict = signal<{ kt: KnowledgeType; name: string; state: TypeSchemaState; allowAddAs: boolean } | null>(null);
 
   importConflictAddAsName = signal('');
+
+  /**
+   * The conflict sentence's two names, as HTML text. `spaces.schema.conflict.body` carries `<strong>` tags and is bound with `[innerHTML]`,
+   * and both names come from an IMPORTED file: the sanitizer keeps `<b>`, `<i>` and `<a>`, so unescaped they would render as markup.
+   */
+  protected conflictNames(conflict: { name: string; kt: string }): { name: string; kt: string } {
+    return { name: escapeHtml(conflict.name), kt: escapeHtml(conflict.kt) };
+  }
 
   showLibPickerDialog = signal(false);
 
@@ -686,10 +693,9 @@ export class SpaceSchemaTabComponent implements OnInit {
    */
   readonly validateProgressText = computed(() => {
     const { checked, total } = this.validateChecked();
-    const lang = this.lang();
     return !this.validateDone() && checked >= total
-      ? pluralText(this.transloco, lang, 'validate.progressOpen', checked)
-      : pluralText(this.transloco, lang, 'validate.progress', total, { checked });
+      ? this.plural.text('validate.progressOpen', checked)
+      : this.plural.text('validate.progress', total, { checked });
   });
 
   /** "All good" is said only when the whole space was read (or the sample judged) and nothing was found. */
@@ -998,7 +1004,7 @@ export class SpaceSchemaTabComponent implements OnInit {
         this.state.schTypeSchemas = merged;
         this.schImportError.set('');
         // Import only STAGES the schemas — they aren't persisted until Save is pressed.
-        this.schImportInfo.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'spaces.schema.import.staged', imported));
+        this.schImportInfo.set(this.plural.text('spaces.schema.import.staged', imported));
       } catch {
         this.schImportError.set(this.transloco.translate('spaces.schema.import.parseFailed'));
       } finally {

@@ -41,6 +41,7 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 
 import { ActivatedRoute, Router } from '@angular/router';
 import { BrainTab, CollectionTab, BRAIN_TABS } from './brain-tabs';
+import { PluralPipe } from '../../core/plural.pipe';
 
 interface SpaceView {
   space: Space;
@@ -59,7 +60,7 @@ interface SpaceView {
   // or happens in a template event handler, both of which mark the view dirty. That coupling is
   // load-bearing and pinned by the specs (the drawer's own version lives in the drawer component).
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ViewsMigrationBannerComponent, UnknownSpaceNoticeComponent, MyViewsComponent, ViewOverviewComponent, ViewReadsFromComponent, CommonModule, FormsModule, GraphComponent, FileManagerComponent, PhIconComponent, RecordDrawerComponent, QueryTabComponent, FactsTabComponent, EntitiesTabComponent, EdgesTabComponent, ChronoTabComponent, OverviewTabComponent, ReviewTabComponent, ErrorStateComponent, TranslocoPipe, SpaceSettingsPopupComponent],
+  imports: [PluralPipe, ViewsMigrationBannerComponent, UnknownSpaceNoticeComponent, MyViewsComponent, ViewOverviewComponent, ViewReadsFromComponent, CommonModule, FormsModule, GraphComponent, FileManagerComponent, PhIconComponent, RecordDrawerComponent, QueryTabComponent, FactsTabComponent, EntitiesTabComponent, EdgesTabComponent, ChronoTabComponent, OverviewTabComponent, ReviewTabComponent, ErrorStateComponent, TranslocoPipe, SpaceSettingsPopupComponent],
   providers: [BrainStore, EntityRefPicker, RecordDrawerState, RecordListState, OverviewDataService, SpacesStore, SpaceSettingsState],
   styles: [`
     .space-tabs {
@@ -219,7 +220,7 @@ interface SpaceView {
               </span>
             }
             @if (sv.stats) {
-              <span class="space-chip-count">{{ spaceTotal(sv.stats) }} {{ 'brain.spaceChip.records' | transloco }}</span>
+              <span class="space-chip-count">{{ spaceTotal(sv.stats) | plural:'brain.spaceChip.records' }}</span>
             }
           </button>
         }

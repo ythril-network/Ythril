@@ -187,8 +187,9 @@ const RECORD_TERMS: readonly RecordTerm[] = [
   { kind: 'entity', en: /\bentit(?:y|ies)\b/i, stem: { de: /entität/i, pl: /podmiot/i }, wrong: { de: null, pl: /encj|jednost/i }, floor: 30, hasTab: true },
   { kind: 'fact', en: /\bfacts?\b/i, stem: { de: /fakt/i, pl: /fakt/i }, wrong: { de: /erinnerung|tatsache/i, pl: /wspomnie/i }, floor: 20, hasTab: true },
   { kind: 'edge', en: /\bedges?\b/i, stem: { de: /kante/i, pl: /krawęd/i }, wrong: { de: /beziehung/i, pl: /relacj/i }, floor: 20, hasTab: true },
-  // The word most values already use. A key naming a link is outside the edge check: an edge is a record, a link is a reference.
-  { kind: 'link', en: /\blinks?\b/i, stem: { de: /verknüpf/i, pl: /powiąz/i }, wrong: { de: null, pl: null }, floor: 8, hasTab: false },
+  // No row for 'link': the word names the record reference, the catalog hyperlink (schemaLib 'Katalog-Link', pl 'łącze') and the verb ('Link as
+  // contradiction'), which a stem cannot tell apart, and no tab names the record kind. The edge row's wrong stems leave 'powiąz' out for the
+  // same reason: Polish uses it for a link and for plain 'related'.
   { kind: 'file', en: /\bfiles?\b/i, stem: { de: /datei/i, pl: /plik/i }, wrong: { de: null, pl: /\bakt(?:a|ach|ami)?\b/i }, floor: 60, hasTab: true },
   {
     kind: 'chrono', en: /\bchrono\b/i, stem: { de: /chrono-?eintr/i, pl: /chronologiczn/i }, label: { de: /chrono/i, pl: /chrono/i },
@@ -199,10 +200,12 @@ const RECORD_TERMS: readonly RecordTerm[] = [
 ];
 
 /**
- * A key whose de / pl value is allowed to lack the pinned stem of a kind its en value names, with the reason. Keyed `<kind>:<key>`. None
- * today: every value that lacked a stem when this gate was written was a word to fix, none names the kind by a pronoun.
+ * A key whose de / pl value is allowed to lack the pinned stem of a kind its en value names, with the reason. Keyed `<kind>:<key>`. One
+ * today: every value that lacked a stem when this gate was written was a word to fix, bar this standard term.
  */
-const STEM_EXEMPT: Readonly<Record<string, string>> = {};
+const STEM_EXEMPT: Readonly<Record<string, string>> = {
+  'entity:brain.overview.er.diagramLabel': 'Entity-Relationship-Diagramm is the standard term for the diagram, in German as in English',
+};
 
 /** The en value with what is not a sentence about the kind blanked: placeholders, brace blocks, dotted and slashed identifiers. */
 function prose(value: string): string {

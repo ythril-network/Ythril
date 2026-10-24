@@ -2,11 +2,11 @@ import { Injectable, inject, signal } from '@angular/core';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { NetworksApi } from '../../core/networks-api.service';
 import type { CompletenessReport, EmbeddingQueue, SpaceActivity, TokenAccessEntry, VoteRound } from '../../core/api.types';
+import { PluralText } from '../../core/plural-text.service';
 
 /** Just the shape `loadOverviewVotes` needs — the shell knows about SpaceView; this service must not. */
 export interface SpaceNetworkRef { id: string }
@@ -41,6 +41,7 @@ export class OverviewDataService {
   private brainApi = inject(BrainApi);
   private networksApi = inject(NetworksApi);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** Embedding-job backlog for the ACTIVE space (Overview embedding-queue panel); refreshed on space switch + live events. */
   embeddingQueue = signal<EmbeddingQueue | null>(null);
@@ -225,7 +226,7 @@ export class OverviewDataService {
     this.spacesApi.resetSpaceActivity(spaceId).subscribe({
       next: ({ cleared }) => {
         this.resettingUsage.set(false);
-        this.usageResetResult.set(pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.usageResetDone', cleared));
+        this.usageResetResult.set(this.plural.text('brain.overview.usageResetDone', cleared));
         this.loadSpaceActivity(spaceId, isActive);
       },
       error: () => {

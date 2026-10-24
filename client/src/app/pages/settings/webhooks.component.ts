@@ -2,7 +2,6 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
 import { AdminApi } from '../../core/admin-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { ToastService } from '../../core/toast.service';
@@ -20,6 +19,8 @@ import {
   Space, WebhookSubscription, WebhookDelivery, WebhookEventType, WEBHOOK_EVENT_GROUPS,
 } from '../../core/api.types';
 import { refusalText } from '../../core/refusal-text';
+import { PluralText } from '../../core/plural-text.service';
+import { PluralPipe } from '../../core/plural.pipe';
 
 /** Editable form model for the create/edit dialog. */
 interface WebhookForm {
@@ -36,7 +37,7 @@ interface WebhookForm {
 @Component({
   selector: 'app-webhooks',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent,
+  imports: [PluralPipe, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent,
             SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, HscrollTopDirective, InstantPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
@@ -203,8 +204,8 @@ interface WebhookForm {
               @for (w of sortedWebhooks(); track w.id) {
                 <tr>
                   <td class="url-cell">{{ w.url }}</td>
-                  <td style="font-size:12px;">{{ w.events.length ? w.events.length + ' ' + ('webhooks.selected' | transloco) : ('webhooks.all' | transloco) }}</td>
-                  <td style="font-size:12px;">{{ w.spaces.length ? w.spaces.length + ' ' + ('webhooks.selected' | transloco) : ('webhooks.all' | transloco) }}</td>
+                  <td style="font-size:12px;">@if (w.events.length) { {{ w.events.length | plural:'webhooks.selected' }} } @else { {{ 'webhooks.all' | transloco }} }</td>
+                  <td style="font-size:12px;">@if (w.spaces.length) { {{ w.spaces.length | plural:'webhooks.selected' }} } @else { {{ 'webhooks.all' | transloco }} }</td>
                   <td>
                     <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
                       <app-status-pill [variant]="statusVariant(w.status)" [dot]="true">{{ 'webhooks.status.' + w.status | transloco }}</app-status-pill>
@@ -247,10 +248,11 @@ export class WebhooksComponent implements OnInit {
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "N consecutive failures", in the plural form the reader's language uses for N. */
   protected failuresText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'webhooks.failures', count);
+    return this.plural.text('webhooks.failures', count);
   }
 
   /** A next probe at or before now is due (the next tick takes it): said as such, never as a time already past. */

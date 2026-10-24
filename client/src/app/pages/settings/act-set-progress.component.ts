@@ -2,12 +2,12 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output } f
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import type { ActSetReport, ActSetSpaceReport, RestoreFileClass } from '../../core/admin-data.types';
 import { DateFormatService } from '../../core/date-format.service';
-import { pluralText } from '../../core/plural-text';
 import { actRowView, actWhenText, type ActRowView } from '../../core/space-act-view';
 import { SettingsCardComponent } from '../../shared/settings-card.component';
 import { StatusPillComponent, type StatusVariant } from '../../shared/status-pill.component';
 import { StepProgressBarComponent } from '../../shared/step-progress-bar.component';
 import type { StepProgress } from '../../shared/step-progress.model';
+import { PluralText } from '../../core/plural-text.service';
 
 /** The colour of a set's state pill, as a pure function of the state the reader sees (a set state, or the client's own `stopped`). */
 export function actSetVariant(state: string): StatusVariant {
@@ -114,6 +114,8 @@ export class ActSetProgressComponent {
   readonly stopped = input(false);
 
   private readonly transloco = inject(TranslocoService);
+
+  private readonly plural = inject(PluralText);
   private readonly dates = inject(DateFormatService);
 
   /** The process that runs a migrate has exited while the report still says running: nothing here is running any more. */
@@ -150,7 +152,7 @@ export class ActSetProgressComponent {
   // Methods, not computeds: they translate, and a computed would keep the words of a language file that had not loaded yet.
   doneText(): string {
     const r = this.report();
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'data.progress.spacesDone', r.total, { done: r.done });
+    return this.plural.text('data.progress.spacesDone', r.total, { done: r.done });
   }
 
   /**
@@ -162,7 +164,6 @@ export class ActSetProgressComponent {
     const files = this.kind() === 'restore' ? s.files : undefined;
     if (!files) return null;
     if (!files.checked) return { attention: true, reason: this.notCheckedText(files), summary: '', groups: [], truncated: false };
-    const lang = this.transloco.getActiveLang();
     const entries = Object.entries(files.classes).filter(([, c]) => c.count > 0);
     if (entries.length === 0) return null;
     const known = (cls: string): number => FILE_CLASS_ORDER.indexOf(cls);
@@ -170,7 +171,7 @@ export class ActSetProgressComponent {
     const total = entries.reduce((n, [, c]) => n + c.count, 0);
     return {
       attention: true, reason: '', truncated: entries.some(([, c]) => c.paths.length < c.count),
-      summary: pluralText(this.transloco, lang, 'data.progress.files.mismatch', total),
+      summary: this.plural.text('data.progress.files.mismatch', total),
       groups: entries.map(([cls, c]) => ({ cls, text: this.classText(cls, c), paths: c.paths })),
     };
   }
@@ -202,7 +203,7 @@ export class ActSetProgressComponent {
 
   /** A sentence about `count`, in the active language's plural form. */
   private counted(base: string, count: number, params: Record<string, unknown> = {}): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), base, count, params);
+    return this.plural.text(base, count, params);
   }
 
   emptiedText(): string { return this.listText('data.restore.emptied', this.report().emptied); }
@@ -212,6 +213,6 @@ export class ActSetProgressComponent {
 
   private listText(base: string, spaces: string[] | undefined): string {
     if (!spaces?.length) return '';
-    return pluralText(this.transloco, this.transloco.getActiveLang(), base, spaces.length, { spaces: spaces.join(', ') });
+    return this.plural.text(base, spaces.length, { spaces: spaces.join(', ') });
   }
 }

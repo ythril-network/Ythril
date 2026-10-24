@@ -1,8 +1,7 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, computed, inject, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
 import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../core/plural-text';
+import { PluralText } from '../core/plural-text.service';
 
 /** A property the retype would remove, with the value it holds. */
 export interface RetypeKey { key: string; value: unknown }
@@ -74,8 +73,7 @@ const VALUE_MAX = 80;
 })
 export class RetypeConfirmDialogComponent {
   private readonly transloco = inject(TranslocoService);
-  /** The active language as a signal, so the counted sentences below follow a language switch. */
-  private readonly lang = toSignal(this.transloco.langChanges$, { initialValue: this.transloco.getActiveLang() });
+  private readonly plural = inject(PluralText);
   private readonly data = inject<{ keys: RetypeKey[] } | null>(DIALOG_DATA, { optional: true });
   private readonly ref = inject<DialogRef<boolean> | null>(DialogRef, { optional: true });
 
@@ -93,8 +91,8 @@ export class RetypeConfirmDialogComponent {
   private readonly all = computed(() => (this.given().length ? this.given() : this.data?.keys ?? []));
   protected readonly shown = computed(() => this.all().slice(0, RETYPE_LIST_MAX));
   protected readonly rest = computed(() => Math.max(0, this.all().length - RETYPE_LIST_MAX));
-  protected readonly confirmText = computed(() => pluralText(this.transloco, this.lang(), 'retype.confirm', this.all().length));
-  protected readonly moreText = computed(() => pluralText(this.transloco, this.lang(), 'retype.more', this.rest()));
+  protected readonly confirmText = computed(() => this.plural.text('retype.confirm', this.all().length));
+  protected readonly moreText = computed(() => this.plural.text('retype.more', this.rest()));
 
   /** A value as a person reads it: text as is, numbers and booleans plainly, an object as JSON, all cut at {@link VALUE_MAX}. */
   protected shorten(value: unknown): string {

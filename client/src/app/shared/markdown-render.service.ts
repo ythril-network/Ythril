@@ -12,17 +12,12 @@
 import { Injectable } from '@angular/core';
 import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { escapeHtml } from './escape-html';
 import { headingIdFor, headingSlug, headingTextOf, makeSlugger } from './heading-slug';
 
 // Where the slug rule lives, so the Help gate can run it; kept exported here for the callers that read it from the renderer.
 export { headingSlug };
 
-
-/** Escapes a string for safe interpolation into HTML. Used for the invalid-diagram fallback. */
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
 
 @Injectable({ providedIn: 'root' })
 export class MarkdownRenderService {

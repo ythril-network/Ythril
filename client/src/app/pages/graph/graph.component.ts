@@ -48,6 +48,7 @@ import { GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent } from './gr
 import { GraphPanelHeaderComponent } from './graph-panel-header.component';
 import { GraphToolbarComponent } from './graph-toolbar.component';
 import { readinessText, type ReadinessReason } from './graph-readiness';
+import { PluralText } from '../../core/plural-text.service';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 // The record drawer and its state are shared with the Brain page rather than forked here: this page
 // used to carry a copy that had drifted behind (no schema-driven properties, no confidence field, no
@@ -386,10 +387,11 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   loadError = signal<string | null>(null);
   private lastTraverse: { startId: string; maxDepth: number; direction: 'outbound' | 'inbound' | 'both' } | null = null;
   private transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** One reason the graph is slow to answer, in words (the embedding backlog in its plural form). */
   protected reasonText(reason: ReadinessReason): string {
-    return readinessText(this.transloco, this.transloco.getActiveLang(), reason);
+    return readinessText(this.transloco, this.plural, reason);
   }
   /** Q-155: a long load says it is still waiting, and why — see `graph-load-watch.ts`. */
   private loadWatch = new GraphLoadWatch(this.spacesApi, this.transloco);

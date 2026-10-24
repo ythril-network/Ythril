@@ -38,14 +38,14 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, output, signal,
   viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { pluralText } from '../../core/plural-text';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { SkeletonLinesComponent } from '../../shared/skeleton-lines.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { BrainApi } from '../../core/brain-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import type { ErModel, ErEntityType } from '../../core/api.types';
 import { layoutErModel } from './er-layout';
+import { PluralText } from '../../core/plural-text.service';
 
 @Component({
   selector: 'app-er-model-panel',
@@ -206,11 +206,11 @@ import { layoutErModel } from './er-layout';
 })
 export class ErModelPanelComponent {
   private readonly api = inject(BrainApi);
-  private readonly transloco = inject(TranslocoService);
+  private readonly plural = inject(PluralText);
 
   /** "N edges point at an entity that no longer exists.", in the plural form the reader's language uses for N. */
   protected danglingText(count: number): string {
-    return pluralText(this.transloco, this.transloco.getActiveLang(), 'brain.overview.er.dangling', count);
+    return this.plural.text('brain.overview.er.dangling', count);
   }
 
   readonly spaceId = input.required<string>();
