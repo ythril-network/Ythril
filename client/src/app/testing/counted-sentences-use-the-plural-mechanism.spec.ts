@@ -19,9 +19,13 @@
  * Not claimed: a number the code passes under another name (`{{name}}` given a number) is not found here; time units (`{{days}} d`)
  * are quantities and not counted nouns, and are left out of `COUNT_PARAMS` on purpose.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { dictionary } from './i18n-dictionary';
 import { componentTemplates, type ComponentTemplate } from './component-templates';
+import { CLIENT_ROOT, trackedAppSources } from './tracked-sources';
+import { stripComments } from './strip-comments';
 
 /** The parameter names that carry a count of things. */
 const COUNT_PARAMS = /^(?:n|count|total|done|rows|affected|shown|remaining|skipped|enqueued|checked|applied|pending|created|updated|resolved|failed|returned|matches|nodes|edges|hops|cols|totalRows|totalCols)$/;
@@ -182,5 +186,41 @@ describe('a counted sentence in a template uses the plural mechanism (Q-572)', (
     expect(countLike('spaceTotal(sv.stats)')).toBe(true);
     expect(countLike('failedCount()')).toBe(true);
     expect(countLike('label')).toBe(false);
+  });
+});
+
+/**
+ * The code half: a count and a translated word joined in a template string, `${n} ${this.transloco.translate('...kind', ...)}`.
+ *
+ * Found by bundle-164's second reader after the template half was green: the delete-cascade confirmation built "1 Chronoeinträge" and
+ * "5 wpisy chronologiczne" this way, because the word was one key with no plural forms and the count was glued on in code. Neither half
+ * above could see it - the value had no `{{count}}` and the line was not in a template. The cure is the same: the plural service, whose
+ * forms carry the count. Derived over every tracked source, comments stripped, so a site written tomorrow is held to it.
+ */
+const CODE_HAND_COUNT = /\$\{\s*([^{}`]+?)\s*\}\s+\$\{[^{}`]*?\btranslate\(/g;
+
+function codeHandCounts(src: string): { expr: string; index: number }[] {
+  return [...src.matchAll(new RegExp(CODE_HAND_COUNT.source, 'g'))].map(m => ({ expr: m[1]!, index: m.index! }));
+}
+
+describe('a counted sentence built in code uses the plural mechanism (Q-572)', () => {
+  const sources = trackedAppSources().filter(f => !f.endsWith('.spec.ts'));
+  const sites = sources.flatMap(file => {
+    const src = stripComments(readFileSync(resolve(CLIENT_ROOT, file), 'utf8'));
+    return codeHandCounts(src).map(s => `${file}:${src.slice(0, s.index).split('\n').length}  \${${s.expr}} \${...translate(`);
+  });
+
+  it('scans the tracked sources (a floor, so an empty listing cannot pass)', () => {
+    expect(sources.length).toBeGreaterThan(200);
+  });
+
+  it('no source writes a count beside a translated word in a template string: it asks the plural service', () => {
+    expect(sites, `${sites.length} places glue a count to a translated word:\n  ${sites.join('\n  ')}`).toEqual([]);
+  });
+
+  it('the detector sees the shape, and leaves a label-then-value alone', () => {
+    expect(codeHandCounts("`  • ${n} ${this.transloco.translate(`brain.cascade.kind.${type}`, { count: n })}`")).toHaveLength(1);
+    expect(codeHandCounts("`${this.transloco.translate('a.title')}: ${n}`")).toHaveLength(0);
+    expect(codeHandCounts("`${n} ${this.plural.text('a.base', n)}`")).toHaveLength(0);
   });
 });
