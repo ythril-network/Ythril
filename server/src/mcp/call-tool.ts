@@ -53,6 +53,8 @@ import { answerForCaught } from '../util/answer-for-caught.js';
 import { spaceActAnswer } from '../spaces/space-act-answer.js';
 import { NotFoundError, ToolRefusal } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
+import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
+import { PositionClockUnusable, PositionsSeedUnavailable } from '../util/errors.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 import { mergeRefusal } from '../brain/merge.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
@@ -455,6 +457,14 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     // The same 409 the REST door answers: another write kept moving the record, nothing was written, retry.
     if (err instanceof WriteConflict) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: writeRefusalAnswer(err, 'update')!.status, callSpace };
+    }
+    // The refusals of a local write's stamp (`record_version_at_ceiling`, a clock before the first usable instant, a position seed the store could
+    // not read): the status and body REST answers (`writeRefusalAnswer`), carried as `structuredContent` beside the same sentence.
+    // (A seed the store could not read is the store's failure and falls through to it below: `writeRefusalAnswer` answers null for that one.)
+    const stampRefusal = err instanceof RecordVersionAtCeiling || err instanceof PositionClockUnusable || err instanceof PositionsSeedUnavailable
+      ? writeRefusalAnswer(err, 'update') : null;
+    if (stampRefusal) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...stampRefusal.body } }, status: stampRefusal.status, callSpace };
     }
     // The store's condition, answered as every door answers it (`storeFailureAnswer`, bundle-30 I6 `C1`); this
     // transport has no status line to carry it, so `storeSideFailure: true` says it in the body. The text is the

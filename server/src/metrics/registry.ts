@@ -25,7 +25,9 @@ import { getConfig, getStorageConfig } from '../config/loader.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComplete, USAGE_AREAS } from '../quota/quota.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { oldestHoldAgeSeconds } from '../util/seq.js';
+import { positionClockUnusable } from '../util/position-clock.js';
+import { setBrainWriteSink } from './brain-write-count.js';
+import { oldestRecordPositionHoldSeconds } from '../sync/record-position-stream.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
 import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
 import { JUDGED_WRITE_OPERATIONS } from '../contract/judged-write-operations.js';
@@ -808,14 +810,28 @@ function perSpaceGauge({ name, help, read }: { name: string; help: string; read:
 }
 
 /**
- * How long each space's oldest seq hold has been held (`Q-200`). A hold that does not end stops every seq-paged
- * reader of its space — a peer's pull is served nothing above it while each cycle reports success — and until this
- * nothing measured it. 0 for a space holding nothing. Read from `util/seq.ts`'s registry.
+ * How long each space's oldest record-position hold has been held (`Q-200`, renamed from the seq horizon's when the records took the position
+ * clock: bundle-81). A hold that does not end stops every position-paged reader of its space — a peer's pull is served nothing above it while
+ * each cycle reports success — and until this nothing measured it. 0 for a space holding nothing. Read from the records stream
+ * (`sync/record-position-stream.ts`), whose lines say `record position held`.
  */
-export const seqHorizonOldestHoldSeconds = perSpaceGauge({
-  name: 'ythril_seq_horizon_oldest_hold_seconds',
-  help: 'Age in seconds of the oldest open seq hold per space (0 when none); a growing value means replication of the space is held',
-  read: oldestHoldAgeSeconds,
+export const recordPositionOldestHoldSeconds = perSpaceGauge({
+  name: 'ythril_record_position_oldest_hold_seconds',
+  help: 'Age in seconds of the oldest open record-position hold per space (0 when none); a growing value means replication of the space is held',
+  read: oldestRecordPositionHoldSeconds,
+});
+
+/**
+ * 1 while a local write is being refused because the system clock reads before 2005-09-05T05:58:26.843Z, the first instant a record position
+ * can be taken at (`util/position-clock.ts`): every local write answers `positions_clock_unusable` (503) until the clock is right. 0 otherwise.
+ * It is a runtime refusal, not a readiness one: the instance can still serve reads and sync, so `/ready` is unchanged. Read at scrape time from
+ * the clock's own state, so the gauge cannot disagree with the refusal.
+ */
+export const positionClockUnusableGauge = new Gauge({
+  name: 'ythril_position_clock_unusable',
+  help: '1 while local writes are refused because the system clock reads before the first usable record-position instant, 0 otherwise',
+  registers: [register],
+  collect() { this.set(positionClockUnusable() ? 1 : 0); },
 });
 
 /**
@@ -1839,6 +1855,8 @@ export const brainWriteSeqTotal = new Counter({
   labelNames: ['collection', 'outcome'] as const,
   registers: [register],
 });
+// The door the stamping modules count through without importing this one (`metrics/brain-write-count.ts`).
+setBrainWriteSink((collection, outcome) => brainWriteSeqTotal.labels({ collection, outcome }).inc());
 // Pre-declared for the same reason as above: absent and zero look identical in a graph and mean opposites.
 //
 // All FOUR record types, because all four are now instrumented. #674 shipped `facts` alone while the
@@ -1858,7 +1876,8 @@ export const brainWriteSeqTotal = new Counter({
 // a fifth record type would be instrumented by its writer and silently absent from this pre-declaration,
 // and a graph would show nothing where it should show a zero.
 for (const collection of Object.values(COLLECTION_SUFFIX)) {
-  for (const outcome of ['clean', 'collision', 'refused']) {
+  // `ceiling`: a write refused because the record's own version is at the highest number sync accepts (`record_version_at_ceiling`).
+  for (const outcome of ['clean', 'collision', 'refused', 'ceiling']) {
     brainWriteSeqTotal.labels({ collection, outcome }).inc(0);
   }
 }

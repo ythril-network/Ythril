@@ -5,7 +5,7 @@
  *
  * A reader that pages by a position (a seq, an instant) and moves its cursor to the last row it saw loses any row that lands
  * BELOW the cursor afterwards. So a position that a write has taken and not yet committed must stop every reader below it
- * until the write ends. That is the seq horizon (`util/seq.ts`, `Q-196`) and it is the file-tombstone position
+ * until the write ends. That is the record-position horizon (`util/position-clock.ts`, `Q-196`, which was the seq's before bundle-81) and it is the file-tombstone position
  * (`files/tombstones.ts`, `Q-346`): instances of one hold, each with its own kind of floor (a number, an ISO instant).
  *
  * ## Why a module, and what a copy drops
@@ -28,7 +28,7 @@
  * ## Each instance writes its own lines
  *
  * An instance gives its noun, its floor's name and its readers (`HoldWording`), so a line reads in the words an operator
- * greps for: `seq horizon held 31.0s space=s seq=4 holder=fact.update ended=timeout`, and for the position
+ * greps for: `record position held 31.0s space=s pos=1790000000000000 holder=fact.update ended=timeout`, and for the position
  * `file tombstone position held 31.0s space=s at=2026-… holder=… ended=ok`. The words are the instance's, the rule is one.
  */
 
@@ -40,7 +40,7 @@ import { intervalJob } from './interval-job.js';
 
 /** The words an instance's lines and errors are written in. */
 export interface HoldWording {
-  /** What the lines start with: `seq horizon`, `file tombstone position`. */
+  /** What the lines start with: `record position`, `file tombstone position`. */
   readonly noun: string;
   /** The key the floor is printed under: `seq`, `at`. */
   readonly floorKey: string;
@@ -174,7 +174,7 @@ export async function heldWhile<F extends number | string, T>(
  * ── The watchdog (`Q-200`) ────────────────────────────────────────────────────────────────────────────────────
  *
  * The release line speaks when a hold ENDS. A hold that has not ended yet — the one stopping replication right now — is named
- * by the watchdog, once per hold, as soon as it is older than `holdWarnMs()`. One for every instance (the seq horizon and the
+ * by the watchdog, once per hold, as soon as it is older than `holdWarnMs()`. One for every instance (the record-position horizon and the
  * file-tombstone position are scanned by the same tick), started with the background services, unref'd so it never keeps the
  * process alive, and stopped on shutdown.
  */

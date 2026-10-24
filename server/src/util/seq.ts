@@ -1,231 +1,32 @@
-import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { col, asFilter } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { eachMemberMarkOf } from '../sync/receive-marks.js';
-import { log, peerText } from './log.js';
+import { log } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
-import { spaceCollection, type SpacePart } from '../db/space-collection.js';
-import { HorizonHolds, heldWhile } from './horizon-holds.js';
+import type { SpacePart } from '../db/space-collection.js';
 
 /*
- * ── Allocation carries its write (`Q-196`) ──────────────────────────────────────────────────────────────────
+ * ── What `seq` is, now that a position exists (bundle-81) ─────────────────────────────────────────────────────
  *
- * A seq is allocated in one round trip and the record that carries it is written in another. Everything that
- * pages by seq — the pull routes, the push loop, the tombstone pages, the scanners — serves what comes after a
- * position (`util/seq-keyset.ts`) and moves its cursor to the last record it saw. So a write that allocated 7 and has not committed yet, beside a
- * write that allocated 8 and has, lets a reader take 8, move past 7, and never come back for it: a record lost
- * to one peer for ever, with every later cycle reporting nothing to do.
+ * A record's `seq` is its VERSION: the number two copies of it are compared by, so an edit beats what it replaces and a peer takes a
+ * copy only when it is newer. It is stamped by `util/version-stamp.ts` (`max(V + 1, the stored version + 1, …)`, `V` the space's counter)
+ * and a record keeps its AUTHOR's version when it replicates. It is NOT where a record sits in a stream: paging, acknowledgement and
+ * the default list order read the record's POSITION (`pos`), which this instance takes when the record lands, however it got here
+ * (`util/position-clock.ts`, `sync/record-position-stream.ts`). That split is what ended Q-196's horizon on versions (a version needs
+ * no horizon, since nothing pages by it) and Q-278, Q-238 and Q-394 with it (a relayed record, a relayed tombstone and a tombstone-only
+ * cycle all took their position at receipt and so were offered once).
  *
- * **The rule: no seq-paged reader is handed a seq at or above one that is allocated and not yet settled.**
- * Two halves make it hold, and each is the half a hand-written copy would drop:
- *
- *   - `withAllocatedSeqs` takes the WRITE with the allocation and releases in a `finally`. A bare allocator
- *     returning a number cannot know when its write settles, so it cannot be released — which is why there is
- *     no exported `nextSeq` any more. A write that throws releases too, or the horizon would stick and every
- *     pull of the space would stall below it.
- *   - The registry is entered BEFORE the `$inc` is sent, as a bound rather than a number. The seq is unknown
- *     until the reply arrives, and a reader asking in between must still stop below it. Any seq Mongo hands
- *     this allocation is above every seq this process had seen when it asked, so `maxSeen + 1` is a safe floor.
- *
- * And `settledSeqRange` caps a reader at `maxSeen + 1` when nothing is in flight, because an allocation that
- * starts after the reader computed its range, and a later one that commits before the reader's query runs,
- * would otherwise slip a committed seq past an uncommitted one in exactly the same way.
- *
- * The hold itself — the registry, the holder check, the write bound, the release in a `finally`, the release line, the
- * watchdog — is `util/horizon-holds.ts`, one primitive with two instances: this one (a floor is a seq), and the file
- * tombstones' position (`files/tombstones.ts`, a floor is an ISO instant; a tombstone has no seq, so its pages are paged
- * and capped by `positionAt` and never by this horizon). What is THIS module's is how a floor is chosen: `maxSeen + 1`, then
- * the block's first seq once the allocation answers.
- *
- * In-process, and that is sufficient: one server process owns a space's counter. `maxSeen` is seeded from the
- * counter document on first use, and `bumpSeq` (an ingest moving the counter) advances it, so a record that
- * arrived from a peer is not hidden behind a stale bound. The bump is the ONLY way an arrival becomes visible
- * (`Q-107`): the arrival writer bumps after each landed chunk and never notes a seq on its own, because a note
- * without the counter would let a local write take a seq below a record a reader has already been handed.
+ * This module keeps what is still a fact about versions and nothing else: which collections carry them, the ceilings, and the counter's
+ * read. The counter is written by `versionsFor` and `raiseVersionTo` only.
  */
-interface SeqState {
-  /** The highest seq this process has seen allocated or bumped to; undefined until seeded. */
-  maxSeen: number | undefined;
-}
-const seqState = new Map<string, SeqState>();
-
-function stateOf(spaceId: string): SeqState {
-  let s = seqState.get(spaceId);
-  if (!s) { s = { maxSeen: undefined }; seqState.set(spaceId, s); }
-  return s;
-}
 
 /**
- * The seq instance of the hold (`util/horizon-holds.ts`): holds registered and not yet released — allocations sent and not
- * yet answered, and blocks not yet settled. The registry, the holder check, the bound, the release line and the watchdog scan
- * are the primitive's; this module owns what a floor IS (a seq) and how it is chosen.
- */
-const seqHolds: HorizonHolds<number> = new HorizonHolds<number>({
-  noun: 'seq horizon', floorKey: 'seq', floorName: 'seq', readers: 'every seq-paged reader of the space',
-});
-
-/**
- * The collections whose records carry a space seq and are paged by it. The seeding below reads the highest seq
- * stored in each, and `a-pull-never-passes-an-uncommitted-seq-db` derives the pull routes and fails on any
- * route whose collection this misses.
+ * The collections whose records carry a space seq and a position. The version floor reads the highest seq stored in each, the records
+ * stream's seed the highest `pos`, and `a-pull-never-passes-an-uncommitted-position-db` derives the pull routes and fails on any route
+ * whose collection this misses.
  */
 export const SEQ_CARRYING: readonly SpacePart[] = ['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones'];
 
-/**
- * The highest seq stored in any of the space's seq-carrying collections — one read each, once per space per
- * process. Every one of them has a `{ seq: 1, _id: 1 }` index once its keyset index is built (`SEQ_KEYSET_INDEXES`,
- * `util/seq-keyset.ts`), which serves a newest-first read of one record by walking it backwards; until then `files`
- * has none, and that one read scans the space's file metadata.
- */
-async function highestStoredSeq(spaceId: string): Promise<number> {
-  const tops = await Promise.all(SEQ_CARRYING.map(c => col<{ seq?: number }>(spaceCollection(spaceId, c))
-    .find(asFilter<{ seq?: number }>({ seq: { $type: 'number' } }), { projection: { seq: 1 } })
-    .sort({ seq: -1 }).limit(1).toArray()));
-  return Math.max(0, ...tops.map(t => t[0]?.seq ?? 0));
-}
-
-/**
- * Seeded from the counter AND from what is stored, because the two can disagree: before `Q-198` a
- * single-document sync push stored the sender's seq without moving the counter, and a database written then
- * still holds such records. Seeded from the
- * counter alone, the bound hid every such record from every pull until the counter happened to pass it.
- *
- * It does NOT move the counter, though the store being ahead of it is its own defect (`Q-198`): a pull is a
- * READ door, and `no-read-door-reaches-a-write` holds a read-only token to causing no write at all. Moving the
- * counter belongs to the ingest that stored the record.
- */
-async function seededState(spaceId: string): Promise<SeqState> {
-  const s = stateOf(spaceId);
-  if (s.maxSeen === undefined) {
-    const [counter, stored] = await Promise.all([currentSeq(spaceId), highestStoredSeq(spaceId)]);
-    // Another caller may have allocated while the reads were out; never move the bound backwards.
-    s.maxSeen = Math.max(s.maxSeen ?? 0, counter, stored);
-  }
-  return s;
-}
-
-/**
- * Allocate `n` consecutive seqs for one space and run `write` with the first. The block is registered as in
- * flight before the allocation is sent and released when `write` settles, success or failure.
- *
- * `write` should be the record write and nothing else: everything awaited inside it holds every seq-paged
- * reader of this space below the block (`a-seq-allocation-is-followed-by-its-write` holds the writers to it).
- * Every operation it issues — and the allocation's own `$inc` — is bounded (`db/write-bound.ts`), so the hold
- * ends when the write does, within the bound.
- *
- * `holder` names who holds the horizon (one word: `fact.update`, `sync.push.fork`) for the release line, the
- * watchdog and the gauge. It is REQUIRED: a stalled hold nobody can name is the defect `Q-200` fixed.
- */
-export async function withAllocatedSeqs<T>(
-  spaceId: string, n: number, write: (first: number) => Promise<T>, holder: string,
-): Promise<T> {
-  if (!Number.isInteger(n) || n < 1) throw new Error(`withAllocatedSeqs: n must be a positive integer, got ${n}`);
-  seqHolds.requireHolder(holder);
-  const s = await seededState(spaceId);
-  const h = seqHolds.enter(spaceId, (s.maxSeen ?? 0) + 1, holder);
-  return heldWhile(seqHolds, spaceId, h, async () => {
-    const result = await col<SpaceCounterDoc>('ythril_counters').findOneAndUpdate(
-      { _id: spaceId },
-      { $inc: { seq: n } },
-      { upsert: true, returnDocument: 'after' },
-    );
-    if (!result) throw new Error(`Failed to increment sequence counter for space ${spaceId}`);
-    // The floor moves up to the block. Every seq Mongo hands this allocation is above every seq this process had
-    // seen when it asked, so the block's first is at or above the floor: the horizon never moves down here.
-    h.floor = result.seq - n + 1;
-    if (result.seq > (s.maxSeen ?? 0)) s.maxSeen = result.seq;
-    return write(h.floor);
-  });
-}
-
-/**
- * Hold the horizon for the whole of `fn`: every seq allocated while it runs stays unsettled until it returns.
- *
- * For a TRANSACTION. Inside a session a write that returns has not committed — the commit is the session's —
- * so `withAllocatedSeqs` releasing when its write returns would hand a reader a seq whose record is not yet
- * visible, and the reader would step past it. Any seq allocated after this call starts is at or above the
- * floor it registers, so holding the floor holds them all. Reached through `brain/held-transaction.ts`, which
- * gives the transaction's session the hold's deadline.
- */
-export async function withSeqHorizonHeld<T>(spaceId: string, fn: () => Promise<T>, holder: string): Promise<T> {
-  seqHolds.requireHolder(holder);
-  const s = await seededState(spaceId);
-  return heldWhile(seqHolds, spaceId, seqHolds.enter(spaceId, (s.maxSeen ?? 0) + 1, holder), fn);
-}
-
-/** One seq: `withAllocatedSeqs(spaceId, 1, write, holder)`. */
-export function withSeq<T>(spaceId: string, write: (seq: number) => Promise<T>, holder: string): Promise<T> {
-  return withAllocatedSeqs(spaceId, 1, write, holder);
-}
-
-/**
- * Take a seq only once the condition that decides the write has been ANSWERED — for a write that routinely lands
- * nothing.
- *
- * ## What it prevents
- *
- * The counter moves BEFORE the write: `withAllocatedSeqs` runs its `$inc` and only then calls `write`. So a guarded
- * write whose filter matches nothing still consumes a number, and the hole it leaves is worse than the waste — the
- * counter names a seq no record holds, and every peer pages past it. Measured on a file uploaded WITH a description:
- * the upload took seq 1, the derived-description write landed nothing and the counter stood at 2 with no record
- * holding it.
- *
- * ## How to use it, and the half that is easy to drop
- *
- * `stillTrue` reads what decides the write and answers before any number is taken. **The condition stays in the write's
- * own filter as well**: the read answers "is this worth a number", the filter answers "is it still true at the instant
- * of the write", and dropping the second turns a burned number into a lost update — which is the thing the filter was
- * there for in the first place.
- *
- * ## Who CANNOT use this, which is most callers
- *
- * A write whose precondition must be ATOMIC with it — `findOneAndUpdate` filtered by `writeFilterFor(id, ifMatchSeq)`
- * in `brain/fact.ts`, `entities.ts`, `edges.ts` and `chrono.ts` — cannot move its check in front of the allocation
- * without reintroducing the lost update the filter exists to prevent. Those four decline BY DESIGN (a 412, or a
- * concurrent delete) and keep their burn: a sanctioned decline, named here so this form is not read as covering them.
- * Two more can lose a race to a concurrent write of the same row and burn a number that way, which is rare and is a
- * race rather than a routine outcome.
- *
- * @returns what `write` returned, or `undefined` when the condition was already false — then no number was taken.
- */
-export async function withSeqWhen<T>(
-  spaceId: string,
-  stillTrue: () => Promise<boolean>,
-  write: (seq: number) => Promise<T>,
-  holder: string,
-): Promise<T | undefined> {
-  if (!await stillTrue()) return undefined;
-  return await withAllocatedSeqs(spaceId, 1, write, holder);
-}
-
-/** The lowest seq allocated (or being allocated) and not yet settled, or undefined when none is. */
-export function lowestUncommittedSeq(spaceId: string): number | undefined {
-  return seqHolds.lowest(spaceId);
-}
-
-/** How long the oldest hold on `spaceId` has been held, in seconds — 0 when it holds nothing. For the gauge. */
-export function oldestHoldAgeSeconds(spaceId: string): number {
-  return seqHolds.oldestAgeSeconds(spaceId);
-}
-
-/**
- * The seq range a seq-paged reader may be handed after `since`: `{ $gt: since, $lt: horizon }`. The horizon is
- * the lowest unsettled seq, or one past the highest seq this process knows of when nothing is in flight.
- *
- * Reached ONLY through `util/seq-keyset.ts` (`readAfterSeq`), which applies it to both finds of a keyset read and builds
- * the position around it; `every-seq-paged-reader-goes-through-the-keyset` holds that no other file calls it. A reader
- * that builds `{ $gt }` by hand, or asks this and builds its own filter, is the defect that module ends.
- */
-export async function settledSeqRange(spaceId: string, since: number): Promise<{ $gt: number; $lt: number }> {
-  const s = await seededState(spaceId);
-  const lowest = lowestUncommittedSeq(spaceId);
-  return { $gt: since, $lt: lowest ?? (s.maxSeen ?? 0) + 1 };
-}
-
-/*
- * A block (`n > 1` above) keeps the contract the old `reserveSeqBlock` had and that is easy to get wrong:
- * GAPS are safe — a write that fails leaves its seqs unused and nothing pages over a hole incorrectly — but
- * REUSE is not, so a block is never handed out twice and a re-planned write allocates a fresh one.
- */
 /** Read the current counter for a space (0 when it does not exist yet). */
 export async function currentSeq(spaceId: string): Promise<number> {
   const doc = await col<SpaceCounterDoc>('ythril_counters')
@@ -234,39 +35,23 @@ export async function currentSeq(spaceId: string): Promise<number> {
 }
 
 /**
- * The lowest value the space's counter may hold without handing out a seq again: the counter doc, the highest seq stored, and the
- * highest this process has seen allocated or bumped (`maxSeen`), whichever is highest. Three sources because each can be the one ahead:
- * a counter doc a restore left below its records, records a peer pushed past the counter before `Q-198`, and a seq this process handed
- * out to a write whose record has since gone. A replace of the space's data (a restore act) takes it after its drain and writes the
- * counter to at least it (bundle-157, Q-554), so the next write never takes a seq a reader was already handed.
- */
-export async function seqFloor(spaceId: string): Promise<number> {
-  const [counter, stored] = await Promise.all([currentSeq(spaceId), highestStoredSeq(spaceId)]);
-  return Math.max(counter, stored, stateOf(spaceId).maxSeen ?? 0);
-}
-
-/**
  * The protocol sequence ceiling — the one definition: the `Incoming*` schemas in `api/sync/_shared.ts`
  * validate against this constant (`<= 2^50`), and it had a second copy there until `Q-107`. A document at or
  * above this cannot be represented, so it is never a legitimate value on the wire. Kept within safe-integer
- * arithmetic so a seq allocation can never round.
+ * arithmetic so a version can never round. Every position of the clock band is above it (`util/position-clock.ts`).
  */
 export const MAX_SYNC_SEQ = 2 ** 50;
 
 /**
- * Headroom kept below `MAX_SYNC_SEQ`. Ingesting a document advances the space
- * counter (`bumpSeq`) so local writes always sort above synced ones — so a peer
- * that pushes one document with `seq` near the ceiling drags the counter there,
- * and the space's *next* local write exceeds `MAX_SYNC_SEQ` and is rejected by
- * every peer: silent, unrecoverable write loss.
+ * Headroom kept below `MAX_SYNC_SEQ`. A peer that pushes one document with `seq` near the ceiling must not be able to take this
+ * instance's own versions with it, or the space's *next* local write exceeds `MAX_SYNC_SEQ` and is rejected by every peer: silent,
+ * unrecoverable write loss (Q-241). Arrivals no longer move the counter at all (D-19 B), and what a held record raises is capped
+ * ({@link VERSION_FLOOR_CAP}), so the headroom is what a local stamp may still climb through.
  *
- * The guard is absolute rather than relative to the current counter: legitimate
- * seqs are small monotonic counters (an allocation increments by its block size), so they sit far
- * below `MAX_SYNC_SEQ - SEQ_CEILING_RESERVE` regardless of a space's history,
- * while the poisoning value (near 2^50) is caught. A relative "max jump" guard
- * would instead false-positive on the initial sync of a high-volume space to a
- * fresh peer. 2^40 (~1.1e12) of reserve leaves an unreachable number of future
- * writes before the ceiling.
+ * The guard is absolute rather than relative to the current counter: legitimate seqs are small monotonic counters (an allocation
+ * increments by its block size), so they sit far below `MAX_SYNC_SEQ - SEQ_CEILING_RESERVE` regardless of a space's history,
+ * while the poisoning value (near 2^50) is caught. A relative "max jump" guard would instead false-positive on the initial sync of a
+ * high-volume space to a fresh peer. 2^40 (~1.1e12) of reserve leaves an unreachable number of future writes before the ceiling.
  */
 export const SEQ_CEILING_RESERVE = 2 ** 40;
 
@@ -274,40 +59,20 @@ export const SEQ_CEILING_RESERVE = 2 ** 40;
 export const MAX_INGEST_SEQ = MAX_SYNC_SEQ - SEQ_CEILING_RESERVE;
 
 /**
+ * The highest value the space's counter `V` may hold, and the highest a held version may raise a local stamp's floor to: `MAX_INGEST_SEQ`
+ * less the reserve. A stamp above it is still written when it is at or below `MAX_INGEST_SEQ` (an edit of a near-ceiling arrival is one
+ * above it), but it never raises `V`, so one edit cannot drag every later create up to the ceiling. Every stamp at or below it leaves
+ * `SEQ_CEILING_RESERVE` creates of headroom.
+ */
+export const VERSION_FLOOR_CAP = MAX_INGEST_SEQ - SEQ_CEILING_RESERVE;
+
+/**
  * True when `seq` is out of range or so close to the protocol ceiling that
- * ingesting it would strand the space's counter. Callers reject such documents.
+ * ingesting it would strand a record's next version. Callers reject such documents.
  * Synchronous — the bound does not depend on the current counter.
  */
 export function isSeqImplausible(seq: number): boolean {
   return !Number.isFinite(seq) || seq < 0 || seq > MAX_INGEST_SEQ;
-}
-
-/**
- * Ensure the space counter is at least `minSeq`.
- * Called after receiving remote documents via sync so that subsequent local
- * writes always get a seq higher than any synced document.
- * Uses $max — only advances the counter, never decreases it.
- *
- * The advance is CLAMPED to `MAX_INGEST_SEQ`: ingest paths already refuse
- * documents above it, and this is the backstop that keeps a stray value from
- * stranding the counter within `SEQ_CEILING_RESERVE` of the ceiling.
- */
-export async function bumpSeq(spaceId: string, minSeq: number): Promise<void> {
-  if (minSeq > MAX_INGEST_SEQ) {
-    log.warn(
-      `Clamped seq bump for space '${peerText(spaceId)}': requested ${minSeq} exceeds ` +
-      `MAX_INGEST_SEQ (${MAX_INGEST_SEQ}) — advancing to the ceiling reserve instead.`,
-    );
-    minSeq = MAX_INGEST_SEQ;
-  }
-  await col<SpaceCounterDoc>('ythril_counters').updateOne(
-    asFilter<SpaceCounterDoc>({ _id: spaceId }),
-    asUpdate<SpaceCounterDoc>({ $max: { seq: minSeq } }),
-    { upsert: true },
-  );
-  // A record that arrived at this seq is committed (ingest writes before it bumps); readers may be handed it.
-  const s = stateOf(spaceId);
-  if (s.maxSeen !== undefined && minSeq > s.maxSeen) s.maxSeen = minSeq;
 }
 
 /**

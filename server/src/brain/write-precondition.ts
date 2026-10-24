@@ -15,29 +15,64 @@
  *
  * ── Why `seq` is the right validator, and how to talk about it ──────────────────────────────────
  *
- * `seq` comes from `withSeq(spaceId, …)` — a per-SPACE monotonic counter, not a per-record version. It
- * still answers the only question a precondition asks ("has this record been written since I read
- * it?"), because a record's `seq` changes on every write to that record and on no other event. What
- * it is NOT is a small counter that goes 1, 2, 3 for a given record, so nothing user-facing should
- * describe it as a version number: it is an opaque validator that clients echo back.
+ * `seq` is the record's VERSION: a local write stamps `max(V + 1, the stored version + 1, …)` (`util/version-stamp.ts`), so it
+ * is above every version this instance has held for the record, and it changes on every write to that record and on no other
+ * event. It still answers the only question a precondition asks ("has this record been written since I read it?"). What it is
+ * NOT is a small counter that goes 1, 2, 3 for a given record, so nothing user-facing should describe it as a count: it is an
+ * opaque validator that clients echo back.
+ *
+ * ── The write is the version's own (bundle-81, decision 14) ─────────────────────────────────────
+ *
+ * A local write is stamped against the version it READ (`readSeq`), and its filter names that version whether or not the
+ * caller sent an `If-Match`. Without it an arrival landing between the read and the write was overwritten by a stamp BELOW
+ * it, and since an arrival no longer lifts the counter nothing corrected that afterwards: a peer holding the arrival never
+ * took this copy as newer. So `readSeq` is REQUIRED — a caller cannot ask for the unconditional filter, and there is none.
+ * A miss without `If-Match` is retried by the writer (re-read, re-stamp, at most three attempts); with one, it is the
+ * precondition refusal at once.
  *
  * ── The one thing the caller must get right ─────────────────────────────────────────────────────
  *
  * A `null` from `findOneAndUpdate` means the filter matched nothing. Under a precondition that means
- * "the record moved or is gone"; with no precondition it means "gone". The update functions return
- * `null` in both cases and the ROUTE decides between 404 and 412, because only the route knows
+ * "the record moved or is gone"; with no precondition it means "gone" or "moved again after every retry". The update
+ * functions return `null` in both cases and the ROUTE decides between 404 and 412, because only the route knows
  * whether it read the record a moment earlier.
  */
 
 import { atReadSeq } from '../db/at-read-seq.js';
 
 /**
- * The filter for an update's own write. `ifMatchSeq === undefined` gives the unconditional filter
- * this code has always used, byte for byte; a seq gives `atReadSeq`'s — the one spelling of "still at the
- * version I read" (`null`: still carrying none), which the write plan's converge uses too (bundle-30 I6, C3).
+ * The code a write answers when the version it would stamp is above the highest one sync accepts (`MAX_INGEST_SEQ`): the record's
+ * own version is at that ceiling, so this instance can no longer change or delete it — the instance that wrote it can. A constant,
+ * spelled here once because this module owns a write's version outcome; the clients' words are keyed by it
+ * (`networks.refusal.record_version_at_ceiling`).
  */
-export function writeFilterFor(id: string, ifMatchSeq?: number | null): Record<string, unknown> {
-  return ifMatchSeq === undefined ? { _id: id } : atReadSeq(id, ifMatchSeq);
+export const RECORD_VERSION_AT_CEILING = 'record_version_at_ceiling';
+
+/**
+ * A local write was refused because its version would be above `MAX_INGEST_SEQ`, which every receiver refuses: written, it would
+ * reach nobody. Thrown by `versionsFor` (`util/version-stamp.ts`) before anything is written, so a refused edit changes nothing, a
+ * refused delete leaves no tombstone and a refused merge is refused whole. One sentence for both doors: REST answers `409` with
+ * `{ error, code, id }`, MCP a refusal carrying the same code and sentence (`writeRefusalAnswer`).
+ */
+export class RecordVersionAtCeiling extends Error {
+  override readonly name = 'RecordVersionAtCeiling';
+  readonly code = RECORD_VERSION_AT_CEILING;
+  constructor(readonly id: string) {
+    super('This record\'s version is already at the highest number that sync accepts, so this instance can no longer change or delete it. '
+      + 'The instance that wrote it can.');
+  }
+}
+
+/**
+ * The filter for an update's own write: still at the version the stamp read (`readSeq`: a number, or `null` when the stored row carries
+ * none) — `atReadSeq`'s, the one spelling of that (which the write plan's converge uses too, bundle-30 I6, C3) — and, when the caller sent an
+ * `If-Match`, still at that version as well, so an `If-Match` of any other version never matches. `readSeq` is required on purpose (see above).
+ */
+export function writeFilterFor(
+  id: string, { readSeq, ifMatchSeq }: { readSeq: number | null; ifMatchSeq?: number | null | undefined },
+): Record<string, unknown> {
+  const read = atReadSeq(id, readSeq);
+  return ifMatchSeq === undefined || ifMatchSeq === readSeq ? read : { $and: [read, atReadSeq(id, ifMatchSeq)] };
 }
 
 /**

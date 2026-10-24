@@ -4,7 +4,7 @@
  *
  * ## The defect
  *
- * `withAllocatedSeqs` and `withSeqHorizonHeld` (`util/seq.ts`) hold a floor every seq-paged reader of the space stops
+ * `withLandingStamp` and the transaction floor (`sync/record-position-stream.ts`, `util/position-clock.ts`) hold a floor every position-paged reader of the space stops
  * below, and release it when the write settles. Nothing bounded the write. A document lock held by another session,
  * a stalled socket, or `withTransaction` retrying a conflict for its default 120 s held the floor for as long as it
  * waited — and every peer pulling that space was served nothing above it, while every cycle reported success over

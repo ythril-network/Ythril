@@ -30,6 +30,9 @@ import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/con
 import type { FileActAnswer } from '../files/act-answers.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { spaceActAnswer } from '../spaces/space-act-answer.js';
+import { writeRefusalAnswer } from '../brain/write-validation.js';
+import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
+import { PositionClockUnusable, PositionsSeedUnavailable } from '../util/errors.js';
 
 /**
  * Put a store failure's answer on the wire: status, `Retry-After` when the answer is retryable, and the body —
@@ -102,6 +105,12 @@ export function sendCaughtFailure(res: express.Response, where: string, err: unk
   // same answer `callTool` and the app's final handler give, from the one function all three ask (`spaceActAnswer`, Q-560).
   const closed = spaceActAnswer(err);
   if (closed) { res.status(closed.status).json(closed.body); return; }
+  // A local write's stamp refused it: the version is at the ceiling (409, a code), or the clock or the position seed will not let it be taken (503).
+  const stamp = writeRefusalAnswer(err, 'update');
+  if (stamp && (err instanceof RecordVersionAtCeiling || err instanceof PositionClockUnusable || err instanceof PositionsSeedUnavailable)) {
+    res.status(stamp.status).json(stamp.body);
+    return;
+  }
   const store = storeFailureAnswer(err, where);
   if (store) { sendStoreFailure(res, store); return; }
   // Whatever is left is a fault, whatever it is: this is a catch-all and every route answered its own refusals before it (`refusals: false`).
