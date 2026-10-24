@@ -145,7 +145,7 @@ describe('a door governed by a read rung never writes a space', () => {
   it('the writer set holds the writers this rule was written about', () => {
     // Anchors, not the set: each is a writer the ticket named, found by a DIFFERENT path through the
     // derivation — a helper-returned collection, the counter, the file tree, a direct open.
-    for (const key of ['server/src/brain/embed-queue.ts:enqueueEmbedJob', 'server/src/util/seq.ts:bumpSeq',
+    for (const key of ['server/src/brain/embed-queue.ts:enqueueEmbedJob', 'server/src/util/version-stamp.ts:raiseVersionTo',
       'server/src/files/stored-bytes.ts:writeStored', 'server/src/files/file-meta.ts:upsertFileMeta']) {
       assert.ok(writesReachedBy({ roots: [key] }).length > 0,
         `${key} reaches no space write — the derivation lost a whole path through it`);

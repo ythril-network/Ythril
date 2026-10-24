@@ -142,7 +142,7 @@ describe('seq ingest guard — the sync-poisoning ceiling', () => {
   });
 
   it('rejects a value near the ceiling — the poisoning case', () => {
-    // One document carrying this drags the space counter up via bumpSeq, and every subsequent LOCAL
+    // One document carrying this drags the space counter up via raiseVersionTo, and every subsequent LOCAL
     // write then exceeds what peers accept. The loss is silent and unrecoverable, which is why the
     // guard is absolute rather than relative to the current counter.
     assert.equal(isSeqImplausible(MAX_INGEST_SEQ + 1), true);

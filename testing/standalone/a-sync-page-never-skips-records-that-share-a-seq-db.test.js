@@ -51,7 +51,7 @@ const families = await replicatedFixtureFamilies();
 /** The run: 199 distinct seqs, then four records sharing seq 200 — the 200-record engine page ends INSIDE the run. */
 const RUN = { before: ENGINE_PAGE - 1, tie: 4, extra: { author: PEER_AUTHOR } };
 
-let door, bumpSeq;
+let door, raiseVersionTo;
 
 /** The ids of the RECORDS a page carries — the tombstones that ride along are `{ _id, seq, deletedAt }` stubs. */
 const recordIds = (body) => body.items.filter(d => d.deletedAt === undefined).map(d => d._id);
@@ -81,7 +81,7 @@ async function storedIds(family) {
 describe('a sync page never skips a record that shares its seq', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'tiepull', spaces: [S] });
-    ({ bumpSeq } = await import('../../server/dist/util/seq.js'));
+    ({ raiseVersionTo } = await import('../../server/dist/util/version-stamp.js'));
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => { await door.reset(); });
@@ -102,7 +102,7 @@ describe('a sync page never skips a record that shares its seq', { skip }, () =>
           for (const limit of [1, 2, 3, 4, 5]) {
             await door.wipe(S);
             await door.coll(S, family.collection).insertMany(tied.docs.map(d => ({ ...d })));
-            await bumpSeq(S, 100);
+            await raiseVersionTo(S, 100);
             const got = await readAll(family, { limit, echoSince });
             const { missing, repeated } = missingAndRepeated(tied.ids, got);
             assert.deepEqual({ missing, repeated }, { missing: [], repeated: [] },
@@ -126,7 +126,7 @@ describe('a sync page never skips a record that shares its seq', { skip }, () =>
         family.make(S, 'd-fourth.md', 4, { author: PEER_AUTHOR }),
       ];
       await door.coll(S, family.collection).insertMany(docs.map(d => ({ ...d })));
-      await bumpSeq(S, 100);
+      await raiseVersionTo(S, 100);
       for (const echoSince of [false, true]) {
         // limit 2: the long path is the LAST item of the first page, so the cursor has to name a 2000-character id.
         const got = await readAll(family, { limit: 2, echoSince });

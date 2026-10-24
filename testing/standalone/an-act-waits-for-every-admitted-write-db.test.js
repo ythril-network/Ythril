@@ -111,7 +111,8 @@ describe('a wipe waits for every write admitted before it, and no such write sur
     await row({
       name: 'writeTombstones', collection: 'tombstones', method: 'bulkWrite',
       seed: async () => { await door.coll(S, 'tombstones').deleteMany({}); },
-      run: () => writers.tombstones.writeTombstones(S, [{ _id: 'tomb-wait', type: 'fact' }]),
+      // A tombstone is written under the version taken for it BEFORE the record goes (bundle-81: `stampTombstones`, which `writeTombstones` requires).
+      run: async () => { const t = { _id: 'tomb-wait', type: 'fact' }; await writers.tombstones.writeTombstones(S, [t], await writers.tombstones.stampTombstones(S, [t])); },
       gone: () => door.coll(S, 'tombstones').countDocuments({ _id: 'tomb-wait' }),
     });
   });

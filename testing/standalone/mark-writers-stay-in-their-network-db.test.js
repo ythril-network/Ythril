@@ -109,7 +109,7 @@ describe('a mark writer stays in its network', { skip }, () => {
 
   it('a club push moves the club row\'s lastPosPushed only: the braintree row\'s stays at its sentinel', async () => {
     await door.coll(S, 'facts').insertOne(positioned(build.fact(S, 'marks-own', 60, { author: ME }), { writtenHere: true }));
-    await door.bumpSeq(S, 60);
+    await door.raiseVersionTo(S, 60);
     const sent = await cycle();
     assert.ok(sent.includes('marks-own'), `control: the club did not push the record written here (${sent.join(', ') || 'nothing'})`);
     const club = markOn(CLUB, 'pushed');
@@ -125,7 +125,7 @@ describe('a mark writer stays in its network', { skip }, () => {
       positioned(build.fact(S, 'marks-relayed', 70, { author: { instanceId: 'marks-elsewhere', instanceLabel: 'Elsewhere' } }),
         { writtenHere: false, deliveredBy: PEER }),
     ]);
-    await door.bumpSeq(S, 70);
+    await door.raiseVersionTo(S, 70);
     const first = await cycle();
     assert.ok(first.includes('marks-own'), `control: the club did not push the record written here (${first.join(', ') || 'nothing'})`);
     assert.ok(!first.includes('marks-relayed'), 'the club pushed a record it did not write: the club selection is not what this case assumes');

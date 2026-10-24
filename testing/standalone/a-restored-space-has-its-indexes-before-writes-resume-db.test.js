@@ -1,6 +1,6 @@
 /**
- * A restored space has its unique and keyset indexes, and a counter at or above every seq it could have handed out, BEFORE its writes
- * resume (bundle-157, Q-554; design rev 2 "The counter raise", rev 3 R3.3 steps 1-4 and R3.10).
+ * A restored space has its unique and keyset indexes, and a counter at or above every version it holds, BEFORE its writes
+ * resume (bundle-157, Q-554; design rev 2 "The counter raise", rev 3 R3.3 steps 1-4 and R3.10; re-pointed by bundle-81, see below).
  *
  * ## The rule this holds, and the red it is seen at
  *
@@ -9,15 +9,22 @@
  * the backup's `ythril_counters` can hold no doc for the space at all, or one below seqs this process already handed out, so the next
  * write takes a seq a peer has already been served. The rule: the act body, inside the hold,
  *
- * - takes the floor AFTER the drain as max(the counter doc, the highest stored seq, the in-process `maxSeen`), and writes the counter
- *   to at least that floor and the highest seq it restored;
+ * - takes the floor AFTER the drain as max(the counter doc, the highest stored version below the cap), and writes the counter
+ *   to at least that floor and the highest version it restored;
  * - builds the edge identity and guard unique indexes and every `SEQ_KEYSET_INDEXES` entry before the completion lifts the hold.
  *
  * ## What is asserted
  *
- * - **Floor.** Space `floored` holds facts up to seq 3 and NO counter doc at the backup. After it: facts at 4 and 5, a write that
- *   takes seq 9 (so `maxSeen` is 9) and is then removed, and the counter doc set back to 7 - three sources, each different. After the
- *   restore the counter doc exists and is at least 9 and at least the highest stored seq.
+ * - **Floor.** Space `floored` holds facts up to seq 3 and NO counter doc at the backup. After it: facts at 4 and 5 and the counter doc
+ *   set to 7 — two sources, each different. After the restore the counter doc exists and is at least 7 and at least the highest stored version.
+ *
+ * ## What bundle-81 changed in this file, and why
+ *
+ * It asserted a THIRD source, the in-process `maxSeen`: a write that took seq 9 and was then removed, so the floor had to be 9 though no row held it.
+ * The memory is gone with the seq hold it served (`util/seq.ts`): a version is stamped per RECORD, above the version that record holds and above any deletion
+ * held for its id (`util/version-stamp.ts`), so a number a removed record once took can be taken again by another record without harm, and by the same
+ * record never (its tombstone, or the row itself, holds it). What the counter must not do is fall below a version a record still holds, which is the
+ * floor this file keeps (`highestVersionBelowCap`, `db/restore-act.ts`).
  * - **Indexes before writes resume.** In the runner's `beforeComplete` hook (the act's body is done, the hold not yet lifted), the
  *   edges carry the identity index and every `EDGE_GUARD_INDEXES` entry, unique, and every restored collection named by
  *   `SEQ_KEYSET_INDEXES` carries its keyset index. The sets are read from the server's own declarations, with a floor.
@@ -45,7 +52,7 @@ const SUITE = 'restoreindexes';
 const T = { timeout: 90_000 };
 const IDENTITY_KEYS = { from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 };
 
-let door, mods, writers;
+let door, mods;
 const facts = (space, ns) => ns.map(n => ({ _id: `${space}-${n}`, spaceId: space, fact: `${space} ${n}`, tags: [], seq: n }));
 const sameKeys = (a, b) => JSON.stringify(Object.entries(a)) === JSON.stringify(Object.entries(b));
 
@@ -63,12 +70,11 @@ describe('a restored space has its indexes and its counter floor before writes r
   before(async () => {
     door = await openToolDoor({ suite: SUITE, spaces: ['floored', 'indexed'].map(id => ({ id, label: id, folders: [] })) });
     mods = await restoreModules();
-    writers = { fact: await import('../../server/dist/brain/fact.js') };
   });
   after(async () => { try { resetRunnerForTest(mods.runner); } catch { /* never loaded */ } await door?.close(); });
   beforeEach(() => { resetRunnerForTest(mods.runner); clearActEntries(mods.loader); });
 
-  it('the counter after a restore that dropped the counter doc is at least max(counter doc, highest stored seq, maxSeen)', T, async () => {
+  it('the counter after a restore that dropped the counter doc is at least max(counter doc, highest stored version)', T, async () => {
     const S = 'floored';
     await door.coll(S, 'facts').insertMany(facts(S, [1, 2, 3]));
     await door.mongo.col('ythril_counters').deleteMany({ _id: S });
@@ -77,19 +83,13 @@ describe('a restored space has its indexes and its counter floor before writes r
       || !(await door.mongo.col('ythril_counters').findOne({ _id: S })), 'fixture: the backup holds a counter doc for the space');
 
     await door.coll(S, 'facts').insertMany(facts(S, [4, 5]));
-    await door.setCounter(S, 8);
-    const taken = await writers.fact.saveFact(S, 'takes seq 9', [], [], undefined, undefined, 'note');
-    const takenId = taken?._id ?? taken?.fact?._id ?? taken?.id;
-    const nine = await door.coll(S, 'facts').findOne({ seq: 9 });
-    assert.ok(nine, `fixture: the write did not take seq 9 (${JSON.stringify(takenId)})`);
-    await door.coll(S, 'facts').deleteOne({ _id: nine._id });
     await door.setCounter(S, 7);
-    const floor = 9;
+    const floor = 7;
 
     await restoreToTheEnd(mods, { backupId: backup.id });
     const counter = (await door.mongo.col('ythril_counters').findOne({ _id: S }))?.seq;
     assert.ok(counter !== undefined, 'after the restore the space has no counter doc: the next write starts again from 1, below seqs already handed out');
-    assert.ok(counter >= floor, `after the restore the counter is ${counter}, below the floor ${floor} (in-process maxSeen 9, counter doc 7): the next write reuses a seq already handed out`);
+    assert.ok(counter >= floor, `after the restore the counter is ${counter}, below the floor ${floor} (the counter doc the restore left standing): the next write can take a version below one this space already holds`);
     const highest = await highestStoredSeq(S);
     assert.ok(counter >= highest, `after the restore the counter ${counter} is below the highest stored seq ${highest}`);
   });

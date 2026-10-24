@@ -63,6 +63,10 @@ const LOCAL_VALUES = {
   // The write guard (`Q-439`): this instance's lock on an edge's subject. A literal, because the table is about whether it
   // CROSSES an arrival, not about what it is a function of.
   _functionalGuard: 'a-subject-key-this-instance-stamped',
+  // Bundle-81: where this instance stored the copy, and that it wrote it. An arrival LANDS afresh (`LANDED`), so neither survives it.
+  pos: 1_700_000_000_000_000,
+  posAtSeq: 5,
+  writtenHere: true,
 };
 /**
  * The local-only fields that exist on ONE family only: a write guard is an edge's marker, and a fact or an entity has no
@@ -75,6 +79,8 @@ const heldBy = (fam, field) => !(field in ONLY_ON) || ONLY_ON[field] === fam.col
 const GUARD_FIELD = '_functionalGuard';
 /** Local-only fields a peer's arrival replaces by its own delivery instead of carrying across: what a "keeps" check leaves out. */
 const BY_THE_ARRIVAL = new Set(['deliveredBy']);
+/** The ones a landing stamps afresh (`isLandingStamped`, read from the module in `before`): the position taken for the arriving version, and not written here. */
+let LANDED = () => false;
 const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', filemeta: 'filemeta' };
 
 let door, importMod, families, TYPE_FIELD, LOCAL_ONLY;
@@ -137,7 +143,9 @@ describe('a suppressed arrival holds no vector (Q-230)', { skip }, () => {
     importMod = await import('../../server/dist/api/admin-import.js');
     const { REPLICATED_FAMILIES, RECORD_TYPE_OF } = await import('../../server/dist/sync/replicated-families.js');
     families = REPLICATED_FAMILIES.map(f => ({ key: f.payloadKey, collection: f.collection, recordType: RECORD_TYPE_OF[f.collection] }));
-    ({ LOCAL_ONLY_FIELDS: LOCAL_ONLY } = await import('../../server/dist/sync/local-only-fields.js'));
+    const localOnly = await import('../../server/dist/sync/local-only-fields.js');
+    LOCAL_ONLY = localOnly.LOCAL_ONLY_FIELDS;
+    LANDED = localOnly.isLandingStamped;
   });
   after(async () => { await door?.close(); });
 
@@ -192,8 +200,12 @@ describe('a suppressed arrival holds no vector (Q-230)', { skip }, () => {
         await deliver(via, fam, OPEN, arriving(fam, OPEN, id, 6, 'none'));
         const after = await door.coll(OPEN, fam.collection).findOne({ _id: id });
         if (after?.seq !== 6) { wrong.push(`${fam.key}: fixture check — the arrival did not land`); continue; }
-        const lost = [...LOCAL_ONLY].filter(f => heldBy(fam, f) && !BY_THE_ARRIVAL.has(f) && !isDeepStrictEqual(after[f], LOCAL_VALUES[f]));
+        const lost = [...LOCAL_ONLY].filter(f => heldBy(fam, f) && !BY_THE_ARRIVAL.has(f) && !LANDED(f) && !isDeepStrictEqual(after[f], LOCAL_VALUES[f]));
         if (lost.length) wrong.push(`${fam.key}: lost ${lost.join(', ')}`);
+        // What it landed instead: a position taken for the version that arrived, above the stored copy's, and no claim that this instance wrote it.
+        if (!(typeof after.pos === 'number' && after.pos > LOCAL_VALUES.pos) || after.posAtSeq !== 6 || 'writtenHere' in after) {
+          wrong.push(`${fam.key}: the arrival did not land afresh (pos ${after.pos}, posAtSeq ${after.posAtSeq}, writtenHere ${after.writtenHere})`);
+        }
       }
       assert.deepEqual(wrong, [], `${via}: a peer's edit of a record this instance still embeds erased its own fields`);
     });

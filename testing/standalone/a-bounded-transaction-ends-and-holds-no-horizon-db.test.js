@@ -1,11 +1,11 @@
 /**
- * A transaction is ended by the write bound, holds no seq horizon of its own, and ends its session — whoever starts it
+ * A transaction is ended by the write bound, holds no record-position horizon of its own, and ends its session — whoever starts it
  * (bundle-44 plan rev 3, D2: `db/bounded-transaction.ts`, `inBoundedTransaction`).
  *
  * ## The defect
  *
  * Two places started a MongoDB session by hand, and a third was about to. `brain/held-transaction.ts` did it correctly,
- * under a seq hold, with a bound (bundle-30, `Q-213`). `files/media/lease.ts` `writeUnderClaim` did it with NO bound
+ * under a position hold, with a bound (bundle-30, `Q-213`). `files/media/lease.ts` `writeUnderClaim` did it with NO bound
  * (`getMongo().startSession()`, then `withTransaction`): a document lock held elsewhere (the job row being fenced, a
  * record the writes touch) makes `withTransaction` retry the write conflict for the driver's default 120 s, and the
  * media worker, the move and every other caller of the fence waits that long. The bound, the read-back of a commit
@@ -16,9 +16,9 @@
  *
  * **A transaction started through `inBoundedTransaction` (`db/bounded-transaction.ts`) —**
  *
- *  - **holds NO seq horizon.** The bound and the horizon are two questions. `inHeldTransaction` is the horizon hold put
- *    around it (`withSeqHorizonHeld(() => inBoundedTransaction(…))`); a transaction that writes no seq-carrying
- *    document (the lease fence) must not stall every seq-paged reader of a space for as long as it runs;
+ *  - **holds NO record-position horizon.** The bound and the horizon are two questions. `inHeldTransaction` is the horizon hold put
+ *    around it (`withPositionFloorHeld(recordPositions, space, () => inBoundedTransaction(…))`); a transaction that writes no seq-carrying
+ *    document (the lease fence) must not stall every position-paged reader of a space for as long as it runs;
  *  - **is ended by the write bound** when a document lock is held elsewhere — within the bound, never after the
  *    driver's 120 s — and nothing it wrote lands;
  *  - **answers a lost commit reply as landed** when `landed` says so, and as the error it came as when it does not;
@@ -99,7 +99,7 @@ const ROWS = 1_200;
 const JOB = 'job-1';
 const CLAIM = { jobId: JOB, claimToken: 'token-1' };
 
-let mongo, seq, writeBound, lease, held, storeCondition, logLines;
+let mongo, lowestRecordPosition, writeBound, lease, held, storeCondition, logLines;
 /** The relay the server's client goes through (passing everything until a row holds something), and a client that does not. */
 let relay, fixture;
 /** The module the design creates — loaded in `before`, so a missing one fails EACH row with its own message. */
@@ -220,7 +220,9 @@ describe('a bounded transaction ends, holds no horizon, and ends its session', {
       spaces: [{ id: S, label: 'Bounded transaction', folders: [], meta: {} }],
     }, null, 2), { mode: 0o600 });
     (await import('../../server/dist/config/loader.js')).loadConfig();
-    seq = await import('../../server/dist/util/seq.js');
+    const position = await import('../../server/dist/util/position-clock.js');
+    const stream = await import('../../server/dist/sync/record-position-stream.js');
+    lowestRecordPosition = (space) => position.lowestOpenPosition(stream.recordPositions, space);
     writeBound = await import('../../server/dist/db/write-bound.js');
     lease = await import('../../server/dist/files/media/lease.js');
     held = await import('../../server/dist/brain/held-transaction.js');
@@ -252,18 +254,18 @@ describe('a bounded transaction ends, holds no horizon, and ends its session', {
 
   // ── inBoundedTransaction: no horizon ───────────────────────────────────────────────────────────────────────
 
-  it('control: inHeldTransaction DOES hold the space\'s seq horizon while it runs (what the test below is the opposite of)', async () => {
-    const inside = await held.inHeldTransaction(S, 'test.bounded-txn.control', async () => seq.lowestUncommittedSeq(S));
+  it('control: inHeldTransaction DOES hold the space\'s record-position horizon while it runs (what the test below is the opposite of)', async () => {
+    const inside = await held.inHeldTransaction(S, 'test.bounded-txn.control', async () => lowestRecordPosition(S));
     assert.notEqual(inside, undefined, 'fixture: inHeldTransaction held no horizon, so "holds none" below proves nothing');
   });
 
-  it('holds NO seq horizon: no space\'s seq-paged reader is stalled while it runs', async () => {
+  it('holds NO record-position horizon: no space\'s position-paged reader is stalled while it runs', async () => {
     const inside = await inBounded()(async (session) => {
       await facts().findOne({ _id: 'f-00000' }, { session });
-      return seq.lowestUncommittedSeq(S);
+      return lowestRecordPosition(S);
     });
     assert.equal(inside, undefined,
-      `a bounded transaction registered a seq hold at ${inside} on '${S}': every seq-paged reader of the space (the pull routes, `
+      `a bounded transaction registered a position hold at ${inside} on '${S}': every position-paged reader of the space (the pull routes, `
       + 'the push loop, the tombstone pages) would be served nothing above it for as long as the transaction lives');
   });
 
@@ -280,7 +282,7 @@ describe('a bounded transaction ends, holds no horizon, and ends its session', {
       }));
       // the callback has started (it will stall on the lock); the assertion after the finally reports it if it never did
       await waitFor(() => entered, 5000, 10).catch(() => {});
-      horizonWhileStalled = seq.lowestUncommittedSeq(S);
+      horizonWhileStalled = lowestRecordPosition(S);
       res = await settleWithin(op, CAP_MS);
     } finally {
       await lock.release();
@@ -573,7 +575,7 @@ describe('a bounded transaction ends, holds no horizon, and ends its session', {
 
   it('Q-530 (iii): an ordinary refusal inside the transaction sends no seal and no kill (green at base: no seal exists yet)', async () => {
     // What it guards: the seal is for an exit where a statement may still be in flight (the store did not answer). A callback
-    // that refused is not one, and a seal there is a store call inside the seq hold that buys nothing (vet C3 6).
+    // that refused is not one, and a seal there is a store call inside the position hold that buys nothing (vet C3 6).
     const refusals = [
       { name: 'a claim that is gone (JobLeaseLostError)', run: () => lease.writeUnderClaim(S, { jobId: JOB, claimToken: 'someone-elses' }, async () => {}), is: (e) => lease.isLeaseLost(e) },
       { name: 'a callback that throws', run: () => inBounded()(async (s) => { await facts().findOne({ _id: 'f-00011' }, { session: s }); throw new Error('the callback refused'); }), is: (e) => e?.message === 'the callback refused' },

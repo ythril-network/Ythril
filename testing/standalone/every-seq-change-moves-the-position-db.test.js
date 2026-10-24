@@ -27,6 +27,10 @@
  * Red on 9a7ab3f7: every seq-setting write sets `seq` alone (there is no `pos` anywhere). Mutation for the newly covered part:
  * stamp `pos` without `posAtSeq` in one writer, and the case names that collection and method. Restore by hand.
  *
+ * Decision 48 (bundle-81 I1): the multi-record writers are driven as well — a merge (survivor, relinked edges, files and links), an edge re-key,
+ * a bulk save, an entity cascade, a file move and the legacy file stamp. Seen red for that part: the merge's survivor update written with `seq: patch.seq` in place
+ * of the landing patch, and the case answered `entities.updateOne seq=10: sets no pos in the clock band`; restored by hand.
+ *
  * Database prefix: `b81tE_`. Run: node --test testing/standalone/every-seq-change-moves-the-position-db.test.js
  * (requires a prior `npm run build` in server/)
  */
@@ -44,6 +48,8 @@ const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'b81e-seq-pos-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
+// The file writers (a file move's bytes) read the data root when they are first used.
+process.env['DATA_ROOT'] ??= path.join(tmpDir, 'data');
 
 const SPACE = 'b81e-seqpos';
 const CLOCK_BAND = 2 ** 50;
@@ -83,7 +89,7 @@ before(async () => {
   mongo = await openB81Mongo('seqpos');
   fs.writeFileSync(CONFIG_PATH, JSON.stringify({
     instanceId: 'b81e-seqpos-test', instanceLabel: 'test', tokens: [], networks: [],
-    spaces: [{ id: SPACE, label: 'E', folders: [], meta: {} }],
+    spaces: [{ id: SPACE, label: 'E', folders: [], completeLinkage: true, meta: {} }],
   }, null, 2), { mode: 0o600 });
   (await import('../../server/dist/config/loader.js')).loadConfig();
   seqMod = await import('../../server/dist/util/seq.js');
@@ -122,7 +128,61 @@ describe('the mutators and the collections are derived', () => {
   });
 });
 
+/** Every seq-setting write observed since `seen` was last emptied: the problems with it, one line each. */
+function problemsSeen() {
+  const problems = [];
+  for (const { part, method, doc } of seen) {
+    const where = `${part}.${method} seq=${doc.seq}`;
+    if (typeof doc.pos !== 'number' || !(doc.pos > CLOCK_BAND)) problems.push(`${where}: sets no pos in the clock band (pos = ${JSON.stringify(doc.pos)})`);
+    else if (doc.posAtSeq !== doc.seq && doc.posAtSeq !== '$seq') problems.push(`${where}: sets pos but posAtSeq = ${JSON.stringify(doc.posAtSeq)}, not the seq`);
+  }
+  return problems;
+}
+
 describe('every write that sets seq sets a fresh pos and posAtSeq = seq', { skip }, () => {
+  // Decision 48: the writers that touch many rows in one go — a merge, an edge re-key, a bulk save, an entity cascade, a file move and the
+  // legacy file stamp — are driven too, every one of them through the observation on EVERY driver method `_document-mutators.mjs` derives.
+  it('the multi-record writers: merge, re-key, bulk, cascade, file move and the legacy stamp carry their positions too', async () => {
+    const ents = await import('../../server/dist/brain/entities.js');
+    const edges = await import('../../server/dist/brain/edges.js');
+    const merge = await import('../../server/dist/brain/merge.js');
+    const bulk = await import('../../server/dist/brain/bulk.js');
+    const cascade = await import('../../server/dist/brain/entity-delete-cascade.js');
+    const conversion = await import('../../server/dist/brain/links-conversion.js');
+    const files = await import('../../server/dist/files/files.js');
+    const moveCascade = await import('../../server/dist/files/move-cascade.js');
+    // Every driver method that can change a document is observed (the park wraps `MUTATORS`, never a list kept here).
+    assert.ok(MUTATORS.length >= 11);
+    seen.length = 0;
+
+    const one = (await ents.upsertEntity(SPACE, 'MergeOne', 'concept', [], {})).entity;
+    const two = (await ents.upsertEntity(SPACE, 'MergeTwo', 'concept', [], {})).entity;
+    const other = (await ents.upsertEntity(SPACE, 'MergeOther', 'concept', [], {})).entity;
+    const edge = await edges.upsertEdge(SPACE, one._id, other._id, 'cites');
+    await edges.upsertEdge(SPACE, two._id, other._id, 'cites');
+    await edges.updateEdgeById(SPACE, edge.edge?._id ?? edge._id, { label: 'renamed' });
+    // A link into the absorbed entity, which the merge rewrites onto the survivor.
+    const linkedFact = await (await import('../../server/dist/brain/fact.js')).saveFact(SPACE, 'a fact about two', [], [], undefined, undefined, 'note');
+    await (await import('../../server/dist/brain/links.js')).addLink(SPACE, linkedFact._id ?? linkedFact.fact?._id, 'fact', two._id, 'entity');
+    const merged = await merge.mergeEntities(SPACE, one._id, two._id, []);
+    assert.equal(merged.kind, 'merged', JSON.stringify(merged).slice(0, 300));
+    await bulk.bulkWrite(SPACE, { entities: [{ name: 'Bulky', type: 'concept' }], facts: [{ fact: 'a bulk fact' }] });
+    const doomed = (await ents.upsertEntity(SPACE, 'Doomed', 'concept', [], {})).entity;
+    await cascade.deleteEntityCascade(SPACE, doomed._id, (await cascade.previewEntityCascade(SPACE, doomed._id)).token);
+    await files.writeFile(SPACE, 'mv-src.md', 'bytes to move');
+    await moveCascade.moveFileCascade(SPACE, 'mv-src.md', 'mv-dst.md');
+    await mongo.getDb().collection(collectionOf('files')).insertOne({ _id: 'legacy.md', spaceId: SPACE, path: 'legacy.md', tags: [], sizeBytes: 1 });
+    await conversion.stampFileMetaSeqs(SPACE);
+
+    const touched = new Set(seen.map(s => s.part));
+    for (const part of ['entities', 'edges', 'links', 'tombstones', 'facts', 'files']) {
+      assert.ok(touched.has(part), `the multi-record drive set no seq on ${part}: a writer of it is not driven here (observed ${[...touched]})`);
+    }
+    assert.deepEqual(problemsSeen(), [],
+      'a multi-record writer moved a version without moving its position (or its posAtSeq): every puller and the landing order miss the change');
+    seen.length = 0;
+  });
+
   it('one create or edit per family, an edit that converges, and a delete: every seq-setting write carries its position', async () => {
     const fact = await import('../../server/dist/brain/fact.js');
     const ents = await import('../../server/dist/brain/entities.js');
@@ -145,13 +205,7 @@ describe('every write that sets seq sets a fresh pos and posAtSeq = seq', { skip
     assert.deepEqual(undriven, [],
       `no seq-setting write was observed on ${undriven}: a collection of SEQ_CARRYING this file does not drive, or a writer that stopped setting seq. Observed: ${[...parts]}`);
 
-    const problems = [];
-    for (const { part, method, doc } of seen) {
-      const where = `${part}.${method} seq=${doc.seq}`;
-      if (typeof doc.pos !== 'number' || !(doc.pos > CLOCK_BAND)) problems.push(`${where}: sets no pos in the clock band (pos = ${JSON.stringify(doc.pos)})`);
-      else if (doc.posAtSeq !== doc.seq && doc.posAtSeq !== '$seq') problems.push(`${where}: sets pos but posAtSeq = ${JSON.stringify(doc.posAtSeq)}, not the seq`);
-    }
-    assert.deepEqual(problems, [],
+    assert.deepEqual(problemsSeen(), [],
       'a write moved a record\'s version without moving its position (or its posAtSeq): every puller and the landing order miss the change, and the repair cannot tell it from a 5.6 edit');
   });
 });

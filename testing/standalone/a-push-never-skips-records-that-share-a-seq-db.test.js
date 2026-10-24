@@ -56,6 +56,8 @@ const LOCAL_VALUE = {
   deliveredBy: 'some-peer',
   // Q-439: an edge's write guard - this instance's lock on a functional subject, never sent.
   _functionalGuard: '4:from5:label',
+  // bundle-81: where this instance stored the record and whether it wrote it — its own, never sent.
+  pos: 1_700_000_000_000_000, posAtSeq: 1, writtenHere: true,
 };
 
 /** Store records as this instance's own writes would, so the engine's push cycle offers them. */
@@ -64,7 +66,7 @@ async function seedLocal(family, docs) {
   // gets it suffixed with each record's id; it is still seeded on every record, which is what the wire check needs.
   await door.mongo.col(`${S}_${family.collection}`).insertMany(docs.map(d => (
     typeof d._functionalGuard === 'string' ? { ...d, _functionalGuard: `${d._functionalGuard}:${d._id}` } : { ...d })));
-  await door.bumpSeq(S, docs.reduce((m, d) => Math.max(m, d.seq), 0));
+  await door.raiseVersionTo(S, docs.reduce((m, d) => Math.max(m, d.seq), 0));
 }
 
 /** The ids offered to the receiver for a family, in request order, accepted or not. */

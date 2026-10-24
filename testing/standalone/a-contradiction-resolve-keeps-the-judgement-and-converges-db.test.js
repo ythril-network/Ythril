@@ -89,8 +89,8 @@ describe('a contradiction resolve keeps the judgement and converges', { skip }, 
     });
     router = (await import('../../server/dist/api/contradictions.js')).contradictionsRouter;
     ({ StoreTimeout } = await import('../../server/dist/db/write-timeout.js'));
-    const { bumpSeq } = await import('../../server/dist/util/seq.js');
-    for (const name of Object.keys(SPACES)) await bumpSeq(space(name), 50);
+    const { raiseVersionTo } = await import('../../server/dist/util/version-stamp.js');
+    for (const name of Object.keys(SPACES)) await raiseVersionTo(space(name), 50);
     faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), [...ASYNC_MUTATORS]);
   });
   after(async () => {

@@ -139,7 +139,7 @@ describe('a space owes its positions until one write', { skip }, () => {
     it('push leg: a batch answered 503 positions_building', async () => {
       await freshCycle('push');
       await door.coll(HELD, 'facts').insertOne(positioned(build.fact(HELD, 'owed-held-f', 30, { author: ME }), { writtenHere: true }));
-      await door.bumpSeq(HELD, 30);
+      await door.raiseVersionTo(HELD, 30);
       setMark(door, 'pushed', HELD, SENTINEL);
       door.state.batchUpsert = () => building;
       await networkCycle();
@@ -150,7 +150,7 @@ describe('a space owes its positions until one write', { skip }, () => {
     it('control: the same push against a peer that answers normally moves the mark and sends the record', async () => {
       await freshCycle('push');
       await door.coll(HELD, 'facts').insertOne(positioned(build.fact(HELD, 'owed-held-f', 30, { author: ME }), { writtenHere: true }));
-      await door.bumpSeq(HELD, 30);
+      await door.raiseVersionTo(HELD, 30);
       setMark(door, 'pushed', HELD, SENTINEL);
       await networkCycle();
       assert.deepEqual(door.state.pushedRecords.map(r => r._id), ['owed-held-f']);
@@ -169,7 +169,7 @@ describe('a space owes its positions until one write', { skip }, () => {
         tombstones: [6].map(s => build.tombstone(space, `${space}-t${s}`, 'fact', s, { instanceId: door.instanceId })),
       };
       for (const [part, docs] of Object.entries(rows)) await door.coll(space, part).insertMany(docs.map(d => ({ ...d })));
-      await door.bumpSeq(space, 6);
+      await door.raiseVersionTo(space, 6);
       return rows;
     }
     const noPosition = async (space) => {
@@ -252,7 +252,7 @@ describe('a space owes its positions until one write', { skip }, () => {
       const own = build.fact(space, 'owed-own', 5, { author: ME });
       const relayed = build.fact(space, 'owed-relayed', 9, { author: PEER_AUTHOR, deliveredBy: PEER_AUTHOR.instanceId });
       await door.coll(space, 'facts').insertMany([own, relayed]);
-      await door.bumpSeq(space, 9);
+      await door.raiseVersionTo(space, 9);
       const backup = await takeBackup(SUITE, 'b81tB-owed-backup');
       await door.wipe(space);
       await restoreToTheEnd(await restoreModules(), { backupId: backup.id });

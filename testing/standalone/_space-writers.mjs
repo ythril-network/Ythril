@@ -21,7 +21,7 @@
  *
  * - **space**: a name built by `spaceCollection(…)` or as `` `${id}_…` `` — the per-space collections — and
  *   `ythril_counters`, whose rows are keyed by space id: it is the space's sequence counter (`nextSeq`,
- *   `bumpSeq`), and advancing it is a write every peer's sync position depends on.
+ *   `raiseVersionTo`), and advancing it is a write every peer's sync position depends on.
  * - **files**: a filesystem mutation (write, rename, remove, mkdir…) inside `server/src/files/`, or in a body
  *   that addresses the space's file tree (`spaceRoot(…)`, `resolveSafePath`, a `'files'` or `'.chunks'`
  *   segment); and a call from `files/` into a `util/` filesystem primitive (`mkdirPrivate`, `harden…`).

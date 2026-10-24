@@ -21,8 +21,11 @@
  *  5. **The write is UNGUARDED**: a restore replaces, so a same-seq or lower-seq re-import writes its content.
  *  6. **A repeated id in one file stores the highest seq**, not the last one read.
  *  7. **Inserted and updated are counted correctly**; **a record restored over a tombstone is reported** by id.
- *  8. **The seq counter is at least the max imported seq afterwards** — or the next local write sorts below a
- *     restored record and every peer that already holds that seq ignores it.
+ *  8. **The seq counter is NOT moved by an import** (bundle-81, D-19 B; this rule read "at least the max imported seq afterwards — or the next local write
+ *     sorts below a restored record and every peer that already holds that seq ignores it"). A seq is a version: a local write stamps above the version of
+ *     the record it writes, so one that replaces a restored record is above it whatever the counter stands at, and an import that lifted the counter would
+ *     lift every later stamp of the space to the backup's clock. (The restore ACT, which loads a backup raw, still floors the counter at the highest
+ *     version below the cap: `a-restored-space-has-its-indexes-before-writes-resume-db`.)
  *  9. **D-9**: an imported record with no stamp, in a space with a window, is stamped from its own `createdAt` by
  *     `schema > space`; one that carries a stamp keeps it.
  * 10. **The export carries every replicated family — links included — and export -> wipe -> import restores each.**
@@ -395,19 +398,22 @@ describe('the admin import restores what the export wrote', { skip }, () => {
       + 'peer holding the tombstone deletes it again, which reads as data loss');
   });
 
-  it('the counter is at least the max imported seq afterwards, in every family', async () => {
+  it('the counter is moved by no import, in any family; the record it restores is stored at its seq', async () => {
     const wrong = [];
     let seq = 100;
     for (const c of importKeys()) {
       seq += 100;
       const space = SPACE;
       await wipe(space);
-      await importMod.importDocuments(space, { [c]: [fixture(c, c === 'files' ? 'ctr/a.md' : `ctr-${c}`, seq)] });
+      const before = await seqMod.currentSeq(space);
+      const id = c === 'files' ? 'ctr/a.md' : `ctr-${c}`;
+      await importMod.importDocuments(space, { [c]: [fixture(c, id, seq)] });
       const now = await seqMod.currentSeq(space);
-      if (now < seq) wrong.push(`${c}-only import at seq ${seq}: counter ${now}`);
+      if (now !== before) wrong.push(`${c}-only import at seq ${seq}: counter ${before} -> ${now}`);
+      const stored = await coll(space, c).findOne({ _id: id });
+      if (stored?.seq !== seq) wrong.push(`${c}-only import at seq ${seq}: stored at ${stored?.seq}`);
     }
-    assert.deepEqual(wrong, [], 'after a restore the next local write takes a seq at or below a restored record, and '
-      + 'every peer that already holds that position never pulls the write');
+    assert.deepEqual(wrong, [], 'an import lifted the counter to the backup\'s clock (every later stamp of the space follows it), or did not store the record');
   });
 
   it('D-9: an unstamped import is stamped from its createdAt by schema > space; a carried stamp is kept', async () => {

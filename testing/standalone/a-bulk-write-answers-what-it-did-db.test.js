@@ -298,7 +298,7 @@ describe('bulkWrite answers what it did', { skip }, () => {
      * Every case is one where the batch overlay matters: an item that must see an EARLIER item of the same
      * batch. Ids are NOT normalised away — a minted id is replaced by the `$ref` key that named it, after
      * asserting it is not an id the caller supplied, and an edge's `_id` is checked against the identity it
-     * must derive from before it is replaced the same way. Only seq, the two timestamps and the space id
+     * must derive from before it is replaced the same way. Only seq, the landing position, the two timestamps and the space id
      * (the two runs write to two spaces) are dropped.
      */
     const CASES = [
@@ -448,7 +448,11 @@ function answerNormalised(r, refs) {
   };
 }
 
-const DROPPED = new Set(['seq', 'createdAt', 'updatedAt', 'spaceId']);
+// Bundle-81: the landing position (`pos`, `posAtSeq`) is where THIS instance stored the row, in the clock it ran on when it did — the one batch and
+// the N single writes land at different moments, in two spaces, so it differs between the two runs exactly as `seq` and the timestamps do. Read from the
+// module's class, so a landing field added to it is dropped here too and not compared.
+const { POSITION_FIELDS } = await import('../../server/dist/sync/local-only-fields.js');
+const DROPPED = new Set(['seq', 'createdAt', 'updatedAt', 'spaceId', ...POSITION_FIELDS]);
 
 /**
  * Every stored entity and edge, with seq, time and the space id dropped, and minted ids replaced by the key

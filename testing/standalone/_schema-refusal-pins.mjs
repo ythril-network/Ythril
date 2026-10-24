@@ -13,7 +13,7 @@
  *
  * - **The route's own handler.** `rest` runs the handler production runs, past auth and rate limit (`_tool-door.mjs`'s
  *   `routeHandler`), and throws when a route has moved, so a pin cannot pass by reaching nothing.
- * - **The seeded records carry a seq the counter has passed.** A record inserted without `bumpSeq` is behind the space's counter and
+ * - **The seeded records carry a seq the counter has passed.** A record inserted without `raiseVersionTo` is behind the space's counter and
  *   the writers read it as a stale copy; `seed` bumps it.
  * - **Nothing is embedded.** Both spaces suppress embeddings, so no case fetches a model.
  *
@@ -71,7 +71,7 @@ export async function openPinDoors({ suite }) {
     const routers = {};
     for (const [kind, r] of Object.entries(ROUTES)) routers[kind] = (await import(`../../server/dist/api/brain/${r.module}.js`))[r.router];
     const { bulkRouter } = await import('../../server/dist/api/brain/bulk.js');
-    const { bumpSeq } = await import('../../server/dist/util/seq.js');
+    const { raiseVersionTo } = await import('../../server/dist/util/version-stamp.js');
 
     /** A REST record write: `create` posts to the collection, `update` patches `<collection>/:id`. Answers `{ status, body }`. */
     function rest(kind, verb, space, { id, body }) {
@@ -105,7 +105,7 @@ export async function openPinDoors({ suite }) {
       await door.coll(space, 'facts').insertOne({ _id: ids.fact, fact: 'a seeded fact', type: 'claim', properties: { confidence: 1 }, ...base(4) });
       await door.coll(space, 'chrono').insertOne({ _id: ids.chrono, title: 'a seeded event', type: 'event', startsAt: T0, status: 'upcoming', properties: { priority: 'low' }, ...base(5) });
       await door.coll(space, 'edges').insertOne({ _id: ids.edge, from: ids.person1, to: ids.person2, label: 'knows', properties: { since: 1 }, ...base(6) });
-      await bumpSeq(space, 6);
+      await raiseVersionTo(space, 6);
       return ids;
     }
 

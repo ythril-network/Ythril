@@ -36,7 +36,7 @@
  *
  * ## Exemptions, each with its reason
  *
- * - `highestStoredSeq`: `sort({ seq: -1 }).limit(1)`, the MAXIMUM. The check asks for the `limit(1)` on the chain itself, not for
+ * - `highestStored` (`util/index-top.ts`, which replaced `highestStoredSeq`): `sort({ [field]: -1 }).limit(1)`, the MAXIMUM. The check asks for the `limit(1)` on the chain itself, not for
  *   "a limit somewhere in the statement" (which a hand-written position read also has).
  * - `matchFreshWrites`: `$sort { seq: -1 }` followed by `$limit`, a newest window. The check asks for the `$limit` stage after it.
  * - the listings (`listEdges`, `queryBrain`, the query tool's `handle`, `compareQueryOrder`): the default order is a TOTAL order that
@@ -83,9 +83,11 @@ const inDelete = (e) => (e.inCalls.includes('deleteMany') ? null : `the range is
  */
 const EXEMPT = [
   {
-    file: SEQ_UTIL, fn: 'highestStoredSeq', kind: 'ordering', by: 'slot',
-    why: 'the maximum stored seq: a newest-first sort capped at one row, so there is no next page and a tie cannot lose a record a later page would serve',
-    holds: (e) => (e.after.includes('limit(1)') ? null : `the chain after the sort is [${e.after.join(', ')}], with no limit(1): it is a read, not a maximum`),
+    // Bundle-81: `highestStoredSeq` (util/seq.ts) became the one reader of "the highest value of a field across these collections", for the version
+    // floor (seq), the records stream's seed (pos) and the file stream's seed (positionAt). The field is the caller's, so the slot is a computed key.
+    file: 'server/src/util/index-top.ts', fn: 'highestStored', kind: 'unresolved', by: 'origin',
+    why: 'the maximum of a field across collections (the stored version below the cap, the highest position): a descending sort capped at one row, so there is no next page and a tie cannot lose a record a later page would serve',
+    holds: (e) => (e.after === undefined || e.after.includes('limit(1)') ? null : `the chain after the sort is [${e.after.join(', ')}], with no limit(1): it is a read, not a maximum`),
   },
   {
     file: 'server/src/brain/fresh-writes.ts', fn: 'matchFreshWrites', kind: 'ordering', by: 'slot',
@@ -170,11 +172,14 @@ describe('the orderings are derived from the type-checked program, and the deriv
     assert.ok(imported.every(e => e.origin === 'server/src/brain/query.ts'), 'the imported constant is not resolved to its declaration in brain/query.ts');
   });
 
-  it('resolves a computed key to `unresolved` rather than dropping it (toMongoSort is the one today)', () => {
+  it('resolves a computed key to `unresolved` rather than dropping it (toMongoSort and highestStored are the two today)', () => {
     const unresolved = byKind('unresolved');
     assert.ok(unresolved.length >= 1, 'no unresolved slot: toMongoSort\'s computed `[sort.field]` key is no longer reported, so the fail-closed path is not exercised');
-    assert.ok(unresolved.every(e => e.origin === 'server/src/brain/list-sort.ts' && e.originFunction === 'toMongoSort'),
-      `an unresolved slot that is not toMongoSort: ${unresolved.filter(e => e.originFunction !== 'toMongoSort').map(e => `${e.file}:${e.line}`).join(', ')}`);
+    // The two functions whose sort key is the caller's field: the listing sort (`toMongoSort`) and, since bundle-81, the maximum of a field across
+    // collections (`util/index-top.ts highestStored`), each held by its own EXEMPT entry above.
+    const NAMED = [['server/src/brain/list-sort.ts', 'toMongoSort'], ['server/src/util/index-top.ts', 'highestStored']];
+    assert.ok(unresolved.every(e => NAMED.some(([file, fn]) => e.origin === file && e.originFunction === fn)),
+      `an unresolved slot that is neither toMongoSort nor highestStored: ${unresolved.filter(e => !NAMED.some(([, fn]) => e.originFunction === fn)).map(e => `${e.file}:${e.line}`).join(', ')}`);
   });
 });
 

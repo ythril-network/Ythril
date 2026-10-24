@@ -112,7 +112,7 @@ describe('a relayed tombstone reaches every hop', { skip }, () => {
   it('a re-delivery at a higher seq replaces the stored tombstone, keeps its issuer, storedVia and issuedHere, and is served from its new position', async () => {
     const held = positionedTombstone(S, 'q238-higher', 'fact', 10, { instanceId: 'q238-origin-a', deletedAt: T0, storedVia: 'q238-upstream', issuedHere: false });
     await door.coll(S, 'tombstones').insertOne({ ...held });
-    await door.bumpSeq(S, 10);
+    await door.raiseVersionTo(S, 10);
     const answer = await deliver([arriving('q238-higher', 20, { instanceId: 'q238-someone-else', deletedAt: T1 })]);
     assert.equal(answer.code, 200, JSON.stringify(answer.body));
     const row = await stored('q238-higher');
@@ -128,7 +128,7 @@ describe('a relayed tombstone reaches every hop', { skip }, () => {
   it('a re-delivery at an equal or lower seq writes nothing: the stored document is exactly as it was', async () => {
     const held = positionedTombstone(S, 'q238-same', 'fact', 20, { instanceId: 'q238-origin-a', deletedAt: T0, storedVia: 'q238-upstream', issuedHere: false });
     await door.coll(S, 'tombstones').insertOne({ ...held });
-    await door.bumpSeq(S, 20);
+    await door.raiseVersionTo(S, 20);
     const before = await stored('q238-same');
     for (const seq of [20, 15]) {
       const answer = await deliver([arriving('q238-same', seq, { instanceId: 'q238-someone-else', deletedAt: T1 })]);

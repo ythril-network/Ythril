@@ -67,7 +67,7 @@ describe('a redacted copy is the same copy', { skip }, () => {
         await door.reset();
         const held = { ...stored('c', 5), ...LOCAL };
         await door.coll(S, 'chrono').insertOne(held);
-        await door.bumpSeq(S, 5);
+        await door.raiseVersionTo(S, 5);
         await deliver[via]([arriving('c', 5), entry('control', 9, {})]);
         await door.settled();
         const now = await door.coll(S, 'chrono').findOne({ _id: 'c' });
@@ -85,7 +85,7 @@ describe('a redacted copy is the same copy', { skip }, () => {
     await door.reset();
     const held = { ...redacted('c', 5), ...LOCAL };
     await door.coll(S, 'chrono').insertOne(held);
-    await door.bumpSeq(S, 5);
+    await door.raiseVersionTo(S, 5);
     // Not a redaction: the title differs. Chrono never forks at one seq, so this too leaves the stored row alone — the rule above is
     // about WHICH copies count as the same, and for chrono both answers are "no write"; a fact would fork here (`divergesFrom`).
     await deliver.batch([{ ...full('c', 5), title: 'another title' }]);

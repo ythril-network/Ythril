@@ -29,7 +29,8 @@
  *
  * The stored rows of the family's collection and of the space's tombstones, field for field. A fork's
  * `seq`, `createdAt` and `updatedAt` are left out of the comparison: the seq comes from a counter both doors reach
- * by different paths, and a fork's `createdAt` has its own test (`a-fork-keeps-its-copys-created-at-db`).
+ * by different paths, and a fork's `createdAt` has its own test (`a-fork-keeps-its-copys-created-at-db`). A row's landing `pos` is compared as
+ * "took a position in the clock band" (bundle-81): its value is the moment each door landed it.
  *
  * ## The one deliberate difference, stated as a row
  *
@@ -231,6 +232,9 @@ async function snapshot(local, key, knownIds) {
   const fam = families.find(f => f.payloadKey === key);
   const docs = (await door.coll(local, fam.collection).find({}).sort({ _id: 1 }).toArray()).map(d => {
     const out = { ...d };
+    // Bundle-81: `pos` is the moment THIS arrival landed, which differs between the three doors and between runs by construction. What the doors must
+    // agree on is that each took a position in the clock band for the version it stored (`posAtSeq`, compared as it is), so the value becomes that fact.
+    if ('pos' in out) out.pos = Number.isSafeInteger(out.pos) && out.pos > 2 ** 50;
     if (out.forkOf && !knownIds.has(out._id)) { delete out.seq; delete out.createdAt; delete out.updatedAt; }
     return out;
   });

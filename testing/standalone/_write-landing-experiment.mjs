@@ -93,7 +93,7 @@ for (const [holder, cases] of HOLDERS) {
     const collection = mine.lock === 'counter' ? 'ythril_counters' : mine.collection;
     if (!collection) throw new Error(`holder case '${mine.label}' locks a document but names no collection in _seq-hold-cases.mjs`);
     LANES.push({
-      name: `holder ${holder}: ${mine.label}`, space, collection, expect503: false,
+      name: `holder ${holder}: ${mine.label}`, space, collection, expect503: false, endedAs: mine.endedAs, baseOnly: mine.baseOnly,
       seed: () => seedHolderSpace(env.fixture, space),
       lock: mine.lock === 'counter' ? () => holdCounterLock(env.fixture.mongo, space) : mine.lock,
       call: mine.run,
@@ -288,7 +288,14 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
     throw new Error(`landingExperiment: laneIndexes [${laneIndexes}] names a lane outside the table of ${LANES.length}`);
   }
   /** The lanes this run walks: the whole table unless it was narrowed. Its spaces are the only ones opened. */
-  const lanes = laneIndexes === undefined ? LANES : laneIndexes.map(i => LANES[i]);
+  const narrowed = laneIndexes === undefined ? LANES : laneIndexes.map(i => LANES[i]);
+  /**
+   * The two VARIANTS of this experiment (a client whose URI sets `timeoutMS`, a command that reaches the server late) leave out the lanes a case marks `baseOnly`
+   * (`_seq-hold-cases.mjs`, with its reason): a multi-step act whose first statements answer on their own clocks before the stall, which a variant's one clock
+   * (or one lateness per statement) cannot be told apart from. The base experiment reads them.
+   */
+  const isBase = (query ?? '') === '' && lateByMs === LATE_BY_MS;
+  const lanes = narrowed.filter(l => isBase || !l.baseOnly);
   let doors;
   let relay;
   let seamError = null;
@@ -358,9 +365,10 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
         const unstalled = rs.filter(r => !r.sawStall);
         assert.deepEqual(unstalled.map(r => `#${r.rep}: answered after ${r.elapsedMs} ms (${r.thrown ?? r.status}: ${r.said}), ${r.attempts} attempt(s); the server said: ${r.serverSaid.join(' | ') || 'nothing'}`), [],
           `${lane.name}: no write was ever alive on ${lane.collection} while the call waited, in ${MAX_ATTEMPTS} attempts — the lock stalled nothing, so "nothing landed" proves nothing`);
-        const notTimedOut = rs.filter(r => !(r.status === 503 || /Timeout|timed out/i.test(r.thrown ?? '')));
+        // The bound's timeout, unless the lane's own designed answer says otherwise (`endedAs`, `_seq-hold-cases.mjs`: a move whose rows are not carried is OWED).
+        const notTimedOut = rs.filter(r => !(lane.endedAs ? lane.endedAs.test(r.thrown ?? '') : (r.status === 503 || /Timeout|timed out/i.test(r.thrown ?? ''))));
         assert.deepEqual(notTimedOut.map(r => `#${r.rep}: ${r.thrown ?? r.status}`), [],
-          `${lane.name}: answered, but not with the bound's timeout — the write was not ended by the bound`);
+          `${lane.name}: answered, but not with ${lane.endedAs ? `its designed answer (${lane.endedAs})` : 'the bound\'s timeout'} — the write was not ended by the bound`);
         if (lane.expect503) {
           assert.deepEqual(rs.filter(r => r.status !== 503).map(r => `#${r.rep}: ${r.status ?? r.thrown}`), [], `${lane.name}: not answered 503`);
         }

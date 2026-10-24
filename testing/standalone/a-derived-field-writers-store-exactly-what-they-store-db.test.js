@@ -79,6 +79,15 @@ const stored = (id, space = OPEN) => files(space).findOne({ _id: id });
 
 /** The row without the named keys: what a write that changed ONLY those keys leaves behind. */
 const without = (doc, keys) => Object.fromEntries(Object.entries(doc).filter(([k]) => !keys.includes(k)));
+/**
+ * The keys of a row that a local write's LANDING stamped (bundle-81: `pos`, `posAtSeq`, `writtenHere`) — read from the module that names them
+ * (`isLandingStamped`, `sync/local-only-fields.ts`), never listed here. A write that stamps a `seq` stamps its landing with it, so a case that
+ * lists `seq` among the keys the write owns lists these too; the writes that stamp NO seq (the derived ones below) must leave them off.
+ */
+const landingKeys = async (doc) => {
+  const { isLandingStamped } = await import('../../server/dist/sync/local-only-fields.js');
+  return Object.keys(doc).filter(isLandingStamped);
+};
 
 describe('every writer of a file row\'s derived fields stores exactly what it stores today (real MongoDB, real embed() over a stub)', { skip }, () => {
   before(async () => {
@@ -292,7 +301,7 @@ describe('every writer of a file row\'s derived fields stores exactly what it st
         assert.equal(after.descriptionSource, 'generated');
         assert.ok(Number.isInteger(after.seq) && after.seq > before.seq, `an authored write stamps a seq above ${before.seq}, got ${after.seq}`);
         assert.ok(after.updatedAt > before.updatedAt, 'an authored write stamps updatedAt');
-        assert.deepEqual(without(after, ['description', 'descriptionSource', 'seq', 'updatedAt']),
+        assert.deepEqual(without(after, ['description', 'descriptionSource', 'seq', 'updatedAt', ...await landingKeys(after)]),
           without(before, ['description', 'seq', 'updatedAt']),
           'the derived description write changed a field it does not own (author included: it never claims a legacy row)');
         assert.equal(await jobs().countDocuments({}), 0, 'a derived description write enqueues no embed job of its own');

@@ -37,7 +37,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf, argumentsOf } from './_structural-window.mjs';
+import { bodyOf, argumentsOf, balancedFrom, statementFrom } from './_structural-window.mjs';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
@@ -109,26 +109,31 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
      * than for ever.
      */
     const b = body();
-    // ONE block of 2n (`withAllocatedSeqs`, `Q-196`) for n moves — re-anchored from "a block of two" when the re-key
-    // became one implementation for a batch (bundle-30): the tombstones take the block's first half and the inserts
-    // the half after it, so every tombstone is below every insert and the order is in the arithmetic rather than in
-    // which of two calls came first.
-    assert.match(b, /withAllocatedSeqs\(\s*spaceId\s*,\s*2\s*\*\s*n\s*,\s*async\s*\(\s*tombSeq\s*\)/,
-      'both halves must come from one block whose FIRST half is the tombstones\', so their ORDER is visible here');
-    assert.match(b, /const insertSeq = tombSeq \+ n\b/,
-      'the insert seqs must be the half AFTER the tombstones\', or a peer can advance past an insert and keep only the delete');
+    /*
+     * Re-anchored by bundle-81 (design rev 8 §1a): there is no block of 2n any more. A version is stamped per id by `versionsFor` (`util/version-stamp.ts`),
+     * so the order is kept the way a version order is kept: the tombstones are stamped FIRST (`stampTombstones`), and the inserts are stamped knowing
+     * them (`known: tombAt`), so an insert onto an id another move is vacating is above the tombstone written for it, whatever either record's
+     * own version was. And the writes follow the stamps: the tombstones are written (and take their positions) BEFORE the inserts take theirs, so
+     * a peer that pulls the tombstone and stops finds the insert above its cursor, never below it.
+     */
+    /** The parenthesised arguments of the first call of `name` in the body, bounded by the closing bracket and not by a character count. */
+    const callOf = (name) => balancedFrom(b, b.indexOf(`${name}(`) + name.length, `the call of ${name}`);
+    const tombStamp = b.indexOf('stampTombstones(');
+    const insertStamp = b.indexOf('versionsFor(');
+    assert.ok(tombStamp > -1 && insertStamp > tombStamp, 'the tombstones must be stamped before the inserts, so the inserts can be stamped above them');
+    assert.match(callOf('versionsFor'), /known:\s*tombAt\b/,
+      'the inserts must be stamped knowing the tombstones\' versions, or an insert onto a vacated id can be stamped at the tombstone\'s version and lose to it');
 
     /*
-     * AND each write must use the one it was given. Checking the declaration order alone pins a SPELLING:
-     * swapping which variable each write consumes leaves the declarations in place and inverts the property,
-     * and the gate would not notice. That is the same wrong-axis mistake this file was written to replace.
+     * AND each write must use the stamps it was given. Checking the order of the stamps alone pins a SPELLING: swapping which versions each write
+     * consumes leaves the calls in place and inverts the property.
      */
-    const tombWrite = b.slice(b.indexOf('removeWithTombstones('));
-    assert.match(tombWrite.slice(0, 400), /firstSeq: tombSeq\b/,
-      'the tombstone is stamped with the later seq, so a peer can advance past the insert');
-    const insertDoc = b.slice(b.indexOf('const stored ='));
-    assert.match(insertDoc.slice(0, 300), /seq: insertSeq/,
-      'the re-inserted edge carries the earlier seq, which is the ordering that loses it');
+    assert.match(callOf('removeWithTombstones'), /versions:\s*tombVersions\b/,
+      'the tombstones are not written under the versions taken for them, so a peer can advance past the insert');
+    assert.ok(b.indexOf('removeWithTombstones(') < b.indexOf('withLandingStamp('), 'the tombstones must be written before the inserts take their positions');
+    assert.match(callOf('withLandingStamp'), /insertVersions\.map/, 'the inserts do not take their positions from the versions stamped for them');
+    assert.match(statementFrom(b, b.indexOf('const stored ='), 'the inserted row'), /\.\.\.patches\[i\]!/,
+      'the re-inserted edge does not carry its own landing (version, position, written here)');
   });
 
   it('the embed queue is NOT touched inside the re-key', () => {

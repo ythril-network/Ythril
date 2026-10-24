@@ -66,14 +66,14 @@ const SCANNERS = [
 ];
 
 describe('a scanner reads every record of a run that shares a seq', { skip }, () => {
-  let door, loader, proto, realFindOne, scanned, bumpSeq;
+  let door, loader, proto, realFindOne, scanned, raiseVersionTo;
 
   before(async () => {
     door = await openPushDoor({ suite: 'scantie', spaces: [{ id: S, label: S, folders: [] }] });
     const available = await door.mongo.checkVectorSearchAvailability();
     assert.equal(available.available, true, 'the harness Mongo has no $vectorSearch: the scanners return before reading anything, so every case below would pass for no reason');
     loader = await import('../../server/dist/config/loader.js');
-    ({ bumpSeq } = await import('../../server/dist/util/seq.js'));
+    ({ raiseVersionTo } = await import('../../server/dist/util/version-stamp.js'));
     proto = Object.getPrototypeOf(door.mongo.col('probe'));
     realFindOne = proto.findOne;
     proto.findOne = function recording(filter, ...rest) {
@@ -90,7 +90,7 @@ describe('a scanner reads every record of a run that shares a seq', { skip }, ()
     await door.mongo.col('ythril_dupe_scan_state').deleteMany({});
     await door.coll(S, 'facts').deleteMany({});
     await door.coll(S, 'facts').insertMany(ALL.map(record));
-    await bumpSeq(S, 100);
+    await raiseVersionTo(S, 100);
   });
 
   const stored = async (scanner) => door.mongo.col('ythril_dupe_scan_state').findOne({ _id: scanner.cursorId });

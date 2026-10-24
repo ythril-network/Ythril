@@ -24,7 +24,7 @@
  * the field under test.
  *
  * **The peer's settled bound.** `listTombstones` serves only seqs below the space's settled bound, which is seeded
- * once per process from the counter. `seedPeer` bumps the peer-side counter through the server's own `bumpSeq`, so a
+ * once per process from the counter. `seedPeer` bumps the peer-side counter through the server's own `raiseVersionTo`, so a
  * seed is served whatever was seeded before it.
  *
  * ## The topology a case is about (bundle-51)
@@ -355,7 +355,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   }
   const loader = await import('../../server/dist/config/loader.js');
   const engine = await import('../../server/dist/sync/engine.js');
-  const seq = await import('../../server/dist/util/seq.js');
+  const stamp = await import('../../server/dist/util/version-stamp.js');
   const { log } = await import('../../server/dist/util/log.js');
   families = (await import('../../server/dist/sync/replicated-families.js')).REPLICATED_FAMILIES.map(f => f.payloadKey);
   maxCap = (await import('../../server/dist/util/bounded-read.js')).maxUpstreamResponseBytes();
@@ -367,7 +367,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   async function seedPeer(remote, tombstones) {
     if (tombstones.length === 0) return;
     await door.mongo.col(`${peerSide(remote)}_tombstones`).insertMany(tombstones.map(t => ({ ...t })), { ordered: false });
-    await seq.bumpSeq(peerSide(remote), tombstones.reduce((m, t) => Math.max(m, t.seq), 0));
+    await stamp.raiseVersionTo(peerSide(remote), tombstones.reduce((m, t) => Math.max(m, t.seq), 0));
   }
 
   /** The member fields a `configure` added, so `reset` can take them off again. */
@@ -503,7 +503,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   async function seedPeerRecords(remote, payloadKey, docs) {
     if (docs.length === 0) return;
     await door.mongo.col(`${peerSide(remote)}_${familyCollection(payloadKey)}`).insertMany(docs.map(d => ({ ...d })), { ordered: false });
-    await seq.bumpSeq(peerSide(remote), docs.reduce((m, d) => Math.max(m, d.seq), 0));
+    await stamp.raiseVersionTo(peerSide(remote), docs.reduce((m, d) => Math.max(m, d.seq), 0));
   }
 
   /**
@@ -543,7 +543,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
 
   return {
     ...door, NET, url, state, instanceId: `${suite}-receiver`, remoteOf: (local) => remoteOf.get(local), maxUpstreamBytes: maxCap,
-    member, seedPeer, seedPeerRecords, serveFamily, peerSide, reset, sync, logsDuring, bumpSeq: seq.bumpSeq, close,
+    member, seedPeer, seedPeerRecords, serveFamily, peerSide, reset, sync, logsDuring, raiseVersionTo: stamp.raiseVersionTo, close,
     configure, config: () => loader.getConfig(), LATERAL_NET, seedPeerFileTombstones, seedPeerFile, writeLocalFile, localFileExists, peerFilesRoot, localFilesRoot,
     failRecordWrite, clearRecordFault,
   };

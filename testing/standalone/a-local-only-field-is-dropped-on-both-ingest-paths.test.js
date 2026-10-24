@@ -99,8 +99,9 @@ describe('the two ingest paths agree about local-only fields', () => {
     const prep = bodyOf(src(ARRIVALS), 'prepared');
     assert.match(prep, /for \(const f of NOT_CARRIED_BY_BACKUP\) delete doc\[f\];/,
       'the writer no longer drops the derived local-only fields (vector, model, matchedText) and the write guard from what arrived');
-    assert.match(src(FIELDS), /NOT_CARRIED_BY_BACKUP[^=]*=\s*new Set\(\[\.\.\.DERIVED_LOCAL_FIELDS,\s*\.\.\.WRITE_GUARD_FIELDS\]\)/,
-      'NOT_CARRIED_BY_BACKUP is no longer the derived fields plus the write guards, so the writer drops less than a backup leaves out');
+    // Bundle-81 (design rev 8 §2): the position class joins them — a position is stamped afresh by the landing, never taken from an arrival or an export.
+    assert.match(src(FIELDS), /NOT_CARRIED_BY_BACKUP[^=]*=\s*new Set\(\[\.\.\.DERIVED_LOCAL_FIELDS,\s*\.\.\.WRITE_GUARD_FIELDS,\s*\.\.\.POSITION_FIELDS\]\)/,
+      'NOT_CARRIED_BY_BACKUP is no longer the derived fields plus the write guards plus the position class, so the writer drops less than a backup leaves out');
     assert.match(prep, /for \(const f of RESTORED_LOCAL_FIELDS\) \{\s*if \(!restore\) \{ delete doc\[f\]; continue; \}/,
       'the writer keeps a peer\'s retention stamps or sync base — a peer would decide when this instance deletes '
       + 'its data, which is what `ttl-sweep.ts` acts on');

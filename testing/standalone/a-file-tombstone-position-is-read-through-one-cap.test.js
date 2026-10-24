@@ -2,6 +2,11 @@
  * Every ordering read of a file tombstone's position is capped by ONE function, `settledPositionCap` — so no page, and no
  * prune, can take a position that an earlier, uncommitted write may still land below (Q-346, bundle-71 D1, gate T6b).
  *
+ * **Extended by bundle-81 to every stream of `util/position-clock.ts`** (design rev 8 §9, "gates the change inverts"): the records stream's
+ * reader (`util/position-keyset.ts`) is held to the same rule, and the streams are DERIVED (every module that imports the clock and declares a
+ * stream), with a floor, so a third stream added next year is owed its cap the day it is declared. The file stream's cap is this module's own
+ * `settledPositionCap(spaceId)` over the clock's `settledPositionCap(stream, spaceId)`, and the check below holds that the former IS the latter.
+ *
  * ## Why a gate, and why it is the position twin of the seq keyset's
  *
  * The hold that keeps a position from being acknowledged early is only a hold on whoever READS below it. The seq horizon
@@ -34,7 +39,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT } from './_sources.mjs';
+import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { topLevelFunctionSpans } from './_call-graph.mjs';
 
@@ -110,3 +115,45 @@ describe('every ordering read of a file tombstone position is capped by one func
     assert.deepEqual(positionReaders(asked), { readers: ['page', 'prune'], uncapped: ['page'] }, 'a reader that asks the position questions is not seen');
   });
 });
+
+describe('bundle-81: every stream of the position clock is read below one cap (the rule, not the file)', () => {
+  const CLOCK = 'server/src/util/position-clock.ts';
+  const clockCode = blankComments(readFileSync(join(REPO_ROOT, CLOCK), 'utf8'));
+  const sources = trackedSources('server/src', { floor: 100 });
+  const imports = (code) => /from\s+['"][^'"]*util\/position-clock\.js['"]|from\s+['"]\.\/position-clock\.js['"]/.test(code);
+  const DECLARES_A_STREAM = /:\s*PositionStream\b|\bnew\s+PositionStream\b|\b(?:define|create)\w*Stream\s*\(/;
+
+  it('the streams are derived: every module that imports the clock and declares one (a floor of two: the records and the file tombstones)', () => {
+    const definers = sources.filter(f => f !== CLOCK && imports(blankComments(readFileSync(join(REPO_ROOT, f), 'utf8')))
+      && DECLARES_A_STREAM.test(blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'))));
+    assert.ok(definers.length >= 2, `only ${definers.length} stream definer(s) derived (${definers}): the derivation is broken`);
+    assert.ok(definers.includes('server/src/files/tombstones.ts') && definers.includes('server/src/sync/record-position-stream.ts'), `derived: ${definers}`);
+  });
+
+  it('the clock exports the one cap and computes it, never stores it (a read must not move the clock)', () => {
+    assert.match(clockCode, /export\s+async\s+function\s+settledPositionCap\b/, 'the clock exports no settledPositionCap');
+    const body = topLevelFunctionSpans(clockCode).get('settledPositionCap')?.body ?? '';
+    assert.ok(body.length > 0 && !/\.last\s*=/.test(body), 'settledPositionCap writes the clock: a read would move it');
+  });
+
+  it('the file stream\'s cap is the clock\'s: ' + OWNER + ' exports settledPositionCap over the clock\'s, never a clock of its own', () => {
+    const body = topLevelFunctionSpans(code0()).get(CAP)?.body ?? '';
+    assert.match(body, /\bcapOf\s*\(\s*fileTombstonePositions\b|\bsettledPositionCap\s*\(\s*fileTombstonePositions\b/, `${OWNER}'s ${CAP} does not ask the clock's cap for the file stream`);
+  });
+
+  it('the records\' reader compares pos only below a cap it is handed or takes from the clock', () => {
+    const READER = 'server/src/util/position-keyset.ts';
+    const rcode = blankComments(readFileSync(join(REPO_ROOT, READER), 'utf8'));
+    const spans = [...topLevelFunctionSpans(rcode)];
+    const comparing = spans.filter(([, span]) => /\bpos['"]?\s*:\s*\{\s*\$(?:lt|lte|gt|gte)\b/.test(span.body));
+    assert.ok(comparing.length >= 1, `no function of ${READER} compares \`pos\`: the scan looks at the wrong thing`);
+    /** The parameter list of a top-level function, from its declaration. */
+    const paramsOf = (name) => new RegExp(`function\\s+${name}\\s*(?:<[^>(]*>)?\\(([^)]*)\\)`).exec(rcode)?.[1] ?? '';
+    const uncapped = comparing.filter(([name, span]) => !/\bcap\b/.test(paramsOf(name)) && !/\bsettledPositionCap\s*\(/.test(span.body)).map(([name]) => name);
+    assert.deepEqual(uncapped, [], `these compare pos in ${READER} with no cap handed in and none taken from the clock: ${uncapped}`);
+    assert.ok(/\bsettledPositionCap\s*\(\s*recordPositions\b/.test(rcode), `${READER} never asks the clock's cap for the records stream`);
+  });
+});
+
+/** The owner's code, comments blanked: read once for the case above. */
+function code0() { return blankComments(readFileSync(join(REPO_ROOT, OWNER), 'utf8')); }

@@ -115,7 +115,7 @@ const EXEMPT = {
   'server/src/db/drop-link-arrays.ts:dropLinkArrays': 'boot migration: drops the 4.x link arrays',
   'server/src/db/restore.ts:backupLoader': 'backup restore loads what the backup holds into a collection it emptied (the whole-database copy and each restore act alike)',
   // The sequence counter is not here: `_record-writes.mjs` excludes it by what it is, so the three rows that
-  // excused it one caller at a time (`withAllocatedSeqs`, `bumpSeq`, `moveSpaceData`) went with the extraction.
+  // excused it one caller at a time (`withAllocatedSeqs`, `raiseVersionTo`, `moveSpaceData`) went with the extraction.
 };
 
 /** Orphan sites (no function owns them) are exempted by FILE, with the same obligation to be real. */

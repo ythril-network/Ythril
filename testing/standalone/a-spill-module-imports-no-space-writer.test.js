@@ -5,7 +5,7 @@
  *
  * `brain/graph-spill.ts` imported `writeFile` from `files/files.js` and `upsertFileMeta` from
  * `files/file-meta.js`, so a recall — a READ, reachable with `knowledge: read` — wrote a blob, a `<space>_files`
- * record, a seq bump that synced the record to every peer, and an embed job. The spill now lives in the
+ * record, a version that synced the record to every peer, and an embed job. The spill now lives in the
  * instance store (`brain/read-spill-store.ts`), and this gate holds both modules to never reaching back.
  *
  * ## What it checks, and the scope it does NOT claim
@@ -18,7 +18,7 @@
  *
  * - every tracked module under `server/src/files/` whose code performs a write — a Mongo mutator or a
  *   filesystem write — because that directory IS a space's file store;
- * - whichever module EXPORTS `bumpSeq`, `enqueueEmbedJob`, `upsertFileMeta` and `writeFile`, found by their
+ * - whichever module EXPORTS `raiseVersionTo` (the counter's one raiser, bundle-81; it was `bumpSeq`), `enqueueEmbedJob`, `upsertFileMeta` and `writeFile`, found by their
  *   declarations rather than by a path that moves.
  *
  * A floor is asserted on what was found, and the known writers must be IN it, so a pattern that stopped
@@ -38,7 +38,7 @@ import { stripComments } from './_strip-comments.mjs';
 const SUBJECTS = ['server/src/brain/graph-spill.ts', 'server/src/brain/read-spill-store.ts'];
 
 /** The functions whose defining module is a space writer wherever it lives. */
-const WRITER_FUNCTIONS = ['bumpSeq', 'enqueueEmbedJob', 'upsertFileMeta', 'writeFile'];
+const WRITER_FUNCTIONS = ['raiseVersionTo', 'enqueueEmbedJob', 'upsertFileMeta', 'writeFile'];
 
 const code = (f) => stripComments(readFileSync(f, 'utf8'));
 

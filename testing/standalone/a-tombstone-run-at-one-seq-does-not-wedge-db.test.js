@@ -170,7 +170,7 @@ describe('a run of tombstones at one seq does not wedge a transfer', { skip }, (
     async function cursorAtRunStart() {
       const facts = [build.fact(S, 'a-1', RUN_SEQ), build.fact(S, 'a-2', RUN_SEQ)];
       await door.coll(S, 'facts').insertMany(facts.map(f => ({ ...f })));
-      await door.bumpSeq(S, 100);
+      await door.raiseVersionTo(S, 100);
       const page = await door.pull('/facts', { spaceId: S, sinceSeq: String(RUN_SEQ - 1), limit: '1' });
       assert.ok(page.nextCursor, 'the fact route handed no cursor for a one-row page of two — the fixture is broken');
       return page.nextCursor;

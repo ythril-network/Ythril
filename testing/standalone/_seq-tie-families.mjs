@@ -6,7 +6,7 @@
  *
  * A record keeps its AUTHOR's seq when it replicates, so records from several authors share seqs. Every reader that
  * pages by `seq > last` is correct while every seq is distinct and loses the tail of a run at a page or batch boundary,
- * or at a stop. A fixture with distinct seqs — which is what every record seeded one by one with `bumpSeq` has — can
+ * or at a stop. A fixture with distinct seqs — which is what every record seeded one by one with `raiseVersionTo` has — can
  * never show it, so this one builds the run on purpose: where it starts, how long it is, and what follows it.
  *
  * ## What it derives and what it declares

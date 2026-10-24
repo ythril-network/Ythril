@@ -114,21 +114,29 @@ describe('the request-level helper', () => {
 });
 
 describe('the precondition is enforced in the write filter', () => {
-  it('no precondition leaves the filter exactly as it was', () => {
-    // Every existing caller must be byte-for-byte unaffected. This is the assertion that says the feature
-    // is opt-in at the storage layer and not only at the route.
-    assert.deepEqual(writeFilterFor('abc'), { _id: 'abc' });
-    assert.deepEqual(writeFilterFor('abc', undefined), { _id: 'abc' });
+  // Bundle-81 (design rev 8 §1a, decision 14): there is NO unconditional filter any more. A local write names the version its stamp READ
+  // (`readSeq`, required), with or without an `If-Match`, because an arrival that lands between the read and the write would otherwise be
+  // overwritten by a lower stamp and nothing corrects it. The `If-Match` stays what it was: a second condition on the same write.
+  it('with no If-Match the filter still names the version the stamp read: there is no unconditional filter', () => {
+    assert.deepEqual(writeFilterFor('abc', { readSeq: 5 }), { _id: 'abc', seq: 5 });
+    assert.deepEqual(writeFilterFor('abc', { readSeq: 5, ifMatchSeq: undefined }), { _id: 'abc', seq: 5 });
+    // A stored row that carries no version is matched by its absence, never by `seq: undefined`.
+    assert.deepEqual(writeFilterFor('abc', { readSeq: null }), { _id: 'abc', seq: { $exists: false } });
   });
 
   it('a precondition constrains the same write, not a separate read', () => {
-    assert.deepEqual(writeFilterFor('abc', 12), { _id: 'abc', seq: 12 });
+    // Equal to the version read: the one condition. Anything else is a second condition no row can meet together with the first, so the write is
+    // refused in the store, atomically, and never by a comparison made before it.
+    assert.deepEqual(writeFilterFor('abc', { readSeq: 12, ifMatchSeq: 12 }), { _id: 'abc', seq: 12 });
+    const moved = writeFilterFor('abc', { readSeq: 12, ifMatchSeq: 11 });
+    assert.deepEqual(moved, { $and: [{ _id: 'abc', seq: 12 }, { _id: 'abc', seq: 11 }] });
   });
 
   it('seq 0 is a real precondition and not an absent one', () => {
     // The falsy-zero trap. `if (ifMatchSeq)` would drop it and silently write unconditionally — the exact
     // false safety the whole feature exists to prevent, reachable only on the lowest-numbered record.
-    assert.deepEqual(writeFilterFor('abc', 0), { _id: 'abc', seq: 0 });
+    assert.deepEqual(writeFilterFor('abc', { readSeq: 0 }), { _id: 'abc', seq: 0 });
+    assert.deepEqual(writeFilterFor('abc', { readSeq: 3, ifMatchSeq: 0 }), { $and: [{ _id: 'abc', seq: 3 }, { _id: 'abc', seq: 0 }] });
   });
 
   it('every update function puts it in the filter of its own findOneAndUpdate', () => {
@@ -173,7 +181,8 @@ describe('the metric keeps meaning what it meant', () => {
     // Absent and zero look identical in a graph and mean opposite things. `refused` staying absent until
     // the first refusal would read as "this instance cannot refuse", which is the opposite of the truth.
     const code = withoutComments(src('server/src/metrics/registry.ts'));
-    assert.match(code, /for \(const outcome of \['clean', 'collision', 'refused'\]\)/,
+    // 'ceiling' joined them in bundle-81: a write refused because the record's own version is at the highest number sync accepts.
+    assert.match(code, /for \(const outcome of \['clean', 'collision', 'refused', 'ceiling'\]\)/,
       'the refused series is not pre-declared, so it reads as absent until the first refusal');
   });
 });

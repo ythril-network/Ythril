@@ -97,7 +97,11 @@ const EXEMPT = {
   'server/src/spaces/rename.ts:moveSpaceData': 'moves a whole space\'s collections to a new id: every row, flagged included, goes',
   // `ensure-query-indexes.ts:ensureQueryIndexes` came off with Q-445 (bundle-101): it names no collection now, the per-space
   // declaration (`spaces/space-indexes.ts`) does, by part.
-  'server/src/util/seq.ts:highestStoredSeq': 'reconciles the space counter against the highest stored seq of any row; a flagged row\'s seq still counts',
+  // bundle-81: `util/seq.ts:highestStoredSeq` is gone; its three questions are asked of every record collection, the files included, by part.
+  'server/src/util/version-stamp.ts:highestVersionBelowCap': 'the version the counter may continue from: the highest stored version at or below the cap in any row; a flagged row\'s version still counts',
+  'server/src/util/version-stamp.ts:heldTermsOf': 'the version a local write must stand above: the stored row\'s own, flagged or not — a write over a flagged row is the revival of a deleted file, which sorts above it',
+  'server/src/sync/record-position-stream.ts:positionFloor': 'the highest position the records stream has handed out: any row\'s, a flagged row\'s included, or the next stamp could fall below a position a peer holds a mark for',
+  'server/src/util/position-keyset.ts:readAfterPosition': 'the one position reader of every record collection: the family\'s own filter (`LIVE_FILE_ROW`) is the `extra` its caller passes, so the reader itself must not narrow what it is handed',
   'server/src/sync/delivered-by-backfill.ts:stampCollection': 'the one-time stamp of who delivered rows held before `deliveredBy` existed: it must visit every row, flagged or not',
   // ── it must SEE the flagged row, because the flag is what it decides on
   'server/src/sync/arrivals.ts:writeArrivals': 'the arrival writer reads the stored copy and its `deletedAt` to refuse an arrival onto a row this instance flagged (arrivals.ts, "Except onto a row this instance FLAGGED"): a predicate would hide the very row it decides on',

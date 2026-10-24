@@ -121,7 +121,7 @@ describe('a tombstone-only cycle moves the marks', { skip }, () => {
   it('push door: the cycle that only pushed a tombstone moves lastPosPushed, the next sends nothing, and a later record is sent', async () => {
     const T = positionedTombstone(S, 'q394-push-t', 'fact', TOMBSTONE_SEQ, { instanceId: door.instanceId, issuedHere: true });
     await door.coll(S, 'tombstones').insertOne({ ...T });
-    await door.bumpSeq(S, TOMBSTONE_SEQ);
+    await door.raiseVersionTo(S, TOMBSTONE_SEQ);
     setMark(door, 'pushed', S, SENTINEL);
 
     const first = await cycle();
@@ -136,7 +136,7 @@ describe('a tombstone-only cycle moves the marks', { skip }, () => {
     // Positive control: a record written here after the tombstone-only cycle is sent, identified by id, and the tombstone is not.
     const F = positioned(build.fact(S, 'q394-push-f', RECORD_SEQ, { author: ME }), { writtenHere: true });
     await door.coll(S, 'facts').insertOne({ ...F });
-    await door.bumpSeq(S, RECORD_SEQ);
+    await door.raiseVersionTo(S, RECORD_SEQ);
     const third = await cycle();
     assert.deepEqual(third.recordsSent, [F._id], 'positive control: the record written after the cycle was not sent exactly once');
     assert.deepEqual(third.tombstonesSent.filter(id => id === T._id), [], 'the cycle that sent the later record sent the tombstone again');

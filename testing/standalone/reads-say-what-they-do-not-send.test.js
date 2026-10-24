@@ -34,10 +34,10 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-let mergeEmbeddingExclusion, toRecallRecord, recallTool, queryTool, NEVER_RETURNED_FIELDS;
+let mergeEmbeddingExclusion, toRecallRecord, recallTool, queryTool, WITHHELD_FROM_ANSWERS;
 before(async () => {
   ({ mergeEmbeddingExclusion } = await import('../../server/dist/brain/query.js'));
-  ({ NEVER_RETURNED_FIELDS } = await import('../../server/dist/brain/recall-shape.js'));
+  ({ WITHHELD_FROM_ANSWERS } = await import('../../server/dist/brain/recall-shape.js'));
   ({ toRecallRecord } = await import('../../server/dist/mcp/tools/shared.js'));
   ({ recallTool } = await import('../../server/dist/mcp/tools/search.js'));
   // `filter` moved out of `search.ts` when that file hit its size ceiling: the three tools there were
@@ -51,11 +51,11 @@ before(async () => {
  * neither. Each case now asks its question of every withheld field, read from the build.
  */
 describe('no withheld field can be asked for, which is why there is no parameter', () => {
-  const withheld = () => Object.fromEntries(NEVER_RETURNED_FIELDS.map(f => [f, 0]));
+  const withheld = () => Object.fromEntries(WITHHELD_FROM_ANSWERS.map(f => [f, 0]));
 
   it('no projection at all still excludes every one', () => {
     // Was: `{embedding: 0}`. Now: every withheld field is excluded.
-    assert.ok(NEVER_RETURNED_FIELDS.length >= 3, 'the withheld set read from the build is too small to mean anything');
+    assert.ok(WITHHELD_FROM_ANSWERS.length >= 3, 'the withheld set read from the build is too small to mean anything');
     assert.deepEqual(mergeEmbeddingExclusion(), withheld());
     assert.deepEqual(mergeEmbeddingExclusion({}), withheld());
   });
@@ -63,7 +63,7 @@ describe('no withheld field can be asked for, which is why there is no parameter
   it('an exclusion projection gains every one', () => {
     // Was: `embedding: 0` is added. Now: each withheld field is.
     const out = mergeEmbeddingExclusion({ description: 0 });
-    for (const f of NEVER_RETURNED_FIELDS) assert.equal(out[f], 0, `${f} is not excluded: ${JSON.stringify(out)}`);
+    for (const f of WITHHELD_FROM_ANSWERS) assert.equal(out[f], 0, `${f} is not excluded: ${JSON.stringify(out)}`);
   });
 
   it('and a caller who asks for one back does not get it', () => {
@@ -71,7 +71,7 @@ describe('no withheld field can be asked for, which is why there is no parameter
     // rather than honoured. An inclusion projection excludes by omission, so the test is that the field
     // is not among the keys — not that it is mapped to 0, which MongoDB would refuse to mix.
     // Was: `embedding: 1` alone. Now: every withheld field.
-    for (const f of NEVER_RETURNED_FIELDS) {
+    for (const f of WITHHELD_FROM_ANSWERS) {
       const out = mergeEmbeddingExclusion({ _id: 1, tags: 1, [f]: 1 });
       assert.equal(f in out, false, `an explicit \`${f}: 1\` must be dropped, not honoured`);
       assert.deepEqual(out, { _id: 1, tags: 1 });

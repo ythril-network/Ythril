@@ -52,15 +52,20 @@ const fields = () => needModule(loaded, [
  * is REQUIRED by the describe at the foot of this file.
  */
 const writeGuard = () => loaded.mod?.WRITE_GUARD_FIELDS ?? new Set();
+/**
+ * The position class (bundle-81, design rev 8 §2): `pos` and `posAtSeq`, a class of its own. Classified by NAME in the module, like the guard: neither
+ * restored from an export nor derived (a content change must not clear a position), and stamped afresh by every landing.
+ */
+const positions = () => loaded.mod?.POSITION_FIELDS ?? new Set();
 
 describe('every local-only field is classified on purpose', () => {
   it('names each as record tier (restored) or as derived with a reason — nothing is derived by being left out', () => {
     const { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS } = fields();
     assert.ok(LOCAL_ONLY_FIELDS.size >= 6, `only ${LOCAL_ONLY_FIELDS.size} local-only fields were read`);
     const guard = writeGuard();
-    const unclassified = [...LOCAL_ONLY_FIELDS].filter(f => !RESTORED_LOCAL_FIELDS.has(f) && !DERIVED_ON_PURPOSE.has(f) && !guard.has(f));
+    const unclassified = [...LOCAL_ONLY_FIELDS].filter(f => !RESTORED_LOCAL_FIELDS.has(f) && !DERIVED_ON_PURPOSE.has(f) && !guard.has(f) && !positions().has(f));
     assert.deepEqual(unclassified, [],
-      `local-only field(s) ${unclassified.join(', ')} are in none of RESTORED_LOCAL_FIELDS, WRITE_GUARD_FIELDS and DERIVED_ON_PURPOSE in this test — `
+      `local-only field(s) ${unclassified.join(', ')} are in none of RESTORED_LOCAL_FIELDS, WRITE_GUARD_FIELDS, POSITION_FIELDS and DERIVED_ON_PURPOSE in this test — `
       + 'the module would call them derived by default, drop them on a restore and `$unset` them on every content change. '
       + 'Decide which half each belongs to, and write the reason here if it is derived.');
   });
@@ -144,10 +149,10 @@ describe('the write-guard class: local, never restored, never derived', () => {
     assert.deepEqual([...guard].filter(f => DERIVED_ON_PURPOSE.has(f)), []);
   });
 
-  it('restored, derived and write-guard together are exactly the local-only fields, each in one class', () => {
+  it('restored, derived, write-guard and position together are exactly the local-only fields, each in one class', () => {
     const { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } = fields();
     const guard = guardFields();
-    const all = [...RESTORED_LOCAL_FIELDS, ...DERIVED_LOCAL_FIELDS, ...guard];
+    const all = [...RESTORED_LOCAL_FIELDS, ...DERIVED_LOCAL_FIELDS, ...guard, ...positions()];
     assert.equal(new Set(all).size, all.length, 'a field is in two classes');
     assert.deepEqual([...new Set(all)].sort(), [...LOCAL_ONLY_FIELDS].sort());
   });
@@ -163,5 +168,50 @@ describe('the write-guard class: local, never restored, never derived', () => {
     const { carriedFields, RESTORED_LOCAL_FIELDS } = fields();
     assert.equal(RESTORED_LOCAL_FIELDS.has('_functionalGuard'), false);
     assert.equal(carriedFields({ restore: true, suppressed: false }).has('_functionalGuard'), false);
+  });
+});
+
+/**
+ * The fourth class (bundle-81, design rev 8 §2): `POSITION_FIELDS`. `pos` is where a record sits in THIS instance's stream and `posAtSeq` the version
+ * that position was taken for. Local, so hashed nowhere, sent to no peer and taken from no arrival; not derived (a content change must never clear a
+ * position: the record would drop out of every pager and list order); not restored from an export (it would sit below peers' marks); stamped afresh by every landing
+ * (`withLandingStamp`), so an arrival never carries the replaced copy's across the replace. `writtenHere` is record tier (restored with a database's raw
+ * restore) and is stamped afresh by a landing as well — it is in `RESTORED_LOCAL_FIELDS`, and `carriedFields` never carries it.
+ */
+describe('the position class: local, never restored from an export, never derived, stamped by the landing', () => {
+  const classFields = () => needModule(loaded, ['POSITION_FIELDS'], 'the position class').POSITION_FIELDS;
+
+  it('POSITION_FIELDS is exported and names `pos` and `posAtSeq`', () => {
+    const cls = classFields();
+    assert.deepEqual([...cls].sort(), ['pos', 'posAtSeq']);
+  });
+
+  it('every position field is local-only, and in no other class', () => {
+    const { LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS } = fields();
+    const cls = classFields();
+    assert.deepEqual([...cls].filter(f => !LOCAL_ONLY_FIELDS.has(f)), [], 'a position outside LOCAL_ONLY_FIELDS is hashed and replicated');
+    for (const [name, other] of [['RESTORED_LOCAL_FIELDS', RESTORED_LOCAL_FIELDS], ['DERIVED_LOCAL_FIELDS', DERIVED_LOCAL_FIELDS], ['WRITE_GUARD_FIELDS', writeGuard()]]) {
+      assert.deepEqual([...cls].filter(f => other.has(f)), [], `a position field is also in ${name}`);
+    }
+  });
+
+  it('is left out of what is served, stripped from a document and never cleared by a content change', () => {
+    const { LOCAL_ONLY_EXCLUSION, stripLocalOnly, UNSET_DERIVED } = fields();
+    for (const f of classFields()) {
+      assert.equal(LOCAL_ONLY_EXCLUSION[f], 0, `${f} is served to a peer`);
+      assert.equal(f in UNSET_DERIVED, false, `${f} is cleared with the vectors`);
+    }
+    assert.deepEqual(stripLocalOnly({ _id: 'x', pos: 1, posAtSeq: 1, fact: 'f' }), { _id: 'x', fact: 'f' });
+  });
+
+  it('is taken from no export and no arrival, and carried across no replace, a restore included', () => {
+    const { carriedFields } = fields();
+    const { NOT_CARRIED_BY_BACKUP } = needModule(loaded, ['NOT_CARRIED_BY_BACKUP'], 'the not-carried set');
+    for (const f of [...classFields(), 'writtenHere']) {
+      for (const restore of [false, true]) for (const suppressed of [false, true]) {
+        assert.equal(carriedFields({ restore, suppressed }).has(f), false, `${f} is carried across a replace (restore ${restore}, suppressed ${suppressed}): the landing's patch is the only source`);
+      }
+    }
+    for (const f of classFields()) assert.ok(NOT_CARRIED_BY_BACKUP.has(f), `${f} is carried by a backup's export: a restored row would sit below peers' marks`);
   });
 });
