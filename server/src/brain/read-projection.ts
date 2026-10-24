@@ -36,7 +36,7 @@
  * 11 MB actually costs something. `withoutDiagnostics` still strips after the fact on the recall path, and
  * that is the belt to this braces — but a read that never asks for the field is the fix.
  */
-import { NEVER_RETURNED_FIELDS } from './recall-shape.js';
+import { WITHHELD_FROM_ANSWERS, ORDER_ONLY_FIELDS } from './recall-shape.js';
 import { stripLocalOnly } from '../sync/local-only-fields.js';
 
 /**
@@ -92,7 +92,7 @@ export function withoutListDiagnostics<T extends object>(
  * anybody adds to a record would be silently absent from the API.
  */
 export const NEVER_RETURNED_PROJECTION: Record<string, 0> =
-  Object.fromEntries(NEVER_RETURNED_FIELDS.map(f => [f, 0 as const]));
+  Object.fromEntries(WITHHELD_FROM_ANSWERS.map(f => [f, 0 as const]));
 
 /**
  * The same rule for a WRITE's return value, where a projection cannot reach.
@@ -119,7 +119,22 @@ export const NEVER_RETURNED_PROJECTION: Record<string, 0> =
  */
 export function withoutVector<T extends object>(doc: T): T {
   const out = { ...doc } as Record<string, unknown>;
-  for (const f of NEVER_RETURNED_FIELDS) delete out[f];
+  for (const f of WITHHELD_FROM_ANSWERS) delete out[f];
+  return out as T;
+}
+
+/**
+ * A copy of `row` without its order-only fields (`ORDER_ONLY_FIELDS`, `brain/recall-shape.ts`): what a cross-space merge answers once it has ordered by them.
+ *
+ * ## What it prevents
+ *
+ * A merge of several spaces' pages has to READ `pos` to order by it (`projectionForOrderedMerge` admits it), and then must not hand it to
+ * the answer. The strip used to be a loop each caller of the merge wrote (`for (const k of strip) delete row[k]`); a caller that forgot it
+ * returned the landing position of every row. The merge function (`pageAcrossMembers`) applies this itself, so no caller can.
+ */
+export function withoutOrderOnly<T extends object>(row: T): T {
+  const out = { ...row } as Record<string, unknown>;
+  for (const f of ORDER_ONLY_FIELDS) delete out[f];
   return out as T;
 }
 

@@ -21,7 +21,7 @@
  *
  * ## The forgettable parts, which are the reason to call this and not rebuild it
  *
- *   - the horizon (`settledSeqRange`, `util/seq.ts`) is applied HERE and nowhere else: a position that hands a reader a
+ *   - the horizon (`NO_HORIZON`: a seq is a version and is no longer held below; paging by position applies `settledPositionCap`, `util/position-keyset.ts`) is applied HERE and nowhere else: a position that hands a reader a
  *     seq at or above an unsettled write moves it past that write for good (`Q-196`);
  *   - the caller's extra filter (a family's `pushFilter`, `ownedFilter`) is composed through `andPredicates` (an `$and`) into
  *     BOTH finds, never spread beside the position, so a key it happens to share with the guard cannot overwrite it;
@@ -52,7 +52,7 @@ import { indexNamesOf } from '../db/index-names.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { createProbeCache, type ProbeTtl } from './cached-probe.js';
 import { isComparableIso, COMPARABLE_ISO_LENGTH } from './comparable-iso.js';
-import { MAX_SYNC_SEQ, SEQ_CARRYING, settledSeqRange } from './seq.js';
+import { MAX_SYNC_SEQ, SEQ_CARRYING } from './seq.js';
 
 // ── The position and its cursor ────────────────────────────────────────────────
 
@@ -244,15 +244,20 @@ export function seqKeysetFilters(
 }
 
 /**
- * {@link seqKeysetFilters} below the space's CURRENT horizon — what a read of `spaceId` after `after` asks the store, and
- * the one place the horizon and the position meet. `readAfterSeq` uses it; so does a test that needs "the filter a keyset
- * reader of this space builds" without copying it.
+ * The horizon of a seq-paged read in THIS build: none. A version is compared, never paged by, so nothing holds a horizon on versions any
+ * more (bundle-81): a record's place in the stream is its position, and the position readers are capped by `settledPositionCap`
+ * (`util/position-clock.ts`). This reader is the one the 5.x wire still pages by until the wire moves to positions, and it goes with it.
+ */
+const NO_HORIZON = Number.MAX_SAFE_INTEGER;
+
+/**
+ * {@link seqKeysetFilters} with no horizon — what a read of `spaceId` after `after` asks the store. `readAfterSeq` uses it; so does a test
+ * that needs "the filter a keyset reader of this space builds" without copying it.
  */
 export async function settledSeqKeysetFilters(
-  spaceId: string, after: SeqPosition, extra?: Readonly<Record<string, unknown>>,
+  _spaceId: string, after: SeqPosition, extra?: Readonly<Record<string, unknown>>,
 ): Promise<{ tie: Record<string, unknown> | null; range: Record<string, unknown>; horizon: number }> {
-  const { $lt: horizon } = await settledSeqRange(spaceId, after.seq);
-  return { ...seqKeysetFilters(after, horizon, extra), horizon };
+  return { ...seqKeysetFilters(after, NO_HORIZON, extra), horizon: NO_HORIZON };
 }
 
 // ── The indexes ────────────────────────────────────────────────────────────────

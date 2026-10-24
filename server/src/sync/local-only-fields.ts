@@ -7,6 +7,13 @@
 export const FUNCTIONAL_GUARD = '_functionalGuard' as const;
 
 /**
+ * The name of the bit that says THIS instance wrote a record (`sync/written-here.ts`'s predicate stamps it): spelled once, as the guard is,
+ * so no writer, projection or filter can drift from the field the push selection reads. A local write sets it in its landing patch
+ * (`withLandingStamp`); it is restored with a backup's raw load and stamped fresh on every other landing.
+ */
+export const WRITTEN_HERE = 'writtenHere' as const;
+
+/**
  * The fields a record holds that belong to THIS INSTANCE and must never be taken from a peer.
  *
  * ## Why they are one list with two consumers
@@ -57,6 +64,12 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
   // The write guard (`Q-439`): `functionalSubjectKey(from, label)` on an edge a strict space inserted under a functional label,
   // the value the unique partial index refuses a second writer on. A peer's would name a subject under THIS instance's index.
   FUNCTIONAL_GUARD,
+  // The position (`pos`) this instance took the record at when it landed, and the version that position was taken for (`posAtSeq`):
+  // where the record sits in THIS instance's stream, which no peer can know (`POSITION_FIELDS`, bundle-81).
+  'pos', 'posAtSeq',
+  // Whether this instance wrote the record, or only holds a peer's copy of it: the bit mesh push selection reads (`sync/written-here.ts`).
+  // A peer's would claim the receiver's own authorship, which a deliverer's text cannot prove.
+  WRITTEN_HERE,
 ]);
 
 /**
@@ -90,19 +103,56 @@ export const WRITE_GUARD_FIELDS: ReadonlySet<string> = new Set([FUNCTIONAL_GUARD
  * The default is not allowed to classify a field: `every-local-only-field-is-classified-on-purpose` holds that each
  * local-only name is here or is named derived, with a reason, in the gate.
  */
-export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt', 'syncBase', 'deliveredBy']);
+export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt', 'syncBase', 'deliveredBy', WRITTEN_HERE]);
+
+/**
+ * The fourth class of local-only field: where a record sits in THIS instance's stream (bundle-81, design rev 8 §2). `pos` is the position
+ * the record landed at (`util/position-clock.ts`) and `posAtSeq` the version it was taken for, so a row whose `posAtSeq` is not its `seq`
+ * changed without a position (a 5.6 build `$set` it and kept `pos`) and is found and repaired at re-upgrade.
+ *
+ * Its own class, because neither older half fits:
+ *  - **not derived.** `UNSET_DERIVED` clears every derived field when content changes, and a position is not about content: unset, the
+ *    record would drop out of every pager and every list order until it was written again.
+ *  - **not taken from anywhere.** A peer's would sit below this instance's own marks and the record would never be offered on; a backup's
+ *    export or an admin import's would too. The writer stamps fresh ones (`withLandingStamp`): {@link NOT_CARRIED_BY_BACKUP} says so,
+ *    and `carriedFields` never carries them across a replace (the landing's patch is the new value).
+ *  - **kept by the restore act's raw load**, which puts a database back as it was (a 6.0 backup keeps its positions).
+ * It is excluded from every answer (`LOCAL_ONLY_EXCLUSION`), so 6.0 never serves a position; the order-only class
+ * (`ORDER_ONLY_FIELDS`, `brain/recall-shape.ts`) is how a read may ORDER by `pos` without ever returning it.
+ */
+export const POSITION_FIELDS: ReadonlySet<string> = new Set(['pos', 'posAtSeq']);
+
+/**
+ * The local-only fields of a stored BRAIN TOMBSTONE, which `listTombstones` and every serving read leave off the wire: how it reached this
+ * instance (`storedVia`, the upstream it is relayed for), whether this instance issued it (`issuedHere`, a mark the local tombstone writer
+ * stamps and nothing a peer says can set: `TombstoneShape` strips an arriving one), and where it sits in this instance's stream
+ * (`pos`, `posAtSeq`). Tombstones are not hashed (`brain/merkle.ts`), so no hash list changes with it.
+ */
+export const TOMBSTONE_LOCAL_FIELDS: ReadonlySet<string> = new Set(['storedVia', 'issuedHere', ...POSITION_FIELDS]);
+
+/**
+ * What a landing stamps afresh on every row that lands, whatever the door: the position class and the written-here bit. Never taken from
+ * what arrived and never carried from the copy a landing replaces, a restore and an import included — the landing's patch
+ * (`withLandingStamp`) is the only source. NOT a `*_FIELDS` class of its own (`the-docs-name-every-local-only-field` derives those from
+ * what the module exports): every member is already named by a class that is.
+ */
+const LANDING_STAMPED: ReadonlySet<string> = new Set([...POSITION_FIELDS, WRITTEN_HERE]);
+
+/** Is `field` stamped afresh by every landing (see {@link LANDING_STAMPED})? */
+export const isLandingStamped = (field: string): boolean => LANDING_STAMPED.has(field);
 
 /**
  * The rest — what THIS instance computes with its own model (`embedding`, `embeddingModel`, `matchedText`), so
- * never taken from anywhere, a restore included. Derived, so a local-only field lands in the record tier or the write
- * guard by being named once, and one that is named in neither is derived data by default.
+ * never taken from anywhere, a restore included. Derived, so a local-only field lands in the record tier, the write
+ * guard or the position class by being named once, and one that is named in none is derived data by default.
  */
 export const DERIVED_LOCAL_FIELDS: ReadonlySet<string> =
-  new Set([...LOCAL_ONLY_FIELDS].filter(f => !RESTORED_LOCAL_FIELDS.has(f) && !WRITE_GUARD_FIELDS.has(f)));
+  new Set([...LOCAL_ONLY_FIELDS].filter(f => !RESTORED_LOCAL_FIELDS.has(f) && !WRITE_GUARD_FIELDS.has(f) && !POSITION_FIELDS.has(f)));
 
 /**
- * Everything a backup never carries and a restore never takes: what this instance derives with its own model, and its write
- * guard. The record tier ({@link RESTORED_LOCAL_FIELDS}) is the rest of {@link LOCAL_ONLY_FIELDS}.
+ * Everything a backup never carries and a restore never takes: what this instance derives with its own model, its write
+ * guard, and its positions (the writer stamps fresh ones). The record tier ({@link RESTORED_LOCAL_FIELDS}) is the rest of
+ * {@link LOCAL_ONLY_FIELDS}.
  *
  * ## What it prevents
  *
@@ -110,11 +160,16 @@ export const DERIVED_LOCAL_FIELDS: ReadonlySet<string> =
  * `WRITE_GUARD_FIELDS` separately: a third class of local-only field would have been added to one of the two sites and not
  * the other, so a backup would carry a lock that a restore then dropped, or the reverse.
  */
-export const NOT_CARRIED_BY_BACKUP: ReadonlySet<string> = new Set([...DERIVED_LOCAL_FIELDS, ...WRITE_GUARD_FIELDS]);
+export const NOT_CARRIED_BY_BACKUP: ReadonlySet<string> = new Set([...DERIVED_LOCAL_FIELDS, ...WRITE_GUARD_FIELDS, ...POSITION_FIELDS]);
 
 for (const f of RESTORED_LOCAL_FIELDS) {
   // A restored field that is not local-only would be a field the hash covers and the restore treats as local.
   if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`RESTORED_LOCAL_FIELDS names '${f}', which is not a local-only field`);
+}
+for (const f of POSITION_FIELDS) {
+  if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`POSITION_FIELDS names '${f}', which is not a local-only field`);
+  // Restored from a backup's export, a position would sit below peers' marks; derived, a content change would clear it.
+  if (RESTORED_LOCAL_FIELDS.has(f) || WRITE_GUARD_FIELDS.has(f)) throw new Error(`POSITION_FIELDS names '${f}', which another class also claims`);
 }
 for (const f of WRITE_GUARD_FIELDS) {
   if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`WRITE_GUARD_FIELDS names '${f}', which is not a local-only field`);
@@ -149,8 +204,13 @@ for (const f of VECTOR_FIELDS) {
 }
 
 const NOTHING: ReadonlySet<string> = new Set();
+/**
+ * What an ordinary peer arrival keeps of the stored copy: every local-only field except what the landing stamps afresh (the position class
+ * and the written-here bit, which describe THIS landing and not the copy it replaces).
+ */
+const KEPT_BY_ARRIVAL: ReadonlySet<string> = new Set([...LOCAL_ONLY_FIELDS].filter(f => !LANDING_STAMPED.has(f)));
 /** What an arrival this instance suppresses keeps of the stored copy: the record tier, and the write guard (suppression is not a change of subject). */
-const KEPT_BY_SUPPRESSED: ReadonlySet<string> = new Set([...RESTORED_LOCAL_FIELDS, ...WRITE_GUARD_FIELDS]);
+const KEPT_BY_SUPPRESSED: ReadonlySet<string> = new Set([...RESTORED_LOCAL_FIELDS, ...WRITE_GUARD_FIELDS].filter(f => !LANDING_STAMPED.has(f)));
 
 /**
  * What crosses a write from the STORED copy, per document (`Q-230`, `Q-234`): a restore takes nothing; an arrival this
@@ -164,7 +224,7 @@ const KEPT_BY_SUPPRESSED: ReadonlySet<string> = new Set([...RESTORED_LOCAL_FIELD
  */
 export function carriedFields({ restore, suppressed }: { restore: boolean; suppressed: boolean }): ReadonlySet<string> {
   if (restore) return NOTHING;
-  return suppressed ? KEPT_BY_SUPPRESSED : LOCAL_ONLY_FIELDS;
+  return suppressed ? KEPT_BY_SUPPRESSED : KEPT_BY_ARRIVAL;
 }
 
 /**
@@ -243,6 +303,12 @@ export function stripLocalOnly<T extends object>(doc: T): T {
  * slot for ever. The caller that moves an edge onto a functional label in a strict space stamps the new marker AFTER this
  * drop (`rekeyEdges`), never through `patch`, which the drop would also erase.
  *
+ * **It drops the position class and `writtenHere` too (bundle-81).** A carried `pos` sits below the marks peers hold for this instance's
+ * stream, so the re-keyed row would never be pushed; a carried `writtenHere` describes the old row. The caller's landing
+ * (`withLandingStamp`) puts fresh ones on, and EVERY copier of a record to a new id goes through here
+ * (`a-record-copied-to-a-new-id-goes-through-rekeyed-row`): the forgettable part is inside, so a copier that spreads the row by
+ * hand is the one that keeps a stale position.
+ *
  * `patch` wins over the old row, as the spread it replaces; the stamp and `syncBase` win over `patch`, and the write guard is
  * absent from the result whatever `patch` holds.
  */
@@ -250,5 +316,9 @@ export function rekeyedRow<T extends object, P extends object>(old: T, patch: P)
   const out = { ...old, ...patch, deliveredBy: '' } as Record<string, unknown>;
   delete out['syncBase'];
   for (const f of WRITE_GUARD_FIELDS) delete out[f];
+  // The old row's position sits where the OLD record landed, below peers' marks, so a re-keyed row that kept it would never be
+  // offered on; and the old row's provenance (`writtenHere`) says nothing of this write. The caller's `withLandingStamp` patch puts
+  // fresh ones on. A field `patch` names is the caller's own and stays, whatever class it is in.
+  for (const f of LANDING_STAMPED) if (!(f in patch)) delete out[f];
   return out as Omit<T, keyof P | 'deliveredBy' | 'syncBase'> & P & { deliveredBy: '' };
 }

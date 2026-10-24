@@ -16,6 +16,7 @@
  *    index (`spaces/lifecycle.ts`), which also names the forks already stored, and a **chain walk level by
  *    level** with `$in`, at most `MAX_FORK_DEPTH` reads.
  */
+import type { ClientSession } from 'mongodb';
 import { FILE_HASH_PROJECTION, fileContentHash } from '../brain/merkle.js';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -30,10 +31,10 @@ import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
  * tombstone type, for every id the request carries.
  */
 export async function readPageTombstones(
-  spaceId: string, ids: readonly string[],
+  spaceId: string, ids: readonly string[], session?: ClientSession,
 ): Promise<Map<TombstoneType, Map<string, HeldTombstone>>> {
   const rows = await readStoredById<{ type?: TombstoneType; seq?: number; instanceId?: string; storedVia?: string }>(
-    spaceCollection(spaceId, 'tombstones'), ids, { type: 1, seq: 1, instanceId: 1, storedVia: 1 });
+    spaceCollection(spaceId, 'tombstones'), ids, { type: 1, seq: 1, instanceId: 1, storedVia: 1 }, session ? { session } : {});
   const out = new Map<TombstoneType, Map<string, HeldTombstone>>();
   for (const [id, t] of rows) {
     if (t.type === undefined || typeof t.seq !== 'number') continue;

@@ -19,7 +19,7 @@
 import { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../../config/types.js';
 import { REFUSED_OPERATORS, REGEX_OPERATORS } from '../../brain/filter-sanitizer.js';
-import { NEVER_RETURNED_FIELDS } from '../../brain/recall-shape.js';
+import { WITHHELD_FROM_ANSWERS } from '../../brain/recall-shape.js';
 import { resolveBudget, applyBudget, budgetFields, type BudgetRequest, defaultBudgetChars, carriagesFor } from '../../brain/result-budget.js';
 import {
   queryBrain, countBrain, compareBySort, DEFAULT_QUERY_SORT, DEFAULT_QUERY_LIMIT, PROXY_PAGE_CEILING,
@@ -48,7 +48,7 @@ export const queryTool: ToolHandler = {
     + 'you is the record BODIES, and a '
     + 'projection of the four fields you actually read turns a page of them into something small.\n\n'
     + 'THE RESPONSE:\n'
-    + '• `results` — the matching documents, with ' + NEVER_RETURNED_FIELDS.join(', ')
+    + '• `results` — the matching documents, with ' + WITHHELD_FROM_ANSWERS.join(', ')
     + ' always stripped. Ordered seq/updatedAt/createdAt descending unless you pass `sort`.\n'
     + '• `count` — how many rows are in THIS page. `total` — how many satisfy the filter overall. They differ whenever `limit` bit, and that difference is the only signal that there is more to page through.\n'
     + '• `limit`, `skip` — echoed back, so a pager can carry on without keeping its own state.\n\n'
@@ -81,7 +81,7 @@ export const queryTool: ToolHandler = {
               type: 'object',
               // Built from the sets that ENFORCE it (Q-118): this said "only these operators are allowed" over a list
               // nothing enforced, while every query operator but the JavaScript ones was accepted.
-              description: `MongoDB filter document. Every MongoDB query operator is accepted except the ones that run JavaScript in the database, which are refused: ${[...REFUSED_OPERATORS].join(', ')}. A predicate that names a field no read returns (${NEVER_RETURNED_FIELDS.join(', ')}) directly — as a field key, at the top level or inside $and/$or/$nor, or as a "$field" path inside $expr — is refused, naming the field, because matching on it would read it one row at a time; only {field: {$exists: true|false}} is accepted on one. Nesting is capped at depth 8. Every regex the filter would run — ${[...REGEX_OPERATORS].join(', ')}, the last three inside $expr — must be a literal string pattern (not a field path or an expression), length-limited, and is rejected if it risks catastrophic backtracking; $options is allowed only alongside $regex and only with flags i, m, s, x. Results are ordered seq/updatedAt/createdAt descending unless 'sort' is passed; 'skip' pages through the order used.`,
+              description: `MongoDB filter document. Every MongoDB query operator is accepted except the ones that run JavaScript in the database, which are refused: ${[...REFUSED_OPERATORS].join(', ')}. A predicate that names a field no read returns (${WITHHELD_FROM_ANSWERS.join(', ')}) directly — as a field key, at the top level or inside $and/$or/$nor, or as a "$field" path inside $expr — is refused, naming the field, because matching on it would read it one row at a time; only {field: {$exists: true|false}} is accepted on one. Nesting is capped at depth 8. Every regex the filter would run — ${[...REGEX_OPERATORS].join(', ')}, the last three inside $expr — must be a literal string pattern (not a field path or an expression), length-limited, and is rejected if it risks catastrophic backtracking; $options is allowed only alongside $regex and only with flags i, m, s, x. Results are ordered seq/updatedAt/createdAt descending unless 'sort' is passed; 'skip' pages through the order used.`,
             },
             projection: {
               type: 'object',
@@ -259,8 +259,8 @@ export const queryTool: ToolHandler = {
     // and takes them off again before anything else sees the page (`Q-446` R8). One member needs no merge and reads as asked.
     const merge = members.length > 1
       ? projectionForOrderedMerge(projection, Object.keys(order))
-      : { read: projection, strip: [] as string[] };
-    const page = await pageAcrossMembers({
+      : { read: projection, finish: undefined };
+    const page = await pageAcrossMembers<Record<string, unknown>>({
       members,
       limit,
       skip,
@@ -268,9 +268,10 @@ export const queryTool: ToolHandler = {
       compare: compareBySort(order),
       readMember: async (mid, lim, sk) => decorateMemberRows(coll, mid,
         (await queryBrain(mid, coll, await filterFor(mid), merge.read, lim, maxTimeMS, sk, order, read)) as Array<Record<string, unknown>>),
+      // The merge takes off what it added to order by (and every order-only field), itself: no caller strips by hand.
+      ...(merge.finish ? { finish: merge.finish } : {}),
     });
     if (!page.ok) throw new Error(page.error);
-    if (merge.strip.length > 0) for (const row of page.rows as Array<Record<string, unknown>>) for (const k of merge.strip) delete row[k];
     /*
      * The same two DECORATIONS the REST door applies, through the same module: an edge's endpoint names,
      * and a file's job step progress (joined per member above, before the page is merged). They were on

@@ -44,7 +44,7 @@ import { col, getDb } from '../db/mongo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { envInt } from '../config/env-num.js';
 import { UUID_V4_RE } from './entity-refs.js';
-import { NEVER_RETURNED_FIELDS } from './recall-shape.js';
+import { WITHHELD_FROM_ANSWERS } from './recall-shape.js';
 import { budgetMeter, type CeilingRefusal } from './result-budget.js';
 
 const gzipAsync = promisify(gzip);
@@ -108,13 +108,13 @@ const pages = () => col<SpillPage>(READ_SPILL_PAGES);
 /**
  * Keys whose values are vectors, removed at every depth before anything is stored.
  *
- * `NEVER_RETURNED_FIELDS` is the base — what no read returns — and the rest are what a spill must not carry
+ * `WITHHELD_FROM_ANSWERS` is the base — what no answer carries, the order-only class included — and the rest are what a spill must not carry
  * even where another door may: `faceEmbedding` is a biometric descriptor the face tools read deliberately, and
  * a search dump is not that door. Named, not matched by pattern: `suppressEmbeddings` is a record's own flag and
  * must survive, and `embeddingModel` is a name, not a vector.
  */
 const VECTOR_KEYS = new Set([
-  ...NEVER_RETURNED_FIELDS, 'embeddings', 'vector', 'vectors', 'contentEmbedding', 'faceEmbedding',
+  ...WITHHELD_FROM_ANSWERS, 'embeddings', 'vector', 'vectors', 'contentEmbedding', 'faceEmbedding',
 ]);
 
 /** Deep copy without any vector field, and without touching the caller's objects. */

@@ -42,10 +42,25 @@
  * the mode from `normaliseProjection`, so none can read it differently.
  */
 
-import { NEVER_RETURNED_FIELDS } from './recall-shape.js';
+import { WITHHELD_FROM_ANSWERS, ORDER_ONLY_FIELDS } from './recall-shape.js';
+
+/**
+ * The capability a cross-space merge's read carries: the order-only keys (`ORDER_ONLY_FIELDS`) its sort names, which this read — and no
+ * other — may return. A symbol-keyed property, so it is invisible to `Object.entries` and to JSON, and minted only by
+ * `projectionForOrderedMerge`: a caller's own projection object cannot hold it, so `{ pos: 1 }` from a caller is dropped as `{ embedding: 1 }` is.
+ */
+const ADMITS_ORDER_KEYS = Symbol('admitsOrderKeys');
+
+/** The order-only keys `projection` was minted to admit (`projectionForOrderedMerge`), or none. */
+function admittedOrderKeysOf(projection: Record<string, unknown> | null | undefined): readonly string[] {
+  const admitted = (projection as { [ADMITS_ORDER_KEYS]?: readonly string[] } | null | undefined)?.[ADMITS_ORDER_KEYS];
+  return admitted ?? [];
+}
 
 /** Which way a projection reads, and the paths it names, pre-split on `.` so no applier re-parses. */
 export interface NormalisedProjection {
+  /** The order-only keys a merge's read admits (see {@link ADMITS_ORDER_KEYS}); absent for every other projection. */
+  admitted?: readonly string[];
   /** `true` when the caller listed fields to KEEP; `false` when they listed fields to DROP. */
   include: boolean;
   /** Each named field as its path segments — `properties.status` becomes `['properties','status']`. */
@@ -62,10 +77,11 @@ export interface NormalisedProjection {
 }
 
 /**
- * The fields a caller can never have, whatever they ask for — `NEVER_RETURNED_FIELDS`, not a second list.
- * Kept under its old name because it is the name this module's rule has always been read by.
+ * The fields a caller can never have, whatever they ask for — the two classes `recall-shape.ts` names (`WITHHELD_FROM_ANSWERS`: what no
+ * read returns, and the order-only class), not a second list. Kept under its old name because it is the name this module's rule has
+ * always been read by.
  */
-const NEVER_PROJECTABLE: readonly string[] = NEVER_RETURNED_FIELDS;
+const NEVER_PROJECTABLE: readonly string[] = WITHHELD_FROM_ANSWERS;
 
 const WITHHELD: ReadonlySet<string> = new Set(NEVER_PROJECTABLE);
 
@@ -73,6 +89,10 @@ const WITHHELD: ReadonlySet<string> = new Set(NEVER_PROJECTABLE);
 export function isWithheldPath(key: string): boolean {
   return WITHHELD.has(key.split('.')[0]!);
 }
+
+/** What `NEVER_PROJECTABLE` withholds from a read that admits `admitted` (a merge's order-only keys). */
+const withheldFrom = (admitted: readonly string[] | undefined): readonly string[] =>
+  admitted && admitted.length > 0 ? NEVER_PROJECTABLE.filter(f => !admitted.includes(f)) : NEVER_PROJECTABLE;
 
 const truthy = (v: unknown) => v === 1 || v === true || v === '1';
 
@@ -87,7 +107,8 @@ const truthy = (v: unknown) => v === 1 || v === true || v === '1';
 export function normaliseProjection(
   projection?: Record<string, unknown> | null,
 ): NormalisedProjection | undefined {
-  if (!projection || Object.keys(projection).length === 0) return undefined;
+  const admitted = admittedOrderKeysOf(projection);
+  if (!projection || (Object.keys(projection).length === 0 && admitted.length === 0)) return undefined;
 
   const entries = Object.entries(projection);
   const nonId = entries.filter(([k]) => k !== '_id');
@@ -99,7 +120,7 @@ export function normaliseProjection(
   for (const [key, value] of nonId) {
     // A withheld field is dropped rather than refused: a caller asking for it has made a mistake we can correct
     // without failing their read, and refusing would be a new 400 on a parameter that has always accepted it.
-    if (isWithheldPath(key)) continue;
+    if (isWithheldPath(key) && !admitted.includes(key.split('.')[0]!)) continue;
     if (include !== truthy(value)) continue; // a mixed projection: honour the mode, ignore the stragglers
     paths.push(key.split('.'));
   }
@@ -109,7 +130,7 @@ export function normaliseProjection(
   let idExplicit = idSent && truthy(projection['_id']);
   // An inclusion with nothing left to include answers the id, whatever `_id` said — never "every field".
   if (include && paths.length === 0) { keepId = true; idExplicit = true; }
-  return { include, paths, keepId, idExplicit };
+  return { include, paths, keepId, idExplicit, ...(admitted.length > 0 ? { admitted } : {}) };
 }
 
 /**
@@ -126,15 +147,22 @@ export function toMongoProjection(norm: NormalisedProjection | undefined): Recor
   }
   for (const p of norm.paths) out[p.join('.')] = norm.include ? 1 : 0;
   if (norm.include) {
-    // An inclusion already omits every withheld field: none of them can be among its paths.
+    // An inclusion already omits every withheld field: none of them can be among its paths (a merge's admitted order keys are).
     if (!norm.keepId) out['_id'] = 0;
     else if (norm.idExplicit) out['_id'] = 1;
   } else {
     // An exclusion must still drop every withheld field, and `_id: 0` is the one inclusion Mongo allows here.
-    for (const f of NEVER_PROJECTABLE) out[f] = 0;
+    for (const f of withheldFrom(norm.admitted)) out[f] = 0;
     if (!norm.keepId) out['_id'] = 0;
   }
-  return out;
+  // A merge's read carries the capability on, so the store read it is handed to (which normalises it again) still admits the keys.
+  return norm.admitted && norm.admitted.length > 0 ? admitting(out, norm.admitted) : out;
+}
+
+/** `projection` carrying the capability to return `keys` (see {@link ADMITS_ORDER_KEYS}). Only a merge's read is minted this way. */
+function admitting<T extends Record<string, 0 | 1>>(projection: T, keys: readonly string[]): T {
+  (projection as Record<symbol, unknown>)[ADMITS_ORDER_KEYS] = keys;
+  return projection;
 }
 
 /** Read a dotted path out of a record, or `undefined` when any segment is missing. */
@@ -192,6 +220,7 @@ export function applyProjection<T extends object>(
     for (const f of NEVER_PROJECTABLE) delete out[f];
     return out;
   }
+  const withheld = withheldFrom(norm.admitted);
 
   if (norm.include) {
     const out: Record<string, unknown> = {};
@@ -207,7 +236,7 @@ export function applyProjection<T extends object>(
   // otherwise be shared with the caller's own record and mutated by the delete below. The withheld fields go
   // first, so a vector is never cloned only to be dropped.
   const visible = { ...src };
-  for (const f of NEVER_PROJECTABLE) delete visible[f];
+  for (const f of withheld) delete visible[f];
   const out = structuredClone(visible) as Record<string, unknown>;
   for (const p of norm.paths) deletePath(out, p);
   if (!norm.keepId) delete out['_id'];
@@ -229,15 +258,31 @@ export function applyProjection<T extends object>(
  *  - a key whose first segment a caller path SHARES (`type.x` under `sort: type`) is left alone, and the merge orders
  *    by the caller's value of that segment — widening the caller's path would answer more than was asked.
  *
- * `strip` names what was added, and the caller deletes those keys from every merged row BEFORE anything else reads
- * the page (decorations, the byte budget), so the answer is exactly what the projection asked for.
+ * `strip` names what was added, and `finish(row)` is the strip: a copy of a merged row without those keys and without any
+ * order-only field (`withoutOrderOnly`), applied by the merge itself (`pageAcrossMembers`' `finish`) BEFORE anything else reads the page
+ * (decorations, the byte budget), so the answer is exactly what the projection asked for and no caller deletes keys by hand.
+ *
+ * **The one path that admits an order-only field.** A sort that names one (`pos`, `LANDING_ORDER`) needs it on every row to merge by it, but a
+ * caller's projection can never name it (`NEVER_PROJECTABLE`), and the store read re-normalises whatever it is handed. The read this returns
+ * therefore carries the capability to return exactly the order-only keys the sort names (`ADMITS_ORDER_KEYS`), and nothing else does.
  */
 export function projectionForOrderedMerge(
   projection: Record<string, unknown> | undefined,
   orderKeys: readonly string[],
-): { read: Record<string, 0 | 1> | undefined; strip: string[] } {
+): { read: Record<string, 0 | 1> | undefined; strip: string[]; finish: <T extends object>(row: T) => T } {
+  const admitted = orderKeys.filter(k => ORDER_ONLY_FIELDS.includes(k));
   const norm = normaliseProjection(projection);
-  if (!norm) return { read: undefined, strip: [] };
+  const finishing = (strip: readonly string[]) => <T extends object>(row: T): T => {
+    const out = { ...row } as Record<string, unknown>;
+    for (const k of strip) delete out[k];
+    for (const k of ORDER_ONLY_FIELDS) delete out[k];
+    return out as T;
+  };
+  if (!norm) {
+    // No projection: every field but the withheld ones, and the order-only keys the sort names too — which the merge strips again.
+    return { read: admitted.length > 0 ? toMongoProjection({ include: false, paths: [], keepId: true, idExplicit: false, admitted }) : undefined,
+      strip: [...admitted], finish: finishing(admitted) };
+  }
   const keys = [...new Set([...orderKeys, '_id'])];
   const shared = (k: string) => norm.paths.some(p => p[0] === k && p.length > 1);
   const strip: string[] = [];
@@ -252,6 +297,11 @@ export function projectionForOrderedMerge(
     const named = paths.some(p => p.length === 1 && p[0] === k);
     if (norm.include && !named) { paths = [...paths, [k]]; strip.push(k); }
     if (!norm.include && named) { paths = paths.filter(p => !(p.length === 1 && p[0] === k)); strip.push(k); }
+    // An exclusion returns an admitted key on its own: nothing was added to the read, but the merge must still strip it.
+    if (!norm.include && admitted.includes(k) && !strip.includes(k)) strip.push(k);
   }
-  return { read: toMongoProjection({ ...norm, paths, keepId, idExplicit: norm.idExplicit && keepId }), strip };
+  return {
+    read: toMongoProjection({ ...norm, paths, keepId, idExplicit: norm.idExplicit && keepId, ...(admitted.length > 0 ? { admitted } : {}) }),
+    strip, finish: finishing(strip),
+  };
 }
