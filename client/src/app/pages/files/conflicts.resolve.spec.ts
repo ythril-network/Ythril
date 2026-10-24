@@ -244,8 +244,8 @@ describe('the Conflicts table is labelled', () => {
       expect(words['conflicts.action.saveToSpace']).toMatch(move[lang]!);
       const save: Record<string, RegExp> = { en: /^Save/, de: /speicher/i, pl: /^Zapisz/ };
       expect(words['conflicts.action.saveToSpace'], `${lang} no longer says "save"`).not.toMatch(save[lang]!);
-      // de follows the page: this page says Bereich for a space.
-      if (lang === 'de') expect(words['conflicts.action.saveToSpace']).toContain('Bereich');
+      // de names a space 'Space', as every German value does (D-63; locale-false-friends RECORD_TERMS).
+      if (lang === 'de') expect(words['conflicts.action.saveToSpace']).toContain('Space');
     });
   }
 
