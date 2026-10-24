@@ -86,6 +86,35 @@ describe('ActiveLanguage', () => {
     expect(active.revision(), 'a failure is a change anything computed from the language must see').toBeGreaterThan(before);
   });
 
+  it('switchingTo names the language a switch waits for, and is null once it lands', async () => {
+    const loads = new LanguageLoads().now('en', EN);
+    const de = loads.late('de');
+    setup(loads);
+    const transloco = await startInEnglish();
+    const active = TestBed.inject(ActiveLanguage);
+    expect(active.switchingTo(), 'no switch asked for').toBeNull();
+
+    switchTo(transloco, 'de');
+    await settle();
+    expect(active.switchingTo(), 'de was asked for and its words are not here').toBe('de');
+
+    de.resolve(DE);
+    await settle();
+    expect(active.switchingTo(), 'the page is in de now').toBeNull();
+  });
+
+  it('switchingTo is null after a failed load falls back, so a control never waits on a switch that ended', async () => {
+    setup(new LanguageLoads().now('en', EN).failing('de'));
+    const transloco = await startInEnglish();
+    const active = TestBed.inject(ActiveLanguage);
+
+    switchTo(transloco, 'de');
+    await settle();
+
+    expect(active.language()).toBe('en');
+    expect(active.switchingTo()).toBeNull();
+  });
+
   it('a load that never resolves keeps the previous language and does not throw', async () => {
     setup(new LanguageLoads().now('en', EN).never('de'));
     const transloco = await startInEnglish();

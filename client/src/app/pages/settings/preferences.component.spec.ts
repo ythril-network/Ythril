@@ -14,6 +14,7 @@ import { getTranslocoModule } from '../../testing/transloco-testing';
 import { PreferencesComponent } from './preferences.component';
 import { AuthApi } from '../../core/auth-api.service';
 import { DateFormatService } from '../../core/date-format.service';
+import { ActiveLanguage } from '../../core/active-language';
 
 function make() {
   TestBed.resetTestingModule();
@@ -45,6 +46,22 @@ describe('PreferencesComponent — language switch', () => {
     expect(spy).toHaveBeenCalledWith('de');
     expect(c.activeLang()).toBe('de');
     expect(localStorage.getItem('lang')).toBe('de');
+  });
+
+  it('a language whose words are still loading shows as switching on its button, and the old one stays current', () => {
+    const { fixture } = make();
+    fixture.detectChanges();
+    const active = TestBed.inject(ActiveLanguage);
+    vi.spyOn(active, 'switchingTo').mockReturnValue('de');
+    fixture.componentRef.changeDetectorRef.markForCheck();
+    fixture.detectChanges();
+
+    const button = (label: string) =>
+      [...fixture.nativeElement.querySelectorAll('.lang-btn')].find((b: HTMLElement) => b.textContent!.trim() === label) as HTMLElement;
+    expect(button('Deutsch').getAttribute('aria-busy'), 'the click shows at once that a switch is under way').toBe('true');
+    expect(button('Deutsch').classList.contains('switching')).toBe(true);
+    expect(button('English').getAttribute('aria-current'), 'the page is still in English until the words arrive').toBe('true');
+    expect(button('English').getAttribute('aria-busy')).toBeNull();
   });
 
   it('Date and time: picking a format and a zone sets the one preference every date reads (Q-146)', () => {
