@@ -100,6 +100,14 @@ export class NetworksApi {
     return this.http.post<{ ok: boolean }>(`/api/networks/${networkId}/sync`, {});
   }
 
+  /**
+   * Start a re-read of everything from the peers (bundle-81): admin with MFA, which the MFA interceptor asks for. `spaces` narrows it; absent is
+   * every space of the network. A member then reads one space per sync cycle.
+   */
+  rereadNetwork(networkId: string, spaces?: string[]): Observable<unknown> {
+    return this.http.post<unknown>(`/api/networks/${encodeURIComponent(networkId)}/reread`, { confirm: true, ...(spaces ? { spaces } : {}) });
+  }
+
   /** Sync now, carrying a change note to the members below this instance (F-42). Refused 409 when nobody is below. */
   syncWithNote(networkId: string, note: string, spaces: string[]): Observable<{ ok: boolean; noteId?: string }> {
     return this.http.post<{ ok: boolean; noteId?: string }>(`/api/networks/${networkId}/sync`, { note, ...(spaces.length ? { spaces } : {}) });

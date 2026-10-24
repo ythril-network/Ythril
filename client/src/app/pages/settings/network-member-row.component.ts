@@ -26,13 +26,15 @@ import { Component, ChangeDetectionStrategy, inject, input, output } from '@angu
 import { InstantComponent } from '../../shared/instant.component';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
+import { StatusPillComponent } from '../../shared/status-pill.component';
 import type { NetworkMember } from '../../core/api.types';
 import { PluralText } from '../../core/plural-text.service';
+import type { RereadState } from './network-reread-view';
 
 @Component({
   selector: 'app-network-member-row',
   standalone: true,
-  imports: [InstantComponent, TranslocoPipe, PhIconComponent],
+  imports: [InstantComponent, TranslocoPipe, PhIconComponent, StatusPillComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <span class="mono badge badge-gray" style="font-size:11px;">{{ member().instanceId.slice(0, 8) }}</span>
@@ -54,6 +56,13 @@ import { PluralText } from '../../core/plural-text.service';
         <ph-icon name="warning" [size]="11"/>
         {{ 'networks.member.failing' | transloco: { count: member().consecutiveFailures } }}
       </span>
+    }
+
+    <!-- A re-read this member still owes (bundle-81): not a failure, so it is a status pill and not the red badge above. -->
+    @if (reread(); as state) {
+      <app-status-pill [variant]="state === 'catching' ? 'pending' : 'warn'" [dot]="true">
+        {{ (state === 'catching' ? 'networks.reread.member.catchingUp' : 'networks.reread.member.owed') | transloco }}
+      </app-status-pill>
     }
 
     <span class="member-sync">
@@ -116,6 +125,8 @@ export class NetworkMemberRowComponent {
   private readonly plural = inject(PluralText);
 
   readonly member = input.required<NetworkMember>();
+  /** Whether this member still owes a re-read of the network (`owed`: spaces still to come, `catching`: one is being read now); null when nothing is owed. */
+  readonly reread = input<RereadState | null>(null);
   /** "N consecutive failed sync attempts since the last success", in the plural form the reader's language uses for N. */
   protected failingTitle(): string {
     return this.plural.text('networks.member.failingTitle', this.member().consecutiveFailures ?? 0);
