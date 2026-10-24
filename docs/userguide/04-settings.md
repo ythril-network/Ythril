@@ -562,8 +562,10 @@ two are kept in this browser only — another browser, or a private window, star
 
 ### Language
 
-English, Deutsch or Polski. The switch takes effect at once, without a reload, and dates that follow the
-language (see below) switch with it.
+English, Deutsch or Polski. The switch takes effect without a reload, as soon as the language's words have
+loaded; until then the page stays in the language it was in, and the button you clicked shows a dashed border.
+If the words cannot be loaded, the page falls back to English. Dates that follow the language (see below) switch
+with it.
 
 ### Date and time
 
