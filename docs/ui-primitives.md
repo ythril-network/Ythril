@@ -153,6 +153,32 @@ has bitten this codebase twice, both times invisibly.
 
 ---
 
+## `plural` pipe and `PluralText` — a count beside a word
+
+A number next to a word ("3 edges", "2 Kanten", "5 rekordów") is one sentence, in the plural form the reader's
+language uses for that number. English has two forms; Polish has four. **Every count shown beside a word goes
+through one of these two.**
+
+```html
+<span>{{ total | plural:'brain.spaceChip.records' }}</span>
+```
+
+```ts
+private readonly plural = inject(PluralText);
+
+this.plural.text('brain.cascade.kind.edge', n);
+```
+
+The base names a key family, one key per form: `.one` and `.other` in `en`, `.one`, `.few`, `.many` and `.other`
+in `pl`. Each sentence carries its own `{{count}}`. The client unit tests check every locale for every form.
+
+Both read the page's language from `ActiveLanguage`. During a switch it keeps the old language until the new
+words have loaded, so a count and its word never come from two languages. For the same reason, a list joined
+for a sentence (`formatList`) takes `ActiveLanguage.language()`, never `transloco.getActiveLang()`. Neither is
+ever bound as HTML.
+
+---
+
 ## Checklist for a page PR
 
 Not primitives, but the same class of thing — verify these on whatever page you touch:
@@ -160,6 +186,7 @@ Not primitives, but the same class of thing — verify these on whatever page yo
 - `<app-relative-time>` on every timestamp; `tabular-nums` on every numeric column.
 - Every user-facing string through transloco. No hardcoded English — `en`, `de` and `pl` all need the
   key, and the client unit tests check coverage.
+- A count beside a word through the `plural` pipe or `PluralText`, never `{{ n }} {{ 'key' | transloco }}`.
 - `<ph-icon>` rather than a raw glyph.
 - A `<app-summary-strip>` on every list page.
 - A visible in-flight state on every async action.

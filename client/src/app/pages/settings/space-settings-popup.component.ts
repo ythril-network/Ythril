@@ -51,6 +51,7 @@ import { SpaceDangerTabComponent } from './space-danger-tab.component';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { describeRefusal, refusalIssues } from '../../core/refusal-text';
 import { formatList } from '../../core/list-format';
+import { ActiveLanguage } from '../../core/active-language';
 
 @Component({
   selector: 'app-space-settings-popup',
@@ -170,6 +171,7 @@ export class SpaceSettingsPopupComponent {
   readonly state = inject(SpaceSettingsState);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
+  private readonly language = inject(ActiveLanguage).language;
   /** The list store, so a successful save updates the row behind the modal. Both hosts provide it. */
   private store = inject(SpacesStore);
 
@@ -266,7 +268,7 @@ export class SpaceSettingsPopupComponent {
         const pending = (result.layers ?? []).filter(l => l.outcome === 'vote_pending');
         if (pending.length > 0) {
           const applied = (result.layers ?? []).filter(l => l.outcome === 'applied');
-          const lang = this.transloco.getActiveLang();
+          const lang = this.language();
           this.state.settingsNotice.set(this.transloco.translate('spaces.settings.layersMixed', {
             applied: formatList(applied.map(l => l.networkLabel), lang),
             pending: formatList(pending.map(l => l.networkLabel), lang),

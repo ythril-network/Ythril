@@ -20,7 +20,10 @@
  *       a check that the entry is still true;
  *   (c) a counted sentence is never bound as HTML: `| plural` or the PluralText service's `.text(` never sits inside `[innerHTML]` or a
  *       `bypassSecurityTrust*` call. The sentence is built from a translation value and a number; a count is not markup, and a value that
- *       later carries a tag would otherwise be rendered through the sanitizer's bypass.
+ *       later carries a tag would otherwise be rendered through the sanitizer's bypass;
+ *   (d) a file that joins a list for a sentence (`formatList(`) never reads `getActiveLang()`: the list's "and" is a word of the sentence
+ *       around it, so it takes the language that sentence is rendered in (`ActiveLanguage.language()`, or a parameter its caller passes).
+ *       Lists were joined in the REQUESTED language beside counts in the loaded one, so a switch in flight read "2 Kanten and 1 Fakt".
  *
  * Not claimed: `getActiveLang()` has many legitimate readers (a date's locale, a file size's) that are not counted sentences and are not
  * counted here; and a method that returns a sentence which another template binds as HTML is out of reach of a scan - (c) reads the
@@ -61,6 +64,16 @@ function pluralTextCalls(src: string): number[] {
 /** Where `langChanges$` is referenced in a source. */
 function langChangesReads(src: string): number[] {
   return [...src.matchAll(/\blangChanges\$/g)].map(m => lineOf(src, m.index!));
+}
+
+/** Where `formatList(` is called in a source (its definition `function formatList(` is not a call). */
+function formatListCalls(src: string): number[] {
+  return [...src.matchAll(/\bformatList\(/g)].filter(m => !/\bfunction\s+$/.test(src.slice(0, m.index!))).map(m => lineOf(src, m.index!));
+}
+
+/** Where `getActiveLang()` is read in a source. */
+function requestedLanguageReads(src: string): number[] {
+  return [...src.matchAll(/\bgetActiveLang\(\)/g)].map(m => lineOf(src, m.index!));
 }
 
 /** The text of every `[innerHTML]="..."` binding in a template. */
@@ -117,6 +130,18 @@ describe('the page\'s language has one reader (Q-574)', () => {
     }
     expect(reads, 'a floor: the bootstrap entry reads langChanges$, so a scan that finds none is broken').toBeGreaterThan(0);
     expect(offenders, `${offenders.length} private copies of the page's language - read ActiveLanguage.language() (it flips once the words are here; a private toSignal(langChanges$) flips at the request, before them):\n  ${offenders.join('\n  ')}`).toEqual([]);
+  });
+
+  it('(d) a file that joins a list for a sentence reads the language the sentence is rendered in, never getActiveLang()', () => {
+    const offenders: string[] = [];
+    let joiners = 0;
+    for (const { file, src } of all) {
+      if (!formatListCalls(src).length) continue;
+      joiners++;
+      offenders.push(...requestedLanguageReads(src).map(line => `${file}:${line}`));
+    }
+    expect(joiners, 'a floor: lists are joined for sentences in several files, so a scan that finds fewer is broken').toBeGreaterThan(3);
+    expect(offenders, `${offenders.length} lists joined in the REQUESTED language - read ActiveLanguage.language(), as the counts beside them do:\n  ${offenders.join('\n  ')}`).toEqual([]);
   });
 
   it('every LANG_CHANGES_ALLOWED entry has its reason written and still reads langChanges$', () => {

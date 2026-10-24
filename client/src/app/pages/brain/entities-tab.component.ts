@@ -26,6 +26,7 @@ import { PluralText } from '../../core/plural-text.service';
 import { firstValueFrom } from 'rxjs';
 import { refusalText, type RefusalSource } from '../../core/refusal-text';
 import { formatList } from '../../core/list-format';
+import { ActiveLanguage } from '../../core/active-language';
 import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
 import { RetypeConfirmService } from '../../core/retype-confirm.service';
 import { RefusalAlertComponent } from '../../shared/refusal-alert.component';
@@ -277,6 +278,7 @@ export class EntitiesTabComponent extends RecordTabBase {
   private route = inject(ActivatedRoute);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+  private readonly language = inject(ActiveLanguage).language;
   private plural = inject(PluralText);
   private retype = inject(RetypeConfirmService);
 
@@ -500,7 +502,7 @@ export class EntitiesTabComponent extends RecordTabBase {
       if (records.length > 0) {
         const counts = new Map<string, number>();
         for (const r of records) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
-        const list = formatList([...counts].map(([type, n]) => this.cascadeCount(type, n)), this.transloco.getActiveLang());
+        const list = formatList([...counts].map(([type, n]) => this.cascadeCount(type, n)), this.language());
         this.recordList.deleteError.set(this.transloco.translate('brain.cascade.blockedByRecords', { list }));
         return;
       }
@@ -509,16 +511,7 @@ export class EntitiesTabComponent extends RecordTabBase {
   }
 
   /**
-   * Ask, showing what goes — COUNTED BY KIND rather than listed.
-   *
-   * A list of identifiers is not something an operator can act on, and the decision in front of them is
-   * *how much goes with it*. Twenty UUIDs obscure that; "3 edges, 1 chrono entry" is the answer.
-   *
-   * It also says what does NOT go, because that is the half people fear: an edge is removed, and the
-   * record at the other end of it is not.
-   */
-  /**
-   * "3 edges", "1 timeline entry": one counted line per kind, in the reader's plural form. Each kind names its base as a literal so the
+   * "3 edges", "1 chrono entry": one counted line per kind, in the reader's plural form. Each kind names its base as a literal so the
    * key-coverage gate can hold every locale to every plural category; a kind the server adds later shows its count and its name.
    */
   private cascadeCount(type: string, n: number): string {
@@ -532,6 +525,15 @@ export class EntitiesTabComponent extends RecordTabBase {
     }
   }
 
+  /**
+   * Ask, showing what goes — COUNTED BY KIND rather than listed.
+   *
+   * A list of identifiers is not something an operator can act on, and the decision in front of them is
+   * *how much goes with it*. Twenty UUIDs obscure that; "3 edges, 1 chrono entry" is the answer.
+   *
+   * It also says what does NOT go, because that is the half people fear: an edge is removed, and the
+   * record at the other end of it is not.
+   */
   private confirmCascade(preview: CascadePreview): Promise<boolean> {
     const counts = new Map<string, number>();
     for (const r of preview.removes) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);

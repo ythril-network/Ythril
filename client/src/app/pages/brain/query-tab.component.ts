@@ -18,6 +18,7 @@ import { type IncompleteRow } from '../../core/recall-graph-report';
 import { SpillEndingComponent } from './spill-ending.component';
 import { ceilingFieldKeys } from '../../core/ceiling-advice';
 import { formatList } from '../../core/list-format';
+import { ActiveLanguage } from '../../core/active-language';
 import { refusalText } from '../../core/refusal-text';
 import { PluralText } from '../../core/plural-text.service';
 import { PluralPipe } from '../../core/plural.pipe';
@@ -522,6 +523,7 @@ export class QueryTabComponent {
   private brainApi = inject(BrainApi);
   private store = inject(BrainStore);
   private transloco = inject(TranslocoService);
+  private readonly language = inject(ActiveLanguage).language;
   private readonly plural = inject(PluralText);
 
   /** The counted sentences of this tab, each in the plural form the reader's language uses for its count. */
@@ -604,7 +606,7 @@ export class QueryTabComponent {
 
   /** The size fields to raise, by their labels, as one phrase in the reader's language. */
   fieldNames(keys: string[] | null): string {
-    return keys ? formatList(keys.map(k => this.transloco.translate(k)), this.transloco.getActiveLang()) : '';
+    return keys ? formatList(keys.map(k => this.transloco.translate(k)), this.language()) : '';
   }
 
   /** Type names offered by the recall "filter by type" dropdown (F5): schema type
