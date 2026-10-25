@@ -26,6 +26,14 @@
  *
  * Nothing that is not the driver is awaited inside: every await holds every reader of the space.
  *
+ * ## A lock met at the bound is the bound's own answer (bundle-81, decision 66)
+ *
+ * A document lock held elsewhere is a `WriteConflict` the driver retries for as long as the bound lasts, and what it then hands back is the DRIVER's error
+ * (a `MongoServerError` with the transient-transaction label), not the bound's timeout. Every door classifies such an error as the store not answering today,
+ * but the classification is the door's to remember: a caller of this function that asked the error what it was got a driver error naming a collection. So a
+ * write conflict the bound ended is thrown here as the bound's `StoreTimeout`, the driver's error kept as its `cause` — `isWriteTimeout`, the doors' `503`,
+ * and a walk's `space-timeout` verdict all read it, and the driver's text never reaches a caller.
+ *
  * A session is started in `db/bounded-transaction.ts` and nowhere else (`every-transaction-is-bounded.test.js`): a
  * transaction that stamps no position has no business in this file, and one that stamps positions has no business outside it.
  */
@@ -33,6 +41,7 @@ import type { ClientSession } from 'mongodb';
 import { withPositionFloorHeld } from '../util/position-clock.js';
 import { recordPositions } from '../sync/record-position-stream.js';
 import { inBoundedTransaction, type BoundedTransactionOptions } from '../db/bounded-transaction.js';
+import { isWriteTimeout, StoreTimeout } from '../db/write-timeout.js';
 
 /**
  * Run `fn` as one transaction under a position floor on `spaceId` — see the module docblock. `holder` names it, as every
@@ -41,5 +50,13 @@ import { inBoundedTransaction, type BoundedTransactionOptions } from '../db/boun
 export async function inHeldTransaction<T>(
   spaceId: string, holder: string, fn: (session: ClientSession) => Promise<T>, opts: BoundedTransactionOptions<T> = {},
 ): Promise<T> {
-  return withPositionFloorHeld(recordPositions, spaceId, () => inBoundedTransaction(fn, opts), holder);
+  return withPositionFloorHeld(recordPositions, spaceId, async () => {
+    try {
+      return await inBoundedTransaction(fn, opts);
+    } catch (err) {
+      // The bound ended it (a write conflict retried to the bound, a server deadline): the bound's own error, the driver's kept beneath it.
+      if (isWriteTimeout(err) && !(err instanceof StoreTimeout)) throw new StoreTimeout('the transaction', { cause: err });
+      throw err;
+    }
+  }, holder);
 }

@@ -51,7 +51,7 @@ import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { idKeysetPage } from '../db/id-keyset-page.js';
 import { getConfig } from '../config/loader.js';
 import { changeSpaceEntries } from '../config/change-space-entries.js';
-import { authorRef } from '../config/author.js';
+import { isIssuedHere } from '../sync/issued-here.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { LEAKED_ROWS_REPAIR_OPERATION } from '../audit/middleware.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
@@ -220,11 +220,10 @@ async function derivedRowsPage(spaceId: string, after: string | undefined, stamp
  * `a.jpg` — so asked as itself it read "no tombstone" and its links stayed for ever, though the delete's own step takes them.
  */
 async function leakedLinkSources(spaceId: string, froms: readonly string[]): Promise<{ sources: string[]; unlooked: Array<{ path: string; err: unknown }> }> {
-  const self = authorRef().instanceId;
   const owner = await owningFilesOf(spaceId, froms);
   const owners = [...new Set(owner.values())];
   const held = await heldFileTombstones(spaceId, owners);
-  const deletedHere = owners.filter(p => held.get(p)?.some(t => t.issuer === self));
+  const deletedHere = owners.filter(p => held.get(p)?.some(t => isIssuedHere(t)));
   const live = new Set((await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'files'), deletedHere, { _id: 1 }, { filter: LIVE_FILE_ROW })).keys());
   const unmoved = deletedHere.filter(p => !live.has(p));
   const carried = await pathsCarriedByOwedMoves(spaceId, unmoved);

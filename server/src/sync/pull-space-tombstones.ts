@@ -21,7 +21,6 @@ import { stampDeliveriesOnce } from './delivered-by-backfill.js';
 import { pullTombstones } from './tombstone-transfer.js';
 import { rereadUpstreamTombstones } from './tombstone-reread.js';
 import type { NetworkMember } from '../config/types.js';
-import type { TransferOutcome } from './watermark.js';
 import type { ExchangeTurn } from './held-answer.js';
 
 export async function pullSpaceTombstones(opts: {
@@ -29,14 +28,15 @@ export async function pullSpaceTombstones(opts: {
   spaceId: string;
   remoteSpaceId: string;
   networkId: string;
-  sinceSeq: number;
+  /** The peer's position the ordinary pull is complete through (the mark), 0 when none. */
+  since: number;
   requestInit: () => RequestInit;
   /** The space's turn with this member, handed to both pulls: their fetches take its signal and a refusal goes to it (design v5 X5). */
   turn?: ExchangeTurn;
-}): Promise<TransferOutcome> {
-  const { member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit, turn } = opts;
+}): Promise<Awaited<ReturnType<typeof pullTombstones>>> {
+  const { member, spaceId, remoteSpaceId, networkId, since, requestInit, turn } = opts;
   await stampDeliveriesOnce(spaceId);
-  const outcome = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit, turn });
-  await rereadUpstreamTombstones({ member, spaceId, remoteSpaceId, networkId, requestInit, ordinary: { sinceSeq, outcome }, turn });
+  const outcome = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, since, requestInit, turn });
+  await rereadUpstreamTombstones({ member, spaceId, remoteSpaceId, networkId, requestInit, ordinary: { since, outcome }, turn });
   return outcome;
 }

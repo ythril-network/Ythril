@@ -109,7 +109,7 @@ export async function triggerPeerSync(
   }
   try {
     const r = await runSyncForPeer(peerId);
-    res.json({ ok: true, status: 'completed', peerId, networksSynced: r.networksSynced, errors: r.errors });
+    res.json({ ok: true, status: 'completed', peerId, networksSynced: r.networksSynced, errors: r.errors, refused: r.refused });
   } catch (err) {
     sendCaughtFailure(res, `synchronous sync trigger for peer ${peerText(peerId)}`, err,
       { ok: false, status: 'error', peerId, error: SYNC_FAILED_TEXT });

@@ -101,8 +101,8 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     // 6.0: a subscription that named only retired proxy ids is disabled, never emptied (an empty list means every space).
     await retireWebhookSpaceIds((await import('./config/loader.js')).getConfig().retiredSpaceIds ?? []);
 
-    const { resetStaleWatermarksIfNeeded } = await import('./util/seq.js');
-    await resetStaleWatermarksIfNeeded();
+    const { forgetWhatWasReceivedAfterCounterWipe } = await import('./util/seq.js');
+    await forgetWhatWasReceivedAfterCounterWipe();
 
     // Per-space usefulness counters: the TTL index above all. An activity log without one becomes the largest
     // collection in the instance, which is the standard way a metrics table stops being worth having.

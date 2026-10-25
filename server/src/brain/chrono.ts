@@ -5,7 +5,7 @@ import { writeAtReadVersion } from './write-at-read-version.js';
 import { writeTombstone, stampTombstones } from './tombstones.js';
 import { listReadMaxMs } from './tag-filter.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
-import { toMongoSort, type SortSpec } from './list-sort.js';
+import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { conveniencePredicate } from './list-conveniences.js';
 import { SimilarMatch } from './recall.js';
@@ -551,7 +551,7 @@ export async function listChrono(
       projection: NEVER_RETURNED_PROJECTION,
       maxTimeMS: listReadMaxMs(comparesAgainstTheClock),
     })
-    .sort(sort ? toMongoSort(sort) : { createdAt: -1 })
+    .sort(sort ? toMongoSort(sort) : { ...LANDING_ORDER })
     .skip(parseSkip(skip))
     .limit(parseLimit(limit, 20, 1000))
     .toArray() as ChronoEntry[];

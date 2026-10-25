@@ -23,7 +23,7 @@
 import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { dropIndexesIfPresent, indexNamesOf } from '../db/index-names.js';
-import { bareKeysOf, indexNameOf, noteKeysetIndexes, type SeqKeysetIndex } from '../util/seq-keyset.js';
+import { bareKeysOf, indexNameOf, type SeqKeysetIndex } from '../util/seq-keyset.js';
 
 /** What one `buildKeysetIndex` did, for the pass's log. */
 export interface KeysetBuild { built: boolean; droppedBare: boolean }
@@ -49,6 +49,5 @@ export async function buildKeysetIndex(
   }
   const droppedBare = names.includes(bare);
   names = await dropIndexesIfPresent(collName, [bare], names);
-  noteKeysetIndexes(collName, names);
   return { built, droppedBare };
 }

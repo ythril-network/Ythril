@@ -4,12 +4,11 @@
  * Split out of the api/sync.ts monolith (A17.6); handlers are unchanged.
  */
 import { Router } from 'express';
-import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../../config/types.js';
 import { z } from 'zod';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { peerBoundTo } from '../../auth/peer-bound.js';
-import { listTombstones, listTombstonesAfterPosition } from '../../brain/tombstones.js';
-import { pageAnswer } from '../../sync/wire-answer.js';
+import { listTombstonesAfterPosition } from '../../brain/tombstones.js';
+import { pageAnswer, pushAnswer } from '../../sync/wire-answer.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { withinWriteBound } from '../../db/write-bound.js';
@@ -19,11 +18,10 @@ import {
 } from '../../files/tombstones.js';
 import { applyPeerFileTombstones } from '../../files/peer-tombstone-apply.js';
 
-import { refusePeerSpace, refusePeerWrite, pushAllowed, deliveryOfRequest, syncReadStart, syncPositionStart, isPositionRequest, BAD_SYNC_START, BAD_POSITION_START } from './_shared.js';
+import { refusePeerSpace, refusePeerWrite, pushAllowed, deliveryOfRequest, syncPositionStart, BAD_SINCE_INSTANT } from './_shared.js';
 import { parseLimit } from '../../util/pagination.js';
-import { recordServedSeq } from '../../sync/served-watermark.js';
-import { completeThrough } from '../../sync/watermark.js';
-import { encodeSeqCursor, isoReadStart, BAD_ISO_CURSOR } from '../../util/seq-keyset.js';
+import { recordServedPosition } from '../../sync/served-watermark.js';
+import { isoReadStart, BAD_ISO_CURSOR } from '../../util/seq-keyset.js';
 import { refusalOfParse } from '../../util/log.js';
 
 export const syncTombstonesRouter = Router();
@@ -34,76 +32,32 @@ export const syncTombstonesRouter = Router();
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * GET /api/sync/tombstones?spaceId=&networkId=&sinceSeq=&cursor=
- * Bulk tombstone export for efficient deletion sync, in one of two modes.
+ * GET /api/sync/tombstones?spaceId=&networkId=&afterPos=&cursor=
+ * Brain tombstones in the same position stream as the records (bundle-81, design rev 8 §6): one read of every type, `limit` rows in `(pos, _id)` order after
+ * the start, below the settled cap, each carrying its `type`, answered as the wire module builds a page: `{ items, nextCursor, through, head, positions: 1 }`.
+ * The start is `afterPos` (a whole number) or the opaque `p1.` cursor a previous page handed back, which also pages through a run of equal positions (a
+ * relayed tombstone of the legacy band shares its position with the rows beside it). A `sinceSeq` and every old cursor form are refused, and the grouped
+ * per-type answer of 5.6 is gone with them.
  *
- * **`sinceSeq` alone (legacy mode)** serves `seq > sinceSeq` per type, at most `limit` of each, and is UNCHANGED: a 5.6
- * puller reads a full group as "more may follow" and moves on from the group's last seq, so a different shape would be
- * misread. It cannot page past more than `limit` tombstones at one seq, and a peer token can plant that many (it names the
- * seq of what it issues): such a puller stays held below that seq until it upgrades.
- *
- * **`cursor` (cursor mode)** is one read of every type, `limit` rows in `(seq, _id)` order after the cursor's position
- * (`util/seq-keyset.ts`), grouped by type in the answer, with `nextCursor` beside the type keys — `null` on the last page.
- * It pages through a run at one seq, which is what closes that wedge. A first request carries the bare-seq cursor of
- * its watermark. The cursor wins over `sinceSeq`, and it is opaque: a client echoes it and never builds one.
- *
- * Also records how far this peer has been served (`lastSeqServed`), which is what makes the tombstones
- * prunable at all — see `sync/served-watermark.ts`. This is the right hook for it: `pullFromPeer` calls this
- * endpoint first, once per space per cycle, with the peer's raw confirmed watermark. Legacy mode records `sinceSeq`;
- * cursor mode records the cursor's seq MINUS ONE — everything below it was delivered, and part of the run at it may not
- * have been, so a prune must keep that run.
+ * Also records how far this peer has been served (`lastPosServed`), which is what makes the tombstones prunable at all — see `sync/served-watermark.ts`.
+ * The mark is the position the peer asked from, cut at this instance's own settled cap (`ownPositionMark`), so a puller that sends `afterPos` near 2^53 cannot
+ * drive this instance's clock toward the ceiling through it; a cursor inside a run records the position BEFORE it (everything below was delivered, and part
+ * of the run at it may not have been, so a prune must keep that run). Written on every network that carries the space: it belongs to the peer's token.
  */
 syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, res) => {
   try {
-    const { spaceId, networkId, sinceSeq, cursor, limit } = req.query as Record<string, unknown>;
+    const { spaceId, networkId, limit } = req.query as Record<string, unknown>;
     if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
 
-    // A read by POSITION (`afterPos`, or a `p1.` cursor): the 6.0 page. Tombstones are items of the same stream as the records, served in
-    // `(pos, _id)` order below the settled cap, each carrying its type; the legacy seq read below stays until the wire moves.
-    if (isPositionRequest(req.query as Record<string, unknown>)) {
-      const start = syncPositionStart(req.query as Record<string, unknown>);
-      if (start === undefined) { res.status(400).json({ error: BAD_POSITION_START }); return; }
-      res.json(pageAnswer(await listTombstonesAfterPosition(spaceId, start, parseLimit(limit, 1000, 5000) + 1), parseLimit(limit, 1000, 5000)));
-      return;
-    }
-
-    // One reading of the start and the size for every sync read (`Q-388`): see `syncReadStart`.
-    const since = syncReadStart(sinceSeq, cursor);
-    if (since === undefined) { res.status(400).json({ error: BAD_SYNC_START }); return; }
+    const start = syncPositionStart(req.query as Record<string, unknown>);
+    if ('refusal' in start) { res.status(400).json({ error: start.refusal }); return; }
     const pageSize = parseLimit(limit, 1000, 5000);
-
-    if (cursor !== undefined && cursor !== '') {
-      // One more row than asked for decides `nextCursor` without a second query, as the record pages do.
-      const rows = await listTombstones(spaceId, since, pageSize + 1);
-      const page = rows.slice(0, pageSize);
-      const last = page[page.length - 1];
-      const byType = Object.fromEntries(TOMBSTONE_TYPES.map(t => [TOMBSTONE_COLLECTION[t], page.filter(r => r.type === t)] as const));
-      // Mid-run, the rest of the cursor's seq is not delivered yet, so only the seq before it counts as served.
-      recordServedSeq(peerBoundTo(req.authToken), spaceId, completeThrough(since.seq, true));
-      res.json({ ...byType, nextCursor: rows.length > pageSize && last ? encodeSeqCursor({ seq: last.seq, id: last._id }) : null });
-      return;
-    }
-    /*
-     * DERIVED from `TOMBSTONE_TYPES`, and it was four hand-written calls with a four-key response.
-     *
-     * A tombstone type absent from here is never SERVED: the deleting instance stores its tombstone, the
-     * peer asks for tombstones and is handed a response with no key for that kind, and the deleted record
-     * lives on there for ever. Nothing reports it — the peer got a 200 with a well-formed body, and the
-     * record it still holds looks exactly like a record nobody deleted.
-     *
-     * `M-2` is the fifth type, and the key each one takes is its COLLECTION name (`fact` is served under
-     * `facts`) — which is a mapping that already exists rather than a naming convention to re-derive
-     * here. The response keys are the same as before plus `links`; JSON has no key order, so nothing a peer
-     * parses changes.
-     */
-    const grouped = Object.fromEntries(await Promise.all(TOMBSTONE_TYPES.map(async (t) =>
-      [TOMBSTONE_COLLECTION[t], await listTombstones(spaceId, since.seq, pageSize, t)] as const,
-    )));
-
-    // After the read, so a bookkeeping failure can never cost the peer its tombstones.
-    recordServedSeq(peerBoundTo(req.authToken), spaceId, since.seq);
-    res.json(grouped);
+    // One more row than asked for decides `nextCursor` without a second query, as the record pages do.
+    const read = await listTombstonesAfterPosition(spaceId, start, pageSize + 1);
+    // After the read, so a bookkeeping failure can never cost the peer its tombstones; mid-run only the position before the cursor's counts as served.
+    await recordServedPosition(peerBoundTo(req.authToken), spaceId, start.id === undefined ? start.pos : Math.max(0, start.pos - 1));
+    res.json(pageAnswer(read, pageSize));
   } catch (err) {
     sendCaughtFailure(res, `sync GET tombstones`, err);
   }
@@ -148,10 +102,10 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
 
     // `applied` keeps its meaning — every element admitted by shape and seq — and `refused` is additive, as is
     // `declined` (elements the deletion authority did not honour; absent when none, so an exact old body still holds).
-    res.status(200).json({
+    res.status(200).json(pushAnswer({
       applied: out.admitted, refused: out.refused.length,
       ...(out.declined.length > 0 ? { declined: out.declined.length } : {}),
-    });
+    }));
   } catch (err) {
     if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST tombstones', err);
@@ -192,7 +146,7 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
       res.json({ tombstones: page.rows.map(fileTombstoneOnTheWire), nextCursor: page.next });
       return;
     }
-    if (since !== undefined && since !== '' && typeof since !== 'string') { res.status(400).json({ error: BAD_SYNC_START }); return; }
+    if (since !== undefined && since !== '' && typeof since !== 'string') { res.status(400).json({ error: BAD_SINCE_INSTANT }); return; }
     const rows = await publishedFileTombstones(spaceId, { ...(since ? { since: since as string } : {}), limit: LEGACY_FILE_TOMBSTONE_LIMIT });
     res.json({ tombstones: rows.map(fileTombstoneOnTheWire) });
   } catch (err) {

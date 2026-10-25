@@ -206,7 +206,7 @@ export const network_syncTool: ToolHandler = {
           type: 'text' as const,
           text: result.notFound
             ? `Peer '${peerId}' not found in any network.`
-            : `Sync complete: ${result.networksSynced} network(s) synced, ${result.errors} error(s).`,
+            : `Sync complete: ${result.networksSynced} network(s) synced, ${result.errors} error(s)${result.refused > 0 ? `, ${result.refused} member(s) too old to exchange with (pre-6.0)` : ''}.`,
         }],
         // `notFound` is carried EXPLICITLY rather than inferred from a sentence. It is the one
         // outcome a caller must branch on — a named peer that does not exist is not a sync that

@@ -85,3 +85,31 @@ export class PositionsSeedUnavailable extends Error {
     super(`The ${stream} of this space could not be read from the store, so the write was not made. Retry it.`, { cause });
   }
 }
+
+/** The code a sync door puts on the 503 for a space that owes its positions, which a sender reads as HELD. A constant, never a literal at a site. */
+export const POSITIONS_BUILDING = 'positions_building';
+
+/**
+ * A sync read or write met a space whose positions are not built yet (its first carry, or a repair, is owed: `sync/positions-owed.ts`). The doors
+ * answer it `503` with `code: 'positions_building'`; the sender reads that code as HELD, not as a failed member, and tries again next cycle. A
+ * housekeeping walk reads it as "not ready: skipped this tick" (`walkVerdict`), never as the space's failure.
+ */
+export class PositionsBuilding extends Error {
+  override readonly name = 'PositionsBuilding';
+  readonly code = POSITIONS_BUILDING;
+  constructor(readonly spaceId: string) {
+    super('This space is building its positions, so it cannot be exchanged yet. Try again shortly.');
+  }
+}
+
+/**
+ * A peer answered a sync request in the 5.x shape: a page with no `through`, `head` or `positions`, or a push answer without `positions: 1`. 6.0 pages
+ * by position and a 5.x peer cannot be synced with by these rules, so the client THROWS this from both parsers (`sync/wire-answer.ts`); the engine ends
+ * that member's turn on it, counts no failure and shows the member as too old.
+ */
+export class PeerPagesBySeq extends Error {
+  override readonly name = 'PeerPagesBySeq';
+  constructor() {
+    super('peer does not page by position (pre-6.0)');
+  }
+}

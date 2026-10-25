@@ -42,7 +42,7 @@ import { mergeEntities, mergeRefusal } from './merge.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import type { DupeCandidateDoc, DupeScanType, DupeActionRule } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
-import { readAfterSeq } from '../util/seq-keyset.js';
+import { readAfterPosition } from '../util/position-keyset.js';
 import { readScanStart, writeScanPosition, advanceScanPosition } from './scan-cursor.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
@@ -378,14 +378,16 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
   for (const type of types) {
     if (scanned >= maxPerRun) break;
     if (opts?.reset) await writeScanPosition(cursorId(spaceId, type), { spaceId, type }, null);
-    let cursor = opts?.reset ? { seq: 0 } : await readScanStart(cursorId(spaceId, type));
+    let cursor = opts?.reset ? { pos: 0 } : await readScanStart(cursorId(spaceId, type));
 
     while (scanned < maxPerRun) {
       const take = Math.min(batchSize, maxPerRun - scanned);
-      // The collection is the space's own, so no `spaceId` in the filter: the keyset index leads with `seq`, and a filter on a
-      // constant field would stop it covering the read. Ties at the cursor's seq are read by `_id` (`util/seq-keyset.ts`).
-      const batch = await readAfterSeq<{ _id: string; seq?: number }>(spaceId, COLLECTION_SUFFIX[type], cursor,
-        { limit: take, projection: { _id: 1, seq: 1 } });
+      // The collection is the space's own, so no `spaceId` in the filter: the keyset index leads with `pos`, and a filter on a
+      // constant field would stop it covering the read. Ties at the cursor's position are read by `_id` (`util/position-keyset.ts`), and a
+      // space that owes its positions throws `PositionsBuilding` here: the walk reads it as "not ready, skipped this tick".
+      const read = await readAfterPosition<{ _id: string }>(spaceId, COLLECTION_SUFFIX[type], cursor,
+        { limit: take, projection: { _id: 1 } });
+      const batch = read.rows.map(r => ({ _id: r.row._id, pos: r.pos }));
       if (batch.length === 0) break;
 
       await runSeeds(batch, async (rec) => {

@@ -400,7 +400,7 @@ export async function collectEachSpace(
  * The kinds a failure is counted under, as a record so a kind added to `SpaceFailureKind` that is not named here is a type
  * error: a kind that is not pre-declared would be a series that appears only at its first event.
  */
-const FAILURE_KIND_SERIES: Record<SpaceFailureKind, true> = { failure: true, timeout: true, store_down: true, stalled: true };
+const FAILURE_KIND_SERIES: Record<SpaceFailureKind, true> = { failure: true, timeout: true, store_down: true, stalled: true, not_ready: true };
 export const HOUSEKEEPING_FAILURE_KINDS = Object.keys(FAILURE_KIND_SERIES) as SpaceFailureKind[];
 
 /**
@@ -1401,29 +1401,60 @@ export const toolValidatorCacheTotal = new Counter({
 
 // ── Sync ─────────────────────────────────────────────────────────────────────
 
+/**
+ * The statuses a sync cycle is counted under: `success`; `partial` (a pull stopped at the cycle's page cap, or records were refused, or a member
+ * was refused beside members that synced); `failed`; and `refused` (the cycle's members were answered in the 5.x shape and their turns ended,
+ * `sync/wire-answer.ts`: no mark was written and no failure was counted). Pre-declared below, so each is a series from the first scrape.
+ */
+export const SYNC_CYCLE_STATUSES = ['success', 'partial', 'failed', 'refused'] as const;
+
 export const syncCyclesTotal = new Counter({
   name: 'ythril_sync_cycles_total',
-  help: 'Sync cycles by network and status (success, partial, error)',
+  help: 'Sync cycles by network and status (success, partial, failed, refused)',
   labelNames: ['network', 'status'] as const,
   registers: [register],
 });
 // Pre-initialise so HELP/TYPE lines appear in /metrics from startup
 // (labelled counters are invisible until first .inc() in prom-client)
-syncCyclesTotal.labels({ network: '', status: 'success' }).inc(0);
+for (const status of SYNC_CYCLE_STATUSES) syncCyclesTotal.labels({ network: '', status }).inc(0);
+
+/**
+ * What became of an item an exchange was handed: `stored` (it moved), `refused` (the receiver's own rules refused it: counted and passed, never a
+ * reason to stop) or `held` (a peer answered `positions_building` to the batch that carried it: nothing moved and nothing failed).
+ */
+export const SYNC_ITEM_OUTCOMES = ['stored', 'refused', 'held'] as const;
 
 export const syncItemsPulledTotal = new Counter({
   name: 'ythril_sync_items_pulled_total',
-  help: 'Items received during sync by type (facts, entities, edges, files, chrono)',
-  labelNames: ['type'] as const,
+  help: 'Items received during sync by type (facts, entities, edges, files, chrono, links) and outcome (stored, refused, held)',
+  labelNames: ['type', 'outcome'] as const,
   registers: [register],
 });
 
 export const syncItemsPushedTotal = new Counter({
   name: 'ythril_sync_items_pushed_total',
-  help: 'Items sent during sync by type (facts, entities, edges, files, chrono)',
-  labelNames: ['type'] as const,
+  help: 'Items sent during sync by type (facts, entities, edges, files, chrono, links) and outcome (stored, refused, held)',
+  labelNames: ['type', 'outcome'] as const,
   registers: [register],
 });
+// Every outcome is a series from the first scrape (the type is declared per collection once an item of it moves).
+for (const outcome of SYNC_ITEM_OUTCOMES) {
+  syncItemsPulledTotal.labels({ type: '', outcome }).inc(0);
+  syncItemsPushedTotal.labels({ type: '', outcome }).inc(0);
+}
+
+/**
+ * A puller whose mark for a member is ABOVE that member's `head` (its settled cap less one): the peer's positions went backwards (a database restore
+ * with the wall clock set back across a start that also lost its stored maximum). The puller forgets the receive mark and re-reads, sorting by id and
+ * version (D-48): one count per forgotten mark, by network (rev 8 §4).
+ */
+export const syncPositionBehindTotal = new Counter({
+  name: 'ythril_sync_position_behind_total',
+  help: "Receive marks forgotten because the peer's head was below them (its positions went backwards), by network",
+  labelNames: ['network'] as const,
+  registers: [register],
+});
+syncPositionBehindTotal.labels({ network: '' }).inc(0);
 
 export const syncDurationSeconds = new Histogram({
   name: 'ythril_sync_duration_seconds',
@@ -1443,8 +1474,8 @@ export const syncDurationSeconds = new Histogram({
  */
 export const syncTombstonesAppliedTotal = new Counter({
   name: 'ythril_sync_tombstones_applied_total',
-  help: 'Peer tombstones that deleted a held object, by kind (record type or file) and ground (issuer, upstream)',
-  labelNames: ['kind', 'ground'] as const,
+  help: 'Peer tombstones applied, by kind (record type or file), ground (issuer, upstream, absent) and outcome (deleted, already_newer)',
+  labelNames: ['kind', 'ground', 'outcome'] as const,
   registers: [register],
 });
 

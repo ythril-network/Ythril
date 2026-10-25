@@ -31,6 +31,10 @@ import { pushFamily } from './push-family.js';
 import { pushTombstones } from './tombstone-transfer.js';
 import { pullSpaceTombstones } from './pull-space-tombstones.js';
 import { refusedTransfers } from './push-refusals.js';
+import { assertPositionsReady } from './positions-owed.js';
+import { ownPositionMark } from './served-watermark.js';
+import { syncItemsPulledTotal, syncPositionBehindTotal } from '../metrics/registry.js';
+import { PositionsBuilding } from '../util/errors.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { isDirectionalNetwork } from '../networks/network-spaces.js';
 import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
@@ -38,7 +42,7 @@ import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
 import { checkMerkleWithPeer } from './merkle-check.js';
 import { recordFileMetaMerkleComparison, rereadFileMeta } from './file-meta-reread.js';
-import { readMemberSpaceMark } from './member-space-mark.js';
+import { readMemberSpaceMark, setMemberSpaceMark } from './member-space-mark.js';
 import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
 import { reverseSpaceMap, localToRemote } from './space-map.js';
 import { exchangeVerdicts, mayExchangeNow, enterSpaceTransfer, spaceHold } from './space-exchange-set.js';
@@ -55,6 +59,8 @@ export interface MemberExchange {
   pulled: SyncCounts;
   pushed: SyncCounts;
   incomplete: string[];
+  /** A pull that stopped at the cycle's page cap, one entry per space: PARTIAL, not a failure — the member is catching up. */
+  capped: string[];
   refused: string[];
   recorded: SyncSchemaRecording[];
   held: HeldSpace[];
@@ -64,6 +70,8 @@ export interface MemberExchange {
 
 /** The reason a turn the PEER held is listed under. */
 const HELD_BY_THE_MEMBER = 'held by the member';
+/** The reason a space THIS instance owes the positions of is listed under (its first carry or a repair has not finished). */
+const POSITIONS_BUILDING_REASON = 'positions building';
 
 /** One turn: the fence's transfer, plus the first hold or decline a peer answered during it. */
 class SpaceTurn implements ExchangeTurn {
@@ -106,7 +114,7 @@ function exchangeDirections(net: NetworkConfig, member: NetworkMember): { should
 export async function exchangeSpacesWithMember(
   net: NetworkConfig, member: NetworkMember, headers: Record<string, string>, fetchOpts: () => RequestInit, batchFetchOpts: () => RequestInit,
 ): Promise<MemberExchange> {
-  const out: MemberExchange = { pulled: zero(), pushed: zero(), incomplete: [], refused: [], recorded: [], held: [], declined: [] };
+  const out: MemberExchange = { pulled: zero(), pushed: zero(), incomplete: [], capped: [], refused: [], recorded: [], held: [], declined: [] };
   const liveNet = getConfig().networks.find(n => n.id === net.id) ?? net;
   const { exchange, held: heldNow, declined: declinedNow } = exchangeVerdicts(liveNet, member);
   out.held.push(...heldNow);
@@ -123,7 +131,7 @@ export async function exchangeSpacesWithMember(
     }
     const turn = await exchangeSpaceWithMember(liveNet, member, spaceId, toNetworkId.get(spaceId) ?? spaceId, headers, fetchOpts, batchFetchOpts);
     for (const k of Object.keys(out.pulled) as (keyof SyncCounts)[]) { out.pulled[k] += turn.pulled[k]; out.pushed[k] += turn.pushed[k]; }
-    out.incomplete.push(...turn.incomplete); out.refused.push(...turn.refused); out.recorded.push(...turn.recorded);
+    out.incomplete.push(...turn.incomplete); out.capped.push(...turn.capped); out.refused.push(...turn.refused); out.recorded.push(...turn.recorded);
     if (turn.held) out.held.push({ spaceId, reason: turn.held });
     if (turn.declined) {
       out.declined.push(spaceId);
@@ -140,7 +148,7 @@ async function exchangeSpaceWithMember(
   net: NetworkConfig, member: NetworkMember, spaceId: string, remoteSpaceId: string,
   headers: Record<string, string>, fetchOpts: () => RequestInit, batchFetchOpts: () => RequestInit,
 ): Promise<Turn> {
-  const out: Turn = { pulled: zero(), pushed: zero(), incomplete: [], refused: [], recorded: [] };
+  const out: Turn = { pulled: zero(), pushed: zero(), incomplete: [], capped: [], refused: [], recorded: [] };
   // Skip spaces that don't exist in local config — prevents orphan data and collection access for space ids that were
   // registered on the network but never created locally.
   if (!configuredSpaces().some(s => s.id === spaceId)) {
@@ -150,17 +158,22 @@ async function exchangeSpaceWithMember(
   const transfer = enterSpaceTransfer(spaceId, member.instanceId, net.id);
   if (!transfer) return { ...out, held: spaceHold(getConfig(), spaceId, member.instanceId, net.id) ?? 'act owed here' };
   const turn = new SpaceTurn(transfer);
+  let building = false;
   // Push to this member if the direction allows it (push or both); pull if bidirectional, or for non-directional networks.
   // Braintree/pubsub with direction='push': parent/publisher pushes down, child/subscriber never pushes up.
   const { shouldPull, shouldPush } = exchangeDirections(net, member);
   try {
+    // A space that owes its positions is not exchanged (design rev 8 §3): the turn is HELD for the cycle and counts no failure. Asked here so no
+    // transfer starts on rows that are not paged yet; the readers and the writers ask it again inside, for a space that began to owe meanwhile.
+    await assertPositionsReady(spaceId);
     if (shouldPull) {
       await pullSpaceMetaFromUpstream(net, member, spaceId, remoteSpaceId, fetchOpts, turn); // F-39.1: only from upstream, never throws
       if (turn.mayContinue()) {
         const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts, turn);
         out.pulled.facts += pc.facts; out.pulled.entities += pc.entities; out.pulled.edges += pc.edges; out.pulled.chrono += pc.chrono; out.pulled.links += pc.links;
         if (pc.recorded.records > 0) out.recorded.push({ spaceId, ...pc.recorded });
-        if (pc.stoppedEarly.length > 0) out.incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')} stopped early`);
+        if (pc.stoppedEarly.length > 0) out.incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')}`);
+        if (pc.capped.length > 0) out.capped.push(`space '${spaceId}' receive: ${pc.capped.join(', ')} read up to the cycle's cap and continue next cycle`);
       }
       // A drifted file row is behind the watermark the ordinary pull starts from; a merkle divergence owes it a re-read.
       if (turn.mayContinue()) await rereadFileMeta({ member, spaceId, remoteSpaceId, networkId: net.id, requestInit: batchFetchOpts, turn });
@@ -168,7 +181,8 @@ async function exchangeSpaceWithMember(
     if (shouldPush && turn.mayContinue()) {
       const pc = await pushToPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts, turn);
       out.pushed.facts += pc.facts; out.pushed.entities += pc.entities; out.pushed.edges += pc.edges; out.pushed.chrono += pc.chrono; out.pushed.links += pc.links;
-      if (pc.stoppedEarly.length > 0) out.incomplete.push(`space '${spaceId}' push: ${pc.stoppedEarly.join(', ')} stopped early`);
+      if (pc.stoppedEarly.length > 0) out.incomplete.push(`space '${spaceId}' push: ${pc.stoppedEarly.join(', ')}`);
+      if (pc.capped.length > 0) out.capped.push(`space '${spaceId}' push: ${pc.capped.join(', ')} sent up to the cycle's bound and continue next cycle`);
       if (pc.refused.length > 0) out.refused.push(`space '${spaceId}' push: ${pc.refused.join(', ')}`);
     }
     // File manifest, tombstones and bytes — the same direction guards as above. A pulled file is processed where it is recorded.
@@ -182,18 +196,40 @@ async function exchangeSpaceWithMember(
       if (turn.mayContinue()) recordFileMetaMerkleComparison(member, spaceId, verdict);
     }
   } catch (err) {
+    // A space that owes its positions: held, not this member's failure, and nothing was moved past it.
+    if (err instanceof PositionsBuilding) building = true;
     // A unit cut by the act's signal, or a refusal the peer answered, ends the turn: that is a hold, not this member's failure.
-    if (turn.mayContinue()) throw err;
+    else if (turn.mayContinue()) throw err;
   } finally {
     transfer.release();
   }
-  if (turn.refusal === 'declined') return { ...out, incomplete: [], declined: true };
-  if (turn.refusal === 'held') return { ...out, incomplete: [], held: HELD_BY_THE_MEMBER };
-  if (turn.cut) return { ...out, incomplete: [], held: 'act owed here' };
+  if (building) return { ...out, incomplete: [], capped: [], held: POSITIONS_BUILDING_REASON };
+  if (turn.refusal === 'declined') return { ...out, incomplete: [], capped: [], declined: true };
+  if (turn.refusal === 'held') return { ...out, incomplete: [], capped: [], held: HELD_BY_THE_MEMBER };
+  if (turn.cut) return { ...out, incomplete: [], capped: [], held: 'act owed here' };
   return out;
 }
 
 // ── Pull (ingest from peer) ─────────────────────────────────────────────────
+
+/** What one pull moved, and what it did not: the errors are a failed member, the capped are a pull that is still catching up. */
+type PullCounts = { facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; capped: string[]; recorded: RecordedSummary };
+
+/**
+ * The receive mark of `member` for `spaceId` on `networkId`, forgotten because the peer's positions went backwards (`head` below the mark): the pull
+ * re-reads from 0 and sorts by id and version (D-48). Said once per cycle, counted, and written on this network's row only — the mark is per network.
+ */
+function forgetBehindMark(networkId: string, member: NetworkMember, spaceId: string, behind: { peerHead: number; startedFrom: number }): void {
+  syncPositionBehindTotal.inc({ network: networkId });
+  log.warn(`Pull from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}': the receive mark ${behind.startedFrom} is above the peer's head `
+    + `${behind.peerHead} — its positions went backwards (a restore with the clock set back). The mark is forgotten and the space is read again from the start, `
+    + 'skipping what is held by version.');
+  // A mark write like every other: for a space nobody asked the hold about (removed, or newly held) nothing is written back.
+  if (mayExchangeNow(networkId, member.instanceId, spaceId)) {
+    const cfg = getConfig();
+    if (setMemberSpaceMark(cfg, member.instanceId, spaceId, 'lastPosReceived', { networkId }, () => undefined)) saveConfigSoon(cfg);
+  }
+}
 
 async function pullFromPeer(
   member: NetworkMember,
@@ -203,12 +239,19 @@ async function pullFromPeer(
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
   turn: ExchangeTurn,
-): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; recorded: RecordedSummary }> {
-  const sinceSeq = readMemberSpaceMark(networkId, member.instanceId, spaceId, 'lastSeqReceived') ?? 0;
+): Promise<PullCounts> {
+  /** Where this cycle's transfers begin and where the mark stands: the mark, until a peer whose positions went backwards says otherwise. */
+  let from = readMemberSpaceMark(networkId, member.instanceId, spaceId, 'lastPosReceived') ?? 0;
+  const forgetIfBehind = (behind: { peerHead: number; startedFrom: number } | undefined): void => {
+    if (!behind || from === 0) return;
+    forgetBehindMark(networkId, member, spaceId, behind);
+    from = 0;
+  };
 
-  // Tombstones first, so deletions apply before anything that would re-upsert a deleted doc. Both directions
-  // live in `sync/tombstone-transfer.ts`; its own doc block says why they belong together.
-  const tombstones = await pullSpaceTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: opts, turn });
+  // Tombstones first, so deletions apply before anything that would re-upsert a deleted doc. They are a transfer of the same stream as the
+  // families, under the same mark, and both directions live in `sync/tombstone-transfer.ts`; its own doc block says why they belong together.
+  const tombstones = await pullSpaceTombstones({ member, spaceId, remoteSpaceId, networkId, since: from, requestInit: opts, turn });
+  forgetIfBehind(tombstones.behind);
 
   /*
    * What lands in this space's transfer is checked for strict linkage ONCE, after every family (below) — page by
@@ -219,7 +262,7 @@ async function pullFromPeer(
   /*
    * SEQUENTIAL, not `Promise.all`. Each transfer pages against the same peer and applies as it goes, so running them
    * together multiplies the concurrent load on the side of the cycle that is already slow, and interleaves the writes a
-   * truncated transfer's watermark has to reason about.
+   * truncated transfer's mark has to reason about.
    *
    * EVERY BRAIN COLLECTION: `files` as the `filemeta` family (its metadata; the bytes arrive as blob plus manifest in
    * `syncFiles`), and `links` — a collection missing here is one a peer never sends us, and nothing reports that.
@@ -228,7 +271,9 @@ async function pullFromPeer(
   try {
     for (const family of REPLICATED_FAMILIES) {
       if (!turn.mayContinue()) break;
-      pulled[family.payloadKey] = await pullFamily({ family, member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit: batchOpts, linkage, turn });
+      pulled[family.payloadKey] = await pullFamily({ family, member, spaceId, remoteSpaceId, networkId, since: from, requestInit: batchOpts, linkage, turn });
+      forgetIfBehind(pulled[family.payloadKey].behind);
+      if (pulled[family.payloadKey].refused > 0) syncItemsPulledTotal.inc({ type: family.collection, outcome: 'refused' }, pulled[family.payloadKey].refused);
     }
   } finally {
     /*
@@ -242,40 +287,40 @@ async function pullFromPeer(
   const countOf = (k: PayloadKey): number => pulled[k]?.count ?? 0;
   const recorded = REPLICATED_FAMILIES.reduce((sum, f) => mergeSummaries(sum, pulled[f.payloadKey]?.recorded), NOTHING_RECORDED);
   const counts = { facts: countOf('facts'), entities: countOf('entities'), edges: countOf('edges'), chrono: countOf('chrono'), links: countOf('links'), recorded };
-  // A turn the act or the peer stopped moves no watermark: the families it did not finish place the ceiling, and the turn is held.
-  if (!turn.mayContinue()) return { ...counts, stoppedEarly: ['stopped by a hold'] };
+  // A turn the act or the peer stopped moves no mark: the families it did not finish place the ceiling, and the turn is held.
+  if (!turn.mayContinue()) return { ...counts, stoppedEarly: ['stopped by a hold'], capped: [] };
 
   /*
-   * ONE WATERMARK, FIVE TRANSFERS — so the max is only safe if all five finished. `resolveWatermark` lowers the ceiling to
-   * whatever the stopped transfers can actually vouch for; EVERY transfer is passed, since an omitted one places no ceiling.
-   * No counter bump here: every record this pull received was bumped over by the page accept, per page.
+   * ONE MARK, SEVEN TRANSFERS — the tombstones and the six families, in one stream. `resolveWatermark` takes the MINIMUM of what every transfer is
+   * complete through, so a write that landed on the peer between two families' reads is above the mark; EVERY transfer is passed, since an omitted
+   * one places no ceiling, and a cycle that moved only tombstones moves the mark (Q-394).
+   * No counter bump here: an arrival moves no counter (D-19 B), and every record this pull received took its position as it landed.
    */
-  const stoppedEarly: string[] = [];
-  const highestSeq = resolveWatermark({
-    heldBack: stoppedEarly, direction: 'receive', peerLabel: member.label ?? member.instanceId, spaceId,
-    from: sinceSeq,
-    transfers: pulled,
-    // Bounds the advance, never raises it: a tombstone seq is not a position in the data stream.
-    alsoCheck: { tombstones },
-    seqOf: (t) => t.highSeq,
+  const resolution = resolveWatermark({
+    direction: 'receive', peerLabel: member.label ?? member.instanceId, spaceId,
+    from,
+    transfers: { tombstones, ...pulled },
     warn: log.warn,
   });
+  const stoppedEarly = resolution.errored.map(label => `${label} stopped early`);
 
-  // Persist the high-water mark — unless the space was removed or newly held since its exchange began.
-  if (highestSeq > sinceSeq && turn.mayContinue() && mayExchangeNow(networkId, member.instanceId, spaceId)) {
+  // Persist the mark — unless the space was removed or newly held since its exchange began. The peer's position is the peer's own: it is
+  // not capped by this instance's (only a mark of OUR stream is, `ownPositionMark`).
+  if (resolution.at > from && turn.mayContinue() && mayExchangeNow(networkId, member.instanceId, spaceId)) {
     const freshCfg = getConfig();
-    const m = freshCfg.networks.find(n => n.id === networkId)?.members.find(x => x.instanceId === member.instanceId);
-    if (m) {
-      m.lastSeqReceived ??= {};
-      m.lastSeqReceived[spaceId] = highestSeq;
-      // Hot-path watermark: coalesced async write — lost on crash, the next pull re-pulls from the older mark (idempotent by seq).
+    // This network's row only: the mark is how far THIS exchange read (decision 12).
+    // Hot-path mark: coalesced async write — lost on crash, the next pull re-pulls from the older mark (idempotent by version).
+    if (setMemberSpaceMark(freshCfg, member.instanceId, spaceId, 'lastPosReceived', { networkId }, current => (current !== undefined && current >= resolution.at ? null : resolution.at))) {
       saveConfigSoon(freshCfg);
     }
   }
-  return { ...counts, stoppedEarly };
+  return { ...counts, stoppedEarly, capped: resolution.capped };
 }
 
 // ── Push (upload our changes to peer) ──────────────────────────────────────
+
+/** What one push moved, and what it did not: `stoppedEarly` are faults, `capped` a push that is still catching up, `refused` what the peer discarded. */
+type PushCounts = { facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; capped: string[]; refused: string[] };
 
 async function pushToPeer(
   member: NetworkMember,
@@ -285,58 +330,54 @@ async function pushToPeer(
   opts: () => RequestInit,
   batchOpts: () => RequestInit,
   turn: ExchangeTurn,
-): Promise<{ facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; refused: string[] }> {
+): Promise<PushCounts> {
   const cfg = getConfig();
   const freshNet = cfg.networks.find(n => n.id === networkId);
-  const lastSeqPushed = readMemberSpaceMark(networkId, member.instanceId, spaceId, 'lastSeqPushed') ?? 0;
+  const from = readMemberSpaceMark(networkId, member.instanceId, spaceId, 'lastPosPushed') ?? 0;
+  // What this network's push offers is its type's (`sync/push-selection.ts`): the transfers ask for it themselves.
+  const net = freshNet ?? { type: 'closed' as const };
 
   // Tombstones first — paged, with no hard cap, since one would silently drop deletions after a long absence.
-  const tombstones = await pushTombstones({ member, spaceId, remoteSpaceId, networkId, lastSeqPushed, requestInit: opts, turn });
+  const tombstones = await pushTombstones({ member, spaceId, remoteSpaceId, networkId, since: from, net, requestInit: opts, turn });
 
-  // Only docs changed since the last push, read and sent in batches straight from MongoDB (`sync/push-family.ts`). Braintree
-  // nodes relay docs from all peers; other topologies push only their own authored docs, so foreign docs do not pollute
-  // peers' watermarks.
-  const ownedFilter = isDirectionalNetwork(freshNet) ? {} : { 'author.instanceId': cfg.instanceId };
-
+  // Only rows changed since the last push, read and sent in batches straight from MongoDB (`sync/push-family.ts`).
   // Sequential for the same reason as the pull; EVERY brain collection, `files` as the `filemeta` family and `links` included.
-  const pushed = {} as Record<PayloadKey, { pushed: number; maxSeq: number; refused: number } & TransferOutcome>;
+  const pushed = {} as Record<PayloadKey, { pushed: number; refused: number } & TransferOutcome>;
   for (const family of REPLICATED_FAMILIES) {
     if (!turn.mayContinue()) break;
     pushed[family.payloadKey] = await pushFamily({
-      family, member, spaceId, remoteSpaceId, networkId, lastSeqPushed, owned: ownedFilter, instanceId: cfg.instanceId, requestInit: batchOpts, turn,
+      family, member, spaceId, remoteSpaceId, networkId, since: from, net, requestInit: batchOpts, turn,
     });
   }
   const countOf = (k: PayloadKey): number => pushed[k]?.pushed ?? 0;
   const counts = { facts: countOf('facts'), entities: countOf('entities'), edges: countOf('edges'), chrono: countOf('chrono'), links: countOf('links') };
-  if (!turn.mayContinue()) return { ...counts, stoppedEarly: ['stopped by a hold'], refused: [] };
+  if (!turn.mayContinue()) return { ...counts, stoppedEarly: ['stopped by a hold'], capped: [], refused: [] };
 
-  // Same rule as the pull, same function and the same list: the candidate is derived from the transfers (`sync/watermark.ts`).
-  const stoppedEarly: string[] = [];
-  const maxSeqPushed = resolveWatermark({
-    heldBack: stoppedEarly, direction: 'push', peerLabel: member.label ?? member.instanceId, spaceId,
-    from: lastSeqPushed,
-    transfers: pushed,
-    alsoCheck: { tombstones },
-    seqOf: (t) => t.maxSeq,
+  // Same rule as the pull, same function and the same list: the mark is derived from the transfers (`sync/watermark.ts`), tombstones among them.
+  const resolution = resolveWatermark({
+    direction: 'push', peerLabel: member.label ?? member.instanceId, spaceId,
+    from,
+    transfers: { tombstones, ...pushed },
     warn: log.warn,
   });
   const refused = refusedTransfers(pushed); // Q-59: the peer answered, so this is not a failure — see runSyncForNetwork
 
   // What the cycle DECIDED beside what it found (X-20): a mark that moves while every transfer reported zero is the stall's shape.
-  log.debug(`Push cycle to ${peerText(member.label ?? member.instanceId)} space '${peerText(spaceId)}': watermark ${lastSeqPushed} -> `
-    + `${maxSeqPushed}, pushed ${counts.facts}m/${counts.entities}e/${counts.edges}g/${counts.chrono}c/${counts.links}l`);
+  log.debug(`Push cycle to ${peerText(member.label ?? member.instanceId)} space '${peerText(spaceId)}': mark ${from} -> `
+    + `${resolution.at}, pushed ${counts.facts}m/${counts.entities}e/${counts.edges}g/${counts.chrono}c/${counts.links}l`);
 
-  // Persist the push high-water mark — unless the space was removed or newly held since its exchange began.
-  if (maxSeqPushed > lastSeqPushed && turn.mayContinue() && mayExchangeNow(networkId, member.instanceId, spaceId)) {
-    const freshCfg = getConfig();
-    const m = freshCfg.networks.find(n => n.id === networkId)?.members.find(x => x.instanceId === member.instanceId);
-    if (m) {
-      m.lastSeqPushed ??= {};
-      m.lastSeqPushed[spaceId] = maxSeqPushed;
-      // Hot-path watermark: coalesced async write — lost on crash, the next push re-pushes from the older mark (idempotent by seq).
-      saveConfigSoon(freshCfg);
+  // Persist the push mark, cut at this instance's own settled cap (`ownPositionMark`: it seeds the clock after a restart that lost the stored maximum,
+  // so it can only ever be as high as a position this instance handed out) — unless the space was removed or newly held since its exchange began.
+  if (resolution.at > from && turn.mayContinue()) {
+    const own = await ownPositionMark(spaceId, resolution.at);
+    if (own !== null && own > from && turn.mayContinue() && mayExchangeNow(networkId, member.instanceId, spaceId)) {
+      const freshCfg = getConfig();
+      // This network's row only (decision 12): a club push moving the same peer's braintree mark would never push the relayed rows there.
+      // Hot-path mark: coalesced async write — lost on crash, the next push re-pushes from the older mark (idempotent by version).
+      if (setMemberSpaceMark(freshCfg, member.instanceId, spaceId, 'lastPosPushed', { networkId }, current => (current !== undefined && current >= own ? null : own))) {
+        saveConfigSoon(freshCfg);
+      }
     }
   }
-  return { ...counts, stoppedEarly, refused };
+  return { ...counts, stoppedEarly: resolution.errored.map(label => `${label} stopped early`), capped: resolution.capped, refused };
 }
-

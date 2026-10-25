@@ -1899,6 +1899,12 @@ export interface TombstoneDoc {
    */
   storedVia?: string;
   /**
+   * LOCAL, never on the wire (`TOMBSTONE_LOCAL_FIELDS`): `true` on a tombstone THIS instance issued (the local tombstone writer stamps it, nowhere else),
+   * `false` on one stored from a peer, absent on one stored before 6.0 (nothing then proves who issued it). "Issued here" is asked of this mark through
+   * `sync/issued-here.ts`, never of `instanceId`, which is the sender's text.
+   */
+  issuedHere?: boolean;
+  /**
    * LOCAL, never on the wire (`TOMBSTONE_LOCAL_FIELDS`): where this tombstone sits in this instance's record stream (`pos`) and the version
    * that position was taken for (`posAtSeq`). A tombstone lands like a record — a local delete, a relayed deletion — so it is paged and acknowledged by
    * position, and a relayed one is offered on to every peer even though its version (`seq`) is its issuer's.
@@ -2256,9 +2262,9 @@ export interface DupeCandidateDoc {
 
 /**
  * Per-(space, type) scan cursor for the duplicate and contradiction scanners, stored in the global
- * `ythril_dupe_scan_state` collection. `cursorSeq` is the highest `seq` already swept (a number, which an
- * older build reads and moves) and `cursorPos` is the last record scanned within the run at that seq: the
- * next run reads what comes AFTER the pair (new or edited records). `cursorPos` is trusted only while
+ * `ythril_dupe_scan_state` collection. `cursorSeq` is the highest POSITION already swept (a number, which an
+ * older build reads and moves; the name is 5.6's, and a legacy row's position is its seq) and `cursorPos` is the last record scanned within the run at
+ * that position: the next run reads what comes AFTER the pair (what landed since). `cursorPos` is trusted only while
  * `cursorPos.seq === cursorSeq` — see `brain/scan-cursor.ts`.
  */
 export interface DupeScanStateDoc {

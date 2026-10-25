@@ -16,8 +16,7 @@ import { isDirectionalNetwork } from '../../networks/network-spaces.js';
 import { REF_KINDS } from '../../config/types-knowledge.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { MAX_SYNC_SEQ } from '../../util/seq.js';
-import { decodeSeqCursor, parseSeqText, type SeqPosition } from '../../util/seq-keyset.js';
-import { decodePositionCursor, parsePositionText, POSITION_CURSOR_PREFIX, type PositionStart } from '../../util/position-keyset.js';
+import { decodePositionCursor, parsePositionText, type PositionStart } from '../../util/position-keyset.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
 import { LOCAL_ONLY_FIELDS } from '../../sync/local-only-fields.js';
 import { MACHINE_MADE_SOURCES } from '../../files/derived-fields.js';
@@ -269,54 +268,44 @@ export const IncomingChronoDoc = z.object({
 // The cursor codec is `util/seq-keyset.ts` (`encodeSeqCursor`, `decodeSeqCursor`): the one place a position becomes
 // text and back. It had a second decoder here that read a pair as nothing.
 
-/** The one refusal text for a start a sync read cannot read. Fixed, so it never repeats what the caller sent. */
-export const BAD_SYNC_START = 'sinceSeq and cursor must each be a whole number of 0 or more';
-
-/**
- * Where a sync read starts: the `cursor` a previous page handed back when there is one, else `sinceSeq` — a position,
- * which is the pair `(seq, _id)` for a cursor and the bare seq for `sinceSeq`. A cursor wins over `sinceSeq`: a 5.6
- * client sends its `sinceSeq` CONSTANT on every request beside the cursor it echoes.
- *
- * `undefined` means the start cannot be read, and the route answers `400` with {@link BAD_SYNC_START}. It is
- * a refusal and not a default because both defaults are wrong in a way nothing reports: `sinceSeq=abc` used to
- * become `NaN`, which matches no record, so the page came back empty with `nextCursor: null` — and every client
- * reads that as "nothing left" (`Q-388`). A cursor that did not decode read as 0 and silently started over.
- */
-export function syncReadStart(sinceSeq: unknown, cursor: unknown): SeqPosition | undefined {
-  if (cursor !== undefined && cursor !== '') return decodeSeqCursor(cursor);
-  if (sinceSeq === undefined) return { seq: 0 };
-  const seq = typeof sinceSeq === 'string' ? parseSeqText(sinceSeq) : undefined;
-  return seq === undefined ? undefined : { seq };
-}
-
 /** The one refusal text for a position start a sync read cannot read. Fixed, so it never repeats what the caller sent. */
 export const BAD_POSITION_START = 'afterPos must be a whole number from 0 to 9007199254740991, and cursor one a previous page of this route returned';
 
 /**
- * Is this a read by POSITION (6.0 paging): an `afterPos`, or a `p1.` cursor? A request that names neither is the legacy seq read, which
- * the wire still answers until it moves to positions (`readAfterSeq`).
+ * The refusal of a `sinceSeq` (the 5.6.7 rule): this server pages by position, so it names position paging and never guesses what a seq would mean.
+ * Fixed, so it never repeats what the caller sent.
  */
-export function isPositionRequest(query: Record<string, unknown>): boolean {
-  const cursor = query['cursor'];
-  return query['afterPos'] !== undefined || (typeof cursor === 'string' && cursor.startsWith(POSITION_CURSOR_PREFIX));
-}
+export const SINCE_SEQ_REFUSED = 'sinceSeq is not accepted: this server pages by position — start with afterPos (a whole number) or the cursor a previous page returned';
+
+/** A start a position read refuses, with the words the route answers `400` with. */
+export interface PositionStartRefusal { readonly refusal: string }
 
 /**
- * Where a position read starts, from the request: the `cursor` a previous page handed back when there is one, else `afterPos` (a whole
- * number from 0 to `Number.MAX_SAFE_INTEGER`, its own parse and its own bound: `parseSeqText`'s `MAX_SYNC_SEQ` would refuse every clock-band
- * position), else the start of the stream. `undefined` is a start that cannot be read, and the route answers `400` with {@link BAD_POSITION_START}:
- * a refusal and not a default, as `syncReadStart`'s is, because a value that read as 0 would silently start over. A `sinceSeq` beside a position
- * start is refused too: the two are numbers in different spaces.
+ * Where a position read starts, from the request — the ONE parse of every sync read (the six record families and the tombstones), replacing
+ * `syncReadStart` (bundle-81, design rev 8 §6, decision 4):
+ *
+ *  - **a `sinceSeq` is refused FIRST**, before the cursor branch, whatever else the request carries: a 5.6 client sends its `sinceSeq` constant beside the
+ *    cursor it echoes, and read as a position (or ignored beside a cursor) its numbers would be taken for another space's. The answer names position paging;
+ *  - **the `cursor` a previous page handed back** wins over `afterPos`: the opaque `p1.` form, with its own bound (`Number.MAX_SAFE_INTEGER`, not
+ *    `parseSeqText`'s `MAX_SYNC_SEQ`, which would refuse every clock-band cursor). Every OLD form is refused, the bare-seq first cursor the 5.6 integrator
+ *    guide told clients to build included — a cursor that decoded as 0 would silently start over;
+ *  - **`afterPos`**: a whole number from 0 to `Number.MAX_SAFE_INTEGER`, its own parse and its own bound. A value that read as 0 would silently start over, so
+ *    anything else is a refusal and not a default. What bounds the damage of a huge one is not the parse but the cap every read applies and
+ *    `ownPositionMark`'s cut of every mark recorded from it;
+ *  - neither: the start of the stream.
  */
-export function syncPositionStart(query: Record<string, unknown>): PositionStart | undefined {
-  if (query['sinceSeq'] !== undefined) return undefined;
+export function syncPositionStart(query: Record<string, unknown>): PositionStart | PositionStartRefusal {
+  if (query['sinceSeq'] !== undefined) return { refusal: SINCE_SEQ_REFUSED };
   const cursor = query['cursor'];
-  if (cursor !== undefined && cursor !== '') return decodePositionCursor(cursor);
+  if (cursor !== undefined && cursor !== '') return decodePositionCursor(cursor) ?? { refusal: BAD_POSITION_START };
   const afterPos = query['afterPos'];
   if (afterPos === undefined) return { pos: 0 };
   const pos = typeof afterPos === 'string' ? parsePositionText(afterPos) : undefined;
-  return pos === undefined ? undefined : { pos };
+  return pos === undefined ? { refusal: BAD_POSITION_START } : { pos };
 }
+
+/** The refusal of a `since` that is not an ISO instant (the file-tombstone route's legacy start). Fixed, so it never repeats what the caller sent. */
+export const BAD_SINCE_INSTANT = 'since must be an ISO8601 instant';
 
 // ── Space access guard ─────────────────────────────────────────────────────
 

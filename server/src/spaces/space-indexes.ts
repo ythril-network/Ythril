@@ -51,6 +51,7 @@ import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
 import { warnOnce } from '../util/warn-once.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { SEQ_KEYSET_INDEXES } from '../util/seq-keyset.js';
+import { SEQ_CARRYING } from '../util/seq.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { buildKeysetIndex, type KeysetBuild } from './keyset-indexes.js';
 import { EDGE_GUARD_INDEXES, ensureEdgeGuardIndex } from './edge-guard-index.js';
@@ -123,6 +124,17 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
   // The seq keyset compounds: the sync pages, the push and the scanners read records in `(seq, _id)` order. Not boot-safe: a
   // compound over a large existing collection is the background pass's, which drops the bare `{ seq: 1 }` once it is confirmed.
   ...SEQ_KEYSET_INDEXES.map((ix): SpaceIndex => ({ part: ix.part, keys: ix.keys, options: {}, policy: 'throw', bootSafe: false, builder: 'keyset' })),
+  /*
+   * The position compound `(pos, _id)` on every collection the position stream covers (`SEQ_CARRYING`: the record collections and the tombstones),
+   * and NOT PARTIAL (bundle-81, design rev 8 §3 step 7). The sync pages read after a position, every Brain list defaults to `LANDING_ORDER` (`pos` then `_id`,
+   * descending), the fresh-write scan sorts by `pos` with no `$match`, and the carry looks up `pos: null`. MongoDB uses a PARTIAL index only for a query that
+   * names its predicate, and none of these does, so a partial one would be ignored: each read would scan and sort a whole collection, and the fresh-write scan
+   * swallows the sort-memory failure and answers `[]`. A non-partial index serves every `pos` sort and range (a row without `pos` indexes as null: last in a
+   * descending read, outside every `afterPos` range). Non-unique: the legacy band has ties by nature (relayed rows share seqs), and the keyset takes them.
+   * Not boot-safe: a build over a large existing collection reads every row, so it is the background pass's. `report`: a space without it is read by a scan that
+   * is slow and correct, said through the shared reporter and tried again; `every-position-read-is-index-served-db` holds every reader to it.
+   */
+  ...SEQ_CARRYING.map((part): SpaceIndex => ({ part, keys: { pos: 1, _id: 1 }, options: {}, policy: 'report', bootSafe: false })),
   plain('facts', { tags: 1 }),
   // The fork caps' indexes (`sync/upsert-plan.ts`).
   ...FORK_INDEXES.map(ix => plain('facts', ix.keys, declaredOptions(ix))),

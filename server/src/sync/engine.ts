@@ -16,7 +16,7 @@
  */
 
 import { getConfig, saveConfig, saveConfigSoon, getSecrets } from '../config/loader.js';
-import { BRAIN_COLLECTIONS } from '../config/types.js';
+import { CycleOutcome } from './cycle-outcome.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { col, asFilter } from '../db/mongo.js';
 import { deliverChangeNotes } from './change-notes.js';
@@ -35,7 +35,7 @@ import { settleRounds } from '../networks/round-conclusion.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
 import { warnOnce } from '../util/warn-once.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
-import { syncCyclesTotal, syncItemsPulledTotal, syncItemsPushedTotal, syncDurationSeconds } from '../metrics/registry.js';
+import { syncCyclesTotal, syncDurationSeconds } from '../metrics/registry.js';
 import type {
   NetworkConfig,
   NetworkMember,
@@ -148,7 +148,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   const heldBySpace = new Map<string, SyncHeldSpace>(); const declinedBySpace = new Map<string, SyncDeclinedSpace>();
 
   log.info(`Starting sync cycle for network '${peerText(net.label)}' (${net.members.length} members)`);
-  let synced = 0; let errors = 0; let refusals = 0;
+  let synced = 0; let errors = 0; const cycle = new CycleOutcome();
   const syncTimer = syncDurationSeconds.startTimer({ network: networkId });
 
   for (const member of net.members) {
@@ -165,7 +165,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       if (counts.incomplete.length > 0) throw new Error(`transfer did not complete — ${counts.incomplete.join('; ')}`);
       // Q-59: records the peer answered for and refused make the cycle PARTIAL with the reason, not a failure of the
       // member — it answered, so its failure counter (and the "unreachable" alarm read from it) must not move.
-      if (counts.refused.length > 0) { refusals++; errorMessages.push(`${member.label} refused records: ${counts.refused.join('; ')}`); }
+      // A pull stopped at the cycle's page cap is catching up, not failed (decision 33): it answered and its mark moved.
+      cycle.fold(member, counts, errorMessages);
       synced++;
       // Reset failure counter on success
       _setFailureCount(net.id, member.instanceId, 0);
@@ -184,6 +185,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
         );
       }
     } catch (err) {
+      // A peer answered in the 5.x shape: its turn ended, no mark was written, and no failure is counted (Q-59: a refusal is not a failure).
+      if (cycle.foldRefusal(err, net, member, errorMessages)) continue;
       const errMsg = `Sync failed for member ${member.label} (${member.instanceId}): ${err}`;
       log.error(peerText(errMsg));
       errorMessages.push(errMsg);
@@ -212,24 +215,20 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
   syncTimer();
 
   // Calculate status once and share between Prometheus and sync history
-  const status: 'success' | 'partial' | 'failed' =
-    errors === 0 && refusals === 0 ? 'success' : synced === 0 && net.members.length > 0 ? 'failed' : 'partial';
+  const status = cycle.status(synced, errors, net.members.length);
 
   // Record Prometheus metrics
   syncCyclesTotal.inc({ network: networkId, status });
   // Every knowledge collection, so a new one is counted without an edit. Order is irrelevant here: the
   // body only increments two Prometheus counters.
-  for (const type of BRAIN_COLLECTIONS) {
-    if (pulled[type] > 0) syncItemsPulledTotal.inc({ type }, pulled[type]);
-    if (pushed[type] > 0) syncItemsPushedTotal.inc({ type }, pushed[type]);
-  }
+  cycle.countItems(pulled, pushed);
 
   // Persist sync history
   recordSyncResult({
     networkId,
     triggeredAt,
     completedAt: new Date().toISOString(),
-    status,
+    status: status === 'refused' ? 'failed' : status, // nothing was exchanged: the history says `failed`, its errors say why
     pulled,
     pushed,
     ...(errorMessages.length > 0 ? { errors: errorMessages } : {}),
@@ -303,7 +302,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
  */
 export async function runSyncForPeer(
   peerId: string,
-): Promise<{ networksSynced: number; errors: number; notFound: boolean }> {
+): Promise<{ networksSynced: number; errors: number; refused: number; notFound: boolean }> {
   const cfg = getConfig();
   const matches: Array<{ net: typeof cfg.networks[number]; member: typeof cfg.networks[number]['members'][number] }> = [];
 
@@ -312,22 +311,25 @@ export async function runSyncForPeer(
     if (member) matches.push({ net, member });
   }
 
-  if (matches.length === 0) return { networksSynced: 0, errors: 0, notFound: true };
+  if (matches.length === 0) return { networksSynced: 0, errors: 0, refused: 0, notFound: true };
 
   let networksSynced = 0;
   let errors = 0;
+  let refused = 0;
   for (const { net, member } of matches) {
     try {
       await inCycle(() => runSyncForMember(net, member));
       networksSynced++;
       _setFailureCount(net.id, member.instanceId, 0);
     } catch (err) {
+      // A peer that pages by seq (pre-6.0) ended its turn: nothing was exchanged and no failure is counted, as in a cycle (decision 33).
+      if (new CycleOutcome().foldRefusal(err, net, member, [])) { refused++; continue; }
       log.error(`network_sync failed for peer ${peerText(member.label)} (${peerText(member.instanceId)}) in network '${peerText(net.label)}': ${peerText(err)}`);
       errors++;
       _setFailureCount(net.id, member.instanceId, 'increment');
     }
   }
-  return { networksSynced, errors, notFound: false };
+  return { networksSynced, errors, refused, notFound: false };
 }
 
 /** Sync a single member across all network spaces. */
@@ -341,7 +343,7 @@ async function runSyncForMember(
   if (!peerToken) {
     log.warn(`No peer token for ${peerText(member.label)} (${peerText(member.instanceId)}) — skipping sync`);
     const none: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
-    return { pulled: none, pushed: { ...none }, incomplete: ['no peer token for this member'], refused: [], recorded: [], held: [], declined: [] };
+    return { pulled: none, pushed: { ...none }, incomplete: ['no peer token for this member'], capped: [], refused: [], recorded: [], held: [], declined: [] };
   }
 
   const headers: Record<string, string> = {

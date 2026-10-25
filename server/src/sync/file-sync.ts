@@ -38,7 +38,7 @@ import { decideFilePull, decideFilePush, conflictCopyPath, isInstanceLocalFile }
 import { peerFileSpaceId } from './space-map.js';
 import { deliveryOfMember } from './deletion-authority.js';
 import { declinedCountOf, refusedCountOf, sayPeerDeclined, sayPeerRefused } from './decline-report.js';
-import { serverCursorOf } from './seq-run-pager.js';
+import { serverCursorOf } from './position-run-pager.js';
 import { MAX_TRANSFER_PAGES, stopAtPageBound, type TransferOutcome } from './watermark.js';
 import { noteToldTombstoned, wasToldTombstoned, noteRefusedUpload, wasRefusedUpload } from './told-tombstoned.js';
 import { pushStoredFile, type SendUpload } from './file-push.js';

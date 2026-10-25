@@ -11,43 +11,39 @@
  *
  * ## Both return a `TransferOutcome`, and that is the point
  *
- * Tombstones travel under the SAME `lastSeqReceived` / `lastSeqPushed` as the record collections. A deletion that
- * did not transfer, followed by a watermark that moved past it, is a deletion that never propagates — the record
- * stays alive on the peer for ever and every later cycle reports success. So each direction reports how far it
- * is COMPLETE (`deliveredThrough`: a stop inside a run of equal seqs reports that seq minus one), and
- * `sync/watermark.ts` limits the shared watermark to it. A stop for ANY reason — a refused request, a throw, a run
- * that cannot be paged past, the page bound — is a `truncated` outcome.
+ * Brain tombstones travel in the SAME position stream as the record families (bundle-81, design rev 8 §6, Q-394): they are an ordinary transfer under
+ * `lastPosReceived` / `lastPosPushed`, not a ceiling beside them. A deletion that did not transfer, followed by a mark that moved past it, is a deletion
+ * that never propagates — and a tombstone-only cycle that moved no mark re-sent the same deletions for ever. So each direction reports how far it is
+ * COMPLETE (`deliveredThrough`), and `sync/watermark.ts` takes the minimum over every transfer. A stop for ANY reason — a refused request, a throw,
+ * the cycle's page bound — is a `truncated` outcome, and says whether it was a cap or a fault.
  *
- * ## Both page by the SAME rule as the records (`Q-237`, bundle-46; `Q-277` and `Q-295`, bundle-52)
+ * ## Both page by position, the way the records do
  *
- * Equal seqs are legitimate, because a peer relays tombstones issued by several instances, each with its own clock.
+ *   - The PULL goes through `pagePositionRuns` (`sync/position-run-pager.ts`), the pager the record pull uses: the peer answers `{ items, nextCursor, through,
+ *     head, positions: 1 }` with each tombstone carrying its `type`, and a run of equal positions pages through the cursor.
+ *   - The PUSH goes through `pushPositionRuns` (`sync/push-position-runs.ts`) over `listTombstonesAfterPosition`, by `(pos, _id)`, and sends what the
+ *     network's push selection offers (`sync/push-selection.ts`: every tombstone on a relaying network, the ones issued here on a mesh).
  *
- *   - The PULL goes through `pageSeqRuns` (`sync/seq-run-pager.ts`), the pager the record pull uses. Every request carries
- *     `cursor` beside `sinceSeq`: a server that has the cursor mode answers one keyset read of `limit` rows with a
- *     `nextCursor`, which is followed, and a run of any length pages. A 5.6 server ignores the cursor, answers per type with
- *     no `nextCursor`, and is paged by the pager's legacy rule — which cannot pass more than `limit` tombstones at one seq.
- *   - The PUSH goes through `pushSeqRuns` (`sync/push-seq-runs.ts`) over `listTombstones`, by `(seq, _id)`.
+ * Both doors APPLY through `applyPeerTombstones` (`sync/tombstone-apply.ts`), which owns the shape, seq, admitted-space and authorisation rules and the
+ * guarded write. The pull hands it the `Delivery` of the page (`deliveryOf`, `sync/deletion-authority.ts`): who delivered it, and whether that peer is
+ * this space's upstream — the ground on which it may delete what it relayed (bundle-51, D-14).
  *
- * Both doors APPLY through `applyPeerTombstones` (`sync/tombstone-apply.ts`), which owns the shape, seq,
- * admitted-space and authorisation rules and the counter bump. The pull hands it the `Delivery` of the page
- * (`deliveryOf`, `sync/deletion-authority.ts`): who delivered it, and whether that peer is this space's upstream — the
- * ground on which it may delete what it relayed (bundle-51, D-14).
- *
- * The same pull, with `repair`, is the one-time RE-READ of an upstream's tombstones (`sync/tombstone-reread.ts`): its own
- * start and outcome (never part of the receive watermark), its own wording, and its stops said once per window.
+ * The same pull, with `repair`, is the one-time RE-READ of an upstream's tombstones (`sync/tombstone-reread.ts`): its own start and outcome (never part of
+ * the receive mark), its own wording, and its stops said once per window.
  */
 import { peerSafeFetch } from './peer-fetch.js';
 import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { boundedJson } from '../util/bounded-read.js';
-import { listTombstones } from '../brain/tombstones.js';
-import { applyPeerTombstones, admitTombstone, MAX_TOMBSTONES_PER_REQUEST } from './tombstone-apply.js';
-import { pageSeqRuns, serverCursorOf } from './seq-run-pager.js';
-import { pushSeqRuns } from './push-seq-runs.js';
-import { encodeSeqCursor } from '../util/seq-keyset.js';
+import { listTombstonesAfterPosition } from '../brain/tombstones.js';
+import { applyPeerTombstones, MAX_TOMBSTONES_PER_REQUEST } from './tombstone-apply.js';
+import { pagePositionRuns } from './position-run-pager.js';
+import { pushPositionRuns } from './push-position-runs.js';
+import { readPushReply } from './push-refusals.js';
 import { log, logSafe, peerText } from '../util/log.js';
+import { PeerPagesBySeq, PositionsBuilding } from '../util/errors.js';
 import { warnOnce } from '../util/warn-once.js';
-import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
-import type { NetworkMember } from '../config/types.js';
+import type { NetworkConfig, NetworkMember } from '../config/types.js';
+import { pushSelection } from './push-selection.js';
 import { MAX_TRANSFER_PAGES, type TransferOutcome } from './watermark.js';
 import { deliveryOfMember } from './deletion-authority.js';
 import { SAID_AGAIN_MS, declinedCountOf, refusedCountOf, sayPeerDeclined, sayPeerRefused } from './decline-report.js';
@@ -63,7 +59,7 @@ const PUSH_PAGE = 500;
 const rereadSaid = warnOnce<string>({ every: SAID_AGAIN_MS });
 
 /**
- * Fetch the peer's tombstones since `sinceSeq` and apply them to the LOCAL space `spaceId`.
+ * Fetch the peer's tombstones after the position `since` and apply them to the LOCAL space `spaceId`.
  *
  * Called BEFORE the record pull so deletions land before anything that would re-upsert a deleted doc. A failure
  * holds the watermark and is logged.
@@ -77,17 +73,20 @@ export async function pullTombstones(opts: {
   spaceId: string;
   remoteSpaceId: string;
   networkId: string;
-  sinceSeq: number;
+  /** The peer's position this pull is complete through (the mark), or where a re-read is owed from. */
+  since: number;
   requestInit: () => RequestInit;
   repair?: boolean;
   /** The records deleted per ground are added here, for the re-read's own completion line. */
   tally?: { issuer: number; upstream: number };
   /** The space's turn with this member: its signal cuts the page in flight, and a refusal the peer answers is handed to it. */
   turn?: ExchangeTurn;
-}): Promise<TransferOutcome> {
-  const { member, spaceId, remoteSpaceId, networkId, sinceSeq, requestInit, tally, turn } = opts;
+}): Promise<TransferOutcome & { refused: number; behind?: { peerHead: number; startedFrom: number } }> {
+  const { member, spaceId, remoteSpaceId, networkId, since, requestInit, tally, turn } = opts;
   const repair = opts.repair === true;
-  const outcome: TransferOutcome = { deliveredThrough: sinceSeq, truncated: false };
+  const outcome: TransferOutcome = { deliveredThrough: since, truncated: false };
+  let refusedHere = 0;
+  let behind: { peerHead: number; startedFrom: number } | undefined;
   const peer = logSafe(member.label ?? member.instanceId);
   const where = `sync ${repair ? 're-read' : 'pull'} tombstones from ${member.label ?? member.instanceId}`;
   // Resolved once for the page's door: the peer pulled from is the authenticated source, and whether it is this space's
@@ -99,98 +98,100 @@ export async function pullTombstones(opts: {
     rereadSaid(JSON.stringify([member.instanceId, spaceId, kind]), report);
   };
   try {
-    await pageSeqRuns({
+    await pagePositionRuns({
       outcome,
       limit: MAX_TOMBSTONES_PER_REQUEST,
       maxPages: MAX_TRANSFER_PAGES,
       fetch: async (ask, limit) => {
-        // `cursor` on EVERY request: a server with the cursor mode reads it (a first request's is the bare seq of the
-        // position), one without ignores it and reads `sinceSeq` — the two ways of asking are one request.
-        const url = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}`
-          + `&networkId=${encodeURIComponent(networkId)}&sinceSeq=${ask.sinceSeq}&limit=${limit}`
-          + `&cursor=${ask.cursor ?? encodeSeqCursor({ seq: ask.sinceSeq })}`;
+        const params = new URLSearchParams({
+          spaceId: remoteSpaceId, networkId, limit: String(limit),
+          ...(ask.cursor ? { cursor: ask.cursor } : { afterPos: String(ask.afterPos) }),
+        });
         const init = requestInit();
-        const resp = await peerSafeFetch(url, { ...init, signal: turnSignal(init.signal, turn) });
+        const resp = await peerSafeFetch(`${member.url}/api/sync/tombstones?${params}`, { ...init, signal: turnSignal(init.signal, turn) });
         if (!resp.ok) { turn?.refusedBy(await transferRefusal(resp)); await resp.body?.cancel().catch(() => {}); return { status: resp.status }; }
-        // Keyed by COLLECTION name, as `GET /api/sync/tombstones` derives them from `TOMBSTONE_TYPES`. A key missing
-        // here is a delete a peer told us about and we dropped on the floor.
-        const data = await boundedJson<Record<string, unknown>>(resp, 'sync peer');
-        return {
-          groups: TOMBSTONE_TYPES.map(t => data?.[TOMBSTONE_COLLECTION[t]]).map(g => (Array.isArray(g) ? g : [])),
-          nextCursor: serverCursorOf(data?.['nextCursor']),
-        };
+        return { body: await boundedJson<unknown>(resp, 'sync peer') };
       },
-      admit: (raw) => {
-        const a = admitTombstone(raw);
-        return 'tombstone' in a ? { seq: a.tombstone.seq, key: JSON.stringify([a.tombstone.type, a.tombstone._id]) } : null;
-      },
-      deliver: async (fresh) => {
+      deliver: async (items) => {
         // The peer pulled from is the authenticated source: its own tombstones are authorised, and — when it is this
         // space's upstream — so is one for what it relayed. One it relays for a third author of a record it did NOT
         // deliver is refused here and applied when this instance syncs with that author directly.
-        const out = await applyPeerTombstones(spaceId, fresh, delivery, where, repair ? { repair: true } : {});
+        const out = await applyPeerTombstones(spaceId, items, delivery, where, repair ? { repair: true } : {});
+        refusedHere += out.refused.length;
         if (tally) { tally.issuer += out.deleted.issuer; tally.upstream += out.deleted.upstream; }
         return out.unknownTypes.length > 0 ? 'a tombstone type this instance does not know' : null;
       },
+      // The `head` guard belongs to the receive mark; the re-read has none of its own to forget.
+      ...(repair ? {} : { onBehind: (peerHead: number, startedFrom: number) => { behind = { peerHead, startedFrom }; } }),
       stopped: (why, heldAt) => say('stopped', () => log.warn(repair
         ? `Re-read of tombstones from ${peerText(peer)} for space '${peerText(spaceId)}' stopped: ${logSafe(why)} — `
-          + `read through seq ${heldAt}; the one-time repair stays owed and is tried again next cycle.`
+          + `read through position ${heldAt}; the one-time repair stays owed and is tried again next cycle.`
         : `Pull tombstones from ${peerText(peer)} for space '${peerText(spaceId)}' stopped: ${logSafe(why)} — `
-          + `delivered through seq ${heldAt}, so the receive watermark is held there and the rest is asked for next cycle.`)),
+          + `delivered through position ${heldAt}, so the receive mark is held there and the rest is asked for next cycle.`)),
     });
   } catch (err) {
+    // A peer that does not page by position, and a space that owes its positions, are the ENGINE's to read: they end the member's turn.
+    if (err instanceof PeerPagesBySeq || err instanceof PositionsBuilding) throw err;
     outcome.truncated = true;
+    outcome.stoppedBy = 'error';
     say('failed', () => log.warn(repair
       ? `Re-read of tombstones from ${peerText(peer)} for space '${peerText(spaceId)}' failed: ${logSafe(err instanceof Error ? err.message : String(err))} `
-        + `— read through seq ${outcome.deliveredThrough}; the one-time repair stays owed and is tried again next cycle.`
+        + `— read through position ${outcome.deliveredThrough}; the one-time repair stays owed and is tried again next cycle.`
       : `Pull tombstones from ${peerText(peer)} for space '${peerText(spaceId)}' failed: ${logSafe(err instanceof Error ? err.message : String(err))} `
-        + `— delivered through seq ${outcome.deliveredThrough}, so the receive watermark is held there.`));
+        + `— delivered through position ${outcome.deliveredThrough}, so the receive mark is held there.`));
   }
-  return outcome;
+  return { ...outcome, refused: refusedHere, ...(behind ? { behind } : {}) };
 }
 
-/** Send our tombstones newer than `lastSeqPushed`, paging until the peer has them all. */
+/**
+ * Send our tombstones after the position `since`, paging until the peer has them all. WHICH tombstones is the network's selection
+ * (`sync/push-selection.ts`), asked here and handed in by no caller: every tombstone on a relaying network, the ones issued here on a mesh.
+ */
 export async function pushTombstones(opts: {
   member: NetworkMember;
   spaceId: string;
   remoteSpaceId: string;
   networkId: string;
-  lastSeqPushed: number;
+  /** This instance's position the peer has been sent complete through (the mark), 0 when none. */
+  since: number;
+  /** The network this push is on: its type decides what is offered. */
+  net: Pick<NetworkConfig, 'type'>;
   requestInit: () => RequestInit;
   /** The space's turn with this member: its signal cuts the page in flight, and a refusal the peer answers is handed to it. */
   turn?: ExchangeTurn;
 }): Promise<TransferOutcome> {
-  const { member, spaceId, remoteSpaceId, networkId, lastSeqPushed, requestInit, turn } = opts;
-  const outcome: TransferOutcome = { deliveredThrough: lastSeqPushed, truncated: false };
+  const { member, spaceId, remoteSpaceId, networkId, since, requestInit, turn } = opts;
+  const selection = pushSelection(opts.net).tombstones;
+  const outcome: TransferOutcome = { deliveredThrough: since, truncated: false };
   const peer = logSafe(member.label ?? member.instanceId);
   const endpoint = `${member.url}/api/sync/tombstones?spaceId=${encodeURIComponent(remoteSpaceId)}`
     + `&networkId=${encodeURIComponent(networkId)}`;
   let refused = 0;
   let declined = 0;
   // A throw (an unreachable peer, this instance's own store) fails the member's sync, as it always has.
-  await pushSeqRuns({
+  await pushPositionRuns({
     outcome,
     pageSize: PUSH_PAGE,
     maxPages: MAX_TRANSFER_PAGES,
-    read: (after, limit) => listTombstones(spaceId, after, limit),
+    read: (after, limit) => listTombstonesAfterPosition(spaceId, after, limit, selection),
     send: async (rows) => {
       const init = requestInit();
       const resp = await peerSafeFetch(endpoint, {
         ...init, signal: turnSignal(init.signal, turn), method: 'POST', body: JSON.stringify({ tombstones: rows }),
       });
       if (!resp.ok) { turn?.refusedBy(await transferRefusal(resp)); await resp.body?.cancel().catch(() => {}); return `the peer answered ${resp.status}`; }
+      // A 6.0 receiver stamps its answer; one without the stamp is a 5.x receiver, and this THROWS (the turn ends, no mark is written).
       // `refused` is additive (bundle-46): an older peer does not send it. A refusal is by shape or seq, which a
       // re-send cannot change, so the push still advances past it — as a record push does past `rejected`.
       // `declined` is additive too (bundle-51): the peer's deletion authority did not honour that many. A re-send is
       // declined again, so the push advances past them as well, and the line below is what tells an operator.
-      const body = await boundedJson<{ refused?: unknown; declined?: unknown }>(resp, 'sync peer')
-        .catch(() => ({}) as { refused?: unknown; declined?: unknown });
-      refused += refusedCountOf(body);
-      declined += declinedCountOf(body);
+      const body = await readPushReply(resp, peer);
+      refused += refusedCountOf(body as { refused?: unknown });
+      declined += declinedCountOf(body as { declined?: unknown });
       return null;
     },
     stopped: (why, heldAt) => log.warn(`Push tombstones to ${peerText(peer)} for space '${peerText(spaceId)}' `
-      + `stopped: ${logSafe(why)} — delivered through seq ${heldAt}, so the push watermark is held there.`),
+      + `stopped: ${logSafe(why)} — delivered through position ${heldAt}, so the push mark is held there.`),
   });
   sayPeerRefused('tombstones', peer, spaceId, refused);
   sayPeerDeclined('tombstones', peer, spaceId, declined);

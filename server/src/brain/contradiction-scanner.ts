@@ -43,7 +43,7 @@ import { recordContradiction, contradictionPairId } from './contradiction-candid
 import { nliConfigured, nliIsLocal } from './nli-client.js';
 import type { ContradictionScannerConfig, DupeScanType } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
-import { readAfterSeq } from '../util/seq-keyset.js';
+import { readAfterPosition } from '../util/position-keyset.js';
 import { readScanStart, writeScanPosition, advanceScanPosition } from './scan-cursor.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
@@ -339,7 +339,7 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
       if (scanned >= tune.maxPerRun || budgetExhausted) break;
       const stateId = cursorKey(spaceId, type, pass);
       if (opts?.reset) await writeScanPosition(stateId, { spaceId, type }, null);
-      let cursor = opts?.reset ? { seq: 0 } : await readScanStart(stateId);
+      let cursor = opts?.reset ? { pos: 0 } : await readScanStart(stateId);
       let stopThisType = false;
       // Pair ids settled during THIS pass over THIS type, so a mutually-near pair is judged from one side
       // only. Scoped here on purpose: a pair never spans two types, and a structured skip is not an NLI
@@ -350,9 +350,11 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
       while (scanned < tune.maxPerRun && !stopThisType) {
         const take = Math.min(tune.batchSize, tune.maxPerRun - scanned);
         // No `spaceId` in the filter: the collection is the space's own, and a constant field in it would stop the keyset index
-        // covering the read. Ties at the cursor's seq are read by `_id` (`util/seq-keyset.ts`).
-        const batch = await readAfterSeq<{ _id: string; seq?: number }>(spaceId, COLLECTION_SUFFIX[type], cursor,
-          { limit: take, projection: { _id: 1, seq: 1 } });
+        // covering the read. Ties at the cursor's position are read by `_id` (`util/position-keyset.ts`), and a space that owes its positions
+        // throws `PositionsBuilding` here: the walk reads it as "not ready, skipped this tick".
+        const read = await readAfterPosition<{ _id: string }>(spaceId, COLLECTION_SUFFIX[type], cursor,
+          { limit: take, projection: { _id: 1 } });
+        const batch = read.rows.map(r => ({ _id: r.row._id, pos: r.pos }));
         if (batch.length === 0) break;
 
         // The seeds of the batch are isolated from one another by `runSeeds`; an orderly or stalled stop below sets

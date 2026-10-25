@@ -69,7 +69,8 @@ import { atReadSeq } from '../db/at-read-seq.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
 import { warnOnce } from '../util/warn-once.js';
 import { log, peerText } from '../util/log.js';
-import { deliveredByAPeer, notDeliveredByAPeer } from '../sync/delivered-by.js';
+import { deliveredByAPeer } from '../sync/delivered-by.js';
+import { writtenHereFilter } from '../sync/written-here.js';
 import { authorRef } from '../config/author.js';
 import { toDocId } from '../util/paths.js';
 import { inChunks } from '../util/chunks.js';
@@ -570,18 +571,18 @@ export async function setDerivedDescriptionIfUnset(
     { description: { $regex: /^\s*$/ } },
   ] };
   /*
-   * WHOSE ROW IT IS. This instance's by authorship, or — for a row with no author at all, written before authorship was
-   * stamped — this instance's only when no PEER delivered it (E4 item 3, `Q-280`). An author-less row a peer delivered
-   * is the publisher's, and a description derived on it here is the `Q-143` defect: it stamps a seq that outranks the
-   * publisher's next edit, or never replicates and reports a divergence for ever.
+   * WHOSE ROW IT IS: the one predicate's (`sync/written-here.ts`, bundle-81 §6d). No peer delivered it, and it is authored here or has no
+   * author at all (written before authorship was stamped, E4 item 3, `Q-280`). A row a peer delivered is the publisher's, and a description
+   * derived on it here is the `Q-143` defect: it stamps a seq that outranks the publisher's next edit, or never replicates and reports a
+   * divergence for ever. DELIVERY comes first: a record this instance authored and a peer relayed back is the peer's to describe (it used to be
+   * described here under `Q-280`'s form), because an arrival's author is the sender's text.
    *
    * `deliveredBy`, not `syncBase`: any peer metadata arrival sets `deliveredBy`, while `syncBase` is set only by the
    * bytes pull, so a row whose metadata arrived and whose bytes never did carries one and not the other. And through
    * `sync/delivered-by.ts`, because `''` is "nobody's delivery" — the back-fill stamps it on every author-less local row
    * — and a hand-written `$exists: false` would decline every one of those.
    */
-  const unauthored = { author: { $exists: false } };
-  const ours = { $or: [{ 'author.instanceId': self }, { ...unauthored, ...notDeliveredByAPeer(self) }] };
+  const ours = writtenHereFilter();
 
   const writable = asFilter<FileMetaDoc>({ ...thisRow, $and: [noDescription, ours] } as never);
 
@@ -603,11 +604,12 @@ export async function setDerivedDescriptionIfUnset(
        * only on a decline, of the same parts, so it cannot describe a different row from the one the write refused.
        */
       const peerDelivered = asFilter<FileMetaDoc>(
-        { ...thisRow, $and: [noDescription, { ...unauthored, ...deliveredByAPeer(self) }] } as never,
+        { ...thisRow, $and: [noDescription, deliveredByAPeer(self)] } as never,
       );
       // `deliveredBy` is local-only (`sync/local-only-fields.ts`), so `FileMetaDoc` does not declare it.
-      const theirs = await files.findOne(peerDelivered, { projection: { _id: 1, deliveredBy: 1 }, session }) as { deliveredBy?: unknown } | null;
-      if (theirs) {
+      const theirs = await files.findOne(peerDelivered, { projection: { _id: 1, deliveredBy: 1, author: 1 }, session }) as { deliveredBy?: unknown; author?: unknown } | null;
+      // Said for a row with no author only: a row a peer AUTHORED is routinely another instance's, and no line is owed for it.
+      if (theirs && theirs.author === undefined) {
         saidPeerDelivered(`${spaceId}\u0000${_id}`, () => log.warn(
           `No derived description for ${peerText(spaceId)}/${peerText(filePath)}: it has no author and was delivered by `
           + `peer ${peerText(theirs.deliveredBy)}, so it is the publisher's to describe, not this instance's. The `

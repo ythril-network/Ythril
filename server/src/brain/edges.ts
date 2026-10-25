@@ -6,7 +6,7 @@ import { writeAtReadVersion } from './write-at-read-version.js';
 import { inHeldTransaction } from './held-transaction.js';
 import { removeEdges } from './edge-removal.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
-import { toMongoSort, type SortSpec } from './list-sort.js';
+import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { classifyEdgeUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
@@ -189,7 +189,7 @@ export async function listEdges(
       projection: NEVER_RETURNED_PROJECTION,
       maxTimeMS: listReadMaxMs(Boolean(q['$expr'])),
     })
-    .sort(sort ? toMongoSort(sort) : { seq: -1, createdAt: -1, _id: -1 })
+    .sort(sort ? toMongoSort(sort) : { ...LANDING_ORDER })
     .skip(parseSkip(skip))
     .limit(parseLimit(limit, 20, 1000))
     .toArray() as Promise<EdgeDoc[]>;

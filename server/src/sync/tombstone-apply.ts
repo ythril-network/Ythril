@@ -48,9 +48,12 @@
  */
 import { z } from 'zod';
 import { col, asBulk, asFilter } from '../db/mongo.js';
+import { bulkWriteFailures, DUPLICATE_KEY } from '../db/write-errors.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
-import { writeInOneCommands } from '../db/one-command.js';
+import { writeInOneCommands, operationBytes, bulkCommandOf, SlicedBulkWriteError } from '../db/one-command.js';
+import { readBackDuplicates } from './duplicate-readback.js';
+import { assertPositionsReady } from './positions-owed.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { TombstoneDoc } from '../config/types.js';
@@ -150,6 +153,8 @@ export async function applyPeerTombstones(
   // A peer's tombstones delete records of every family a page carries, as an exchange moves every family: any act standing for the
   // space refuses them, as the hold refuses the exchange (the write below asks and counts again, at the instant it is made).
   assertSpaceTakesWrites(localSpaceId);
+  // A space that owes its positions stores nothing and answers `positions_building` (held, to a sender).
+  await assertPositionsReady(localSpaceId);
   const out: TombstoneApplyOutcome = {
     admitted: 0, refused: [], declined: [], unknownTypes: [], maxSeq: 0, deleted: { issuer: 0, upstream: 0 },
   };
@@ -185,8 +190,25 @@ export async function applyPeerTombstones(
       if (!byCollection.has(t.type)) byCollection.set(t.type, []);
       byCollection.get(t.type)!.push(t);
     }
-    /** A stored tombstone, and the upstream it is stored for when it stood on that ground. */
-    const store: Array<{ t: TombstoneDoc; via?: string }> = [];
+    /**
+     * A tombstone to store, the upstream it is stored for when it stood on that ground, and the ground it stood on: `proven` is the ground `issuer`
+     * (the deliverer IS the issuer, so the issuer text is worth storing over a stored one), which is the only proof of who issued a deletion.
+     */
+    const store: Array<{ t: TombstoneDoc; via?: string; ground: DeletionGround | 'absent'; proven: boolean }> = [];
+    /** Tombstones this instance already holds at the same or a higher version: counted, never written. */
+    const alreadyNewer: Array<{ t: TombstoneDoc; ground: string }> = [];
+    /** Held at EXACTLY this version and delivered by an upstream now: the one `storedVia` write a re-delivery still makes. */
+    const rerelay: Array<{ t: TombstoneDoc; via: string }> = [];
+    /** The apply's one decision per tombstone about the STORE (not the delete): what a held copy of the same id means for the write. */
+    const queue = (entry: { t: TombstoneDoc; via?: string; ground: DeletionGround | 'absent'; proven: boolean }): void => {
+      const heldSeq = held.get(entry.t._id)?.seq;
+      if (typeof heldSeq === 'number' && heldSeq >= entry.t.seq) {
+        alreadyNewer.push({ t: entry.t, ground: entry.ground });
+        if (heldSeq === entry.t.seq && entry.via !== undefined) rerelay.push({ t: entry.t, via: entry.via });
+        return;
+      }
+      store.push(entry);
+    };
     /**
      * Per target collection, ground and — on the issuer ground, whose bound names it — issuer: the rows to delete. Every
      * row of one group carries the same bound, so a group is ONE `deleteMany` (per `ROWS_PER_BULK_COMMAND` ids).
@@ -205,7 +227,7 @@ export async function applyPeerTombstones(
           recordDecline(ledger, { id: t._id, reason: verdict.reason, kind: type, what: 'record', issuer: t.instanceId, delivery, target });
           continue;
         }
-        if (verdict.ground === 'absent') { store.push({ t }); continue; }
+        if (verdict.ground === 'absent') { queue({ t, ground: 'absent', proven: false }); continue; }
         // The re-read only: a record newer than the deletion is a re-creation. It is kept, and so is its tombstone
         // unstored — a held tombstone beside a live record would be served on as a deletion of it.
         if (opts.repair && typeof target?.seq === 'number' && target.seq > t.seq) continue;
@@ -213,8 +235,8 @@ export async function applyPeerTombstones(
         // BEFORE the store, because storing it would still mark the newer one as held for this upstream (`storedVia`),
         // and that mark lets the upstream's later version past a deletion it did not make.
         const heldSeq = held.get(t._id)?.seq;
-        if (typeof heldSeq === 'number' && heldSeq > t.seq) continue;
-        store.push(verdict.ground === 'upstream' && delivery.peerInstanceId ? { t, via: delivery.peerInstanceId } : { t });
+        if (typeof heldSeq === 'number' && heldSeq > t.seq) { alreadyNewer.push({ t, ground: verdict.ground }); continue; }
+        queue({ t, ground: verdict.ground, proven: verdict.ground === 'issuer', ...(verdict.ground === 'upstream' && delivery.peerInstanceId ? { via: delivery.peerInstanceId } : {}) });
         // The upstream bound names no issuer (it is the stamp and the self-exclusion), so every issuer shares its group.
         const issuer = verdict.ground === 'issuer' ? t.instanceId : '';
         const key = JSON.stringify([verdict.ground, issuer]);
@@ -226,24 +248,37 @@ export async function applyPeerTombstones(
     // What the page decided is written as ONE admitted and counted unit, from its own check (`admitSpaceWrite`): an act registered while the page
     // was being judged refuses it, and one registered after waits for it, so a stored tombstone or a deleted row never lands after the act's delete.
     await admitSpaceWrite(localSpaceId, undefined, async () => {
+      for (const { t, ground } of alreadyNewer) syncTombstonesAppliedTotal.labels({ kind: t.type, ground, outcome: 'already_newer' }).inc();
+      const tombstones = col<TombstoneDoc>(spaceCollection(localSpaceId, 'tombstones'));
+      // The one `storedVia` a re-delivery at the SAME version still writes: the upstream it is relayed for. It writes no position and no version.
+      for (const { t, via } of rerelay) await tombstones.updateOne({ _id: t._id, seq: t.seq }, { $set: { storedVia: via } });
       if (store.length > 0) {
         // A page is a peer's: counted (`MAX_TOMBSTONES_PER_REQUEST`), not measured, and an id is text it chose, carried twice
         // by each operation. So the bulk is sliced to stay ONE wire command (`db/one-command.ts`): the driver would split a
         // larger one, and a second command carries a deadline of its own after the bound has answered the sender.
-        const tombstones = col<TombstoneDoc>(spaceCollection(localSpaceId, 'tombstones'));
-        // One block of positions for the page's stored tombstones, held below every position-paged reader until the write has settled.
+        // Duplicate keys are collected here and read back AFTER the hold (everything awaited under it holds every reader of the space).
+        const duplicates: Array<{ t: TombstoneDoc; ground: string }> = [];
+        // One block of positions for the page's stored tombstones, held below every position-paged reader until the write has settled. A position
+        // taken for a tombstone whose write then finds a newer copy is burnt, a safe gap: nothing is paged by "no gaps".
         await withLandingStamp(localSpaceId, store.map(({ t }) => arrivalRow(t.seq)), async (landings) => {
-          const ops = store.map(({ t, via }, i) => ({
-            updateOne: {
-              filter: { _id: t._id },
-              // `storedVia` is set whether or not the row existed: a deletion held before this delivery (an earlier one that
-              // stood on no ground, or the same one re-sent) must carry the upstream it is now relayed for.
-              update: via === undefined ? { $setOnInsert: { ...t, ...landings[i]! } } : { $setOnInsert: { ...t, ...landings[i]! }, $set: { storedVia: via } },
-              upsert: true,
-            },
-          }));
-          await writeInOneCommands(ops, (slice, { ordered }) => tombstones.bulkWrite(asBulk<TombstoneDoc>(slice), { ordered }), { ordered: false });
+          const items = store.map((entry, i) => ({ entry, op: guardedUpsertOf(entry, landings[i]!) }));
+          // Slice-local operation indexes: the driver reports a failure by its place in the slice it sent, and the slices are written in order.
+          const slices: Array<typeof items> = [];
+          try {
+            await writeInOneCommands(items, (slice, { ordered }) => {
+              slices.push(slice);
+              return tombstones.bulkWrite(asBulk<TombstoneDoc>(slice.map(x => x.op)), { ordered });
+            }, { ordered: false, bytesOf: (x) => operationBytes(x.op), commandKindOf: (x) => bulkCommandOf(x.op) });
+          } catch (err) {
+            duplicates.push(...duplicateKeysOf(err, slices));
+          }
         }, 'sync.tombstone.apply');
+        // A duplicate key says the held copy is at the same version or newer (the guard refused the write, the copy stays) — or that the
+        // write was lost to something else, which fails the page so the sender offers it again.
+        for (const { planned, held: copy, relation } of await readBackDuplicates<TombstoneDoc, TombstoneDoc>(spaceCollection(localSpaceId, 'tombstones'), duplicates.map(d => d.t))) {
+          if (relation === 'other') throw new Error(`a tombstone write for '${peerText(planned._id)}' met a duplicate key and the stored copy (${copy === undefined ? 'none' : `version ${String(copy.seq)}`}) is not at its version or above`);
+          syncTombstonesAppliedTotal.labels({ kind: planned.type, ground: duplicates.find(d => d.t._id === planned._id)?.ground ?? 'absent', outcome: 'already_newer' }).inc();
+        }
       }
       for (const d of deletes) {
         const coll = col<{ _id: string }>(spaceCollection(localSpaceId, TOMBSTONE_COLLECTION[d.type]));
@@ -260,7 +295,7 @@ export async function applyPeerTombstones(
           deleted += res.deletedCount ?? 0;
         }
         out.deleted[d.ground] += deleted;
-        if (deleted > 0) syncTombstonesAppliedTotal.labels({ kind: d.type, ground: d.ground }).inc(deleted);
+        if (deleted > 0) syncTombstonesAppliedTotal.labels({ kind: d.type, ground: d.ground, outcome: 'deleted' }).inc(deleted);
         if (d.type === 'entity') await unlabelRemoved(localSpaceId, d.rows.map(t => t._id), deleted);
       }
     });
@@ -276,6 +311,57 @@ export async function applyPeerTombstones(
   // A standing decline is the same ones every cycle: said once per (peer, space, reason) window, counted every time.
   sayDeclines(where, localSpaceId, 'tombstone', delivery, ledger.declinedBy);
   if (failed) throw failure;
+  return out;
+}
+
+/** A tombstone to store: what the apply decided about the store of one admitted element (see `applyPeerTombstones`). */
+interface StoreEntry { readonly t: TombstoneDoc; readonly via?: string; readonly ground: DeletionGround | 'absent'; readonly proven: boolean }
+
+/**
+ * The ONE write of an arriving tombstone: a version-guarded upsert (bundle-81, design rev 8 §6c, decisions 1 and 13).
+ *
+ *  - **No tombstone held**: it is inserted — the arriving document, `issuedHere: false` (the mark is a local writer's, never a peer's), and a fresh position
+ *    of THIS instance's stream, so every hop below is served it whatever the issuer's version was.
+ *  - **One held at a LOWER version** (a newer deletion of the same id): the filter `{ _id, seq < arriving }` matches and the `$set` takes `seq`, `deletedAt`,
+ *    `originalSeq` and a fresh position ONLY. The stored `instanceId`, `storedVia` and `issuedHere` are kept — a peer's text never changes who issued a
+ *    deletion — unless the deletion authority PROVED the issuer (the deliverer is the issuer, ground `issuer`): then the issuer text is stored and
+ *    `issuedHere` is false. `storedVia` is set when the ground is the upstream and never cleared by a replace.
+ *  - **One held at the same version or higher**: the filter misses, the upsert tries to insert the id and fails with a duplicate key, which the caller reads
+ *    back as "already newer here". Nothing is written, so no position and no version are spent on a copy that is not newer.
+ *
+ * `$set` and `$setOnInsert` never name the same path (the server refuses it), so the issuer pair sits in the one that fits what was proven.
+ */
+function guardedUpsertOf({ t, via, proven }: StoreEntry, landing: { pos: number; posAtSeq: number }) {
+  const set: Record<string, unknown> = {
+    seq: t.seq, deletedAt: t.deletedAt, ...(t.originalSeq !== undefined ? { originalSeq: t.originalSeq } : {}),
+    pos: landing.pos, posAtSeq: landing.posAtSeq,
+    ...(via !== undefined ? { storedVia: via } : {}),
+    ...(proven ? { instanceId: t.instanceId, issuedHere: false } : {}),
+  };
+  const onInsert: Record<string, unknown> = { type: t.type, spaceId: t.spaceId, ...(proven ? {} : { instanceId: t.instanceId, issuedHere: false }) };
+  return { updateOne: { filter: { _id: t._id, seq: { $lt: t.seq } }, update: { $set: set, $setOnInsert: onInsert }, upsert: true } };
+}
+
+/**
+ * The tombstones whose guarded write failed on a duplicate key, from the failure `writeInOneCommands` raised — or THROWS when it was anything else.
+ *
+ * The write is unordered and sliced, so a failed slice arrives wrapped in `SlicedBulkWriteError.failures[]`, each failure a `MongoBulkWriteError` whose
+ * `writeErrors` name their operations by their place in THAT slice (decision 31): the slice is read back from `slices`, which the caller filled in the
+ * order the slices were written. A failure that is not a per-operation duplicate (the store, a bound that ended the write, a document the store
+ * refuses) is the page's, and is rethrown as it is.
+ */
+function duplicateKeysOf(err: unknown, slices: ReadonlyArray<ReadonlyArray<{ entry: StoreEntry }>>): Array<{ t: TombstoneDoc; ground: string }> {
+  if (!(err instanceof SlicedBulkWriteError)) throw err;
+  const out: Array<{ t: TombstoneDoc; ground: string }> = [];
+  for (const { slice, error } of err.failures) {
+    const failures = bulkWriteFailures(error);
+    if (failures === null) throw err;
+    for (const f of failures) {
+      const item = slices[slice]?.[f.index];
+      if (f.code !== DUPLICATE_KEY || item === undefined) throw err;
+      out.push({ t: item.entry.t, ground: item.entry.ground });
+    }
+  }
   return out;
 }
 

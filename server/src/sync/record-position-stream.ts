@@ -13,7 +13,7 @@
  *
  * The highest of the stored maximum `pos` over the space's collections (the `(pos, _id)` index read backwards) and the marks this instance
  * answers for over its members (`lastPosPushed`, `lastPosServed`), **each capped when it was recorded** at this instance's own settled cap
- * for the space at that moment (`ownPositionMark`, `sync/served-watermark.ts`; the marks half is wired with the marks, see `positionFloor`). The wall
+ * for the space at that moment (`ownPositionMark`, `sync/served-watermark.ts`; read by `positionFloor`). The wall
  * clock and the in-process `last` are the clock's own. A peer-supplied number never enters the seed uncapped: a puller that sends `afterPos` near 2^53 would otherwise drive every
  * later stamp toward the ceiling.
  *
@@ -35,18 +35,34 @@ import { highestStored } from '../util/index-top.js';
 import { SEQ_CARRYING } from '../util/seq.js';
 import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { getConfig } from '../config/loader.js';
+import { eachMemberMarkOf } from './receive-marks.js';
 
 /**
  * The highest position this instance may already have handed out for `spaceId`, in microseconds: see the module docblock.
  *
- * **The stored maximum, and — once the marks exist — the marks.** The marks this instance answers for (`lastPosPushed`, `lastPosServed`, each cut at
- * the instance's own settled cap when it was recorded, `ownPositionMark`, `sync/served-watermark.ts`) enter the seed beside the stored maximum,
- * read through the one walk over every member's marks (`eachMemberMarkOf`, `sync/receive-marks.ts`) the day those keys join the member's marks.
- * Until then there is no such mark to read: nothing writes one, so a seed from the stored maximum alone is the whole of it.
+ * **The stored maximum, and the marks.** The marks this instance answers for (`lastPosPushed`, `lastPosServed`, each cut at the instance's own settled cap when it
+ * was recorded, `ownPositionMark`, `sync/served-watermark.ts`) enter the seed beside the stored maximum, read through the one walk over every member's marks
+ * (`eachMemberMarkOf`, `sync/receive-marks.ts`) of every network. After a restore that lost the stored maximum (a database replaced, the data folder lost) a peer
+ * still holds a mark in OUR stream, and a stamp below it would never be offered again. `lastPosReceived` is the PEER's position space and never enters the seed.
  */
 async function positionFloor(spaceId: string): Promise<number> {
   const stored = await highestStored<number>(SEQ_CARRYING.map(part => col(spaceCollection(spaceId, part))), 'pos', { $type: 'number' });
-  return stored ?? 0;
+  return Math.max(stored ?? 0, ownMarksFloor(spaceId));
+}
+
+/** The highest `lastPosPushed` / `lastPosServed` any member of any network holds for the space: marks that were capped when they were recorded. */
+function ownMarksFloor(spaceId: string): number {
+  let top = 0;
+  let cfg;
+  try { cfg = getConfig(); } catch { return 0; } // before setup there is no member
+  for (const net of cfg.networks ?? []) {
+    eachMemberMarkOf(net, spaceId, (marks, _mark, _who) => {
+      const v = marks[spaceId];
+      if (typeof v === 'number' && Number.isSafeInteger(v) && v > top) top = v;
+    }, ['lastPosPushed', 'lastPosServed']);
+  }
+  return top;
 }
 
 /** THE records stream. Its one export that is an object: the clock's functions take it, and nothing else builds a stream of records. */
@@ -73,8 +89,12 @@ export const arrivalRow = (version: number): { readonly local: false; readonly v
 
 /** What a local write sets on its row: the version, the position it took it at, the version that position is for, and that it was written here. */
 export interface LocalLanding { readonly seq: number; readonly pos: number; readonly posAtSeq: number; readonly writtenHere: true }
-/** What an arrival sets on its row beside the version it already carries. */
-export interface ArrivalLanding { readonly pos: number; readonly posAtSeq: number }
+/**
+ * What an arrival sets on its row beside the version it already carries: where it landed, the version that is for, and — only when it is true —
+ * that the row was written here (`sync/written-here.ts`: nobody delivered it, and it is authored here or has no author). A peer's delivery is never
+ * written here whatever its author says; an admin push or an import of this instance's own rows is.
+ */
+export interface ArrivalLanding { readonly pos: number; readonly posAtSeq: number; readonly writtenHere?: true }
 
 type PatchOf<R extends LandingRow> = R extends { readonly local: true } ? LocalLanding : ArrivalLanding;
 

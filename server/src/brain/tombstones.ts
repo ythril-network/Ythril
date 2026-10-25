@@ -7,7 +7,6 @@ import { andPredicates } from '../db/and-predicates.js';
 import { versionsFor, type VersionAllocation, type VersionReadOptions } from '../util/version-stamp.js';
 import { withLandingStamp, localRow, type LocalLanding } from '../sync/record-position-stream.js';
 import { TOMBSTONE_LOCAL_FIELDS } from '../sync/local-only-fields.js';
-import { readAfterSeq, type SeqPosition } from '../util/seq-keyset.js';
 import { readAfterPosition, type PositionStart, type PositionRead } from '../util/position-keyset.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { TOMBSTONE_COLLECTION, type BrainCollection } from '../config/types-knowledge.js';
@@ -27,35 +26,14 @@ const LOCAL_TOMBSTONE_FIELDS_EXCLUDED: Readonly<Record<string, 0>> =
   Object.fromEntries([...TOMBSTONE_LOCAL_FIELDS].map(f => [f, 0 as const]));
 
 /**
- * List tombstones that come after `after` — settled seqs only, because every caller moves a cursor to the last
- * tombstone it is handed and one committed below that cursor is never offered again.
- *
- * `after` is a position (`util/seq-keyset.ts`): a bare number is `seq > after` as it always was, and a `(seq, _id)` pair
- * also reads the rest of the run at that seq. Several members can plant tombstones at one seq (a peer names the seq of
- * what it issues), and a page that ended inside such a run must be able to continue it. `type` narrows to one tombstone
- * type; without it the read is every type, in `(seq, _id)` order, which is what a cursor-mode `GET /tombstones` serves.
- *
- * What this returns is what leaves the instance — the GET route and the push read it — so the local fields
- * (`TOMBSTONE_LOCAL_FIELDS`) are excluded HERE and cannot be served by a caller that forgot.
- */
-export async function listTombstones(
-  spaceId: string,
-  after: number | SeqPosition,
-  limit = 200,
-  type?: TombstoneDoc['type'],
-): Promise<TombstoneDoc[]> {
-  return readAfterSeq<TombstoneDoc>(spaceId, 'tombstones', typeof after === 'number' ? { seq: after } : after,
-    { limit, extra: type ? { type } : undefined, projection: LOCAL_TOMBSTONE_FIELDS_EXCLUDED });
-}
-
-/**
  * One page of tombstones that come after a POSITION, below the settled cap (`util/position-keyset.ts`), each with the position it sits at: what a
- * position-paged `GET /tombstones` serves. The local fields (`TOMBSTONE_LOCAL_FIELDS`) are excluded HERE, as {@link listTombstones}'s are.
+ * position-paged `GET /tombstones` and the mesh push read: the one reader of tombstones by position. The local fields (`TOMBSTONE_LOCAL_FIELDS`) are excluded
+ * HERE, so what leaves the instance cannot carry them whatever the caller forgot, and `extra` narrows what is read (the push's selection).
  */
 export async function listTombstonesAfterPosition(
-  spaceId: string, after: PositionStart, limit: number,
+  spaceId: string, after: PositionStart, limit: number, extra?: Readonly<Record<string, unknown>>,
 ): Promise<PositionRead<TombstoneDoc>> {
-  return readAfterPosition<TombstoneDoc>(spaceId, 'tombstones', after, { limit, projection: LOCAL_TOMBSTONE_FIELDS_EXCLUDED });
+  return readAfterPosition<TombstoneDoc>(spaceId, 'tombstones', after, { limit, extra, projection: LOCAL_TOMBSTONE_FIELDS_EXCLUDED });
 }
 
 /**
@@ -67,7 +45,7 @@ export async function listTombstonesAfterPosition(
  * for a peer whose watermark never reached the record, and without it that peer is sent deletions for records it never had.
  *
  * `stamp` is the landing of this write (`withLandingStamp`): the tombstone's version, the position it was taken at and the version that
- * position is for. `writtenHere` is not a tombstone's: whether this instance issued one is its own mark (`issuedHere`, `sync/issued-here.ts`).
+ * position is for. `writtenHere` is not a tombstone's: whether this instance issued one is its own mark (`issuedHere: true`, stamped here and nowhere else, asked through `sync/issued-here.ts`).
  */
 export function tombstoneDoc(
   spaceId: string, stamp: Pick<LocalLanding, 'seq' | 'pos' | 'posAtSeq'>,
@@ -75,7 +53,7 @@ export function tombstoneDoc(
 ): TombstoneDoc {
   return {
     _id: t._id, type: t.type, spaceId, deletedAt: t.deletedAt ?? new Date().toISOString(),
-    instanceId: getConfig().instanceId, seq: stamp.seq, pos: stamp.pos, posAtSeq: stamp.posAtSeq,
+    instanceId: getConfig().instanceId, issuedHere: true, seq: stamp.seq, pos: stamp.pos, posAtSeq: stamp.posAtSeq,
     ...(t.originalSeq !== undefined ? { originalSeq: t.originalSeq } : {}),
   };
 }

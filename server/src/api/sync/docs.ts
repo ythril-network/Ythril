@@ -11,18 +11,16 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { peerBoundTo } from '../../auth/peer-bound.js';
 import { getAllowedChronoTypes } from '../../spaces/schema-validation.js';
 import { getConfig } from '../../config/loader.js';
-import { listTombstones } from '../../brain/tombstones.js';
 import { requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { log, logSafe, peerText } from '../../util/log.js';
 import { sendCaughtFailure } from '../send-failure.js';
-import { readAfterSeq, encodeSeqCursor } from '../../util/seq-keyset.js';
 import type { FactDoc, EntityDoc, EdgeDoc, ChronoEntry, LinkDoc } from '../../config/types.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import { LOCAL_ONLY_EXCLUSION } from '../../sync/local-only-fields.js';
 import { readAfterPosition } from '../../util/position-keyset.js';
-import { pageAnswer } from '../../sync/wire-answer.js';
+import { pageAnswer, pushAnswer } from '../../sync/wire-answer.js';
 import { parseLimit } from '../../util/pagination.js';
-import { MAX_FORK_DEPTH, withAuthoredKeys, syncReadStart, syncPositionStart, isPositionRequest, BAD_SYNC_START, BAD_POSITION_START, refusePeerSpace, refusePeerWrite, pushAllowed, withSchemaViolations } from './_shared.js';
+import { MAX_FORK_DEPTH, withAuthoredKeys, syncPositionStart, refusePeerSpace, refusePeerWrite, pushAllowed, withSchemaViolations } from './_shared.js';
 import { boundedRows } from '../../brain/write-validation.js';
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
@@ -44,109 +42,48 @@ const SERVED_AS: Partial<Record<PayloadKey, <D extends object>(doc: D) => D>> = 
 /**
  * ONE paging read for every record family. It was written FOUR times, and `M-2` needed a fifth.
  *
- * The four list routes were identical apart from three names — the collection suffix, the document type, and
- * the tombstone `type` string — and this is the sync CONTRACT: what a page is, where the cursor comes from,
- * which tombstones ride along with it. A copy that drifts makes replication depend on which record family a
- * peer happened to ask for, which is the defect class `CLAUDE.md` names as this repo's most expensive.
+ * The list routes were identical apart from two names — the collection suffix and the document type — and this is the sync CONTRACT: what a page is
+ * and where the cursor comes from. A copy that drifts makes replication depend on which record family a peer happened to ask for, which is the defect
+ * class `CLAUDE.md` names as this repo's most expensive.
  *
  * ## The rule, now that it is in one place to read
  *
- * A page is everything AFTER the start position, ordered `(seq, _id)`, capped at 500, with ONE extra row fetched so
- * `nextCursor` can be decided without a second query. The start is the `cursor` a previous page handed back — a
- * PAIR, `(seq, _id)`, so a page that ended inside a run of records sharing a seq (several authors' records keep their
- * author's seq) continues that run instead of skipping it — or `sinceSeq`, a bare seq. The cursor wins: a 5.6 client
- * sends its `sinceSeq` constant beside the cursor it echoes. It is opaque to a caller (`util/seq-keyset.ts`).
+ * A page is everything AFTER the start POSITION, in `(pos, _id)` order (`readAfterPosition`), below the settled cap (a write in flight holds every reader
+ * below its position), capped at 500, with ONE extra row fetched so `nextCursor` can be decided without a second query. The start is the opaque `p1.`
+ * `cursor` a previous page handed back — a PAIR, so a page that ended inside a run of equal positions (the legacy band, every carried 5.6 seq, has them)
+ * continues that run instead of skipping it — or `afterPos`, a whole number. The answer is `{ items, nextCursor, through, head, positions: 1 }`, built by the
+ * wire module (`sync/wire-answer.ts`) and by nothing in a route: `through` is where the page is complete, `head` the settled end of the stream. A
+ * `sinceSeq` is refused: a 5.6 puller reads its numbers in another space, and a 6.0 server never guesses.
  *
- * Tombstones for the same family ride in the same page, as long as the page carries whole documents. Three filters,
- * and each removes a specific way for a deletion to be delivered twice or too early:
+ * Deletions are NOT riders of a family page any more: a tombstone is an item of the same stream and is served by `GET /tombstones`, which a puller reads
+ * under the same mark. A listing (`full=false`, ids and seqs) is the same read with a thin projection.
  *
- *   - `seq <= pageMaxSeq` — a tombstone with a high seq would otherwise appear on this page AND the next
- *     one, because the cursor only advances to the last ITEM's seq. That was a real duplicate bug.
- *   - not already in `items` — the record is the newer fact, so the deletion is stale within the page.
- *   - `originalSeq > since` — the peer never had the record, so there is nothing to tell it to delete.
- *
- * The riders stay NUMERIC (`seq > since`) beside the pair cursor, and a rider at a seq the page has reached is served
- * once, on the page that reaches it. A listing (`full=false`, ids and seqs) carries none: it pays no tombstone read.
- *
- * `full=true` returns whole documents in one pass; without it a page is ids and seqs only. The pull engine
- * always asks for `full`, because the alternative is N per-document fetches over a WAN. A whole document is served as
- * its family says (`SERVED_AS`): a file's metadata carries `authoredKeys`, the read by id too.
+ * `full=true` returns whole documents in one pass; without it a page is ids and seqs only. The pull engine always asks for `full`, because the
+ * alternative is N per-document fetches over a WAN. A whole document is served as its family says (`SERVED_AS`): a file's metadata carries
+ * `authoredKeys`, the read by id too. The family's own filter (`pushFilter`) narrows what the page serves at all: files serve LIVE FILE ROWS only
+ * (`LIVE_FILE_ROW`: no chunk, no soft-deleted audit row) — a chunk is derived from the blob and the receiver makes its own, with its own chunker and
+ * model, and a soft delete reaches a peer as the file tombstone, never as its flagged row. It comes from the family row rather than a parameter, so the
+ * page, the read by id and the push cannot each be handed a different one.
  */
-/**
- * @param tombstoneType the brain tombstone type that rides in this page, or `null` for a collection whose
- *   deletions travel on their own route. A file is the one: a deleted file has a `FileTombstoneDoc` and
- *   `/api/sync/file-tombstones` carries it, which is why `TOMBSTONE_TYPES` has no `file` member. Passing a
- *   type that matches nothing would have been the quiet alternative and it is a lie: it says deletions ride
- *   here and then carries none.
- * The family's own filter (`pushFilter`) narrows what the page serves at all. Files use it to serve LIVE FILE ROWS
- * only (`LIVE_FILE_ROW`: no chunk, no soft-deleted audit row) — a chunk is derived from the blob and the receiver makes its
- * own, with its own chunker and model, and a soft delete reaches a peer as the file tombstone, never as its flagged row.
- * It comes from the family row rather than a parameter, so the page, the read by id and the push cannot
- * each be handed a different one.
- */
-function pageBySeq<T extends { _id: string; seq: number }>(key: PayloadKey, tombstoneType: string | null) {
+function pageByPosition<T extends { _id: string; seq: number }>(key: PayloadKey) {
   const { collection, pushFilter: extraFilter = {} } = familyOf(key);
   const serve = SERVED_AS[key];
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { spaceId, networkId, sinceSeq, limit, cursor, full: fullParam } = req.query as Record<string, unknown>;
+      const { spaceId, networkId, limit, full: fullParam } = req.query as Record<string, unknown>;
       if (typeof spaceId !== 'string' || !spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
       if (refusePeerSpace(res, spaceId, networkId as string | undefined, req.authToken)) return;
 
-      // A read by POSITION (`afterPos`, or a `p1.` cursor): the 6.0 page, below the settled cap, with no riders — a tombstone is an item of the
-      // same stream and is served by `GET /tombstones`. A request that names neither is the legacy seq read below, until the wire moves.
-      if (isPositionRequest(req.query as Record<string, unknown>)) {
-        const start = syncPositionStart(req.query as Record<string, unknown>);
-        if (start === undefined) { res.status(400).json({ error: BAD_POSITION_START }); return; }
-        const pageSize = parseLimit(limit, 100, 500);
-        const returnFull = fullParam === 'true';
-        const read = await readAfterPosition<T>(spaceId, collection, start, {
-          limit: pageSize + 1, extra: extraFilter, projection: returnFull ? LOCAL_ONLY_EXCLUSION : { _id: 1, seq: 1 },
-        });
-        res.json(pageAnswer(read, pageSize, returnFull && serve ? serve : undefined));
-        return;
-      }
-
-      const sinceVal = syncReadStart(sinceSeq, cursor);
-      if (sinceVal === undefined) { res.status(400).json({ error: BAD_SYNC_START }); return; }
+      const start = syncPositionStart(req.query as Record<string, unknown>);
+      if ('refusal' in start) { res.status(400).json({ error: start.refusal }); return; }
       const pageSize = parseLimit(limit, 100, 500);
       const returnFull = fullParam === 'true';
-
-      /*
-       * Settled seqs only, and ties in `_id` order (`readAfterSeq`): a page that hands out a seq above an unsettled
-       * one moves the peer past it (Q-196), and one that ends inside a run of equal seqs must be able to go on.
-       *
-       * The local-only fields never leave, which is the SAVING rather than the guarantee — a vector is
-       * several hundred floats per record and was the bulk of every page. The guarantee is the receiver's
-       * strip in `sync/engine.ts`, because a peer decides what it sends and we decide what we store.
-       */
-      const rawDocs = await readAfterSeq<T>(spaceId, collection, sinceVal, {
-        limit: pageSize + 1,
-        extra: extraFilter,
-        projection: returnFull ? LOCAL_ONLY_EXCLUSION : { _id: 1, seq: 1 },
+      // The local fields never leave, which is the SAVING rather than the guarantee — a vector is several hundred floats per record and was the
+      // bulk of every page. The guarantee is the receiver's strip (`sync/arrivals.ts`), because a peer decides what it sends and we decide what we store.
+      const read = await readAfterPosition<T>(spaceId, collection, start, {
+        limit: pageSize + 1, extra: extraFilter, projection: returnFull ? LOCAL_ONLY_EXCLUSION : { _id: 1, seq: 1 },
       });
-
-      const hasMore = rawDocs.length > pageSize;
-      const items: typeof rawDocs = hasMore ? rawDocs.slice(0, pageSize) : rawDocs;
-      const last = items[items.length - 1];
-      const nextCursor = hasMore && last ? encodeSeqCursor({ seq: last.seq, id: last._id }) : null;
-
-      const pageMaxSeq = last ? last.seq : sinceVal.seq;
-      // No brain tombstones for a collection whose deletions have their own route — see the parameter doc — and none
-      // for a listing, which is ids and seqs and pays for no second read.
-      const tombstones = tombstoneType === null || !returnFull ? [] : await listTombstones(spaceId, sinceVal.seq, pageSize);
-      const itemIds = new Set(items.map(i => i._id));
-      const tombs = tombstones
-        .filter(t =>
-          t.type === tombstoneType &&
-          t.seq <= pageMaxSeq &&
-          !itemIds.has(t._id) &&
-          (t.originalSeq === undefined || t.originalSeq > sinceVal.seq),
-        )
-        .map(t => ({ _id: t._id, seq: t.seq, deletedAt: t.deletedAt }));
-
-      const served = returnFull && serve ? items.map(d => serve(d)) : items;
-      res.json({ items: [...served, ...tombs].sort((a, b) => a.seq - b.seq), nextCursor });
+      res.json(pageAnswer(read, pageSize, returnFull && serve ? serve : undefined));
     } catch (err) {
       sendCaughtFailure(res, `sync GET /${collection}`, err);
     }
@@ -201,11 +138,11 @@ function oneById<T extends { _id: string }>(key: PayloadKey) {
  * batch-upsert block below carry those differences. A collection missing from this router is one a peer can
  * never fetch, and nothing reports that, because a peer which never receives a link has none to hash either.
  */
-syncDocsRouter.get('/facts', syncRateLimit, requireAuth, pageBySeq<FactDoc>('facts', 'fact'));
-syncDocsRouter.get('/entities', syncRateLimit, requireAuth, pageBySeq<EntityDoc>('entities', 'entity'));
-syncDocsRouter.get('/edges', syncRateLimit, requireAuth, pageBySeq<EdgeDoc>('edges', 'edge'));
-syncDocsRouter.get('/chrono', syncRateLimit, requireAuth, pageBySeq<ChronoEntry>('chrono', 'chrono'));
-syncDocsRouter.get('/links', syncRateLimit, requireAuth, pageBySeq<LinkDoc>('links', 'link'));
+syncDocsRouter.get('/facts', syncRateLimit, requireAuth, pageByPosition<FactDoc>('facts'));
+syncDocsRouter.get('/entities', syncRateLimit, requireAuth, pageByPosition<EntityDoc>('entities'));
+syncDocsRouter.get('/edges', syncRateLimit, requireAuth, pageByPosition<EdgeDoc>('edges'));
+syncDocsRouter.get('/chrono', syncRateLimit, requireAuth, pageByPosition<ChronoEntry>('chrono'));
+syncDocsRouter.get('/links', syncRateLimit, requireAuth, pageByPosition<LinkDoc>('links'));
 /*
  * A file's METADATA — the sixth family, on the owner's `P-32` ruling.
  *
@@ -214,20 +151,18 @@ syncDocsRouter.get('/links', syncRateLimit, requireAuth, pageBySeq<LinkDoc>('lin
  * array it came from, so the graph on a peer showed the connection and the peer's own Files tab showed
  * none.
  *
- * LIVE FILE ROWS ONLY (`LIVE_FILE_ROW`: no chunk, no soft-deleted audit row), and no tombstone rider: a chunk is derived
- * locally, and a deleted file already has its own tombstone route.
+ * LIVE FILE ROWS ONLY (`LIVE_FILE_ROW`: no chunk, no soft-deleted audit row): a chunk is derived locally, and a deleted file already has its own
+ * tombstone route.
  */
 syncDocsRouter.get('/filemeta', syncRateLimit, requireAuth,
   /*
-   * `seq` is OPTIONAL on a file meta record and required by the pager, so the type is narrowed here rather
-   * than made required on the document.
+   * `seq` is OPTIONAL on a file meta record, so the type is narrowed here rather than made required on the document.
    *
-   * A record written before 4.0 has none, and the filter is what makes that safe: `seq: { $gt: n }` never
-   * matches a document without one, so an un-stamped record simply does not page to a peer until it is next
-   * written. `npm run links:convert` stamps the ones already stored. Making the field required instead would
-   * have meant a boot migration over synced data, which `_REFERENCE.md` forbids.
+   * A record written before 4.0 has none, and so no position either (the first carry gives a position to a row that has a seq): an un-stamped
+   * record simply does not page to a peer until it is next written. `npm run links:convert` stamps the ones already stored. Making the field
+   * required instead would have meant a boot migration over synced data, which `_REFERENCE.md` forbids.
    */
-  pageBySeq<FileMetaDoc & { seq: number }>('filemeta', null));
+  pageByPosition<FileMetaDoc & { seq: number }>('filemeta'));
 
 syncDocsRouter.get('/facts/:id', syncRateLimit, requireAuth, oneById<FactDoc>('facts'));
 syncDocsRouter.get('/entities/:id', syncRateLimit, requireAuth, oneById<EntityDoc>('entities'));
@@ -297,12 +232,12 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     const verdict = facts.verdicts[0];
     // Reported on every exit that STORED something: what the page accept recorded for it (`sync/arrival-recording.ts`), which is nothing for
     // a document that was skipped, tombstoned or refused — and for one whose replaced copy already had the same break.
-    if (verdict === 'inserted' || verdict === 'updated') { res.status(200).json(withSchemaViolations({ status: verdict }, recordedRows(facts))); return; }
-    if (verdict === 'forked') { res.status(200).json(withSchemaViolations({ status: 'forked', forkId: facts.forkIds[0] }, recordedRows(facts))); return; }
-    if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
+    if (verdict === 'inserted' || verdict === 'updated') { res.status(200).json(pushAnswer(withSchemaViolations({ status: verdict }, recordedRows(facts)))); return; }
+    if (verdict === 'forked') { res.status(200).json(pushAnswer(withSchemaViolations({ status: 'forked', forkId: facts.forkIds[0] }, recordedRows(facts)))); return; }
+    if (verdict === 'tombstoned') { res.status(200).json(pushAnswer({ status: 'tombstoned' })); return; }
     if (verdict === 'forkRefused') { res.status(400).json(forkCapError(String(doc['_id']))); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(facts)); return; }
-    res.status(200).json({ status: 'skipped' });
+    res.status(200).json(pushAnswer({ status: 'skipped' }));
   } catch (err) {
     if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST facts', err);
@@ -322,9 +257,9 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     if (!one) return;
     const { r: entities } = one;
     const verdict = entities.verdicts[0];
-    if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
+    if (verdict === 'tombstoned') { res.status(200).json(pushAnswer({ status: 'tombstoned' })); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(entities)); return; }
-    res.status(200).json(withSchemaViolations({ status: 'ok' }, recordedRows(entities)));
+    res.status(200).json(pushAnswer(withSchemaViolations({ status: 'ok' }, recordedRows(entities))));
   } catch (err) {
     if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST entities', err);
@@ -345,9 +280,9 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (!one) return;
     const { r: edges } = one;
     const verdict = edges.verdicts[0];
-    if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
+    if (verdict === 'tombstoned') { res.status(200).json(pushAnswer({ status: 'tombstoned' })); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(edges)); return; }
-    res.status(200).json(withSchemaViolations({ status: verdict === 'duplicate' ? 'duplicate' : 'ok' }, recordedRows(edges)));
+    res.status(200).json(pushAnswer(withSchemaViolations({ status: verdict === 'duplicate' ? 'duplicate' : 'ok' }, recordedRows(edges))));
   } catch (err) {
     if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST edges', err);
@@ -377,9 +312,9 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
       res.status(400).json({ error: `\`type\` must be one of: ${[...allowed].join(', ')}` });
       return;
     }
-    if (verdict === 'tombstoned') { res.status(200).json({ status: 'tombstoned' }); return; }
+    if (verdict === 'tombstoned') { res.status(200).json(pushAnswer({ status: 'tombstoned' })); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(chrono)); return; }
-    res.status(200).json(withSchemaViolations({ status: 'ok' }, recordedRows(chrono)));
+    res.status(200).json(pushAnswer(withSchemaViolations({ status: 'ok' }, recordedRows(chrono))));
   } catch (err) {
     if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST chrono', err);
@@ -479,7 +414,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      * space does not declare. `push-refusals.ts` reads it off the response, so a family absent here is a family
      * whose refusals are silent at both ends.
      */
-    res.status(200).json({
+    res.status(200).json(pushAnswer({
       status: 'ok',
       facts: { ...memStats, rejected: rejected('facts', 'forkRefused') },
       entities: { ...entStats, rejected: rejected('entities') },
@@ -487,7 +422,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       chrono: { ...chronoStats, rejected: rejected('chrono', 'unknownType') },
       links: { ...linkStats, rejected: rejected('links') },
       filemeta: { ...fileMetaStats, rejected: rejected('filemeta') },
-    });
+    }));
   } catch (err) {
     if (refusePeerWrite(res, err, req.authToken)) return;
     sendCaughtFailure(res, 'sync POST batch-upsert', err);

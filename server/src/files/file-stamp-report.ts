@@ -44,6 +44,8 @@ import { idKeysetPage, type IdPage } from '../db/id-keyset-page.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { authorRef } from '../config/author.js';
+import { andPredicates } from '../db/and-predicates.js';
+import { writtenHereFilter } from '../sync/written-here.js';
 import { getSecrets } from '../config/loader.js';
 import { isPeerSchemeAllowed } from '../config/transport-security.js';
 import type { FileMetaDoc } from '../config/types.js';
@@ -54,7 +56,8 @@ import { fileKeyOf } from './sandbox.js';
 import { isMachineMadeSource } from './derived-fields.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
 import { FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
-import { isRider, pageSeqRuns, serverCursorOf } from '../sync/seq-run-pager.js';
+import { pagePositionRuns } from '../sync/position-run-pager.js';
+import { PeerPagesBySeq } from '../util/errors.js';
 import { syncBasePath } from '../sync/file-sync.js';
 import { peerIdsCarryingSpace, peersCarryingSpace, type PeerForSpace } from '../sync/peer-for-space.js';
 import { limitRefusal } from '../util/strict-limit.js';
@@ -314,6 +317,8 @@ const failureOfStatus = (status: number): StampFailure => (status === 401 || sta
 /** What an error from the client means for the rows: a refused address, the deadline, or an unreachable peer. */
 function failureOfError(err: unknown, clock: RunClock): StampFailure {
   if (err instanceof FeedFailure) return err.failure;
+  // A peer that answered in the 5.x shape does not page by position: its feed cannot be read by these rules, which is what `too-old` says.
+  if (err instanceof PeerPagesBySeq) return 'too-old';
   if (err instanceof SsrfBlockedError) return 'address-refused';
   return expired(clock) ? 'not-checked' : 'unreachable';
 }
@@ -335,7 +340,7 @@ async function walkFeed(
   let answered = false;
   const headers = { 'Authorization': `Bearer ${token}` };
   try {
-    await pageSeqRuns({
+    await pagePositionRuns({
       outcome,
       limit: FEED_PAGE,
       maxPages: MAX_FEED_PAGES_PER_PEER,
@@ -343,8 +348,8 @@ async function walkFeed(
         if (expired(clock)) throw new FeedFailure('not-checked');
         pages++;
         const params = new URLSearchParams({
-          spaceId: target.remoteSpaceId, networkId: target.networkId, sinceSeq: String(ask.sinceSeq), limit: String(limit), full: 'true',
-          ...(ask.cursor ? { cursor: ask.cursor } : {}),
+          spaceId: target.remoteSpaceId, networkId: target.networkId, limit: String(limit), full: 'true',
+          ...(ask.cursor ? { cursor: ask.cursor } : { afterPos: String(ask.afterPos) }),
         });
         // A fresh signal per request: one shared across sequential asks would starve the later ones.
         const signal = AbortSignal.any([AbortSignal.timeout(FETCH_TIMEOUT_MS), clock.signal]);
@@ -353,20 +358,10 @@ async function walkFeed(
           await resp.body?.cancel().catch(() => {});
           throw new FeedFailure(failureOfStatus(resp.status));
         }
-        const page = await boundedJson<unknown>(resp, 'file stamp feed', FEED_PAGE_MAX_BYTES);
-        if (typeof page !== 'object' || page === null) throw new FeedFailure('unreachable');
-        const { items, nextCursor } = page as { items?: unknown; nextCursor?: unknown };
-        return {
-          groups: [Array.isArray(items) ? items.filter(it => !isRider(it)) : []],
-          nextCursor: serverCursorOf(nextCursor),
-        };
+        return { body: await boundedJson<unknown>(resp, 'file stamp feed', FEED_PAGE_MAX_BYTES) };
       },
-      admit: (raw) => {
-        const { _id: id, seq } = (raw ?? {}) as { _id?: unknown; seq?: unknown };
-        return typeof id === 'string' && id !== '' && typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0 ? { seq, key: id } : null;
-      },
-      deliver: async (fresh) => {
-        for (const raw of fresh) {
+      deliver: async (items) => {
+        for (const raw of items) {
           const parsed = FeedRow.safeParse(raw);
           if (!parsed.success) continue;
           const key = keyOf(spaceId, parsed.data._id);
@@ -494,13 +489,13 @@ function rowOf(doc: CandidateDoc, verdict: StampVerdict, evidence: readonly Peer
  * server): one retry straight after another for the scope's whole figure, with no I/O between them for a timer to fire in. A
  * report is a request, and a request's read has its deadline as an OPTION of the read, like every other read a door makes.
  */
-async function readCandidates(spaceId: string, self: string, peerIds: readonly string[], after: string | undefined, take: number, clock: RunClock): Promise<IdPage<CandidateDoc>> {
+async function readCandidates(spaceId: string, peerIds: readonly string[], after: string | undefined, take: number, clock: RunClock): Promise<IdPage<CandidateDoc>> {
   if (peerIds.length === 0) return { rows: [], end: true };
-  const filter = {
+  // The rows written here (`sync/written-here.ts`: no peer delivered them, and they are authored here or have no author), which a peer holds a base for.
+  const filter = andPredicates({
     ...LIVE_FILE_ROW,
-    'author.instanceId': self,
     $or: peerIds.map(p => ({ [syncBasePath(p)]: { $exists: true } })),
-  };
+  }, writtenHereFilter()) ?? {};
   const projection: Record<string, 1> = {
     _id: 1, seq: 1, createdAt: 1, updatedAt: 1, sha256: 1, description: 1, descriptionSource: 1, tags: 1, properties: 1,
     ...Object.fromEntries(peerIds.map(p => [syncBasePath(p), 1] as const)),
@@ -512,9 +507,9 @@ async function readCandidates(spaceId: string, self: string, peerIds: readonly s
 }
 
 /** The ids among `ids` that are still live files of this instance: a row deleted or replaced since it was read is not reported. */
-async function stillCandidates(spaceId: string, self: string, ids: readonly string[], clock: RunClock): Promise<Set<string>> {
+async function stillCandidates(spaceId: string, ids: readonly string[], clock: RunClock): Promise<Set<string>> {
   const rows = await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'files'), ids, {}, {
-    filter: { ...LIVE_FILE_ROW, 'author.instanceId': self }, timeLeft: () => readBudgetMs(clock),
+    filter: andPredicates(LIVE_FILE_ROW, writtenHereFilter()) ?? {}, timeLeft: () => readBudgetMs(clock),
   });
   return new Set(rows.keys());
 }
@@ -545,7 +540,7 @@ export async function fileStampReport(
   const clock: RunClock = { startedMs, deadlineMs, now, signal: AbortSignal.timeout(deadlineMs) };
 
   const peerIds = peerIdsCarryingSpace(spaceId).filter(id => id !== self);
-  const read = await readCandidates(spaceId, self, peerIds, after, limit + 1, clock);
+  const read = await readCandidates(spaceId, peerIds, after, limit + 1, clock);
   // `take` is `limit + 1`, so a page that is not the end holds the one extra row that says more exist.
   const truncated = !read.end;
   const page = truncated ? read.rows.slice(0, limit) : read.rows;
@@ -570,7 +565,7 @@ export async function fileStampReport(
   }
 
   // A file deleted (or replaced by another author's) between the read and the verdict is not reported.
-  const live = await stillCandidates(spaceId, self, page.map(d => String(d._id)), clock);
+  const live = await stillCandidates(spaceId, page.map(d => String(d._id)), clock);
   const rows: FileStampRow[] = [];
   for (const d of page) {
     if (!live.has(String(d._id))) continue;

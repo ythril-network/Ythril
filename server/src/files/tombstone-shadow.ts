@@ -18,7 +18,7 @@ import { StoreTimeout } from '../db/write-timeout.js';
 import { parentOfSidecar } from './moved-paths.js';
 
 /** The tombstones this instance holds for a path: what an arriving file is compared with. */
-export interface HeldFileTombstone { _id: string; rowSeq?: number; contentHash?: string; issuer?: string; storedVia?: string }
+export interface HeldFileTombstone { _id: string; rowSeq?: number; contentHash?: string; issuer?: string; storedVia?: string; issuedHere?: boolean }
 
 /** The rows of a by-path read of tombstones, grouped by path, as the comparison reads them. */
 export function heldByPath(rows: ReadonlyArray<HeldFileTombstone & { path: string }>): Map<string, HeldFileTombstone[]> {
@@ -26,7 +26,9 @@ export function heldByPath(rows: ReadonlyArray<HeldFileTombstone & { path: strin
   for (const t of rows) {
     if (!out.has(t.path)) out.set(t.path, []);
     out.get(t.path)!.push({ _id: t._id, ...(t.rowSeq !== undefined ? { rowSeq: t.rowSeq } : {}), ...(t.contentHash !== undefined ? { contentHash: t.contentHash } : {}),
-      ...(t.issuer !== undefined ? { issuer: t.issuer } : {}), ...(t.storedVia !== undefined ? { storedVia: t.storedVia } : {}) });
+      ...(t.issuer !== undefined ? { issuer: t.issuer } : {}), ...(t.storedVia !== undefined ? { storedVia: t.storedVia } : {}),
+      // The local mark the file-link repair asks (`isIssuedHere`): dropped here, no tombstone would ever read as issued here and the repair would keep every link.
+      ...(t.issuedHere !== undefined ? { issuedHere: t.issuedHere } : {}) });
   }
   return out;
 }

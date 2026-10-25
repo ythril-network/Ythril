@@ -148,7 +148,7 @@ export function applyFileTombstoneAck(
   ackedAt: string | null,
 ): boolean {
   if (ackedAt === null) return false;
-  return setMemberSpaceMark(cfg, peerInstanceId, spaceId, 'lastFileTombstoneAckedAt', current => foldAckedAt(current, ackedAt));
+  return setMemberSpaceMark(cfg, peerInstanceId, spaceId, 'lastFileTombstoneAckedAt', 'every-network', current => foldAckedAt(current, ackedAt));
 }
 
 /*

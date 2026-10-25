@@ -215,7 +215,7 @@ export async function applyPeerFileTombstones(
       else await removeOneStoredFileHere(localSpaceId, a.key, a.abs);
       rows.delete(a.key); // a second tombstone for the path in this page finds it gone
       removed[verdict.ground] += 1;
-      syncTombstonesAppliedTotal.labels({ kind: 'file', ground: verdict.ground }).inc();
+      syncTombstonesAppliedTotal.labels({ kind: 'file', ground: verdict.ground, outcome: 'deleted' }).inc();
       keep.push({ ...kept, ...(typeof target.sha256 === 'string' && target.sha256 !== '' ? { contentHash: target.sha256 } : {}),
         ...(verdict.ground === 'upstream' && delivery.peerInstanceId ? { storedVia: delivery.peerInstanceId } : {}) });
     }

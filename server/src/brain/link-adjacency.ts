@@ -42,7 +42,8 @@ import { col, asFilter } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { distinctStringsOf } from '../db/distinct-strings.js';
 import { getConfig } from '../config/loader.js';
-import { authorRef } from '../config/author.js';
+import { andPredicates } from '../db/and-predicates.js';
+import { writtenHereFilter } from '../sync/written-here.js';
 import { toDocId } from '../util/paths.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkDoc } from '../config/types.js';
@@ -402,10 +403,10 @@ export async function fileLinkSourcesOf(spaceId: string, path: string, kind: 'fi
 }
 
 /**
- * The link rows starting from any of the file ids `froms` that THIS instance wrote — an author that is this instance's, or none (a row
- * written before authorship was stamped is this instance's, as a file row with no author is, `derived-fields.ts`) — as the id and seq
- * a removal's tombstone needs. A link another instance wrote is not here: it is that instance's, and its deletion is that instance's
- * to make (ADR 05).
+ * The link rows starting from any of the file ids `froms` that THIS instance wrote — written here, by the one predicate
+ * (`sync/written-here.ts`: no peer delivered it, and it is authored here or has no author, as a file row with no author is, `derived-fields.ts`) —
+ * as the id and seq a removal's tombstone needs. A link another instance wrote, or one a peer delivered, is not here: it is that instance's (or
+ * that peer's), and its deletion is theirs to make (ADR 05, which asks delivery as it asks authorship).
  *
  * `createdUntil` ends the read at an instant: a link written AFTER it is not the one a delete is taking, and is not returned. The
  * second pass of a delete, run once the file's row is gone, asks with the instant the row went, so it catches a link written while
@@ -415,13 +416,11 @@ export async function fileLinksThisInstanceWrote(
   spaceId: string, froms: readonly string[], { createdUntil }: { createdUntil?: string } = {},
 ): Promise<Array<{ _id: string; seq: number | undefined }>> {
   if (froms.length === 0) return [];
-  const self = authorRef().instanceId ?? null;
   const rows = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
-    .find(asFilter<LinkDoc>({
+    .find(asFilter<LinkDoc>(andPredicates({
       fromKind: 'file', from: { $in: [...froms] },
-      $or: [{ author: { $exists: false } }, { 'author.instanceId': self }],
       ...(createdUntil === undefined ? {} : { createdAt: { $lte: createdUntil } }),
-    }), { projection: { _id: 1, seq: 1 } }).toArray() as Array<{ _id: string; seq?: number }>;
+    }, writtenHereFilter()) as never), { projection: { _id: 1, seq: 1 } }).toArray() as Array<{ _id: string; seq?: number }>;
   return rows.map(r => ({ _id: r._id, seq: r.seq }));
 }
 

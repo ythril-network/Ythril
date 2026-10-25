@@ -1,13 +1,14 @@
 /**
  * How far each peer has been served — the missing half of the sync watermarks.
  *
- * `NetworkMember.lastSeqReceived` and `.lastSeqPushed` record OUR position in a peer's data. Nothing
- * recorded the position a peer reached in OURS: every pull handler reads `sinceSeq` off the query string and
- * throws it away. That one missing write is why tombstones could never be pruned.
+ * `NetworkMember.lastPosReceived` and `.lastPosPushed` record OUR position in a peer's data. Nothing
+ * recorded the position a peer reached in OURS: every pull handler reads where the puller starts off the query string and
+ * throws it away. That one missing write is why tombstones could never be pruned. 6.0 records it as `lastPosServed`, in the position
+ * stream tombstones share with the records.
  *
  * ── Why a served watermark and not a retention window ────────────────────────────────────────────────────
  *
- * Tombstones are served by `seq > sinceSeq` (see `brain/tombstones.ts` and `GET /api/sync/tombstones`), so a
+ * Tombstones are served by position (see `brain/tombstones.ts` and `GET /api/sync/tombstones`), so a
  * peer that was away resumes from its own watermark and pulls every tombstone above it. Age has nothing to
  * do with it. Delete a tombstone by age and a peer offline longer than the window comes back, never sees the
  * deletion, and pushes its live copy — turning a retention fix into "deleted records keep coming back",
@@ -33,7 +34,7 @@ import { recordPositions } from './record-position-stream.js';
 export interface ServedMember {
   instanceId: string;
   label?: string;
-  lastSeqServed?: Record<string, number>;
+  lastPosServed?: Record<string, number>;
 }
 
 export type TombstoneFloor =
@@ -138,7 +139,7 @@ export function tombstoneFloor(
 
   let floor = Number.MAX_SAFE_INTEGER;
   for (const m of members) {
-    const served = m.lastSeqServed?.[spaceId];
+    const served = m.lastPosServed?.[spaceId];
     if (typeof served !== 'number' || !Number.isFinite(served)) {
       return { prune: false, reason: 'member-never-pulled', blockedBy: m.label ?? m.instanceId };
     }
@@ -158,18 +159,18 @@ export function tombstoneFloorForSpace(cfg: Config, spaceId: string): TombstoneF
 }
 
 /**
- * Fold a newly observed `sinceSeq` into a member's served watermark.
+ * Fold a newly observed position into a member's served mark.
  *
  * Monotonic by `Math.max`: a peer may legitimately re-request from an older position (a retry, a restarted
  * pull, a peer that lost its own watermark), and taking that at face value would drop the floor and re-serve
- * tombstones we had already dropped. It also must never move on a malformed value — `sinceSeq` arrives as a
+ * tombstones we had already dropped. It also must never move on a malformed value — the position arrives as a
  * query-string integer from a remote caller, and `parseInt('abc')` is `NaN`, which compares false against
  * everything and would otherwise poison the record.
  *
  * Returns the new value, or `null` when nothing should be written — so the caller can skip the config save
  * entirely on the overwhelmingly common no-change path.
  */
-export function foldServedSeq(current: number | undefined, observed: number): number | null {
+export function foldServedPosition(current: number | undefined, observed: number): number | null {
   if (!Number.isFinite(observed) || !Number.isInteger(observed) || observed <= 0) return null;
   if (current !== undefined && Number.isFinite(current) && current >= observed) return null;
   return observed;
@@ -201,41 +202,47 @@ export async function ownPositionMark(spaceId: string, value: number): Promise<n
 }
 
 /**
- * Record that `peerInstanceId` has pulled our tombstones for `spaceId` from `sinceSeq`.
+ * Record that `peerInstanceId` has pulled our tombstones for `spaceId` from `position`, cut at this instance's own settled cap
+ * (`ownPositionMark`).
  *
  * Called from the tombstone pull handler on the hot path, so it is deliberately cheap and silent: it writes
  * only when the value actually moves, and it uses the same coalesced `saveConfigSoon` as the pull watermark
- * one layer up. Losing the write on a crash costs a prune cycle, never a tombstone.
+ * one layer up. Losing the write on a crash costs a prune cycle, never a tombstone. It never throws: a read the peer is owed is
+ * never turned into a failure by the bookkeeping of it.
  *
  * A caller with no peer identity (an admin token, the UI, a manual curl) records nothing. It has no member
  * entry to write to, and treating a local read as a peer having caught up is exactly the mistake that would
  * drop tombstones a real peer still needs.
  */
-export function recordServedSeq(
+export async function recordServedPosition(
   peerInstanceId: string | undefined,
   spaceId: string,
-  sinceSeq: number,
-): void {
+  position: number,
+): Promise<void> {
+  if (!peerInstanceId) return;
+  const own = await ownPositionMark(spaceId, position);
+  if (own === null) return;
   let cfg: Config;
   try { cfg = getConfig(); } catch { return; }   // pre-setup
-  if (applyServedSeq(cfg, peerInstanceId, spaceId, sinceSeq)) saveConfigSoon(cfg);
+  if (applyServedPosition(cfg, peerInstanceId, spaceId, own)) saveConfigSoon(cfg);
 }
 
 /**
- * Write the watermark into a config object; returns whether anything changed.
+ * Write the served mark into a config object; returns whether anything changed.
  *
  * Separated from the config read and the save so the decision is testable against a plain object — the branches
  * that matter (an unknown peer, a network that does not carry the space, a value that must not move) are all
  * here, and none of them needs a config file or a running instance.
  *
  * Mutates `cfg` in place, and takes no `await`, so it cannot be holding a detached reference across a reload
- * (the mechanism behind #346/#348/#353/#604) — `setMemberSpaceMark` is the loop, shared with the other per-space marks.
+ * (the mechanism behind #346/#348/#353/#604) — `setMemberSpaceMark` is the loop, shared with the other per-space marks. The served mark
+ * belongs to the peer TOKEN, not to a network, so it is written on every network that carries the space.
  */
-export function applyServedSeq(
+export function applyServedPosition(
   cfg: Config,
   peerInstanceId: string | undefined,
   spaceId: string,
-  sinceSeq: number,
+  position: number,
 ): boolean {
-  return setMemberSpaceMark(cfg, peerInstanceId, spaceId, 'lastSeqServed', current => foldServedSeq(current, sinceSeq));
+  return setMemberSpaceMark(cfg, peerInstanceId, spaceId, 'lastPosServed', 'every-network', current => foldServedPosition(current, position));
 }

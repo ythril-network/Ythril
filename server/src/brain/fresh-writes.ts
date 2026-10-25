@@ -128,7 +128,9 @@ export async function matchFreshWrites(
 
     const [facet] = await col(collName).aggregate<{ inWindow: Array<{ n: number }>; rows: Array<{ _id: string; dot: number; norm: number; dims: number }> }>([
       // Newest first, capped, BEFORE anything expensive. This is the index walk that keeps the cost flat.
-      { $sort: { seq: -1 } },
+      // Landing order, served by the non-partial `(pos, _id)` index (a partial one is ignored by a sort that names no predicate, and this scan swallows
+      // the sort-memory failure it would raise and answers nothing).
+      { $sort: { pos: -1 } },
       { $limit: FRESH_SCAN_CAP },
       // Then the window, and then the vector math — in that order, so a quiet space pays for neither.
       // `embedding` is absent on a record still queued for embedding, and on one excluded from vector
