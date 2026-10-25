@@ -53,6 +53,14 @@ function sendRetryAfter(res: express.Response, retryAfterSeconds: number | undef
 }
 
 /**
+ * The `503` a sender reads as the EDGES FAMILY held (`edge_identity_building`, Q-624): a page of fork edges met a space whose identity index is still the full one.
+ * One sender for the push doors (`sendCaughtFailure`) and for the app's error handler, which answers the import route's.
+ */
+export function sendEdgeIdentityBuilding(res: express.Response, err: EdgeIdentityBuilding): void {
+  res.status(503).json({ error: err.message, code: err.code, retryable: true });
+}
+
+/**
  * Put the answer for a write whose record landed and whose connections did not on the wire (`Q-170`): the cause's status,
  * `written`, no `Retry-After` and `retryable: false` — and the write audited as a write of the record it stored, which a
  * create's path cannot name (`req.auditEntryId`, read by `audit/middleware.ts`).
@@ -109,7 +117,7 @@ export function sendCaughtFailure(res: express.Response, where: string, err: unk
   // A space that owes its positions answers the 503 a sender reads as HELD (`positions_building`), whatever door asked.
   if (err instanceof PositionsBuilding) { res.status(503).json({ error: err.message, code: err.code, retryable: true }); return; }
   // A page of fork edges for a space still rebuilding its edge identity index: the 503 a sender reads as the EDGES FAMILY held (`edge_identity_building`).
-  if (err instanceof EdgeIdentityBuilding) { res.status(503).json({ error: err.message, code: err.code, retryable: true }); return; }
+  if (err instanceof EdgeIdentityBuilding) { sendEdgeIdentityBuilding(res, err); return; }
   const stamp = writeRefusalAnswer(err, 'update');
   if (stamp && (err instanceof RecordVersionAtCeiling || err instanceof PositionClockUnusable || err instanceof PositionsSeedUnavailable)) {
     res.status(stamp.status).json(stamp.body);

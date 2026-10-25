@@ -22,6 +22,8 @@
  *   it is not failing), and the cycle after the last step fetches the edges family and only then ends it;
  * - **the third step needs \`{ from: 1 }\`**: the partial index serves only reads that name \`forkOf: null\`, so dropping the full one before
  *   \`{ from: 1 }\` stands would leave every from-prefixed read scanning; the step refuses, and the full index stands;
+ * - **the import door** holds a restore page of fork edges the same way (`EdgeIdentityBuilding`, which the route answers `503 edge_identity_building`): the
+ *   families before it stay, nothing of the edges is written, and a re-run after the swap lands the rest;
  * - **after the last step** the same page lands: the fork edge is stored beside its subject on both doors;
  * - **the owed job** (\`runEdgeIdentityOwedTick\`, \`spaces/edge-identity-owed\`) builds the swap for a space still on the full index, and
  *   \`ythril_edge_identity_building_spaces\` goes 1 to 0.
@@ -252,5 +254,25 @@ describe('the edge identity index is swapped without a gap (Q-624)', { skip }, (
     assert.equal(await gauge(), 1, 'the tick that built the swap did not report the space as building');
     await owed.runEdgeIdentityOwedTick();
     assert.equal(await gauge(), 0, 'the gauge did not return to 0 once the space was ready');
+  });
+
+  it('an import of a fork edge into a space on the full index is held, the families before it stay, and it lands after the swap (design 5.4, the import door)', async () => {
+    const { importDocuments } = await import('../../server/dist/api/admin-import.js');
+    const m = await import('../../server/dist/spaces/edge-identity-index.js');
+    await door.reset();
+    await to56State();
+    await door.coll(S, 'edges').createIndex({ from: 1 });
+    await door.coll(S, 'edges').insertOne(edge('e1', 5, 'mine'));
+    const rowId = await forkIdOf('edges', 'e1', 5, edge('e1', 5, 'theirs'));
+    const forkRow = { ...edge(rowId, 5, 'theirs'), forkOf: 'e1', forkAt: 5 };
+    const fact = build.fact(S, 'import-fact', 7, { author: { ...PEER_AUTHOR } });
+    await assert.rejects(importDocuments(S, { facts: [fact], edges: [forkRow] }),
+      (e) => e?.code === 'edge_identity_building' && e?.name === 'EdgeIdentityBuilding', 'the import of a fork edge into a space on the full index was not held');
+    assert.ok(await door.coll(S, 'facts').findOne({ _id: 'import-fact' }), 'the family before the held one did not stay');
+    assert.equal(await door.coll(S, 'edges').countDocuments({}), 1, 'the held import wrote an edge');
+    await m.ensurePartialEdgeIdentity(S);
+    const done = await importDocuments(S, { edges: [forkRow] });
+    assert.equal(done.results.edges.inserted, 1, JSON.stringify(done.results.edges));
+    assert.equal((await door.coll(S, 'edges').findOne({ _id: rowId }))?.forkOf, 'e1');
   });
 });

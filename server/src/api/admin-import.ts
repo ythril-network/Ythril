@@ -69,6 +69,8 @@ import { PageStoppedError } from '../sync/page-stopped.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
+import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
+import { EdgeIdentityBuilding } from '../util/errors.js';
 
 /**
  * What an import may carry: every REPLICATED family, by collection name — the same list the export streams, so
@@ -189,6 +191,9 @@ async function importInto(spaceId: string, payload: Record<string, unknown>): Pr
       const held = winners.get(arrivalId(doc));
       if (held === undefined || isNewerCopy((doc as { seq: number }).seq, held['seq'] as number)) winners.set(arrivalId(doc), doc as Record<string, unknown> & { _id: string });
     }
+    // A fork edge shares its subject's five identity fields: a space whose identity index is still the full one cannot hold it. The import answers the push
+    // doors' `503 edge_identity_building` (design 5.4) and the families before it stay, because a restore is idempotent and a re-run lands the rest.
+    if (t === 'edges' && [...winners.values()].some(d => typeof d['forkOf'] === 'string') && !(await edgeIdentityAdmitsForks(spaceId))) throw new EdgeIdentityBuilding(spaceId);
     const watch = await watchArrivals(spaceId, t, [...winners.values()], 'import');
 
     let out: ArrivalOutcome;
