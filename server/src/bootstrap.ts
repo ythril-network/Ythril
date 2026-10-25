@@ -129,6 +129,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   // The work every space that owes its positions needs (the first carry, a repair, a failed index build), retried every minute; retries the detector while it is held.
   const { startPositionsOwedJob } = await import('./sync/positions-owed.js');
   startPositionsOwedJob();
+  // The swap of a space's FULL edge identity index for the partial one that lets a fork edge be stored (Q-624): retried every minute until each space has it.
+  const { startEdgeIdentityOwedJob } = await import('./spaces/edge-identity-owed.js');
+  startEdgeIdentityOwedJob();
   const { startSyncScheduler } = await import('./sync/scheduler.js');
   startSyncScheduler();
   // Names a hold that has stalled while it is still open (`Q-200`); the release line names it when it ends.

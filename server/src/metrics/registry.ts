@@ -1497,6 +1497,19 @@ positionsBuildingSpaces.labels({ kind: 'carry' }).set(0);
 positionsBuildingSpaces.labels({ kind: 'repair' }).set(0);
 
 /**
+ * How many spaces are not ready to store a fork edge right now: their edge identity index is still the full one, or the partial one is not confirmed
+ * (`spaces/edge-identity-index.ts`). Those spaces answer `503 edge_identity_building` to a push of a fork edge and hold the edges family of a pull, and nothing else
+ * (Q-624, design rev 4 section 5.4). Set by the owed job (`spaces/edge-identity-owed.ts`) at each tick. A value above 0 for more than a tick or two is a build that
+ * fails: the reporter's line names the space (unit `edge-identity`).
+ */
+export const edgeIdentityBuildingSpaces = new Gauge({
+  name: 'ythril_edge_identity_building_spaces',
+  help: 'Spaces whose edge identity index is not yet the partial one (503 edge_identity_building to a push of a fork edge, the edges family held on a pull)',
+  registers: [register],
+});
+edgeIdentityBuildingSpaces.set(0);
+
+/**
  * Rows the first carry could NOT give a position because they carry no numeric version (pre-4.0 file rows): they were never served by a seq pager and are
  * not served by the position pager. Counted per collection each time a carry of a space ends, so an operator sees what the carry left out (design rev 8 §3).
  */

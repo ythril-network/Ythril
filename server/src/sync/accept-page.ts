@@ -62,12 +62,14 @@ import { TOMBSTONE_TYPE_OF } from '../config/types.js';
 import type { LinkageCheck } from './linkage-check.js';
 import { writeArrivals, warnArrivalsNotStored, convergeFileStamps, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
 import { admitArrivals } from './arrival-shape.js';
-import { planArrivals, bodyHashesOf, isForkingFamily, FORKING_FAMILIES, MAX_FORK_DEPTH, MAX_FORKS_PER_RECORD, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
-import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from './replicated-families.js';
+import { planArrivals, type ArrivalPlan, type StoredCopy, bodyHashesOf, isForkingFamily, FORKING_FAMILIES, MAX_FORK_DEPTH, MAX_FORKS_PER_RECORD, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
+import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from './push-reads.js';
 import { watchArrivals, recordedOf, sayRecorded, summarise, type ArrivalWatch, type RecordedSummary } from './arrival-recording.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { assertPositionsReady } from './positions-ready.js';
+import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
+import { EdgeIdentityBuilding } from '../util/errors.js';
 import { syncInvalidForksTotal, recordsFailingTheirSchema } from '../metrics/registry.js';
 
 type Arrived = Record<string, unknown> & ArrivalDoc;
@@ -161,22 +163,46 @@ export async function acceptArrivingPage(
       const tombstones = await readPageTombstones(spaceId, REPLICATED_FAMILIES
         .filter(f => TOMBSTONE_TYPE_OF[f.collection] !== undefined).flatMap(f => sound[f.payloadKey].flatMap(s => (s.doc.forkOf === undefined ? [s.doc._id] : [s.doc._id, s.doc.forkOf]))));
       const allowedTypes = door === 'push' ? getAllowedChronoTypes(getConfig().spaces.find(sp => sp.id === spaceId)?.meta) : undefined;
+      // A family's plan, made once per page: the edges family is planned ahead of every write when the space cannot store a fork edge yet (below), and the loop reuses it.
+      const plans = new Map<PayloadKey, Promise<{ stored: Map<string, StoredCopy>; plan: ArrivalPlan<Arrived> }>>();
+      const planOf = (key: PayloadKey, collection: ReplicatedFamily['collection']) => {
+        const done = plans.get(key);
+        if (done) return done;
+        const planned = (async () => {
+          const kind = collection as PlannedFamily;
+          const tombType = TOMBSTONE_TYPE_OF[collection];
+          const docs: Arrived[] = sound[key].map(s => s.doc);
+          const stored = await readPushStored(spaceId, kind, docs);
+          // A stored copy compared at an equal seq that fails its own schema is hashed raw; counted, so an operator can see how many there are (design section 2).
+          for (const copy of stored.values()) if (copy.bodyHash && !copy.bodyHash.normalised) recordsFailingTheirSchema.inc({ family: kind });
+          // One body hash per document per page: the candidate selection, the plan and the writer's read-back all ask it.
+          const hashOf = bodyHashesOf(kind);
+          const plan = planArrivals(docs, {
+            kind, door, stored, deliveredBy, tombstones: (tombType === undefined ? undefined : tombstones.get(tombType)) ?? new Map(), hashOf,
+            ...(kind === 'chrono' ? { allowedTypes } : {}),
+            ...(isForkingFamily(kind) ? await readForkContext(spaceId, kind, docs, stored, hashOf) : {}),
+          });
+          return { stored, plan };
+        })();
+        plans.set(key, planned);
+        return planned;
+      };
+      // A page that carries or plans a fork edge waits for a space whose identity index still counts fork rows: asked AFTER planning and BEFORE any write of the page
+      // (design 5.4), so the held page leaves nothing half landed, and the sender keeps its copy and offers the page again.
+      if (sound.edges.length > 0 && !(await edgeIdentityAdmitsForks(spaceId))) {
+        const { plan } = await planOf('edges', 'edges');
+        const storesAFork = plan.forks.length > 0
+          || sound.edges.some((s, k) => s.doc.forkOf !== undefined && (plan.verdicts[k] === 'upserted' || plan.verdicts[k] === 'updated' || plan.verdicts[k] === 'inserted'));
+        if (storesAFork) {
+          log.warn(`${peerText(where)}: space '${peerText(spaceId)}': the edges of this page are held: this space is rebuilding its edge identity index and cannot store a fork edge yet`);
+          throw new EdgeIdentityBuilding(spaceId);
+        }
+      }
       for (const { payloadKey: key, collection } of REPLICATED_FAMILIES) {
         const items = sound[key];
         if (items.length === 0) continue;
-        const kind = collection as PlannedFamily;
         const tombType = TOMBSTONE_TYPE_OF[collection];
-        const docs = items.map(s => s.doc);
-        const stored = await readPushStored(spaceId, kind, docs);
-        // A stored copy compared at an equal seq that fails its own schema is hashed raw; counted, so an operator can see how many there are (design section 2).
-        for (const copy of stored.values()) if (copy.bodyHash && !copy.bodyHash.normalised) recordsFailingTheirSchema.inc({ family: kind });
-        // One body hash per document per page: the candidate selection, the plan and the writer's read-back all ask it.
-        const hashOf = bodyHashesOf(kind);
-        const plan = planArrivals(docs, {
-          kind, door, stored, deliveredBy, tombstones: (tombType === undefined ? undefined : tombstones.get(tombType)) ?? new Map(), hashOf,
-          ...(kind === 'chrono' ? { allowedTypes } : {}),
-          ...(isForkingFamily(kind) ? await readForkContext(spaceId, kind, docs, stored, hashOf) : {}),
-        });
+        const { stored, plan } = await planOf(key, collection);
         const res = results[key];
         plan.verdicts.forEach((v, k) => { res.verdicts[items[k]!.index] = v; res.forkIds[items[k]!.index] = plan.forkIds[k]; });
         for (const u of plan.unverifiable) res.unverifiable[items[u.index]!.index] = true;
@@ -277,6 +303,8 @@ export async function acceptArrivingPage(
       for (const family of FORKING_FAMILIES) {
         const ofFamily = forks.filter(f => f.key === family);
         if (ofFamily.length === 0) continue;
+        // A divergence the write found meanwhile (Q-232) forks an edge too: the same hold as the page's (above), asked again because the space may have been ready then.
+        if (family === 'edges' && !(await edgeIdentityAdmitsForks(spaceId))) throw new EdgeIdentityBuilding(spaceId);
         // A fork is a new record under an id nothing holds, so there is no copy it replaces; looked at before it is written like any other.
         const forkWatch = await watchArrivals(spaceId, family, ofFamily.map(f => f.doc), door);
         // A fork is a LOCAL version of a divergent copy, stamped above the record it forks from (the stored copy, at the arriving seq):

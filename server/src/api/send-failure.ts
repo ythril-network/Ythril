@@ -32,7 +32,7 @@ import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { spaceActAnswer } from '../spaces/space-act-answer.js';
 import { writeRefusalAnswer } from '../brain/write-validation.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
-import { PositionClockUnusable, PositionsSeedUnavailable, PositionsBuilding } from '../util/errors.js';
+import { PositionClockUnusable, PositionsSeedUnavailable, PositionsBuilding, EdgeIdentityBuilding } from '../util/errors.js';
 
 /**
  * Put a store failure's answer on the wire: status, `Retry-After` when the answer is retryable, and the body —
@@ -108,6 +108,8 @@ export function sendCaughtFailure(res: express.Response, where: string, err: unk
   // A local write's stamp refused it: the version is at the ceiling (409, a code), or the clock or the position seed will not let it be taken (503).
   // A space that owes its positions answers the 503 a sender reads as HELD (`positions_building`), whatever door asked.
   if (err instanceof PositionsBuilding) { res.status(503).json({ error: err.message, code: err.code, retryable: true }); return; }
+  // A page of fork edges for a space still rebuilding its edge identity index: the 503 a sender reads as the EDGES FAMILY held (`edge_identity_building`).
+  if (err instanceof EdgeIdentityBuilding) { res.status(503).json({ error: err.message, code: err.code, retryable: true }); return; }
   const stamp = writeRefusalAnswer(err, 'update');
   if (stamp && (err instanceof RecordVersionAtCeiling || err instanceof PositionClockUnusable || err instanceof PositionsSeedUnavailable)) {
     res.status(stamp.status).json(stamp.body);

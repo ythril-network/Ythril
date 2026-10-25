@@ -53,7 +53,7 @@ import type { SpaceTransfer } from './space-transfer-fence.js';
 const zero = (): SyncCounts => ({ facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 });
 
 /** Why a space was not exchanged with a member this cycle: the hold's reason, or the member's own refusal. */
-export type HeldSpace = { spaceId: string; reason: string };
+export type HeldSpace = { spaceId: string; reason: string; /** The families of the space that are held, when the hold is theirs and not the space's (`edge_identity_building`: `['edges']`). */ families?: string[] };
 
 /** What one member's exchange of a network's spaces moved, and what it did not move and why. */
 export interface MemberExchange {
@@ -73,6 +73,8 @@ export interface MemberExchange {
 const HELD_BY_THE_MEMBER = 'held by the member';
 /** The reason a space THIS instance owes the positions of is listed under (its first carry or a repair has not finished). */
 const POSITIONS_BUILDING_REASON = 'positions building';
+/** The reason a family held (by this instance as a receiver, or by the peer that answered `edge_identity_building`) is listed under, beside the family's name. */
+const FAMILY_HELD_REASON = 'edge identity rebuilding';
 
 /** One turn: the fence's transfer, plus the first hold or decline a peer answered during it. */
 class SpaceTurn implements ExchangeTurn {
@@ -80,7 +82,8 @@ class SpaceTurn implements ExchangeTurn {
   constructor(private readonly transfer: SpaceTransfer) {}
   get signal(): AbortSignal { return this.transfer.signal; }
   mayContinue(): boolean { return this.refusal === null && this.transfer.mayContinue(); }
-  refusedBy(verdict: TransferRefusal): void { if (verdict !== 'failed' && this.refusal === null) this.refusal = verdict; }
+  // A `family-held` answer holds ONE family and is decided by the family's own transfer (`stopTransfer(..., 'held')`); it never ends the turn.
+  refusedBy(verdict: TransferRefusal): void { if (verdict !== 'failed' && verdict !== 'family-held' && this.refusal === null) this.refusal = verdict; }
   /** Stopped by an act on the space (the signal) — as opposed to a peer's refusal. */
   get cut(): boolean { return !this.transfer.mayContinue(); }
 }
@@ -136,6 +139,8 @@ export async function exchangeSpacesWithMember(
     for (const k of Object.keys(out.pulled) as (keyof SyncCounts)[]) { out.pulled[k] += turn.pulled[k]; out.pushed[k] += turn.pushed[k]; }
     out.incomplete.push(...turn.incomplete); out.capped.push(...turn.capped); out.refused.push(...turn.refused); out.recorded.push(...turn.recorded);
     if (turn.held) out.held.push({ spaceId, reason: turn.held });
+    // A hold that is ONE family's (the edges family while an edge identity index is rebuilt) is listed with the family's name, beside the other held spaces.
+    if (turn.heldFamilies.length > 0) out.held.push({ spaceId, reason: `${turn.heldFamilies.join(', ')} held: ${FAMILY_HELD_REASON}`, families: turn.heldFamilies });
     if (turn.declined) {
       out.declined.push(spaceId);
       recordDecline(net.id, member.instanceId, toNetworkId.get(spaceId) ?? spaceId);
@@ -144,14 +149,14 @@ export async function exchangeSpacesWithMember(
   return out;
 }
 
-type Turn = Omit<MemberExchange, 'held' | 'declined'> & { held?: string; declined?: boolean };
+type Turn = Omit<MemberExchange, 'held' | 'declined'> & { held?: string; declined?: boolean; heldFamilies: string[] };
 
 /** One space's turn with one member: meta, records, file rows, files and merkle, in the fence, stopped by an act or a refusal. */
 async function exchangeSpaceWithMember(
   net: NetworkConfig, member: NetworkMember, spaceId: string, remoteSpaceId: string,
   headers: Record<string, string>, fetchOpts: () => RequestInit, batchFetchOpts: () => RequestInit, slot: RereadSlot,
 ): Promise<Turn> {
-  const out: Turn = { pulled: zero(), pushed: zero(), incomplete: [], capped: [], refused: [], recorded: [] };
+  const out: Turn = { pulled: zero(), pushed: zero(), incomplete: [], capped: [], refused: [], recorded: [], heldFamilies: [] };
   // Skip spaces that don't exist in local config — prevents orphan data and collection access for space ids that were
   // registered on the network but never created locally.
   if (!configuredSpaces().some(s => s.id === spaceId)) {
@@ -185,7 +190,9 @@ async function exchangeSpaceWithMember(
         if (pc.recorded.records > 0) out.recorded.push({ spaceId, ...pc.recorded });
         if (pc.stoppedEarly.length > 0) out.incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')}`);
         if (pc.capped.length > 0) out.capped.push(`space '${spaceId}' receive: ${pc.capped.join(', ')} read up to the cycle's cap and continue next cycle`);
-        pullEnded = pc.stoppedEarly.length === 0 && pc.capped.length === 0 && turn.mayContinue();
+        for (const label of pc.held) if (!out.heldFamilies.includes(label)) out.heldFamilies.push(label);
+        // A held family is a family not fetched: a full re-read that ended here would never read what it holds (S6).
+        pullEnded = pc.stoppedEarly.length === 0 && pc.capped.length === 0 && pc.held.length === 0 && turn.mayContinue();
       }
       // A drifted file row is behind the watermark the ordinary pull starts from; a merkle divergence owes it a re-read.
       if (turn.mayContinue()) await rereadFileMeta({ member, spaceId, remoteSpaceId, networkId: net.id, requestInit: batchFetchOpts, turn });
@@ -196,7 +203,8 @@ async function exchangeSpaceWithMember(
       if (pc.stoppedEarly.length > 0) out.incomplete.push(`space '${spaceId}' push: ${pc.stoppedEarly.join(', ')}`);
       if (pc.capped.length > 0) out.capped.push(`space '${spaceId}' push: ${pc.capped.join(', ')} sent up to the cycle's bound and continue next cycle`);
       if (pc.refused.length > 0) out.refused.push(`space '${spaceId}' push: ${pc.refused.join(', ')}`);
-      pushEnded = pc.stoppedEarly.length === 0 && pc.capped.length === 0 && turn.mayContinue();
+      for (const label of pc.held) if (!out.heldFamilies.includes(label)) out.heldFamilies.push(label);
+      pushEnded = pc.stoppedEarly.length === 0 && pc.capped.length === 0 && pc.held.length === 0 && turn.mayContinue();
     }
     // File manifest, tombstones and bytes — the same direction guards as above. A pulled file is processed where it is recorded.
     if ((shouldPull || shouldPush) && turn.mayContinue()) {
@@ -217,17 +225,17 @@ async function exchangeSpaceWithMember(
     transfer.release();
   }
   if (reread !== undefined && !building && turn.refusal === null && !turn.cut && pullEnded && pushEnded) endFullReread(net.id, member.instanceId, spaceId);
-  if (building) return { ...out, incomplete: [], capped: [], held: POSITIONS_BUILDING_REASON };
-  if (turn.refusal === 'declined') return { ...out, incomplete: [], capped: [], declined: true };
-  if (turn.refusal === 'held') return { ...out, incomplete: [], capped: [], held: HELD_BY_THE_MEMBER };
-  if (turn.cut) return { ...out, incomplete: [], capped: [], held: 'act owed here' };
+  if (building) return { ...out, incomplete: [], capped: [], heldFamilies: [], held: POSITIONS_BUILDING_REASON };
+  if (turn.refusal === 'declined') return { ...out, incomplete: [], capped: [], heldFamilies: [], declined: true };
+  if (turn.refusal === 'held') return { ...out, incomplete: [], capped: [], heldFamilies: [], held: HELD_BY_THE_MEMBER };
+  if (turn.cut) return { ...out, incomplete: [], capped: [], heldFamilies: [], held: 'act owed here' };
   return out;
 }
 
 // ── Pull (ingest from peer) ─────────────────────────────────────────────────
 
 /** What one pull moved, and what it did not: the errors are a failed member, the capped are a pull that is still catching up. */
-type PullCounts = { facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; capped: string[]; recorded: RecordedSummary };
+type PullCounts = { facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; capped: string[]; held: string[]; recorded: RecordedSummary };
 
 /**
  * The receive mark of `member` for `spaceId` on `networkId`, forgotten because the peer's positions went backwards (`head` below the mark): the pull
@@ -302,7 +310,7 @@ async function pullFromPeer(
   const recorded = REPLICATED_FAMILIES.reduce((sum, f) => mergeSummaries(sum, pulled[f.payloadKey]?.recorded), NOTHING_RECORDED);
   const counts = { facts: countOf('facts'), entities: countOf('entities'), edges: countOf('edges'), chrono: countOf('chrono'), links: countOf('links'), recorded };
   // A turn the act or the peer stopped moves no mark: the families it did not finish place the ceiling, and the turn is held.
-  if (!turn.mayContinue()) return { ...counts, stoppedEarly: ['stopped by a hold'], capped: [] };
+  if (!turn.mayContinue()) return { ...counts, stoppedEarly: ['stopped by a hold'], capped: [], held: [] };
 
   /*
    * ONE MARK, SEVEN TRANSFERS — the tombstones and the six families, in one stream. `resolveWatermark` takes the MINIMUM of what every transfer is
@@ -328,13 +336,13 @@ async function pullFromPeer(
       saveConfigSoon(freshCfg);
     }
   }
-  return { ...counts, stoppedEarly, capped: resolution.capped };
+  return { ...counts, stoppedEarly, capped: resolution.capped, held: resolution.held };
 }
 
 // ── Push (upload our changes to peer) ──────────────────────────────────────
 
 /** What one push moved, and what it did not: `stoppedEarly` are faults, `capped` a push that is still catching up, `refused` what the peer discarded. */
-type PushCounts = { facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; capped: string[]; refused: string[] };
+type PushCounts = { facts: number; entities: number; edges: number; chrono: number; links: number; stoppedEarly: string[]; capped: string[]; held: string[]; refused: string[] };
 
 async function pushToPeer(
   member: NetworkMember,
@@ -365,7 +373,7 @@ async function pushToPeer(
   }
   const countOf = (k: PayloadKey): number => pushed[k]?.pushed ?? 0;
   const counts = { facts: countOf('facts'), entities: countOf('entities'), edges: countOf('edges'), chrono: countOf('chrono'), links: countOf('links') };
-  if (!turn.mayContinue()) return { ...counts, stoppedEarly: ['stopped by a hold'], capped: [], refused: [] };
+  if (!turn.mayContinue()) return { ...counts, stoppedEarly: ['stopped by a hold'], capped: [], held: [], refused: [] };
 
   // Same rule as the pull, same function and the same list: the mark is derived from the transfers (`sync/watermark.ts`), tombstones among them.
   const resolution = resolveWatermark({
@@ -393,5 +401,5 @@ async function pushToPeer(
       }
     }
   }
-  return { ...counts, stoppedEarly: resolution.errored.map(label => `${label} stopped early`), capped: resolution.capped, refused };
+  return { ...counts, stoppedEarly: resolution.errored.map(label => `${label} stopped early`), capped: resolution.capped, held: resolution.held, refused };
 }

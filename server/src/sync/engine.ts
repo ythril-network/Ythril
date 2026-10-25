@@ -158,7 +158,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
       // Every family, links included: a hand-written list of five here never summed links into the cycle (Q-59).
       for (const k of Object.keys(pulled) as (keyof SyncCounts)[]) { pulled[k] += counts.pulled[k]; pushed[k] += counts.pushed[k]; }
       for (const r of counts.recorded) recordedBySpace.set(r.spaceId, mergeSummaries(recordedBySpace.get(r.spaceId) ?? NOTHING_RECORDED, r));
-      for (const h of counts.held) (heldBySpace.get(h.spaceId) ?? heldBySpace.set(h.spaceId, { spaceId: h.spaceId, members: [], reason: h.reason }).get(h.spaceId)!).members.push(member.instanceId);
+      for (const h of counts.held) (heldBySpace.get(h.spaceId) ?? heldBySpace.set(h.spaceId, { spaceId: h.spaceId, members: [], reason: h.reason, ...(h.families ? { families: h.families } : {}) }).get(h.spaceId)!).members.push(member.instanceId);
       for (const d of counts.declined) (declinedBySpace.get(d) ?? declinedBySpace.set(d, { spaceId: d, members: [] }).get(d)!).members.push(member.instanceId);
       // A member whose transfers were refused or cut short moved nothing it was asked to move. Counting it as
       // synced recorded `success` for a network that had transferred nothing since it was created (`Q-48`), so

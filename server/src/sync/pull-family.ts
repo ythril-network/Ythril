@@ -20,7 +20,7 @@
  * ## What it reports
  *
  * `deliveredThrough` is what the pager says: the peer's own position this transfer is COMPLETE through (a stop inside a run of equal
- * positions reports the position before it), and `stoppedBy` says whether a stop was the cycle's cap or a fault. A record carries no position
+ * positions reports the position before it), and `stoppedBy` says whether a stop was the cycle's cap, a hold (the edges family while this instance rebuilds its edge identity index) or a fault. A record carries no position
  * on the wire, so nothing here derives one from a record; there is no author guard either — the mark is the peer's position in ITS stream
  * and a relayed record is as much a part of it as an authored one.
  */
@@ -29,10 +29,10 @@ import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js
 import { acceptArrivingPage, type AcceptedFamily } from './accept-page.js';
 import { mergeSummaries, NOTHING_RECORDED, type RecordedSummary } from './arrival-recording.js';
 import { pagePositionRuns } from './position-run-pager.js';
-import { truncationWarn, type TransferOutcome } from './watermark.js';
+import { stopTransfer, truncationWarn, type TransferOutcome } from './watermark.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { log, logSafe, peerText } from '../util/log.js';
-import { PositionsBuilding } from '../util/errors.js';
+import { PositionsBuilding, EdgeIdentityBuilding } from '../util/errors.js';
 import type { LinkageCheck } from './linkage-check.js';
 import type { ReplicatedFamily } from './replicated-families.js';
 import type { NetworkMember, FactDoc } from '../config/types.js';
@@ -99,6 +99,13 @@ export async function pullFamily(o: {
         // A space that owes its positions is held, not failed: the engine reads this instance's own readiness before the turn, and this
         // is the backstop for one that began to owe in between (the throw ends the turn as a hold).
         if (isPositionsBuilding(err)) throw err;
+        // A page of fork edges for a space still rebuilding its edge identity index waits for it (design 5.4): the family stops as HELD, with the mark where
+        // it stands, and the space's other families go on in the same cycle. Never rethrown: that would end the space's whole turn.
+        if (err instanceof EdgeIdentityBuilding) {
+          const reason = `the ${key} family is held: this instance is rebuilding its edge identity index for space '${peerText(spaceId)}'`;
+          stopTransfer(outcome, () => {}, reason, 'held');   // said once, by the pager's own stop for the reason handed back
+          return reason;
+        }
         return `a record write failed in space '${peerText(spaceId)}' (${logSafe(err instanceof Error ? err.message : String(err))}); `
           + "this is this instance's database, not the peer, and the page is fetched again next cycle";
       }

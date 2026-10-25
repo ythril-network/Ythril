@@ -390,6 +390,8 @@ After a successful batch push, `lastPosPushed[spaceId]` is advanced to the posit
 
 **A push answer says it is a 6.0 answer.** Every `200` of a push route carries `positions: 1`; a sender that reads an answer without it is talking to a 5.x receiver, ends that member's turn (no mark written, no failure counted, the cycle counted `refused` when nobody else was exchanged with) and shows the member as too old. A `503 positions_building` is *held*: nothing moved and nothing failed.
 
+**`503 edge_identity_building` holds the edges family only.** A space still on the full unique edge identity index cannot store a fork edge (a fork shares its subject's five identity fields), so a page of the edges family that carries a fork edge, or whose equal-seq copy would fork, is refused whole before any document is written: the receiver answers `503 { code: "edge_identity_building", retryable: true }` and the sender reads it as the family held, not the space (`TransferRefusal` `family-held`: the turn and every other family go on). The sender's transfer of the family stops with `stoppedBy: 'held'`, which is neither a fault nor a cap: no failure is counted, `PEER UNREACHABLE` is not approached, and the space's mark stops at the held position (it is the minimum over the families), so the other families are offered again from there next cycle; the receiver plans each re-offered row `skipped` and writes nothing. A full re-read does not end while a family is held. On the pull side the receiving instance holds the edges family of its own space the same way. The hold lasts until the `Edge identity owed` job (every minute) has built the partial index beside the full one, confirmed it and dropped the full one.
+
 ---
 
 ## Conflict resolution

@@ -36,6 +36,7 @@ import { dropReplacedFileTombstoneIndexes, forgetFileTombstonesOf } from '../fil
 import { forgetPathKeyedCache } from '../files/path-keyed-cache.js';
 import { retireEmbedWorkOfRemovedRows } from '../files/file-embed-work.js';
 import { buildSpaceIndexesAtInit, forgetSpaceIndexWarnings } from './space-indexes.js';
+import { edgesHoldNoRow } from './edge-identity-index.js';
 import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -121,7 +122,10 @@ export async function initSpace(
   // now. Before the build, above: the legacy prefixed indexes and the superseded edge identity are gone, or the old three-field
   // unique index would sit beside the widened one and keep refusing the rows it exists to allow. The media job queue, the most
   // polled collection in the product, is in it: its indexes are declared beside its queries (`files/media/job-queue.ts`).
-  await buildSpaceIndexesAtInit(spaceId, part => createdNow.has(spaceCollection(spaceId, part)));
+  // An edges collection that holds no row is as free to build as a new one: the partial edge identity index replaces the full one there at once (Q-624);
+  // one WITH edges stays on the full index until the owed job's swap (`spaces/edge-identity-owed.ts`).
+  const edgesEmpty = createdNow.has(spaceCollection(spaceId, 'edges')) || await edgesHoldNoRow(spaceId);
+  await buildSpaceIndexesAtInit(spaceId, part => createdNow.has(spaceCollection(spaceId, part)) || (part === 'edges' && edgesEmpty));
   // After it: the file tombstone index a later release replaced, maintained on every pending write for nothing.
   await dropReplacedFileTombstoneIndexes(spaceId);
 

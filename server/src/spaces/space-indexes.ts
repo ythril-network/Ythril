@@ -29,8 +29,10 @@
  *   the background pass. **An entry that does not say is NOT boot-safe**: the safe default for an index added later, and every index
  *   that existed before this declaration says so explicitly (`every-pre-existing-space-index-says-whether-it-is-boot-safe`).
  * - `builder`: an index whose build is more than `createIndex` - the keyset compounds (built, confirmed, and only then the bare
- *   `{ seq: 1 }` they replace dropped: `spaces/keyset-indexes.ts`) and the write guard (a build over duplicate markers thins them
- *   and tries again: `spaces/edge-guard-index.ts`).
+ *   `{ seq: 1 }` they replace dropped: `spaces/keyset-indexes.ts`), the write guard (a build over duplicate markers thins them
+ *   and tries again: `spaces/edge-guard-index.ts`) and the edge identity (the partial unique index that replaces the full one: built beside
+ *   it, confirmed, and only then the full one dropped, on a collection with no edge in it; one with edges is the owed job's:
+ *   `spaces/edge-identity-index.ts`, `spaces/edge-identity-owed.ts`).
  *
  * ## What it does not cover
  *
@@ -55,6 +57,10 @@ import { SEQ_CARRYING } from '../util/seq.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import { buildKeysetIndex, type KeysetBuild } from './keyset-indexes.js';
 import { EDGE_GUARD_INDEXES, ensureEdgeGuardIndex } from './edge-guard-index.js';
+import {
+  EDGE_IDENTITY_INDEX, EDGE_FROM_INDEX, ensurePartialEdgeIdentity, buildPartialEdgeIdentity, confirmPartialEdgeIdentity, dropFullEdgeIdentity,
+  edgeIdentityState, edgesHoldNoRow, someEdgeIdentityStands,
+} from './edge-identity-index.js';
 import { VECTOR_INDEXED_COLLECTIONS } from './vector-index.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { FORK_INDEXES, FORKING_FAMILIES } from '../sync/upsert-plan.js';
@@ -82,12 +88,19 @@ export interface SpaceIndex {
   readonly policy: SpaceIndexPolicy;
   readonly bootSafe?: boolean;
   /** The index is built by a builder of its own rather than by a plain `createIndex`. */
-  readonly builder?: 'keyset' | 'guard';
+  readonly builder?: 'keyset' | 'guard' | 'edge-identity';
   /** For a `best-effort` index: what the space does while it is missing, in the warning's words. */
   readonly withoutIt?: string;
   /** The index keeps the TTL sweep's queries cheap: built again by the sweep until it stands ({@link ensureTtlIndexes}). */
   readonly sweep?: true;
 }
+
+/**
+ * `{ from: 1 }` on the edges: the partial identity index serves only a read that names `forkOf: null`, and the full one it replaces served every
+ * `from`-prefixed read through its prefix (`edgesOfRecord`, the entity delete guard, the Brain lists). The swap drops the full index only once this stands
+ * (`dropFullEdgeIdentity`). Not boot-safe: the build reads every edge. `report`: a space without it scans, slowly and correctly, and keeps its full identity index.
+ */
+const EDGE_FROM_ENTRY: SpaceIndex = { part: 'edges', keys: EDGE_FROM_INDEX.keys, options: { ...EDGE_FROM_INDEX.options }, policy: 'report', bootSafe: false };
 
 /** An index every builder runs the same way: `throw` and built at every boot. */
 const plain = (part: SpacePart, keys: SpaceIndex['keys'], options: SpaceIndexOptions = {}): SpaceIndex =>
@@ -151,14 +164,19 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
   ...Object.values(COLLECTION_SUFFIX).map(part => plain(part, { type: 1 })),
   plain('entities', { name: 1, type: 1 }),
   /*
-   * The edges' identity: unique over `(from, to, label, fromKind, toKind)`, the guarantee `edgeIdFor` derives an id from.
+   * The edges' identity: unique over `(from, to, label, fromKind, toKind)` OVER THE ROWS WHOSE `forkOf` IS NULL OR ABSENT (Q-624: a fork edge shares its subject's
+   * five fields and sits outside the slot), the guarantee `edgeIdFor` derives an id from. NOT boot-safe and still `throw`: a new or empty collection is built here by
+   * `initSpace` (the swap is free, and a failure is a space with no unique identity, which does not initialise); a collection with edges still on the full index is the
+   * owed job's (`spaces/edge-identity-owed.ts`), which keeps the full index until the partial one is confirmed. The reader of the readiness is `edgeIdentityAdmitsForks`.
+   *
    * `fromKind` and `toKind` joined the key in M-3: each collection assigns its own UUIDs, so a fact and an entity may hold the same
    * id, and `(X, Y, mentions)` with Y an entity and the same triplet with Y a fact are two relationships with two ids. Safe on an
    * existing collection: an entity endpoint stores nothing (`storedEdgeKind`), Mongo indexes a missing field as null, and every
    * edge written before M-1 keys as `(from, to, label, null, null)`, exactly what a new ordinary edge keys as. `initSpace` drops
    * the three-field index it replaced first (`dropSupersededEdgeIdentityIndex`), or that one would keep refusing the rows this allows.
    */
-  plain('edges', { from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 }, { unique: true }),
+  EDGE_FROM_ENTRY,
+  { part: 'edges', keys: EDGE_IDENTITY_INDEX.keys, options: { ...EDGE_IDENTITY_INDEX.options }, policy: 'throw', bootSafe: false, builder: 'edge-identity' },
   /*
    * The write guard of a strict functional label (`Q-439`), declared with its options in `EDGE_GUARD_INDEXES` and built through
    * `ensureEdgeGuardIndex`, which thins duplicate markers. Not boot-safe: the build reads every edge. `report`: a space whose
@@ -167,7 +185,7 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
    * `sync/arrivals.ts`), so the guard covers a subject once its edge is rewritten; the write-time count refuses meanwhile.
    */
   ...EDGE_GUARD_INDEXES.map((ix): SpaceIndex => ({ part: 'edges', keys: ix.keys, options: ix.options, policy: 'report', bootSafe: false, builder: 'guard' })),
-  // `{ from, … }` above serves `from` through its prefix and leaves `to` unindexed: "which entities does the graph touch" scanned
+  // `{ from: 1 }` above serves `from` and leaves `to` unindexed: "which entities does the graph touch" scanned
   // the inbound half. Completeness' unlinked-entity join asks it per entity; traversal per hop.
   plain('edges', { to: 1 }),
   plain('chrono', { startsAt: 1 }),
@@ -239,8 +257,38 @@ export async function buildSpaceIndex(
 ): Promise<KeysetBuild | undefined> {
   if (ix.builder === 'keyset') return buildKeysetIndex(spaceId, { part: ix.part, keys: ix.keys as Readonly<Record<string, 1>> }, { onBuild: hooks.onKeysetBuild });
   if (ix.builder === 'guard') { await ensureEdgeGuardIndex(spaceId); return undefined; }
+  if (ix.builder === 'edge-identity') { await buildEdgeIdentityIndex(spaceId); return undefined; }
   await col(spaceCollection(spaceId, ix.part)).createIndex({ ...ix.keys }, { ...ix.options });
   return undefined;
+}
+
+/**
+ * The edge identity swap as the owed job and the build run it: `{ from: 1 }` first (declared above, built by the one builder), then the three steps
+ * (`ensurePartialEdgeIdentity`). Idempotent; a swap that stopped anywhere is finished by running it again.
+ */
+export async function swapEdgeIdentity(spaceId: string): Promise<void> {
+  await buildSpaceIndex(spaceId, EDGE_FROM_ENTRY);
+  await ensurePartialEdgeIdentity(spaceId);
+}
+
+/**
+ * What a BUILD of the edge identity does (the declaration's builder), by what the collection holds:
+ *  - no edge at all: the swap, which is free (the full index, on an existing empty collection, is dropped only once `{ from: 1 }` stands: the owed job's otherwise);
+ *  - edges, and a unique identity index of either kind standing: nothing - the full one is swapped by the owed job (the background pass never does it), and the
+ *    partial one is done;
+ *  - edges and neither standing: the partial index, which throws over duplicates (a restore's check must say so).
+ */
+async function buildEdgeIdentityIndex(spaceId: string): Promise<void> {
+  if (await edgesHoldNoRow(spaceId)) {
+    await buildPartialEdgeIdentity(spaceId);
+    await confirmPartialEdgeIdentity(spaceId);
+    // A full index on an EMPTY existing collection goes only once `{ from: 1 }` stands. `{ from: 1 }` is a `report` index, so a refused build of it must not stop the
+    // space initialising (this one is `throw`): uniqueness holds with both standing, and the owed job drops the full index once `{ from: 1 }` is there.
+    const s = await edgeIdentityState(spaceId);
+    if (!s.full || s.from) await dropFullEdgeIdentity(spaceId);
+    return;
+  }
+  if (!(await someEdgeIdentityStands(spaceId))) await buildPartialEdgeIdentity(spaceId);
 }
 
 /** A failed build of an index whose policy is `throw`, naming the index and the space; the store's error is its `cause`. */

@@ -53,8 +53,11 @@ export interface TransferOutcome {
   deliveredThrough: number;
   /** True when it stopped before exhausting what the peer had: a non-`ok` response, a throw, or the cycle's page cap. */
   truncated: boolean;
-  /** Why a truncated transfer stopped: `'cap'` (the cycle's page bound: nothing failed) or `'error'`. Absent while it has not stopped. */
-  stoppedBy?: 'cap' | 'error';
+  /**
+   * Why a truncated transfer stopped: `'cap'` (the cycle's page bound: nothing failed), `'held'` (the receiver holds this family while it builds an
+   * index: nothing failed, the family is offered again from the held position) or `'error'`. Absent while it has not stopped.
+   */
+  stoppedBy?: 'cap' | 'held' | 'error';
 }
 
 /**
@@ -81,10 +84,14 @@ export type TransferStopped = (why: string, heldAt: number) => void;
  *
  * Marking and saying are one step because the pair is what the mark depends on: a stop that logs but leaves `truncated` false lets the mark
  * advance past what did not transfer, and one that marks without logging is a silent hold.
+ *
+ * **A hold is never downgraded to a fault.** The page step that learns the RECEIVER holds the family (`edge_identity_building`) stops the transfer as `'held'`
+ * and hands the loop its reason; the loop's own generic stop for that reason then runs through here with the default `'error'`, and must not rewrite what the
+ * step knew. Only `'error'` yields to a hold: a cap and a hold are both partial and neither failed.
  */
-export function stopTransfer(outcome: TransferOutcome, stopped: TransferStopped, why: string, by: 'cap' | 'error' = 'error'): void {
+export function stopTransfer(outcome: TransferOutcome, stopped: TransferStopped, why: string, by: 'cap' | 'held' | 'error' = 'error'): void {
   outcome.truncated = true;
-  outcome.stoppedBy = by;
+  outcome.stoppedBy = by === 'error' && outcome.stoppedBy === 'held' ? 'held' : by;
   stopped(why, outcome.deliveredThrough);
 }
 
@@ -117,10 +124,11 @@ export function safeWatermark(from: number, transfers: readonly TransferOutcome[
   return Math.max(from, ceiling);
 }
 
+/** A transfer under the name its family or stream goes by. */
+type LabelledTransfer = TransferOutcome & { label: string };
+
 /** The labels of the transfers a stop of kind `by` ended. A truncated transfer that says nothing is read as a fault. */
-export function stoppedTransfers(
-  transfers: readonly (TransferOutcome & { label: string })[], by: 'cap' | 'error',
-): string[] {
+export function stoppedTransfers(transfers: readonly LabelledTransfer[], by: 'cap' | 'held' | 'error'): string[] {
   return transfers.filter(t => t.truncated && (t.stoppedBy ?? 'error') === by).map(t => t.label);
 }
 
@@ -145,6 +153,8 @@ export interface WatermarkResolution {
   readonly errored: string[];
   /** The transfers that stopped at the cycle's page cap: partial, nothing failed. */
   readonly capped: string[];
+  /** The transfers the receiver HOLDS (`edge_identity_building` on the edges family): partial, nothing failed, offered again from the held position. */
+  readonly held: string[];
 }
 
 /**
@@ -171,12 +181,14 @@ export function resolveWatermark<T extends TransferOutcome>(opts: {
   const at = safeWatermark(opts.from, labelled);
   const errored = stoppedTransfers(labelled, 'error');
   const capped = stoppedTransfers(labelled, 'cap');
-  const held = [...errored, ...capped];
-  if (held.length > 0) {
+  const held = stoppedTransfers(labelled, 'held');
+  const stopped = [...errored, ...capped, ...held];
+  if (stopped.length > 0) {
     opts.warn(
-      `Sync ${opts.direction} from/to ${peerText(opts.peerLabel)} space '${peerText(opts.spaceId)}': ${peerList(held, ', ')} stopped `
-      + `early, so the ${opts.direction} mark advances only to ${at}. The rest is ${errored.length > 0 ? 'retried' : 'continued'} next cycle.`,
+      `Sync ${opts.direction} from/to ${peerText(opts.peerLabel)} space '${peerText(opts.spaceId)}': ${peerList(stopped, ', ')} stopped `
+      + `early, so the ${opts.direction} mark advances only to ${at}. The rest is ${errored.length > 0 ? 'retried' : 'continued'} next cycle`
+      + `${held.length > 0 ? ` (held: ${peerList(held, ', ')}, which the receiver is rebuilding an index for)` : ''}.`,
     );
   }
-  return { at, errored, capped };
+  return { at, errored, capped, held };
 }

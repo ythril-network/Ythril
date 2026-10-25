@@ -148,7 +148,7 @@ describe('the edge identity index is swapped without a gap (Q-624)', { skip }, (
         if (r.code !== 503 || r.body?.code !== 'edge_identity_building' || r.body?.retryable !== true) note(label, `${what}: answered ${r.code} ${JSON.stringify(r.body)}, expected 503 edge_identity_building retryable`);
       }
       const rowId = await forkIdOf('edges', 'e1', 5, edge('e1', 5, 'theirs'));
-      const asRow = await door.push('/batch-upsert', { edges: [{ ...edge(rowId, 5, 'theirs'), forkOf: 'e1' }] }, { spaceId: S, networkId: door.NET, token: TOKEN });
+      const asRow = await door.push('/batch-upsert', { edges: [{ ...edge(rowId, 5, 'theirs'), forkOf: 'e1', forkAt: 5 }] }, { spaceId: S, networkId: door.NET, token: TOKEN });
       if (asRow.code !== 503) note(label, `batch, a fork row: answered ${asRow.code} ${JSON.stringify(asRow.body)}, expected 503`);
       if ((await door.coll(S, 'edges').countDocuments({})) !== 1) note(label, 'the held push wrote a row');
       // the other families are served by the same door
@@ -230,7 +230,7 @@ describe('the edge identity index is swapped without a gap (Q-624)', { skip }, (
     if ((readMark(door, 'received', S) ?? 0) === 0) note('after drop', 'the mark did not move once the edges family landed');
     // and the single door stores a fork row now
     const rowId = await forkIdOf('edges', 'e1', 5, edge('e1', 5, 'a third body'));
-    const single = await door.push('/edges', { ...edge(rowId, 5, 'a third body'), forkOf: 'e1' }, { spaceId: S, networkId: door.NET, token: TOKEN });
+    const single = await door.push('/edges', { ...edge(rowId, 5, 'a third body'), forkOf: 'e1', forkAt: 5 }, { spaceId: S, networkId: door.NET, token: TOKEN });
     if (single.code !== 200) note('after drop', `a fork row on the single door answered ${single.code} ${JSON.stringify(single.body)}`);
 
     assert.deepEqual(failures, [], `${failures.length} divergence(s):\n  ${failures.join('\n  ')}`);
@@ -240,7 +240,7 @@ describe('the edge identity index is swapped without a gap (Q-624)', { skip }, (
     const owed = await import('../../server/dist/spaces/edge-identity-owed.js');
     assert.equal(typeof owed.runEdgeIdentityOwedTick, 'function', 'spaces/edge-identity-owed.js has no runEdgeIdentityOwedTick: the design names the job (edgeIdentityOwedJob) and no function that runs one pass of it');
     const m = await import('../../server/dist/spaces/edge-identity-index.js');
-    const gauge = async () => (await register.getSingleMetricAsJSON(GAUGE)).values.reduce((n, v) => n + v.value, 0);
+    const gauge = async () => (await register.getSingleMetric(GAUGE).get()).values.reduce((n, v) => n + v.value, 0);
     await door.reset();
     await to56State();
     await door.coll(S, 'edges').createIndex({ from: 1 });
