@@ -678,7 +678,7 @@ never a silent fall-back to the default order:
 | chrono | `createdAt`, `title`, `startsAt`, `endsAt`, `status`, `type` |
 | files | `createdAt`, `updatedAt`, `path` |
 
-With no `sort`, results are newest first.
+With no `sort`, results come in **landing order**: the record that most recently landed on THIS instance first, whoever wrote it and at whatever version, so a record a peer delivered an hour ago is at the top after a sync (a list ordered by version would bury it). It is the same default on every Brain list, on REST and MCP alike, and it is a total order, so `skip` pages through it without a row drifting between pages. The position it orders by is this instance's own: no answer carries it, and no `sort` can name it.
 
 ### Freetext search (`?search=`)
 

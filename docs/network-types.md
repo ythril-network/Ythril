@@ -289,7 +289,7 @@ See [Tombstone deletion authorisation](sync-protocol.md#tombstone-deletion-autho
 
 ### Temporarily offline (vacation scenario)
 
-A peer that is unreachable for a sync cycle is skipped, and the cycle continues for all other members. The `lastSyncAt` timestamp and the `lastSeqReceived` high-water mark are only advanced on a successful sync — so when the peer comes back online, it picks up exactly where it left off, regardless of how long it was gone. All accumulated changes since the last successful sync are exchanged — deletions included, however many there are — over as many cycles as the per-cycle page bounds need: a cycle that could not deliver everything holds the watermark where it stopped, says so, and the next cycle continues from there.
+A peer that is unreachable for a sync cycle is skipped, and the cycle continues for all other members. The `lastSyncAt` timestamp and the `lastPosReceived` high-water mark are only advanced on a successful sync — so when the peer comes back online, it picks up exactly where it left off, regardless of how long it was gone. All accumulated changes since the last successful sync are exchanged — deletions included, however many there are — over as many cycles as the per-cycle page bounds need: a cycle that could not deliver everything holds the watermark where it stopped, says so, and the next cycle continues from there.
 
 Every outbound call has its own bounded timeout (10 s for small requests, 60 s for batch transfers) rather than the OS TCP timeout (~75 s) — so an offline member simply makes the cycle take longer while it works through those timeouts; the cycle always completes and every other member still syncs.
 

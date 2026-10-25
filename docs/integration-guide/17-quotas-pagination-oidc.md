@@ -74,17 +74,17 @@ naming the parameter to use instead of being accepted and ignored.
 Sync endpoints return a `nextCursor` for efficient sequential reads:
 
 ```http
-GET /api/sync/facts?spaceId=general&sinceSeq=0&limit=200
-→ { "items": [...], "nextCursor": "<opaque cursor>" }
+GET /api/sync/facts?spaceId=general&afterPos=0&limit=200
+→ { "items": [...], "nextCursor": "<opaque cursor>", "through": 1792000000000000, "head": 1792000000000000, "positions": 1 }
 
 GET /api/sync/facts?spaceId=general&cursor=<opaque cursor>&limit=200
 → { "items": [...], "nextCursor": null }
 ```
 
 The cursor is **opaque**: echo the `nextCursor` a page returned as `cursor`, unchanged, and never build, decode or compare
-one. It names a position in the page order — records that share a `seq` are ordered by `_id`, and a page that ends inside such a
-run continues it — so a cursor made from the last `seq` you saw would skip the rest of that run. When both are sent, `cursor`
-wins over `sinceSeq`. When `nextCursor` is `null`, all data has been consumed. The sync routes are specified in
+one. It names a position in the page order — the position a record landed at on the serving instance, ties ordered by `_id`, and a page that ends inside a
+run of equal positions continues it — so a cursor made from a number you saw would skip the rest of that run. When both are sent, `cursor`
+wins over `afterPos`; a `sinceSeq` is refused with `400`, and so is every cursor an earlier release issued. When `nextCursor` is `null`, all data has been consumed. The sync routes are specified in
 [Sync API](09-sync-api.md#common-query-parameters).
 
 ---
