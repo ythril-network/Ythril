@@ -149,6 +149,7 @@ let _mongo = null;
  * @returns the live `db/mongo.js` module namespace (`col`, `asFilter`, `asUpdate`, `getDb`, …).
  */
 export async function openTestMongo(suite, { port, query } = {}) {
+  globalThis.setTimeout = REAL_SET_TIMEOUT; // a file that reopens after a close is not over (see lettingTimersLapse)
   process.env['MONGO_URI'] = testMongoUri(`ythril_harness_${suite}`, { port, query });
 
   const mongo = await import('../../server/dist/db/mongo.js');
@@ -200,10 +201,41 @@ export async function openFixtureMongo(suite) {
   return { getMongo: () => client, getDb: () => db, col: (name) => db.collection(name), close: () => client.close() };
 }
 
+/**
+ * After the database is closed, a timer started by anything is background work and does not hold the process open (Q-623).
+ *
+ * ## What it prevents
+ *
+ * A restore leaves the server's `pollVectorIndexReady` polling the swapped search index for up to 60 s, one `setTimeout` of
+ * a second after another. The harness has closed the connection by then, so the poll only logs `Client must be connected
+ * before running operations` and holds the process open until its own bound. Twelve restore-family files spent those 60 s
+ * each AFTER their tests had passed and been reported (`a-restore-counts-the-files-out-of-step-db`: 63.8 s alone, 2.9 s
+ * without the wait): 720 s of worker time in a full `-db` run, each one holding a slot of its shard.
+ *
+ * Two ways of ending the wait were measured and refused. `node --test --test-force-exit` crashes a file whose process still
+ * has native work at exit (`a-notice-releases-the-answer-it-does-not-read-db`, 0xC0000409, every time), turning a passing
+ * file into a failing one. A harness `process.exit()` after a delay ends the process before node:test has reported the file,
+ * so its results line is missing. This takes neither: `closeTestMongo` makes every timer created AFTER it unref'd, the poll's
+ * next tick included, so the process ends by itself, the way a file with nothing left to wait for always did, reporting
+ * everything. A later `openTestMongo` puts the real `setTimeout` back, so a file that closes and reopens is not affected.
+ *
+ * The server-side poll that does not stop when its connection closes is the defect; this is the harness not paying for it.
+ */
+const REAL_SET_TIMEOUT = globalThis.setTimeout;
+
+function lettingTimersLapse() {
+  globalThis.setTimeout = (...args) => {
+    const timer = REAL_SET_TIMEOUT(...args);
+    timer.unref?.();
+    return timer;
+  };
+}
+
 /** Drop the harness database and disconnect. Call from `after()`. */
 export async function closeTestMongo() {
   if (!_mongo) return;
   try { await _mongo.getDb().dropDatabase(); } catch { /* best-effort */ }
   await _mongo.closeMongo();
   _mongo = null;
+  lettingTimersLapse();
 }

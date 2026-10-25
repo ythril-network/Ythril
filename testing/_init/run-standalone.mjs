@@ -37,14 +37,23 @@
  * plan, `offlineRuns` in `standalone-split.mjs`, which runs the pure files at node's default width and the
  * database-backed ones at `DB_TEST_CONCURRENCY`. The measurement is beside the constant.
  *
+ * ## And over several Mongos when the machine has room (Q-623)
+ *
+ * The one Mongo was the limit: the third took 1 179 s on it. `runDbSharded` below spreads the same files over up to four
+ * fresh Mongos (`_shared/db-shard-plan.mjs` for which file goes where and why, `db-shard-stack.mjs` for starting and removing
+ * them) and the third takes 340 s, 5 426 tests, the same verdicts. A host the size of CI's runner gets one shard, which is
+ * the path this section describes, against the Mongo the job started.
+ *
  * Run: node testing/_init/run-standalone.mjs
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { splitStandalone, batched, offlineRuns, DB_TEST_CONCURRENCY } from '../_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
+import { planDbShards, unitsOf, dbShardPort } from '../_shared/db-shard-plan.mjs';
+import { resolveDbShardConfig, startDbShards, stopDbShards } from './db-shard-stack.mjs';
 
 /**
  * REFUSE a stale `server/dist`, rather than testing the wrong build and reporting either answer.
@@ -133,8 +142,70 @@ function runBatch(kind, args, files) {
 // Only the thirds this run selects are cleared, so running one third leaves another's results alone.
 for (const third of THIRDS) if (wants(third)) clearTimingResults(`standalone-${third}`);
 
+/**
+ * The `-db` third over several fresh Mongos (Q-623, `_shared/db-shard-plan.mjs` for the why): every shard runs its own
+ * files at its own width at the same time, each `node --test` pinned to its shard's Mongo by `YTHRIL_TEST_MONGO_PORT`
+ * (the address every harness file and relay reads, `_shared/test-mongo-address.mjs`). A shard's output is held and
+ * written whole when its batch ends, under a header naming the shard: interleaved TAP from concurrent children is a log
+ * nobody can read, and the `# fail` / `not ok` lines every reader greps stay at the start of their lines. A heartbeat
+ * says the run is alive in between.
+ */
+async function runDbSharded(shardCount, width) {
+  const plan = planDbShards(offlineDb, shardCount);
+  console.log(`standalone: -db third on ${shardCount} Mongo shards, ${width} files at a time each: ${plan.map(f => f.length).join(', ')} files`);
+  const shards = await startDbShards(shardCount);
+  const stop = () => stopDbShards(shards);
+  const onSignal = (sig) => { stop().finally(() => process.exit(sig === 'SIGINT' ? 130 : 143)); };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+  let doneBatches = 0;
+  const heartbeat = setInterval(() => console.log(`standalone: -db shards still running (${doneBatches} batch(es) done, ${((Date.now() - t0) / 1000).toFixed(0)}s)`), 60_000);
+  try {
+    console.log(`standalone: -db shards up after ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    // `width` workers per shard, each pulling the shard's next unit when it finishes one (`unitsOf`: slow files alone and
+    // first, then chunks of the rest). One `node --test` per unit, at width 1 inside it: the workers ARE the width.
+    await Promise.all(plan.flatMap((files, i) => {
+      const units = unitsOf(files);
+      let next = 0;
+      return Array.from({ length: width }, async () => {
+        while (next < units.length) {
+          const n = ++next;
+          const batch = units[n - 1].map(path);
+          ran++;
+          const startedAt = ((Date.now() - t0) / 1000).toFixed(0);
+          const flags = timingReporterFlags({ suite: 'standalone', batch: `db-s${i}-${n}`, scope: 'full' });
+          const out = [];
+          const code = await new Promise((resolve) => {
+            const child = spawn('node', ['--test', '--test-concurrency=1', ...flags.args, ...batch],
+              { env: testChildEnv({ ...flags.env, YTHRIL_TEST_MONGO_PORT: String(dbShardPort(i)) }), stdio: ['ignore', 'pipe', 'pipe'] });
+            child.stdout.on('data', d => out.push(d));
+            child.stderr.on('data', d => out.push(d));
+            child.on('error', () => resolve(1));
+            child.on('close', (c) => resolve(c));
+          });
+          process.stdout.write(`# -db shard ${i} (127.0.0.1:${dbShardPort(i)}) unit ${n} of ${units.length}: ${batch.length} file(s), ${startedAt}s to ${((Date.now() - t0) / 1000).toFixed(0)}s, exit ${code}\n`);
+          process.stdout.write(Buffer.concat(out));
+          doneBatches++;
+          if (code !== 0) failed++;
+        }
+      });
+    }));
+  } finally {
+    clearInterval(heartbeat);
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
+    await stop();
+  }
+}
+
 /** The pure files at node's default width (one worker per core); the database-backed ones capped. */
-for (const run of offlineRuns(split)) if (wants(run.kind)) runBatch(run.kind, run.args, run.files);
+const dbShards = wants('db') ? await resolveDbShardConfig({ defaultWidth: DB_TEST_CONCURRENCY }) : { count: 1, width: DB_TEST_CONCURRENCY };
+for (const run of offlineRuns(split)) {
+  if (!wants(run.kind)) continue;
+  if (run.kind === 'db' && dbShards.count > 1) continue; // the sharded path below runs every database-backed file
+  runBatch(run.kind, run.args, run.files);
+}
+if (wants('db') && dbShards.count > 1) await runDbSharded(dbShards.count, dbShards.width);
 
 /*
  * ONE AT A TIME, and against the live stack. These drive :3200, so two of them at once would interleave

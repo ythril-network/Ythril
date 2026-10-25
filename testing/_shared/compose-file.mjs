@@ -24,12 +24,22 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { load } from 'js-yaml';
+import { load, DEFAULT_SCHEMA, Type } from 'js-yaml';
 import { REPO_ROOT } from '../standalone/_sources.mjs';
+
+/**
+ * Compose's own merge tags, which an override file (`docker-compose.db-shard.yml`) carries and plain YAML does not know:
+ * `!override` stands for the value it tags, and `!reset` for "this key is unset", read as null. Without them every gate that
+ * reads each tracked compose file died on the first override with `unknown tag !<!reset>`, which reads as a broken stack.
+ */
+const COMPOSE_SCHEMA = DEFAULT_SCHEMA.extend(['scalar', 'sequence', 'mapping'].flatMap(kind => [
+  new Type('!override', { kind, construct: data => data }),
+  new Type('!reset', { kind, construct: () => null }),
+]));
 
 /** A compose file, parsed: `rel` under `root` (default: this repository, whatever the working directory). */
 export function loadCompose(rel, root = REPO_ROOT) {
-  const doc = load(readFileSync(join(root, rel), 'utf8'));
+  const doc = load(readFileSync(join(root, rel), 'utf8'), { schema: COMPOSE_SCHEMA });
   if (!doc || typeof doc.services !== 'object' || doc.services === null || Object.keys(doc.services).length === 0) {
     throw new Error(`${rel} does not parse to a compose file with services`);
   }

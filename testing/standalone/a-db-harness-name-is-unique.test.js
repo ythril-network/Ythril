@@ -23,24 +23,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
-import { stripComments } from './_strip-comments.mjs';
-
-/** Every literal suite name handed to the harness, with the file that used it. */
-function harnessNames() {
-  const found = [];
-  for (const { file, text } of readTrackedSources('testing', { ext: ['.test.js', '.mjs'], floor: 100 })) {
-    // The harness module DEFINES the function and takes the name as a parameter — it claims no database.
-    if (file.replace(/\\/g, '/').endsWith('_mongo-harness.mjs')) continue;
-    // A wrapper that opens the harness for its caller (`_push-door.mjs`, and `_stalled-write-doors.mjs` over it) takes the
-    // name as `suite:`, and a name it is handed claims a database exactly as a direct call does — left out, those files
-    // were never checked.
-    for (const m of stripComments(text).matchAll(/(?:openTestMongo\(\s*|(?:openPushDoor|openStalledWriteDoors|landingExperiment)\(\s*\{[^}]*?\bsuite:\s*)'([^']+)'/g)) {
-      found.push({ file: file.replace(/\\/g, '/'), name: m[1] });
-    }
-  }
-  return found;
-}
+import { harnessNames } from './_harness-names.mjs';
 
 describe('a db harness name is unique', () => {
   it('the sweep finds the DB-backed files, so an empty set cannot pass', () => {
