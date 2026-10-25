@@ -225,8 +225,11 @@ async function carryRows(spaceId: string, part: SpacePart): Promise<number> {
  * The repair of one collection: every row with no position, or whose `posAtSeq` is not its `seq`, takes a fresh clock position (one block per chunk, held until its
  * write ends: `withLandingStamp`) and a recomputed `writtenHere`. The write is conditional on the row still being as it was read, so a local edit that landed with a
  * position of its own is never overwritten. Answers how many rows it repaired.
+ *
+ * Exported for the gates that stall a record-position holder behind a lock (`a-write-inside-a-seq-hold-always-ends-db`, `a-write-the-bound-ended-never-lands-db`): they
+ * must see the bound's own timeout THROWN, which `finishPositionsOf` (a walk: it reports a failure and quarantines the space after one) never does.
  */
-async function repairRows(spaceId: string, part: SpacePart): Promise<number> {
+export async function repairRows(spaceId: string, part: SpacePart): Promise<number> {
   const coll = col<Row>(spaceCollection(spaceId, part));
   let repaired = 0;
   for await (const rows of chunksBySeq(coll, { seq: 1, pos: 1, posAtSeq: 1, author: 1, deliveredBy: 1 })) {

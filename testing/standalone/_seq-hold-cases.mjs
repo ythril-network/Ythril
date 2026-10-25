@@ -204,16 +204,14 @@ export function holderCases(ctx, S) {
         await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {}),
     }],
     // The repair (`sync/positions-owed.ts`): every row with no position takes a fresh clock position, one block per chunk, held until its write ends. The seeded rows carry
-    // a version and no position, which is exactly what a 5.6 build leaves; the space is made to owe a repair and the write of one fact's position stalls.
+    // a version and no position, which is exactly what a 5.6 build leaves; the write of one fact's position stalls.
     'server/src/sync/positions-owed.ts:repairRows': [{
       label: 'the repair of rows 5.6 left without a position: the block of fresh positions, inside its landing hold',
       collection: `${S}_facts`,
-      lock: async () => {
-        await mongo().col('ythril_counters').updateOne({ _id: S }, { $set: { positionsOwed: 'repair' }, $unset: { positionsReadyAt: '' } }, { upsert: true });
-        ctx.mods.owed.forgetPositionsReady(S);
-        return recordLock('facts', F)();
-      },
-      run: () => ctx.mods.owed.finishPositionsOf(S),
+      lock: recordLock('facts', F),
+      // `repairRows` itself, not `finishPositionsOf`: the latter is a walk, which reports a failure instead of throwing it and quarantines a space after one timeout, so
+      // the second repetition of a gate that repeats the stall would skip the space without writing at all.
+      run: () => ctx.mods.owed.repairRows(S, 'facts'),
     }],
     // `writeTombstone` is one tombstone through `writeTombstones`, whose landing this is.
     'server/src/brain/tombstones.ts:writeTombstones': [{
