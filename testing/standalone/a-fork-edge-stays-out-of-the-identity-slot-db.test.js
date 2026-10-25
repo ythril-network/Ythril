@@ -157,6 +157,8 @@ describe('a fork edge stays out of the identity slot (Q-624)', { skip }, () => {
      * finds first by every order it could use (natural, id, version). The subject goes in after it.
      */
     const seedEarlyNewFork = async () => {
+      // The space validates strictly (META): the two ends exist as entities, or `upsertEdge` is refused for a dead link before it reaches the identity reads.
+      await door.coll(S, 'entities').insertMany([END.from, END.to].map(id => build.entity(S, id, 3)));
       await seedFork({ ...edge('0-early-fork', 9, 'theirs'), forkOf: SUBJECT });
       await door.coll(S, 'edges').insertOne(edge(SUBJECT, 5, 'mine'));
     };

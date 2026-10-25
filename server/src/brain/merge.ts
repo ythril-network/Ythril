@@ -24,7 +24,7 @@ import { log, peerList, peerText, NAME_QUOTED, REFUSAL_NAMES_MAX } from '../util
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
 import type { EdgeRekey } from './edge-rekey.js';
-import { relinkEdgesOfRecord, relinkLinksOfRecord, settleRekeyedEmbeds, edgesOfRecord, linksOfRecord } from './relink-references.js';
+import { relinkEdgesOfRecord, relinkLinksOfRecord, settleRekeyedEmbeds, edgesOfRecord, relationshipEdgesOfRecord, linksOfRecord } from './relink-references.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
@@ -292,8 +292,9 @@ async function detectEndpointRuleBreaks(
   if (!edgeSchemas || Object.keys(edgeSchemas).length === 0) return [];
 
   const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
+  // The relationships of the absorbed record, never a fork edge of one: a fork is an unchosen version and breaks no endpoint rule of its own (Q-624).
   const moving = await edgeColl
-    .find(relinkFilters(spaceId, absorbedId).edges, { projection: PLAN_EDGE_PROJECTION })
+    .find(relationshipEdgesOfRecord(spaceId, absorbedId), { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
   if (moving.length === 0) return [];
 
@@ -305,7 +306,7 @@ async function detectEndpointRuleBreaks(
    * Counted over the survivor's own edges plus the moving ones, with the relink applied to both ends.
    */
   const survivorEdges = await edgeColl
-    .find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: survivor._id }, { to: survivor._id }] }), { projection: PLAN_EDGE_PROJECTION })
+    .find(relationshipEdgesOfRecord(spaceId, survivor._id), { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
   const afterFrom = (e: EdgeDoc) => (e.from === absorbedId ? survivor._id : e.from);
   const afterTo = (e: EdgeDoc) => (e.to === absorbedId ? survivor._id : e.to);
@@ -348,14 +349,14 @@ async function detectDuplicateEdges(
 ): Promise<DuplicateEdgeWarning[]> {
   const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
-  // All edges currently referencing the absorbed entity
+  // All relationships currently referencing the absorbed entity (a fork edge is not one: it is no duplicate of its subject, Q-624)
   const absorbedEdges = await edgeColl
-    .find(relinkFilters(spaceId, absorbedId).edges, { projection: PLAN_EDGE_PROJECTION })
+    .find(relationshipEdgesOfRecord(spaceId, absorbedId), { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
 
-  // All edges currently referencing the survivor entity
+  // All relationships currently referencing the survivor entity
   const survivorEdges = await edgeColl
-    .find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: survivorId }, { to: survivorId }] }), { projection: PLAN_EDGE_PROJECTION })
+    .find(relationshipEdgesOfRecord(spaceId, survivorId), { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
 
   const warnings: DuplicateEdgeWarning[] = [];

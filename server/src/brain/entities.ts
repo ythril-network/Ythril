@@ -24,6 +24,7 @@ import { log, peerText } from '../util/log.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
 import { listReadMaxMs, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
@@ -148,10 +149,13 @@ export async function upsertEntity(
  * Find all entities in a space that match the given name (case-sensitive).
  * Returns an empty array when no match is found.
  * Name is a non-unique label, so multiple results are possible.
+ *
+ * Never a fork row (Q-624, `CHOSEN_VERSION_ROWS`): this resolves a name to THE entity (edge-by-names, dedupe-on-insert), and an unchosen version of it
+ * carries the same name, which would make every name that has one ambiguous.
  */
 export async function findEntitiesByName(spaceId: string, name: string): Promise<EntityDoc[]> {
   return col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-    .find(asFilter<EntityDoc>({ spaceId, name }), { projection: NEVER_RETURNED_PROJECTION })
+    .find(asFilter<EntityDoc>({ spaceId, name, ...CHOSEN_VERSION_ROWS }), { projection: NEVER_RETURNED_PROJECTION })
     .toArray() as Promise<EntityDoc[]>;
 }
 

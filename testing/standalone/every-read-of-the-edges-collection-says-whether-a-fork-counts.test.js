@@ -97,6 +97,10 @@ const EXEMPT = {
     'brain/ttl-sweep.ts:isStored', 'brain/queue-embed-sweep.ts:countUnswept', 'brain/queue-embed-sweep.ts:queueEmbedSweep',
     'brain/candidate-prune.ts:pruneCandidateCollection', 'brain/chrono-redaction.ts:backfillTypedExpiry',
   ]),
+  // ── the planner's own read of the unchosen versions: it exists to find the forks
+  ...reasoned('it reads the FORK rows of the candidate parents on purpose (their count, their ids, the chain above them): the arrival planner needs every unchosen version, so a clause would blind the cap and the match by id', [
+    'sync/push-reads.ts:readForkContext',
+  ]),
   // ── a fork edge ending at a record is a reference to it, and the delete and the cascade count and remove it (design section 7)
   ...reasoned('a fork edge ending at the record is a reference to it: the delete guard and the cascade preview count it and the cascade removes it', [
     'brain/entity-delete-guard.ts:endsOfEdges', 'brain/entities.ts:findEntityReferences', 'brain/forks.ts:referencesTo',
@@ -104,7 +108,7 @@ const EXEMPT = {
   // ── it reads by id: the id was chosen by something that already decided whether a fork counts
   ...reasoned('by id: the caller names the row, so the question whether a fork counts was answered where the id was chosen', [
     'brain/edges.ts:getEdgeById', 'brain/edges.ts:updateEdgeById', 'brain/traverse-bodies.ts:withTraverseBodies',
-    'api/contradictions.ts:undoClaim', 'api/contradictions.ts:answerAlreadyResolved', 'brain/structured-claims.ts:readStructuredClaims',
+    'api/contradictions.ts:answerAlreadyResolved', 'brain/structured-claims.ts:readStructuredClaims',
     'brain/write-connections.ts:connectionSubject', 'brain/entity-refs.ts:missingRefs', 'sync/linkage-check.ts:missingTargets',
     'brain/links.ts:sourceDoc',
   ]),

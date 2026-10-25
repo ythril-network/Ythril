@@ -37,6 +37,7 @@ import { rekeyEdges, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
 import { enqueueWriteEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from './embed-queue.js';
 import { removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { EdgeDoc, LinkDoc } from '../config/types.js';
@@ -44,9 +45,22 @@ import type { EdgeDoc, LinkDoc } from '../config/types.js';
 /** What kind of record is absorbed: it decides which links are on the end of it. */
 export type RelinkKind = Extract<RefKind, 'entity' | 'fact'>;
 
-/** The edges of a record, either end. ONE definition for a merge's plan, its bound and its writer (`relinkFilters`), and for the fork resolve. */
+/**
+ * The edges of a record, either end, FORK ROWS INCLUDED. ONE definition for what a record's removal must deal with: the fork resolve, and the entity delete's
+ * guard and cascade (a fork edge ending at the record is a reference to it). A reader that means "the relationships of this record" asks
+ * {@link relationshipEdgesOfRecord} instead.
+ */
 export function edgesOfRecord(spaceId: string, id: string) {
   return asFilter<EdgeDoc>({ spaceId, $or: [{ from: id }, { to: id }] });
+}
+
+/**
+ * The relationships of a record, either end: {@link edgesOfRecord} without the unchosen versions (`CHOSEN_VERSION_ROWS`). What a merge's plan, its detection and its
+ * relink read: a fork edge is not a second relationship of the record, so it is no duplicate, no endpoint-rule break and no contradiction of its subject (Q-624,
+ * design rev 4 section 6). The clause is inside, so no detection can drop it.
+ */
+export function relationshipEdgesOfRecord(spaceId: string, id: string) {
+  return asFilter<EdgeDoc>({ spaceId, $or: [{ from: id }, { to: id }], ...CHOSEN_VERSION_ROWS });
 }
 
 /**
@@ -66,7 +80,8 @@ const IDENTITIES_PER_READ = 200;
  * Which of the identities a relink would produce are already held by a stored edge — as `edgeIdFor` keys.
  *
  * Read by the five identity fields, never by `_id` (see the module docblock), and only for the tuples asked: the cost is the relink's, not the
- * survivor's degree. An absent kind is stored for an entity end, so an `entity` end matches both.
+ * survivor's degree. An absent kind is stored for an entity end, so an `entity` end matches both. A fork edge holding the tuple is not a holder: it would
+ * mark its own subject a duplicate (Q-624), so the read carries `CHOSEN_VERSION_ROWS` itself.
  */
 async function storedEdgeIdentities(
   edgeColl: ReturnType<typeof col<EdgeDoc>>, spaceId: string,
@@ -80,7 +95,7 @@ async function storedEdgeIdentities(
       from: r.from, to: r.to, label: r.edge.label, fromKind: kindIs(r.edge.fromKind), toKind: kindIs(r.edge.toKind),
     }));
     const found = await edgeColl
-      .find(asFilter<EdgeDoc>({ spaceId, $or: tuples }),
+      .find(asFilter<EdgeDoc>({ spaceId, $or: tuples, ...CHOSEN_VERSION_ROWS }),
         { session, projection: { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 } })
       .toArray() as EdgeDoc[];
     for (const e of found) keys.add(edgeIdFor(e.from, e.to, e.label, e.fromKind, e.toKind));
@@ -107,7 +122,7 @@ export async function relinkEdgesOfRecord(
   // WITH their vectors: a re-key carries the stored document across, embedding included (`rekeyEdges`). The ids first, then the documents by id in
   // chunks: inside the transaction a read must come back in one batch (`db/write-bound.ts`), and a hub's edges with their vectors are far more than one batch holds.
   const ids = (await edgeColl
-    .find(edgesOfRecord(spaceId, absorbedId), { session, projection: { _id: 1 } })
+    .find(relationshipEdgesOfRecord(spaceId, absorbedId), { session, projection: { _id: 1 } })
     .toArray() as Array<Pick<EdgeDoc, '_id'>>).map(e => e._id);
   const edges = [...(await readStoredById<EdgeDoc>(spaceCollection(spaceId, 'edges'), ids, 'carried', { session })).values()];
   const relinked = edges.map(edge => ({

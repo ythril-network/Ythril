@@ -46,6 +46,7 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { EntityDoc, EdgeDoc, PropertySchema } from '../config/types.js';
 import { LINK_CLASSES, linkGroupsOfClass } from './link-adjacency.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 
 /** Read caps. Generous enough that no real space hits them, low enough that a runaway one cannot hang a page. */
 export const ER_ENTITY_SCAN_LIMIT = 200_000;
@@ -243,7 +244,8 @@ export function declaredEntityTypes(spaceId: string): DeclaredTypes {
 /**
  * Read one space's records and return the OBSERVED half of its model.
  *
- * Every count is a real count of stored records. Nothing here is estimated, and nothing is hidden — a
+ * Every count is a real count of stored records. The relationships it counts are the CHOSEN ones: a fork edge is an unchosen version of one, not a second
+ * relationship under its label (Q-624, `CHOSEN_VERSION_ROWS`). Nothing here is estimated, and nothing is hidden — a
  * capped read reports itself in `truncated`.
  *
  * **Called from `brain/space-shape.ts` and nowhere else** (`space-meta-is-one-answer-on-both-doors.test.js`):
@@ -256,7 +258,7 @@ export async function readErShape(spaceId: string): Promise<ErObserved> {
 
   const [totalEntities, totalEdges] = await Promise.all([
     entities.countDocuments({}),
-    edges.countDocuments({}),
+    edges.countDocuments({ ...CHOSEN_VERSION_ROWS }),
   ]);
 
   // Read through the covering indexes: `{ name: 1, type: 1 }` carries `_id`, as every index does, and the
@@ -265,7 +267,7 @@ export async function readErShape(spaceId: string): Promise<ErObserved> {
   const [entityRows, edgeRows] = await Promise.all([
     entities.find({}, { projection: { type: 1 }, limit: ER_ENTITY_SCAN_LIMIT })
       .toArray() as Promise<Array<{ _id: string; type?: string }>>,
-    edges.find({}, { projection: { from: 1, to: 1, label: 1 }, limit: ER_EDGE_SCAN_LIMIT })
+    edges.find({ ...CHOSEN_VERSION_ROWS }, { projection: { from: 1, to: 1, label: 1 }, limit: ER_EDGE_SCAN_LIMIT })
       .toArray() as Promise<Array<{ from: string; to: string; label: string }>>,
   ]);
 

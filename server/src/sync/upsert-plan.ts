@@ -680,13 +680,17 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     const accepted = overlay.get(doc._id);
     const cur: StoredCopy | undefined = accepted === undefined ? stored.get(doc._id) : forking ? copyOf(accepted) : accepted;
 
+    // An edge's `forkOf` never changes presence: no writer adds or removes it on a stored edge (a re-point re-mints the fork, a resolve of an orphan re-keys it),
+    // and a subject that arrived as a fork, or a stored fork that arrived as a subject, would move a row into or out of the identity slot behind the index's back.
+    // Judged for EVERY arriving edge against what is stored (or accepted earlier in this page), before anything else: a malformed row is never a silent `rejected`.
+    if (kind === 'edges' && cur !== undefined && (cur.forkOf !== undefined) !== (doc.forkOf !== undefined)) { plan.verdicts[i] = 'invalidFork'; return; }
+
     // A row that carries `forkOf` is a fork row arriving, and it is judged FIRST by what it says it is (design sections 3 and 4): a malformed one is
-    // never stored and never a silent `rejected`. A kind that does not fork is malformed by carrying it; an edge's `forkOf` never changes presence.
+    // never stored and never a silent `rejected`. A kind that does not fork is malformed by carrying it.
     let admittedAs: 'legacy' | 'redacted' | undefined;
     if (doc.forkOf !== undefined) {
       const verdict = forking ? forkRowVerdict(kind, doc, hashOf(doc).text) : 'invalid';
-      const flipped = kind === 'edges' && cur !== undefined && (cur.forkOf !== undefined) !== (doc.forkOf !== undefined);
-      if (verdict === 'invalid' || flipped) { plan.verdicts[i] = 'invalidFork'; return; }
+      if (verdict === 'invalid') { plan.verdicts[i] = 'invalidFork'; return; }
       if (verdict !== 'ok') admittedAs = verdict;
       // The deletion wins: a fork row of a record whose tombstone is held here and which is not held itself is an orphan nothing would ever remove.
       if (cur === undefined && !parentHeld(doc.forkOf) && tombstones.has(doc.forkOf)) { plan.verdicts[i] = 'tombstoned'; return; }
