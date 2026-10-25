@@ -1,0 +1,23 @@
+##
+## One shard of the database-backed standalone files' Mongo (Q-623) — an OVERRIDE of `docker-compose.test.yml`, never a copy.
+##
+## `testing/_init/db-shard-stack.mjs` starts N of these, each in a compose project of its own
+## (`docker compose -p ythril-db-shard-<i> -f docker-compose.test.yml -f docker-compose.db-shard.yml up ythril-mongo-a`),
+## and removes them with their volumes when the run ends. The service, its image pin, its healthcheck, its credentials, its
+## memory and CPU ceilings (`YTHRIL_TEST_MONGO_CPUS`, `YTHRIL_TEST_MONGO_A_MEM`) and mongot's heap are `ythril-mongo-a`'s own,
+## read from the base file, so a change to the harness Mongo reaches every shard and there is no second definition to drift.
+##
+## What it changes is exactly the two things that make a second copy impossible on one machine: the fixed container name
+## (dropped, so compose names it by project) and the published port (the shard's own, on loopback only, for the same
+## reason as the base file's: the password is in that file). `a-db-shards-keep-a-harness-database-on-one-mongo` holds the
+## override to those two, so it cannot grow a setting of its own.
+##
+services:
+  ythril-mongo-a:
+    container_name: !reset null
+    volumes: !reset []
+    tmpfs:
+      - /data/db:uid=1000,gid=1000
+      - /data/configdb:uid=1000,gid=1000
+    ports: !override
+      - "127.0.0.1:${YTHRIL_TEST_DB_SHARD_PORT:?set by db-shard-stack.mjs}:27017"

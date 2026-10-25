@@ -59,6 +59,18 @@ because a test run against the build from two branches ago has cost real debuggi
 The database third finds its MongoDB through `YTHRIL_TEST_MONGO_HOST` and `YTHRIL_TEST_MONGO_PORT`; the defaults are the
 loopback port the test stack publishes (see `testing/docker-compose.test.yml`).
 
+**On a machine with room, `npm run test:standalone:db` does not use that MongoDB.** It starts a few fresh ones of its own
+(`testing/docker-compose.db-shard.yml`, an override of the same `ythril-mongo-a` service: a compose project per shard, ports
+27400 and up on loopback), runs every database-backed file against one of them (the shard is a hash of the file's name, so a
+file stays put when others are added), starts the slowest files first (`testing/_shared/db-file-weights.json`, regenerated with
+`node testing/_init/record-db-file-weights.mjs` after a run), and removes the containers and their volumes when it ends, or
+when it is interrupted. Measured on a 24-core machine with a 16-CPU, 15.6 GiB Docker VM: 1 179 s on one MongoDB, 340 s on four,
+the same 5 426 tests and the same verdicts. The count follows the Docker VM (four CPUs and 3 GiB per shard, at most
+four shards); a host the size of CI's runner (4 CPUs) gets one, which is the old path against the MongoDB you started. Set
+`YTHRIL_TEST_DB_SHARDS=1` to force that path, or a number up to 8 to force a count. A file's process also ends 10 s after
+its database is closed (`closeTestMongo`), because a restore leaves a server-side poll running that held twelve files for 60 s
+each after their tests had passed.
+
 To print how many files each kind holds, and how many files a stack suite selects:
 
 ```bash
@@ -557,6 +569,8 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 | Variable | Read by | Meaning |
 |---|---|---|
 | `YTHRIL_TEST_MONGO_HOST`, `YTHRIL_TEST_MONGO_PORT` | `testing/_shared/test-mongo-address.mjs` | Where the database-backed standalone tests find the test MongoDB (CI's Full run and `npm run test:up`; local preflight runs none of them). Defaults are the test stack's loopback address and published port. |
+| `YTHRIL_TEST_DB_SHARDS`, `YTHRIL_TEST_DB_SHARD_WIDTH` | `testing/_init/db-shard-stack.mjs` | How many fresh MongoDBs the database third is spread over (1 is the one at `YTHRIL_TEST_MONGO_PORT`; default from the Docker VM, at most 4; up to 8) and how many files run at once on each (default 4). |
+| `YTHRIL_TEST_DB_SHARD_PORT` | `testing/docker-compose.db-shard.yml` | The loopback port of one shard's MongoDB. Set by the runner for each shard; never by hand. |
 | `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs`, `scripts/trade.mjs` | The recorder's instance and token (trade: `--record` and `--history`). See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
 | `GH_TOKEN`, `GITHUB_API_URL` | `scripts/test-times.mjs` | Read access to this repository's Actions runs, and the API base. |
 | `CLIENT_TEST_OUTCOME` | `scripts/mask-client-report.mjs` | The client test command's own result (`success`, `failure`, `cancelled` or `skipped`), which CI's mask step passes and which is written into the masked report as `runnerOutcome`; the recorder reads a failed runner with no failure counted as an incomplete run. Unset: nothing is stamped. |
