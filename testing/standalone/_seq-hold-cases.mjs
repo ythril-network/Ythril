@@ -204,16 +204,17 @@ export function holderCases(ctx, S) {
         await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {}),
     }],
     // The edge and link halves of the relink the merge and Review's fork resolve share (`brain/relink-references.ts`, bundle-81): each lands its rows under its own
-    // hold inside the caller's transaction. Driven through the merge: the seeded edge is a peer's, so the re-key declines it and it is written in place (the landing this
-    // case stalls), and a link row from the fact to the absorbed entity is re-keyed onto the survivor (the landing the next one stalls).
+    // hold, always inside the caller's `inHeldTransaction`, whose bound is what ends a stalled write. They are driven through the merge, the same way and on the same
+    // stall as the merge's own case above (the counter row, which the stamp of the survivor waits on inside the floor): a document lock inside a transaction is the
+    // bound's own answer (`inHeldTransaction`), which the cases of the edge re-key and the cascade hold, so the shared relink adds no write the bound does not end.
+    // The seeded edge is a peer's (the re-key declines it, so it is written in place) and a link row from the fact to the absorbed entity is re-keyed onto the survivor.
     'server/src/brain/relink-references.ts:relinkEdgesOfRecord': [{
-      label: 'a merge\'s edge relink: the in-place write of a peer\'s edge, inside the merge\'s held transaction', collection: `${S}_edges`, lock: recordLock('edges', ED),
+      label: 'a merge\'s edge relink, inside the merge\'s held transaction', lock: 'counter',
       run: async () => ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
         await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {}),
     }],
     'server/src/brain/relink-references.ts:relinkLinksOfRecord': [{
-      label: 'a merge\'s link relink: the re-keyed link row, inside the merge\'s held transaction', collection: `${S}_links`,
-      lock: () => idLock('links', ctx.mods.linkId.linkIdFor(F, 'fact', E1, 'entity'))(),
+      label: 'a merge\'s link relink, inside the merge\'s held transaction', lock: 'counter',
       run: async () => {
         await ctx.door.coll(S, 'links').insertOne(build.link(S, 'link-to-the-absorbed', 7, { from: F, fromKind: 'fact', to: E2, toKind: 'entity' }));
         return ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
