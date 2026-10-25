@@ -100,6 +100,7 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `network_vote_outcomes` | `POST /api/network_vote_outcomes` · legacy: `GET /api/networks/:id/vote-outcomes` | instance-admin (MCP) · REST exempt |
 | | `network_sync_history` | `POST /api/network_sync_history` · legacy: `GET /api/networks/:id/sync-history` | instance-admin (MCP) · REST exempt |
 | | `network_change_notes` | `POST /api/network_change_notes` · legacy: `GET /api/networks/:id/change-notes` | instance-admin (MCP) · REST exempt |
+| | `network_reread` | `POST /api/network_reread` · legacy: `POST /api/networks/:id/reread` | instance-admin (MCP) · REST exempt |
 | | `network_invite` | `POST /api/network_invite` · legacy: `POST /api/networks/:id/invite` | write (MCP) · REST exempt — instance admin · administers every space |
 | | `network_fork` | `POST /api/network_fork` · legacy: `POST /api/networks/:id/fork` | instance-admin (MCP) · REST exempt |
 | | `network_join_remote` | `POST /api/network_join_remote` · legacy: `POST /api/networks/join-remote` | write `networks` — `networks: write` on every space it maps to · `createSpaces` for a space it creates |

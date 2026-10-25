@@ -18,7 +18,7 @@ Since F-34 a token below instance admin acts on a network through the **`network
 
 **A space admin needs no Networks column for its own spaces** (F-37). A token that administers every space an act touches may create a network carrying them, join one mapped onto them (onto a NEW space too, when it also holds `createSpaces`), see the network, and generate its invite (`POST /api/invite/generate`, `POST /api/networks/:id/invite`) — which is what makes a network it created joinable. A space it does not administer still needs the column, and the refusal names it.
 
-Everything else on this router — members, signing keys, topology (including a reparent invite), votes, vote outcomes, sync and sync history — acts on the network as a whole and stays **instance-admin**. Invites do too, except for the space admin above. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
+Everything else on this router — members, signing keys, topology (including a reparent invite), votes, vote outcomes, sync, sync history and the re-read — acts on the network as a whole and stays **instance-admin**. Invites do too, except for the space admin above. MCP `network_peers` lists the peers of the networks you may see, through the same filter as `GET /api/networks`.
 
 **On MCP** (F-36): `network_get`, `network_create`, `network_update`, `network_leave` and `network_add_space` are the same acts as `GET /api/networks/:id`, `POST /api/networks`, `PATCH /api/networks/:id`, `DELETE /api/networks/:id` and `POST /api/networks/:id/spaces` — same parameters (the network is `id`), the same rights, the same refusal sentences and the same body. `network_votes`, `network_vote`, `network_vote_outcomes` and `network_sync_history` are `GET /api/networks/:id/votes`, `POST /api/networks/:id/votes/:roundId`, `GET /api/networks/:id/vote-outcomes` and `GET /api/networks/:id/sync-history`, instance-admin on both doors. `network_invite` and `network_fork` are `POST /api/networks/:id/invite` (instance admin, or administering every space) and `POST /api/networks/:id/fork` (instance admin). `network_join_remote` is `POST /api/networks/join-remote` — the same handshake, the same Networks rung checked between apply and finalize, and an inviter's refusal relayed with its own sentence. `network_member_add` and `network_member_remove` are `POST /api/networks/:id/members` and `DELETE /api/networks/:id/members/:instanceId`, instance-admin on both doors, with the same vote-or-direct answer per network type. `network_introduction_accept` is `POST /api/networks/:id/introductions/:instanceId/accept`, instance-admin on both doors. `network_member_admit` is `POST /api/networks/:id/join` (the inviter's half of a join by invite key), `network_member_signing_key` is `PUT /api/networks/:id/members/:instanceId/signing-key`, and `network_reparent_self`, `network_member_adopt` and `network_member_revert_parent` are the three braintree topology routes — all instance-admin on both doors. Every network route now has its tool.
 
@@ -71,6 +71,10 @@ Returns one network object (same shape as entries in `GET /api/networks`).
 `network_get` alike. Open rounds are read on [`GET /api/networks/:id/votes`](#list-open-vote-rounds) and how rounds ended
 on [`GET /api/networks/:id/vote-outcomes`](#vote-outcomes); `pendingRounds` is no longer a field of the network, and nothing
 on it, or on a member, ends in `Hash`.
+
+**A member is shown by an allow list per audience, never by subtraction** (6.0). The network views (`GET /api/networks`, `GET /api/networks/:id`, `network_get`) show a member's identity and topology (`instanceId`, `label`, `url`, `direction`, `parentInstanceId`, `originalParentInstanceId`, `children`, `signingPublicKey`, `version`, `versionCheckedAt`, `admittedAt`, `introducedBy`), its status (`lastSyncAt`, `consecutiveFailures`, `declinedSpaces`) and the computed `belowFloor` and `minPeerVersion`. **They carry no per-space mark** (the positions this instance has read from the member, sent to it and served it, the frozen 5.6 `lastSeq*` marks, the file-deletion acknowledgements, the re-read cursors and state) and no `lastSyncAtBy6`: those are this instance's bookkeeping about a peer, and every one that earlier builds returned is gone from the answer. The member list a joiner receives, the roster `GET /api/sync/networks/:id/members` serves a peer and the candidate a join round carries are identity and topology only. A member key nobody listed is not shown.
+
+**An instance administrator also reads two fields, always present:** `rereadOwed`, the full re-reads this instance still has to run ([Re-read a Network](#re-read-a-network-d-20)), one `{ instanceId, space, state }` per member and space with `state` `owed` or `catching` (an empty array when none), and `spaceRecordCounts`, `{ <spaceId>: n }` over the network's spaces, an estimate of the records each holds (read from the collections' metadata, not counted) from which a client estimates a re-read's duration. A token that may only read the network sees neither, as with `owedSpaceActs`.
 
 **`myRole` says what THIS instance is in the network** (F-38.1), and which members that role acts on — each list
 holds instance ids into `members`:
@@ -692,6 +696,23 @@ completed when any of its transfers was refused or cut short (a `403`, a failed 
 only when something failed.
 
 `limit` defaults to 20, max 100. Ordered most-recent-first. The last 100 records per network are retained; older entries are pruned automatically.
+
+---
+
+### Re-read a Network (D-20)
+
+```http
+POST /api/networks/:id/reread
+{ "confirm": true, "spaces": ["notes"] }
+```
+
+Marks the network's spaces as owed a full re-read from every member. `spaces` (local ids the network carries; one it does not carry is `400`) defaults to every space of the network; `confirm: true` is required (`400` without it). It starts nothing and moves nothing itself: the sync engine then forgets **this network's** receive and push marks for **one space per member per cycle** and reads that space again from the start, skipping every copy it already holds by version, and sends it again too. Asking again while a re-read is owed changes nothing. It is the one recovery for a record that 5.6 shadowed below a mark (a record below an author-guarded mark the reader never saw), which the first 6.0 carry deliberately keeps.
+
+**The cost, stated:** records that peers deleted and have since forgotten (their tombstones pruned) can come back. A space of N records takes at least `max(1, ceil(N / 10,000))` cycles, because a pull reads at most 10,000 records per cycle and a member reads one space per cycle, so a re-read of several spaces takes the sum of that over the spaces (Q-264 lifts the cap). A cycle that read up to its cap is `partial`, never a member failure: the member does not show as unreachable while the re-read runs.
+
+**Answer** `200 { status: "owed", networkId, spaces, started, cost, rereadOwed }`: `started` is how many member-space pairs became owed now. `rereadOwed` is the list `GET /api/networks/:id` carries.
+
+**Who may:** an instance administrator, **with the second factor** where the instance asks one (`403 MFA_REQUIRED` without it; `requireAdminMfa`, as the restore and the wipe). MCP `network_reread` takes the same `{ id, confirm, spaces? }` and answers the same body; **it refuses where a second factor is required, with "needs MFA step-up, which this door cannot present; use the web UI"**, because MCP has no channel for a code (the same refusal a personal-view copy gives). Audited on both doors as `network.reread`; the route has a not-area-scoped rights row (it is an instance operation, not a view of a space).
 
 ---
 
