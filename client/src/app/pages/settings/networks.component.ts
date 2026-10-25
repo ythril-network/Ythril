@@ -31,6 +31,7 @@ import { DateFormatService } from '../../core/date-format.service';
 import { NetworkOwedActsComponent } from './network-owed-acts.component';
 import { NetworkRereadSectionComponent } from './network-reread-section.component';
 import { rereadOwedMembers, rereadStateOf } from './network-reread-view';
+import { isLocalOrPrivateUrl } from './local-or-private-url';
 import { voteTally } from '../../core/vote-round-view';
 import { NetworkCreateDialogComponent } from './network-create-dialog.component';
 import { NetworkJoinDialogComponent } from './network-join-dialog.component';
@@ -460,7 +461,7 @@ export class NetworksComponent implements OnInit {
         if (url && url !== 'null') {
           this.joinMyUrl = url;
           this.joinMyUrlAutoFilled.set(true);
-          this.needsNetworkEnable.set(this.isLocalOrPrivateUrl(url));
+          this.needsNetworkEnable.set(isLocalOrPrivateUrl(url));
         }
       },
       error: () => {
@@ -469,7 +470,7 @@ export class NetworksComponent implements OnInit {
         if (origin && origin !== 'null') {
           this.joinMyUrl = origin;
           this.joinMyUrlAutoFilled.set(true);
-          this.needsNetworkEnable.set(this.isLocalOrPrivateUrl(origin));
+          this.needsNetworkEnable.set(isLocalOrPrivateUrl(origin));
         }
       },
     });
@@ -481,24 +482,6 @@ export class NetworksComponent implements OnInit {
     this.joinMyUrl = url;
     this.joinMyUrlAutoFilled.set(true);
     this.needsNetworkEnable.set(false);
-  }
-
-  private isLocalOrPrivateUrl(raw: string): boolean {
-    try {
-      const u = new URL(raw);
-      const host = u.hostname.toLowerCase();
-      if (host === 'localhost' || host === '::1') return true;
-      if (/^127\./.test(host)) return true;
-      if (/^10\./.test(host)) return true;
-      if (/^192\.168\./.test(host)) return true;
-      if (/^169\.254\./.test(host)) return true;
-      if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
-      if (/^f[cd][0-9a-f]{0,2}:/i.test(host)) return true;
-      if (/^fe[89ab][0-9a-f]:/i.test(host)) return true;
-      return false;
-    } catch {
-      return true;
-    }
   }
 
 

@@ -411,7 +411,7 @@ describe('ReviewTabComponent', () => {
       s.c.sub.set('suggestions');
       s.f.detectChanges();
       const el = s.f.nativeElement as HTMLElement;
-      expect(s.c.compError()).toBe(true);
+      expect((s.c as unknown as { completeness: { error(): boolean } }).completeness.error()).toBe(true);
       expect(el.textContent).toContain('review.suggestions.loadError');
       expect(el.textContent).not.toContain('review.suggestions.clean.title');
     });

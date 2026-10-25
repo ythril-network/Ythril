@@ -1,10 +1,9 @@
 import { Component, inject, signal, computed, OnInit, OnChanges, SimpleChanges, Input, Output, EventEmitter } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DuplicateRecord, ContradictionRecord, CompletenessCheck, type ContradictionResolveNote } from '../../core/api.types';
+import { DuplicateRecord, ContradictionRecord, type ContradictionResolveNote } from '../../core/api.types';
 import { translatedOrEmpty } from '../../core/translated-text';
 import { DuplicatesApi } from '../../core/duplicates-api.service';
 import { ContradictionsApi } from '../../core/contradictions-api.service';
-import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import type { CollectionTab } from './brain-tabs';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -21,6 +20,7 @@ import { MergeRefusals } from './merge-refusals';
 import { PluralText } from '../../core/plural-text.service';
 import { ReviewForksPanelComponent } from './review-forks-panel.component';
 import { ReviewForksState } from './review-forks-state';
+import { ReviewCompletenessState } from './review-completeness-state';
 
 /** The family a failed contradiction resolve's `code` is said under (`resolvedOtherwise`, and the codes every family carries). */
 const RESOLVE_REFUSALS = 'review.contradictions.refusal';
@@ -29,7 +29,7 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
   selector: 'app-review-tab',
   standalone: true,
   imports: [FormsModule, PhIconComponent, TranslocoPipe, SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, ErrorStateComponent, ReviewForksPanelComponent],
-  providers: [ReviewForksState],
+  providers: [ReviewForksState, ReviewCompletenessState],
   styles: [`
     .page-title { margin: 0 0 4px; font-size: 18px; }
     .intro { color: var(--text-muted); font-size: 13px; margin: 0 0 16px; }
@@ -170,23 +170,23 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
       <section role="tabpanel" id="review-panel-suggestions" aria-labelledby="review-tab-suggestions">
         <p class="intro">{{ 'review.suggestions.intro' | transloco }}</p>
 
-        @if (compLoading()) {
+        @if (completeness.loading()) {
           <div class="loading-overlay"><span class="spinner"></span></div>
-        } @else if (compError()) {
+        } @else if (completeness.error()) {
           <!-- Never render a failed load as a clean space: "nothing to fix" and "we could not look" are
                opposite answers and must not share a screen. -->
           <div class="alert alert-warning" style="margin-top:16px;">{{ 'review.suggestions.loadError' | transloco }}</div>
         } @else {
-          @if (compScore(); as score) {
+          @if (completeness.score(); as score) {
             <div class="sug-score">
               <span class="sug-score-v" [class.good]="score >= 85" [class.mid]="score >= 60 && score < 85" [class.bad]="score < 60">{{ score }}%</span>
-              <span class="sug-score-l">{{ scoreLabelText(compChecks().length) }}</span>
+              <span class="sug-score-l">{{ scoreLabelText(completeness.checks().length) }}</span>
             </div>
           }
 
-          @if (failingChecks().length) {
+          @if (completeness.failing().length) {
             <div class="dup-grid">
-              @for (c of failingChecks(); track c.id + c.scope) {
+              @for (c of completeness.failing(); track c.id + c.scope) {
                 <div class="dup-card">
                   <div class="dup-card-h">
                     <app-status-pill [variant]="c.severity === 'warn' ? 'warn' : 'off'">{{ 'review.suggestions.severity.' + c.severity | transloco }}</app-status-pill>
@@ -198,14 +198,14 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
                     <div class="sug-title">{{ 'brain.overview.comp.check.' + c.id | transloco: { affected: c.affected, total: c.total, scope: ('brain.overview.comp.scope.' + c.scope | transloco) } }}</div>
                     <div class="sug-why">{{ 'review.suggestions.why.' + c.id | transloco }}</div>
                     <div class="conf">
-                      <span class="conf-track"><span class="conf-fill" [class]="scoreVariant(c.earned / c.weight)" [style.width.%]="earnedPct(c)"></span></span>
-                      <span class="conf-pct">{{ earnedPct(c) }}%</span>
+                      <span class="conf-track"><span class="conf-fill" [class]="scoreVariant(c.earned / c.weight)" [style.width.%]="completeness.earnedPct(c)"></span></span>
+                      <span class="conf-pct">{{ completeness.earnedPct(c) }}%</span>
                     </div>
 
                     @if (c.sample.length) {
                       <ul class="sug-samples">
                         @for (s of c.sample; track s) {
-                          <li [title]="s">{{ sampleLabel(c, s) }}</li>
+                          <li [title]="s">{{ completeness.sampleLabel(c, s) }}</li>
                         }
                       </ul>
                       @if (c.affected > c.sample.length) {
@@ -226,7 +226,7 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
                 </div>
               }
             </div>
-          } @else if (compChecks().length) {
+          } @else if (completeness.checks().length) {
             <div class="empty-state">
               <div class="empty-state-icon"><ph-icon name="check-circle" [size]="48"/></div>
               <h3>{{ 'review.suggestions.clean.title' | transloco }}</h3>
@@ -241,18 +241,18 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
             </div>
           }
 
-          @if (passingChecks().length) {
+          @if (completeness.passing().length) {
             <details class="sug-passing">
-              <summary>{{ passingText(passingChecks().length) }}</summary>
+              <summary>{{ passingText(completeness.passing().length) }}</summary>
               <ul>
-                @for (c of passingChecks(); track c.id + c.scope) {
+                @for (c of completeness.passing(); track c.id + c.scope) {
                   <li><ph-icon name="check-circle" [size]="13"/>{{ 'brain.overview.comp.check.' + c.id | transloco: { affected: c.affected, total: c.total, scope: ('brain.overview.comp.scope.' + c.scope | transloco) } }}</li>
                 }
               </ul>
             </details>
           }
 
-          @if (compTruncated()) {
+          @if (completeness.truncated()) {
             <div class="cap-note" style="margin-top:12px;">{{ 'brain.overview.comp.truncated' | transloco }}</div>
           }
         }
@@ -747,6 +747,8 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   readonly sub = signal<'duplicates' | 'contradictions' | 'suggestions' | 'forks'>('duplicates');
   /** The Forks section's rows, page and last refusal (bundle-81); provided per tab, read by the forks panel. */
   protected readonly forksState = inject(ReviewForksState);
+  /** The Suggestions sub-tab's report (the space's completeness, samples in words); provided per tab, read by the template. */
+  protected readonly completeness = inject(ReviewCompletenessState);
 
   /** The space's completeness tab jumps back into the Brain's own tabs; the shell owns that switch. */
   @Output() openTab = new EventEmitter<CollectionTab>();
@@ -757,7 +759,6 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   @Input() isView = false;
 
   private duplicatesApi = inject(DuplicatesApi);
-  private spacesApi = inject(SpacesApi);
   private brainApi = inject(BrainApi);
   private transloco = inject(TranslocoService);
   private readonly plural = inject(PluralText);
@@ -822,73 +823,6 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     // it is not, which is the same lie as hiding an active filter.
     // Forks are not duplicates or contradictions either: they are facts, and the filter's types come from the two lists it narrows.
     this.sub() !== 'suggestions' && this.sub() !== 'forks' && (this.availableTypes().length > 1 || this.typeFilter() !== 'all'));
-
-  // ── Suggestions (space completeness, part B) ─────────────────────────────────
-  //
-  // Overview shows the score and its three heaviest deductions; this is where the whole report lives,
-  // with the samples resolved into something a reviewer can recognise. A raw entity UUID is not a
-  // finding anyone can act on, so the entity-scoped samples are looked up by name.
-
-  readonly compLoading = signal(false);
-  readonly compError = signal(false);
-  readonly compScore = signal<number | null>(null);
-  readonly compTruncated = signal(false);
-  readonly compChecks = signal<CompletenessCheck[]>([]);
-  /** Entity id → name, for the samples that are record ids rather than schema keys. */
-  readonly entityNames = signal<Record<string, string>>({});
-
-  /** Costing points, heaviest loss first — what a reviewer came here to work through. */
-  readonly failingChecks = computed(() => this.compChecks()
-    .filter(c => c.earned < c.weight)
-    .sort((a, b) => (b.weight - b.earned) - (a.weight - a.earned)));
-
-  /** Everything already clean. Listed, not hidden: on a healthy space this is the whole answer, and an
-   *  empty page would read as "we checked nothing" rather than "nothing is wrong". */
-  readonly passingChecks = computed(() => this.compChecks().filter(c => c.earned >= c.weight));
-
-  /** A sample entry rendered for a human: an entity id becomes its name, everything else is already one. */
-  sampleLabel(check: CompletenessCheck, value: string): string {
-    if (check.scope !== 'entity' || check.id !== 'entity-without-edges') return value;
-    return this.entityNames()[value] ?? value;
-  }
-
-  /** How much of this check's weight the space kept, as a percentage — the card's bar. */
-  earnedPct(c: CompletenessCheck): number {
-    return c.weight > 0 ? Math.round((c.earned / c.weight) * 100) : 100;
-  }
-
-  loadCompleteness(): void {
-    if (!this.spaceId) return;
-    this.compLoading.set(true);
-    this.compError.set(false);
-    const forSpace = this.spaceId;
-    this.spacesApi.getCompleteness(forSpace).subscribe({
-      next: r => {
-        if (this.spaceId !== forSpace) return;      // space switched mid-flight
-        this.compScore.set(r.score);
-        this.compChecks.set(r.checks);
-        this.compTruncated.set(r.truncated);
-        this.compLoading.set(false);
-        this.resolveEntitySamples(forSpace, r.checks);
-      },
-      // A failed load must not render as a perfect space. Surface it and show nothing else.
-      error: () => { if (this.spaceId === forSpace) { this.compError.set(true); this.compLoading.set(false); } },
-    });
-  }
-
-  /** Turn the entity-id samples into names. Best-effort: a failure leaves the ids, which still identify
-   *  the records — degraded, not broken. */
-  private resolveEntitySamples(forSpace: string, checks: CompletenessCheck[]): void {
-    const ids = checks.filter(c => c.id === 'entity-without-edges').flatMap(c => c.sample);
-    if (!ids.length) { this.entityNames.set({}); return; }
-    this.brainApi.getEntitiesByIds(forSpace, ids).subscribe({
-      next: r => {
-        if (this.spaceId !== forSpace) return;
-        this.entityNames.set(Object.fromEntries(r.entities.map(e => [e._id, e.name])));
-      },
-      error: () => { if (this.spaceId === forSpace) this.entityNames.set({}); },
-    });
-  }
 
   /**
    * The options to render: the types present here, plus the active filter if this tab has none of them.
@@ -995,10 +929,10 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   scorePct(s: number): number { return Math.round(Math.min(Math.max(s, 0), 1) * 100); }
   scoreVariant(s: number): 'high' | 'mid' | 'low' { return s >= 0.95 ? 'high' : s >= 0.85 ? 'mid' : 'low'; }
 
-  ngOnInit(): void { if (!this.isView) { this.load(); this.loadContradictions(); this.loadCompleteness(); this.forksState.load(this.spaceId); } }
+  ngOnInit(): void { if (!this.isView) { this.load(); this.loadContradictions(); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); } }
   /** Switching space in the Brain re-points this tab rather than leaving another space's pairs on screen. A view reads none of it. */
   ngOnChanges(ch: SimpleChanges): void {
-    if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.loadContradictions(); this.loadCompleteness(); this.forksState.load(this.spaceId); }
+    if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.loadContradictions(); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); }
   }
 
   load(): void {
