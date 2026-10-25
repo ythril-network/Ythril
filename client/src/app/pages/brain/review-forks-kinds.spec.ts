@@ -4,7 +4,7 @@
  *
  * ## What the design and the green-lit mockup bind
  *
- * - **A segmented control above the list** (`role="radiogroup"`, one `role="radio"` per kind: Facts, Entities, Timeline, Relationships), each
+ * - **A segmented control above the list** (`role="radiogroup"`, one `role="radio"` per kind: Facts, Entities, Chrono, Edges: the names of the Brain tabs, `brain.tab.*`), each
  *   showing its count. It is a ROVING group: the checked radio is the one tab stop, the arrow keys (and Home and End) move AND select, and focus
  *   follows the selection.
  * - **The diff runs on the kind's main field** and every other differing field gets its own line of marks; both are read from the answer's
@@ -68,7 +68,7 @@ function row(kind: Kind, id: string, fork: Row = {}, parent: Row = {}, over: Row
 const tree = (locale: string): Record<string, any> => {
   const out: Record<string, any> = {};
   for (const [key, value] of Object.entries(dictionary(locale))) {
-    if (!key.startsWith('brain.review.forks.')) continue;
+    if (!key.startsWith('brain.review.forks.') && !key.startsWith('brain.tab.')) continue;
     let node = out;
     const parts = key.split('.');
     parts.slice(0, -1).forEach(p => { node = node[p] ??= {}; });
@@ -111,10 +111,10 @@ describe('the kind switch of the Forks section (layout B)', () => {
     const group = radios();
     expect(group.length).toBe(KIND_ORDER.length);
     expect(group.map(r => r.textContent!.trim())).toEqual([expect.stringMatching(/Facts\s*3/), expect.stringMatching(/Entities\s*0/),
-      expect.stringMatching(/Timeline\s*0/), expect.stringMatching(/Relationships\s*1/)]);
+      expect.stringMatching(/Chrono\s*0/), expect.stringMatching(/Edges\s*1/)]);
     // The accessible name says the number in words ("Facts, 3 forks"), as the mockup's `kindCount` does.
     expect(group[0]!.getAttribute('aria-label')).toMatch(/Facts, 3 forks/);
-    expect(group[3]!.getAttribute('aria-label')).toMatch(/Relationships, 1 fork\b/);
+    expect(group[3]!.getAttribute('aria-label')).toMatch(/Edges, 1 fork\b/);
     expect(el.querySelector('[role="radiogroup"]')!.getAttribute('aria-label')).toBeTruthy();
   });
 
@@ -177,15 +177,15 @@ describe('an empty kind', () => {
     const { el, radio, click, button, items } = make([row('fact', 'f1'), row('fact', 'f2'), row('edge', 'g1')]);
     click(radio('chrono'));
     expect(items().length).toBe(0);
-    expect(el.textContent).toMatch(/Nothing to review in Timeline/i);
+    expect(el.textContent).toMatch(/Nothing to review in Chrono/i);
     expect(button(/Show Facts \(2\)/i), 'the offer names the next non-empty kind and its count').toBeTruthy();
-    expect(button(/Show Relationships/i)).toBeUndefined();
+    expect(button(/Show Edges/i)).toBeUndefined();
   });
 
-  it('skips itself: with forks only in Relationships, an empty Entities offers Relationships', () => {
+  it('skips itself: with forks only in Edges, an empty Entities offers Edges', () => {
     const { radio, click, button } = make([row('edge', 'g1')]);
     click(radio('entity'));
-    expect(button(/Show Relationships \(1\)/i)).toBeTruthy();
+    expect(button(/Show Edges \(1\)/i)).toBeTruthy();
   });
 
   it('choosing the offer selects that kind, shows its rows and puts focus on its radio', () => {
@@ -228,7 +228,7 @@ describe('the diff reads the kind\'s own fields', () => {
     expect(line.querySelector('del')!.textContent).toContain('standard');
   });
 
-  it('a timeline entry is marked on its title, and its dates are lines of their own', () => {
+  it('a chrono entry is marked on its title, and its dates are lines of their own', () => {
     const { el } = make([row('chrono', 'c1', { title: 'Quarterly data protection review', start: '2026-11-19' },
       { title: 'Quarterly privacy review', start: '2026-11-12' })]);
     const main = el.querySelector('.l3-text, [data-forks-text]') as HTMLElement;
@@ -239,7 +239,7 @@ describe('the diff reads the kind\'s own fields', () => {
     expect(keys).not.toContain('end');
   });
 
-  it('a relationship is marked on its description, and its weight has a line of its own', () => {
+  it('an edge is marked on its description, and its weight has a line of its own', () => {
     const { el } = make([row('edge', 'g1', { description: 'Twice-weekly deliveries on Tuesdays and Fridays.', weight: 0.9, from: 'Hamburg', label: 'supplies', to: 'Berlin' },
       { description: 'Weekly deliveries on Tuesdays.', weight: 1, from: 'Hamburg', label: 'supplies', to: 'Berlin' })]);
     const main = el.querySelector('.l3-text, [data-forks-text]') as HTMLElement;

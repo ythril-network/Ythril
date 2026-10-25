@@ -66,7 +66,7 @@ const EXEMPT: Record<string, string> = {
     'has its own failure branch (asserted separately below).',
   'src/app/pages/brain/review-forks.component.ts':
     'Presentational: it receives its rows as an input and makes no request of its own. Its one empty state is a KIND with no forks ' +
-    '("Nothing to review in Timeline", which offers the next kind that has some), and it can only be drawn after the host panel ' +
+    '("Nothing to review in Chrono", which offers the next kind that has some), and it can only be drawn after the host panel ' +
     '(review-forks-panel) has an answer: that panel checks the failed load before it renders this component at all, so a 500 ' +
     'reaches its error state and never this one. A kind with no forks is a true answer, not a failed one.',
 };
