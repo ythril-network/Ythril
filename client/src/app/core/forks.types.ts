@@ -1,40 +1,81 @@
 /**
- * The forks of a space, as Review lists them (bundle-81, design rev 8 section 5).
+ * The forks of a space, as Review lists them (bundle-81, design rev 8 section 5; every kind since Q-624, design rev 4 sections 9a, 10, 11).
  *
- * Two peers wrote different text for one fact at one version, so both copies were kept: the second under a derived id with `forkOf`
- * naming the first, its parent. A row is a fork beside its parent, with what points at the fork (the resolve repoints those to the
- * parent) and how many forks the parent has altogether.
+ * Two peers wrote different versions of one record at one version, so both copies were kept: the second under a derived id with `forkOf`
+ * naming the first, its parent. A fact, an entity, a timeline entry and a relationship all fork. A row is a fork beside its parent (or alone,
+ * when the parent was deleted), with what points at the fork (the resolve repoints those to the parent), how many forks the parent has
+ * altogether, and which other instances already decided it.
  */
 
-/** One version of the fact, as far as the Forks section reads it. */
+/** The kinds of record that fork, in the order Review lists them. The server's `FORKING_FAMILIES` in the singular. */
+export const FORK_KINDS = ['fact', 'entity', 'chrono', 'edge'] as const;
+export type ForkKind = (typeof FORK_KINDS)[number];
+
+/**
+ * One version of a record, as far as the Forks section reads it. The fields a kind compares are the ANSWER's (`kinds[kind].fields`), so the
+ * client holds no field list of its own and a version is a record of whatever fields its kind has.
+ */
 export interface ForkVersion {
   _id: string;
-  type?: string;
-  fact: string;
-  description?: string;
-  tags?: string[];
-  linkEntities?: string[];
+  /** The version the record is at; a resolve names it back (`ifMatchSeq`, `ifMatchParentSeq`). */
+  seq?: number;
   properties?: Record<string, unknown>;
   /** Who wrote it. A version with no author was written on this instance. */
   author?: { instanceId?: string; instanceLabel?: string };
   createdAt?: string;
   updatedAt?: string;
+  [field: string]: unknown;
+}
+
+/** An instance that already decided this fork (design rev 4 section 9a). The mark is local to the instance that lists it. */
+export interface ForkResolvedElsewhere {
+  /** The instance that issued the decision. */
+  by: string;
+  at?: string;
+  /** False when the delivering peer did not prove the issuer: the entry is a report, not a fact. */
+  proven: boolean;
+  /** The delivering peer, when it is not the issuer. */
+  via?: string;
+  /** Which side that instance kept, read by the server when the list is read; never stored. */
+  kept: 'original' | 'this version' | 'not yet known';
 }
 
 export interface ForkRow {
+  kind: ForkKind;
   forkId: string;
   parentId: string;
   fork: ForkVersion;
-  parent: ForkVersion;
-  /** Edges and links that point at the fork id: a resolve repoints them to the parent. */
+  /** Null when the parent was deleted: the fork is an orphan and stands alone. */
+  parent: ForkVersion | null;
+  orphaned: boolean;
+  /** Edges and links that point at the fork id: a resolve repoints them to the parent. Zero for a relationship. */
   edgeCount: number;
   linkCount: number;
   /** How many forks the parent holds, this one included; at the cap the next differing copy is dropped. */
   siblings: number;
+  /** The other instances that decided this fork already; empty when none did. */
+  resolvedElsewhere: ForkResolvedElsewhere[];
 }
 
-/** Which version a resolve keeps: the fork's text on the parent id, or the parent as it is. Either way the fork is deleted. */
+/** Which version a resolve keeps: the fork's body on the parent id, or the parent as it is. Either way the fork is deleted. */
 export type ForkKeep = 'fork' | 'parent';
+
+/** How many forks each kind has, as the list answers it. */
+export type ForkCounts = Record<ForkKind, number>;
+/** Per kind, how many of the counted forks another instance already decided. */
+export type ForkMarkedCounts = Partial<Record<ForkKind, number>>;
+
+/** What a kind compares: the fields of its body (the main one among them) and the one Review marks by word. */
+export interface ForkKindFields { fields: string[]; mainField: string }
+export type ForkKindsFields = Record<ForkKind, ForkKindFields>;
+
+/** The body of a resolve: all five parameters are required on both doors (`forkId` rides in the path). */
+export interface ForkResolveRequest {
+  kind: ForkKind;
+  keep: ForkKeep;
+  ifMatchSeq: number;
+  ifMatchParentSeq: number;
+}
 
 /** One page of the list. `total` is absent when the server does not say how many there are. */
 export interface ForkPage {
@@ -42,6 +83,12 @@ export interface ForkPage {
   total?: number;
   skip: number;
   limit: number;
+  /** Forks per kind over the whole space, not the page; absent when the answer does not say. */
+  counts?: ForkCounts;
+  /** Per kind, how many of the counted forks another instance already decided. */
+  resolvedElsewhere?: ForkMarkedCounts;
+  /** Per kind, the fields its versions compare and the main one; absent when the answer does not say. */
+  kinds?: ForkKindsFields;
   /**
    * The most forks one record may hold, as the server says it (`MAX_FORKS_PER_RECORD`): the number the "at the limit" notice names. The client holds no
    * number of its own, so an answer that does not say it shows no such notice rather than one with a guess.

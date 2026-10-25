@@ -2,8 +2,10 @@
  * What differs between a fork and its parent, as marked segments (bundle-81, decision 43, mockup layout 3).
  *
  * The one question: "which words are only in this version, and which only in the other". `ins` is only in the fork (this version),
- * `del` only in the parent (the other), `same` in both. The Forks section writes the fact text once with the marks in place, and each
- * other field that differs as a line of marks; a mark is a word for a screen reader as well as a colour (the component prefixes it).
+ * `del` only in the parent (the other), `same` in both. The Forks section writes a kind's main text (the fact, an entity's name, a timeline
+ * entry's title, a relationship's description) once with the marks in place, and each other field that differs as a line of marks; a mark is a
+ * word for a screen reader as well as a colour (the component prefixes it). Every kind goes through the same functions, with the fields the
+ * list answer names for it.
  *
  * The word diff is a longest common subsequence over words, quadratic in their number. The forgettable part is inside: texts beyond
  * `MAX_DIFF_CELLS` cells are not diffed, they are shown as one removed run and one added run, because a long record must not freeze the page
@@ -57,30 +59,64 @@ export function wordDiff(a: string, b: string): Segment[] {
 export interface FieldDifference { key: string; a: unknown; b: unknown }
 
 export interface ForkComparison {
-  /** The fact text's two versions, when they differ (a fork always differs here). */
-  fact: FieldDifference | undefined;
+  /** The main field's two versions, when they differ (a fork always differs somewhere, and usually here). */
+  main: FieldDifference | undefined;
   /** Every other field that differs. */
   others: FieldDifference[];
   /** The names of the fields that are the same and say something: empty values are left out, as a field that says nothing. */
   same: string[];
 }
 
-const FIELDS = ['fact', 'type', 'description', 'tags', 'linkEntities'] as const;
+const differs = (f: FieldDifference): boolean => JSON.stringify(f.a) !== JSON.stringify(f.b);
+const isEmpty = (v: unknown): boolean => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 
-/** The fields of both versions, split into what differs and what is the same. */
-export function compareForkVersions(fork: ForkVersion, parent: ForkVersion): ForkComparison {
+/**
+ * The fields of both versions, split into what differs and what is the same. `fields` and `mainField` are the list answer's (`kinds[kind]`): a kind
+ * is compared on the fields it states, so a fact, an entity, a timeline entry and a relationship share this one function and it holds no field list.
+ * The main field is the one Review marks by word and is never repeated among the others, whether or not `fields` names it. A property of either
+ * version is compared key by key, whatever the kind.
+ */
+export function compareForkVersions(fork: ForkVersion, parent: ForkVersion, fields: readonly string[], mainField: string): ForkComparison {
   const propertyKeys = [...new Set([...Object.keys(parent.properties ?? {}), ...Object.keys(fork.properties ?? {})])].sort();
   const all: FieldDifference[] = [
-    ...FIELDS.map(key => ({ key: key as string, a: fork[key], b: parent[key] })),
+    ...fields.filter(key => key !== mainField && key !== 'properties').map(key => ({ key, a: fork[key], b: parent[key] })),
     ...propertyKeys.map(p => ({ key: `properties.${p}`, a: fork.properties?.[p], b: parent.properties?.[p] })),
   ];
-  const differs = (f: FieldDifference): boolean => JSON.stringify(f.a) !== JSON.stringify(f.b);
-  const empty = (v: unknown): boolean => v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
+  const main = { key: mainField, a: fork[mainField], b: parent[mainField] };
   return {
-    fact: all.find(f => f.key === 'fact' && differs(f)),
-    others: all.filter(f => f.key !== 'fact' && differs(f)),
-    same: all.filter(f => !differs(f) && !empty(f.a)).map(f => f.key),
+    main: differs(main) ? main : undefined,
+    others: all.filter(differs),
+    same: all.filter(f => !differs(f) && !isEmpty(f.a)).map(f => f.key),
   };
+}
+
+/** The fields an orphan has to say: the ones that hold something, in the answer's order, properties key by key. There is no other version to compare. */
+export function forkOwnFields(fork: ForkVersion, fields: readonly string[], mainField: string): FieldDifference[] {
+  const own = fields.filter(key => key !== mainField && key !== 'properties').map(key => ({ key, a: fork[key], b: undefined }));
+  const props = Object.keys(fork.properties ?? {}).sort().map(p => ({ key: `properties.${p}`, a: fork.properties?.[p], b: undefined }));
+  return [...own, ...props].filter(f => !isEmpty(f.a));
+}
+
+/** Below this share of the longer text's words in common, interleaved marks read as noise: the two texts are shown whole instead. */
+export const WHOLE_TEXT_BELOW = 0.4;
+
+const wordCount = (text: string): number => text.split(/\s+/).filter(Boolean).length;
+
+/**
+ * The marks of the main text (and of a description): the words only one side has, in place, unless fewer than {@link WHOLE_TEXT_BELOW} of the longer
+ * text's words are shared. Then the other text comes whole and struck, and this one whole and underlined, because a sentence cut into shreds of two
+ * texts cannot be read as either (the mockup's `diffHtml`, which the owner green-lit).
+ */
+export function textSegments(a: string, b: string): Segment[] {
+  const segments = wordDiff(a, b);
+  if (a === b) return segments;
+  const common = segments.filter(s => s.kind === 'same').reduce((n, s) => n + wordCount(s.text), 0);
+  if (common / Math.max(wordCount(a), wordCount(b), 1) >= WHOLE_TEXT_BELOW) return segments;
+  return [
+    ...(b ? [{ kind: 'del' as const, text: b }] : []),
+    ...(a && b ? [{ kind: 'same' as const, text: ' ' }] : []),
+    ...(a ? [{ kind: 'ins' as const, text: a }] : []),
+  ];
 }
 
 /** The marks of one differing field: tags and entity links by item, the description by word, anything else as the parent's value then the fork's. */
@@ -96,6 +132,6 @@ export function fieldSegments(field: FieldDifference, words: { empty: string; no
     // A space between the marks, outside them, so a mark's underline or strike does not run into the next one.
     return marks.flatMap((mark, index) => (index === 0 ? [mark] : [{ kind: 'same' as const, text: ' ' }, mark]));
   }
-  if (field.key === 'description') return wordDiff(text(field.a), text(field.b));
+  if (field.key === 'description') return textSegments(text(field.a), text(field.b));
   return [{ kind: 'del', text: text(field.b) }, { kind: 'ins', text: text(field.a) }];
 }

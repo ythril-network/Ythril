@@ -17,9 +17,10 @@
  * ## The API this spec assumes, because the component is not written yet
  *
  * `client/src/app/pages/brain/review-forks.component.ts` exports `ReviewForksComponent` (standalone), taking `rows`:
- * `{ forkId, parentId, fork, parent, edgeCount, linkCount, siblings }[]` (the fields of the mockup's data), and emitting
- * `resolve` with `{ forkId, keep: 'fork' | 'parent' }` once a confirmation is confirmed. The Review tab hosts it in a "Forks"
- * section. If the build names these differently, the import and `make()` are the lines to change; the rules stay.
+ * `{ kind, forkId, parentId, fork, parent, orphaned, edgeCount, linkCount, siblings, resolvedElsewhere }[]` and the list answer's
+ * `kinds` (the fields a kind compares, and its main field), and emitting `resolve` with `{ forkId, kind, keep: 'fork' | 'parent' }` once a
+ * confirmation is confirmed (Q-624: the kind rides along, and `review-forks-kinds.spec.ts` holds the kind switch). The Review tab hosts it
+ * in a "Forks" section. If the build names these differently, the import and `make()` are the lines to change; the rules stay.
  *
  * ## Seen red
  *
@@ -38,15 +39,24 @@ const row = (over: Record<string, unknown> = {}) => ({
   forkId: 'fork-1111-2222', parentId: 'parent-aaaa-bbbb',
   fork: { _id: 'fork-1111-2222', type: 'note', fact: 'Embeddings are rebuilt after a model change, which takes about 20 minutes per 10 000 records.', tags: ['ops'], author: author('Berlin'), updatedAt: '2026-10-20T10:00:00.000Z' },
   parent: { _id: 'parent-aaaa-bbbb', type: 'note', fact: 'Embeddings are rebuilt after a model change, which takes about 12 minutes per 10 000 records.', tags: ['ops'], author: author('Gdansk'), updatedAt: '2026-10-21T10:00:00.000Z' },
-  edgeCount: 1, linkCount: 0, siblings: 1,
+  kind: 'fact' as const, orphaned: false, edgeCount: 1, linkCount: 0, siblings: 1, resolvedElsewhere: [],
   ...over,
 });
+
+/** The list answer's `kinds` (Q-624): the fields a fact compares and its main field. The component holds no field list of its own. */
+const KINDS = {
+  fact: { fields: ['fact', 'type', 'description', 'tags', 'linkEntities'], mainField: 'fact' },
+  entity: { fields: ['name', 'type', 'description', 'tags'], mainField: 'name' },
+  chrono: { fields: ['title', 'type', 'start', 'end', 'description', 'tags'], mainField: 'title' },
+  edge: { fields: ['description', 'weight'], mainField: 'description' },
+};
 
 function make(rows = [row()]) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({ imports: [ReviewForksComponent, getTranslocoModule({ translation: { en: dictionaryTree() } })] });
   const fixture = TestBed.createComponent(ReviewForksComponent);
   fixture.componentRef.setInput('rows', rows);
+  fixture.componentRef.setInput('kinds', KINDS);
   fixture.detectChanges();
   return fixture;
 }
@@ -118,7 +128,7 @@ describe('ReviewForksComponent (layout 3, inline difference)', () => {
     expect(dialog, 'no confirmation names what is deleted').toBeTruthy();
     const confirm = [...dialog.querySelectorAll('button')].find(b => /keep|confirm/i.test(b.textContent ?? ''))!;
     confirm.click();
-    expect(resolved).toHaveBeenCalledWith({ forkId: 'fork-1111-2222', keep: 'fork' });
+    expect(resolved).toHaveBeenCalledWith({ forkId: 'fork-1111-2222', kind: 'fact', keep: 'fork' });
   });
 
   it('the other action keeps the parent', () => {
@@ -129,7 +139,7 @@ describe('ReviewForksComponent (layout 3, inline difference)', () => {
     f.detectChanges();
     const dialog = el(f).querySelector('[role="alertdialog"], [role="dialog"]') as HTMLElement;
     [...dialog.querySelectorAll('button')].find(b => /keep|confirm/i.test(b.textContent ?? ''))!.click();
-    expect(resolved).toHaveBeenCalledWith({ forkId: 'fork-1111-2222', keep: 'parent' });
+    expect(resolved).toHaveBeenCalledWith({ forkId: 'fork-1111-2222', kind: 'fact', keep: 'parent' });
   });
 
   it('says "1 edge points at this fork", not "1 edge point" (the copy fix of decision 43)', () => {
