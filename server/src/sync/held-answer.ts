@@ -18,14 +18,15 @@
  * own transfer on a non-2xx and only the turn can say "stop the rest of this space for this member, and it is not a
  * failure".
  */
-import { POSITIONS_BUILDING } from '../util/errors.js';
+import { POSITIONS_BUILDING, EDGE_IDENTITY_BUILDING } from '../util/errors.js';
 
 /**
  * What a refused transfer means to its sender. `held` and `declined` end the space's exchange with this member for the cycle
- * and move no failure counter. Named for the refusal, not as a "Verdict": the arrival planner's verdicts (`upsert-plan.ts`)
+ * and move no failure counter. `family-held` (Q-624: `edge_identity_building`) holds ONE family of the space: the turn and every other family go on, the
+ * family's transfer stops at its held position (`stopTransfer(..., 'held')`), and no failure is counted. Named for the refusal, not as a "Verdict": the arrival planner's verdicts (`upsert-plan.ts`)
  * are what a receiver did with a record, and the push-pull parity gate derives its rows from every `*Verdict` type.
  */
-export type TransferRefusal = 'held' | 'declined' | 'failed';
+export type TransferRefusal = 'held' | 'family-held' | 'declined' | 'failed';
 
 /**
  * One space's exchange with one member, as the transfer modules see it: the unit in flight takes `signal`, the loops ask
@@ -45,16 +46,18 @@ export const SPACE_DECLINED_ANSWER = { error: 'This member left the space', code
 /**
  * The codes a peer answers a refused space with (`423`, or `503` for a space that is only temporarily not ready), and what each means to the
  * sender. `positions_building` is HELD, not failed (bundle-81, design rev 8 §6, decision 6): the peer is building the positions of that space,
- * it moves no mark and counts no member failure, and the same cycle runs again next time. Every OTHER `503` stays `'failed'`.
+ * it moves no mark and counts no member failure, and the same cycle runs again next time. `edge_identity_building` is `'family-held'` (Q-624): the peer
+ * is rebuilding the edge identity index of that space, so only the edges family waits. Every OTHER `503` stays `'failed'`.
  */
 const VERDICT_OF_CODE: Readonly<Record<string, TransferRefusal>> = {
   [SPACE_HELD_ANSWER.code]: 'held',
   [SPACE_DECLINED_ANSWER.code]: 'declined',
   [POSITIONS_BUILDING]: 'held',
+  [EDGE_IDENTITY_BUILDING]: 'family-held',
 };
 
 /**
- * `'held'` for a `423` whose body says `space_held` (or a `423`/`503` that says `positions_building`), `'declined'` for `space_declined`,
+ * `'held'` for a `423` whose body says `space_held` (or a `423`/`503` that says `positions_building`), `'family-held'` for a `503` that says `edge_identity_building`, `'declined'` for `space_declined`,
  * otherwise `'failed'`. The body's `code` is read on a `503` as well as a `423`, but only a code in the table above changes the verdict:
  * a `503` with no code, or an unknown one, is the failure it always was. Never throws: a body that cannot be read is a failed transfer,
  * as any other non-2xx.

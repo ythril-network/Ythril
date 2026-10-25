@@ -150,6 +150,7 @@ export const UNAWAITED_BACKGROUND = {
   'server/src/brain/embed-worker.ts :: Brain embedding stall sweep': 'requeues stalled embedding jobs; local derived data only',
   'server/src/brain/embed-worker.ts :: Brain embedding heartbeat': 'a liveness stamp for the embedding worker; no network state',
   'server/src/brain/reindex.ts :: Reindex watcher': 'advances this instance\'s own index builds; no network state',
+  'server/src/spaces/edge-identity-owed.ts :: Edge identity owed': 'swaps the edge identity index of a space (an index build, no record is written or sent); the only sync effect is that the edges family of a space still on the full index is held, and a test that waits for a fork edge awaits the swap itself (`ensurePartialEdgeIdentity` or `runEdgeIdentityOwedTick`)',
   'server/src/sync/positions-owed.ts :: Positions owed': 'positions and indexes the rows of a space that owes its positions (local-only fields); every sync door of such a space answers held, so it sends nothing a test reads',
   'server/src/brain/tombstone-prune.ts :: Tombstone prune': 'prunes old tombstones after their retention; sends nothing and starts no round or act',
   'server/src/brain/ttl-sweep.ts :: TTL sweep': 'deletes records past their LOCAL retention; its tombstones travel on a later cycle, and it starts no round, act or notice',

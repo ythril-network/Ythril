@@ -51,7 +51,7 @@ export interface SyncHistoryRecord {
 }
 
 /** One held space of a cycle: the members it was held with, and why. */
-export interface SyncHeldSpace { spaceId: string; members: string[]; reason: string }
+export interface SyncHeldSpace { spaceId: string; members: string[]; reason: string; /** The held families, when the hold is one family's and not the space's. */ families?: string[] }
 /** One declined space of a cycle, and the members that declined it. */
 export interface SyncDeclinedSpace { spaceId: string; members: string[] }
 

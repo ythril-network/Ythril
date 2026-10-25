@@ -141,7 +141,10 @@ describe('one duplicate key does not wedge a member', () => {
     const end = pull.indexOf('for (const verdict of written.verdicts)', write);
     assert.ok(end > write, `${PULL}: the verdict loop after the page write is gone — re-point this gate`);
     const after = pull.slice(write, end);
-    assert.match(after, /catch \(err\) \{\s*\n\s*(?:if \(isPositionsBuilding\(err\)\) throw err;\s*\n\s*)?return `a record write failed[\s\S]*?\}\s*$/,
+    // Re-anchored for Q-624 (design rev 4 section 5.4): the page-write catch carries ONE other hold besides the positions one, the receiver's own edges family
+    // (`EdgeIdentityBuilding`), which stops the transfer as HELD and hands the pager its reason; every other failure still returns a record-write failure, and
+    // nothing in the catch throws but the positions hold (checked below).
+    assert.match(after, /catch \(err\) \{\s*\n\s*(?:if \(isPositionsBuilding\(err\)\) throw err;\s*\n\s*)?(?:(?:\/\/[^\n]*\n\s*)*if \(err instanceof EdgeIdentityBuilding\) \{[\s\S]*?\n\s*\}\s*\n\s*)?return `a record write failed[\s\S]*?\}\s*$/,
       'a failed page write must be caught in the transfer — and handed back as a record-write failure that stops it, '
       + 'not rethrown into the member-level catch, which counts it toward PEER UNREACHABLE');
     // The one rethrow is a space that owes its positions: that is the member's HOLD (the turn catches it), never a failure to count.

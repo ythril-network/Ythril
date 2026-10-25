@@ -102,6 +102,23 @@ export class PositionsBuilding extends Error {
   }
 }
 
+/** The code a sync door puts on the 503 for a space whose edge identity index is being rebuilt, which a sender reads as ONE FAMILY held. A constant, never a literal at a site. */
+export const EDGE_IDENTITY_BUILDING = 'edge_identity_building';
+
+/**
+ * A page of the edges family carried, or would have planned, a fork edge in a space whose edge identity index still counts fork rows (the full five-field unique
+ * index stands, or the partial one is not confirmed: `spaces/edge-identity-index.ts`). A fork edge shares its subject's five identity fields, so storing it would be
+ * a duplicate-key error nobody can explain; it waits until the swap lands. The doors answer `503` with `code: 'edge_identity_building'`; a sender reads that code as
+ * the EDGES FAMILY held (never the space, never a failed member) and offers the page again from the held position.
+ */
+export class EdgeIdentityBuilding extends Error {
+  override readonly name = 'EdgeIdentityBuilding';
+  readonly code = EDGE_IDENTITY_BUILDING;
+  constructor(readonly spaceId: string) {
+    super('This space is rebuilding its edge identity index, so its relationship versions cannot be stored yet. The sender keeps them and offers them again.');
+  }
+}
+
 /**
  * A peer answered a sync request in the 5.x shape: a page with no `through`, `head` or `positions`, or a push answer without `positions: 1`. 6.0 pages
  * by position and a 5.x peer cannot be synced with by these rules, so the client THROWS this from both parsers (`sync/wire-answer.ts`); the engine ends

@@ -38,7 +38,7 @@ import {
 import { pushPositionRuns } from './push-position-runs.js';
 import { pushSelection } from './push-selection.js';
 import { LOCAL_ONLY_EXCLUSION } from './local-only-fields.js';
-import { truncationWarn, type TransferOutcome } from './watermark.js';
+import { stopTransfer, truncationWarn, type TransferOutcome } from './watermark.js';
 import { readAfterPosition } from '../util/position-keyset.js';
 import { andPredicates } from '../db/and-predicates.js';
 import { fileMetaForWire, fileMetaForOlderPeer, withAuthoredKeys } from '../api/sync/_shared.js';
@@ -109,9 +109,17 @@ export async function pushFamily(o: {
       const resp = await offer(newer);
       if (!resp.ok) {
         const verdict = await transferRefusal(resp);
+        await resp.body?.cancel().catch(() => {});
+        if (verdict === 'family-held') {
+          // The peer is rebuilding its edge identity index and holds THIS family only. It is not handed to the turn (`refusedBy` would end the whole space's
+          // exchange): the family stops as held, the mark stops with it, and every other family of the space goes on.
+          syncItemsPushedTotal.inc({ type: family.collection, outcome: 'held' }, batch.length);
+          const reason = `the peer holds the ${key} family (${resp.status}): it is rebuilding its edge identity index`;
+          stopTransfer(outcome, () => {}, reason, 'held');   // said once, by the loop's own stop for the reason handed back
+          return reason;
+        }
         o.turn?.refusedBy(verdict);
         if (verdict === 'held') syncItemsPushedTotal.inc({ type: family.collection, outcome: 'held' }, batch.length);
-        await resp.body?.cancel().catch(() => {});
         return `the peer answered ${resp.status}`;
       }
       // A 6.0 receiver stamps its answer; one without the stamp is a 5.x receiver, and this THROWS (the member's turn ends, no mark is written).
