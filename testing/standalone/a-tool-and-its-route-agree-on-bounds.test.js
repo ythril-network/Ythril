@@ -191,3 +191,114 @@ describe('a tool and its route agree on every bound of a shared parameter', () =
       + `route a schema this gate can read, or delegate it to the tool:\n  ${unreadable.map(p => `${p.toolName} ${p.key}`).join('\n  ')}`);
   });
 });
+
+/**
+ * Q-624: the fork capability's parameters, read rather than skipped.
+ *
+ * ## Why the cases above are not enough for it
+ *
+ * `every shared parameter carries the same bounds` walks the parameters a tool and a route schema BOTH declare. A parameter the route's
+ * schema does not declare is not a disagreement to it, it is not looked at: `resolve_fork` could gain `kind`, `ifMatchSeq` and
+ * `ifMatchParentSeq` on the tool while `ForkResolveParams` kept its two fields, and every case above would stay green, with the REST door
+ * quietly reading those three out of a body by hand. The parameter gate cannot say otherwise either: it reports the resolve route as
+ * `unresolved` ("the body is read field by field") and skips it. So the five parameters of the resolve (design rev 4, section 10) are
+ * asserted here, on the one derivation that does read the route's validator.
+ *
+ * - **The pairs** are the capability map's pairs whose route is under `/forks`, derived, with a floor.
+ * - **Both directions:** a parameter the tool declares must be in the schema the route parses with, and a parameter that schema declares must be
+ *   the tool's (the path's `space` aside), so neither door can offer a parameter the other lacks.
+ * - **The set** below is the design's own statement of the resolve (`kind`, `forkId`, `keep`, `ifMatchSeq` and `ifMatchParentSeq`, all required)
+ *   and of the list (`kind` optional): a fixture of the rule, not a derivation of it, which is why it is written out.
+ * - **`kind`** is judged against `FORKING_FAMILIES` (`sync/upsert-plan.ts`), the one list the design reads every forking kind from, so a fifth
+ *   family widens the enum on both doors or this fails.
+ */
+describe('the fork capability\'s parameters are compared on both doors (Q-624)', () => {
+  const FORK_PAIRS = PAIRS.filter(p => /\/forks(\/|$)/.test(p.route.path));
+  const RESOLVE_PARAMS = ['kind', 'forkId', 'keep', 'ifMatchSeq', 'ifMatchParentSeq'];
+  const resolvePair = FORK_PAIRS.find(p => p.route.method === 'POST');
+  const listPair = FORK_PAIRS.find(p => p.route.method === 'GET');
+
+  /** The properties and required list of every schema the route parses with, merged: that is what the door accepts. */
+  const doorOf = pair => {
+    const properties = {};
+    const required = new Set();
+    for (const name of pair.schemas) {
+      const s = ZODS.get(name).schema;
+      Object.assign(properties, s.properties ?? {});
+      for (const r of s.required ?? []) required.add(r);
+    }
+    return { properties, required };
+  };
+
+  it('finds both fork pairs, and each parses with a schema this gate can read', () => {
+    assert.ok(resolvePair && listPair, `the capability map pairs ${FORK_PAIRS.length} route(s) under /forks; list and resolve are both expected`);
+    for (const p of FORK_PAIRS) {
+      assert.ok(p.delegation || p.schemas.length > 0,
+        `${p.toolName} <-> ${p.key} parses with no schema this gate can read, so none of its parameters is compared by anything`);
+    }
+  });
+
+  it('the resolve takes kind, forkId, keep, ifMatchSeq and ifMatchParentSeq on both doors, every one required', () => {
+    assert.ok(resolvePair, 'no resolve pair');
+    const door = doorOf(resolvePair);
+    const toolHas = Object.keys(resolvePair.tool.schema.properties ?? {});
+    const toolRequired = new Set(resolvePair.tool.schema.required ?? []);
+    const problems = [];
+    for (const param of RESOLVE_PARAMS) {
+      if (!toolHas.includes(param)) problems.push(`MCP ${resolvePair.toolName} does not declare '${param}'`);
+      else if (!toolRequired.has(param)) problems.push(`MCP ${resolvePair.toolName} does not require '${param}'`);
+      if (!(param in door.properties)) problems.push(`${resolvePair.key} parses with no schema that declares '${param}' (${resolvePair.schemas.join(', ')})`);
+      else if (!door.required.has(param)) problems.push(`${resolvePair.key}: its schema does not require '${param}'`);
+    }
+    assert.deepEqual(problems, [], `the resolve's parameters differ by door:\n  ${problems.join('\n  ')}`);
+  });
+
+  it('no fork parameter exists on one door only, in either direction', () => {
+    const problems = [];
+    for (const p of FORK_PAIRS) {
+      if (p.delegation) continue;
+      const door = doorOf(p);
+      const tool = Object.keys(p.tool.schema.properties ?? {}).filter(k => !TRANSPORT.has(k));
+      const rest = Object.keys(door.properties).filter(k => !TRANSPORT.has(k));
+      for (const k of tool) if (!rest.includes(k)) problems.push(`MCP ${p.toolName} declares '${k}', ${p.key} parses with no schema that does`);
+      for (const k of rest) if (!tool.includes(k)) problems.push(`${p.key} (${p.schemas.join(', ')}) declares '${k}', MCP ${p.toolName} does not`);
+    }
+    assert.deepEqual(problems, [], problems.join('\n  '));
+  });
+
+  it('kind is one enum on both doors with a member per forking family; required on the resolve, optional on the list', async () => {
+    const { FORKING_FAMILIES } = await import('../../server/dist/sync/upsert-plan.js');
+    assert.ok(Array.isArray(FORKING_FAMILIES) && FORKING_FAMILIES.length >= 4,
+      'sync/upsert-plan.js exports no FORKING_FAMILIES of at least the four families (facts, entities, chrono, edges) the design forks');
+    assert.ok(resolvePair && listPair);
+    for (const [pair, mustRequire] of [[resolvePair, true], [listPair, false]]) {
+      const tool = pair.tool.schema.properties?.kind;
+      const rest = doorOf(pair).properties.kind;
+      assert.ok(tool, `MCP ${pair.toolName} declares no 'kind'`);
+      assert.ok(rest, `${pair.key} parses with no schema that declares 'kind'`);
+      const toolEnum = boundsOf(tool).enum;
+      const restEnum = boundsOf(rest).enum;
+      assert.ok(toolEnum && restEnum, `'kind' must be an enum on both doors (MCP ${JSON.stringify(toolEnum)}, REST ${JSON.stringify(restEnum)}): an id is unique per collection only, so a free string is a guess`);
+      assert.deepEqual(toolEnum, restEnum, `'kind' differs by door for ${pair.toolName}`);
+      assert.equal(toolEnum.length, FORKING_FAMILIES.length, `the 'kind' enum has ${toolEnum.length} member(s) and there are ${FORKING_FAMILIES.length} forking families`);
+      assert.equal((pair.tool.schema.required ?? []).includes('kind'), mustRequire, `MCP ${pair.toolName}: 'kind' ${mustRequire ? 'is required' : 'is optional'}`);
+      assert.equal(doorOf(pair).required.has('kind'), mustRequire, `${pair.key}: 'kind' ${mustRequire ? 'is required' : 'is optional'}`);
+    }
+  });
+
+  it('ifMatchSeq and ifMatchParentSeq are bounded integers on both doors, and the same bounds', () => {
+    assert.ok(resolvePair);
+    const door = doorOf(resolvePair).properties;
+    for (const param of ['ifMatchSeq', 'ifMatchParentSeq']) {
+      const tool = resolvePair.tool.schema.properties?.[param];
+      assert.ok(tool, `MCP ${resolvePair.toolName} declares no '${param}'`);
+      assert.ok(door[param], `${resolvePair.key} parses with no schema that declares '${param}'`);
+      for (const [side, node] of [['MCP', tool], ['REST', door[param]]]) {
+        assert.ok([node.type].flat().includes('integer'), `${side} '${param}' is not an integer`);
+        const b = boundsOf(node);
+        assert.ok(b.minimum !== undefined && b.maximum !== undefined, `${side} '${param}' states no minimum and maximum: a version is a bounded number`);
+      }
+      assert.deepEqual(boundsOf(tool), boundsOf(door[param]), `'${param}' is bounded differently by door`);
+    }
+  });
+});
