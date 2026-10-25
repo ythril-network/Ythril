@@ -16,6 +16,12 @@ import { compareForkVersions, fieldSegments, forkOwnFields, textSegments, type F
 /** Characters of the discarded text the confirmation quotes: enough to recognise it, short enough to read in a dialog. */
 const QUOTE_CHARS = 90;
 
+/**
+ * The Brain tab a kind is named by: `brain.tab.<name>`. The tab keys are the app's one name for each kind of record, so the kind switch reads them
+ * (a second label per kind would be a second name for a standing thing, and the two would drift).
+ */
+const KIND_TAB: Record<ForkKind, string> = { fact: 'facts', entity: 'entities', chrono: 'chrono', edge: 'edges' };
+
 /** What Review shows of one fork, worked out once per change instead of once per question the template asks. */
 interface RowView {
   row: ForkRow;
@@ -44,7 +50,7 @@ interface RowView {
  * by the owner 2026-10-25).
  *
  * A fork is a record two peers wrote differently at one version; both copies were kept. A segmented control above the list chooses the kind (a fact, an
- * entity, a timeline entry, a relationship), each with its count; it is a roving radio group (one tab stop, arrows, Home and End move AND select, focus
+ * entity, a chrono entry, an edge), each with its count; it is a roving radio group (one tab stop, arrows, Home and End move AND select, focus
  * follows). Each row writes the kind's main text ONCE, with the words only this version has marked `<ins>` and the words only the other has marked `<del>`,
  * and every other field that differs on a line of marks; which fields a kind compares and which one is main is the list answer's (`kinds`), never the
  * client's. Below 40% shared words the main text is not interleaved but written whole, the other struck and this one underlined. The marks are not colour
@@ -316,7 +322,8 @@ export class ReviewForksComponent {
 
   protected count(kind: ForkKind): number { return this.counts()?.[kind] ?? this.counted()[kind]; }
   protected markedCount(kind: ForkKind): number { return this.marked()?.[kind] ?? 0; }
-  protected kindName(kind: ForkKind): string { return this.tr(`brain.review.forks.kind.${kind}`); }
+  /** A kind goes by the name the Brain tab of that kind already has: the switch reads `brain.tab.*` and holds no label of its own. */
+  protected kindName(kind: ForkKind): string { return this.tr(`brain.tab.${KIND_TAB[kind]}`); }
   protected kindNoun(kind: ForkKind): string { return this.tr(`brain.review.forks.kindNoun.${kind}`); }
 
   /** The control's accessible name says the number in words: "Facts, 3 forks". */
@@ -392,7 +399,7 @@ export class ReviewForksComponent {
     return this.visible().find(r => r.parentId === row.parentId)?.forkId === row.forkId;
   }
 
-  /** What points at the fork, said in one sentence: edges, links, both, or nothing. A relationship is pointed at by nothing. */
+  /** What points at the fork, said in one sentence: edges, links, both, or nothing. An edge is pointed at by nothing. */
   private pointedAt(row: ForkRow): string {
     if (row.kind === 'edge') return '';
     const { edgeCount, linkCount } = row;

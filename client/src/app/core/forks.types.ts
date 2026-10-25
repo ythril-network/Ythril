@@ -2,7 +2,7 @@
  * The forks of a space, as Review lists them (bundle-81, design rev 8 section 5; every kind since Q-624, design rev 4 sections 9a, 10, 11).
  *
  * Two peers wrote different versions of one record at one version, so both copies were kept: the second under a derived id with `forkOf`
- * naming the first, its parent. A fact, an entity, a timeline entry and a relationship all fork. A row is a fork beside its parent (or alone,
+ * naming the first, its parent. A fact, an entity, a chrono entry and an edge all fork. A row is a fork beside its parent (or alone,
  * when the parent was deleted), with what points at the fork (the resolve repoints those to the parent), how many forks the parent has
  * altogether, and which other instances already decided it.
  */
@@ -48,7 +48,7 @@ export interface ForkRow {
   /** Null when the parent was deleted: the fork is an orphan and stands alone. */
   parent: ForkVersion | null;
   orphaned: boolean;
-  /** Edges and links that point at the fork id: a resolve repoints them to the parent. Zero for a relationship. */
+  /** Edges and links that point at the fork id: a resolve repoints them to the parent. Zero for an edge. */
   edgeCount: number;
   linkCount: number;
   /** How many forks the parent holds, this one included; at the cap the next differing copy is dropped. */

@@ -23,7 +23,7 @@ import type { ForkRow } from '../../core/forks.types';
 function forksWords(): Record<string, any> {
   const tree: Record<string, any> = {};
   for (const [key, value] of Object.entries(dictionary('en'))) {
-    if (!key.startsWith('brain.review.forks.')) continue;
+    if (!key.startsWith('brain.review.forks.') && !key.startsWith('brain.tab.')) continue;
     let node = tree;
     const parts = key.split('.');
     parts.slice(0, -1).forEach(p => { node = node[p] ??= {}; });
@@ -168,9 +168,9 @@ describe('the Forks tab of Review', () => {
     it('a kind with no forks is not an empty space: the switch stays and offers the next kind', () => {
       const { el, f, openForks } = setup({ listForks: serves() });
       openForks();
-      radio(el, /Timeline/).click();
+      radio(el, /Chrono/).click();
       f.detectChanges();
-      expect(el.textContent).toContain('Nothing to review in Timeline');
+      expect(el.textContent).toContain('Nothing to review in Chrono');
       expect(el.textContent).not.toContain('No forks to review');
       expect([...el.querySelectorAll('button')].some(b => /Show Facts \(1\)/.test(b.textContent ?? ''))).toBe(true);
     });

@@ -2,8 +2,8 @@
  * What differs between a fork and its parent, as marked segments (bundle-81, decision 43, mockup layout 3).
  *
  * The one question: "which words are only in this version, and which only in the other". `ins` is only in the fork (this version),
- * `del` only in the parent (the other), `same` in both. The Forks section writes a kind's main text (the fact, an entity's name, a timeline
- * entry's title, a relationship's description) once with the marks in place, and each other field that differs as a line of marks; a mark is a
+ * `del` only in the parent (the other), `same` in both. The Forks section writes a kind's main text (the fact, an entity's name, a chrono
+ * entry's title, an edge's description) once with the marks in place, and each other field that differs as a line of marks; a mark is a
  * word for a screen reader as well as a colour (the component prefixes it). Every kind goes through the same functions, with the fields the
  * list answer names for it.
  *
@@ -72,7 +72,7 @@ const isEmpty = (v: unknown): boolean => v === undefined || v === null || v === 
 
 /**
  * The fields of both versions, split into what differs and what is the same. `fields` and `mainField` are the list answer's (`kinds[kind]`): a kind
- * is compared on the fields it states, so a fact, an entity, a timeline entry and a relationship share this one function and it holds no field list.
+ * is compared on the fields it states, so a fact, an entity, a chrono entry and an edge share this one function and it holds no field list.
  * The main field is the one Review marks by word and is never repeated among the others, whether or not `fields` names it. A property of either
  * version is compared key by key, whatever the kind.
  */
