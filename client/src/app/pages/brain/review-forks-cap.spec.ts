@@ -17,8 +17,11 @@ import { pageOf } from '../../core/forks-api.service';
 const version = (id: string, fact: string) => ({ _id: id, type: 'note', fact, tags: [] as string[] });
 const row = (forkId: string, siblings: number) => ({
   forkId, parentId: 'parent-aaaa-bbbb', fork: version(forkId, 'one text'), parent: version('parent-aaaa-bbbb', 'another text'),
-  edgeCount: 0, linkCount: 0, siblings,
+  kind: 'fact' as const, orphaned: false, edgeCount: 0, linkCount: 0, siblings, resolvedElsewhere: [],
 });
+
+/** The answer's `kinds`: the fields a fact compares and its main field. The other kinds are not on screen in this spec. */
+const KINDS = Object.fromEntries(['fact', 'entity', 'chrono', 'edge'].map(k => [k, { fields: k === 'fact' ? ['fact', 'type', 'tags'] : ['x'], mainField: k === 'fact' ? 'fact' : 'x' }]));
 
 function make(cap: number | null, siblings: number) {
   const words: Record<string, any> = {};
@@ -33,6 +36,7 @@ function make(cap: number | null, siblings: number) {
   TestBed.configureTestingModule({ imports: [ReviewForksComponent, getTranslocoModule({ translation: { en: words } })] });
   const fixture = TestBed.createComponent(ReviewForksComponent);
   fixture.componentRef.setInput('rows', [row('fork-1111-2222', siblings), row('fork-3333-4444', siblings)]);
+  fixture.componentRef.setInput('kinds', KINDS);
   fixture.componentRef.setInput('cap', cap);
   fixture.detectChanges();
   return fixture.nativeElement as HTMLElement;

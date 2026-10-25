@@ -44,15 +44,17 @@ import { ReviewForksComponent } from './review-forks.component';
         <div class="loading-overlay"><span class="spinner"></span></div>
       } @else if (state().loadError() !== null) {
         <app-error-state [message]="'brain.review.forks.loadError' | transloco" [reason]="state().loadError() ?? ''" (retry)="state().reload(spaceId())" />
-      } @else if (state().rows().length === 0) {
+      } @else if (noForks()) {
         <div class="empty-state">
           <div class="empty-state-icon"><ph-icon name="check-circle" [size]="48"/></div>
           <h3>{{ 'brain.review.forks.empty.title' | transloco }}</h3>
           <p>{{ 'brain.review.forks.empty.body' | transloco }}</p>
         </div>
       } @else {
-        <app-review-forks [rows]="state().rows()" [cap]="state().maxForksPerRecord()" (resolve)="state().resolve(spaceId(), $event)" />
-        @if (state().hasPrevious() || state().hasNext()) {
+        <app-review-forks [rows]="state().rows()" [counts]="state().counts()" [marked]="state().marked()" [kinds]="state().kinds()" [kind]="state().kind()"
+                          [busy]="state().kindLoading()" [cap]="state().maxForksPerRecord()"
+                          (kindChange)="state().selectKind(spaceId(), $event)" (resolve)="state().resolve(spaceId(), $event)" />
+        @if (!state().kindLoading() && (state().hasPrevious() || state().hasNext())) {
           <div class="pagination">
             <button class="btn btn-sm btn-secondary" type="button" [disabled]="!state().hasPrevious()" (click)="state().load(spaceId(), state().skip() - pageSize)"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>
             <span class="pager-info">{{ state().pagerText() }}</span>
@@ -69,4 +71,13 @@ export class ReviewForksPanelComponent {
   /** The Review tab's forks state: its rows, page and refusal. */
   readonly state = input.required<ReviewForksState>();
   protected readonly pageSize = FORKS_PAGE_SIZE;
+
+  /**
+   * The space has no forks of any kind. The answer's counts say it when they are there: a kind with none is not an empty space, it is a kind the
+   * switch says is empty, and offers the next. An answer without counts is judged by its rows.
+   */
+  protected noForks(): boolean {
+    const total = this.state().total();
+    return total === null ? this.state().rows().length === 0 : total === 0;
+  }
 }

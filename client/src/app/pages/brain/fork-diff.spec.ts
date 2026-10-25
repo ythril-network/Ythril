@@ -35,7 +35,7 @@ describe('compareForkVersions', () => {
   it('splits the fields into what differs and what is the same, properties one by one, and leaves empty fields out of "same"', () => {
     const fork = { _id: 'f', fact: 'two', type: 'note', tags: ['a', 'b'], properties: { city: 'Berlin', floor: 3 } };
     const c = compareForkVersions(fork, parent, FACT_FIELDS, 'fact');
-    expect(c.fact?.a).toBe('two');
+    expect(c.main?.a).toBe('two');
     expect(c.others.map(f => f.key)).toEqual(['tags', 'properties.floor']);
     expect(c.same).toEqual(['type', 'properties.city']);
   });
