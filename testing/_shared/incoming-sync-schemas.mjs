@@ -26,6 +26,17 @@
  */
 import assert from 'node:assert/strict';
 
+/*
+ * Re-anchored for Q-624 (design rev 4 section 2, D11): the `Incoming*` schemas live in the schema leaf, `sync/incoming-schemas.ts`, which imports no sync
+ * machinery, and `api/sync/_shared.ts` re-exports them. The set is read out of the leaf, with the same floor; what it holds is unchanged by the move.
+ */
+let LEAF;
+try { LEAF = await import('../../server/dist/sync/incoming-schemas.js'); }
+catch (err) {
+  throw new Error('server/dist/sync/incoming-schemas.js is not built: the Incoming*Doc schemas live in the schema leaf, and every gate that loops over them reads them from there '
+    + `(${String(err?.code ?? err?.message)})`);
+}
+
 /** The prefix/suffix pair the ingest schemas are named with. */
 const NAME = /^Incoming[A-Za-z]*Doc$/;
 
@@ -35,9 +46,14 @@ const NAME = /^Incoming[A-Za-z]*Doc$/;
  * @param {Record<string, unknown>} shared the imported `server/dist/api/sync/_shared.js`
  */
 export function incomingSchemas(shared) {
-  const found = Object.entries(shared)
+  const found = Object.entries(LEAF)
     .filter(([name, v]) => NAME.test(name) && v && typeof v === 'object' && 'shape' in v)
     .sort(([a], [b]) => a.localeCompare(b));
+  // The module a caller hands in (`api/sync/_shared.js`) re-exports what it held, so no importer changes: assert that it still does, and that it is the
+  // SAME schema object, so a caller that tests through `_shared` is testing the leaf's schema and not a second copy of it.
+  const reExported = found.filter(([name, v]) => shared?.[name] === v).length;
+  assert.equal(reExported, found.length,
+    `api/sync/_shared.js re-exports ${reExported} of the ${found.length} Incoming*Doc schemas the leaf holds: an importer that reads them through it is reading something else`);
 
   // THE VACUITY GUARD, and it is the whole point of deriving rather than listing. A rename, a bundler
   // change or a wrong import path would hand every caller an empty array, and an empty array passes every
@@ -45,7 +61,7 @@ export function incomingSchemas(shared) {
   // `CLAUDE.md` describes today; the assertion is a floor rather than an equality so that ADDING a seventh
   // schema does not fail a gate about something else, while losing one still does.
   assert.ok(found.length >= 6,
-    `only ${found.length} Incoming*Doc schemas found in api/sync/_shared.js (${found.map(([n]) => n).join(', ') || 'none'}) — `
+    `only ${found.length} Incoming*Doc schemas found in sync/incoming-schemas.js (${found.map(([n]) => n).join(', ') || 'none'}) — `
     + 're-anchor this helper before trusting any gate that loops over it');
 
   return found;

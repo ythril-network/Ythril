@@ -35,6 +35,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { readTrackedSources } from './_sources.mjs';
 
 const description = (file, name) => {
   const s = stripComments(readFileSync(file, 'utf8'));
@@ -121,15 +122,27 @@ describe('which deletes can be refused, and each one says so where the caller is
       'and must give the reason it is exempt, which is that nothing links to an edge');
   });
 
-  it('delete_fact says its forks survive it', () => {
-    // A fork (`forkOf` naming this fact, made by sync when a peer sent another text at the same version) is its own
-    // record: no delete, expiry, tombstone or wipe follows `forkOf` (it is read only by the fork caps and the
-    // planner). A caller deleting a fact to be rid of it needs to know its conflict copies stay.
-    assert.match(TOOLS.delete_fact, /forks?\b[^.]*\bnot deleted|forks?\b[^.]*\bstay|forks?\b[^.]*\bown records?/i,
-      'delete_fact does not say that the fact\'s forks are left in place');
-    // And how to find them: a caller erasing a text needs the forks' ids, and "delete each by id" is no help without them.
-    assert.match(TOOLS.delete_fact, /filter[^.]*forkOf/,
-      'delete_fact does not say how to find the fact\'s forks (a filter on forkOf)');
+  /*
+   * Re-anchored for Q-624 (design rev 4 sections 7 and 15, re-anchor table): this case said a fact's forks SURVIVE its delete ("forks are own records and are
+   * not deleted"), and it held for facts alone. Every forking kind now has its unresolved versions deleted with it (`removeForksOf`, inside the four delete
+   * functions), and the sentence that says so is ONE shared constant, `FORKS_GO_WITH_THEIR_SUBJECT`, in all four descriptions: four copies of a sentence
+   * about one behaviour is how `mcp/tools/fact.ts` came to say the opposite of what the server did. A caller erasing a text must be told its conflict
+   * copies go with it, that one version alone can be deleted by its id, and where the versions are listed.
+   */
+  it('the four deletes say, in ONE shared sentence, that a record\'s unresolved versions are deleted with it', async () => {
+    const owners = readTrackedSources('server/src', { ext: ['.ts'], floor: 300, specs: false, untracked: true })
+      .filter(s => /export const FORKS_GO_WITH_THEIR_SUBJECT\b/.test(stripComments(s.text)));
+    assert.equal(owners.length, 1, `FORKS_GO_WITH_THEIR_SUBJECT is exported by ${owners.length} module(s): the sentence is not written once`);
+    const builtPath = owners[0].file.replace(/^server\/src\//, '../../server/dist/').replace(/\.ts$/, '.js');
+    const { FORKS_GO_WITH_THEIR_SUBJECT: sentence } = await import(builtPath);
+    assert.equal(typeof sentence, 'string');
+    assert.match(sentence, /\bdelet\w*\b[^.]*\bunresolved versions?\b|\bunresolved versions?\b[^.]*\b(?:go|are deleted|deleted)\b/i, 'the shared sentence does not say that deleting a record deletes its unresolved versions');
+    assert.match(sentence, /\bby (?:its|their) id\b/i, 'the shared sentence does not say that one version alone can be deleted by its id');
+    assert.match(sentence, /\bReview\b/, 'the shared sentence does not say where the versions are listed');
+    for (const [name, d] of Object.entries(TOOLS)) {
+      assert.match(d, /FORKS_GO_WITH_THEIR_SUBJECT/, `${name} does not carry the shared sentence`);
+      assert.doesNotMatch(d, /forks?\b[^.]*\b(?:not deleted|stay|survive|left in place)\b/i, `${name} still says forks survive it`);
+    }
   });
 
   it('and the claims are true — source, not prose', () => {
