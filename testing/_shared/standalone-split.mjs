@@ -43,6 +43,14 @@ import { trackedSources, TEST_FILE_SUFFIXES } from '../standalone/_sources.mjs';
  */
 export const NEEDS_INSTANCE = /^\s*\*\s*@needs-instance/m;
 
+/**
+ * A pure test that takes too long, or too much of a contended machine, for every push, and so runs in CI only: it says `@ci-only` in its header, as a driver of a
+ * live server says `@needs-instance`. Anchored to a HEADER line for the same reason. A `@ci-only` file is still a pure file: CI's `standalone-pure` job and
+ * `npm run test:standalone` run it (`offlineRuns` by default), and only the preflight plan leaves it out (`offlineRuns(split, { ciOnly: false })`).
+ * `a-ci-only-test-runs-in-a-ci-job` holds that such a file runs in some CI job, so the marker can never mean "runs nowhere".
+ */
+export const CI_ONLY = /^\s*\*\s*@ci-only/m;
+
 /** The module every database-backed standalone file opens the test MongoDB through. */
 const DB_HARNESS = '_mongo-harness.mjs';
 
@@ -121,6 +129,8 @@ export function splitStandalone({ root = process.cwd() } = {}) {
     .filter(f => importedNames(readFileSync(join(root, f), 'utf8')).includes(DB_HARNESS)).map(f => f.split('/').pop())]);
   const offlineDb = offline.filter(f => importedNames(read(f)).some(m => dbModules.has(m)));
   const offlinePure = offline.filter(f => !offlineDb.includes(f));
+  // Declared in the header like `@needs-instance`. Any file may carry it; `a-ci-only-test-runs-in-a-ci-job` holds that each one is a pure file that CI runs.
+  const ciOnly = all.filter(f => CI_ONLY.test(read(f)));
   /*
    * A FLOOR, because an empty list runs nothing and reports success about it. That is the same defect
    * one level up from what these tests check, and it is the line a hand-written copy drops.
@@ -137,7 +147,7 @@ export function splitStandalone({ root = process.cwd() } = {}) {
     throw new Error(`only ${offlineDb.length} database-backed standalone file(s) found — the import scan for `
       + `${DB_HARNESS} is broken, and the db files would run uncapped against one MongoDB.`);
   }
-  return { all, offline, needsInstance, offlineDb, offlinePure };
+  return { all, offline, needsInstance, offlineDb, offlinePure, ciOnly };
 }
 
 /**
@@ -147,12 +157,14 @@ export function splitStandalone({ root = process.cwd() } = {}) {
  * `batched` under the Windows command-line limit. One plan, so the two runners cannot disagree about which files
  * run capped — preflight against a developer's local test stack meets the same Mongo the suite does.
  *
+ * `ciOnly: false` (preflight) leaves the `@ci-only` pure files out of the pure batches; the default (CI, `test:standalone`) keeps them.
+ *
  * @returns {Array<{ kind: 'pure' | 'db', args: string[], files: string[] }>} `args` go after `--test`
  */
-export function offlineRuns(split = splitStandalone()) {
+export function offlineRuns(split = splitStandalone(), { ciOnly = true } = {}) {
   const path = (f) => `testing/standalone/${f}`;
   return [
-    ...batched(split.offlinePure.map(path)).map(files => ({ kind: 'pure', args: [], files })),
+    ...batched(split.offlinePure.filter(f => ciOnly || !split.ciOnly.includes(f)).map(path)).map(files => ({ kind: 'pure', args: [], files })),
     ...batched(split.offlineDb.map(path))
       .map(files => ({ kind: 'db', args: [`--test-concurrency=${DB_TEST_CONCURRENCY}`], files })),
   ];

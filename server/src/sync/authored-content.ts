@@ -39,7 +39,7 @@ import { REDACTED_CHRONO_FIELDS } from '../brain/redacted-chrono-fields.js';
  * What says WHEN and WHO and WHICH VERSION a copy is, not what it says: removed at the top level before a body is hashed. `forkOf` is here because a
  * fork row and the copy it was made from say the same thing, and the link between them is not part of what either says.
  */
-export const VERSION_META = Object.freeze(['_id', 'spaceId', 'seq', 'createdAt', 'updatedAt', 'author', 'forkOf'] as const);
+export const VERSION_META = Object.freeze(['_id', 'spaceId', 'seq', 'createdAt', 'updatedAt', 'author', 'forkOf', 'forkAt'] as const);
 
 /**
  * Per family that forks: the keys of its body, DERIVED from its `Incoming*` schema less the version metadata. The families are the ones whose schema

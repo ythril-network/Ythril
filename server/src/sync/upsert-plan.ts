@@ -165,6 +165,8 @@ export type ArrivalDoor = 'push' | 'pull';
 export interface ArrivalDoc extends Replicable {
   fact?: string;
   contentRedacted?: boolean;
+  /** The shared version a fork row was made at: the seq its id is derived from (`forkRowVerdict`). Absent on every record that is no fork, and on a 5.6 fact fork. */
+  forkAt?: number;
   forkOf?: string;
   type?: string;
   from?: string;
@@ -440,8 +442,8 @@ export function divergesFrom(
  * The id a FACT fork had under 5.6.2 and later, derived from the TEXT alone (`forkIdFor(parent, seq, fact)`), or undefined for a family whose forks never had one.
  * Those rows are real on every member that upgraded, so a copy is matched to one by it as well as by the body-derived id.
  */
-function legacyForkIdOf(kind: PlannedFamily, doc: ArrivalDoc): string | undefined {
-  return kind === 'facts' ? forkIdFor(doc._id, doc.seq, doc.fact ?? '') : undefined;
+function legacyForkIdOf(kind: PlannedFamily, doc: ArrivalDoc, parent: string = doc._id, seq: number = doc.seq): string | undefined {
+  return kind === 'facts' ? forkIdFor(parent, seq, doc.fact ?? '') : undefined;
 }
 
 /** Does `id` look like a v4 UUID, the shape of every fork id and of the random ones 5.6.0 and 5.6.1 gave a fact fork? */
@@ -449,17 +451,18 @@ const V4_SHAPED = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a
 
 /**
  * Can a fork row that ARRIVES (a pushed, pulled or restored row carrying `forkOf`) be accepted as what it says it is? The ONE derivation check of
- * every door (design section 3): its `_id` must equal `forkIdFor(forkOf, seq, authoredContentHash(family, row).text)`, so a fork id proves its body and
- * "is this the same fork" is an id lookup.
+ * every door (design section 3): its `_id` must equal `forkIdFor(forkOf, forkAt, authoredContentHash(family, row).text)`, so a fork id proves its body and
+ * "is this the same fork" is an id lookup. The input is `forkAt`, the shared version the copies diverged at (the arriving copy's seq), and never the row's `seq`:
+ * the row keeps a LOCAL version stamp there (parent decision, 2026-10-25).
  *
- *  - `ok`: the id derives. For FACTS the id a 5.6.2 or later instance derived from the TEXT (`forkIdFor(forkOf, seq, fact)`) derives too, because
- *    those rows are real and a member that upgraded serves them.
- *  - `legacy`: a FACT fork whose id derives from neither but is v4-shaped, which is what 5.6.0 and 5.6.1 stored (`uuidv4()`). It cannot be verified,
+ *  - `ok`: the id derives. For FACTS the id a 5.6.2 or later instance derived from the TEXT (`forkIdFor(forkOf, seq, fact)`, a row with no `forkAt`) derives too,
+ *    because those rows are real and a member that upgraded serves them.
+ *  - `legacy`: a FACT fork WITHOUT `forkAt` whose id derives from neither but is v4-shaped, which is what 5.6.0 and 5.6.1 stored (`uuidv4()`). It cannot be verified,
  *    and refusing a real row is a permanent divergence between the members that hold it and the ones that refuse it, so the caller admits it under a
  *    STORED parent and the cap.
  *  - `redacted`: a CHRONO fork carrying `contentRedacted` whose id no longer derives, because the redaction deleted the bytes the id was made from.
  *    Admitted under the cap and the tombstoned-parent rule.
- *  - `invalid`: everything else, a `forkOf` equal to the row's own id included. It is never silently dropped.
+ *  - `invalid`: everything else, a `forkOf` equal to the row's own id and an entity, chrono or edge fork with no `forkAt` included. It is never silently dropped.
  *
  * What it is for, said plainly: `forkIdFor` is public, so this is not authentication. It makes one row per distinct body under a parent, so
  * re-deliveries collapse and a buggy peer cannot plant duplicates.
@@ -469,11 +472,17 @@ export function forkRowVerdict(
 ): 'ok' | 'legacy' | 'redacted' | 'invalid' {
   const parent = row.forkOf;
   if (parent === undefined || parent === row._id || !isForkingFamily(kind)) return 'invalid';
-  if (row._id === forkIdFor(parent, row.seq, text)) return 'ok';
-  if (row._id === legacyForkIdOf(kind, row)) return 'ok';
-  if (kind === 'chrono' && row.contentRedacted === true) return 'redacted';
-  if (kind === 'facts' && V4_SHAPED.test(row._id)) return 'legacy';
-  return 'invalid';
+  if (row.forkAt === undefined) {
+    // A row that carries no `forkAt` is one 5.6 stored, and only a FACT fork existed then: its id derived from the text (at the seq the copies shared, which
+    // the row no longer says) or was a random v4 uuid. An entity, chrono or edge fork without it cannot have been written by anything that exists.
+    if (kind !== 'facts') return 'invalid';
+    if (row._id === legacyForkIdOf(kind, row, parent)) return 'ok';
+    return V4_SHAPED.test(row._id) ? 'legacy' : 'invalid';
+  }
+  // The derivation input is `forkAt`, never `seq`: the row keeps its LOCAL version stamp in `seq`, which no other instance derived the id from.
+  if (row._id === forkIdFor(parent, row.forkAt, text)) return 'ok';
+  if (row._id === legacyForkIdOf(kind, row, parent, row.forkAt)) return 'ok';
+  return kind === 'chrono' && row.contentRedacted === true ? 'redacted' : 'invalid';
 }
 
 /**
@@ -712,7 +721,7 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
       if (cur.forkOf !== undefined) { plan.verdicts[i] = 'skipped'; return; }
       newForks.add(forkId);
       forksMade.set(doc._id, (forksMade.get(doc._id) ?? 0) + 1);
-      plan.forks.push({ index: i, doc: { ...doc, _id: forkId, forkOf: doc._id } });
+      plan.forks.push({ index: i, doc: { ...doc, _id: forkId, forkOf: doc._id, forkAt: doc.seq } });
       plan.verdicts[i] = 'forked'; plan.forkIds[i] = forkId;
       return;
     }

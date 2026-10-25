@@ -147,7 +147,8 @@ export function bodyText(family, row) {
 }
 
 /** The id a fork row carries: derived from its parent, its (shared) seq and its whole body. */
-export const forkIdOfBody = (family, forkOf, row) => upsertPlan.forkIdFor(forkOf, row.seq, bodyText(family, { ...row, forkOf }));
+// The id derives from `forkAt`, the shared version the copies diverged at, never from the row's own `seq`, which is a local stamp (parent decision, 2026-10-25).
+export const forkIdOfBody = (family, forkOf, row) => upsertPlan.forkIdFor(forkOf, row.forkAt ?? row.seq, bodyText(family, { ...row, forkOf }));
 
 /**
  * Store a fork of `parentId`: the `extra` body over the kind's minimal row, at the parent's seq, under its derived id. Returns the stored row.
@@ -156,7 +157,7 @@ export const forkIdOfBody = (family, forkOf, row) => upsertPlan.forkIdFor(forkOf
 export async function seedFork(door, S, kind, parentId, seq, extra = {}) {
   const k = FORK_KINDS[kind];
   // A carried row's position is its seq (as `a-scanner-reads-every-record-of-a-tie-db` seeds): a row with none is invisible to every position reader.
-  const row = { ...k.row(S, 'placeholder', seq, { pos: seq, posAtSeq: seq, ...extra }), forkOf: parentId };
+  const row = { ...k.row(S, 'placeholder', seq, { pos: seq, posAtSeq: seq, ...extra }), forkOf: parentId, forkAt: extra.forkAt ?? seq };
   row._id = forkIdOfBody(k.family, parentId, row);
   try { await door.coll(S, k.family).insertOne(row); } catch (err) {
     if (err?.code === 11000 && kind === 'edge') {

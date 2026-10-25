@@ -25,6 +25,14 @@ import { MAX_FACT_LENGTH, MAX_TAGS } from '../util/request-bounds.js';
 
 // ── Incoming document schemas (Zod validation for peer-submitted docs) ─────
 
+/**
+ * The shared version a fork was made at (`forkAt`): the arriving copy's `seq` at the equal-seq divergence, which is what the fork's `_id` is derived from
+ * (`forkIdFor(forkOf, forkAt, body)`). A fork row keeps its LOCAL version stamp in `seq` (the position machinery needs it), so the derivation cannot read
+ * `seq`: two receivers stamp two versions and would name one fork two ways, and a peer verifying the row would recompute from a seq the id never saw.
+ * Authored, replicated and hashed like `forkOf`, so declared on every forking family; not body (`sync/authored-content.ts`). Parent decision, 2026-10-25.
+ */
+const ForkAtSchema = z.number().int().nonnegative().max(MAX_SYNC_SEQ).optional();
+
 export const AuthorRefSchema = z.object({
   instanceId: z.string().min(1),
   instanceLabel: z.string().min(1),
@@ -62,6 +70,8 @@ export const IncomingFactDoc = z.object({
    * forking family. `.min(1)` because `''` would escape the partial identity index of an edge fork (`forkOf: null` is the identity's filter).
    */
   forkOf: z.string().min(1).optional(),
+  /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
+  forkAt: ForkAtSchema,
 });
 
 /** How many authored keys, and how long a key name, a peer's `authoredKeys` may carry (a file has a handful today). */
@@ -151,6 +161,8 @@ export const IncomingEntityDoc = z.object({
   seq: z.number().int().nonnegative().max(MAX_SYNC_SEQ),
   /** See `IncomingFactDoc`: the fork link, hashed and so replicated. */
   forkOf: z.string().min(1).optional(),
+  /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
+  forkAt: ForkAtSchema,
 });
 
 /**
@@ -185,6 +197,8 @@ export const IncomingEdgeDoc = z.object({
   seq: z.number().int().nonnegative().max(MAX_SYNC_SEQ),
   /** See `IncomingFactDoc`: the fork link, hashed and so replicated. An edge's is never added or removed once stored (`invalidFork`). */
   forkOf: z.string().min(1).optional(),
+  /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
+  forkAt: ForkAtSchema,
 });
 
 /**
@@ -246,6 +260,8 @@ export const IncomingChronoDoc = z.object({
   seq: z.number().int().nonnegative().max(MAX_SYNC_SEQ),
   /** See `IncomingFactDoc`: the fork link, hashed and so replicated. */
   forkOf: z.string().min(1).optional(),
+  /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
+  forkAt: ForkAtSchema,
 });
 
 /** A family's wire key: the name its documents travel under in a page and in the push and pull routes. */

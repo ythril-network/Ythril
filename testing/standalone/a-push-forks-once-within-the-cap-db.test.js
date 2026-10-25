@@ -121,10 +121,10 @@ describe('a push forks once, within the fan-out cap, on both doors', { skip }, (
     for (const cap of ['fan-out', 'depth']) {
       for (const via of ['single', 'batch']) {
         it(`R9 ${via}, at the ${cap} cap: a re-sent push whose derived fork exists answers forked with that id`, async () => {
-          // Q-624 re-anchor: a fork's id derives from its BODY (`forkIdFor(forkOf, seq, authoredContentHash(family, body).text)`, design
+          // Q-624 re-anchor: a fork's id derives from its BODY (`forkIdFor(forkOf, forkAt, authoredContentHash(family, body).text)`, design
           // section 3), no longer from the text alone; and the stored fork keeps the seq its id was derived from, so its row verifies.
           const forkId = await forkIdOf('facts', 'f', 5, variant(1));
-          const theFork = build.fact(S, forkId, 5, { fact: 'variant 1', forkOf: 'f' });
+          const theFork = build.fact(S, forkId, 5, { fact: 'variant 1', forkOf: 'f', forkAt: 5 });
           if (cap === 'fan-out') {
             await door.coll(S, 'facts').insertMany([theFork,
               ...Array.from({ length: CAP - 1 }, (_, i) => build.fact(S, `sib-${i}`, 20 + i, { fact: `sib ${i}`, forkOf: 'f' }))]);

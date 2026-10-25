@@ -25,7 +25,7 @@
  *
  * The writer's read-back decides by the body, so the race is the same for every kind that forks (`FORKING_FAMILIES`, read from the
  * planner via `_fork-kinds.mjs`): an entity, a chrono entry and an edge whose write lost the race keep their body as a fork too. And the
- * fork the loser becomes is stored under the id ITS BODY derives (`forkIdFor(forkOf, seq, authoredContentHash(family, body).text)`, design
+ * fork the loser becomes is stored under the id ITS BODY derives (`forkIdFor(forkOf, forkAt, authoredContentHash(family, body).text)`, design
  * section 3), not the text-derived id the fact fork had. Seen red on the base (b857da8f): an equal-seq entity, chrono entry or edge is
  * never a divergence, so the loser's body is stored nowhere; and the fact fork's id is the text-derived one.
  *

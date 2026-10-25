@@ -16,7 +16,12 @@
  *    no module that imports the store or the config loader (`util/seq.ts` does, which is why `MAX_SYNC_SEQ` moved to an import-free
  *    module): the schemas must load without a database;
  *  - the hash leaf's closure holds the same nothing, beside the schema leaf it reads;
- *  - merkle's closure holds neither leaf, because `docLeaf` needs only `DERIVED_FIELDS`.
+ *  - merkle imports none of the sync machinery DIRECTLY (`arrival-shape`, the schema leaf, the hash leaf, the planner, `api/sync/_shared`), because `docLeaf`
+ *    needs only `DERIVED_FIELDS`. It is the DIRECT form on purpose (Q-624 round I1b): the transitive one cannot hold and never could. `brain/merkle.ts`
+ *    imports `db/mongo`, which reaches `config/loader` and from there `spaces/body-schemas`, `files/files`, `files/tombstones`, `files/tombstone-shadow` and
+ *    `sync/upsert-plan` (and `util/version-stamp` and `sync/push-reads`), so merkle's closure holds the planner at the base, before any of this change, and the
+ *    planner must import the hash leaf. What the cycle needed was an edge FROM merkle (or a module merkle needs at load) INTO the machinery that reads merkle; the
+ *    leaves removed that edge, and a direct import is the one a later change can add by accident.
  *
  * ## Red on the unchanged code
  *
@@ -29,7 +34,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { importClosure } from './_import-closure.mjs';
+import { importClosure, relativeImports } from './_import-closure.mjs';
 import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
@@ -77,12 +82,13 @@ describe('each leaf loads without the sync machinery or the store', () => {
   });
 });
 
-describe('merkle imports neither leaf', () => {
-  it('the closure of brain/merkle.ts holds neither the schema leaf nor the hash leaf', () => {
+describe('merkle imports none of the sync machinery directly', () => {
+  it('brain/merkle.ts does not import arrival-shape, the schema leaf, the hash leaf, the planner or api/sync/_shared', () => {
     assert.ok(exists(SCHEMA_LEAF) && exists(HASH_LEAF), 'the leaves are not written, so this holds of nothing');
-    const closure = importClosure(MERKLE);
-    assert.ok(closure.length >= 5, `only ${closure.length} module(s) in the closure of ${MERKLE}: the walk is broken`);
-    assert.deepEqual(closure.filter(f => f === SCHEMA_LEAF || f === HASH_LEAF), [],
-      'merkle imports a leaf that reads the planner side: docLeaf needs only DERIVED_FIELDS, and the body hash is the planner\'s');
+    const direct = relativeImports(MERKLE);
+    assert.ok(direct.length >= 8, `only ${direct.length} import(s) read from ${MERKLE}: the read is broken`);
+    const machinery = [...SYNC_MACHINERY.filter(f => f !== MERKLE), SCHEMA_LEAF, HASH_LEAF];
+    assert.deepEqual(direct.filter(f => machinery.includes(f)), [],
+      'merkle imports sync machinery that reads merkle back: docLeaf needs only DERIVED_FIELDS, and the body hash belongs to the planner side');
   });
 });

@@ -198,6 +198,8 @@ export const PROXY_TEST_CLASSIFICATION = Object.freeze([
     why: 'Q-531\'s own test (b100 lens D3): reloads a 5.x proxyFor config to see the reload back it up before converting it' },
   { file: 'testing/sync/a-migrated-proxy-leaves-its-network-space-as-its-peers-see-it.test.js', verdict: 'unaffected',
     why: 'Q-531\'s own test: hand-edits a 5.x proxyFor into a config so the migration takes it out of its network' },
+  { file: 'testing/standalone/a-fork-keep-writes-the-whole-body-db.test.js', verdict: 'unaffected',
+    why: 'a Q-624 test: names targetSpace only in its list of write arguments that are controls and not body fields; it calls no proxy helper' },
   { file: 'testing/standalone/rollback-is-documented.test.js', verdict: 'unaffected',
     why: 'names proxyFor as the key the 6.0 migration reads when it explains the rollback; a historical note, not a use' },
 ]);

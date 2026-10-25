@@ -4,7 +4,7 @@
  *
  * ## The rule
  *
- * Stored forks are never hashed to be matched. A fork row's id proves its body (`forkIdFor(forkOf, seq, authoredContentHash(...).text)`),
+ * Stored forks are never hashed to be matched. A fork row's id proves its body (`forkIdFor(forkOf, forkAt, authoredContentHash(...).text)`),
  * so "is this the same fork" is an id lookup: the planner derives the id of the arriving copy, and when a stored fork (or one this
  * page already made) has it, the verdict is `forked` WITH THAT ID and no second row is written, whatever cap the parent has reached
  * since. Two spellings of the id exist for FACTS and both must match:
@@ -60,7 +60,7 @@ async function deliverAgain(via, family, storedId) {
   await door.reset();
   await door.coll(S, family).insertMany([
     subject(family),
-    { ...arriving(family), _id: storedId, forkOf: ID },
+    { ...arriving(family), _id: storedId, forkOf: ID, forkAt: SEQ },
   ]);
   await door.raiseVersionTo(S, SEQ);
   const answers = [];
@@ -126,9 +126,9 @@ describe('a copy whose body a stored fork holds is that fork (Q-624)', { skip },
       const storedId = await forkIdOf(family, ID, SEQ, arriving(family));
       const siblings = await Promise.all(Array.from({ length: CAP - 1 }, async (_, i) => {
         const doc = copyOf(family, S, ID, SEQ, `sibling ${i}`, { author: { ...PEER_AUTHOR } });
-        return { ...doc, _id: await forkIdOf(family, ID, SEQ, doc), forkOf: ID };
+        return { ...doc, _id: await forkIdOf(family, ID, SEQ, doc), forkOf: ID, forkAt: SEQ };
       }));
-      await door.coll(S, family).insertMany([subject(family), { ...arriving(family), _id: storedId, forkOf: ID }, ...siblings]);
+      await door.coll(S, family).insertMany([subject(family), { ...arriving(family), _id: storedId, forkOf: ID, forkAt: SEQ }, ...siblings]);
       await door.raiseVersionTo(S, SEQ);
       const r = await door.push('/batch-upsert', { [family]: [arriving(family)] }, { spaceId: S, networkId: door.NET, token: TOKEN });
       const stats = r.body?.[family];

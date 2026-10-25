@@ -10,7 +10,7 @@
  *
  * - **single push** (`POST /<kind>`), **batch push** (`POST /batch-upsert`) and **pull** (the real engine against a fake peer):
  *   the stored copy stays, ONE fork row appears with `forkOf` naming it, the arriving body, and the id section 3 derives,
- *   `forkIdFor(forkOf, seq, authoredContentHash(family, body).text)`; the same copy delivered again is that fork and adds no row;
+ *   `forkIdFor(forkOf, forkAt, authoredContentHash(family, body).text)`; the same copy delivered again is that fork and adds no row;
  * - **import** (an admin restore): it does not PLAN forks, it restores rows. A fork row in an export comes back as a fork row
  *   (its `forkOf` is not stripped, so it is not a second plain record), and a fork row whose id does not derive from its own
  *   subject, seq and body is refused, never stored (section 3, "on any door (push, pull, import)").
@@ -86,6 +86,7 @@ describe('every kind that forks forks on every door, and two receivers derive on
           const field = FORK_FIXTURE[family].field;
           if (forks.length !== 1) { failures.push(`${via}/${family}/${space}: ${forks.length} fork rows, expected 1`); continue; }
           ids.push(forks[0]._id);
+          if (forks[0].forkAt !== SEQ) failures.push(`${via}/${family}/${space}: the fork row says forkAt ${forks[0].forkAt}, the shared version is ${SEQ}`);
           if (forks[0]._id !== expected) failures.push(`${via}/${family}/${space}: fork id ${forks[0]._id}, section 3 derives ${expected}`);
           if (forks[0][field] !== 'what the peer wrote') failures.push(`${via}/${family}/${space}: the fork says ${JSON.stringify(forks[0][field])}`);
           if (parent?.[field] !== 'what this instance wrote' || parent.forkOf !== undefined) {
@@ -116,6 +117,37 @@ describe('every kind that forks forks on every door, and two receivers derive on
     });
   }
 
+  /*
+   * A fork row keeps the LOCAL version stamp of the instance that stored it in `seq`, and its id derives from `forkAt`, the shared version the copies diverged
+   * at (parent decision, 2026-10-25). So a third instance, handed that stored row, recomputes the same id from `forkAt` and stores it under that id; derived from
+   * the stored `seq` it would be `invalidFork` and never land. Edge forks follow in I2 (they need the partial identity index to be stored at all).
+   */
+  for (const via of ['batch', 'pull']) {
+    it(`${via}: a fork row stored by one receiver verifies at a third instance and lands under the same id, for every kind but edges`, async () => {
+      const failures = [];
+      for (const family of FAMILIES.filter(f => f !== 'edges')) {
+        await door.reset();
+        const [first, third] = SPACES;
+        await door.coll(first, family).insertOne(mine(family, first));
+        await door.raiseVersionTo(first, SEQ);
+        await DELIVER.batch(family, { [first]: [theirs(family, first)] });
+        await door.settled();
+        const stored = (await forksOf(first, family))[0];
+        if (!stored) { failures.push(`${via}/${family}: the first receiver made no fork row`); continue; }
+        if (stored.seq === SEQ) failures.push(`${via}/${family}: fixture check: the stored fork kept the shared seq, so the case cannot tell seq from forkAt`);
+        // The third instance holds the subject (it is the same record) and is handed the stored fork row, as a pull or a push of it would.
+        await door.coll(third, family).insertOne(mine(family, third));
+        await door.raiseVersionTo(third, SEQ);
+        const { _id, spaceId, embedding, embeddingModel, pos, posAtSeq, deliveredBy, _expireAt, _contentExpireAt, syncBase, ...wire } = stored;
+        await DELIVER[via](family, { [third]: [{ ...wire, _id, spaceId: third }] });
+        await door.settled();
+        const landed = await forksOf(third, family);
+        if (landed.length !== 1 || landed[0]._id !== stored._id) failures.push(`${via}/${family}: the third instance holds ${JSON.stringify(landed.map(r => r._id))}, expected only ${stored._id}`);
+      }
+      assert.deepEqual(failures, [], `${failures.length} divergence(s):\n  ${failures.join('\n  ')}`);
+    });
+  }
+
   it('import: a fork row of every kind is restored as a fork row, and one whose id does not derive is refused', async () => {
     const { importDocuments } = await import('../../server/dist/api/admin-import.js');
     const failures = [];
@@ -124,7 +156,7 @@ describe('every kind that forks forks on every door, and two receivers derive on
       const space = SPACES[0];
       const parent = mine(family, space);
       const forkId = await forkIdOf(family, ID, SEQ, theirs(family, space));
-      const fork = { ...theirs(family, space), _id: forkId, forkOf: ID };
+      const fork = { ...theirs(family, space), _id: forkId, forkOf: ID, forkAt: SEQ };
       const planted = { ...theirs(family, space), _id: 'planted-not-derived', forkOf: ID, [FORK_FIXTURE[family].field]: 'a body that never made this id' };
       const out = await importDocuments(space, { [family]: [parent, fork, planted] });
       const stored = await door.coll(space, family).find({}).toArray();

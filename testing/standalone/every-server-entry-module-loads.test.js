@@ -26,6 +26,14 @@
  * there is the floor of what it must cover, `sync/incoming-schemas` and `sync/authored-content`, which do not exist yet. Seen red by hand
  * for the load rule (put back by hand): a `throw` added at the top of one built module, and an import cycle with a top-level read.
  *
+ * ## Where it runs, and why (parent decision, 2026-10-25)
+ *
+ * About 44 s alone on a quiet machine and a process per module (eight at a time), so it is CI-only: preflight's pure batches skip it, CI's `standalone-pure`
+ * job runs it. Run beside the other 600 pure files on a loaded machine it exceeded its own 30 s per-module bound and reported a load failure that was not one. A
+ * cycle itself is still found at every push by `no-runtime-import-cycles` (the source graph); this finds what a cycle does at load.
+ *
+ * @ci-only
+ *
  * Run: node --test testing/standalone/every-server-entry-module-loads.test.js
  * (requires a prior `npm run build` in server/)
  */

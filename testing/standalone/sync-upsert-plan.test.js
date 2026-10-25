@@ -428,8 +428,9 @@ describe('an equal-seq copy that says something different forks, for every forki
   const FIRST = (kind) => (kind === 'facts' ? 'inserted' : 'upserted');
   /** A fork row of `kind` under the subject `p`, its id derived the way a sender derives it. */
   const forkRow = (kind, over) => {
-    const row = base(kind, { forkOf: 'p', ...over });
-    return { ...row, _id: P.forkIdFor('p', row.seq, H.authoredContentHash(kind, row).text) };
+    // `forkAt` is the shared version the copies diverged at, and what the id derives from; the row's own `seq` is a local stamp (parent decision, 2026-10-25).
+    const row = base(kind, { forkOf: 'p', forkAt: 5, ...over });
+    return { ...row, _id: P.forkIdFor('p', row.forkAt, H.authoredContentHash(kind, row).text) };
   };
 
   it('a body field that differs: forked, with the derived fork id and the shared seq, for every body field of every kind', () => {
@@ -445,7 +446,8 @@ describe('an equal-seq copy that says something different forks, for every forki
         assert.deepEqual(p.verdicts, ['forked'], `${kind}.${field}: a different value at an equal seq does not fork`);
         assert.equal(p.forks.length, 1);
         assert.equal(p.forks[0].doc.forkOf, 'p');
-        assert.equal(p.forks[0].doc.seq, 5, 'the fork keeps the shared seq its id is derived from');
+        assert.equal(p.forks[0].doc.seq, 5, 'the planned fork carries the arriving seq of the copy, which the writer then stamps locally');
+        assert.equal(p.forks[0].doc.forkAt, 5, 'the fork records the shared version its id is derived from');
         assert.equal(p.forks[0].doc._id, P.forkIdFor('p', 5, H.authoredContentHash(kind, arriving).text), `${kind}.${field}: the fork id is not derived from the body`);
         assert.equal(p.forkIds[0], p.forks[0].doc._id);
       }
