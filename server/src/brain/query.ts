@@ -13,6 +13,7 @@ import { normaliseProjection, toMongoProjection } from './projection.js';
 import { sanitizeFilter, type CallerCheckedFilter } from './filter-sanitizer.js';
 import { CONVENIENCE_KEYS } from './list-conveniences.js';
 import { UNSUPPORTED_PAGE_PARAMS } from '../util/pagination.js';
+import { LANDING_ORDER } from './list-sort.js';
 import { peerList, peerText, NAME_QUOTED } from '../util/log.js';
 
 /*
@@ -261,16 +262,17 @@ export function parseQueryPaging(
  */
 export const PROXY_PAGE_CEILING = 1000;
 
+/** LANDING order, the default of every Brain list: defined beside the sort parse every list function reads (`brain/list-sort.ts`) and exported from here too. */
+export { LANDING_ORDER };
+
 /**
- * The default result order, as DATA so the same value can go to MongoDB and to the merge comparator.
+ * The default result order, as DATA so the same value can go to MongoDB and to the merge comparator: landing order, whatever the collection.
  *
  * `_id` last is not decoration: it makes the order TOTAL, which is what lets `skip` page without a row drifting between
  * pages and being seen twice or missed. Any caller-supplied sort gets `_id` appended for the same reason — see
  * `toMongoSort` in list-sort.ts, which has always done this for the list endpoints.
  */
-export const DEFAULT_QUERY_SORT: Record<string, 1 | -1> = {
-  seq: -1, updatedAt: -1, createdAt: -1, _id: -1,
-};
+export const DEFAULT_QUERY_SORT: Record<string, 1 | -1> = LANDING_ORDER;
 
 /**
  * A comparator for a given sort document, for merging pages across the members of a proxy space.
@@ -375,8 +377,8 @@ export async function queryBrain(
     // The deadline is an option of the read, not a call on its cursor: a scope's bound lowers only a `maxTimeMS` it can
     // see in the options, and the driver drops a chained one when it applies an injected `timeoutMS` (Q-358).
     .find(safeFilter, { maxTimeMS: safeMaxTime })
-    // Deterministic newest-first ordering by default, which keeps recent writes visible under the default limit even
-    // when historical datasets grow large. Every order ends in `_id`, so it is total and pageable.
+    // Deterministic landing order by default (`LANDING_ORDER`: what landed here most recently first), which keeps recent arrivals and writes visible
+    // under the default limit even when historical datasets grow large. Every order ends in `_id`, so it is total and pageable.
     .sort(sort)
     // Skip BEFORE limit, which is the order the driver applies regardless of call order — spelled out here because
     // the reverse reading (limit the page, then drop rows from it) would silently return short pages.

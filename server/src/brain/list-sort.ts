@@ -12,6 +12,23 @@
  * quiet fall-back to natural order.
  */
 
+/**
+ * LANDING order: the default order of every Brain list, newest landing first (bundle-81, design rev 8 §6a, decision 20).
+ *
+ * ## The question it answers
+ *
+ * "What landed HERE most recently", not "which version is newest". A record a peer delivered an hour ago at an old version is the one an operator
+ * wants to see first after a sync, and a list ordered by version buries it. `pos` is where a record landed in THIS instance's stream (a clock position,
+ * which compares across spaces, where a counter's would not), and `_id` breaks the ties of the legacy band — every carried 5.6 seq, which a relayed
+ * record shares with its author's — alone, so the order is TOTAL (what lets `skip` page without a row drifting between pages and being seen twice or
+ * missed) and is fully served by the `(pos, _id)` index read backwards. A row with no position (a carry in progress) sorts last.
+ *
+ * It is ONE constant, read by every list: the four list functions (`listFacts`, `listChrono`, `listEntities`, `listEdges`), `queryBrain` through
+ * `DEFAULT_QUERY_SORT`, the MCP `filter` merge and the cross-space comparator, so REST and MCP cannot be given another default. `pos` is order-only
+ * (`ORDER_ONLY_FIELDS`, `brain/recall-shape.ts`): a read may order by it and no answer returns it.
+ */
+export const LANDING_ORDER: Readonly<Record<'pos' | '_id', -1>> = Object.freeze({ pos: -1, _id: -1 });
+
 /** A validated sort request: a whitelisted field and a direction (1 asc, -1 desc). */
 export interface SortSpec {
   field: string;

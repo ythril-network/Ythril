@@ -18,6 +18,8 @@
  * own transfer on a non-2xx and only the turn can say "stop the rest of this space for this member, and it is not a
  * failure".
  */
+import { POSITIONS_BUILDING } from '../util/errors.js';
+
 /**
  * What a refused transfer means to its sender. `held` and `declined` end the space's exchange with this member for the cycle
  * and move no failure counter. Named for the refusal, not as a "Verdict": the arrival planner's verdicts (`upsert-plan.ts`)
@@ -40,18 +42,25 @@ export const SPACE_HELD_ANSWER = { error: 'This space is held for this member wh
 /** The `423` body a peer gets for a network space this member left (pub/sub, design v5 section 2.9, X10). */
 export const SPACE_DECLINED_ANSWER = { error: 'This member left the space', code: 'space_declined' } as const;
 
-/** The codes a peer answers `423` with, and what each means to the sender. */
+/**
+ * The codes a peer answers a refused space with (`423`, or `503` for a space that is only temporarily not ready), and what each means to the
+ * sender. `positions_building` is HELD, not failed (bundle-81, design rev 8 §6, decision 6): the peer is building the positions of that space,
+ * it moves no mark and counts no member failure, and the same cycle runs again next time. Every OTHER `503` stays `'failed'`.
+ */
 const VERDICT_OF_CODE: Readonly<Record<string, TransferRefusal>> = {
   [SPACE_HELD_ANSWER.code]: 'held',
   [SPACE_DECLINED_ANSWER.code]: 'declined',
+  [POSITIONS_BUILDING]: 'held',
 };
 
 /**
- * `'held'` for a `423` whose body says `space_held`, `'declined'` for `space_declined`, otherwise `'failed'`. Never throws:
- * a body that cannot be read is a failed transfer, as any other non-2xx.
+ * `'held'` for a `423` whose body says `space_held` (or a `423`/`503` that says `positions_building`), `'declined'` for `space_declined`,
+ * otherwise `'failed'`. The body's `code` is read on a `503` as well as a `423`, but only a code in the table above changes the verdict:
+ * a `503` with no code, or an unknown one, is the failure it always was. Never throws: a body that cannot be read is a failed transfer,
+ * as any other non-2xx.
  */
 export function transferRefusal(resp: Pick<Response, 'status' | 'clone'>): Promise<TransferRefusal> {
-  if (resp.status !== 423) return Promise.resolve('failed');
+  if (resp.status !== 423 && resp.status !== 503) return Promise.resolve('failed');
   return readVerdict(resp);
 }
 

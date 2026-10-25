@@ -4,9 +4,10 @@
  *
  * ## What it answers
  *
- * *"Record this fact about this peer and this space on every network that carries the space."* Three marks are written
- * that way: how far a peer has been served our tombstones (`lastSeqServed`), which file deletions it acknowledged
- * (`lastFileTombstoneAckedAt`), and where the one-time re-read of an upstream's tombstones stands (`tombstoneRereadAt`).
+ * *"Record this fact about this peer and this space, on the networks the caller's `scope` names."* Marks are written
+ * that way: how far a peer has been served our tombstones (`lastPosServed`, every network: it is the peer token's), which file deletions it
+ * acknowledged (`lastFileTombstoneAckedAt`), where the one-time re-read of an upstream's tombstones stands (`tombstoneRereadAt`), and what an
+ * exchange of ONE network recorded (`lastPosReceived`, `lastPosPushed`, scoped to that network's row).
  * Each had its own copy of the loop — find the networks that carry the space, find the member, fold, create the map on
  * first write — and the fold is the only thing that differs.
  *
@@ -32,8 +33,17 @@ export type MemberSpaceMarkKey = (typeof PER_SPACE_WATERMARKS)[number];
 export type MemberSpaceMark<K extends MemberSpaceMarkKey> = NonNullable<NetworkMember[K]>[string];
 
 /**
- * Fold `key` for `peerInstanceId` and `spaceId` on every member row of every network carrying the space.
+ * Which networks' rows a mark is written on: ONE network (the exchange of that network recorded it: how far it read or sent) or every network that
+ * carries the space (the peer's own request fixed it, and a peer token is not per network). REQUIRED, so each caller says which where a reviewer
+ * sees it (bundle-81, design rev 8 §6, decision 12): a club push sends only the rows written here, a braintree push everything it holds, and a
+ * `lastPosPushed` the club moved on the same peer's braintree row would believe the relayed rows sent that no braintree push ever offered.
+ */
+export type MarkScope = { readonly networkId: string } | 'every-network';
+
+/**
+ * Fold `key` for `peerInstanceId` and `spaceId` on the member rows of `scope`'s networks that carry the space.
  *
+ * @param scope `{ networkId }`: that network's row only; `'every-network'`: every network carrying the space
  * @param fold the current value (or `undefined`) to the next one, `null` when nothing should be written, or `undefined`
  *   to REMOVE the space's entry — a mark that is no longer owed is absent, never an empty or sentinel value
  * @returns whether any row changed
@@ -43,11 +53,13 @@ export function setMemberSpaceMark<K extends MemberSpaceMarkKey>(
   peerInstanceId: string | undefined,
   spaceId: string,
   key: K,
+  scope: MarkScope,
   fold: (current: MemberSpaceMark<K> | undefined) => MemberSpaceMark<K> | null | undefined,
 ): boolean {
   if (!peerInstanceId) return false;
   let changed = false;
   for (const net of cfg.networks ?? []) {
+    if (scope !== 'every-network' && net.id !== scope.networkId) continue;
     if (!net.spaces?.includes(spaceId)) continue;
     const m = net.members?.find(x => x.instanceId === peerInstanceId);
     if (!m) continue;
@@ -96,7 +108,7 @@ export function foldRepairMark(
 ): { before: string | undefined; after: string | undefined } | null {
   const cfg = getConfig();
   let seen: { before: string | undefined; after: string | undefined } | null = null;
-  const changed = setMemberSpaceMark(cfg, peerInstanceId, spaceId, key, (current) => {
+  const changed = setMemberSpaceMark(cfg, peerInstanceId, spaceId, key, 'every-network', (current) => {
     const after = next(current);
     seen ??= { before: current, after };
     return after === current ? null : after;

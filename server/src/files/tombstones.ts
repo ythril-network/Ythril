@@ -127,6 +127,7 @@ import {
   ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, FILE_TOMBSTONE_PART, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
   type MoveMarker, type PrunableRow, type StoredFileTombstone,
 } from './tombstone-store.js';
+import { issuedHereStamp } from '../sync/issued-here.js';
 import { admitSpaceWrite, assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
 import {
   abandonMove, createMoveMarkerPager, markerDocOf, moveMarker, MOVE_MARKER_KEEP_MS, movesStillOwed, removeUnlessOwed,
@@ -576,6 +577,8 @@ export async function writePendingFileTombstones(
     return {
       _id: uuidv4(), spaceId, path: p, deletedAt: now, writtenAt: now, settleAt, pending: true as const, ...marker,
       ...(issuer ? { issuer } : {}),
+      // This instance's own act: the local mark "issued here" (`sync/issued-here.ts`), which no arrival carries and no peer's text can set.
+      ...issuedHereStamp(),
       ...(typeof row?.seq === 'number' ? { rowSeq: row.seq } : {}),
       ...(typeof row?.sha256 === 'string' && row.sha256 !== '' ? { contentHash: row.sha256 } : {}),
     };
@@ -880,7 +883,7 @@ export function settledFileTombstones<T extends { positionAt: string }>(sent: re
 }
 
 /** What a comparison reads of a tombstone: published or pending, the same fields (`HeldFileTombstone`, grouped by `heldByPath`). */
-const HELD_PROJECTION = { _id: 1, path: 1, rowSeq: 1, contentHash: 1, issuer: 1, storedVia: 1 } as const;
+const HELD_PROJECTION = { _id: 1, path: 1, rowSeq: 1, contentHash: 1, issuer: 1, storedVia: 1, issuedHere: 1 } as const;
 
 /**
  * THE one reader of the PUBLISHED tombstones held for a set of paths — one `$in` per chunk, by the `path` index — with what

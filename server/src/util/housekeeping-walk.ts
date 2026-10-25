@@ -363,6 +363,13 @@ export function createHousekeepingWalk(
       const { err } = thrown;
       slots[index] = { spaceId, status: 'failed' };
       const verdict = await walkVerdict(err, { storeAnswers });
+      if (verdict === 'space-not-ready') {
+        // Not a failure and not a hang: the space owes its positions (`PositionsBuilding`). Skipped this tick, said once per window, and the store
+        // did answer, so a quarantine or a stall run is not begun and a hung one is not ended by it.
+        slots[index] = { spaceId, status: 'skipped' };
+        reporter.spaceFailure(ctx.step, spaceId, err, { kind: verdict, when });
+        return;
+      }
       if (verdict === 'store-down') {
         const held = quarantine.get(spaceId);
         if (held) held.probing = false;

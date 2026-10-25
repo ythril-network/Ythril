@@ -5,7 +5,7 @@ import { readRowsById } from '../db/read-by-id.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
 import { writeTombstone, stampTombstones } from './tombstones.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
-import { toMongoSort, type SortSpec } from './list-sort.js';
+import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -345,9 +345,8 @@ export async function listEntities(
       projection: NEVER_RETURNED_PROJECTION,
       maxTimeMS: listReadMaxMs(Boolean(filter['$expr'])),
     });
-  // Default is natural (insertion) order — unchanged for every existing caller. A sort is only
-  // applied when one is explicitly requested.
-  if (sort) cursor.sort(toMongoSort(sort));
+  // Default is landing order, like every Brain list (`LANDING_ORDER`, `brain/query.ts`): it was natural (insertion) order, which no caller relied on.
+  cursor.sort(sort ? toMongoSort(sort) : { ...LANDING_ORDER });
   return cursor
     .skip(parseSkip(skip))
     .limit(parseLimit(limit, 20, 1000))

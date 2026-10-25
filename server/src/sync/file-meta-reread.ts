@@ -26,7 +26,7 @@
  *  - **A cost nobody opted into.** Unlike the tombstone re-read, absent means NOT owed: nothing is read until a check with
  *    `merkle: true` says the roots differ, so an instance with merkle off pays nothing.
  *  - **A livelock.** The mark carries its own cursor and completes only when a read reaches the end. It cannot share
- *    `lastSeqReceived` — one number across six families — and it never moves it: a repair is not a position in the record
+ *    `lastPosReceived` — one number across six families — and it never moves it: a repair is not a position in the record
  *    stream, and the ordinary pull's place must survive a re-read that stops.
  *  - **A re-read for ever.** Some differences a re-read cannot fix — the author left the network, the row names no author,
  *    a real divergence. After `FILE_META_REREAD_CAP` attempts that each read to the end with the roots still differing, the
@@ -42,7 +42,7 @@ import type { Config, NetworkMember } from '../config/types.js';
 import { setFileMetaRereadsOwedProvider } from '../metrics/registry.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { log, peerText } from '../util/log.js';
-import { parseSeqText } from '../util/seq-keyset.js';
+import { parsePositionText } from '../util/position-keyset.js';
 import { LinkageCheck } from './linkage-check.js';
 import { foldRepairMark, readMemberSpaceMark } from './member-space-mark.js';
 import type { MerkleComparison } from './merkle-check.js';
@@ -58,14 +58,14 @@ const SPENT = 'spent';
 
 type Parsed = { owed: true; attempt: number; from: number } | { owed: false; attempt: number } | null;
 
-/** Read a mark: `k:<seq>` owed, `k:done` finished, anything else (absent, `spent`, unreadable) neither. */
+/** Read a mark: `k:<pos>` owed, `k:done` finished, anything else (absent, `spent`, unreadable) neither. */
 function parse(state: string | undefined): Parsed {
   const m = state === undefined ? null : /^([1-9]\d*):(.*)$/.exec(state);
   if (!m) return null;
   const attempt = Math.min(Number(m[1]), FILE_META_REREAD_CAP);
   if (m[2] === 'done') return { owed: false, attempt };
-  // A cursor that is not a seq reads again from the start, never skips: a guess here is the one place rows could be lost.
-  return { owed: true, attempt, from: parseSeqText(m[2]!) ?? 0 };
+  // A cursor that is not a position (a carried 5.6 `k:<seq>` is one, by identity) reads again from the start, never skips: a guess here is the one place rows could be lost.
+  return { owed: true, attempt, from: parsePositionText(m[2]!) ?? 0 };
 }
 
 /**
@@ -135,7 +135,7 @@ export function recordFileMetaMerkleComparison(member: NetworkMember, spaceId: s
 
 /**
  * Re-read `member`'s file rows for `spaceId` when its mark says a read is owed. Called once per member and space from the
- * pull step, after the ordinary pull. Never throws, and never moves `lastSeqReceived`.
+ * pull step, after the ordinary pull. Never throws, and never moves `lastPosReceived`.
  */
 export async function rereadFileMeta(o: {
   member: NetworkMember;
@@ -153,7 +153,7 @@ export async function rereadFileMeta(o: {
     // Its own linkage check: a file row is a target, so what it lands is checked like any other pull, never skipped.
     const linkage = new LinkageCheck(spaceId, member.instanceId);
     const res = await pullFamily({
-      family: familyOf('filemeta'), member, spaceId, remoteSpaceId, networkId, sinceSeq: start, requestInit, linkage, turn,
+      family: familyOf('filemeta'), member, spaceId, remoteSpaceId, networkId, since: start, requestInit, linkage, turn,
     });
     await linkage.run();
     const complete = !res.truncated;

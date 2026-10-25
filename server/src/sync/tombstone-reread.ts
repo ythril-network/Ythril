@@ -37,7 +37,7 @@
 import type { NetworkMember } from '../config/types.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { log, peerText } from '../util/log.js';
-import { parseSeqText } from '../util/seq-keyset.js';
+import { parsePositionText } from '../util/position-keyset.js';
 import { deliveryOfMember, nextRereadState } from './deletion-authority.js';
 import { foldRepairMark, readMemberSpaceMark } from './member-space-mark.js';
 import { pullTombstones } from './tombstone-transfer.js';
@@ -47,11 +47,12 @@ import type { ExchangeTurn } from './held-answer.js';
 const STEP = 'sync tombstone re-read';
 
 /**
- * Where a state says to start: a decimal seq a cursor can carry (`parseSeqText`, the one reading of a seq written as text) is
- * the position, anything else (absent included, and a number past what a seq may be) is the start — read again, never skipped.
+ * Where a state says to start: a decimal position a cursor can carry (`parsePositionText`, the one reading of a position written as text; a
+ * carried 5.6 cursor is a seq, which is a position of the legacy band by identity) is the position, anything else (absent included, and a
+ * number past what a position may be) is the start — read again, never skipped.
  */
 function startOf(state: string | undefined): number {
-  return (state === undefined ? undefined : parseSeqText(state)) ?? 0;
+  return (state === undefined ? undefined : parsePositionText(state)) ?? 0;
 }
 
 /** The state this member row holds for the space, read from the LIVE config. */
@@ -75,7 +76,7 @@ export async function rereadUpstreamTombstones(o: {
   networkId: string;
   requestInit: () => RequestInit;
   /** The ordinary tombstone pull this cycle made: where it started and how it ended. */
-  ordinary: { sinceSeq: number; outcome: TransferOutcome };
+  ordinary: { since: number; outcome: TransferOutcome };
   /** The space's turn with this member: the re-read's fetches take its signal (design v5 X5). */
   turn?: ExchangeTurn;
 }): Promise<void> {
@@ -85,12 +86,12 @@ export async function rereadUpstreamTombstones(o: {
   if (current === 'done') return;
 
   // The first read of a new member started at the beginning and ran to the end: nothing is owed beyond it.
-  if (ordinary.sinceSeq === 0 && !ordinary.outcome.truncated) { record(member.instanceId, spaceId, { complete: true }); return; }
+  if (ordinary.since === 0 && !ordinary.outcome.truncated) { record(member.instanceId, spaceId, { complete: true }); return; }
 
   const start = startOf(current);
   const tally = { issuer: 0, upstream: 0 };
   try {
-    const outcome = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, sinceSeq: start, requestInit, repair: true, tally, turn });
+    const outcome = await pullTombstones({ member, spaceId, remoteSpaceId, networkId, since: start, requestInit, repair: true, tally, turn });
     const complete = !outcome.truncated;
     const progressed = outcome.deliveredThrough > start;
     record(member.instanceId, spaceId, {

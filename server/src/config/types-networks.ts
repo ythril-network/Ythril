@@ -38,8 +38,13 @@ export interface NetworkMember {
   tokenHash: string;         // bcrypt of the token this instance uses to auth inbound from peer
   direction: SyncDirection;
   lastSyncAt?: string;       // ISO8601 — set only on successful sync
-  lastSeqReceived?: Record<string, number>;  // spaceId → last seq ingested from this peer
-  lastSeqPushed?: Record<string, number>;    // spaceId → last seq we confirmed pushed to this peer
+  /** spaceId → the peer's position this instance is COMPLETE through (6.0: its clock stream, `through` of its last page). */
+  lastPosReceived?: Record<string, number>;
+  /** spaceId → this instance's own position the peer has been sent complete through (the position of OUR stream, per network). */
+  lastPosPushed?: Record<string, number>;
+  /** FROZEN for rollback (`ROLLBACK_MARKS`): the 5.6 marks, never read or written by 6.0 after the carry copies them to `lastPos*`. */
+  lastSeqReceived?: Record<string, number>;  // spaceId → last seq ingested from this peer (5.6)
+  lastSeqPushed?: Record<string, number>;    // spaceId → last seq we confirmed pushed to this peer (5.6)
   /** spaceId → the newest POSITION (`positionAt`, this instance's own stamp) among FILE tombstones this peer has answered 200 to
    *  on a push. File tombstones carry no `seq`, so their retention floor is built from acknowledgement rather than from a
    *  served seq (see `sync/file-tombstone-ack.ts`). Only a 200 may advance it: a direction-blocked peer
@@ -50,6 +55,8 @@ export interface NetworkMember {
    *  peer's position in ours, and without it a tombstone can never be safely dropped (see
    *  `sync/served-watermark.ts`). Monotonic; absent means "never pulled", which blocks pruning. */
   lastSeqServed?: Record<string, number>;
+  /** spaceId → the position in OUR stream this peer has pulled our tombstones from (6.0; `lastSeqServed` is its frozen 5.6 twin). */
+  lastPosServed?: Record<string, number>;
   /** spaceId → where the ONE-TIME re-read of this UPSTREAM's tombstones stands (`sync/deletion-authority.ts`,
    *  `nextRereadState`): absent = owed from the start, a cursor = owed from there, `'done'` = ran to the end once and
    *  is never asked for again. It exists because deletions an upstream issued before D-14 were declined and the
@@ -156,8 +163,8 @@ export interface MemberRemoval {
  * through ONE loop, `eachMemberMarkOf` (`sync/receive-marks.ts`), which visits the members and a join round's `pendingMember` alike.
  */
 export const PER_SPACE_WATERMARKS = [
-  'lastSeqReceived', 'lastSeqPushed', 'lastSeqServed', 'lastFileTombstoneAckedAt', 'tombstoneRereadAt',
-  'fileMetaRereadAt',
+  'lastPosReceived', 'lastPosPushed', 'lastPosServed', 'lastFileTombstoneAckedAt', 'tombstoneRereadAt',
+  'fileMetaRereadAt', 'lastSeqReceived', 'lastSeqPushed', 'lastSeqServed',
 ] as const satisfies readonly (keyof NetworkMember)[];
 
 /** One of the per-space marks a member carries. */
@@ -172,17 +179,28 @@ export type PerSpaceWatermark = (typeof PER_SPACE_WATERMARKS)[number];
  * (`receive-marks-and-kept-marks-classify-every-mark`), so a mark added to the member type is decided about here, once, and cannot be
  * forgotten by one door and kept by another.
  */
-export const RECEIVE_MARKS = ['lastSeqReceived', 'tombstoneRereadAt', 'fileMetaRereadAt'] as const satisfies readonly PerSpaceWatermark[];
+export const RECEIVE_MARKS = ['lastPosReceived', 'tombstoneRereadAt', 'fileMetaRereadAt'] as const satisfies readonly PerSpaceWatermark[];
 
 /**
  * The marks a RESTORE keeps, each with the reason. They describe what this instance SENT or what its peers acknowledged, which the
  * restore does not undo; the counter raise keeps them correct, because new local writes land above them.
  */
 export const KEPT_ON_RESTORE = {
-  lastSeqPushed: 'Clearing it re-sends restored records whose deletions the peers already pruned, so the peers would store them again.',
-  lastSeqServed: 'It is how far a peer has taken our tombstones; the restore does not change what that peer holds, so it stays true.',
+  lastPosPushed: 'Clearing it re-sends restored records whose deletions the peers already pruned, so the peers would store them again.',
+  lastPosServed: 'It is how far a peer has taken our tombstones; the restore does not change what that peer holds, so it stays true.',
   lastFileTombstoneAckedAt: 'It records which file deletions a peer has taken; the peer still holds that knowledge after our restore.',
 } as const satisfies Partial<Record<PerSpaceWatermark, string>>;
+
+/**
+ * The 5.6 marks, FROZEN: `lastSeqReceived`, `lastSeqPushed` and `lastSeqServed` stay in `config.json` for rollback only (bundle-81, design
+ * rev 8 §3a). The first 6.0 carry copies each into its `lastPos*` twin by identity (a legacy row's position is its legacy seq), and 6.0 neither
+ * reads nor writes them again, so a 5.6 started after a rollback finds its own marks where it left them. Removable at 7.0.
+ *
+ * They are per-space maps like the rest, so a rename still moves them (`moveEveryMark`: a 5.6 rolled back after a rename must find them under the
+ * new id) and a restore never forgets them (they describe 5.6's state, which a restore does not change). Together with {@link RECEIVE_MARKS} and
+ * {@link KEPT_ON_RESTORE} they are exactly {@link PER_SPACE_WATERMARKS}.
+ */
+export const ROLLBACK_MARKS = ['lastSeqReceived', 'lastSeqPushed', 'lastSeqServed'] as const satisfies readonly PerSpaceWatermark[];
 
 export interface VoteCast {
   instanceId: string;

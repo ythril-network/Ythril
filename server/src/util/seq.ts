@@ -1,6 +1,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { eachMemberMarkOf } from '../sync/receive-marks.js';
+import { RECEIVE_MARKS } from '../config/types-networks.js';
 import { log } from './log.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import type { SpacePart } from '../db/space-collection.js';
@@ -77,56 +78,46 @@ export function isSeqImplausible(seq: number): boolean {
 
 /**
  * Detects the bind-mount / volume mismatch that occurs when `docker compose
- * down -v` wipes MongoDB but leaves config.json intact on the host bind-mount.
+ * down -v` wipes MongoDB but leaves config.json intact on the host bind-mount, and forgets what was RECEIVED
+ * (bundle-81, design rev 8 section 3a; it cleared every mark when a mark was a seq of this instance's counter).
  *
- * Symptom: `ythril_counters` is empty — the counter lived in the wiped volume — yet one or more network
- * members still carry watermarks from the previous run. Local seqs now restart at 1 while the watermarks
- * describe a history of numbers that will be reused for entirely different records.
+ * Symptom: `ythril_counters` is empty - the counter lived in the wiped volume - yet one or more network
+ * members still carry marks from the previous run. The store holds none of what those marks say was received.
  *
- * ## It used to clear ONE of them, and the others fail in different directions
+ * ## Which marks are lies after a wipe, and which stay true
  *
- * | watermark | what it means | stale-high costs |
+ * | mark | what it means | after a wipe |
  * |---|---|---|
- * | `lastSeqReceived` | our position in the peer's data | we pull `sinceSeq=47` and silently miss its 1..47 |
- * | `lastSeqPushed` | our position in what we have sent | we push `seq > 47` and NEVER send our own new 1..47 |
- * | `lastSeqServed` | the peer's position in ours | we believe it has applied deletions it has not, and prune |
- * | `lastFileTombstoneAckedAt` | file deletions a peer has taken | same, for files: prune, and the file returns |
+ * | `lastPosReceived` | our position in the peer's stream | a lie: the records are gone, the peer must send them again (`RECEIVE_MARKS`) |
+ * | `tombstoneRereadAt`, `fileMetaRereadAt` | the one-time re-reads done | a lie, for the same reason (`RECEIVE_MARKS`) |
+ * | `lastPosPushed`, `lastPosServed` | what we sent, and what the peer took of ours | true: positions are clock-stamped and seeded from the store, so the wiped space's next position is above them, and a mark that is too low costs a re-send, never a miss |
+ * | `lastFileTombstoneAckedAt` | file deletions a peer has taken | true (a time) |
  *
- * Only the first was reset, and the second is the same defect pointing the other way — a silent, permanent
- * failure to deliver our own records, with the sender's cycles completing normally because `seq > 47`
- * genuinely matches nothing. That is indistinguishable from a healthy idle cycle without the debug line the
- * push loop now emits.
+ * That is the same list a restore forgets (`forgetWhatWasReceived`, `sync/receive-marks.ts`), and it is walked through the same one loop over
+ * the member marks, for every space (`null`) and for the member a join round in flight carries, so the reset cannot miss a carrier the forget reaches.
+ * The frozen 5.6 marks (`ROLLBACK_MARKS`) are neither: nothing in 6.0 reads them and a rollback needs them as they were.
  *
- * The last two of those fail toward PRUNING, which `sync/served-watermark.ts` names as the dangerous direction:
- * a tombstone dropped too early lets a deleted record come back from a peer that never saw the deletion.
- * Clearing them fails toward keeping, which is that module's stated rule.
- *
- * Safe to call at every startup: a no-op when `ythril_counters` is non-empty (a normal restart) or when no
- * watermark is set.
+ * Safe to call at every startup: a no-op when `ythril_counters` is non-empty (a normal restart) or when no mark is set.
  */
-export async function resetStaleWatermarksIfNeeded(): Promise<void> {
+export async function forgetWhatWasReceivedAfterCounterWipe(): Promise<void> {
   const count = await col<SpaceCounterDoc>('ythril_counters').estimatedDocumentCount();
-  if (count > 0) return; // MongoDB intact — nothing to do
+  if (count > 0) return; // MongoDB intact - nothing to do
 
   const cfg = getConfig();
   const cleared: string[] = [];
 
-  // EVERY per-space mark is a lie once the counter restarts at zero (`PER_SPACE_WATERMARKS`), on every member and on the member a join
-  // round in flight carries (`pendingMember`): the one loop over them visits both, so the reset cannot miss a carrier the forget reaches.
-  // A map that must SURVIVE a counter wipe would be passed over here, by name, with its reason; none does.
   for (const net of cfg.networks) {
     eachMemberMarkOf(net, null, (marks, mark, who) => {
       for (const spaceId of Object.keys(marks)) delete marks[spaceId];
       cleared.push(`${who}.${mark}`);
-    });
+    }, RECEIVE_MARKS);
   }
 
   if (cleared.length > 0) {
     saveConfig(cfg);
     log.warn(
-      `Seq counters absent but ${cleared.length} watermark map(s) were set — reset (bind-mount/volume mismatch `
-      + `recovery). Local seqs restart at 1, so a retained watermark would describe numbers about to be reused: `
-      + `${cleared.join(', ')}`,
+      `Counters absent but ${cleared.length} receive mark map(s) were set - forgotten (bind-mount/volume mismatch `
+      + `recovery). The peers send again what this instance no longer holds: ${cleared.join(', ')}`,
     );
   }
 }

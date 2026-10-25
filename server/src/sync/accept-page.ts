@@ -68,6 +68,7 @@ import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from '
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from './push-reads.js';
 import { watchArrivals, recordedOf, sayRecorded, summarise, type ArrivalWatch, type RecordedSummary } from './arrival-recording.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
+import { assertPositionsReady } from './positions-owed.js';
 
 type Arrived = Record<string, unknown> & ArrivalDoc;
 
@@ -117,6 +118,8 @@ export async function acceptArrivingPage(
   spaceId: string, page: Partial<Record<PayloadKey, readonly unknown[]>>, opts: AcceptOptions,
 ): Promise<Record<PayloadKey, AcceptedFamily>> {
   return withinWriteBound(async () => {
+    // A space that owes its positions stores nothing and answers `positions_building` (held, to a sender): asked before any element is read.
+    await assertPositionsReady(spaceId);
     const { door, deliveredBy } = opts;
     const peer = opts.from ?? deliveredBy ?? 'unknown';
     const where = `sync ${door} from ${peer}`;

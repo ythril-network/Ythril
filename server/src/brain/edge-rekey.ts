@@ -46,7 +46,7 @@ import { versionsFor } from '../util/version-stamp.js';
 import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { assertNewIdsFree } from '../files/rekey-rows.js';
-import { getConfig } from '../config/loader.js';
+import { isWrittenHere } from '../sync/written-here.js';
 import { edgeIdFor } from './edge-id.js';
 import { withoutVector } from './read-projection.js';
 import type { EdgeDoc } from '../config/types.js';
@@ -174,7 +174,6 @@ export async function rekeyEdges(
 ): Promise<Array<EdgeRekey | null>> {
   // Refused before the plan is read; the write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'edges');
-  const instanceId = getConfig().instanceId;
   const planned = moves.map(({ existing, next }) => {
     const from = next.from ?? existing.from;
     const to = next.to ?? existing.to;
@@ -217,8 +216,8 @@ export async function rekeyEdges(
      * is applied as a MOVE. That is a change to a sync contract two other parties consume, and it is not
      * smuggled in behind a bug fix.
      */
-    const author = existing.author?.instanceId;
-    if (author !== undefined && author !== instanceId) return null;
+    // Only a row written HERE moves: the one predicate (`sync/written-here.ts`), delivery first, so a peer's row that names this instance as author stays put.
+    if (!isWrittenHere(existing)) return null;
     return { existing, from, to, label, newId };
   });
   const moving = planned.filter((m): m is NonNullable<typeof m> => m !== null);

@@ -25,8 +25,11 @@
  * that, and starts the step's series at 0.
  */
 
-/** The kinds a failure counter is labelled with. `failure` is a space's own, `timeout` a bound that ended an operation. */
-export type SpaceFailureKind = 'failure' | 'timeout' | 'store_down' | 'stalled';
+/**
+ * The kinds a failure counter is labelled with. `failure` is a space's own, `timeout` a bound that ended an operation, and `not_ready` a space that owes its
+ * positions (a first carry or a repair, `sync/positions-owed.ts`): not a failure at all, counted so a space that stays unready is a rate and said once per window.
+ */
+export type SpaceFailureKind = 'failure' | 'timeout' | 'store_down' | 'stalled' | 'not_ready';
 
 export type HousekeepingSignal =
   /** One failure of a step in a space, or a walk's stop (`store_down`, `stalled`). Counted on EVERY call, said or not. */

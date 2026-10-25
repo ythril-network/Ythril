@@ -23,10 +23,11 @@
  * `p1.` followed by `base64url("<pos>:<id>")`, or by `base64url("<pos>")` when there is no id or it is longer than {@link MAX_CURSOR_ID_LENGTH}.
  * Opaque to a caller (echo it, never build one), refusing every older form: a 5.x cursor is a position in another space of numbers.
  *
- * ## Not here yet
+ * ## Readiness is asked here
  *
- * Whether the space's positions are READY (the first carry done, the `(pos, _id)` index standing) is asked inside the reader by the slice that
- * adds the carry; until then a read of a collection without the index sorts what it reads in memory, which is correct and slower.
+ * Whether the space's positions are READY (`sync/positions-owed.ts`: it owes no carry and no repair) is asked INSIDE the reader, before either find, so no
+ * caller can drop it: an unready space throws `PositionsBuilding`, which the doors answer `503 positions_building` (a sender reads it as held) and a walk
+ * reads as "not ready: skipped this tick".
  */
 import type { Document, Filter } from 'mongodb';
 import { col, asFilter } from '../db/mongo.js';
@@ -36,6 +37,7 @@ import { settledPositionCap } from './position-clock.js';
 import { tieThenRange } from './seq-keyset.js';
 import { MAX_CURSOR_ID_LENGTH } from './seq-keyset.js';
 import { recordPositions } from '../sync/record-position-stream.js';
+import { assertPositionsReady } from '../sync/positions-owed.js';
 
 /** Where a position read starts: strictly after `pos`, and — with an `id` — after that record within the run at `pos`. */
 export interface PositionStart {
@@ -65,11 +67,17 @@ export function parsePositionText(text: string): number | undefined {
   return isPositionNumber(n) ? n : undefined;
 }
 
+/**
+ * Whether a cursor can name this id (a pair). One that is longer than {@link MAX_CURSOR_ID_LENGTH} degrades to the bare position, which continues from the
+ * NEXT position and so skips the rest of a run of equal ones: a page must therefore never end inside a run on a row this says no to (`pageAnswer`).
+ */
+export const cursorCanNameId = (id: string | undefined): id is string => id !== undefined && id !== '' && id.length <= MAX_CURSOR_ID_LENGTH;
+
 /** The cursor for a position: opaque, `p1.` and base64url, a pair when it can carry the id. */
 export function encodePositionCursor(start: PositionStart): string {
   const { pos, id } = start;
   if (!isPositionNumber(pos)) throw new RangeError(`a cursor cannot name position ${String(pos)}`);
-  const text = id !== undefined && id !== '' && id.length <= MAX_CURSOR_ID_LENGTH ? `${pos}:${id}` : String(pos);
+  const text = cursorCanNameId(id) ? `${pos}:${id}` : String(pos);
   return POSITION_CURSOR_PREFIX + Buffer.from(text).toString('base64url');
 }
 
@@ -90,6 +98,19 @@ export function decodePositionCursor(cursor: unknown): PositionStart | undefined
   const id = text.slice(colon + 1);
   if (id === '' || id.length > MAX_CURSOR_ID_LENGTH) return undefined;
   return { pos, id };
+}
+
+/**
+ * Order two positions the way the index does: by `pos`, then by `_id` as UTF-8 bytes (how MongoDB compares strings). A position with no id comes
+ * before every id at the same `pos`. A client that follows a peer's cursor compares it with where it asked from, so a cursor that does not move
+ * forward ends the transfer instead of looping.
+ */
+export function comparePositionStarts(a: PositionStart, b: PositionStart): number {
+  if (a.pos !== b.pos) return a.pos < b.pos ? -1 : 1;
+  if (a.id === b.id) return 0;
+  if (a.id === undefined) return -1;
+  if (b.id === undefined) return 1;
+  return Buffer.compare(Buffer.from(a.id), Buffer.from(b.id));
 }
 
 /** The order that goes with every position read; its last key makes a tie a total order. */
@@ -136,6 +157,7 @@ export async function readAfterPosition<T extends Document>(
 ): Promise<PositionRead<T>> {
   const { limit, extra } = opts;
   const collName = spaceCollection(spaceId, part);
+  await assertPositionsReady(spaceId);
   // One cap for both finds, taken before either: a position stamped meanwhile is at or above it, and waits.
   const cap = await settledPositionCap(recordPositions, spaceId);
   const { tie, range } = positionKeysetFilters(after, cap, extra);
@@ -158,6 +180,7 @@ export async function readAfterPosition<T extends Document>(
 function withPosition(projection: Document | undefined): Document | undefined {
   if (!projection) return undefined;
   const entries = Object.entries(projection).filter(([k]) => k !== 'pos');
-  const including = entries.some(([k, v]) => k !== '_id' && v === 1);
+  // `{ _id: 1 }` alone is an inclusion of `_id` and nothing else: it needs `pos` added as much as `{ name: 1 }` does (a scanner's projection is exactly that).
+  const including = entries.some(([, v]) => v === 1 || v === true);
   return including ? { ...Object.fromEntries(entries), pos: 1 } : Object.fromEntries(entries);
 }

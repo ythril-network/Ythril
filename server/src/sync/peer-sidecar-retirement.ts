@@ -33,13 +33,12 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { getConfig } from '../config/loader.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { CONVERTED_ROOT, EXTRACTED_ROOT } from '../files/moved-paths.js';
 import { resolveSafePathChecked } from '../files/sandbox.js';
 import { removeOneStoredFileHere } from '../files/remove-file-here.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
-import { deliveredByAPeer } from './delivered-by.js';
+import { writtenHereFilter } from './written-here.js';
 import { escapeRegex } from '../util/redos.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -55,12 +54,11 @@ export const RETIRE_PER_SPACE_PER_CYCLE = 200;
 /** Retire the peer-supplied sidecars of one space; returns how many were retired. Throws what ends the space's step. */
 async function retireInSpace(spaceId: string): Promise<number> {
   const startedAt = Date.now();
-  const self = getConfig().instanceId;
   const found = await col<{ _id: string }>(spaceCollection(spaceId, 'files')).find(asFilter<{ _id: string }>({
     _id: { $regex: `^(?:${escapeRegex(CONVERTED_ROOT)}|${escapeRegex(EXTRACTED_ROOT)})` },
     ...LIVE_FILE_ROW,
-    // A peer's: it delivered the bytes, or it wrote the row. A row this instance authored with nobody delivering is its own.
-    $or: [deliveredByAPeer(self), { 'author.instanceId': { $exists: true, $ne: self } }],
+    // A peer's: it delivered the bytes, or it wrote the row — the complement of "written here" (`sync/written-here.ts`), one predicate.
+    $nor: [writtenHereFilter()],
   }), { projection: { _id: 1 } }).limit(RETIRE_PER_SPACE_PER_CYCLE).toArray();
   if (found.length === 0) return 0;
 

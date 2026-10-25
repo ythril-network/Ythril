@@ -33,12 +33,33 @@ import { LruMap } from '../util/lru-map.js';
 import { warnOnce } from '../util/warn-once.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
 import { peerRunsAtLeast } from './peer-floor.js';
+import { parsePushAnswer, type PushAnswer } from './wire-answer.js';
+import { PeerPagesBySeq } from '../util/errors.js';
 
 /**
  * The per-type counters `batch-upsert` returns. `rejected` is every record of the family the peer neither stored nor
  * already held (Q-59); `forkDepthRefused` is what a peer before 5.5 sends instead, and the only refusal it counted.
  */
 type BatchUpsertReply = Record<string, { rejected?: number; forkDepthRefused?: number } | undefined> | null;
+
+/**
+ * The answer a 2xx push got, read as the 6.0 answer it must be: the body with `positions: 1`, or a THROWN `PeerPagesBySeq` for a 200 without it.
+ *
+ * A 5.x receiver answers a push `200` with a body that says nothing about positions. Read as success it moved the push mark on an answer that cannot
+ * promise the receiver pages by position (or re-sent the whole selection every cycle, when the mark did not move). The throw passes the pushers uncaught,
+ * ends the member's turn before any file route, writes no mark and counts no failure. Reads a CLONE, so the caller can still read the body for its
+ * refusal counters; a body that is not JSON is the same refusal, a transport failure while reading it is not (it is the member's failure).
+ */
+export async function readPushReply(resp: Response, peerLabel: string): Promise<PushAnswer> {
+  let json: unknown;
+  try {
+    json = await boundedJson<unknown>(resp.clone(), `push response from ${peerLabel}`);
+  } catch (err) {
+    if (err instanceof SyntaxError) throw new PeerPagesBySeq();
+    throw err;
+  }
+  return parsePushAnswer(json);
+}
 
 /**
  * Report records the peer accepted the request for and then discarded. Never throws.

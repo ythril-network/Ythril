@@ -19,6 +19,7 @@
  * | only a LABEL says "the driver would try again" | `store-down` when the store does not answer a ping, else the space's own |
  * | a bound of ours ended it (`isWriteTimeout`: `StoreTimeout`, `MongoOperationTimeoutError`, code 50) | `store-down` when the store does not answer a ping, else `space-timeout` |
  * | code 112 `WriteConflict`: one hot document | `space-failure` while the store answers |
+ * | a space that owes its positions (`PositionsBuilding`) | `space-not-ready`: skipped this tick, not a failure, said once per window |
  * | anything else | `space-failure` |
  *
  * **The ping is asked of a store that timed out an operation, because a timeout is not a store condition** (the two deadline
@@ -48,6 +49,7 @@
  * to catch one.
  */
 import { errorChain } from '../db/error-chain.js';
+import { PositionsBuilding } from './errors.js';
 import { storeConditionKind, storeIsNotAnswering } from '../db/store-condition.js';
 import { writeErrorCode } from '../db/write-errors.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
@@ -64,7 +66,7 @@ export const SPACE_FAILURE_MAX_KEYS = 20_000;
 /** The server's `WriteConflict`: two writers on one document — a hot record, not a sick space. */
 const WRITE_CONFLICT = 112;
 
-export type WalkVerdict = 'store-down' | 'space-timeout' | 'space-failure';
+export type WalkVerdict = 'store-down' | 'space-timeout' | 'space-failure' | 'space-not-ready';
 
 /** `storeAnswers`, injected: the real one is `db/store-answers.ts`; a test says what it likes. */
 export interface VerdictDeps { storeAnswers: () => Promise<boolean> }
@@ -81,6 +83,8 @@ async function storeDoesAnswer(storeAnswers: () => Promise<boolean>): Promise<bo
 export async function walkVerdict(err: unknown, { storeAnswers }: VerdictDeps): Promise<WalkVerdict> {
   try {
     const chain = errorChain(err);
+    // A space that owes its positions is not failing: it is skipped this tick and visited again (bundle-81, `PositionsBuilding`).
+    if (chain.some(e => e instanceof PositionsBuilding)) return 'space-not-ready';
     const kinds = chain.map(storeConditionKind);
     if (kinds.some(k => k === 'class' || k === 'code')) return 'store-down';
     const labelOnly = kinds.includes('label');
@@ -102,6 +106,7 @@ export interface BoundNote { ms: number; env?: string }
  * that moves it, because the driver's text for a timeout says nothing an operator can act on.
  */
 export function failureReason(verdict: WalkVerdict, err: unknown, bound?: BoundNote): string {
+  if (verdict === 'space-not-ready') return 'positions building';
   if (verdict !== 'space-timeout') return peerText(err);
   if (!bound) return 'a database operation ran past its time bound';
   return `a database operation ran past its time bound of ${bound.ms} ms${bound.env ? ` (${bound.env})` : ''}`;
@@ -149,7 +154,7 @@ export interface ReporterOptions {
 }
 
 const kindOf = (verdict: WalkVerdict | undefined): SpaceFailureKind =>
-  verdict === 'space-timeout' ? 'timeout' : verdict === 'store-down' ? 'store_down' : 'failure';
+  verdict === 'space-timeout' ? 'timeout' : verdict === 'store-down' ? 'store_down' : verdict === 'space-not-ready' ? 'not_ready' : 'failure';
 
 /**
  * A reporter with its own memory and clock: the module's default is one instance, so every caller shares one throttle, and a test
@@ -188,6 +193,11 @@ export function spaceFailureReporter(
         const reason = failureReason(verdict, err, o.bound);
         const unit = o.unit === undefined ? '' : ` (${peerText(o.unit)})`;
         const failed = o.count === undefined ? '' : ` (count: ${o.count})`;
+        // A space that owes its positions is skipped, not failed: its own line, in the same one-per-window throttle.
+        if (verdict === 'space-not-ready') {
+          say(unitKey(step, spaceId, o.unit), 0, `${step} skipped space '${peerText(spaceId)}'${unit}: positions building — retried ${o.when ?? 'next cycle'}`, indexOf(step, peerText(spaceId)));
+          return;
+        }
         const when = o.quarantineSec === undefined ? (o.when ?? 'next cycle') : `after quarantine (${o.quarantineSec}s)`;
         const key = unitKey(step, spaceId, o.unit);
         say(key, o.quarantineSec ?? 0, `${step} failed for space '${peerText(spaceId)}'${unit}: ${reason}${failed} — retried ${when}`, indexOf(step, peerText(spaceId)));

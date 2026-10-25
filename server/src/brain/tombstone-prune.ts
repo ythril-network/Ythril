@@ -8,7 +8,7 @@
  *
  * ── Why this is not a TTL ────────────────────────────────────────────────────────────────────────────────
  *
- * `listTombstones` serves by `seq > sinceSeq`, so a peer that was away resumes from its own watermark. Delete
+ * `GET /api/sync/tombstones` serves by position, so a peer that was away resumes from its own watermark. Delete
  * by AGE and a peer offline longer than the window comes back, never learns of the deletion, and pushes its
  * live copy: the retention fix becomes "deleted records keep coming back" weeks later. The floor here is what
  * peers have provably been served instead — below it, every peer has already applied the deletion, so
@@ -75,7 +75,7 @@ export interface TombstonePruneResult {
 export async function pruneTombstonesToFloor(spaceId: string, floor: TombstoneFloor): Promise<number> {
   if (!floor.prune) return -1;
   const res = await col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'))
-    .deleteMany(asFilter<TombstoneDoc>({ seq: { $lte: floor.upTo } }));
+    .deleteMany(asFilter<TombstoneDoc>({ pos: { $lte: floor.upTo } }));
   return res.deletedCount ?? 0;
 }
 

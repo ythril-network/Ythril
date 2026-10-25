@@ -59,6 +59,12 @@ export interface StoredFileTombstone extends FileTombstoneDoc {
   contentHash?: string;
   /** The upstream that delivered a RELAYED tombstone, so a later version from that same upstream is not refused by it. */
   storedVia?: string;
+  /**
+   * `true` on a tombstone THIS instance's own act wrote (stamped by `writePendingFileTombstones`, which is the one writer of a pending row), absent on one stored
+   * from a peer or before 6.0. The local mark `sync/issued-here.ts` asks, never the `issuer` text, which a peer writes: a tombstone that named this instance
+   * as issuer is no proof of a deletion this instance made. Never on the wire (`WIRE`).
+   */
+  issuedHere?: true;
   /** This instance's own position for the tombstone, for paging, acknowledgement and pruning: the publish time of an
    *  own one, the RECEIVE time of a relayed one — a foreign clock never enters a local position. */
   positionAt?: string;

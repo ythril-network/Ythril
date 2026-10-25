@@ -11,7 +11,7 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
-import { toMongoSort, type SortSpec } from './list-sort.js';
+import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { classifyFactUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
@@ -308,7 +308,7 @@ export async function listFacts(
     // The deadline is an option of the read, not a call on its cursor (Q-358; see `listChrono`).
     .find(asFilter<FactDoc>(filter), { maxTimeMS: listReadMaxMs(Boolean(filter['$expr'])) })
     .project({ embedding: 0 })
-    .sort(sort ? toMongoSort(sort) : { createdAt: -1 })
+    .sort(sort ? toMongoSort(sort) : { ...LANDING_ORDER })
     .skip(parseSkip(skip))
     .limit(parseLimit(limit, 20, 1000))
     .toArray();

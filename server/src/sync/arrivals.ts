@@ -94,6 +94,8 @@ import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
 import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, NOT_CARRIED_BY_BACKUP, WRITE_GUARD_FIELDS, WRITTEN_HERE, carriedFields, stampOfArrival } from './local-only-fields.js';
 import { retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
+import { readBackDuplicates } from './duplicate-readback.js';
+import { isWrittenHere } from './written-here.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
 import { retentionSpace, retentionStamps } from '../brain/ttl.js';
@@ -361,7 +363,7 @@ function replacementFor(
  * A landing the update holds BY REFERENCE: sized with the right bytes and none of the right value, before its chunk's block of positions is
  * taken, then set in place (`Object.assign`) once it is — so the update is built once per document, measured and written through the one memo.
  */
-type MutableLanding = { pos: number; posAtSeq: number };
+type MutableLanding = { pos: number; posAtSeq: number; writtenHere?: true };
 
 const storeRefusal = (err: unknown): string =>
   `the store refused it (${writeErrorCode(err) !== undefined ? `error code ${writeErrorCode(err)}` : 'no error code'})`;
@@ -487,7 +489,14 @@ export async function writeArrivals(
   const landingOf = new Map<string, MutableLanding>();
   const landingRef = (d: Doc): MutableLanding => {
     let landing = landingOf.get(d._id);
-    if (!landing) { landing = { pos: Number.MAX_SAFE_INTEGER, posAtSeq: Number.MAX_SAFE_INTEGER }; landingOf.set(d._id, landing); }
+    if (!landing) {
+      // The written-here bit is the one predicate's, asked of what will be STORED (the delivery stamp this landing writes, never the document's own claim).
+      landing = {
+        pos: Number.MAX_SAFE_INTEGER, posAtSeq: Number.MAX_SAFE_INTEGER,
+        ...(isWrittenHere({ author: d.author as { instanceId?: unknown } | null | undefined, deliveredBy: stampOfArrival({ restore, doc: d, deliveredBy: opts.deliveredBy }) }) ? { writtenHere: true as const } : {}),
+      };
+      landingOf.set(d._id, landing);
+    }
     return landing;
   };
   // Built ONCE per document: the update is a copy of the document, read for its size when the page is sliced and again to
@@ -613,14 +622,10 @@ export async function writeArrivals(
         // Read back: a stored copy AT the planned seq is this version, landed — unless its content differs, which is
         // a divergence (`Q-232`); one above it was written meanwhile and is kept ("skipped"); anything else collided
         // on a unique index other than `_id`.
-        const now = await readStoredById<Doc>(collName, dupes.map(d => d._id), family === 'facts' ? { seq: 1, fact: 1 } : { seq: 1 });
-        for (const d of dupes) {
-          const held = now.get(d._id);
-          const s = held?.seq;
-          const sameSeq = typeof s === 'number' && s === d.seq;
-          if (!restore && sameSeq && divergesFrom(d, held)) out.diverged.push(d._id);
-          else if (!restore && sameSeq) landed.push(d);
-          else if (!restore && typeof s === 'number' && isNewerCopy(s, d.seq)) out.newerLocal.push(d._id);
+        for (const { planned: d, held, relation } of await readBackDuplicates<Doc, Doc>(collName, dupes, family === 'facts' ? { fact: 1 } : {})) {
+          if (!restore && relation === 'same-version' && divergesFrom(d, held)) out.diverged.push(d._id);
+          else if (!restore && relation === 'same-version') landed.push(d);
+          else if (!restore && relation === 'newer') out.newerLocal.push(d._id);
           else out.duplicates.push(d._id);
         }
       }
