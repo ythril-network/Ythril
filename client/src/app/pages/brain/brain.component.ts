@@ -40,7 +40,7 @@ import { ToastService } from '../../core/toast.service';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 
 import { ActivatedRoute, Router } from '@angular/router';
-import { BrainTab, CollectionTab, BRAIN_TABS } from './brain-tabs';
+import { BrainTab, CollectionTab, BRAIN_TABS, RECORD_TABS, type RecordTab } from './brain-tabs';
 import { PluralPipe } from '../../core/plural.pipe';
 
 interface SpaceView {
@@ -442,14 +442,17 @@ export class BrainComponent implements OnInit, OnDestroy {
    * leaving a strip where some tabs have an icon and some do not. The icons match the Overview tiles
    * that link here, because the tiles and the tabs are the same five things.
    */
-  collectionTabs: { key: BrainTab; label: string; icon: string; statsKey?: keyof SpaceStats }[] = [
-    { key: 'entities', label: 'brain.tab.entities', icon: 'stack', statsKey: 'entities' },
+  /** What the strip shows for each record tab. The ORDER is not here: it is `RECORD_TABS`, which Review's Forks kind switch reads as well. */
+  private readonly recordTabs: Record<RecordTab, { label: string; icon: string; statsKey: keyof SpaceStats }> = {
+    entities: { label: 'brain.tab.entities', icon: 'stack', statsKey: 'entities' },
     // `link` and not `graph`: the Graph tab already owns that glyph, and two different tabs wearing the
     // same icon in one strip is worse than a slightly less literal one.
-    { key: 'edges', label: 'brain.tab.edges', icon: 'link', statsKey: 'edges' },
-    { key: 'facts', label: 'brain.tab.facts', icon: 'brain', statsKey: 'facts' },
-    { key: 'chrono', label: 'brain.tab.chrono', icon: 'timer', statsKey: 'chrono' },
-  ];
+    edges: { label: 'brain.tab.edges', icon: 'link', statsKey: 'edges' },
+    facts: { label: 'brain.tab.facts', icon: 'brain', statsKey: 'facts' },
+    chrono: { label: 'brain.tab.chrono', icon: 'timer', statsKey: 'chrono' },
+  };
+
+  collectionTabs: { key: BrainTab; label: string; icon: string; statsKey?: keyof SpaceStats }[] = RECORD_TABS.map(key => ({ key, ...this.recordTabs[key] }));
 
   readonly pageSize = 20;
 

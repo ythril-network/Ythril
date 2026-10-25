@@ -35,10 +35,14 @@ import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { dictionary } from '../../testing/i18n-dictionary';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { FORK_KIND_TAB } from '../../core/forks.types';
+import { RECORD_TABS } from './brain-tabs';
 import { ReviewForksComponent } from './review-forks.component';
 
 type Row = Record<string, any>;
-const KIND_ORDER = ['fact', 'entity', 'chrono', 'edge'] as const;
+const KIND_ORDER = ['entity', 'edge', 'fact', 'chrono'] as const;
 type Kind = (typeof KIND_ORDER)[number];
 
 /** The answer's `kinds`: BODY_FIELDS_OF (the main field among them) and the main field, per kind. Shaped as the design's section 10 says. */
@@ -110,53 +114,66 @@ describe('the kind switch of the Forks section (layout B)', () => {
     expect(el.querySelectorAll('[role="radiogroup"]').length).toBe(1);
     const group = radios();
     expect(group.length).toBe(KIND_ORDER.length);
-    expect(group.map(r => r.textContent!.trim())).toEqual([expect.stringMatching(/Facts\s*3/), expect.stringMatching(/Entities\s*0/),
-      expect.stringMatching(/Chrono\s*0/), expect.stringMatching(/Edges\s*1/)]);
+    expect(group.map(r => r.textContent!.trim())).toEqual([expect.stringMatching(/Entities\s*0/), expect.stringMatching(/Edges\s*1/),
+      expect.stringMatching(/Facts\s*3/), expect.stringMatching(/Chrono\s*0/)]);
     // The accessible name says the number in words ("Facts, 3 forks"), as the mockup's `kindCount` does.
-    expect(group[0]!.getAttribute('aria-label')).toMatch(/Facts, 3 forks/);
-    expect(group[3]!.getAttribute('aria-label')).toMatch(/Edges, 1 fork\b/);
+    expect(group[2]!.getAttribute('aria-label')).toMatch(/Facts, 3 forks/);
+    expect(group[1]!.getAttribute('aria-label')).toMatch(/Edges, 1 fork\b/);
     expect(el.querySelector('[role="radiogroup"]')!.getAttribute('aria-label')).toBeTruthy();
+  });
+
+  it('lists the kinds in the Brain tab order, which is one list that both read (Entities, Edges, Facts, Chrono)', () => {
+    const { radios } = make([row('fact', '1')]);
+    const tabOf = (r: HTMLElement) => FORK_KIND_TAB[r.getAttribute('data-kind') as Kind];
+    expect(radios().map(tabOf), 'the switch is not in the order of RECORD_TABS, the strip\'s').toEqual([...RECORD_TABS]);
+    // The expected order, written out once as a fixture: the strip's order today.
+    expect([...RECORD_TABS]).toEqual(['entities', 'edges', 'facts', 'chrono']);
+    // The strip is built from that same list, not from an order of its own.
+    const brain = readFileSync(resolve(__dirname, 'brain.component.ts'), 'utf8');
+    expect(brain).toMatch(/collectionTabs[^=]*=\s*RECORD_TABS\.map\(/);
+    const forkKinds = readFileSync(resolve(__dirname, '../../core/forks.types.ts'), 'utf8');
+    expect(forkKinds).toMatch(/FORK_KINDS[^=]*=\s*RECORD_TABS\.map\(/);
   });
 
   it('starts on the first kind that has forks, and shows only that kind\'s rows', () => {
     const { radios, items } = make([row('entity', 'e1'), row('entity', 'e2'), row('edge', 'g1')]);
-    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false', 'false']);
+    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false', 'false']);
     expect(items().length).toBe(2);
     expect(items().every(li => /fork-e[12]/.test(li.querySelector('.fk-id')?.getAttribute('title') ?? ''))).toBe(true);
   });
 
   it('choosing a kind shows that kind\'s rows and no other', () => {
     const { radio, radios, items, click } = make([row('fact', 'f1'), row('edge', 'g1'), row('edge', 'g2')]);
+    expect(items().length, 'Edges comes before Facts, so it is the kind the switch opens on').toBe(2);
+    click(radio('fact'));
+    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'false', 'true', 'false']);
     expect(items().length).toBe(1);
-    click(radio('edge'));
-    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'false', 'false', 'true']);
-    expect(items().length).toBe(2);
   });
 
   it('is a roving group: the checked radio is the one tab stop', () => {
     const { radio, radios, click } = make([row('fact', 'f1'), row('chrono', 'c1')]);
-    expect(radios().map(r => r.getAttribute('tabindex'))).toEqual(['0', '-1', '-1', '-1']);
-    click(radio('chrono'));
     expect(radios().map(r => r.getAttribute('tabindex'))).toEqual(['-1', '-1', '0', '-1']);
+    click(radio('chrono'));
+    expect(radios().map(r => r.getAttribute('tabindex'))).toEqual(['-1', '-1', '-1', '0']);
   });
 
   it('the arrow keys move AND select, wrap at both ends, and focus follows the selection', () => {
     const { radio, radios, key, fixture } = make([row('fact', 'f1'), row('edge', 'g1')]);
-    radio('fact').focus();
-    key(radio('fact'), 'ArrowRight');
+    radio('entity').focus();
+    key(radio('entity'), 'ArrowRight');
     expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false', 'false']);
+    expect(document.activeElement).toBe(radio('edge'));
+    key(radio('edge'), 'ArrowLeft');
+    key(radio('entity'), 'ArrowLeft'); // wraps to the last
+    expect(radio('chrono').getAttribute('aria-checked')).toBe('true');
+    expect(document.activeElement).toBe(radio('chrono'));
+    key(radio('chrono'), 'ArrowDown'); // down is right, and wraps to the first
+    expect(radio('entity').getAttribute('aria-checked')).toBe('true');
     expect(document.activeElement).toBe(radio('entity'));
-    key(radio('entity'), 'ArrowLeft');
-    key(radio('fact'), 'ArrowLeft'); // wraps to the last
-    expect(radio('edge').getAttribute('aria-checked')).toBe('true');
-    expect(document.activeElement).toBe(radio('edge'));
-    key(radio('edge'), 'ArrowDown'); // down is right, and wraps to the first
-    expect(radio('fact').getAttribute('aria-checked')).toBe('true');
-    expect(document.activeElement).toBe(radio('fact'));
-    key(radio('fact'), 'End');
-    expect(document.activeElement).toBe(radio('edge'));
-    key(radio('edge'), 'Home');
-    expect(document.activeElement).toBe(radio('fact'));
+    key(radio('entity'), 'End');
+    expect(document.activeElement).toBe(radio('chrono'));
+    key(radio('chrono'), 'Home');
+    expect(document.activeElement).toBe(radio('entity'));
     fixture.detectChanges();
     expect(radios().filter(r => r.getAttribute('aria-checked') === 'true').length).toBe(1);
   });
@@ -165,7 +182,7 @@ describe('the kind switch of the Forks section (layout B)', () => {
     const { radio, radios, key } = make([row('fact', 'f1')]);
     radio('fact').focus();
     key(radio('fact'), 'a');
-    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false', 'false']);
+    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'false', 'true', 'false']);
   });
 });
 
@@ -178,8 +195,8 @@ describe('an empty kind', () => {
     click(radio('chrono'));
     expect(items().length).toBe(0);
     expect(el.textContent).toMatch(/Nothing to review in Chrono/i);
-    expect(button(/Show Facts \(2\)/i), 'the offer names the next non-empty kind and its count').toBeTruthy();
-    expect(button(/Show Edges/i)).toBeUndefined();
+    expect(button(/Show Edges \(1\)/i), 'the offer names the next non-empty kind, in the Brain tab order, and its count').toBeTruthy();
+    expect(button(/Show Facts/i), 'only the first other kind that has forks is offered').toBeUndefined();
   });
 
   it('skips itself: with forks only in Edges, an empty Entities offers Edges', () => {
@@ -192,7 +209,7 @@ describe('an empty kind', () => {
     const { radio, radios, click, button, items } = make([row('fact', 'f1'), row('fact', 'f2')]);
     click(radio('entity'));
     click(button(/Show Facts \(2\)/i));
-    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false', 'false']);
+    expect(radios().map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'false', 'true', 'false']);
     expect(items().length).toBe(2);
     expect(document.activeElement).toBe(radio('fact'));
   });

@@ -7,9 +7,22 @@
  * altogether, and which other instances already decided it.
  */
 
-/** The kinds of record that fork, in the order Review lists them. The server's `FORKING_FAMILIES` in the singular. */
-export const FORK_KINDS = ['fact', 'entity', 'chrono', 'edge'] as const;
-export type ForkKind = (typeof FORK_KINDS)[number];
+import { RECORD_TABS, type RecordTab } from '../pages/brain/brain-tabs';
+
+/** The kinds of record that fork. The server's `FORKING_FAMILIES` in the singular. */
+export type ForkKind = 'fact' | 'entity' | 'chrono' | 'edge';
+
+/**
+ * The Brain tab that names each kind: the app's one name for it (`brain.tab.<tab>`), and the place the kind sits in the Brain's tab strip.
+ * Written as the record's table, so a kind added to `ForkKind` without a tab fails the build.
+ */
+export const FORK_KIND_TAB: Record<ForkKind, RecordTab> = { entity: 'entities', edge: 'edges', fact: 'facts', chrono: 'chrono' };
+
+/**
+ * The kinds in the order Review lists them, DERIVED from the Brain's tab strip (`RECORD_TABS`): Entities, Edges, Facts, Chrono, whatever the strip
+ * says. No order is written here, so the kind switch and the strip cannot differ.
+ */
+export const FORK_KINDS: readonly ForkKind[] = RECORD_TABS.map(tab => (Object.keys(FORK_KIND_TAB) as ForkKind[]).find(kind => FORK_KIND_TAB[kind] === tab)!);
 
 /**
  * One version of a record, as far as the Forks section reads it. The fields a kind compares are the ANSWER's (`kinds[kind].fields`), so the

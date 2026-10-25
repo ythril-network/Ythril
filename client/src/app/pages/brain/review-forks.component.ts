@@ -6,7 +6,7 @@ import { DateFormatService } from '../../core/date-format.service';
 import { formatList } from '../../core/list-format';
 import { PluralText } from '../../core/plural-text.service';
 import {
-  FORK_KINDS, type ForkCounts, type ForkKeep, type ForkKind, type ForkKindsFields, type ForkMarkedCounts, type ForkResolvedElsewhere, type ForkRow, type ForkVersion,
+  FORK_KINDS, FORK_KIND_TAB, type ForkCounts, type ForkKeep, type ForkKind, type ForkKindsFields, type ForkMarkedCounts, type ForkResolvedElsewhere, type ForkRow, type ForkVersion,
 } from '../../core/forks.types';
 import { ModalDirective } from '../../shared/modal.directive';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -15,12 +15,6 @@ import { compareForkVersions, fieldSegments, forkOwnFields, textSegments, type F
 
 /** Characters of the discarded text the confirmation quotes: enough to recognise it, short enough to read in a dialog. */
 const QUOTE_CHARS = 90;
-
-/**
- * The Brain tab a kind is named by: `brain.tab.<name>`. The tab keys are the app's one name for each kind of record, so the kind switch reads them
- * (a second label per kind would be a second name for a standing thing, and the two would drift).
- */
-const KIND_TAB: Record<ForkKind, string> = { fact: 'facts', entity: 'entities', chrono: 'chrono', edge: 'edges' };
 
 /** What Review shows of one fork, worked out once per change instead of once per question the template asks. */
 interface RowView {
@@ -323,7 +317,7 @@ export class ReviewForksComponent {
   protected count(kind: ForkKind): number { return this.counts()?.[kind] ?? this.counted()[kind]; }
   protected markedCount(kind: ForkKind): number { return this.marked()?.[kind] ?? 0; }
   /** A kind goes by the name the Brain tab of that kind already has: the switch reads `brain.tab.*` and holds no label of its own. */
-  protected kindName(kind: ForkKind): string { return this.tr(`brain.tab.${KIND_TAB[kind]}`); }
+  protected kindName(kind: ForkKind): string { return this.tr(`brain.tab.${FORK_KIND_TAB[kind]}`); }
   protected kindNoun(kind: ForkKind): string { return this.tr(`brain.review.forks.kindNoun.${kind}`); }
 
   /** The control's accessible name says the number in words: "Facts, 3 forks". */
