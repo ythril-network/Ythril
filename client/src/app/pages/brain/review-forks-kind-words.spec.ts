@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { dictionary, LOCALES } from '../../testing/i18n-dictionary';
+import { FORK_KIND_TAB } from '../../core/forks.types';
 
 const P = 'brain.review.forks.';
 const KEYS = [
@@ -90,9 +91,9 @@ describe('the words of the kind switch exist in en, de and pl', () => {
     }
     expect(TAB_KEYS.map(k => dictionary('en')[k])).toEqual(['Facts', 'Entities', 'Chrono', 'Edges']);
     const source = readFileSync(resolve(__dirname, 'review-forks.component.ts'), 'utf8');
-    expect(source).toMatch(/brain\.tab\.\$\{KIND_TAB\[kind\]\}/);
+    expect(source).toMatch(/brain\.tab\.\$\{FORK_KIND_TAB\[kind\]\}/);
     expect(source, 'the component still reads a label key of its own').not.toMatch(/brain\.review\.forks\.kind\./);
-    for (const name of ['facts', 'entities', 'chrono', 'edges']) expect(source).toContain(`'${name}'`);
+    expect(Object.values(FORK_KIND_TAB).sort(), "the tabs that name the kinds").toEqual(["chrono", "edges", "entities", "facts"]);
   });
 
   it('the sentences that name a kind use the app\'s own term for it, not a new one', () => {

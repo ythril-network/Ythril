@@ -148,9 +148,9 @@ describe('the Forks tab of Review', () => {
       const listForks = serves();
       const { el, openForks } = setup({ listForks });
       openForks();
-      expect(listForks.mock.calls.map(c => c[3])).toEqual([undefined, 'fact']);
-      expect(radio(el, /Facts/).getAttribute('aria-checked')).toBe('true');
-      expect(el.querySelectorAll('app-review-forks article').length).toBe(1);
+      expect(listForks.mock.calls.map(c => c[3])).toEqual([undefined, 'entity']);
+      expect(radio(el, /Entities/).getAttribute('aria-checked')).toBe('true');
+      expect(el.querySelectorAll('app-review-forks article').length).toBe(2);
       expect(el.querySelector('#review-tab-forks')!.textContent).toContain('4');
     });
 
@@ -158,11 +158,11 @@ describe('the Forks tab of Review', () => {
       const listForks = serves();
       const { el, f, openForks } = setup({ listForks });
       openForks();
-      radio(el, /Entities/).click();
+      radio(el, /Facts/).click();
       f.detectChanges();
-      expect(listForks.mock.calls.at(-1)![3]).toBe('entity');
-      expect(radio(el, /Entities/).getAttribute('aria-checked')).toBe('true');
-      expect(el.querySelectorAll('app-review-forks article').length).toBe(2);
+      expect(listForks.mock.calls.at(-1)![3]).toBe('fact');
+      expect(radio(el, /Facts/).getAttribute('aria-checked')).toBe('true');
+      expect(el.querySelectorAll('app-review-forks article').length).toBe(1);
     });
 
     it('a kind with no forks is not an empty space: the switch stays and offers the next kind', () => {
@@ -172,7 +172,7 @@ describe('the Forks tab of Review', () => {
       f.detectChanges();
       expect(el.textContent).toContain('Nothing to review in Chrono');
       expect(el.textContent).not.toContain('No forks to review');
-      expect([...el.querySelectorAll('button')].some(b => /Show Facts \(1\)/.test(b.textContent ?? ''))).toBe(true);
+      expect([...el.querySelectorAll('button')].some(b => /Show Entities \(2\)/.test(b.textContent ?? ''))).toBe(true);
     });
   });
 

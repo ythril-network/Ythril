@@ -52,3 +52,15 @@ export const BRAIN_TABS = [...COLLECTION_TABS, ...NON_COLLECTION_TABS] as const;
 
 /** Every Brain tab. The collection tabs plus the views that are not backed by one collection. */
 export type BrainTab = CollectionTab | typeof NON_COLLECTION_TABS[number];
+
+/**
+ * The tabs that browse one kind of record, in the order the Brain's tab strip shows them.
+ *
+ * ONE order, read by everything that lists the four kinds of record: the strip (`brain.component`'s `collectionTabs`) and Review's Forks kind
+ * switch (`core/forks.types`'s `FORK_KINDS`). A second hand-written order agrees until someone reorders the strip, and then the same four kinds
+ * read in two orders a few clicks apart. `COLLECTION_TABS` above is not this list: it has `files`, and its order is the type's, not the strip's.
+ */
+export const RECORD_TABS = ['entities', 'edges', 'facts', 'chrono'] as const satisfies readonly CollectionTab[];
+
+/** A tab that browses one kind of record: a collection tab, by construction (`satisfies` fails the build on a name that is not one). */
+export type RecordTab = typeof RECORD_TABS[number];
