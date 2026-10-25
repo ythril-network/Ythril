@@ -46,10 +46,14 @@ const MAX_SAFE = Number.MAX_SAFE_INTEGER; // 9007199254740991
  * `SEQ_CEILING_RESERVE = 2 ** 40`, and `MAX_INGEST_SEQ` is their difference. A source that stops spelling them that way fails here,
  * loudly, instead of leaving this file attacking a boundary that moved.
  */
-const seqSource = fs.readFileSync(path.join(__dirname, '..', '..', 'server', 'dist', 'util', 'seq.js'), 'utf8');
+// `MAX_SYNC_SEQ` is defined in `util/seq-ceiling.js` (import-free, so the `Incoming*` schema leaf can read it, Q-624) and re-exported by `util/seq.js`;
+// `SEQ_CEILING_RESERVE` stays in `util/seq.js`. Each is read from the module that spells it.
+const distUtil = (name) => fs.readFileSync(path.join(__dirname, '..', '..', 'server', 'dist', 'util', name), 'utf8');
+const sourceOf = { MAX_SYNC_SEQ: ['seq-ceiling.js', distUtil('seq-ceiling.js')], SEQ_CEILING_RESERVE: ['seq.js', distUtil('seq.js')] };
 const exponentOf = (name) => {
-  const m = new RegExp(name + String.raw`\s*=\s*2\s*\*\*\s*(\d+)`).exec(seqSource);
-  assert.ok(m, `server/dist/util/seq.js no longer spells ${name} as 2 ** n: re-anchor this test`);
+  const [file, text] = sourceOf[name];
+  const m = new RegExp(name + String.raw`\s*=\s*2\s*\*\*\s*(\d+)`).exec(text);
+  assert.ok(m, `server/dist/util/${file} no longer spells ${name} as 2 ** n: re-anchor this test`);
   return Number(m[1]);
 };
 const MAX_INGEST_SEQ = 2 ** exponentOf('MAX_SYNC_SEQ') - 2 ** exponentOf('SEQ_CEILING_RESERVE');

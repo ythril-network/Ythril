@@ -38,6 +38,7 @@ import { linkIdFor } from '../brain/link-id.js';
 import { fileContentHash } from '../brain/merkle.js';
 import { authorRef } from '../config/author.js';
 import type { BrainCollection, RefKind } from '../config/types-knowledge.js';
+import { authoredContentHash, bodiesDiffer, BodyNotRead, BODY_FIELDS_OF, type AuthoredContent } from './authored-content.js';
 
 /** The minimum shape this module needs: everything sync replicates carries an id and a seq. */
 export interface Replicable {
@@ -106,10 +107,42 @@ export const MAX_FORK_DEPTH = 10;
 export const MAX_FORKS_PER_RECORD = 10;
 
 /**
- * The indexes on a space's FACTS collection the fork caps read through — declared once, as `LINK_INDEXES` is, and
- * created by `initSpace` for a new space and by `ensureQueryIndexes` for every existing one. Without it the push
- * door's sibling count was a `countDocuments({ forkOf })` per candidate over the whole collection. Sparse: most
- * facts are no fork. Local, like every index — nothing about it replicates.
+ * The families whose records FORK: an equal-seq copy that says something different is kept beside the stored one as a fork row of its own
+ * family (D-23, Q-624). Declared ONCE, here; every place that handles a fork reads it (the planner, the fork context read, the fork write, the
+ * writer's read-back, the fork indexes, the fork list), and `a-forking-family-is-read-from-the-planner` holds each of them to it.
+ *
+ * **Links are out** because a link's body IS its identity (`brain/link-id.ts`): two links that say different things are two links, and there is
+ * nothing for a fork to hold. **Files are out** because a file keeps its own conflict copies (`api/conflicts.ts`) and its row is hashed by
+ * `fileContentHash`, which this does not touch.
+ *
+ * Checked at load against the hash leaf, which derives the families it hashes from the schemas that declare `forkOf`: the two lists cannot say
+ * different things for longer than it takes the server to start.
+ */
+// NOT ALL BRAIN COLLECTIONS, deliberately: the four that fork, and links and files are out for the reasons above.
+export const FORKING_FAMILIES: readonly ForkingFamily[] = Object.freeze(['facts', 'entities', 'edges', 'chrono'] as const);
+
+// NOT ALL BRAIN COLLECTIONS: see FORKING_FAMILIES.
+/** A family that forks. */
+export type ForkingFamily = 'facts' | 'entities' | 'edges' | 'chrono';
+
+{
+  const hashed = new Set(Object.keys(BODY_FIELDS_OF));
+  const declared = new Set<string>(FORKING_FAMILIES);
+  if (hashed.size !== declared.size || [...declared].some(f => !hashed.has(f))) {
+    throw new Error(`FORKING_FAMILIES (${[...declared]}) does not match the families whose Incoming schema declares forkOf (${[...hashed]}): a family forks only when both say so`);
+  }
+}
+
+/** Does `kind` fork? The one test of it, so no caller spells the list or the `includes` of its own. */
+export function isForkingFamily(kind: string): kind is ForkingFamily {
+  return (FORKING_FAMILIES as readonly string[]).includes(kind);
+}
+
+/**
+ * The indexes on the collection of EACH forking family the fork caps read through — declared once, as `LINK_INDEXES` is, and
+ * created by `initSpace` for a new space and by `ensureQueryIndexes` for every existing one, for every member of `FORKING_FAMILIES`
+ * (`spaces/space-indexes.ts`). Without it the push door's sibling count was a `countDocuments({ forkOf })` per candidate over the whole
+ * collection. Sparse: most records are no fork. Local, like every index — nothing about it replicates.
  */
 export const FORK_INDEXES: readonly { keys: Record<string, 1>; sparse: true }[] = Object.freeze([
   { keys: { forkOf: 1 }, sparse: true as const },
@@ -131,6 +164,7 @@ export type ArrivalDoor = 'push' | 'pull';
 /** The fields of an arriving document the planner reads. */
 export interface ArrivalDoc extends Replicable {
   fact?: string;
+  contentRedacted?: boolean;
   forkOf?: string;
   type?: string;
   from?: string;
@@ -160,8 +194,12 @@ export interface HeldTombstone {
 /** What the planner needs to know of a stored copy. */
 export interface StoredCopy {
   seq?: number;
-  fact?: string;
   forkOf?: string;
+  /**
+   * The hash of this copy's body (`authoredContentHash`, the WHOLE answer), read by the door and only when this copy's seq EQUALS an arriving one's:
+   * a copy at another seq is newer or older and its body is not asked. A copy at an equal seq without it is a programming error (`BodyNotRead`).
+   */
+  bodyHash?: AuthoredContent;
   /**
    * A FILE row's own fields, read for the equal-seq convergence (`Q-419`): who authored it, the timestamp two copies
    * may disagree about, and the hash of everything else the wire carries.
@@ -202,7 +240,15 @@ export interface ArrivalPlanInput {
   allowedTypes?: ReadonlySet<string>;
   forkParent?: ReadonlyMap<string, string | undefined>;
   siblings?: ReadonlyMap<string, number>;
+  /** The ids of every fork already stored for the candidate parents: a copy whose derived id is among them IS that fork. */
   existingForks?: ReadonlySet<string>;
+  /** The ids, among the parents the page's fork rows name, that are stored here: a legacy fact fork is admitted only under a stored parent. */
+  heldParents?: ReadonlySet<string>;
+  /**
+   * The body hash of an arriving document, memoised for the page: the candidate selection, the verdict and the writer's read-back all ask it, and
+   * a document is hashed once. A door that reads a fork context passes the same function it selected candidates with.
+   */
+  hashOf?: BodyHashes;
 }
 
 /**
@@ -211,7 +257,7 @@ export interface ArrivalPlanInput {
  * than `_id`, a store refusal), and the door overwrites the winner's verdict with them.
  */
 export type ArrivalVerdict = 'inserted' | 'updated' | 'upserted' | 'skipped' | 'tombstoned' | 'forked'
-  | 'forkRefused' | 'unknownType' | 'duplicate' | 'rejected' | 'converged';
+  | 'forkRefused' | 'invalidFork' | 'unknownType' | 'duplicate' | 'rejected' | 'converged';
 
 export interface ArrivalPlan<T extends ArrivalDoc> {
   /** One verdict per input document, in input order — what sequential processing would have answered. */
@@ -235,6 +281,11 @@ export interface ArrivalPlan<T extends ArrivalDoc> {
    * counted as landed — so no embed job is queued for a row whose content did not change.
    */
   converges: Array<{ index: number; doc: T }>;
+  /**
+   * The documents (by index) admitted although their fork id could not be derived from their body: a legacy fact fork of 5.6.0 or 5.6.1 under its
+   * stored parent, and a chrono fork whose bytes a redaction took. They are stored as ordinary arrivals and counted `unverifiable`.
+   */
+  unverifiable: Array<{ index: number; reason: 'legacy' | 'redacted' }>;
   /**
    * Stale tombstones to delete: those below `below`. `onLanding` means only once the record lands — a tombstone
    * deleted before a write that then fails leaves the record absent and its deletion gone. Without it, the stored
@@ -282,16 +333,34 @@ export function forkDepth(id: string, parentOf: (id: string) => string | undefin
   return depth;
 }
 
+/** A memoised body hash of an arriving document: one `authoredContentHash` per document per page. */
+export type BodyHashes = (doc: object) => AuthoredContent;
+
 /**
- * The fact ids in a page that may FORK — the only ones the door reads a fork chain and a sibling count for.
- * Divergent text at an equal seq, against the stored copy or against another copy in the same page.
+ * A fresh per-page memo of `authoredContentHash` for one family. A per-page Map keyed by the document, never a `WeakMap` on it: the planner spreads
+ * documents into fork rows, and object identity is not a safe key across that. Owned by the door that reads a page, handed to every reader of it.
  */
-export function forkCandidates(docs: readonly ArrivalDoc[], stored: ReadonlyMap<string, StoredCopy>): string[] {
+export function bodyHashesOf(kind: PlannedFamily): BodyHashes {
+  const memo = new Map<object, AuthoredContent>();
+  return (doc) => {
+    let found = memo.get(doc);
+    if (found === undefined) { found = authoredContentHash(kind, doc as Record<string, unknown>); memo.set(doc, found); }
+    return found;
+  };
+}
+
+/**
+ * The ids in a page that may FORK — the only ones the door reads a fork chain and a sibling count for.
+ * A different body at an equal seq, against the stored copy or against another copy in the same page.
+ */
+export function forkCandidates(
+  kind: PlannedFamily, docs: readonly ArrivalDoc[], stored: ReadonlyMap<string, StoredCopy>, hashOf: BodyHashes = bodyHashesOf(kind),
+): string[] {
   const out = new Set<string>();
   const seen = new Map<string, ArrivalDoc[]>();
   for (const d of docs) {
-    if (divergesFrom(d, stored.get(d._id))) out.add(d._id);
-    for (const other of seen.get(d._id) ?? []) if (divergesFrom(d, other)) out.add(d._id);
+    if (divergesFrom(kind, d, stored.get(d._id), hashOf)) out.add(d._id);
+    for (const other of seen.get(d._id) ?? []) if (divergesFrom(kind, d, { seq: other.seq, bodyHash: hashOf(other) }, hashOf)) out.add(d._id);
     const copies = seen.get(d._id);
     if (copies) copies.push(d); else seen.set(d._id, [d]);
   }
@@ -349,12 +418,62 @@ export function convergesOnAuthorStamp(
 }
 
 /**
- * Does an arriving fact DIVERGE from a copy of it — the same seq, different `fact` text? The one fork rule, asked
- * by `forkCandidates` (which facts the door reads a fork context for) and `planArrivals` (which facts fork),
- * so the reads and the decision cannot disagree about what a fork is.
+ * Does an arriving copy DIVERGE from a copy of it: the same seq, a different BODY? The one fork rule, for every family that forks, asked by
+ * `forkCandidates` (which records the door reads a fork context for), `planArrivals` (which records fork) and the writer's read-back of a guarded write
+ * (`writeArrivals`), so the reads and the decision cannot disagree about what a fork is.
+ *
+ * The body is `authoredContentHash` (`sync/authored-content.ts`): the family's body fields, normalised through its `Incoming*` schema, version metadata
+ * removed. Two copies of one document are never different (`divergence-is-irreflexive`). A copy at another seq is newer or older, never a divergence, and
+ * its body is not asked. A copy at an EQUAL seq whose body was not read is `BodyNotRead`: a door that hands one over has a defect, and "different" would
+ * be a fork nobody can explain while "same" would lose the edit.
  */
-export function divergesFrom(doc: { seq?: number; fact?: string }, copy: { seq?: number; fact?: string } | undefined): boolean {
-  return copy !== undefined && copy.seq === doc.seq && copy.fact !== doc.fact;
+export function divergesFrom(
+  kind: PlannedFamily, doc: object & { seq?: number }, copy: { seq?: number; bodyHash?: AuthoredContent } | undefined,
+  hashOf: BodyHashes = (d) => authoredContentHash(kind, d as Record<string, unknown>),
+): boolean {
+  if (copy === undefined || copy.seq !== doc.seq) return false;
+  if (copy.bodyHash === undefined) throw new BodyNotRead(kind, (doc as { _id?: unknown })._id);
+  return bodiesDiffer(hashOf(doc), copy.bodyHash);
+}
+
+/**
+ * The id a FACT fork had under 5.6.2 and later, derived from the TEXT alone (`forkIdFor(parent, seq, fact)`), or undefined for a family whose forks never had one.
+ * Those rows are real on every member that upgraded, so a copy is matched to one by it as well as by the body-derived id.
+ */
+function legacyForkIdOf(kind: PlannedFamily, doc: ArrivalDoc): string | undefined {
+  return kind === 'facts' ? forkIdFor(doc._id, doc.seq, doc.fact ?? '') : undefined;
+}
+
+/** Does `id` look like a v4 UUID, the shape of every fork id and of the random ones 5.6.0 and 5.6.1 gave a fact fork? */
+const V4_SHAPED = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/**
+ * Can a fork row that ARRIVES (a pushed, pulled or restored row carrying `forkOf`) be accepted as what it says it is? The ONE derivation check of
+ * every door (design section 3): its `_id` must equal `forkIdFor(forkOf, seq, authoredContentHash(family, row).text)`, so a fork id proves its body and
+ * "is this the same fork" is an id lookup.
+ *
+ *  - `ok`: the id derives. For FACTS the id a 5.6.2 or later instance derived from the TEXT (`forkIdFor(forkOf, seq, fact)`) derives too, because
+ *    those rows are real and a member that upgraded serves them.
+ *  - `legacy`: a FACT fork whose id derives from neither but is v4-shaped, which is what 5.6.0 and 5.6.1 stored (`uuidv4()`). It cannot be verified,
+ *    and refusing a real row is a permanent divergence between the members that hold it and the ones that refuse it, so the caller admits it under a
+ *    STORED parent and the cap.
+ *  - `redacted`: a CHRONO fork carrying `contentRedacted` whose id no longer derives, because the redaction deleted the bytes the id was made from.
+ *    Admitted under the cap and the tombstoned-parent rule.
+ *  - `invalid`: everything else, a `forkOf` equal to the row's own id included. It is never silently dropped.
+ *
+ * What it is for, said plainly: `forkIdFor` is public, so this is not authentication. It makes one row per distinct body under a parent, so
+ * re-deliveries collapse and a buggy peer cannot plant duplicates.
+ */
+export function forkRowVerdict(
+  kind: PlannedFamily, row: ArrivalDoc, text: string,
+): 'ok' | 'legacy' | 'redacted' | 'invalid' {
+  const parent = row.forkOf;
+  if (parent === undefined || parent === row._id || !isForkingFamily(kind)) return 'invalid';
+  if (row._id === forkIdFor(parent, row.seq, text)) return 'ok';
+  if (row._id === legacyForkIdOf(kind, row)) return 'ok';
+  if (kind === 'chrono' && row.contentRedacted === true) return 'redacted';
+  if (kind === 'facts' && V4_SHAPED.test(row._id)) return 'legacy';
+  return 'invalid';
 }
 
 /**
@@ -364,6 +483,8 @@ export function divergesFrom(doc: { seq?: number; fact?: string }, copy: { seq?:
  * row under the index, so they collide here exactly when they would collide in the store.
  */
 function uniqueKey(kind: PlannedFamily, d: ArrivalDoc): string | undefined {
+  // A fork edge shares its subject's five identity fields and stays outside the identity slot (the partial index), so it holds no key.
+  if (kind === 'edges' && d.forkOf) return undefined;
   if (kind === 'edges') return edgeIdFor(String(d.from ?? ''), String(d.to ?? ''), String(d.label ?? ''), d.fromKind, d.toKind);
   if (kind === 'links') {
     return linkIdFor(String(d.from ?? ''), d.fromKind as RefKind, String(d.to ?? ''), d.toKind as RefKind);
@@ -462,9 +583,15 @@ export function tombstoneGoverns(issuer: string | undefined, author: string | un
  *   later copies of the id in the page no longer see it, and it is deleted once the record lands.
  * - Chrono, on PUSH only: a type outside this space's vocabulary is `unknownType`, before anything else is
  *   consulted (the one door difference — `ArrivalPlanInput.door` says why).
- * - Facts: no copy -> `inserted`; a higher seq -> `updated`; an equal seq with different `fact` text -> a FORK;
- *   anything else -> `skipped`. The other families: no copy or a higher seq -> `upserted`, else `skipped` — an
- *   equal seq never forks there.
+ * - Every family that forks (`FORKING_FAMILIES`): no copy -> `inserted` (facts) or `upserted`; a higher seq -> `updated` or
+ *   `upserted`; an equal seq with a different BODY (`divergesFrom`, the body hash) -> a FORK; anything else -> `skipped`. The
+ *   other families (links, file metadata) carry no body of their own to disagree about: no copy or a higher seq ->
+ *   `upserted`, else `skipped`.
+ * - A row that arrives carrying `forkOf` is judged by what it says it is first (`forkRowVerdict`): an id that does not derive from
+ *   its body, a `forkOf` equal to its own id, one on a family that does not fork, or an edge whose `forkOf` presence differs from
+ *   the stored copy's is `invalidFork` — its own verdict, never a silent `rejected`. A fork row of a record whose tombstone is held
+ *   and which is not held itself is `tombstoned`: the deletion wins. No fork of a fork is minted: a stored row that carries
+ *   `forkOf` never forks.
  * - "The copy" is the stored one OVERLAID by every version this page accepted before it, so `[5, 6]` is
  *   inserted-then-updated and `[9, 3]` is inserted-then-skipped. The counters count ITEMS, as processing them in
  *   order counted them; the write is the final winner per id.
@@ -476,12 +603,15 @@ export function tombstoneGoverns(issuer: string | undefined, author: string | un
  * A fork is refused (`forkRefused`) when the parent's chain is already `MAX_FORK_DEPTH` deep, or when the parent
  * already has `MAX_FORKS_PER_RECORD` forks — stored ones and the ones this page is creating together, because a cap
  * that counts only stored siblings lets one page past it by any amount. A fork whose derived id is already stored
- * (or already created by this page) is that same fork: `forked`, with no second write and no cap consulted.
+ * (or already created by this page) is that same fork: `forked`, with no second write and no cap consulted — matched by
+ * ID, never by hashing a stored fork, because a fork's id proves its body.
  */
 export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: ArrivalPlanInput): ArrivalPlan<T> {
   const { kind, stored, tombstones } = input;
+  const forking = (FORKING_FAMILIES as readonly string[]).includes(kind);
+  const hashOf = input.hashOf ?? bodyHashesOf(kind);
   const plan: ArrivalPlan<T> = {
-    verdicts: [], forkIds: [], accepts: new Map(), forks: [], converges: [], tombstoneCleanups: new Map(),
+    verdicts: [], forkIds: [], accepts: new Map(), forks: [], converges: [], unverifiable: [], tombstoneCleanups: new Map(),
   };
   /** The version of each id this page has accepted so far — what a later copy is compared against. */
   const overlay = new Map<string, T>();
@@ -492,6 +622,7 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
   const ownKey = new Map<string, string>();
   const newForks = new Set<string>();
   const forksMade = new Map<string, number>();
+  const pageIds = new Set(docs.map(d => d._id));
 
   const parentOf = (id: string): string | undefined => {
     if (overlay.has(id)) return overlay.get(id)!.forkOf;
@@ -499,6 +630,12 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     return input.forkParent?.get(id);
   };
   const siblingsOf = (id: string): number => (input.siblings?.get(id) ?? 0) + (forksMade.get(id) ?? 0);
+  /** Is the record `id` held here: stored, accepted earlier in this page, or about to be accepted later in it. */
+  const parentHeld = (id: string): boolean => stored.has(id) || overlay.has(id) || pageIds.has(id) || input.heldParents?.has(id) === true;
+  /** The copy a later document is compared against: the page's accepted version, whose body is hashed only when its seq is asked. */
+  const copyOf = (accepted: T): StoredCopy => {
+    return { seq: accepted.seq, ...(accepted.forkOf !== undefined ? { forkOf: accepted.forkOf } : {}), get bodyHash() { return hashOf(accepted); } };
+  };
 
   const accept = (i: number, doc: T, verdict: ArrivalVerdict, tomb: number | undefined, via: string | undefined): void => {
     plan.verdicts[i] = verdict;
@@ -507,7 +644,7 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     if (!plan.accepts.has(doc._id)) plan.accepts.set(doc._id, []);
     plan.accepts.get(doc._id)!.push({ index: i, doc });
     // A foreign fork arriving under its parent is a sibling as soon as it is stored, as it was one at a time.
-    if (kind === 'facts' && doc.forkOf && doc.forkOf !== prev) forksMade.set(doc.forkOf, (forksMade.get(doc.forkOf) ?? 0) + 1);
+    if (forking && doc.forkOf && doc.forkOf !== prev) forksMade.set(doc.forkOf, (forksMade.get(doc.forkOf) ?? 0) + 1);
     const key = uniqueKey(kind, doc);
     if (key !== undefined) {
       const old = ownKey.get(doc._id);
@@ -530,37 +667,62 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
       plan.verdicts[i] = 'unknownType';
       return;
     }
+    // What this page accepted for the id so far overlays what is stored; a family that forks compares it by body, a file by its own fields.
+    const accepted = overlay.get(doc._id);
+    const cur: StoredCopy | undefined = accepted === undefined ? stored.get(doc._id) : forking ? copyOf(accepted) : accepted;
+
+    // A row that carries `forkOf` is a fork row arriving, and it is judged FIRST by what it says it is (design sections 3 and 4): a malformed one is
+    // never stored and never a silent `rejected`. A kind that does not fork is malformed by carrying it; an edge's `forkOf` never changes presence.
+    let admittedAs: 'legacy' | 'redacted' | undefined;
+    if (doc.forkOf !== undefined) {
+      const verdict = forking ? forkRowVerdict(kind, doc, hashOf(doc).text) : 'invalid';
+      const flipped = kind === 'edges' && cur !== undefined && (cur.forkOf !== undefined) !== (doc.forkOf !== undefined);
+      if (verdict === 'invalid' || flipped) { plan.verdicts[i] = 'invalidFork'; return; }
+      if (verdict !== 'ok') admittedAs = verdict;
+      // The deletion wins: a fork row of a record whose tombstone is held here and which is not held itself is an orphan nothing would ever remove.
+      if (cur === undefined && !parentHeld(doc.forkOf) && tombstones.has(doc.forkOf)) { plan.verdicts[i] = 'tombstoned'; return; }
+      // A legacy fork cannot prove its body, so it is admitted only under a parent that is here.
+      if (verdict === 'legacy' && !parentHeld(doc.forkOf)) { plan.verdicts[i] = 'invalidFork'; return; }
+      // The cap counts the stored siblings and this page's, and a fork row already stored here is a re-delivery that the cap does not refuse.
+      if (cur === undefined && siblingsOf(doc.forkOf) >= MAX_FORKS_PER_RECORD) { plan.verdicts[i] = 'forkRefused'; return; }
+    }
+
     const held = superseded.has(doc._id) ? undefined : tombstones.get(doc._id);
     const tomb = tombSeqFor(doc, held, input.deliveredBy);
     const via = held === undefined ? undefined : supersededVia(held, input.deliveredBy);
     if (tomb !== undefined && tomb >= doc.seq) { plan.verdicts[i] = 'tombstoned'; return; }
 
-    const cur: StoredCopy | undefined = overlay.get(doc._id) ?? stored.get(doc._id);
     const curSeq = cur?.seq;
     const newer = isNewerCopy(doc.seq, curSeq);
 
-    if (kind === 'facts') {
-      if (cur === undefined) return accept(i, doc, 'inserted', tomb, via);
-      if (newer) return accept(i, doc, 'updated', tomb, via);
-      if (divergesFrom(doc, cur)) {
-        const forkId = forkIdFor(doc._id, doc.seq, doc.fact ?? '');
-        if (input.existingForks?.has(forkId) || newForks.has(forkId)) {
-          plan.verdicts[i] = 'forked'; plan.forkIds[i] = forkId; return;
-        }
-        if (forkDepth(doc._id, parentOf) >= MAX_FORK_DEPTH || siblingsOf(doc._id) >= MAX_FORKS_PER_RECORD) {
-          plan.verdicts[i] = 'forkRefused'; return;
-        }
-        newForks.add(forkId);
-        forksMade.set(doc._id, (forksMade.get(doc._id) ?? 0) + 1);
-        plan.forks.push({ index: i, doc: { ...doc, _id: forkId, forkOf: doc._id } });
-        plan.verdicts[i] = 'forked'; plan.forkIds[i] = forkId;
-        return;
+    if (forking && cur !== undefined && !newer && divergesFrom(kind, doc, cur, hashOf)) {
+      // The fork's id proves its body: a copy whose body a stored fork (or one this page made) already holds IS that fork, found by id, so a
+      // re-delivery adds no row whatever cap the parent has reached since. A FACT fork a 5.6.2 or later instance stored is under the id its TEXT derives.
+      const forkId = forkIdFor(doc._id, doc.seq, hashOf(doc).text);
+      const legacyId = legacyForkIdOf(kind, doc);
+      const known = [forkId, legacyId].find(id => id !== undefined && (input.existingForks?.has(id) || newForks.has(id)));
+      if (known !== undefined) {
+        plan.verdicts[i] = 'forked'; plan.forkIds[i] = known; return;
       }
-    } else if (newer) {
+      if (forkDepth(doc._id, parentOf) >= MAX_FORK_DEPTH || siblingsOf(doc._id) >= MAX_FORKS_PER_RECORD) {
+        plan.verdicts[i] = 'forkRefused'; return;
+      }
+      // No fork of a fork is minted: a stored row that carries `forkOf` is one body under one derived id, so a divergent copy of it is no new version of
+      // anything the author wrote. A legacy fact chain keeps its depth cap above (a copy refused there is still dropped and said), and is never extended.
+      if (cur.forkOf !== undefined) { plan.verdicts[i] = 'skipped'; return; }
+      newForks.add(forkId);
+      forksMade.set(doc._id, (forksMade.get(doc._id) ?? 0) + 1);
+      plan.forks.push({ index: i, doc: { ...doc, _id: forkId, forkOf: doc._id } });
+      plan.verdicts[i] = 'forked'; plan.forkIds[i] = forkId;
+      return;
+    }
+    if (newer) {
       const key = uniqueKey(kind, doc);
       const holder = key === undefined ? undefined : keyOwner.get(key);
       if (holder !== undefined && holder !== doc._id) { plan.verdicts[i] = 'duplicate'; return; }
-      return accept(i, doc, 'upserted', tomb, via);
+      if (admittedAs !== undefined) plan.unverifiable.push({ index: i, reason: admittedAs });
+      // The facts family's own spelling of the two outcomes; every other family says `upserted`.
+      return accept(i, doc, kind === 'facts' ? (cur === undefined ? 'inserted' : 'updated') : 'upserted', tomb, via);
     }
     /*
      * A file row the AUTHOR delivered at the seq we already hold, identical but for its timestamp (`Q-419`).

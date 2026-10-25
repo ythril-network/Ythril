@@ -37,7 +37,9 @@ const { REPLICATED_FAMILIES } = await import('../../server/dist/sync/replicated-
  * page accept they share with the pull (`sync/accept-page.ts`) and the one validation step that holds the schema
  * table (`sync/arrival-shape.ts`). Read as one, so a table moved between them is still counted.
  */
-const DOOR_FILES = ['server/src/api/sync/docs.ts', 'server/src/sync/accept-page.ts', 'server/src/sync/arrival-shape.ts'];
+// Re-anchored for Q-624 (design rev 4 section 2): the schema table moved from `arrival-shape.ts` into the schema leaf, `sync/incoming-schemas.ts`, so that is a door file
+// now and `arrival-shape.ts` keeps the load-time check of it. The rule is unchanged: two family-keyed tables, the schema table and the response literal.
+const DOOR_FILES = ['server/src/api/sync/docs.ts', 'server/src/sync/accept-page.ts', 'server/src/sync/arrival-shape.ts', 'server/src/sync/incoming-schemas.ts'];
 const DOCS = DOOR_FILES.map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
 const KEYS = REPLICATED_FAMILIES.map(f => f.payloadKey);
 const KEY_LINE = new RegExp(`^\\s*(?:${KEYS.join('|')})\\s*:`);

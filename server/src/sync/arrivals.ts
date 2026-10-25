@@ -93,7 +93,8 @@ import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
 import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, NOT_CARRIED_BY_BACKUP, WRITE_GUARD_FIELDS, WRITTEN_HERE, carriedFields, stampOfArrival } from './local-only-fields.js';
-import { retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
+import { retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom, forkRowVerdict, isForkingFamily } from './upsert-plan.js';
+import { authoredContentHash, bodyProjectionOf } from './authored-content.js';
 import { readBackDuplicates } from './duplicate-readback.js';
 import { isWrittenHere } from './written-here.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
@@ -418,6 +419,13 @@ export async function writeArrivals(
     const why = arrivalRefusal(raw, { seqOptional: family === 'files' });
     if (why) { out.refused.push({ _id: arrivalId(raw), reason: why }); continue; }
     const doc = raw as Doc;
+    // A fork row is accepted on EVERY door only when its id derives from its subject, its seq and its body (design section 3): a restore plans nothing
+    // and so asks it here, where the row is refused by name and never stored. A row the derivation cannot prove (a legacy fact fork, a redacted chrono
+    // fork) is restored: a backup is this instance's own export, and refusing a real row would be the divergence the exception exists to avoid.
+    if (restore && typeof doc['forkOf'] === 'string' && forkRowVerdict(family, doc as Parameters<typeof forkRowVerdict>[1], (isForkingFamily(family) ? authoredContentHash(family, doc as Record<string, unknown>).text : '')) === 'invalid') {
+      out.refused.push({ _id: doc._id, reason: 'a fork row whose id does not derive from its subject, its seq and its body (or whose forkOf is its own id, or on a family that does not fork)' });
+      continue;
+    }
     // A chunk is derived from the blob here, and a file this instance derives for ITSELF travels in neither direction
     // (`isInstanceLocalFile`, the one predicate every door asks: a legacy read spill `Q-92`, a conflict copy, a schema
     // snapshot, and what lies under a derived tree — each receiver converts by its own configuration).
@@ -622,8 +630,11 @@ export async function writeArrivals(
         // Read back: a stored copy AT the planned seq is this version, landed — unless its content differs, which is
         // a divergence (`Q-232`); one above it was written meanwhile and is kept ("skipped"); anything else collided
         // on a unique index other than `_id`.
-        for (const { planned: d, held, relation } of await readBackDuplicates<Doc, Doc>(collName, dupes, family === 'facts' ? { fact: 1 } : {})) {
-          if (!restore && relation === 'same-version' && divergesFrom(d, held)) out.diverged.push(d._id);
+        // A family that forks is compared by BODY, so the read-back reads the body the hash is made of; any other family has none to disagree about.
+        const forking = isForkingFamily(family);
+        for (const { planned: d, held: stored, relation } of await readBackDuplicates<Doc, Doc>(collName, dupes, forking ? bodyProjectionOf(family) : {})) {
+          const held = forking && stored ? { ...stored, bodyHash: authoredContentHash(family, stored) } : stored;
+          if (!restore && relation === 'same-version' && forking && divergesFrom(family, d, held)) out.diverged.push(d._id);
           else if (!restore && relation === 'same-version') landed.push(d);
           else if (!restore && relation === 'newer') out.newerLocal.push(d._id);
           else out.duplicates.push(d._id);

@@ -21,7 +21,7 @@
  */
 import readline from 'node:readline';
 import { openPushDoor, peerToken } from './_push-door.mjs';
-import { initForkFixtures, reviewDoors, rowsOf } from './_q624-fork-fixtures.mjs';
+import { initForkFixtures, reviewDoors, rowsOf } from './_fork-kinds.mjs';
 
 const SPACE = process.env.MESH_SPACE;
 const door = await openPushDoor({

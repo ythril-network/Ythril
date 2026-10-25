@@ -91,12 +91,21 @@ function sha256hex(input: string): string {
 const DERIVED_FIELDS: ReadonlySet<string> = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS]);
 
 /**
- * Hash of a document's canonical JSON: keys sorted at every level, derived fields dropped at every level. Two
+ * A copy of `doc` without `fields` at its TOP LEVEL. The one spelling of "the record less its local fields": a derived field is a field of the
+ * RECORD, so a key spelled like one inside `properties` (authored, free-form) is content and stays. The space hash left them out at every level until
+ * Q-624, and two instances that differed in a nested `embedding`, `spaceId` or `syncBase` agreed they matched for ever.
+ */
+function withoutTopLevel(doc: Record<string, unknown>, fields: ReadonlySet<string>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(doc).filter(([key]) => !fields.has(key)));
+}
+
+/**
+ * Hash of a document's canonical JSON: keys sorted at every level, derived fields dropped at the top level only. Two
  * instances holding the same document must produce byte-identical output regardless of field insertion order
  * (Mongo does not preserve it) — which is why the text is `util/canonical-json.ts`'s and nobody else's.
  */
 function canonicalDocHash(doc: Record<string, unknown>): string {
-  return canonicalJsonHash(doc, { omitKeys: DERIVED_FIELDS });
+  return canonicalJsonHash(withoutTopLevel(doc, DERIVED_FIELDS));
 }
 
 /**

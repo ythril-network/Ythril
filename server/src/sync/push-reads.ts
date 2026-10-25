@@ -11,10 +11,13 @@
  * once for the whole page; these are the reads that feed it, each one per page:
  *
  *  - **one tombstone read per request**, every family's ids in one `$in` (a tombstone's `_id` is its record's);
- *  - **one stored read per family**, projected to what the planner compares;
- *  - for facts that may FORK only — none on a fork-free page — **one sibling aggregate** over the `{ forkOf: 1 }`
- *    index (`spaces/lifecycle.ts`), which also names the forks already stored, and a **chain walk level by
- *    level** with `$in`, at most `MAX_FORK_DEPTH` reads.
+ *  - **one stored read per family**, projected to what the planner compares: the seq and the fork link, and — only for
+ *    the ids whose stored seq EQUALS an arriving one — a second read of the body, because a body is asked only at an
+ *    equal seq and most arrivals are newer or older;
+ *  - for records that may FORK only — none on a fork-free page, of any family that forks — **one sibling aggregate**
+ *    over the `{ forkOf: 1 }` index (`spaces/space-indexes.ts`), UNCAPPED for the read (it names every fork id stored for
+ *    the candidate parents, so the match of a re-delivery by id can never fall outside a window), and a **chain walk
+ *    level by level** with `$in`, at most `MAX_FORK_DEPTH` reads.
  */
 import type { ClientSession } from 'mongodb';
 import { FILE_HASH_PROJECTION, fileContentHash } from '../brain/merkle.js';
@@ -22,7 +25,8 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import type { TombstoneType } from '../config/types.js';
-import { forkCandidates, MAX_FORK_DEPTH, CONVERGE_BLANKED, type HeldTombstone, type ArrivalDoc, type PlannedFamily, type StoredCopy } from './upsert-plan.js';
+import { forkCandidates, isForkingFamily, bodyHashesOf, MAX_FORK_DEPTH, CONVERGE_BLANKED, type BodyHashes, type HeldTombstone, type ArrivalDoc, type PlannedFamily, type StoredCopy } from './upsert-plan.js';
+import { authoredContentHash, bodyProjectionOf } from './authored-content.js';
 import { TOMBSTONE_COLLECTION } from '../config/types-knowledge.js';
 import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
@@ -48,7 +52,7 @@ export async function readPageTombstones(
   return out;
 }
 
-/** The stored copies the planner compares a page against: the seq, and for facts the text and the fork parent. */
+/** The stored copies the planner compares a page against: the seq and the fork link, and for a family that forks the hash of the body at an equal seq. */
 export async function readPushStored(
   spaceId: string, family: PlannedFamily, docs: readonly ArrivalDoc[],
 ): Promise<Map<string, StoredCopy>> {
@@ -71,31 +75,45 @@ export async function readPushStored(
       contentHash: fileContentHash(row, CONVERGE_BLANKED),
     } satisfies StoredCopy]));
   }
-  const fields: Record<string, 1> = family === 'facts' ? { seq: 1, fact: 1, forkOf: 1 } : { seq: 1 };
-  return readStoredById<StoredCopy>(spaceCollection(spaceId, family), docs.map(d => d._id), fields);
+  if (!isForkingFamily(family)) return readStoredById<StoredCopy>(spaceCollection(spaceId, family), docs.map(d => d._id), { seq: 1 });
+  const collection = spaceCollection(spaceId, family);
+  const base = await readStoredById<StoredCopy>(collection, docs.map(d => d._id), { seq: 1, forkOf: 1 });
+  // The body only where it can be asked: a stored copy at the seq an arriving copy of the same id carries.
+  const arriving = new Map<string, Set<number>>();
+  for (const d of docs) (arriving.get(d._id) ?? arriving.set(d._id, new Set()).get(d._id)!).add(d.seq);
+  const equal = [...base].filter(([id, row]) => typeof row.seq === 'number' && arriving.get(id)?.has(row.seq)).map(([id]) => id);
+  if (equal.length === 0) return base;
+  const bodies = await readStoredById<Record<string, unknown>>(collection, equal, bodyProjectionOf(family));
+  for (const [id, row] of bodies) base.set(id, { ...base.get(id)!, bodyHash: authoredContentHash(family, row) });
+  return base;
 }
 
 /**
- * The fork context of a facts page: how many forks each candidate parent already has, which fork ids are already
- * stored, and the `forkOf` of every ancestor above the candidates. Empty, and nothing read, when no fact can fork.
+ * The fork context of a page of a family that forks: how many forks each candidate parent already has, EVERY fork id already stored for them,
+ * the `forkOf` of every ancestor above the candidates, and which parents a page's own fork rows name are held here. A candidate is a record that may
+ * fork (a different body at an equal seq) or the parent of a fork row the page carries. Empty, and nothing read, when no record can fork.
  */
 export async function readForkContext(
-  spaceId: string, docs: readonly ArrivalDoc[], stored: ReadonlyMap<string, StoredCopy>,
-): Promise<{ forkParent?: Map<string, string | undefined>; siblings?: Map<string, number>; existingForks?: Set<string> }> {
-  const candidates = forkCandidates(docs, stored);
+  spaceId: string, kind: PlannedFamily, docs: readonly ArrivalDoc[], stored: ReadonlyMap<string, StoredCopy>, hashOf: BodyHashes = bodyHashesOf(kind),
+): Promise<{ forkParent?: Map<string, string | undefined>; siblings?: Map<string, number>; existingForks?: Set<string>; heldParents?: Set<string> }> {
+  const forking = forkCandidates(kind, docs, stored, hashOf);
+  const named = [...new Set(docs.flatMap(d => (d.forkOf === undefined ? [] : [d.forkOf])))];
+  const candidates = [...new Set([...forking, ...named])];
   if (candidates.length === 0) return {};
-  const facts = spaceCollection(spaceId, 'facts');
+  const records = spaceCollection(spaceId, kind);
 
-  const groups = await col<{ _id: string; forkOf?: string }>(facts).aggregate<{ _id: string; n: number; ids: string[] }>([
+  const groups = await col<{ _id: string; forkOf?: string }>(records).aggregate<{ _id: string; n: number; ids: string[] }>([
     { $match: asFilter({ forkOf: { $in: candidates } }) },
     { $group: { _id: '$forkOf', n: { $sum: 1 }, ids: { $push: '$_id' } } },
   ]).toArray();
   const siblings = new Map(groups.map(g => [String(g._id), g.n]));
   const existingForks = new Set(groups.flatMap(g => g.ids.map(String)));
+  const pending = named.filter(id => !stored.has(id));
+  const heldParents = new Set((pending.length === 0 ? new Map() : await readStoredById<{ _id: string }>(records, pending, { _id: 1 })).keys());
 
   const forkParent = new Map<string, string | undefined>();
   let frontier = new Set<string>();
-  for (const c of candidates) {
+  for (const c of forking) {
     const parent = stored.get(c)?.forkOf;
     if (parent) frontier.add(parent);
     for (const d of docs) if (d._id === c && d.forkOf) frontier.add(d.forkOf);
@@ -103,7 +121,7 @@ export async function readForkContext(
   for (let level = 0; level < MAX_FORK_DEPTH && frontier.size > 0; level++) {
     const ids = [...frontier].filter(id => !forkParent.has(id) && !stored.has(id));
     if (ids.length === 0) break;
-    const rows = await readStoredById<{ forkOf?: string }>(facts, ids, { forkOf: 1 });
+    const rows = await readStoredById<{ forkOf?: string }>(records, ids, { forkOf: 1 });
     frontier = new Set();
     for (const id of ids) {
       const parent = rows.get(id)?.forkOf;
@@ -111,7 +129,7 @@ export async function readForkContext(
       if (parent) frontier.add(parent);
     }
   }
-  return { forkParent, siblings, existingForks };
+  return { forkParent, siblings, existingForks, heldParents };
 }
 
 /**

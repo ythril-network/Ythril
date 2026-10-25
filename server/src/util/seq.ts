@@ -4,6 +4,7 @@ import { eachMemberMarkOf } from '../sync/receive-marks.js';
 import { RECEIVE_MARKS } from '../config/types-networks.js';
 import { log } from './log.js';
 import { highestStored } from './index-top.js';
+import { MAX_SYNC_SEQ } from './seq-ceiling.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import type { SpacePart } from '../db/space-collection.js';
 
@@ -37,12 +38,10 @@ export async function currentSeq(spaceId: string): Promise<number> {
 }
 
 /**
- * The protocol sequence ceiling — the one definition: the `Incoming*` schemas in `api/sync/_shared.ts`
- * validate against this constant (`<= 2^50`), and it had a second copy there until `Q-107`. A document at or
- * above this cannot be represented, so it is never a legitimate value on the wire. Kept within safe-integer
- * arithmetic so a version can never round. Every position of the clock band is above it (`util/position-clock.ts`).
+ * The protocol sequence ceiling: defined in `util/seq-ceiling.ts` (an import-free module, so the `Incoming*` schema leaf
+ * can read it without loading the store) and re-exported here for every caller that already imports it from this module.
  */
-export const MAX_SYNC_SEQ = 2 ** 50;
+export { MAX_SYNC_SEQ };
 
 /**
  * Headroom kept below `MAX_SYNC_SEQ`. A peer that pushes one document with `seq` near the ceiling must not be able to take this

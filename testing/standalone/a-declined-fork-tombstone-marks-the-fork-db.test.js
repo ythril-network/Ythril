@@ -28,7 +28,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build, peerToken } from './_push-door.mjs';
-import { FORK_KINDS, initForkFixtures, seedFork, reviewDoors } from './_q624-fork-fixtures.mjs';
+import { FORK_KINDS, initForkFixtures, seedFork, reviewDoors } from './_fork-kinds.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'q624decline';

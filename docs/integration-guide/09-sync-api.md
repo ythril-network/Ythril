@@ -434,15 +434,15 @@ Each array is capped at 500 items; documents past the cap are counted in `reject
 
 ```json
 { "status": "ok",
-  "facts":    { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "tombstoned": 0, "schemaViolations": 0, "rejected": 0 },
-  "entities": { "upserted": 5, "skipped": 2, "tombstoned": 0, "schemaViolations": 0, "rejected": 0 },
-  "edges":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "schemaViolations": 0, "duplicateTriplets": 0, "rejected": 0 },
-  "chrono":   { "upserted": 0, "skipped": 0, "tombstoned": 0, "schemaViolations": 0, "unknownType": 0, "rejected": 0 },
+  "facts":    { "inserted": 3, "updated": 1, "forked": 0, "skipped": 12, "forkDepthRefused": 0, "invalidFork": 0, "tombstoned": 0, "schemaViolations": 0, "rejected": 0 },
+  "entities": { "upserted": 5, "forked": 0, "skipped": 2, "forkDepthRefused": 0, "invalidFork": 0, "tombstoned": 0, "schemaViolations": 0, "rejected": 0 },
+  "edges":    { "upserted": 0, "forked": 0, "skipped": 0, "forkDepthRefused": 0, "invalidFork": 0, "tombstoned": 0, "schemaViolations": 0, "duplicateTriplets": 0, "rejected": 0 },
+  "chrono":   { "upserted": 0, "forked": 0, "skipped": 0, "forkDepthRefused": 0, "invalidFork": 0, "tombstoned": 0, "schemaViolations": 0, "unknownType": 0, "rejected": 0 },
   "links":    { "upserted": 0, "skipped": 0, "tombstoned": 0, "rejected": 0 },
   "filemeta": { "upserted": 0, "skipped": 0, "rejected": 0 } }
 ```
 
-`filemeta.tombstoned` and `filemeta.converged` are the two counters that are **absent when they are zero**: read a missing one as zero. `tombstoned` counts arrivals a held file tombstone covered; `converged` counts file rows that took their author's `updatedAt` at an equal seq (below), which store nothing and so are neither `upserted` nor `skipped`.
+Every family that forks (facts, entities, edges and chrono entries) carries `forked`, `forkDepthRefused` and `invalidFork`: an equal-`seq` copy that says something different is kept beside the stored one as a fork row of its own family (`forked`), one past the cap is dropped (`forkDepthRefused`), and a fork row whose `_id` does not derive from its `forkOf`, its `seq` and its body is refused and never stored (`invalidFork`; the single routes answer `400` with `code: "invalid_fork"` and the id). `unverifiable` is **absent when zero** on those four: a fork admitted although its `_id` could not be derived (a legacy fact fork of 5.6.0 or 5.6.1 under its stored parent, or a chrono fork whose content a retention window already redacted). `filemeta.tombstoned` and `filemeta.converged` are the two counters that are **absent when they are zero**: read a missing one as zero. `tombstoned` counts arrivals a held file tombstone covered; `converged` counts file rows that took their author's `updatedAt` at an equal seq (below), which store nothing and so are neither `upserted` nor `skipped`.
 
 **A file's key is one string, whoever spelled the path.** The canonical key of a path is its Unicode NFC form with `/` separators, no leading slash, no empty or `.` segment, and a `..` that stays inside the space collapsed (`a/x/../b` is `a/b`); this instance keys every file row it writes itself by it, and keys what a peer sends (a manifest entry, a tombstone's path, an upload's `?path=`) by the path as it resolves in the space. A file-metadata document whose `_id` is not that key (`a/../b`, `./b`, `a//b`, a decomposed accented name, or a path that leaves the space) counts in `filemeta.rejected` and is not stored, and the receiver's log names the id: send the path's canonical spelling, which is the key every other door uses. A row an older release stored under another spelling keeps that id and is refused the same way by an upgraded peer; see [Upgrading](02b-upgrading.md).
 
@@ -456,7 +456,8 @@ which is the whole reason this paragraph exists.
 | counter | what happened | did the record land? |
 |---|---|---|
 | `skipped` | the receiver already holds that record at the same `seq` or newer | **nothing was lost** — this is ordinary conflict resolution and is by far the common case |
-| `forkDepthRefused` | facts only: content diverged at an identical `seq` and the record's fork chain, or its fan-out (10 forks of one parent, those this request creates counted), is already at its cap, so the incoming version was **discarded** | **no — the record is gone** |
+| `forkDepthRefused` | every family that forks (facts, entities, edges, chrono): content diverged at an identical `seq` and the record's fork chain, or its fan-out (10 forks of one parent, those this request creates counted), is already at its cap, so the incoming version was **discarded** | **no — the record is gone** |
+| `invalidFork` | every family that forks: a fork row whose `_id` does not derive from its subject, its `seq` and its body (or that is its own fork, or an edge that changed whether it is one), so it was **refused**; it is not counted in `rejected` and a malformed row is never offered again | **no** — subtract it from what you count as delivered |
 | `rejected` | every family: the records of this request the receiver refused for any reason (schema, past the 500 cap, a non-string `_id`, an implausible `seq`, a store refusal, fork cap, undeclared chrono type) | **no** — subtract it from what you count as delivered |
 
 **A `200` therefore does not mean every record was applied — read `rejected`.** Every family carries it since

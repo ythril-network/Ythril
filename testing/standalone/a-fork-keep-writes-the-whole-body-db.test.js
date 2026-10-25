@@ -32,7 +32,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { FORK_KINDS, initForkFixtures, seedFork, reviewDoors } from './_q624-fork-fixtures.mjs';
+import { FORK_KINDS, initForkFixtures, seedFork, reviewDoors } from './_fork-kinds.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const skip = await mongoSkipReason();
