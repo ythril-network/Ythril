@@ -28,10 +28,11 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason, openTestMongo, closeTestMongo, isIndexPollStack } from './_mongo-harness.mjs';
 
 const skip = await mongoSkipReason();
+const SUITE = 'closetimers';
 
 describe('closing the harness leaves a test\'s timers alone', { skip }, () => {
   before(async () => {
-    await openTestMongo('closetimers');
+    await openTestMongo(SUITE);
     await closeTestMongo();
   });
   after(async () => { await closeTestMongo(); });
@@ -55,7 +56,7 @@ describe('closing the harness leaves a test\'s timers alone', { skip }, () => {
 
   it('the server\'s own poll, ticking after the close, creates the timer that is unref\'d', async () => {
     // The poll is started while the harness is open and ticks after it is closed: the restore case, in miniature.
-    await openTestMongo('closetimers');
+    await openTestMongo(SUITE);
     const { pollVectorIndexReady } = await import('../../server/dist/spaces/vector-index.js');
     const poll = pollVectorIndexReady('closetimers', 'entities', 'closetimers_entities_embedding', { vectorPath: 'embedding', dims: 4 }, { timeoutMs: 3000 });
     const done = poll.catch(() => {});
