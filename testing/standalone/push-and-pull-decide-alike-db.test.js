@@ -5,7 +5,7 @@
  * ## The rule
  *
  * Push and pull are two doors to one arrival. The push door plans each page with `planPushArrivals` — a held
- * tombstone governs a record its issuer authored, an equal-seq divergent fact FORKS within the caps, an in-page
+ * tombstone governs a record its issuer authored, an equal-seq divergent copy of any kind that forks FORKS within the caps (Q-624), an in-page
  * unique-key collision is decided first-accepted-wins — and validates every document against its `Incoming*`
  * schema. The pull door accepted by seq alone (`planSeqUpserts`) and validated nothing. So the same document
  * delivered the other way round resurrected a deleted record, dropped one side of a divergence, stored a key the
@@ -54,6 +54,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { incomingSchemas } from '../_shared/incoming-sync-schemas.mjs';
+import { forkingFamilies } from './_fork-kinds.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -79,7 +80,7 @@ function plannerVerdicts() {
   return out;
 }
 
-let door, families, tombstoneTypeOf, schemaOf, singleRouteOf;
+let door, families, tombstoneTypeOf, schemaOf, singleRouteOf, forking;
 
 /** A fresh fixture for a family, authored by the delivering peer unless a row says otherwise. */
 const make = (key, space, id, seq, extra = {}) => {
@@ -187,18 +188,31 @@ function rows() {
     );
   }
 
-  // Facts: the fork rules.
-  out.push(
-    { name: 'facts: an equal-seq divergent copy forks', family: 'facts', verdict: 'forked', aliased: true,
-      seed: (s) => ({ stored: [make('facts', s, 'f', 5, { fact: 'mine' })] }),
-      page: (s) => [make('facts', s, 'f', 5, { fact: 'theirs' })],
-      check: (snap) => has(snap, 'f', 'fact', 'mine') && snap.docs.some(d => d.forkOf === 'f' && d.fact === 'theirs') },
-    { name: 'facts: a divergent copy at the fan-out cap is refused, nothing written', family: 'facts', verdict: 'forkRefused',
-      seed: (s) => ({ stored: [make('facts', s, 'f', 5, { fact: 'mine' }),
-        ...Array.from({ length: 10 }, (_, i) => make('facts', s, `sib-${i}`, 20 + i, { fact: `sib ${i}`, forkOf: 'f' }))] }),
-      page: (s) => [make('facts', s, 'f', 5, { fact: 'theirs' })],
-      check: (snap) => !snap.docs.some(d => d.fact === 'theirs') },
-  );
+  // The fork rules, for EVERY kind that forks (Q-624, D-23: an equal-seq divergent copy of any of them is kept beside its subject), the set
+  // read from the planner (`FORKING_FAMILIES`, never listed here). A fork of an EDGE has its subject's identity: the row says so, or the
+  // fixture's own per-id endpoints would make it a different relationship and the identity slot would never be in question.
+  for (const key of forking) {
+    const t = TEXT[key];
+    const withIdentity = (id, extra) => (key === 'edges' ? { from: 'from-f', to: 'to-f', label: 'relates', ...extra } : extra);
+    const forkRow = (s, id, seq, text) => make(key, s, id, seq, withIdentity(id, { [t]: text, forkOf: 'f' }));
+    out.push(
+      { name: `${key}: an equal-seq divergent copy forks`, family: key, verdict: 'forked', aliased: true,
+        seed: (s) => ({ stored: [make(key, s, 'f', 5, { [t]: 'mine' })] }),
+        page: (s) => [make(key, s, 'f', 5, { [t]: 'theirs' })],
+        check: (snap) => has(snap, 'f', t, 'mine') && snap.docs.some(d => d.forkOf === 'f' && d[t] === 'theirs') },
+      { name: `${key}: a divergent copy at the fan-out cap is refused, nothing written`, family: key, verdict: 'forkRefused',
+        seed: (s) => ({ stored: [make(key, s, 'f', 5, { [t]: 'mine' }),
+          ...Array.from({ length: 10 }, (_, i) => forkRow(s, `sib-${i}`, 20 + i, `sib ${i}`))] }),
+        page: (s) => [make(key, s, 'f', 5, { [t]: 'theirs' })],
+        check: (snap) => !snap.docs.some(d => d[t] === 'theirs') },
+      // A fork row whose id does not derive from its own subject, seq and body is malformed, and it is NEVER a silent `rejected`
+      // (design section 4, `invalidFork`): nothing is stored, on any door, and the verdict has its own name.
+      { name: `${key}: a fork row whose id does not derive from its body is invalidFork, nothing written`, family: key, verdict: 'invalidFork',
+        seed: (s) => ({ stored: [make(key, s, 'f', 5, { [t]: 'mine' })] }),
+        page: (s) => [forkRow(s, 'f-bad-fork', 5, 'theirs')],
+        check: (snap) => has(snap, 'f', t, 'mine') && !has(snap, 'f-bad-fork') && !snap.docs.some(d => d[t] === 'theirs') },
+    );
+  }
   // Unique-key collisions: in one page, and against a stored record.
   for (const key of ['edges', 'links']) {
     const twin = key === 'edges'
@@ -284,6 +298,7 @@ describe('push and pull decide alike (Q-204, Q-225)', { skip }, () => {
     door = await openPullDoor({ suite: 'push-pull-alike', spaces: [L, LA], spaceMap: { [RA]: LA } });
     ({ REPLICATED_FAMILIES: families } = await import('../../server/dist/sync/replicated-families.js'));
     ({ TOMBSTONE_TYPE_OF: tombstoneTypeOf } = await import('../../server/dist/config/types.js'));
+    forking = await forkingFamilies();
     const shared = await import('../../server/dist/api/sync/_shared.js');
     const schemas = new Map(incomingSchemas(shared));
     const { FAMILIES } = await import('./_push-door.mjs');
@@ -304,6 +319,15 @@ describe('push and pull decide alike (Q-204, Q-225)', { skip }, () => {
     const verdicts = plannerVerdicts();
     const missing = [...verdicts].filter(v => !ROWS.some(r => r.verdict === v));
     assert.deepEqual(missing, [], `planner verdicts with no row: ${missing}`);
+    // The other way round: a row names a verdict the planner has. Q-624 adds `invalidFork`, the one answer for a malformed fork row, so
+    // a planner without it fails here, and a row whose verdict is misspelt cannot pass for covering one.
+    const unknown = [...new Set(ROWS.map(r => r.verdict))].filter(v => !verdicts.has(v));
+    assert.deepEqual(unknown, [], `rows exercise verdicts the planner's union does not name: ${unknown}`);
+    // Every kind that forks has its three fork rows (forked, the cap, the malformed row), so a kind added to the planner is covered at once.
+    for (const key of forking) {
+      const have = ROWS.filter(r => r.family === key && ['forked', 'forkRefused', 'invalidFork'].includes(r.verdict)).map(r => r.verdict).sort();
+      assert.deepEqual(have, ['forkRefused', 'forked', 'invalidFork'], `${key}: fork rows present: ${have}`);
+    }
     const uncovered = families.filter(f => !ROWS.some(r => r.family === f.payloadKey)).map(f => f.payloadKey);
     assert.deepEqual(uncovered, [], `replicated families with no row: ${uncovered}`);
     assert.ok(ROWS.length >= 40, `only ${ROWS.length} rows — the derivation shrank`);

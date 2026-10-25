@@ -34,6 +34,10 @@
  * A megabyte string seq on the tombstone and batch pushes is refused by a wire schema whose reason names only the
  * field, so there it is the `_id` that floods.
  *
+ * Q-624 re-anchor: the fork-cap 400 and the malformed-fork answers (`invalid_fork`, `invalidFork` counted) quote ids a peer chose, for every kind
+ * that forks (`FORKING_FAMILIES`), so the bounded-answer and bounded-line rule is held over each. Seen red on the base (b857da8f): an entity, chrono
+ * entry or edge at an equal seq is never forked, so no cap and no malformed-fork answer exists to be bounded.
+ *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-megabyte-from-a-peer-makes-a-bounded-line-and-answer-db.test.js
  * (requires a prior `npm run build` in server/)
@@ -43,6 +47,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
+import { FORK_FIXTURE, forkingFamilies } from './_fork-kinds.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -106,14 +111,44 @@ describe('a megabyte from a peer makes a bounded line and a bounded answer', { s
     });
   }
 
-  it('single push at the fork cap under a megabyte _id: the 400 is bounded', async () => {
-    await door.coll(S, 'facts').insertOne(build.fact(S, BIG_ID, 5, { fact: 'root' }));
-    await door.coll(S, 'facts').insertMany(Array.from({ length: CAP }, (_, i) =>
-      build.fact(S, `old-fork-${i}`, 100 + i, { fact: `old ${i}`, forkOf: BIG_ID })));
-    const { result: r } = await boundedLinesDuring(() =>
-      door.push('/facts', build.fact(S, BIG_ID, 5, { fact: 'divergent at the cap' }), { spaceId: S }));
-    assert.equal(r.code, 400, `fixture check: the fork was not refused at the cap: ${JSON.stringify(r.body).slice(0, 300)}`);
-    assertBoundedAnswer(r.body, 'the fork-cap 400');
+  /*
+   * Q-624 re-anchor: the fork paths a megabyte `_id` can reach are no longer the fact's alone. Every kind that forks (read from the
+   * planner, never listed) has the cap's 400 and the malformed-fork answers (`invalid_fork`, with the id; the receiver's reporter line
+   * and the counted `invalidFork`), and each quotes an id the peer chose: bounded where it is SHOWN, never where it is a key.
+   */
+  /** The identity an edge needs to be a fork's subject without a megabyte endpoint: its `from`/`to`/`label` are short on purpose. */
+  const ofKind = (family, id, seq, extra = {}) => FORK_FIXTURE[family].build(S, id, seq, {
+    ...(family === 'edges' ? { from: 'a', to: 'b', label: 'knows' } : {}), ...extra });
+  const bodyOf = (family, text) => ({ [FORK_FIXTURE[family].field]: text });
+
+  it('single push at the fork cap under a megabyte _id: the 400 is bounded, for every kind that forks', async () => {
+    for (const family of await forkingFamilies()) {
+      await door.wipe(S);
+      await door.coll(S, family).insertOne(ofKind(family, BIG_ID, 5, bodyOf(family, 'root')));
+      await door.coll(S, family).insertMany(Array.from({ length: CAP }, (_, i) =>
+        ofKind(family, `old-fork-${i}`, 100 + i, { ...bodyOf(family, `old ${i}`), forkOf: BIG_ID })));
+      const { result: r } = await boundedLinesDuring(() =>
+        door.push(FORK_FIXTURE[family].single, ofKind(family, BIG_ID, 5, bodyOf(family, 'divergent at the cap')), { spaceId: S }));
+      assert.equal(r.code, 400, `${family}: fixture check: the fork was not refused at the cap: ${JSON.stringify(r.body).slice(0, 300)}`);
+      assertBoundedAnswer(r.body, `the ${family} fork-cap 400`);
+    }
+  });
+
+  it('a malformed fork row under a megabyte _id: the single answer, the batch answer and every line are bounded, for every kind', async () => {
+    for (const family of await forkingFamilies()) {
+      await door.wipe(S);
+      await door.coll(S, family).insertOne(ofKind(family, 'parent', 5, bodyOf(family, 'root')));
+      // The id is a megabyte and derives from nothing: the row is malformed whatever else it says.
+      const bad = () => ofKind(family, BIG_ID, 5, { ...bodyOf(family, 'theirs'), forkOf: 'parent' });
+      const { result: one } = await boundedLinesDuring(() => door.push(FORK_FIXTURE[family].single, bad(), { spaceId: S }));
+      assert.deepEqual([one.code, one.body?.code], [400, 'invalid_fork'], `${family}: single: ${JSON.stringify(one.body).slice(0, 300)}`);
+      assertBoundedAnswer(one.body, `the ${family} invalid_fork 400`);
+      const { result: many } = await boundedLinesDuring(() => door.push('/batch-upsert', { [family]: [bad()] }, { spaceId: S }));
+      assert.equal(many.code, 200, JSON.stringify(many.body).slice(0, 300));
+      assert.equal(many.body[family].invalidFork, 1, `${family}: batch: ${JSON.stringify(many.body[family]).slice(0, 300)}`);
+      assertBoundedAnswer(many.body, `the ${family} batch answer`);
+      assert.equal(await door.coll(S, family).countDocuments({ _id: BIG_ID }), 0, `${family}: a malformed fork row was stored`);
+    }
   });
 
   it('PIN: single push of a megabyte string seq answers a bounded 400', async () => {

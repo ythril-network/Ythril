@@ -28,6 +28,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
+import { forkIdOf } from './_fork-kinds.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -91,6 +92,18 @@ describe('a push forks once, within the fan-out cap, on both doors', { skip }, (
       if (retry.body.status === 'forked') assert.equal(retry.body.forkId, first.body.forkId);
     });
 
+    // Q-624 re-anchor: the id the push makes IS the body-derived one (section 3). A re-send is found by that equation, so it is the
+    // equation this file holds; the old one (`forkIdFor(parent, seq, text)`) names a different row.
+    it('the fork a push makes is stored under the id its body derives, on both doors', async () => {
+      const expected = await forkIdOf('facts', 'f', 5, variant(1));
+      const one = await door.push('/facts', variant(1), { spaceId: S });
+      assert.equal(one.body.forkId, expected, `single: the fork was stored under ${one.body.forkId}, its body derives ${expected}`);
+      await door.wipe(S);
+      await door.coll(S, 'facts').insertOne(build.fact(S, 'f', 5, { fact: 'root' }));
+      await door.push('/batch-upsert', { facts: [variant(1)] }, { spaceId: S });
+      assert.deepEqual((await door.coll(S, 'facts').find({ forkOf: 'f' }).toArray()).map(d => d._id), [expected], 'batch: the fork id is not the one its body derives');
+    });
+
     it('batch-upsert: the same page twice leaves one fork', async () => {
       await door.push('/batch-upsert', { facts: [variant(1)] }, { spaceId: S });
       const retry = await door.push('/batch-upsert', { facts: [variant(1)] }, { spaceId: S });
@@ -108,9 +121,10 @@ describe('a push forks once, within the fan-out cap, on both doors', { skip }, (
     for (const cap of ['fan-out', 'depth']) {
       for (const via of ['single', 'batch']) {
         it(`R9 ${via}, at the ${cap} cap: a re-sent push whose derived fork exists answers forked with that id`, async () => {
-          const { forkIdFor } = await import('../../server/dist/sync/upsert-plan.js');
-          const forkId = forkIdFor('f', 5, 'variant 1');
-          const theFork = build.fact(S, forkId, 50, { fact: 'variant 1', forkOf: 'f' });
+          // Q-624 re-anchor: a fork's id derives from its BODY (`forkIdFor(forkOf, seq, authoredContentHash(family, body).text)`, design
+          // section 3), no longer from the text alone; and the stored fork keeps the seq its id was derived from, so its row verifies.
+          const forkId = await forkIdOf('facts', 'f', 5, variant(1));
+          const theFork = build.fact(S, forkId, 5, { fact: 'variant 1', forkOf: 'f' });
           if (cap === 'fan-out') {
             await door.coll(S, 'facts').insertMany([theFork,
               ...Array.from({ length: CAP - 1 }, (_, i) => build.fact(S, `sib-${i}`, 20 + i, { fact: `sib ${i}`, forkOf: 'f' }))]);
