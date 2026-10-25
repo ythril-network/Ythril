@@ -189,11 +189,12 @@ export async function acceptArrivingPage(
       };
       // A page that carries or plans a fork edge waits for a space whose identity index still counts fork rows: asked AFTER planning and BEFORE any write of the page
       // (design 5.4), so the held page leaves nothing half landed, and the sender keeps its copy and offers the page again.
-      if (sound.edges.length > 0 && !(await edgeIdentityAdmitsForks(spaceId))) {
+      // The readiness (one listIndexes, design 5.3) is asked ONLY for a page that stores a fork edge: an ordinary page of edges never pays for it.
+      if (sound.edges.length > 0) {
         const { plan } = await planOf('edges', 'edges');
         const storesAFork = plan.forks.length > 0
           || sound.edges.some((s, k) => s.doc.forkOf !== undefined && (plan.verdicts[k] === 'upserted' || plan.verdicts[k] === 'updated' || plan.verdicts[k] === 'inserted'));
-        if (storesAFork) {
+        if (storesAFork && !(await edgeIdentityAdmitsForks(spaceId))) {
           log.warn(`${peerText(where)}: space '${peerText(spaceId)}': the edges of this page are held: this space is rebuilding its edge identity index and cannot store a fork edge yet`);
           throw new EdgeIdentityBuilding(spaceId);
         }

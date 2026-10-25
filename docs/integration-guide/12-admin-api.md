@@ -164,6 +164,8 @@ What the import stores of each document:
 - The space's seq counter is moved past every imported seq, chunk by chunk, so the next local write sorts above
   every restored record.
 
+**`503` with `code: "edge_identity_building"`**: the `edges` array carries a fork edge (a row with a `forkOf`) and the space still has the full unique edge identity index, which counts a fork as a duplicate of its subject. The families before `edges` have been stored, and nothing of `edges` is. Nothing is lost: a restore is idempotent, so run the same import again once `ythril_edge_identity_building_spaces` no longer counts the space (the owed job swaps the index within a minute). A space created by this release, or one with no edge yet, never answers it ([Upgrading](02b-upgrading.md)).
+
 **Response** `200`:
 
 ```json

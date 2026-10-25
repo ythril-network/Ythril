@@ -2,7 +2,8 @@ import { writeRefusalAnswer } from './brain/write-validation.js';
 import { ConnectionsNotWritten } from './brain/connections-not-written.js';
 import { storeFailureAnswer } from './brain/store-failure.js';
 import { spaceActAnswer } from './spaces/space-act-answer.js';
-import { sendCaughtFailure, sendStoreFailure, sendConnectionsNotWritten } from './api/send-failure.js';
+import { sendCaughtFailure, sendStoreFailure, sendConnectionsNotWritten, sendEdgeIdentityBuilding } from './api/send-failure.js';
+import { EdgeIdentityBuilding } from './util/errors.js';
 import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
@@ -750,6 +751,11 @@ export function createApp() {
      * reaches here: without this branch sixteen REST record routes answered `500` for a documented `409` while the MCP door and the
      * routes that catch answered it right (Q-560). The same function `sendCaughtFailure` and `callTool` ask.
      */
+    // A restore page of fork edges into a space still rebuilding its edge identity index (`api/admin-import.ts`): the same `503 edge_identity_building` the push doors answer.
+    if (err instanceof EdgeIdentityBuilding) {
+      sendEdgeIdentityBuilding(res, err);
+      return;
+    }
     const actAnswer = spaceActAnswer(err);
     if (actAnswer) {
       res.status(actAnswer.status).json(actAnswer.body);
