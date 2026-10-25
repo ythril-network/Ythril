@@ -263,7 +263,7 @@ export function formatRecallSummary(r: RecallResult): string {
  *
  *  - `embeddingModel` — identical for every record in a space. Instance configuration, not a per-record
  *    signal, and it was being repeated on every row.
- *  - `seq` — the per-space monotonic counter that sync orders replication by. It is not an input to any
+ *  - `seq` — the record's version, which sync compares to know which copy is newer. It is not an input to any
  *    tool, nothing outside `sync/*` reads it, and it means nothing to a model. A caller that genuinely
  *    needs it can read the record by `_id`.
  *

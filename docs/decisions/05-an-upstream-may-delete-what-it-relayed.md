@@ -65,7 +65,8 @@ every subscriber.
   explained.
 - **The repair is bounded by what the source kept.** A tombstone pruned at the upstream is not recoverable by anything
   here; the residue stays until deleted by hand, and the upgrade notes say how to spot it. Upgrading root-first avoids
-  a second residue, because a relayed tombstone keeps its issuer's seq.
+  a second residue: a relayed tombstone keeps its issuer's version and is served by the position it landed at here, so a
+  reader below it still receives it, and an equal or lower re-delivery writes nothing.
 - **Rolling back** returns to the older rule and leaves a stamp an older build does not know to treat as local.
 - **This is the reversal to prevent:** widening the rule to "any peer's deletion applies" or to "an upstream may delete
   what this instance wrote" (each makes a delivered record, or the instance's own content, deletable by whoever

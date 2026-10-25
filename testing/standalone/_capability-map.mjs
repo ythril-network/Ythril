@@ -78,6 +78,9 @@ export const CAPABILITIES = [
   // against `list_embed_jobs`'s `knowledge: read`. Mapping them together claimed a coverage that would
   // also have been a rung claim, and `mcp-tool-rights` said so. Declared as a gap in `parity.ts`.
   ['Brain — ops', 'retry_embed_record', 'POST /api/brain/spaces/:spaceId/embedding-queue/records/retry'],
+  // Review's forks (bundle-81): one capability each, both doors the same act (`brain/forks.ts`).
+  ['Brain — ops', 'list_forks', 'GET /api/brain/spaces/:spaceId/forks'],
+  ['Brain — ops', 'resolve_fork', 'POST /api/brain/spaces/:spaceId/forks/:forkId/resolve'],
   ['Brain — ops', 'retry_embed_media', 'POST /api/brain/spaces/:spaceId/embedding-queue/media/retry-failed'],
 
   // `read_file` answers the EXTRACTED-TEXT route and nothing else. The bytes route is a declared gap in

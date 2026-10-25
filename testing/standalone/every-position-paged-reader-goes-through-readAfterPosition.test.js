@@ -96,6 +96,13 @@ const EXEMPT = [
     why: LISTING, holds: allOf(spreadsConstant('LANDING_ORDER'), endsInId, pagedBySkip),
   })),
   {
+    // Review's list of forks (bundle-81 slice I4): a user listing in landing order, as the Brain lists are, paged by `$skip` inside one `$facet` with its total.
+    file: 'server/src/brain/forks.ts', fn: 'listForks', kind: 'ordering', by: 'slot',
+    why: 'Review\'s list of forks: `{ ...LANDING_ORDER }`, a total order (ends in `_id`) paged by `$skip`, for a user listing, not a position',
+    holds: allOf(spreadsConstant('LANDING_ORDER'), endsInId,
+      (e) => (/\$skip:/.test(bodyOf(rawByFile.get(e.file) ?? '', e.function)) ? null : 'the list is not paged by `$skip`')),
+  },
+  {
     file: 'server/src/brain/list-sort.ts', fn: '<module>', kind: 'ordering', by: 'origin',
     why: 'LANDING_ORDER itself, reached through DEFAULT_QUERY_SORT by `queryBrain`, the query tool and the cross-space comparator: one total order (ends in `_id`) paged by `skip`',
     holds: allOf(viaConstant('LANDING_ORDER'), endsInId),

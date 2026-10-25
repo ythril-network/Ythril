@@ -418,7 +418,10 @@ const SITES = [
   { file: 'server/src/brain/read-spill-store.ts', sites: 1, kind: 'request-capped', reason: 'the pages of one spilled answer, which is cut at a stated size before it is stored' },
   { file: 'server/src/sync/linkage-check.ts', sites: 1, kind: 'request-capped', reason: 'one row of about 300 bytes per dangling end of ONE accepted page, a page being counted' },
   { file: 'server/src/sync/positions-owed.ts', sites: 1, kind: 'sliced', reason: 'the repair\'s positions of one chunk of rows: a space\'s count is the store\'s, so the write is sliced to one command each (`writeInOneCommands`)' },
-  { file: 'server/src/brain/merge.ts', sites: 3, kind: 'sliced', reason: 'every edge, file and link of the absorbed entity: a hub\'s count is the store\'s, not a request\'s' },
+  // The edges and links of the absorbed record moved out of the merge into the relink the fork resolve shares (`brain/relink-references.ts`): one site each, the
+  // merge keeps the file rows of the absorbed entity's faces.
+  { file: 'server/src/brain/merge.ts', sites: 1, kind: 'sliced', reason: 'every face label of the absorbed entity: a hub\'s count is the store\'s, not a request\'s' },
+  { file: 'server/src/brain/relink-references.ts', sites: 2, kind: 'sliced', reason: 'every edge written in place and every link re-keyed for the record absorbed by a merge or a fork resolve: a hub\'s count is the store\'s, not a request\'s' },
   { file: 'server/src/files/rekey-rows.ts', sites: 1, kind: 'sliced', reason: 'the rows of ONE batch of a move (the file rows, the rows derived from them, the jobs), inside the caller transaction: a batch is held under a byte budget by its caller and the slicer cuts it by the one-command limits' },
   { file: 'server/src/files/tombstones.ts', sites: EVERY, kind: 'sliced', reason: 'one tombstone per path of a deleted or moved directory, one per tombstone a peer delivered that is kept to pass on, one delete per path a newer arriving version supersedes (a peer\'s page: the count is the store\'s)' },
   { file: 'server/src/files/manifest.ts', sites: 1, kind: 'sliced', reason: 'one cache row per file hashed in a round: the count is the store\'s; small rows' },

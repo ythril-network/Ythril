@@ -33,6 +33,8 @@ export class ReviewForksState {
   readonly rows = signal<readonly ForkRow[]>([]);
   /** How many forks the space has, or null when the answer does not say. */
   readonly total = signal<number | null>(null);
+  /** How many forks one record may hold, as the list's answer says it; null when it does not. */
+  readonly maxForksPerRecord = signal<number | null>(null);
   readonly skip = signal(0);
   readonly loading = signal(false);
   /** Null until the last load failed: checked before the empty state, so a failure never reads as "no forks". */
@@ -64,6 +66,7 @@ export class ReviewForksState {
         if (page.forks.length === 0 && skip > 0) { this.load(spaceId, Math.max(0, skip - FORKS_PAGE_SIZE), true); return; }
         this.rows.set(page.forks);
         this.total.set(page.total ?? null);
+        this.maxForksPerRecord.set(page.maxForksPerRecord ?? null);
         this.skip.set(skip);
         this.loading.set(false);
       },

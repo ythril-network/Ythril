@@ -349,7 +349,7 @@ routes (batch and single), the pulled page and the admin import all go through i
 precondition a door used to hold a subset of: per-document shape and seq refusal, the retag to the local space,
 a repeated id collapsed to its highest seq, the local-only fields dropped and the receiver's own carried, the
 receiver's retention stamped, the seq write guard, failures classified per document, and — per landed chunk, in a
-`finally` — the awaited counter bump, then the embed enqueue (`enqueueIngestedRecords`). It used to be two
+`finally` — the landing at a position of this instance's own stream (an arrival moves no counter: a version is stamped only by a local write), then the embed enqueue (`enqueueIngestedRecords`). It used to be two
 functions (`ingestBrainDoc` and the pull's `batchUpsertBySeq`) plus a raw `$setOnInsert`, which is how a pulled
 record was never queued and a new entity pushed singly was never embedded.
 `an-arrival-is-written-by-one-writer.test.js` holds that no door writes a record collection anywhere else.

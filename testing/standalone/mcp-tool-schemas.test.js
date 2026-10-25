@@ -135,7 +135,10 @@ describe('MCP tool schemas — universal invariants', () => {
     // posture is the plan's (a token may manage its OWN views), and `16-mcp.md` carries a row for each.
     // 86 -> 87: `network_reread` (bundle-81, D-20), the door onto `rereadNetworkAct` like `POST /api/networks/:id/reread`: `admin: true`, `mutating`, an
     // audit-map entry under `network.reread`, a `NOT_AREA_SCOPED` row, a capability-map row, and `16-mcp.md` rows.
-    assert.equal(ALL_TOOLS.length, 87);
+    // 87 -> 89: `list_forks` and `resolve_fork` (bundle-81, D-23), the doors onto `brain/forks.ts` like `GET`/`POST /api/brain/spaces/:spaceId/forks`: `list_forks` not
+    // mutating, `resolve_fork` mutating, both `spaceRequired`, TOOL_RIGHTS rows (knowledge read / write), audit-map entries (`fork.list`, `fork.resolve`), capability-map
+    // rows, and `16-mcp.md` rows.
+    assert.equal(ALL_TOOLS.length, 89);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

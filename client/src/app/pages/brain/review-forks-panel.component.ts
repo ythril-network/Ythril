@@ -51,7 +51,7 @@ import { ReviewForksComponent } from './review-forks.component';
           <p>{{ 'brain.review.forks.empty.body' | transloco }}</p>
         </div>
       } @else {
-        <app-review-forks [rows]="state().rows()" (resolve)="state().resolve(spaceId(), $event)" />
+        <app-review-forks [rows]="state().rows()" [cap]="state().maxForksPerRecord()" (resolve)="state().resolve(spaceId(), $event)" />
         @if (state().hasPrevious() || state().hasNext()) {
           <div class="pagination">
             <button class="btn btn-sm btn-secondary" type="button" [disabled]="!state().hasPrevious()" (click)="state().load(spaceId(), state().skip() - pageSize)"><ph-icon name="arrow-left" [size]="14" style="display:inline-flex;vertical-align:middle;"/> {{ 'common.prev' | transloco }}</button>

@@ -6,6 +6,10 @@
 
 ### Upsert an Entity
 
+> **Versions and order.** An entity's and an edge's `seq` is its version: every create, update, delete and merge stores a higher one than the record read, and one whose next
+> version would pass the ceiling is `409` `record_version_at_ceiling` with nothing written (a merge touching such a record is refused whole). The lists default to landing
+> order, newest arrival first. See [Brain API](04-brain-api.md#write--read-semantics).
+
 ```http
 POST /api/brain/spaces/:spaceId/entities
 ```

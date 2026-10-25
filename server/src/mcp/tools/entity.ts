@@ -184,9 +184,10 @@ export const update_entityTool: ToolHandler = {
     + '- `ttlDays` — this record\'s own expiry, and the MOST specific of three tiers: it beats the type\'s '
     + 'retention window, which beats the space-wide one.\n'
     + '\n'
-    + 'RESPONSE: one line naming the entity, its type, its id and its new `seq` — the sync sequence number, '
-    + 'which increments on every write and is how a peer knows this version is newer. An id that does not exist '
-    + 'is an error, not a silent no-op, so a successful reply means a record really changed.\n\n'
+    + 'RESPONSE: one line naming the entity, its type, its id and its new `seq` — the entity\'s version, which a peer '
+    + 'compares to know whether this copy is newer. An entity whose next version would pass the ceiling is refused (`409` '
+    + '`record_version_at_ceiling`, nothing written). An id that does not exist is an error, not a silent no-op, so a successful '
+    + 'reply means a record really changed.\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,

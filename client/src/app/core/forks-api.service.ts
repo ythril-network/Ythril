@@ -40,5 +40,6 @@ export function pageOf(body: unknown, skip: number, limit: number): ForkPage {
     ...(typeof total === 'number' ? { total } : {}),
     skip: typeof record['skip'] === 'number' ? record['skip'] : skip,
     limit: typeof record['limit'] === 'number' ? record['limit'] : limit,
+    ...(typeof record['maxForksPerRecord'] === 'number' ? { maxForksPerRecord: record['maxForksPerRecord'] } : {}),
   };
 }

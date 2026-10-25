@@ -19,6 +19,7 @@ import { ingestRouter } from './ingest.js';
 import { brainEventsRouter } from './events.js';
 import { embedJobsRouter } from './embed-jobs.js';
 import { spillsRouter } from './spills.js';
+import { forksRouter } from './forks.js';
 
 export const brainRouter = Router();
 brainRouter.use(memoriesRouter);
@@ -33,3 +34,4 @@ brainRouter.use(ingestRouter);
 brainRouter.use(brainEventsRouter);
 brainRouter.use(embedJobsRouter);
 brainRouter.use(spillsRouter);
+brainRouter.use(forksRouter);

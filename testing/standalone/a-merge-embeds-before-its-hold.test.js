@@ -17,6 +17,8 @@ import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
 const SRC = stripComments(readFileSync('server/src/brain/merge.ts', 'utf8'));
+// The edge and link relink the merge's transaction runs moved into the module the fork resolve shares; it runs inside the same hold.
+const RELINK = stripComments(readFileSync('server/src/brain/relink-references.ts', 'utf8'));
 
 describe('a merge embeds before its hold', () => {
   it('the survivor is embedded before the held transaction starts, in the function that starts it', () => {
@@ -30,7 +32,7 @@ describe('a merge embeds before its hold', () => {
 
   it('nothing the transaction runs embeds', () => {
     // The transaction's work is relinkAndAbsorb and what it calls in this module; none of it may reach the model.
-    const inside = ['relinkAndAbsorb', 'storedEdgeIdentities'].map(n => bodyOf(SRC, n)).join('\n');
+    const inside = [bodyOf(SRC, 'relinkAndAbsorb'), ...['storedEdgeIdentities', 'relinkEdgesOfRecord', 'relinkLinksOfRecord'].map(n => bodyOf(RELINK, n))].join('\n');
     assert.ok(inside.length > 500, 'the transaction\'s functions were not found — re-anchor this gate');
     assert.doesNotMatch(inside, /\bembed\(|\bembedText\(|\bembedBatch\(/, 'the merge transaction calls the model while it holds every reader');
   });

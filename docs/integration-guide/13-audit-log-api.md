@@ -168,6 +168,7 @@ Audit entries are recorded for all write operations and (when `logReads` is enab
 | Category | Operations |
 |----------|-----------|
 | Fact | `fact.create`, `fact.update`, `fact.delete`, `fact.list` |
+| Fork | `fork.list` (Review's forks, a read), `fork.resolve` (keeping one side of a fork: the entry names the fork, which is the record that is deleted; `POST /api/brain/spaces/:spaceId/forks/:forkId/resolve` and MCP `resolve_fork`) |
 | Entity | `entity.create`, `entity.update`, `entity.delete`, `entity.list`, `entity.merge`, `entity.cascade_preview` (a read — it reports what a cascade WOULD remove and removes nothing) |
 | Edge | `edge.create`, `edge.update`, `edge.delete`, `edge.list` |
 | Link | `link.create`, `link.delete` |

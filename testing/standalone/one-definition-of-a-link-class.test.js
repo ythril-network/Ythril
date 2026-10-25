@@ -245,6 +245,9 @@ describe('no reader re-derives a link class', () => {
     'server/src/brain/merge.ts':
       'A RE-KEY. When two entities become one, every link naming the absorbed id has to be rewritten to '
       + 'name the survivor — an update over rows, not a question about a record.',
+    'server/src/brain/relink-references.ts':
+      'THE RE-KEY, shared. The links half of that merge relink, moved here so Review\'s fork resolve points the links of a fork at its parent by the same code: '
+      + 'every link naming the absorbed id is rewritten to name the survivor — an update over rows, not a question about a record.',
     // `spaces/lifecycle.ts` (CREATION) came off this list with Q-445 (bundle-101): it no longer opens the links collection, whose
     // indexes are built from the per-space declaration (`spaces/space-indexes.ts`), which names the collection by its part only.
   }));

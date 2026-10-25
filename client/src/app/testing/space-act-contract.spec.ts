@@ -157,7 +157,8 @@ describe('the server\'s space-act shapes are derived (floors: an empty set passe
     expect(entryKeys).toEqual(expect.arrayContaining(['kind', 'since', 'attempts', 'nextRetryAt', 'state']));
     expect(owedKeys, `owed entry: ${owedKeys.join(', ')}`).toEqual(expect.arrayContaining(['entryId', 'localSpaceId', 'networkSpaceId', 'rounds', 'kind', 'state']));
     expect(owedKeys).not.toContain('roundId');
-    expect(networkViewKeys.sort()).toEqual(['owedSpaceActs', 'ownYesCarries']);
+    // Bundle-81 adds the two fields the administrator's view carries beside the owed acts (`rereadOwed`, `spaceRecordCounts`), both read by the re-read dialog.
+    expect(networkViewKeys.sort()).toEqual(['owedSpaceActs', 'ownYesCarries', 'rereadOwed', 'spaceRecordCounts']);
   });
 });
 

@@ -60,12 +60,13 @@ describe('the receiver separates a drop from an already-current skip', () => {
   it('counts them apart', () => {
     assert.match(receiver, /forkDepthRefused: count\('facts', 'forkRefused'\)/,
       'the lossy outcome needs its own counter, or it is invisible inside `skipped`');
-    assert.match(planner, /MAX_FORK_DEPTH \|\| siblingsOf\(doc\._id\) >= MAX_FORK_DEPTH\) \{\s*plan\.verdicts\[i\] = 'forkRefused'/,
-      'and the MAX_FORK_DEPTH path must answer its own verdict');
+    // The sibling cap is `MAX_FORKS_PER_RECORD` since bundle-81 slice I4 (one constant Review's list reports); the depth cap keeps `MAX_FORK_DEPTH`.
+    assert.match(planner, /MAX_FORK_DEPTH \|\| siblingsOf\(doc\._id\) >= MAX_FORKS_PER_RECORD\) \{\s*plan\.verdicts\[i\] = 'forkRefused'/,
+      'and the fork-cap path must answer its own verdict');
   });
 
   it('no longer counts a dropped record as `skipped`', () => {
-    assert.doesNotMatch(planner, /MAX_FORK_DEPTH\) \{\s*plan\.verdicts\[i\] = 'skipped'/,
+    assert.doesNotMatch(planner, /MAX_FORK(?:S_PER_RECORD|_DEPTH)\) \{\s*plan\.verdicts\[i\] = 'skipped'/,
       'a fork-depth refusal must never be counted as an already-current skip');
   });
 

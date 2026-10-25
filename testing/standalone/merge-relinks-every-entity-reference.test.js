@@ -41,6 +41,9 @@ import { readFileSync } from 'node:fs';
 
 const TYPES = 'server/src/config/types.ts';
 const MERGE = 'server/src/brain/merge.ts';
+// The edge and link halves of the relink moved out of the merge into the module the fork resolve shares (`brain/relink-references.ts`):
+// what the merge relinks is what the merge's writer and that module do together, so the gates below read both.
+const RELINK = 'server/src/brain/relink-references.ts';
 
 const withoutComments = (t) =>
   t.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -139,6 +142,9 @@ describe('the check itself works before it is trusted', () => {
 
 describe('executeMerge relinks every collection that can reference an entity', () => {
   const merge = withoutComments(readFileSync(MERGE, 'utf8'));
+  const relink = withoutComments(readFileSync(RELINK, 'utf8'));
+  /** The merge's writer and the shared relink, as one text: the code that runs when an entity is merged. */
+  const mergeCode = `${merge}\n${relink}`;
 
   for (const [type, suffix] of Object.entries(COLLECTION_SUFFIX)) {
     it(`relinks ${suffix} (${type})`, () => {
@@ -216,22 +222,27 @@ describe('executeMerge relinks every collection that can reference an entity', (
     assert.ok(naming.length >= 3,
       `only ${naming.length} class(es) can name an entity — the import is stale and this checks less`);
 
-    assert.match(merge, /spaceCollection\(spaceId, 'links'\)/,
+    assert.match(mergeCode, /spaceCollection\(spaceId, 'links'\)/,
       'the merge never opens the links collection, so every link naming the absorbed entity survives it '
       + 'pointing at the record phase 5 deletes');
-    // Through the one selection since bundle-30 I6 (C12): the links key of `relinkFilters`, read by the writer.
-    assert.match(bodyOf(merge, 'relinkFilters'), /\blinks: asFilter<[^>]*>\(\{[^\n]*\bto: absorbedId, toKind: 'entity'/,
+    // Through the one selection since bundle-30 I6 (C12), now `linksOfRecord` (the fork resolve reads it too): the bound's count asks it for an
+    // entity, and so does the writer, which is what the relink module's `relinkLinksOfRecord` does with its `kind`.
+    assert.match(bodyOf(merge, 'relinkFilters'), /\blinks: linksOfRecord\(spaceId, absorbedId, 'entity'\)/,
+      'the bound does not count the links through the one selection the writer re-keys by');
+    assert.match(bodyOf(relink, 'linksOfRecord'), /kind === 'entity'\s*\?\s*asFilter<[^>]*>\(\{[^\n]*\bto: id, toKind: 'entity'/,
       'the link search is not aimed at the absorbed entity as a link TARGET — an entity is only ever a `to`');
-    assert.match(merge, /relinkFilters\(spaceId, absorbed\._id\)\.links/,
-      'the merge writer does not read the links it re-keys through the one selection the bound counts');
+    assert.match(bodyOf(merge, 'relinkAndAbsorb'), /relinkLinksOfRecord\(spaceId, \{[^}]*\bkind: 'entity'/,
+      'the merge writer does not re-key the links through the one relink, as an entity');
+    assert.match(bodyOf(relink, 'relinkLinksOfRecord'), /linksOfRecord\(spaceId, absorbedId, kind\)/,
+      'the relink writer does not read the links it re-keys through the one selection the bound counts');
     /*
      * RE-KEYED, not `$set`. A link's `_id` is derived from both endpoints, so moving the `to` changes the
      * identity — an update in place leaves an id that disagrees with its own contents and nothing finds it
      * again. The old id needs a tombstone, or the next pull from a peer restores the broken link.
      */
-    assert.match(merge, /linkIdFor\(link\.from, link\.fromKind, survivor\._id, 'entity'\)/,
+    assert.match(relink, /linkIdFor\(from, link\.fromKind, to, link\.toKind\)/,
       'the link is updated in place rather than re-keyed, so its id no longer derives from its contents');
-    assert.match(merge, /_id: link\._id, type: 'link'/,
+    assert.match(relink, /_id: link\._id, type: 'link'/,
       'the old link id gets no tombstone, so the next pull from a peer re-creates it pointing at the '
       + 'deleted entity and the repair undoes itself');
   });
@@ -270,7 +281,7 @@ describe('executeMerge relinks every collection that can reference an entity', (
     // the dangling reference would come back on the next pull.
     // A stamped write is `withLandingStamp(spaceId` since bundle-81 (it was `withSeq` / `withAllocatedSeqs`, Q-196) — the write rides inside it, and
     // each takes a version per row from `versionsFor` just before it.
-    const relinkBlocks = (merge.match(/\bwithLandingStamp\(\s*spaceId\b/g) ?? []).length;
+    const relinkBlocks = (mergeCode.match(/\bwithLandingStamp\(\s*spaceId\b/g) ?? []).length;
     assert.ok(relinkBlocks >= 4,
       `only ${relinkBlocks} stamped writes — each relinked collection plus the survivor needs its own`);
   });
@@ -289,21 +300,25 @@ describe('executeMerge relinks every collection that can reference an entity', (
      *  - a LINK whose re-keyed id the survivor already holds is not written again: the survivor's row stays as it is,
      *    author included, and only the absorbed row goes.
      */
-    const writer = bodyOf(merge, 'relinkAndAbsorb');
-    assert.match(writer, /if \(survivorKeys\.has\(\w+\)\) duplicates\.push\(/,
+    // The writers are the relink module's two functions (the merge's writer calls them, and `merge-relinks` above holds that it does).
+    assert.match(bodyOf(merge, 'relinkAndAbsorb'), /relinkEdgesOfRecord\([\s\S]*?relinkLinksOfRecord\(/,
+      'the merge writer does not relink the edges and then the links through the shared relink');
+    const edgeWriter = bodyOf(relink, 'relinkEdgesOfRecord');
+    const linkWriter = bodyOf(relink, 'relinkLinksOfRecord');
+    assert.match(edgeWriter, /if \(survivorKeys\.has\(\w+\)\) duplicates\.push\(/,
       'an absorbed edge whose relinked identity the survivor already holds is not routed to the duplicates, so it '
       + 'is relinked into the unique identity index and the merge fails on it, or holds the survivor twice');
-    assert.match(writer, /else\s*\{[^}]*\bedgesToRelink\.push\([^}]*\bsurvivorKeys\.add\(/,
+    assert.match(edgeWriter, /else\s*\{[^}]*\btoRelink\.push\([^}]*\bsurvivorKeys\.add\(/,
       'an identity this merge relinks is not recorded as held, so a second absorbed edge onto it is relinked as '
       + 'well and the survivor holds it twice');
-    assert.match(writer, /removeWithTombstones\(spaceId, 'edges',\s*duplicates\.map\(/,
+    assert.match(edgeWriter, /removeWithTombstones\(spaceId, 'edges',\s*duplicates\.map\(/,
       'the duplicate edges are not deleted with a tombstone, so the next pull from a peer brings them back');
-    assert.match(writer, /readStoredById<[^>]*>\(spaceCollection\(spaceId, 'links'\), linkMoves\.map\(m => m\.newId\)/,
+    assert.match(linkWriter, /readStoredById<[^>]*>\(spaceCollection\(spaceId, 'links'\), moves\.map\(m => m\.newId\)/,
       'the links the survivor already holds are not read, so there is nothing to dedupe a re-keyed link against');
-    assert.match(writer, /const fresh = linkMoves\.filter\(m => !held\.has\(m\.newId\)\)/,
+    assert.match(linkWriter, /const fresh = moves\.filter\(m => !held\.has\(m\.newId\)\)/,
       'a link whose re-keyed id the survivor already holds is not filtered out, so the absorbed row overwrites the '
       + 'survivor\'s and hands its authorship to whoever wrote the absorbed one');
-    assert.match(writer, /versionsFor\(spaceId, fresh\.map\([\s\S]*?withLandingStamp\(spaceId, linkVersions\.map\([\s\S]*?fresh\.map\(/,
+    assert.match(linkWriter, /versionsFor\(spaceId, fresh\.map\([\s\S]*?withLandingStamp\(spaceId, versions\.map\([\s\S]*?fresh\.map\(/,
       'the links are stamped and written from the full move list rather than from `fresh`, so the dedupe filters nothing');
   });
 });

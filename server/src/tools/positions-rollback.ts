@@ -1,8 +1,8 @@
 /**
- * The rollback tool's entry: `node server/dist/tools/positions-rollback.js` (in the image: `node dist/tools/positions-rollback.js`, WORKDIR `/app`).
+ * The rollback tool's entry: `node server/dist/tools/positions-rollback.js` (the image's WORKDIR is `/app`, where the build is `server/dist`, as `CMD` runs it).
  *
  * Run it with the 6.0 instance STOPPED and before 5.6 starts, as a one-off container on the same compose file (`docker compose run --rm --no-deps ythril node
- * dist/tools/positions-rollback.js`), while the file still names the 6.0 image. What it does and why it must come first is `sync/positions-rollback.ts`.
+ * server/dist/tools/positions-rollback.js`), while the file still names the 6.0 image. What it does and why it must come first is `sync/positions-rollback.ts`.
  *
  * It reads `config.json` ITSELF, for the one thing it needs from it (`mongo.uri`, when `MONGO_URI` is not set), and never goes through the config loader: that
  * runs the boot migrations and WRITES the file, and this tool runs against whatever 5.6 left, with nothing started. The rule for which URI is used is the server's

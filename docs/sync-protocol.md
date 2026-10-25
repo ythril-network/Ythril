@@ -403,7 +403,7 @@ Brain A:  { _id: "abc", seq: 5, fact: "The sky is blue" }
 Brain B:  { _id: "abc", seq: 5, fact: "The sky is cerulean" }   ← concurrent edit
 ```
 
-The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== existing.fact` and creates a **fork**: a new fact with `forkOf: "abc"` and the next available local `seq`. Both versions coexist and can be reviewed by the user.
+The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== existing.fact` and creates a **fork**: a new fact with `forkOf: "abc"`, stamped as a local version above the parent's. Both versions coexist and are listed in Review's **Forks**, where the user keeps one.
 
 **The fork's id is derived** from the parent's id, the shared seq and the incoming text (a v4-shaped UUID). So a push whose response was lost and is re-sent upserts the fork it already made instead of forking again, and an identical divergence forks once.
 
@@ -412,6 +412,8 @@ The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== 
 **A fork is its own record.** `forkOf` names the parent it diverged from and is read only by the two caps below and by
 the planner; nothing follows it on a delete. Deleting or expiring the parent leaves its forks in place, and a fork is
 deleted, expires and replicates like any other fact.
+
+**Review settles a fork** (`GET /api/brain/spaces/:spaceId/forks`, `POST .../forks/:forkId/resolve`, the MCP tools `list_forks` and `resolve_fork`; [Brain API](integration-guide/04-brain-api.md#forks-list-them-and-keep-one-side)). Keeping a side writes the kept text on the parent as a **local edit stamped above both versions**, so a peer holding either copy takes it as the newer; the fork is deleted behind a tombstone this instance issues (`issuedHere`, so a mesh peer is told) and the edges and links that named it are pointed at the parent. One row of the truth table is not a conflict: two copies of a chrono entry at one seq whose bodies differ only by redaction (one has `contentRedacted` and the other has more of the fields redaction removes) are the same copy, so nothing forks and nothing is written. Only facts fork: an equal seq never forks an entity, an edge, a chrono entry or a link, and the edge and link identity indexes would refuse a second row for one identity.
 
 **Two caps, on every door — both push routes and the pull.** A fork is refused when the parent's `forkOf` chain is already 10 deep, or when the parent already has 10 forks — stored ones and the ones the same request is creating, counted together. `POST /facts` answers `400 Fork depth limit (10) exceeded for _id '…'`; `batch-upsert` counts it in `forkDepthRefused` and `rejected`; a pull names it in the receiver's log and moves past it, as the push sender does. **Mixed versions:** the fan-out cap on `batch-upsert` is new in this release — an older receiver accepts an eleventh fork of one parent that a newer one refuses, so a network mixing the two can hold different fork sets for such a record.
 

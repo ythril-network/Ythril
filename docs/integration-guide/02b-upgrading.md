@@ -59,6 +59,8 @@ the same idea is now a **personal view**, a named list of spaces that one token 
 5.x left it. Views live in `config.json`, not in the database, so a Mongo backup does not carry them: back up the config
 with the data. A config reload that finds a file without the views the process holds keeps them and logs a line. **The copy is written only when the upgrade converted proxies** (an instance with none gets no `config.json.pre-6.0`), so a rollback does not depend on one existing; see Rolling Back.
 
+**Upgrade every instance of a network to 6.0 together: a 5.x peer and a 6.0 peer exchange nothing.** A 6.0 instance pages by the position a record landed at and answers `positions: 1`; a 5.x peer pages by version and sends `sinceSeq`, which a 6.0 instance refuses with `400`. A 6.0 instance ends its turn with a 5.x peer without writing a mark or counting a failure, and shows the member as *Version too old* (it recognises a 5.x answer by the missing `positions: 1`); a 5.x instance meets the `400` and reports it as it reports any refusal. There is no 5.6.x patch that bridges the two; the gap is accepted, and the fix is upgrading every member.
+
 **Upgrading to 6.0 carries every space into position space, once, and a space answers `503 positions_building` while it waits.** Sync pages by a position this instance gives a record when it lands, not by the record's version (`seq`). Every row a 5.6 build stored has a version and no position, so the first 6.0 start gives it one, by identity (`pos = seq`, below every clock value), and gives every row of a record family its `writtenHere` mark. The first start also carries the marks: each `lastSeqReceived`, `lastSeqPushed` and `lastSeqServed` becomes `lastPosReceived`, `lastPosPushed` and `lastPosServed` with the same number, so the first 6.0 cycle offers exactly what 5.6's next cycle would have, and each scanner cursor is carried the same way. The 5.6 marks stay in `config.json`, frozen, for a rollback.
 
 - **The work is done by an owed job, not at boot.** A counter document with neither marker field owes its first carry (`positionsOwed: "carry"`); the job (every 60 s) builds the `(pos, _id)` index first, then positions each collection 1,000 rows at a time, and records the space ready in one write. A crash or a failed index build leaves the space owing and the next tick finishes it. `GET /metrics` says how many spaces owe, by kind (`ythril_positions_building_spaces`). The carry rewrites every document once, so the vector search index re-reads every document of every collection once.
@@ -152,10 +154,10 @@ below it, everything it relayed.** Clubs, closed and democratic networks are unc
   be gone at the source: the record it would have removed stays until you delete it. A `merkle: true` network shows
   that as a divergence on the space. A re-read deletes a record only if its seq is not above the tombstone's, which
   fails toward keeping a record re-created after the deletion.
-- **Upgrade root-first.** A middle node that re-reads after its children have passed the seq a relayed tombstone
-  carries leaves them holding the record, because a relayed tombstone keeps its issuer's seq and is not offered again
-  by position (the same limit that records have, in the Sync Protocol's watermark section). Upgrading the root, then
-  each level below it, avoids it.
+- **Upgrade root-first.** On 5.x, a middle node that re-read after its children had passed the seq a relayed tombstone
+  carries left them holding the record, because a relayed tombstone kept its issuer's seq and was not offered again
+  by that seq (the same limit that records had). Upgrading the root, then each level below it, avoids it. From 6.0 a
+  relayed tombstone keeps its issuer's version and is served by the position it landed at, so a hop below it still receives it.
 
 **Upgrading past 5.6.x changes what a file a peer delivers does on the instance that receives it, and what a conversion's sidecar is.** The receiver applies its own rules to every file it is given, and a file's arrival is recorded completely, by one function, whether the peer pushed it or this instance pulled it.
 
@@ -325,7 +327,7 @@ See [Admin API](12a-data-management-api.md#post-apiadmindatarestore) for the who
 
 ## Rolling Back
 
-**A rollback from 6.0 is `config.json.pre-6.0`, and nothing else brings the proxies back.** A 5.x build does not read
+**Nothing but `config.json.pre-6.0` brings the proxies back, and that copy exists only if the upgrade converted proxies.** A rollback to 5.6.x does not need it: the 6.0 `config.json` is read by 5.6, which keeps the keys it does not know (the next section). A 5.x build does not read
 `views`, `unclaimedViews`, `retiredSpaceIds` or `viewsMigration` (the report `GET /api/admin/views/migration` answers from), and the 6.0 conversion already removed each proxy (a space entry carrying `proxyFor`) from `spaces`, every
 network and every token's rights rows, so a 5.x started on the 6.0 `config.json` runs without them. To return: stop the
 stack, put the `config.json.pre-6.0` copy back as `config.json`, then start the older image. Views made since the upgrade
@@ -335,7 +337,7 @@ the network spaces this member left at the upgrade is permanent; the swap does n
 **A rollback from 6.0 to 5.6.x runs the positions tool first, with 6.0 stopped and before 5.6 starts.** 5.6 runs on the 6.0 `config.json` and database (it reads its own frozen `lastSeq*` marks and keeps unknown keys), but the rows carry fields it does not know. Without the step, 5.6's merkle hashes `pos`, `posAtSeq`, `writtenHere` and `issuedHere` on every brain row, so every rolled-back space on a `merkle: true` network logs `MERKLE_DIVERGENCE` every cycle for data that is the same, its reads return the fields, and a 5.6 local edit is stamped below the row it replaces until its counter is raised. Stop the stack, then, while the compose file still names the 6.0 image:
 
 ```sh
-docker compose run --rm --no-deps ythril node dist/tools/positions-rollback.js
+docker compose run --rm --no-deps ythril node server/dist/tools/positions-rollback.js
 ```
 
 then pin the image back to 5.6 and start. The tool takes its settings the way the server does (`MONGO_URI`, else `mongo.uri` in `config.json`; `CONFIG_PATH`), reads `config.json` itself and never rewrites it, and prints `<space>: <n> rows cleared, counter <old> -> <new>` per space and a total (never the database address). It does four things, each safe to run again: it removes `pos`, `posAtSeq`, `writtenHere` and `issuedHere` from every record collection and tombstone collection of every space (a tombstone's `storedVia` stays: 5.x has it), raises each space's counter to the highest version the space stores below the cap (never lower), marks every counter document `positionsOwed: "repair"` so a re-upgrade repairs every space, and leaves `seqSeenBy6` alone. It writes no audit entry (it runs with no instance up). What 5.6 then does is stated above under Upgrading: it re-reads and re-pushes everything since the upgrade, skipping held copies by version, and a record deleted during 6.0 whose tombstone was pruned can come back. An operator who skips the step gets the hash divergence until the re-upgrade repair.

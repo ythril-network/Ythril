@@ -72,8 +72,10 @@ before(async () => {
   const { SPACE_ACT_KINDS } = await import('../../server/dist/config/types-space-acts.js');
   const actCodes = Object.values(SPACE_ACT_KINDS).map(k => k.writeRefusalCode);
   assert.ok(actCodes.length >= 5, `only ${actCodes.length} space act refusal codes were read`);
+  // And the `code` a write at its version ceiling answers (`409`, the four update tools and the fork resolve name it), from the constant the doors answer with.
+  const { RECORD_VERSION_AT_CEILING } = await import('../../server/dist/brain/write-precondition.js');
   ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
-    ...actCodes];
+    ...actCodes, RECORD_VERSION_AT_CEILING];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 

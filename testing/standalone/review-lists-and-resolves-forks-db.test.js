@@ -107,12 +107,13 @@ describe('Review lists and resolves forks, on both doors', { skip }, () => {
   const mcp = async (name, args, rights = adminRights) => {
     const out = await callTool({ name, args, caller: caller(rights, 'mcp') });
     const text = (out.result.content ?? []).map(c => c.text ?? '').join('');
-    return { ok: !out.result.isError, body: out.result.structuredContent ?? null, sentence: out.result.isError ? text : undefined, text };
+    // The `Error: ` an MCP refusal opens with is the transport's framing of a thrown message (every both-doors test strips it); the sentence is what follows.
+    return { ok: !out.result.isError, body: out.result.structuredContent ?? null, sentence: out.result.isError ? text.replace(/^Error: /, '') : undefined, text };
   };
   const toolDoor = async (name, args, rights = adminRights) => {
     const res = { ...fakeRes(), end() { this.sent = true; return this; }, setHeader() { return this; }, set() { return this; }, send(b) { this.body = b; this.sent = true; return this; } };
     await handlerFor(toolsRouter, 'post', '/:tool')({ method: 'POST', params: { tool: name }, body: args, query: {}, authToken: { rights }, ip: '127.0.0.1', headers: {}, get: () => undefined }, res);
-    return { ok: res.code < 400, body: res.body?.data ?? null, sentence: res.body?.error };
+    return { ok: res.code < 400, body: res.body?.data ?? null, sentence: typeof res.body?.error === 'string' ? res.body.error.replace(/^Error: /, '') : res.body?.error };
   };
   const doors = {
     list: {

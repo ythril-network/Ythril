@@ -91,6 +91,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   update_file_meta: 'file.meta.update',
   retry_embed_media: 'file.retry_embedding_all',
   retry_embed_record: 'brain.retry_embedding',
+  // Review's forks, under the operations their routes record: one capability, one audit name, whichever door it came through.
+  resolve_fork: 'fork.resolve',
   create_dir: 'file.mkdir',
   // The tool registry flags this `mutating: true`, and it is right: a sync cycle pulls records from
   // peers and writes them locally, so "who started the run that brought in these records" is a fair
@@ -140,6 +142,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // F-46: the live check, under the operation its REST twin records — a stored-data check reads the space's records.
   schema_validate: 'space.schema.validate',
   ingest_status: 'brain.ingest.status',
+  list_forks: 'fork.list',
   // Audited for the same reason `space_stats` is: it reports what a space CONTAINS — type names, edge labels
   // and counts. The REST route was not audited while `stats` was, which was an asymmetry rather than a
   // decision; both are now.
