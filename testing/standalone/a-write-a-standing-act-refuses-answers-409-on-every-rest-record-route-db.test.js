@@ -69,6 +69,8 @@ const REQUESTS = {
   'POST /api/brain/spaces/:spaceId/links': { body: { from: 'aaaaaaaa-0000-4000-8000-0000000000f2', fromKind: 'fact', to: 'aaaaaaaa-0000-4000-8000-0000000000e1', toKind: 'entity' }, coll: 'links', match: { from: 'aaaaaaaa-0000-4000-8000-0000000000f2', to: 'aaaaaaaa-0000-4000-8000-0000000000e1' } },
   'DELETE /api/brain/spaces/:spaceId/links/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000b1' }, gone: { coll: 'links', _id: 'aaaaaaaa-0000-4000-8000-0000000000b1' } },
   'PATCH /api/brain/spaces/:spaceId/files': { query: { path: 'held.txt' }, body: { tags: ['changed-during'] }, coll: 'files', match: { tags: 'changed-during' } },
+  // Review's fork resolve (bundle-81): the fork of the fact seeded below as `f1`; a refused resolve neither deletes it nor writes its text on the parent.
+  'POST /api/brain/spaces/:spaceId/forks/:forkId/resolve': { params: { forkId: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, body: { keep: 'fork' }, gone: { coll: 'facts', _id: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, coll: 'facts', match: { _id: 'aaaaaaaa-0000-4000-8000-0000000000f1', fact: 'the fork text, resolved during the restore' } },
   'POST /api/brain/spaces/:spaceId/bulk': { body: { facts: [{ fact: 'bulk during the restore' }] }, coll: 'facts', match: { fact: 'bulk during the restore' } },
 };
 
@@ -98,6 +100,8 @@ describe('a write a standing act refuses answers 409 with its code on every REST
     adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
 
     await door.coll(S, 'facts').insertMany(['aaaaaaaa-0000-4000-8000-0000000000f1', 'aaaaaaaa-0000-4000-8000-0000000000f2'].map((id, i) => build.fact(S, id, i + 1)));
+    // A fork of `f1`, for the resolve route: its text is what a refused `keep: 'fork'` must not leave on the parent.
+    await door.coll(S, 'facts').insertOne(build.fact(S, 'aaaaaaaa-0000-4000-8000-0000000000f3', 3, { forkOf: 'aaaaaaaa-0000-4000-8000-0000000000f1', fact: 'the fork text, resolved during the restore' }));
     await door.coll(S, 'entities').insertMany(['aaaaaaaa-0000-4000-8000-0000000000e1', 'aaaaaaaa-0000-4000-8000-0000000000e2', 'aaaaaaaa-0000-4000-8000-0000000000e3', 'aaaaaaaa-0000-4000-8000-0000000000e4'].map((id, i) => build.entity(S, id, i + 1)));
     await door.coll(S, 'edges').insertMany([build.edge(S, 'aaaaaaaa-0000-4000-8000-0000000000a1', 1, { from: 'aaaaaaaa-0000-4000-8000-0000000000e1', to: 'aaaaaaaa-0000-4000-8000-0000000000e3' }), build.edge(S, 'aaaaaaaa-0000-4000-8000-0000000000a2', 2, { from: 'aaaaaaaa-0000-4000-8000-0000000000e3', to: 'aaaaaaaa-0000-4000-8000-0000000000e1' })]);
     await door.coll(S, 'chrono').insertMany(['aaaaaaaa-0000-4000-8000-0000000000c1', 'aaaaaaaa-0000-4000-8000-0000000000c2'].map((id, i) => build.chrono(S, id, i + 1)));
