@@ -13,6 +13,7 @@ import { normaliseProjection, toMongoProjection } from './projection.js';
 import { sanitizeFilter, type CallerCheckedFilter } from './filter-sanitizer.js';
 import { CONVENIENCE_KEYS } from './list-conveniences.js';
 import { UNSUPPORTED_PAGE_PARAMS } from '../util/pagination.js';
+import { skipRefusal } from '../util/strict-limit.js';
 import { LANDING_ORDER } from './list-sort.js';
 import { peerList, peerText, NAME_QUOTED } from '../util/log.js';
 
@@ -238,9 +239,8 @@ export function parseQueryPaging(
   raw: { limit?: unknown; skip?: unknown },
 ): { limit: number; skip: number } | { error: string } {
   const { limit, skip } = raw;
-  if (skip !== undefined && (typeof skip !== 'number' || !Number.isInteger(skip) || skip < 0)) {
-    return { error: 'skip must be a non-negative integer' };
-  }
+  const skipError = skip === undefined ? null : skipRefusal(skip);
+  if (skipError) return { error: skipError };
   if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) {
     return { error: 'limit must be a positive integer' };
   }

@@ -23,7 +23,12 @@ export function limitRefusal(limit: number, max: number): string | null {
   return Number.isInteger(limit) && limit >= 1 && limit <= max ? null : `limit must be an integer from 1 to ${max}`;
 }
 
-export type StrictLimit = { ok: true; limit: number } | { ok: false; error: string };
+/** The sentence a caller reads when its `skip` is not a whole number of 0 or more, `null` when it is — the one spelling every list that refuses a `skip` says. */
+export function skipRefusal(skip: unknown): string | null {
+  return Number.isInteger(skip) && (skip as number) >= 0 ? null : 'skip must be a non-negative integer';
+}
+
+export type StrictLimit ={ ok: true; limit: number } | { ok: false; error: string };
 
 /** `raw` as a limit in `1`..`max`, `fallback` when it is absent or empty, the one refusal otherwise. */
 export function parseStrictLimit(raw: unknown, fallback: number, max: number): StrictLimit {

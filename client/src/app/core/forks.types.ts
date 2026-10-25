@@ -36,13 +36,15 @@ export interface ForkRow {
 /** Which version a resolve keeps: the fork's text on the parent id, or the parent as it is. Either way the fork is deleted. */
 export type ForkKeep = 'fork' | 'parent';
 
-/** The most forks one record holds (design rev 8 section 5): the number the "at the limit" notice names. */
-export const MAX_FORKS_PER_RECORD = 10;
-
 /** One page of the list. `total` is absent when the server does not say how many there are. */
 export interface ForkPage {
   forks: ForkRow[];
   total?: number;
   skip: number;
   limit: number;
+  /**
+   * The most forks one record may hold, as the server says it (`MAX_FORKS_PER_RECORD`): the number the "at the limit" notice names. The client holds no
+   * number of its own, so an answer that does not say it shows no such notice rather than one with a guess.
+   */
+  maxForksPerRecord?: number;
 }

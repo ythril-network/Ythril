@@ -14,7 +14,6 @@ import { col, asFilter, asUpdate, asBulk } from '../db/mongo.js';
 import { versionsFor } from '../util/version-stamp.js';
 import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
 import { writeInOneCommands } from '../db/one-command.js';
-import { readStoredById } from '../db/read-by-id.js';
 import { inHeldTransaction } from './held-transaction.js';
 import { NUMERIC_MERGE_FNS, BOOLEAN_MERGE_FNS } from '../config/types-knowledge.js';
 import { embed } from './embedding.js';
@@ -24,11 +23,8 @@ import { getConfig } from '../config/loader.js';
 import { log, peerList, peerText, NAME_QUOTED, REFUSAL_NAMES_MAX } from '../util/log.js';
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
-import { edgeEndpointKind } from './entity-refs.js';
-import type { RefKind } from '../config/types-knowledge.js';
-import { linkIdFor } from './links.js';
-import { rekeyEdges, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
-import { enqueueWriteEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from './embed-queue.js';
+import type { EdgeRekey } from './edge-rekey.js';
+import { relinkEdgesOfRecord, relinkLinksOfRecord, settleRekeyedEmbeds, edgesOfRecord, linksOfRecord } from './relink-references.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
@@ -38,9 +34,8 @@ import { recordViewOf } from './record-view.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { eventEntryOf } from './read-projection.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
-import { writeTombstone, removeWithTombstones, stampTombstones } from './tombstones.js';
+import { writeTombstone, stampTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
 import { SubjectEdges } from './functional-subject.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
@@ -644,8 +639,8 @@ export interface MergeRefusal {
  */
 function relinkFilters(spaceId: string, absorbedId: string) {
   return {
-    edges: asFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }] }),
-    links: asFilter<LinkDoc>({ spaceId, to: absorbedId, toKind: 'entity' }),
+    edges: edgesOfRecord(spaceId, absorbedId),
+    links: linksOfRecord(spaceId, absorbedId, 'entity'),
     faces: asFilter<FileMetaDoc>({ spaceId, faceEntityId: absorbedId }),
   };
 }
@@ -780,16 +775,10 @@ export async function executeMerge(
    * of re-embeds must not queue ahead of the writes people are waiting on. Never thrown: the merge is stored, and
    * reporting it failed would invite a retry of a merge whose absorbed entity no longer exists.
    */
-  if (written.rekeyed.length > 0) {
-    try {
-      await retireEmbedJobs(spaceId, 'edge', written.rekeyed.map(m => embedQueueWorkFor(m).retire));
-    } catch (err) {
-      log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but the embed jobs of `
-        + `${written.rekeyed.length} re-keyed edge(s) were not retired: ${peerText(err)}`);
-    }
-    await enqueueWriteEmbedJobs(spaceId, written.rekeyed.map(m => ({ recordType: 'edge' as const, recordId: embedQueueWorkFor(m).enqueue })),
-      { priority: EMBED_PRIORITY.background });
-  }
+  await settleRekeyedEmbeds(spaceId, written.rekeyed, (err) => {
+    log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but the embed jobs of `
+      + `${written.rekeyed.length} re-keyed edge(s) were not retired: ${peerText(err)}`);
+  });
 
   // Centralised webhook emission: a merge is an update to the survivor, deletion of the absorbed entity, and
   // deletion of any duplicate edges collapsed in the process. All fire here so every door is consistent.
@@ -805,35 +794,6 @@ export async function executeMerge(
   return { entity: survivor, deletedDuplicateEdgeIds: written.deletedDuplicateEdgeIds };
 }
 
-/** How many identities one collision read asks for: an `$or` of this many exact tuples. */
-const IDENTITIES_PER_READ = 200;
-
-/**
- * Which of the identities a relink would produce are already held by a stored edge — as `edgeIdFor` keys.
- *
- * Read by the five identity fields, never by `_id` (see the caller), and only for the tuples asked: the cost is the
- * relink's, not the survivor's degree. An absent kind is stored for an entity end, so an `entity` end matches both.
- */
-async function storedEdgeIdentities(
-  edgeColl: ReturnType<typeof col<EdgeDoc>>, spaceId: string,
-  relinked: ReadonlyArray<{ edge: EdgeDoc; from: string; to: string }>, session: ClientSession,
-): Promise<Set<string>> {
-  const kindIs = (k: string | undefined): unknown => (edgeEndpointKind(k as RefKind | undefined) === 'entity' ? { $in: [null, 'entity'] } : k);
-  // The dedupe the collision rule rests on: one key per identity, however many stored edges hold it.
-  const keys: Set<string> = new Set();
-  for (let i = 0; i < relinked.length; i += IDENTITIES_PER_READ) {
-    const tuples = relinked.slice(i, i + IDENTITIES_PER_READ).map(r => ({
-      from: r.from, to: r.to, label: r.edge.label, fromKind: kindIs(r.edge.fromKind), toKind: kindIs(r.edge.toKind),
-    }));
-    const found = await edgeColl
-      .find(asFilter<EdgeDoc>({ spaceId, $or: tuples }),
-        { session, projection: { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 } })
-      .toArray() as EdgeDoc[];
-    for (const e of found) keys.add(edgeIdFor(e.from, e.to, e.label, e.fromKind, e.toKind));
-  }
-  return keys;
-}
-
 /**
  * The merge's writes, inside its transaction: every class of record one bulk write and one seq block.
  *
@@ -845,7 +805,6 @@ async function relinkAndAbsorb(
 ): Promise<MergeWrite> {
   // A merge rewrites entities, edges, links and their tombstones. Its one caller runs it inside `admitSpaceWrite`, which asks the gate and counts
   // the whole merge, so an act standing for the space refuses it and an act registered mid-merge waits for it.
-  const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
 
   // The two versions this merge always takes — the survivor's update and the absorbed entity's tombstone — are taken FIRST, before anything is
   // written: a merge touching a record whose version is at the ceiling is refused whole (`record_version_at_ceiling`), and the refusal
@@ -855,72 +814,9 @@ async function relinkAndAbsorb(
   const absorbedVersions = await stampTombstones(spaceId, [absorbedTombstone], { session });
 
   // ── 1. Relink edges ──────────────────────────────────────────────────
-  // WITH their vectors: a re-key carries the stored document across, embedding included (`rekeyEdges`). The ids
-  // first, then the documents by id in chunks: inside the transaction a read must come back in one batch
-  // (`db/write-bound.ts`), and a hub's edges with their vectors are far more than one batch holds.
-  const absorbedIds = (await edgeColl
-    .find(relinkFilters(spaceId, absorbed._id).edges, { session, projection: { _id: 1 } })
-    .toArray() as Array<Pick<EdgeDoc, '_id'>>).map(e => e._id);
-  const absorbedEdges = [...(await readStoredById<EdgeDoc>(spaceCollection(spaceId, 'edges'), absorbedIds, 'carried', { session })).values()];
-  const relinked = absorbedEdges.map(edge => ({
-    edge,
-    from: edge.from === absorbed._id ? survivor._id : edge.from,
-    to: edge.to === absorbed._id ? survivor._id : edge.to,
-  }));
-
-  /*
-   * Collisions are found by IDENTITY — `(from, to, label, fromKind, toKind)`, keyed through `edgeIdFor` because it
-   * length-prefixes each part (a joined string collides two relationships the moment a label holds the separator).
-   * Never by the survivor edge's stored `_id`: an edge from before 3.6, or a peer's edge an earlier merge relinked
-   * in place, is stored under an id its identity does not derive, and looked up by id its collision is invisible.
-   *
-   * And only the identities the relink PRODUCES are looked up — at most `MERGE_MAX_RELINKS` — never the survivor's
-   * whole edge set (bundle-30 I8): a survivor hub of eighty thousand edges was read inside the transaction, past the
-   * one batch a read there may take, and the merge of a small entity into it failed as a store error.
-   */
-  const survivorKeys = await storedEdgeIdentities(edgeColl, spaceId, relinked, session);
-  const duplicates: EdgeDoc[] = [];
-  const edgesToRelink: typeof relinked = [];
-  for (const r of relinked) {
-    const postKey = edgeIdFor(r.from, r.to, r.edge.label, r.edge.fromKind, r.edge.toKind);
-    // A survivor edge holds this identity, or an absorbed edge relinked earlier in this loop now does: the
-    // absorbed one is a duplicate, deleted with its tombstone rather than relinked into the unique index.
-    if (survivorKeys.has(postKey)) duplicates.push(r.edge);
-    else { edgesToRelink.push(r); survivorKeys.add(postKey); }
-  }
-
-  // 1a. The duplicates: one delete, and their tombstones in one block, each carrying the seq of the edge it deletes.
-  await removeWithTombstones(spaceId, 'edges',
-    duplicates.map(e => ({ _id: e._id, type: 'edge' as const, deletedAt: now, originalSeq: e.seq })), { session });
-
-  /*
-   * 1b. RE-KEYED rather than `$set`, since 3.6. Relinking an endpoint changes what the edge IS, and its `_id` is
-   * derived from its identity — a `$set` left it under an id the identity no longer derived, and the next peer to
-   * create that relationship inserted and hit the unique index instead of converging. `rekeyEdges` owns the
-   * delete-and-insert, the tombstones, and the seq ordering that makes one safe on a synced collection.
-   *
-   * Where it declines (`null`) the endpoints are written IN PLACE, which is what this did before 3.6 and must
-   * still do: an edge a PEER authored is not moved (its copy would refuse our tombstone and hold two rows), and
-   * dropping the write would leave the edge pointing at the entity this merge deletes.
-   */
-  const moved = await rekeyEdges(spaceId, edgesToRelink.map(r => ({ existing: r.edge, next: { from: r.from, to: r.to } })),
-    { updatedAt: now }, [], session);
-  const inPlace = edgesToRelink.filter((_, i) => moved[i] === null);
-  if (inPlace.length > 0) {
-    // A relink moves `from`, and the write guard (`_functionalGuard`, cleared by `UNSET_GUARD`) is a function of `(from, label)`: it is DROPPED, never restamped, so a merge —
-    // which reports a functional breach and never refuses one — can never fail on the guard index (`Q-439`). The re-key above
-    // drops it inside `rekeyedRow`; this is the in-place twin, whoever authored the edge.
-    // A hub's count is the store's, so the write is sliced to one command each (`db/one-command.ts`), inside the one hold.
-    // `ordered: true` here and at the two writes below: they run in the merge's transaction, which the server aborts at the
-    // first error, so going on to the next slice would only send it into a dead transaction and bury the real failure.
-    const inPlaceVersions = await versionsFor(spaceId, inPlace.map(r => r.edge._id), { parts: ['edges'], session });
-    await withLandingStamp(spaceId, inPlaceVersions.map(v => localRow(v.version)), (patches) => writeInOneCommands(inPlace.map((r, i) => {
-      const updates: Record<string, unknown> = { updatedAt: now, ...patches[i]! };
-      if (r.edge.from === absorbed._id) updates['from'] = survivor._id;
-      if (r.edge.to === absorbed._id) updates['to'] = survivor._id;
-      return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: UNSET_GUARD } } };
-    }), (slice, { ordered }) => edgeColl.bulkWrite(asBulk<EdgeDoc>(slice), { ordered, session }), { ordered: true }), 'entity.merge.edge');
-  }
+  // The one relink (`brain/relink-references.ts`, shared with Review's fork resolve): duplicates deleted with their tombstones, the rest re-keyed, or
+  // written in place where a peer authored the edge. Its collision reads are bounded by `MERGE_MAX_RELINKS`, the bound the merge was refused at.
+  const { rekeyed, deletedDuplicateEdgeIds } = await relinkEdgesOfRecord(spaceId, { absorbedId: absorbed._id, survivorId: survivor._id }, { now, session });
 
   /*
    * ── 2. Relink FILE metadata: the face labels ──────────────────────────
@@ -953,41 +849,11 @@ async function relinkAndAbsorb(
   /*
    * ── 3. Relink LINK RECORDS ─────────────────────────────────────────────
    *
-   * On a space that has been through the link conversion — every space, at the boot after it is created — a link
-   * is how a fact, a chrono entry or a file names an entity. **A link is RE-KEYED, not updated**: its `_id` is
-   * derived from both endpoints (`linkIdFor`), so moving the `to` changes the identity. **The old id gets a
-   * TOMBSTONE**, or the next pull from any peer still holding it re-creates the link pointing at the deleted
-   * entity. An entity is only ever a `to` — nothing hangs off an entity — so there is no `from` half here.
-   *
-   * The survivor may ALREADY be linked from the same record: that row is kept as it is, author included, and only
-   * the absorbed one goes — two rows describing one connection is what the derived id exists to prevent, and
-   * overwriting the survivor's row would hand its authorship to whoever wrote the absorbed one.
+   * On a space that has been through the link conversion — every space, at the boot after it is created — a link is how a fact, a chrono entry or a
+   * file names an entity. An entity is only ever a `to` — nothing hangs off an entity — so there is no `from` half here: the one relink
+   * (`brain/relink-references.ts`) re-keys each link onto its new `to`, tombstones the old id and keeps a row the survivor already holds as it is.
    */
-  const linkColl = col<LinkDoc>(spaceCollection(spaceId, 'links'));
-  const affectedLinks = await linkColl
-    .find(relinkFilters(spaceId, absorbed._id).links, { session })
-    .toArray() as LinkDoc[];
-  if (affectedLinks.length > 0) {
-    const linkMoves = affectedLinks.map(link => ({ link, newId: linkIdFor(link.from, link.fromKind, survivor._id, 'entity') }));
-    const held = await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'links'), linkMoves.map(m => m.newId), { _id: 1 }, { session });
-    const fresh = linkMoves.filter(m => !held.has(m.newId));
-    // The old rows' tombstones BELOW the new rows' seqs — the re-key's order (`edge-rekey.ts`).
-    await removeWithTombstones(spaceId, 'links',
-      linkMoves.map(({ link }) => ({ _id: link._id, type: 'link' as const, deletedAt: now, originalSeq: link.seq })),
-      { session, filter: { spaceId } });
-    if (fresh.length > 0) {
-      // Stamped after the tombstones above, so every new row's version is above every tombstone's (the re-key's order, `edge-rekey.ts`).
-      const linkVersions = await versionsFor(spaceId, fresh.map(m => m.newId), { parts: ['links'], session });
-      await withLandingStamp(spaceId, linkVersions.map(v => localRow(v.version)), (patches) => writeInOneCommands(fresh.map(({ link, newId }, i) => ({
-        replaceOne: {
-          filter: { _id: newId, spaceId },
-          // `rekeyedRow`: a link under a NEW id is a record this instance wrote, stamped as nobody's delivery, with none of the old row's position.
-          replacement: rekeyedRow(link, { _id: newId, to: survivor._id, updatedAt: now, ...patches[i]! }),
-          upsert: true,
-        },
-      })), (slice, { ordered }) => linkColl.bulkWrite(asBulk<LinkDoc>(slice), { ordered, session }), { ordered: true }), 'entity.merge.link');
-    }
-  }
+  await relinkLinksOfRecord(spaceId, { absorbedId: absorbed._id, survivorId: survivor._id, kind: 'entity' }, { now, session });
 
   // ── 4. Update the survivor, delete the absorbed entity + its tombstone ──
   const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
@@ -998,11 +864,7 @@ async function relinkAndAbsorb(
   await entityColl.deleteOne(asFilter<EntityDoc>({ _id: absorbed._id, spaceId }), { session });
   await writeTombstone(spaceId, absorbedTombstone, absorbedVersions, session);
 
-  return {
-    seq,
-    rekeyed: moved.filter((m): m is EdgeRekey => m !== null),
-    deletedDuplicateEdgeIds: duplicates.map(e => e._id),
-  };
+  return { seq, rekeyed, deletedDuplicateEdgeIds };
 }
 
 // ── The door ───────────────────────────────────────────────────────────────

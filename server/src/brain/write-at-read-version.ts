@@ -41,9 +41,11 @@ export interface AtReadVersion extends VersionAllocation {
 export async function writeAtReadVersion<T>(
   spaceId: string, part: BrainCollection, id: string, ifMatchSeq: number | undefined,
   write: (at: AtReadVersion) => Promise<T | null>, holder: string,
+  /** A version of ANOTHER record the new one must also be above (Review's fork resolve: the parent is stamped above both versions). */
+  above?: number,
 ): Promise<T | null> {
   for (let attempt = 1; ; attempt++) {
-    const [stamp] = await versionsFor(spaceId, [id], { parts: [part] });
+    const [stamp] = await versionsFor(spaceId, [id], { parts: [part], ...(above !== undefined ? { known: new Map([[id, above]]) } : {}) });
     const at = stamp!;
     const done = await withLandingStamp(spaceId, [localRow(at.version)], ([patch]) => write({ ...at, patch: patch! }), holder);
     if (done !== null) return done;

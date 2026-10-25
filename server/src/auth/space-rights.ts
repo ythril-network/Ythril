@@ -172,6 +172,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // A files-only token can read the media queue and must not read a listing of knowledge record ids.
   { route: '/api/brain/spaces/:spaceId/embedding-queue/records', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/records/retry', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
+  // Review's forks (bundle-81): the list is a view of the space's facts, so a reader may see it; the resolve rewrites one fact and deletes another, so it is a write.
+  { route: '/api/brain/spaces/:spaceId/forks', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/forks/:forkId/resolve', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/files', method: 'PATCH', area: 'files', needs: 'write', scope: 'path' },
   { route: '/api/files/:spaceId/mkdir', method: 'POST', area: 'files', needs: 'write', scope: 'path' },
   // These three were UNGOVERNED, and invisible to `every-space-route-has-an-area` because the gate strips block
@@ -347,6 +350,8 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'space_reembed', area: 'knowledge', needs: 'admin' },
   { tool: 'list_embed_jobs', area: 'knowledge', needs: 'read' },
   { tool: 'retry_embed_record', area: 'knowledge', needs: 'write' },
+  { tool: 'list_forks', area: 'knowledge', needs: 'read' },
+  { tool: 'resolve_fork', area: 'knowledge', needs: 'write' },
   { tool: 'retry_embed_media', area: 'files', needs: 'write' },
   { tool: 'read_file', area: 'files', needs: 'read' },
   { tool: 'write_file', area: 'files', needs: 'write' },

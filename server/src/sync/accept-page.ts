@@ -63,7 +63,7 @@ import { MAX_FORK_DEPTH } from '../api/sync/_shared.js';
 import type { LinkageCheck } from './linkage-check.js';
 import { writeArrivals, warnArrivalsNotStored, convergeFileStamps, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
 import { admitArrivals } from './arrival-shape.js';
-import { planArrivals, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
+import { planArrivals, MAX_FORKS_PER_RECORD, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from './replicated-families.js';
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from './push-reads.js';
 import { watchArrivals, recordedOf, sayRecorded, summarise, type ArrivalWatch, type RecordedSummary } from './arrival-recording.js';
@@ -300,9 +300,9 @@ export async function acceptArrivingPage(
      */
     // A fork refused at its cap was admitted, so its parsed document is there.
     const droppedForks = (results.facts.docs as Arrived[]).filter((_, i) => results.facts.verdicts[i] === 'forkRefused').map(d => d._id);
-    warnArrivalsNotStored(where, spaceId, 'facts', 'DROPPED — divergent content at an equal seq whose fork chain or '
-      + `fan-out is at its cap (MAX_FORK_DEPTH=${MAX_FORK_DEPTH}); the sender will not offer them again. Resolve the `
-      + 'fork chain to accept them', droppedForks);
+    warnArrivalsNotStored(where, spaceId, 'facts', 'DROPPED — divergent content at an equal seq whose fork chain is '
+      + `${MAX_FORK_DEPTH} deep or whose record already has ${MAX_FORKS_PER_RECORD} forks; the sender will not offer them again. `
+      + 'Resolve a fork of that record in Review to make room', droppedForks);
     // What landed is handed to the door's linkage check, which checks it once the door's transfer is whole — never
     // here, page by page, where a target later in the same transfer would be recorded missing (bundle-30 I8).
     for (const { key, doc } of landed) opts.linkage.add(key, doc);

@@ -93,10 +93,17 @@ export function seqGuard(id: string, seq: number | undefined): Record<string, un
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 /**
- * The fork cap, twice over: a fork chain may be this deep, and one parent may have this many forks. It lives
- * with the planner that enforces it on every door; `api/sync/_shared.ts` re-exports it.
+ * How deep a fork chain may be: a fork of a fork of a fork, counted in `forkOf` hops. It lives with the planner that enforces it on every door;
+ * `api/sync/_shared.ts` re-exports it.
  */
 export const MAX_FORK_DEPTH = 10;
+
+/**
+ * How many forks one record may have: the next differing copy of a record already at this many is dropped (`forkRefused`, logged and counted), so
+ * Review's list is bounded per record. ONE constant for the planner that enforces it, the fork list that reports it (`maxForksPerRecord`, which the
+ * client's "at the limit" notice reads) and the tool description that tells a caller, so none of them holds a number of its own.
+ */
+export const MAX_FORKS_PER_RECORD = 10;
 
 /**
  * The indexes on a space's FACTS collection the fork caps read through — declared once, as `LINK_INDEXES` is, and
@@ -467,7 +474,7 @@ export function tombstoneGoverns(issuer: string | undefined, author: string | un
  * ## The fork caps, on every door
  *
  * A fork is refused (`forkRefused`) when the parent's chain is already `MAX_FORK_DEPTH` deep, or when the parent
- * already has `MAX_FORK_DEPTH` forks — stored ones and the ones this page is creating together, because a cap
+ * already has `MAX_FORKS_PER_RECORD` forks — stored ones and the ones this page is creating together, because a cap
  * that counts only stored siblings lets one page past it by any amount. A fork whose derived id is already stored
  * (or already created by this page) is that same fork: `forked`, with no second write and no cap consulted.
  */
@@ -540,7 +547,7 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
         if (input.existingForks?.has(forkId) || newForks.has(forkId)) {
           plan.verdicts[i] = 'forked'; plan.forkIds[i] = forkId; return;
         }
-        if (forkDepth(doc._id, parentOf) >= MAX_FORK_DEPTH || siblingsOf(doc._id) >= MAX_FORK_DEPTH) {
+        if (forkDepth(doc._id, parentOf) >= MAX_FORK_DEPTH || siblingsOf(doc._id) >= MAX_FORKS_PER_RECORD) {
           plan.verdicts[i] = 'forkRefused'; return;
         }
         newForks.add(forkId);

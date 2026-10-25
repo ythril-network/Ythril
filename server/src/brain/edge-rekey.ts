@@ -161,6 +161,10 @@ export interface EdgeMove {
  * Every caller runs this inside a transaction under the horizon hold (`inHeldTransaction`), because the seq
  * block's release here precedes the commit.
  *
+ * @param moveForeign move an edge a PEER authored as well (default: not, see below). Only Review's fork resolve asks it: the fork an edge names is
+ *          deleted whoever authored the edge, so leaving the edge under the fork's id would leave it pointing at nothing, and the cost the rule
+ *          below names — a peer that refuses this instance's tombstone keeps the old row beside the new one — is the cost of the fork's own
+ *          tombstone, which a peer that authored the fork refuses in the same way.
  * @returns one entry per move, in order: the re-key, or `null` where the edge stays under its id — the derived id
  *          is the one it already has, or a PEER authored it (see below). The caller writes those in place.
  */
@@ -171,6 +175,7 @@ export async function rekeyEdges(
   alsoUnset: readonly string[] = [],
   session?: ClientSession,
   functionalGuard?: string,
+  { moveForeign = false }: { moveForeign?: boolean } = {},
 ): Promise<Array<EdgeRekey | null>> {
   // Refused before the plan is read; the write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'edges');
@@ -217,7 +222,7 @@ export async function rekeyEdges(
      * smuggled in behind a bug fix.
      */
     // Only a row written HERE moves: the one predicate (`sync/written-here.ts`), delivery first, so a peer's row that names this instance as author stays put.
-    if (!isWrittenHere(existing)) return null;
+    if (!moveForeign && !isWrittenHere(existing)) return null;
     return { existing, from, to, label, newId };
   });
   const moving = planned.filter((m): m is NonNullable<typeof m> => m !== null);

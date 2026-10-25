@@ -761,8 +761,21 @@ when you click it. See the integration guide's graph page, *Bodies in one call*.
 > no index to rebuild. Open one of those spaces to reindex it.
 
 The **Review** tab inside a space's Brain is that space's record-QA queue, split into sub-tabs:
-**Duplicates**, **Contradictions** and **Suggestions**. (Contradictions needs an NLI model configured
+**Duplicates**, **Contradictions**, **Forks** and **Suggestions**. (Contradictions needs an NLI model configured
 under **Settings → Media Processing**; until the scanner has run, the tab explains what it needs.)
+
+**Forks** lists the facts that two instances wrote *differently* while both held the same version of them. Ythril
+does not pick one silently: it keeps both, the second as a **fork** beside the first, and this tab is where you choose.
+Each card shows the fork beside the fact it forks with the differing words marked in place (words only in the fork,
+words only in the other version; each mark also says so in words, so colour is never the only signal), who wrote each
+version and when, and how many edges and links point at the fork. **Show both versions in full** opens both texts whole.
+**Keep this version** puts the fork's text, tags, description, properties and type on the fact; **Keep the other
+version** leaves the fact as it is. Both ask for a confirmation that names what is deleted, and both do the same three things:
+the fact is saved as a new edit of its own, newer than both versions, so any peer holding either one takes it; the fork is
+deleted and peers are told; and every edge and link that pointed at the fork points at the fact instead. A fact may hold
+only so many forks; the card says when it is at that number, because the next differing copy of it would be dropped until one
+is resolved (the Server Log names the dropped record). A fork whose original has been deleted is not listed: it is an ordinary
+fact now. The same two actions are the API's `GET`/`POST …/forks` routes and the `list_forks` and `resolve_fork` tools.
 
 **Suggestions** is the space's completeness report, worked as a queue. A space is "set up" long before
 it is *usable* — schemas declare types nothing instantiates and properties nothing fills, entities pile

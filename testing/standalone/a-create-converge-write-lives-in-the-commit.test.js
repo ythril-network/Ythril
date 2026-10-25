@@ -90,6 +90,9 @@ const EXEMPT = {
   // Re-keyed (bundle-30, Q-107 part 3a): the merge's writes moved into its transaction's callback, and the re-key's
   // into the one batched implementation `rekeyEdge` now calls.
   'server/src/brain/merge.ts:relinkAndAbsorb': 'merge: rewrites a survivor and retires the merged records',
+  // The edge and link halves of the merge's relink, moved out so Review's fork resolve calls the same code (`brain/relink-references.ts`).
+  'server/src/brain/relink-references.ts:relinkEdgesOfRecord': 'relink: moves the edges of a record that is deleted in favour of another onto it, in place where the re-key declines; never a create or a converge',
+  'server/src/brain/relink-references.ts:relinkLinksOfRecord': 're-key of the links of a record that is deleted in favour of another: delete + insert under the new id, never a create or a converge',
   'server/src/brain/edge-rekey.ts:rekeyEdges': 're-key: moves an edge to a new identity, delete + insert',
   'server/src/files/rekey-rows.ts:rekeyRows': 're-key of the rows of a file move (file rows, derived rows, jobs): delete + insert in the caller transaction, never a create or a converge',
   'server/src/brain/chrono-redaction.ts:redactLapsedChronoContent': 'redaction: a retention schedule clears content',

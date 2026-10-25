@@ -12,7 +12,7 @@ import { listEmbedJobs, getEmbedJobCounts } from './embed-queue.js';
 import { pageAcrossMembers } from '../spaces/page-across-members.js';
 import { PROXY_PAGE_CEILING } from './query.js';
 import type { BrainEmbedJobDoc } from '../config/types.js';
-import { limitRefusal } from '../util/strict-limit.js';
+import { limitRefusal, skipRefusal } from '../util/strict-limit.js';
 
 /** The page size when the caller names none. */
 export const DEFAULT_JOB_PAGE = 50;
@@ -59,9 +59,8 @@ export async function embedJobsPage(
   // The one sentence a caller reads for a `limit` out of bounds (`util/strict-limit.ts`); `Number.isInteger` is false for a non-number.
   const limitError = limit === undefined ? null : limitRefusal(limit as number, MAX_JOB_PAGE);
   if (limitError) return { ok: false, error: limitError };
-  if (skip !== undefined && (!Number.isInteger(skip) || (skip as number) < 0)) {
-    return { ok: false, error: 'skip must be a non-negative integer' };
-  }
+  const skipError = skip === undefined ? null : skipRefusal(skip);
+  if (skipError) return { ok: false, error: skipError };
   const effectiveLimit = (limit as number | undefined) ?? DEFAULT_JOB_PAGE;
   const effectiveSkip = (skip as number | undefined) ?? 0;
 

@@ -125,7 +125,7 @@ What you CAN control, and where:
   BOTH doors, it adds back the three RECORD fields a result carries for the
   system: matchedText (the pre-embedding source string -- for a file chunk, the
   passage a second time), embeddingModel (identical for every record in a
-  space), and seq (a sync counter that is not an input to any tool). It is
+  space), and seq (a record's version, which sync compares and no tool takes as input). It is
   RECURSIVE: a traverse answer's _graph nodes and edges follow it at every
   depth. Turn it on to see WHICH TEXT was embedded, then turn it off.
 

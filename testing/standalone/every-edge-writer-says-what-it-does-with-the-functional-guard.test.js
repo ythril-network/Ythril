@@ -54,8 +54,9 @@ const WRITERS = {
     { marker: 'stamp', why: 'a relabel moves the edge to a new identity: the row is stamped for its NEW label, after the re-key helper drops the old marker' },
   'server/src/brain/edges.ts:updateEdgeById':
     { marker: 'stamp', why: 'both relabel branches (the re-key and the in-place peer-authored one) set or unset the marker in the same write as the label' },
-  'server/src/brain/merge.ts:relinkAndAbsorb':
-    { marker: 'drop', why: 'a merge relinks from/to: the re-key drops the marker and the in-place relink only $unsets it, so a merge never fails on it' },
+  // Moved from `merge.ts:relinkAndAbsorb` (bundle-81 slice I4): the relink is shared with Review's fork resolve.
+  'server/src/brain/relink-references.ts:relinkEdgesOfRecord':
+    { marker: 'drop', why: 'a relink moves from/to: the re-key drops the marker and the in-place relink only $unsets it, so a merge or a fork resolve never fails on it' },
   'server/src/sync/arrivals.ts:writeArrivals':
     { marker: 'carry-if-unchanged', why: 'a peer arrival never brings a marker; the replacement keeps this instance\'s own only while from and label are the stored ones' },
 

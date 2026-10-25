@@ -117,6 +117,8 @@ export async function updateFact(
   ifMatchSeq?: number,
   /** See `saveFact`'s: the classification, so a door never re-derives it for presentation. */
   onValidation?: (check: UpdateValidation) => void,
+  /** A version the edit must be stamped above besides the stored one: the fork Review resolves, whose version the parent's new one outranks. */
+  aboveVersion?: number,
 ): Promise<FactDoc | null> {
   // Refused before anything is read; the store write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'facts');
@@ -223,7 +225,7 @@ export async function updateFact(
       asUpdate<FactDoc>(updateOp),
       { returnDocument: 'before' },
     );
-  }, 'fact.update')) as FactDoc | null;
+  }, 'fact.update', aboveVersion)) as FactDoc | null;
   brainWriteSeqTotal
     .labels({
       collection: 'facts',

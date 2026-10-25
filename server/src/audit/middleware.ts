@@ -99,6 +99,10 @@ export const ROUTE_RULES: RouteRule[] = [
   // up, and the snapshot is the only place the failure it was retried FROM survives: a successful retry clears
   // `lastError`, so without this row the reason the job failed is gone the moment someone fixes it.
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/embedding-queue\/records\/retry$/, operation: 'brain.retry_embedding', spaceGroup: 1 },
+  // Review's forks (bundle-81): the list is a read of the space's records, the resolve deletes one of them and rewrites its parent, so it is the act an
+  // operator is asked about afterwards ("who kept which text"). The entry names the fork, which is the record that goes.
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/forks$/,            operation: 'fork.list',     spaceGroup: 1, read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/forks\/([^/]+)\/resolve$/, operation: 'fork.resolve', spaceGroup: 1, entryGroup: 2 },
 
   // ── Space operations ─────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/spaces$/,                                  operation: 'space.create' },

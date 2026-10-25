@@ -191,7 +191,9 @@ describe('an identity change is re-keyed, and both paths do it', () => {
      */
     // Re-anchored (bundle-30, `Q-107` part 3a): the relink is batched in `relinkAndAbsorb` through `rekeyEdges`,
     // and the in-place write takes only the moves the re-key returned `null` for — the same order, by the batch.
-    const loop = bodyOf(src('server/src/brain/merge.ts'), 'relinkAndAbsorb');
+    // Re-anchored (bundle-81 slice I4): the relink moved out of the merge into `brain/relink-references.ts`, which the fork resolve shares; the merge calls it.
+    assert.match(bodyOf(src('server/src/brain/merge.ts'), 'relinkAndAbsorb'), /relinkEdgesOfRecord\(/, 'the merge no longer relinks its edges through the shared relink');
+    const loop = bodyOf(src('server/src/brain/relink-references.ts'), 'relinkEdgesOfRecord');
     const rekeyAt = loop.indexOf('rekeyEdges(');
     const setAt = loop.search(/updates\['from'\]|updates\['to'\]/);
     assert.ok(rekeyAt > 0, 'a relinked edge must move onto the id its new identity derives');

@@ -54,8 +54,12 @@ describe('the re-key is one implementation, not one per path', () => {
       'the re-key must be a named function, not an inline delete-and-insert at each call site');
     assert.match(bodyOf(src('server/src/brain/edge-rekey.ts'), 'rekeyEdge'), /rekeyEdges\(/,
       'the single-edge re-key is a second implementation instead of a call to the one');
-    assert.match(src('server/src/brain/merge.ts'), /rekeyEdges\(/,
-      'merge still mutates an endpoint in place, so a relinked edge keeps an id its identity does not derive');
+    // Re-anchored (bundle-81 slice I4): the merge's edge relink is `relinkEdgesOfRecord` (`brain/relink-references.ts`, shared with the fork
+    // resolve), which is what calls `rekeyEdges`; the merge calls it.
+    assert.match(bodyOf(src('server/src/brain/relink-references.ts'), 'relinkEdgesOfRecord'), /rekeyEdges\(/,
+      'the relink still mutates an endpoint in place, so a relinked edge keeps an id its identity does not derive');
+    assert.match(bodyOf(src('server/src/brain/merge.ts'), 'relinkAndAbsorb'), /relinkEdgesOfRecord\(/,
+      'merge no longer relinks its edges through the one relink');
     assert.match(bodyOf(src('server/src/brain/edges.ts'), 'updateEdgeById'), /rekeyEdge\(/,
       'a label change still leaves the edge under its old id');
     /*
@@ -168,13 +172,20 @@ describe('the delete half leaves a tombstone a peer can act on', () => {
     const exec = bodyOf(merge, 'executeMerge');
     const commitAt = exec.indexOf('inHeldTransaction(');
     assert.ok(commitAt > 0, 'merge no longer runs its transaction through inHeldTransaction — re-point this gate');
-    assert.match(exec.slice(commitAt), /enqueue\w*EmbedJobs?\(/,
-      'merge queues the embedding before the transaction has committed, or not at all');
-    assert.match(exec.slice(commitAt), /retireEmbedJobs?\(/, 'merge never retires the jobs of the old edge ids');
-    assert.doesNotMatch(exec.slice(0, commitAt), /enqueue\w*EmbedJobs?\(|retireEmbedJobs?\(/,
+    // Re-anchored (bundle-81 slice I4): what follows the commit is `settleRekeyedEmbeds` (`brain/relink-references.ts`), the one place that
+    // retires the old ids' jobs and enqueues the new ones, so a caller cannot run the transaction and forget the queue.
+    const relinkModule = src('server/src/brain/relink-references.ts');
+    const settle = bodyOf(relinkModule, 'settleRekeyedEmbeds');
+    assert.match(exec.slice(commitAt), /settleRekeyedEmbeds\(/,
+      'merge settles the embed queue before the transaction has committed, or not at all');
+    assert.match(settle, /enqueue\w*EmbedJobs?\(/, 'the queue work after a relink never enqueues the re-keyed edges');
+    assert.match(settle, /retireEmbedJobs?\(/, 'the queue work after a relink never retires the jobs of the old edge ids');
+    assert.doesNotMatch(exec.slice(0, commitAt), /enqueue\w*EmbedJobs?\(|retireEmbedJobs?\(|settleRekeyedEmbeds\(/,
       'merge touches the queue before its transaction, for edges it has not moved yet');
-    assert.doesNotMatch(bodyOf(merge, 'relinkAndAbsorb'), /enqueue\w*EmbedJobs?\(|retireEmbedJobs?\(/,
-      'merge still touches the queue inside the transaction, which is what wakes the worker too early');
+    for (const inside of [bodyOf(merge, 'relinkAndAbsorb'), bodyOf(relinkModule, 'relinkEdgesOfRecord'), bodyOf(relinkModule, 'relinkLinksOfRecord')]) {
+      assert.doesNotMatch(inside, /enqueue\w*EmbedJobs?\(|retireEmbedJobs?\(|settleRekeyedEmbeds\(/,
+        'the relink still touches the queue inside the transaction, which is what wakes the worker too early');
+    }
   });
 });
 
@@ -263,8 +274,9 @@ describe('the delete has to be one a PEER will actually apply', () => {
     // would leave the endpoint pointing at the absorbed entity.
     // Re-anchored (bundle-30): the relink is batched in `relinkAndAbsorb`, so the fallback is read from where the
     // re-key's answer is consumed — the moves it declined (`null`) — to the end of the edge phase.
-    const relink = bodyOf(src('server/src/brain/merge.ts'), 'relinkAndAbsorb');
-    const body1b = relink.slice(relink.indexOf('rekeyEdges('), relink.indexOf('const fileColl'));
+    // Re-anchored (bundle-81 slice I4): the edge relink is `relinkEdgesOfRecord`, so the phase is that function from `rekeyEdges(` to its end.
+    const relink = bodyOf(src('server/src/brain/relink-references.ts'), 'relinkEdgesOfRecord');
+    const body1b = relink.slice(relink.indexOf('rekeyEdges('));
     assert.match(body1b, /=== null/, 'the moves the re-key declined are never picked out for the in-place write');
     assert.match(body1b, /updateOne|\$set/,
       'a relink the re-key declines has no fallback, so the absorbed endpoint survives the merge');

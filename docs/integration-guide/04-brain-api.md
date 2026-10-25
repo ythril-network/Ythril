@@ -476,6 +476,11 @@ what a read never sends, retiring a record from semantic search, and partial upd
 `deleteFields` are in **[Write & Read Semantics](04f-write-semantics.md)** — they apply to every
 brain record, not only to facts.
 
+**A record's `seq` is its version, and a list's default order is not by it.** An edit stores a higher `seq` than the one it read, and an edit whose read version moved
+meanwhile reads again and writes above it. A write whose next version would pass the ceiling is `409` `record_version_at_ceiling` on every create, update, delete and merge
+route and tool, with nothing written. Every brain list (facts, entities, edges, chrono, `query`) defaults to **landing order**, the order records arrived on this instance,
+newest first; `sort` and `dir` choose another and `skip` pages through whichever is used ([Write & Read Semantics](04f-write-semantics.md#optimistic-concurrency-if-match)).
+
 ### Read one fact by id
 
 There is no `GET .../facts/:id` (removed in 5.0 — port reads to `filter`). One record is a predicate over
@@ -579,6 +584,51 @@ DELETE /api/brain/spaces/:spaceId/facts/:id
 Deleting a fact does not delete its forks — the facts sync created when a peer sent a different text for it at the
 same version (they carry `forkOf` naming this fact). To erase a text everywhere it was kept, list them first with
 [`POST /api/filter`](04d-brain-ops-api.md#structured-query-read-only) on `facts`, `{"forkOf": "<id>"}`. A fork is its own record, deleted like any other fact.
+
+### Forks: list them and keep one side
+
+Two copies of a fact that carry one version and different text are both kept: the second as a **fork** of the first (its `forkOf` names the
+first, its **parent**), rather than one silently replacing the other. Two routes read and settle them; the same two capabilities are the MCP tools
+`list_forks` and `resolve_fork`, with these parameters and these refusals.
+
+```http
+GET /api/brain/spaces/:spaceId/forks?limit=25&skip=0
+```
+
+`limit` runs from 1 to 200 (default 25) and a value outside that is `400 limit must be an integer from 1 to 200`, not a smaller page; `skip` is a
+non-negative integer. Newest first (landing order).
+
+**Response** `200` `{ forks, total, skip, limit, maxForksPerRecord }`. `total` counts every fork of the space whose parent is still stored (a fork whose parent
+is gone is an ordinary fact and is not listed). `maxForksPerRecord` is how many forks one record may hold: a record at that many drops the next differing copy
+(logged and counted), so resolve one before another version can be kept. Each row of `forks`:
+
+| Field | |
+|---|---|
+| `forkId`, `parentId` | the two records |
+| `fork`, `parent` | each version as a reader compares them: `_id`, `type`, `fact`, `description`, `tags`, `properties`, `author`, `createdAt`, `updatedAt` |
+| `edgeCount`, `linkCount` | the edges (either end) and links (either side) that point at the fork: a resolve moves them to the parent |
+| `siblings` | how many forks the parent holds, this one included |
+
+```http
+POST /api/brain/spaces/:spaceId/forks/:forkId/resolve
+Content-Type: application/json
+
+{ "keep": "fork" }
+```
+
+`keep` is `"fork"` (the fork's `fact`, `tags`, `description`, `properties` and `type` replace the parent's) or `"parent"` (the parent's stay). Either way:
+
+- the **parent is written as a new edit of its own**, with a version above both the parent's and the fork's, so a peer holding either one takes this as the newer;
+- the **fork is deleted** and a tombstone is issued for it by this instance, so peers that accept its deletion are told;
+- every **edge and link that pointed at the fork points at the parent** instead (one the parent already has is not duplicated, and an edge is re-keyed onto the id its new endpoints derive).
+
+The parent is written first, so a failure part-way leaves the fork stored and the same call resolves it again; no text is lost to a half-done resolve.
+
+**Response** `200` `{ resolved: true, keep, forkId, parentId, parent, edgesRepointed, linksRepointed }`, `parent` being the stored parent without its vector.
+Refused: `400` for a `keep` that is neither side (`keep must be one of 'fork' or 'parent'`); `404` for an id that is not stored; `409` for a record that
+is not a fork, for a fork whose parent is no longer stored, or for a parent property whose name holds a dot (it cannot be removed by a path, so edit it first);
+and the write refusals of an ordinary edit (a schema violation, `record_version_at_ceiling`). A token needs `knowledge: read` to list and `knowledge: write` to resolve.
+Both are audited (`fork.list` as a read, `fork.resolve` naming the fork).
 
 ---
 

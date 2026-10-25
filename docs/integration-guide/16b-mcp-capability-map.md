@@ -62,6 +62,8 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `space_reindex` | `POST /api/space_reindex` · legacy: `POST /api/brain/spaces/:spaceId/reindex` | admin `knowledge` |
 | | `list_embed_jobs` | `POST /api/list_embed_jobs` · legacy: `GET /api/brain/spaces/:spaceId/embedding-queue/records` | read `knowledge` |
 | | `retry_embed_record` | `POST /api/retry_embed_record` · legacy: `POST /api/brain/spaces/:spaceId/embedding-queue/records/retry` | write `knowledge` |
+| | `list_forks` | `POST /api/list_forks` · legacy: `GET /api/brain/spaces/:spaceId/forks` | read `knowledge` |
+| | `resolve_fork` | `POST /api/resolve_fork` · legacy: `POST /api/brain/spaces/:spaceId/forks/:forkId/resolve` | write `knowledge` |
 | | `retry_embed_media` | `POST /api/retry_embed_media` · legacy: `POST /api/brain/spaces/:spaceId/embedding-queue/media/retry-failed` | write `files` |
 | **Files** | | | |
 | | `write_file` | `POST /api/write_file` · legacy: `POST /api/files/:spaceId` | write `files` |

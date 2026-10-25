@@ -6,6 +6,10 @@
 
 ### Create a Chrono Entry
 
+> **Versions and order.** A chrono entry's `seq` is its version: every create, update and delete stores a higher one than the entry read, and one whose next version would
+> pass the ceiling is `409` `record_version_at_ceiling` with nothing written. Redacting a lapsed entry's content stores no version. Chrono lists default to landing order, newest
+> arrival first. See [Brain API](04-brain-api.md#write--read-semantics).
+
 ```http
 POST /api/brain/spaces/:spaceId/chrono
 ```

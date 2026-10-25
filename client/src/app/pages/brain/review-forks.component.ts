@@ -5,7 +5,7 @@ import { ActiveLanguage } from '../../core/active-language';
 import { DateFormatService } from '../../core/date-format.service';
 import { formatList } from '../../core/list-format';
 import { PluralText } from '../../core/plural-text.service';
-import { MAX_FORKS_PER_RECORD, type ForkKeep, type ForkRow, type ForkVersion } from '../../core/forks.types';
+import { type ForkKeep, type ForkRow, type ForkVersion } from '../../core/forks.types';
 import { ModalDirective } from '../../shared/modal.directive';
 import { DIALOG_STYLES } from '../settings/dialog.styles';
 import { compareForkVersions, fieldSegments, wordDiff, type FieldDifference, type Segment } from './fork-diff';
@@ -105,9 +105,9 @@ const QUOTE_CHARS = 90;
             <header class="l3-h">
               <span class="fk-id" [attr.title]="r.forkId">{{ 'brain.review.forks.forkOf' | transloco: { id: short(r.forkId) } }}</span>
               <span class="fk-type">{{ r.fork.type }}</span>
-              @if (capNoteFor(r)) { <span class="fk-cap">{{ 'brain.review.forks.atCap' | transloco: { cap: cap } }}</span> }
+              @if (capNoteFor(r)) { <span class="fk-cap">{{ 'brain.review.forks.atCap' | transloco: { cap: cap() } }}</span> }
             </header>
-            @if (capNoteFor(r)) { <p class="cap-note">{{ 'brain.review.forks.atCapBody' | transloco: { cap: cap } }}</p> }
+            @if (capNoteFor(r)) { <p class="cap-note">{{ 'brain.review.forks.atCapBody' | transloco: { cap: cap() } }}</p> }
             <dl class="l3-who">
               <div><dt>{{ 'brain.review.forks.thisVersion' | transloco }}</dt><dd>{{ written(r.fork) }}</dd></div>
               <div><dt>{{ 'brain.review.forks.otherVersion' | transloco }}</dt><dd>{{ written(r.parent) }}</dd></div>
@@ -165,12 +165,13 @@ export class ReviewForksComponent {
 
   /** The forks to show, each beside its parent. */
   readonly rows = input.required<readonly ForkRow[]>();
+  /** The most forks one record may hold, as the server's list says it; null when it does not (no "at the limit" notice then). */
+  readonly cap = input<number | null>(null);
   /** A confirmation was confirmed: which fork, and which version to keep (`fork` is this version, `parent` the other). */
   readonly resolve = output<{ forkId: string; keep: ForkKeep }>();
 
   /** The fork whose keep action is awaiting its confirmation. */
   protected readonly pending = signal<{ row: ForkRow; keep: ForkKeep } | null>(null);
-  protected readonly cap = MAX_FORKS_PER_RECORD;
 
   protected short(id: string): string { return id.slice(0, 8); }
 
@@ -182,7 +183,8 @@ export class ReviewForksComponent {
 
   /** The parent holds as many forks as it may: said on the first of its forks in the list only, so the notice is not repeated per row. */
   protected capNoteFor(row: ForkRow): boolean {
-    if (row.siblings < MAX_FORKS_PER_RECORD) return false;
+    const cap = this.cap();
+    if (cap === null || row.siblings < cap) return false;
     const first = this.rows().find(r => r.parentId === row.parentId);
     return first?.forkId === row.forkId;
   }

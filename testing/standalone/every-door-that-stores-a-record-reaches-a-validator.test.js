@@ -194,6 +194,14 @@ const EXEMPT = {
   'server/src/brain/chrono-redaction.ts:redactLapsedChronoContent':
     'the retention sweep REMOVES the content of a chrono entry whose window passed and stamps the redaction marks: no caller-chosen '
     + 'property is written (it is reached from the boot walk, which a setup route starts)',
+  // Review's fork resolve (bundle-81 slice I4) points the edges of a fork at its parent: the stored edge, carried across under the id its new
+  // endpoints derive. The parent it writes is a fact edit through `updateFact`, which validates (the door's validator of its own kind).
+  'server/src/brain/relink-references.ts:relinkEdgesOfRecord':
+    'moves the stored edges of a record that is deleted in favour of another onto it, in place where the re-key declines: only `from`/`to` change, '
+    + 'no caller-chosen property is written, and an edge keeps the properties it was validated with',
+  'server/src/brain/edge-rekey.ts:rekeyEdges':
+    'moves a stored edge to the id its endpoints derive: the document is carried across, so no caller-chosen property is written; the doors that '
+    + 'change an edge\'s label or endpoints validate it themselves before they reach this',
   'server/src/files/rekey-rows.ts:rekeyRows':
     'moves the derived rows of a FILE to a new path (a file move): a re-key of rows no door authors, whatever collection the '
     + 'caller names; it writes no entity, edge, fact or chrono property',
