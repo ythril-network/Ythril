@@ -194,3 +194,37 @@ describe('the declared MCP/REST gap is real in both directions', () => {
     assert.match(src, /structuredContent/, 'the map must ride in structuredContent, not only in prose');
   });
 });
+
+/**
+ * Q-624: a capability that exists on both doors takes the same PARAMETERS on both, which this file's cases above do not read at all.
+ *
+ * They compare which capabilities exist, so `resolve_fork` and its route could differ in every parameter and this file would stay green:
+ * the five the resolve now takes (`kind`, `forkId`, `keep`, `ifMatchSeq`, `ifMatchParentSeq`, all required, design rev 4 section 10) and the `kind`
+ * the list takes are exactly the "parameter added to one surface alone" `CLAUDE.md` names. The names are compared here, against the schema
+ * `brain/forks.ts` exports for the door (`ForkListParams`, `ForkResolveParams`: the one validator both doors share), derived from the module
+ * rather than from the route, and the bounds are `a-tool-and-its-route-agree-on-bounds`'s. The five names are the design's own words: a
+ * fixture of the rule, not a derivation of it.
+ */
+describe('the fork capability takes the same parameters on both doors (Q-624)', () => {
+  const RESOLVE = ['kind', 'forkId', 'keep', 'ifMatchSeq', 'ifMatchParentSeq'];
+  const spaceless = tool => Object.keys((typeof tool.inputSchema === 'function'
+    ? tool.inputSchema({ requiredSpace: { type: 'string' }, optionalSpace: { type: 'string' } }) : tool.inputSchema).properties ?? {})
+    .filter(k => k !== 'space').sort();
+
+  it('resolve_fork takes exactly the five, and ForkResolveParams declares exactly the same', async () => {
+    const { ForkResolveParams } = await import('../../server/dist/brain/forks.js');
+    const tool = ALL_TOOLS.find(t => t.name === 'resolve_fork');
+    assert.ok(tool, 'resolve_fork is not registered');
+    assert.deepEqual(spaceless(tool), [...RESOLVE].sort(), 'resolve_fork does not take the five resolve parameters');
+    assert.deepEqual(Object.keys(ForkResolveParams.shape).sort(), [...RESOLVE].sort(),
+      'the door schema both doors validate the resolve with does not declare the five');
+  });
+
+  it('list_forks takes skip, limit and kind, and ForkListParams declares the same three', async () => {
+    const { ForkListParams } = await import('../../server/dist/brain/forks.js');
+    const tool = ALL_TOOLS.find(t => t.name === 'list_forks');
+    assert.ok(tool, 'list_forks is not registered');
+    assert.deepEqual(spaceless(tool), ['kind', 'limit', 'skip']);
+    assert.deepEqual(Object.keys(ForkListParams.shape).sort(), ['kind', 'limit', 'skip']);
+  });
+});
