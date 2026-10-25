@@ -158,9 +158,9 @@ describe('a redacted copy is the same copy', { skip }, () => {
     await rdoor.coll(SR, 'chrono').insertOne(doc('c', 5, { title: 'mine' }));
     await rdoor.raiseVersionTo(SR, 5);
     // The sender's copy lost `description` to ITS redaction after the id was derived from it: the id cannot be recomputed from what is left.
-    const gone = { ...doc('redacted-fork', 5, { title: 'theirs', forkOf: 'c', contentRedacted: true, contentRedactedAt: REDACTED_AT }) };
+    const gone = { ...doc('redacted-fork', 5, { title: 'theirs', forkOf: 'c', forkAt: 5, contentRedacted: true, contentRedactedAt: REDACTED_AT }) };
     delete gone.description;
-    const bare = doc('bare-bad-fork', 5, { title: 'theirs again', forkOf: 'c' });
+    const bare = doc('bare-bad-fork', 5, { title: 'theirs again', forkOf: 'c', forkAt: 5 });
     const r = await batch([gone, bare]);
     assert.equal(r.code, 200, JSON.stringify(r.body));
     const stored = await rdoor.coll(SR, 'chrono').find({ forkOf: 'c' }).sort({ _id: 1 }).toArray();

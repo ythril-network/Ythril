@@ -44,7 +44,7 @@ import { join } from 'node:path';
 import { moduleIndex } from './_call-graph.mjs';
 import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf } from './_structural-window.mjs';
+import { bodyOf, statementFrom } from './_structural-window.mjs';
 import { requireSpaceIndexDeclaration } from './_space-index-declaration.mjs';
 
 const code = (file) => stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
@@ -143,7 +143,8 @@ describe('every forking family is handled where a family is handled', () => {
     const src = code('server/src/brain/forks.ts');
     const at = src.indexOf('export const FORK_KINDS');
     assert.ok(at > -1, 'brain/forks.ts does not export FORK_KINDS');
-    assert.match(src.slice(at, at + 700), /FORKING_FAMILIES/, 'FORK_KINDS is written out instead of derived from FORKING_FAMILIES');
+    // Bounded by the declaration itself (its statement), not by a guessed number of characters after the anchor.
+    assert.match(statementFrom(src, at, 'FORK_KINDS'), /FORKING_FAMILIES/, 'FORK_KINDS is written out instead of derived from FORKING_FAMILIES');
     const { FORK_KINDS } = await import('../../server/dist/brain/forks.js');
     const rows = Array.isArray(FORK_KINDS) ? FORK_KINDS.length : FORK_KINDS.size ?? Object.keys(FORK_KINDS).length;
     assert.equal(rows, FORKING_FAMILIES.length, 'FORK_KINDS holds another number of kinds than there are forking families');

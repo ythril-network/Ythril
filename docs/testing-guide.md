@@ -56,6 +56,8 @@ narrowed like that is recorded as a subset, never as the whole suite.
   needs ranking uses the stub embedder (`EMBEDDING_URL`), and no database test sets the model variables itself.
 - **instance**: declares `@needs-instance` in its header comment and drives a running Ythril. Runs one file at a time.
 
+A pure file may also declare `@ci-only` in its header comment (anchored to a header line, like `@needs-instance`). It stays a pure file: CI's `standalone-pure` job and `npm run test:standalone` run it, and only preflight's pure batches leave it out, for a test that is too slow, or too sensitive to a loaded machine, to run at every push (`every-server-entry-module-loads`, about 44 s, is the one today). `a-ci-only-test-runs-in-a-ci-job` holds that every `@ci-only` file is a pure file that a CI job runs, so the marker can never mean "runs nowhere".
+
 You do not choose the kind: write the file and the split reads it. `npm run test:standalone` refuses to start when
 `server/dist` is older than the server source (`--allow-stale` overrides it when you know the build is what you meant),
 because a test run against the build from two branches ago has cost real debugging time.

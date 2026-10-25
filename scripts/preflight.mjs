@@ -125,11 +125,12 @@ for (const [file, why] of BUILT_GATES) gate(file, why, file);
 // places for preflight and the suite to disagree about which gates exist — which is the one divergence
 // that makes a green preflight worthless.
 const standaloneSplit = splitStandalone();
-const { all: allStandalone, offline, offlinePure: pure, offlineDb } = standaloneSplit;
+const { all: allStandalone, offline, offlinePure: pure, offlineDb, ciOnly } = standaloneSplit;
 console.log(`
 ── standalone tests that need no running instance and no database (${pure.length} of ${allStandalone.length}; `
   + `${allStandalone.length - offline.length} declare @needs-instance and run in CI) ──`);
 console.log(`  ${offlineDb.length} database test files are not run here; CI's Full run runs them.`);
+console.log(`  ${ciOnly.length} file(s) declare @ci-only (too slow for every push); CI's standalone-pure job runs them.`);
 
 /*
  * DEFAULT CONCURRENCY — one worker per core — and the flag that was here is gone.
@@ -147,7 +148,7 @@ console.log(`  ${offlineDb.length} database test files are not run here; CI's Fu
  * CI's Full run runs them. `offlineRuns` is the plan `test:standalone` runs too; this keeps its pure batches only, and the
  * gate `a-preflight-runs-no-database-batch-and-static-is-never-a-push-pass` holds that for both modes.
  */
-const runs = offlineRuns(standaloneSplit).filter(r => r.kind === 'pure');
+const runs = offlineRuns(standaloneSplit, { ciOnly: false }).filter(r => r.kind === 'pure');
 let standaloneFailed = false;
 // Timing, through the shared helper: one destination per batch, the flags AFTER the plan's own args so the batch
 // budget and the cap stay about the files, and the recorder's credentials out of the children's environment.

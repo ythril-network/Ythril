@@ -68,7 +68,7 @@ import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTo
 import { watchArrivals, recordedOf, sayRecorded, summarise, type ArrivalWatch, type RecordedSummary } from './arrival-recording.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { assertPositionsReady } from './positions-ready.js';
-import { syncInvalidForksTotal } from '../metrics/registry.js';
+import { syncInvalidForksTotal, recordsFailingTheirSchema } from '../metrics/registry.js';
 
 type Arrived = Record<string, unknown> & ArrivalDoc;
 
@@ -168,6 +168,8 @@ export async function acceptArrivingPage(
         const tombType = TOMBSTONE_TYPE_OF[collection];
         const docs = items.map(s => s.doc);
         const stored = await readPushStored(spaceId, kind, docs);
+        // A stored copy compared at an equal seq that fails its own schema is hashed raw; counted, so an operator can see how many there are (design section 2).
+        for (const copy of stored.values()) if (copy.bodyHash && !copy.bodyHash.normalised) recordsFailingTheirSchema.inc({ family: kind });
         // One body hash per document per page: the candidate selection, the plan and the writer's read-back all ask it.
         const hashOf = bodyHashesOf(kind);
         const plan = planArrivals(docs, {

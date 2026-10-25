@@ -1456,6 +1456,19 @@ export const syncInvalidForksTotal = new Counter({
 });
 
 /**
+ * Stored copies of a record that failed their `Incoming*` schema when they were compared with an arriving copy at an equal seq, by family (Q-624, design
+ * section 2). Such a copy (a row `deleteFields` wrote with `description: null` before the fix, or one an old version stored) is hashed RAW, so it forks only when its
+ * raw body really differs; this is the count an operator reads to know how many there are. A gauge, as the design names it, that only rises within a process: it
+ * counts the failing copies the arrival path has MET since start, and one met again is counted again, since finding every such row would be a scan of every space.
+ */
+export const recordsFailingTheirSchema = new Gauge({
+  name: 'ythril_records_failing_their_schema',
+  help: 'Stored records met at an equal seq that fail their Incoming schema (hashed raw), by family, since process start',
+  labelNames: ['family'] as const,
+  registers: [register],
+});
+
+/**
  * A puller whose mark for a member is ABOVE that member's `head` (its settled cap less one): the peer's positions went backwards (a database restore
  * with the wall clock set back across a start that also lost its stored maximum). The puller forgets the receive mark and re-reads, sorting by id and
  * version (D-48): one count per forgotten mark, by network (rev 8 §4).
