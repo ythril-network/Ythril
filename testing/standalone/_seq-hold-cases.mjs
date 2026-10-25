@@ -203,6 +203,23 @@ export function holderCases(ctx, S) {
       run: async () => ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
         await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {}),
     }],
+    // The edge and link halves of the relink the merge and Review's fork resolve share (`brain/relink-references.ts`, bundle-81): each lands its rows under its own
+    // hold inside the caller's transaction. Driven through the merge: the seeded edge is a peer's, so the re-key declines it and it is written in place (the landing this
+    // case stalls), and a link row from the fact to the absorbed entity is re-keyed onto the survivor (the landing the next one stalls).
+    'server/src/brain/relink-references.ts:relinkEdgesOfRecord': [{
+      label: 'a merge\'s edge relink: the in-place write of a peer\'s edge, inside the merge\'s held transaction', collection: `${S}_edges`, lock: recordLock('edges', ED),
+      run: async () => ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
+        await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {}),
+    }],
+    'server/src/brain/relink-references.ts:relinkLinksOfRecord': [{
+      label: 'a merge\'s link relink: the re-keyed link row, inside the merge\'s held transaction', collection: `${S}_links`,
+      lock: () => idLock('links', ctx.mods.linkId.linkIdFor(F, 'fact', E1, 'entity'))(),
+      run: async () => {
+        await ctx.door.coll(S, 'links').insertOne(build.link(S, 'link-to-the-absorbed', 7, { from: F, fromKind: 'fact', to: E2, toKind: 'entity' }));
+        return ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
+          await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {});
+      },
+    }],
     // The repair (`sync/positions-owed.ts`): every row with no position takes a fresh clock position, one block per chunk, held until its write ends. The seeded rows carry
     // a version and no position, which is exactly what a 5.6 build leaves; the write of one fact's position stalls.
     'server/src/sync/positions-owed.ts:repairRows': [{
