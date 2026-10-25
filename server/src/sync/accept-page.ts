@@ -59,16 +59,16 @@ import { log, peerList, peerText } from '../util/log.js';
 import { versionsForRows } from '../util/version-stamp.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { TOMBSTONE_TYPE_OF } from '../config/types.js';
-import { MAX_FORK_DEPTH } from '../api/sync/_shared.js';
 import type { LinkageCheck } from './linkage-check.js';
 import { writeArrivals, warnArrivalsNotStored, convergeFileStamps, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
 import { admitArrivals } from './arrival-shape.js';
-import { planArrivals, MAX_FORKS_PER_RECORD, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
+import { planArrivals, bodyHashesOf, isForkingFamily, FORKING_FAMILIES, MAX_FORK_DEPTH, MAX_FORKS_PER_RECORD, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from './replicated-families.js';
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from './push-reads.js';
 import { watchArrivals, recordedOf, sayRecorded, summarise, type ArrivalWatch, type RecordedSummary } from './arrival-recording.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { assertPositionsReady } from './positions-ready.js';
+import { syncInvalidForksTotal } from '../metrics/registry.js';
 
 type Arrived = Record<string, unknown> & ArrivalDoc;
 
@@ -77,6 +77,11 @@ export interface AcceptedFamily {
   /** One per document handed in, in order: what sequential processing would have answered. */
   verdicts: ArrivalVerdict[];
   forkIds: Array<string | undefined>;
+  /**
+   * Admitted although the fork id could not be derived from the body (a legacy fact fork under its stored parent, a chrono fork a redaction took the
+   * bytes of): stored as an ordinary arrival, and counted so a peer's report of it reads as what it is.
+   */
+  unverifiable: boolean[];
   /** Why each `rejected` document was refused — the schema's, the shape rule's or the store's words. */
   reasons: Array<string | undefined>;
   /** Refused by the family's wire schema: a single route answers it in its own words. */
@@ -130,7 +135,7 @@ export async function acceptArrivingPage(
     for (const { payloadKey: key } of REPLICATED_FAMILIES) {
       const docs = page[key] ?? [];
       const res: AcceptedFamily = { verdicts: docs.map(() => 'rejected' as ArrivalVerdict), forkIds: docs.map(() => undefined),
-        reasons: docs.map(() => undefined), invalid: docs.map(() => false), docs: docs.map(() => undefined), recorded: docs.map(() => undefined) };
+        reasons: docs.map(() => undefined), invalid: docs.map(() => false), unverifiable: docs.map(() => false), docs: docs.map(() => undefined), recorded: docs.map(() => undefined) };
       results[key] = res;
       const { admitted, refused } = admitArrivals(key, docs);
       for (const r of refused) { res.reasons[r.index] = r.reason; res.invalid[r.index] = r.invalid; }
@@ -152,8 +157,9 @@ export async function acceptArrivingPage(
     const watches = new Map<PayloadKey, ArrivalWatch | null>();
     let failure: { err: unknown } | undefined;
     try {
+      // One read, as before: the arriving ids, and the parent each fork row names, because a fork row of a record whose tombstone is held is refused with it (D2).
       const tombstones = await readPageTombstones(spaceId, REPLICATED_FAMILIES
-        .filter(f => TOMBSTONE_TYPE_OF[f.collection] !== undefined).flatMap(f => sound[f.payloadKey].map(s => s.doc._id)));
+        .filter(f => TOMBSTONE_TYPE_OF[f.collection] !== undefined).flatMap(f => sound[f.payloadKey].flatMap(s => (s.doc.forkOf === undefined ? [s.doc._id] : [s.doc._id, s.doc.forkOf]))));
       const allowedTypes = door === 'push' ? getAllowedChronoTypes(getConfig().spaces.find(sp => sp.id === spaceId)?.meta) : undefined;
       for (const { payloadKey: key, collection } of REPLICATED_FAMILIES) {
         const items = sound[key];
@@ -162,13 +168,19 @@ export async function acceptArrivingPage(
         const tombType = TOMBSTONE_TYPE_OF[collection];
         const docs = items.map(s => s.doc);
         const stored = await readPushStored(spaceId, kind, docs);
+        // One body hash per document per page: the candidate selection, the plan and the writer's read-back all ask it.
+        const hashOf = bodyHashesOf(kind);
         const plan = planArrivals(docs, {
-          kind, door, stored, deliveredBy, tombstones: (tombType === undefined ? undefined : tombstones.get(tombType)) ?? new Map(),
+          kind, door, stored, deliveredBy, tombstones: (tombType === undefined ? undefined : tombstones.get(tombType)) ?? new Map(), hashOf,
           ...(kind === 'chrono' ? { allowedTypes } : {}),
-          ...(kind === 'facts' ? await readForkContext(spaceId, docs, stored) : {}),
+          ...(isForkingFamily(kind) ? await readForkContext(spaceId, kind, docs, stored, hashOf) : {}),
         });
         const res = results[key];
         plan.verdicts.forEach((v, k) => { res.verdicts[items[k]!.index] = v; res.forkIds[items[k]!.index] = plan.forkIds[k]; });
+        for (const u of plan.unverifiable) res.unverifiable[items[u.index]!.index] = true;
+        if (plan.unverifiable.some(u => u.reason === 'legacy')) {
+          log.warn(`${peerText(where)}: space '${peerText(spaceId)}': legacy fact fork ids from 5.6.0-5.6.1 cannot be verified; admitted under its stored parent`);
+        }
         for (const f of plan.forks) forks.push({ key, index: items[f.index]!.index, doc: f.doc });
         // Every version the plan may write: the newest of each id, and the older ones a failed write falls back to.
         watches.set(key, await watchArrivals(spaceId, collection, [...plan.accepts.values()].flatMap(list => list.map(a => a.doc)), door));
@@ -260,32 +272,34 @@ export async function acceptArrivingPage(
 
     // ── 5. forks ─────────────────────────────────────────────────────────────────────────────────────────────
     try {
-      if (forks.length > 0) {
+      for (const family of FORKING_FAMILIES) {
+        const ofFamily = forks.filter(f => f.key === family);
+        if (ofFamily.length === 0) continue;
         // A fork is a new record under an id nothing holds, so there is no copy it replaces; looked at before it is written like any other.
-        const forkWatch = await watchArrivals(spaceId, 'facts', forks.map(f => f.doc), door);
+        const forkWatch = await watchArrivals(spaceId, family, ofFamily.map(f => f.doc), door);
         // A fork is a LOCAL version of a divergent copy, stamped above the record it forks from (the stored copy, at the arriving seq):
         // `versionsForRows` over the parents, so a parent at the ceiling refuses its fork (answered `rejected`, Q-241 doneWhen 2) and the
         // other forks of the page land. The copy lands as an arrival (`writePage`), which takes its own position.
-        const stamps = await versionsForRows(spaceId, forks.map(f => String(f.doc['forkOf'] ?? f.doc._id)), { parts: ['facts'] });
-        const live = forks.flatMap((f, k) => { const s = stamps[k]!; return 'refused' in s ? [] : [{ f, version: s.version }]; });
+        const stamps = await versionsForRows(spaceId, ofFamily.map(f => String(f.doc['forkOf'] ?? f.doc._id)), { parts: [family] });
+        const live = ofFamily.flatMap((f, k) => { const s = stamps[k]!; return 'refused' in s ? [] : [{ f, version: s.version }]; });
         let forkOut: ArrivalOutcome | undefined;
         if (live.length > 0) {
           // The divergent copy's own createdAt and updatedAt, never "now" — see step 5 of the module docblock.
-          forkOut = await writePage(spaceId, 'facts', live.map(({ f, version }) => ({ ...f.doc, seq: version })),
+          forkOut = await writePage(spaceId, family, live.map(({ f, version }) => ({ ...f.doc, seq: version })),
             { from: peer, deliveredBy, deferEnqueue: true });
         }
         await forkOut?.enqueue();
         const liveIds = new Set(live.map(l => l.f.doc._id));
         const failed = new Set([
-          ...forks.map(f => f.doc._id).filter(id => !liveIds.has(id)),
+          ...ofFamily.map(f => f.doc._id).filter(id => !liveIds.has(id)),
           ...(forkOut?.refused.map(r => r._id) ?? []), ...(forkOut?.duplicates ?? []),
         ]);
-        for (const f of forks) {
+        for (const f of ofFamily) {
           if (!failed.has(f.doc._id)) continue;
           results[f.key].verdicts[f.index] = 'rejected';
           results[f.key].forkIds[f.index] = undefined;
         }
-        record('facts', forks.filter(f => !failed.has(f.doc._id)), forkWatch);
+        record(family, ofFamily.filter(f => !failed.has(f.doc._id)), forkWatch);
       }
     } finally {
       // Said once for the page, whatever the forks did: what landed is stored, and an operator is told what it carried.
@@ -298,11 +312,19 @@ export async function acceptArrivingPage(
      * that cannot fork any further, so the incoming version is discarded — and the sender moves past it. Holding
      * the watermark back would re-offer a record refused identically every cycle; the fix is visibility.
      */
-    // A fork refused at its cap was admitted, so its parsed document is there.
-    const droppedForks = (results.facts.docs as Arrived[]).filter((_, i) => results.facts.verdicts[i] === 'forkRefused').map(d => d._id);
-    warnArrivalsNotStored(where, spaceId, 'facts', 'DROPPED — divergent content at an equal seq whose fork chain is '
-      + `${MAX_FORK_DEPTH} deep or whose record already has ${MAX_FORKS_PER_RECORD} forks; the sender will not offer them again. `
-      + 'Resolve a fork of that record in Review to make room', droppedForks);
+    for (const family of FORKING_FAMILIES) {
+      // A fork refused at its cap was admitted, so its parsed document is there.
+      const droppedForks = (results[family].docs as Arrived[]).filter((_, i) => results[family].verdicts[i] === 'forkRefused').map(d => d._id);
+      warnArrivalsNotStored(where, spaceId, family, 'DROPPED — divergent content at an equal seq whose fork chain is '
+        + `${MAX_FORK_DEPTH} deep or whose record already has ${MAX_FORKS_PER_RECORD} forks; the sender will not offer them again. `
+        + 'This space will show as a merkle divergence for each of those records until its forks are resolved. '
+        + 'Resolve a fork of that record in Review to make room', droppedForks);
+      // A malformed fork row is never stored and never a silent `rejected`: said once for the page, with the ids a sender can look up.
+      const malformed = (results[family].docs as Arrived[]).filter((_, i) => results[family].verdicts[i] === 'invalidFork').map(d => d._id);
+      warnArrivalsNotStored(where, spaceId, family, 'REFUSED as malformed fork row(s) — the id does not derive from the subject, the seq and the body '
+        + '(or the row is its own fork, or an edge changed whether it is one); they are not offered again', malformed);
+      if (malformed.length > 0) syncInvalidForksTotal.inc({ family }, malformed.length);
+    }
     // What landed is handed to the door's linkage check, which checks it once the door's transfer is whole — never
     // here, page by page, where a target later in the same transfer would be recorded missing (bundle-30 I8).
     for (const { key, doc } of landed) opts.linkage.add(key, doc);
@@ -319,7 +341,7 @@ async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrive
 }
 
 /**
- * Plan again the facts whose write found a same-seq copy with other content stored meanwhile (`Q-232`): against what
+ * Plan again the records of a family that forks whose write found a same-seq copy with other content stored meanwhile (`Q-232`): against what
  * is stored NOW they are equal-seq divergences, so they fork within the caps as any other — or are refused at the cap.
  * Anything else the second plan says (the stored copy moved on) leaves them `skipped`. Returns the forks to write.
  */
@@ -328,10 +350,12 @@ async function forkDiverged(
   { door, deliveredBy }: { door: ArrivalDoor; deliveredBy: string | undefined },
 ): Promise<Array<{ key: PayloadKey; index: number; doc: Arrived }>> {
   const docs = diverged.map(d => d.doc);
-  const stored = await readPushStored(spaceId, 'facts', docs);
+  const kind = familyOf(key).collection as PlannedFamily;
+  const stored = await readPushStored(spaceId, kind, docs);
+  const hashOf = bodyHashesOf(kind);
   // No tombstones: the first plan already found none governing these documents.
-  const again = planArrivals(docs, { kind: 'facts', door, stored, deliveredBy, tombstones: new Map(),
-    ...await readForkContext(spaceId, docs, stored) });
+  const again = planArrivals(docs, { kind, door, stored, deliveredBy, tombstones: new Map(), hashOf,
+    ...await readForkContext(spaceId, kind, docs, stored, hashOf) });
   again.verdicts.forEach((v, k) => {
     if (v !== 'forked' && v !== 'forkRefused') return;
     res.verdicts[diverged[k]!.index] = v;

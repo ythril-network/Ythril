@@ -239,13 +239,13 @@ Found while shipping M-1 and finished by W-10, 2026-09-01. A rule rather than an
 are invisible from both ends.
 
 **Stripping.** Every arriving document — pushed or pulled — is validated against its `Incoming*` schema in
-`api/sync/_shared.ts`, through one step (`admitArrivals`, `sync/arrival-shape.ts`, Q-225), and **zod strips keys
+`sync/incoming-schemas.ts` (the schema leaf, which `api/sync/_shared.ts` re-exports), through one step (`admitArrivals`, `sync/arrival-shape.ts`, Q-225), and **zod strips keys
 the schema does not declare.** Until bundle-30 the pull path validated nothing, so a field missing from its
 `Incoming*` twin was **kept when the record arrived by pull and deleted when the same record arrived by push** —
 same version of the code, same document, one direction, no error, no statistic, and a 200 on the way back. Both
 doors now strip (or refuse) alike, which is why a field missing from its schema is lost on EVERY door now.
 
-**The rule is "every `Incoming*` schema in `api/sync/_shared.ts`", and it is written that way on purpose.** This
+**The rule is "every `Incoming*` schema in `sync/incoming-schemas.ts`", and it is written that way on purpose.** This
 paragraph named four documents and there are six; the two it did not name arrived after it was written. **The
 gate had the identical bug and it is what the derivation cost was paid for**: its hand-written list of four
 missed `LinkDoc`, so every assertion ran over the old four and reported clean about a document nobody had

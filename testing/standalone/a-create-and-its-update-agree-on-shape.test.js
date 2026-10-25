@@ -120,7 +120,10 @@ describe('the table itself', () => {
      */
     const written = new RegExp(`\\[\\s*${[...CHRONO_STATUSES].map(v => `'${v}'`).join('\\s*,\\s*')}`);
     const files = trackedSources('server/src')
-      .filter(f => f.endsWith('.ts') && f !== 'server/src/config/types.ts');
+      // Re-anchored for Q-624 (design rev 4 section 2): the tuple is DEFINED in `config/chrono-statuses.ts`, a module that imports nothing, because the `Incoming*`
+      // schema leaf must read it and `config/types.ts` reaches the config loader and the store through its imports. `types.ts` re-exports it, so it is checked
+      // like every other file: it must not write the list out either.
+      .filter(f => f.endsWith('.ts') && f !== 'server/src/config/chrono-statuses.ts');
     assert.ok(files.length > 100, `only ${files.length} server sources found; the listing is broken`);
     const offenders = files.filter(f => written.test(code(f)));
     assert.deepEqual(offenders, [],

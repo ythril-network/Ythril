@@ -1,7 +1,7 @@
 import type { TokenRights } from './rights-shape.js';
 import type { ModelSlot, ModelSlotsConfig } from './model-slots.js';
 import type { AssistModelExtras } from './assist-backend.js';
-import type { MachineMadeSource } from '../files/derived-fields.js';
+import type { MachineMadeSource } from '../files/machine-made-sources.js';
 import type { SpaceActEntry, SpaceActSet } from './types-space-acts.js';
 export type { SpaceActEntry, SpaceActKind, SpaceActState, SpaceActRound, SpaceActPostSteps, SpaceActSet, SpaceActSetMember } from './types-space-acts.js';
 export interface TokenRecord {
@@ -1795,15 +1795,9 @@ export interface LinkDoc extends StampSkewable {
 }
 
 export type ChronoType = 'event' | 'deadline' | 'plan' | 'prediction' | 'milestone';
-/**
- * The statuses a chrono entry may carry.
- *
- * A TUPLE, and the type below derives from it — because the five names were also written out as a `Set` in
- * `api/brain/chrono.ts` and again in `brain/bulk.ts`, and a fourth copy in the shared write-shape table got
- * two of them wrong. A union type cannot be iterated at run time, so every door that had to CHECK a status
- * built its own list from the same five words, and nothing compared them.
- */
-export const CHRONO_STATUSES = ['upcoming', 'active', 'completed', 'overdue', 'cancelled'] as const;
+// `CHRONO_STATUSES` is defined in `config/chrono-statuses.ts` (import-free, so the schema leaf can read it) and re-exported here.
+export { CHRONO_STATUSES } from './chrono-statuses.js';
+import { CHRONO_STATUSES } from './chrono-statuses.js';
 
 /** @see CHRONO_STATUSES — derived, never written out a second time. */
 export type ChronoStatus = typeof CHRONO_STATUSES[number];

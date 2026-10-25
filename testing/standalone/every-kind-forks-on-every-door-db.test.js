@@ -68,7 +68,7 @@ describe('every kind that forks forks on every door, and two receivers derive on
     assert.ok(FAMILIES.length >= 4, `only ${FAMILIES.length} forking famil(ies) read from the planner`);
   });
 
-  for (const via of Object.keys(DELIVER)) {
+  for (const via of ['single', 'batch', 'pull']) { // the doors arrivalDoors() builds; DELIVER is set in before(), after this body has run
     it(`${via}: every kind keeps an equal-seq divergent copy as ONE fork under the derived id, on both receivers`, async () => {
       const failures = [];
       for (const family of FAMILIES) {

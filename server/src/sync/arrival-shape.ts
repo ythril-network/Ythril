@@ -48,31 +48,18 @@
  * deleted as answered, losing the description it carried for good (bundle-30 I2b). The fill's schema is the family's
  * own made partial, never a second copy of it, so a key added to the wire schema is checked here too.
  */
-import {
-  IncomingFactDoc, IncomingEntityDoc, IncomingEdgeDoc, IncomingChronoDoc, IncomingLinkDoc, IncomingFileMetaDoc,
-  fileMetaFromSender,
-} from '../api/sync/_shared.js';
+import { fileMetaFromSender } from '../api/sync/_shared.js';
+import { INCOMING_SCHEMA_OF } from './incoming-schemas.js';
 import { arrivalRefusal, arrivalId } from './arrivals.js';
 import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
 import { peerText, refusalOfParse } from '../util/log.js';
 
-type SafeParser = { safeParse: (v: unknown) => { success: boolean; data?: unknown; error?: { issues: unknown[] } } };
-
 /**
- * The `Incoming*` schema each family is validated against — the one hand-written family table, because a schema is
- * a fact about the wire that no registry can derive. Keyed by the DERIVED family list, and checked at load against
- * it, so a family added to `REPLICATED_FAMILIES` without a schema stops the server rather than being stored
- * unchecked.
+ * The `Incoming*` schema each family is validated against lives in the schema leaf (`sync/incoming-schemas.ts`, Q-624): it is re-exported here, so
+ * no importer changes, and CHECKED here at load against the derived family list. The check stays in this module because it needs
+ * `REPLICATED_FAMILIES`, and the leaf may import no registry.
  */
-export const INCOMING_SCHEMA_OF: Readonly<Partial<Record<PayloadKey, { schema: SafeParser; name: string; fill?: SafeParser }>>> = {
-  facts: { schema: IncomingFactDoc, name: 'IncomingFactDoc' },
-  entities: { schema: IncomingEntityDoc, name: 'IncomingEntityDoc' },
-  edges: { schema: IncomingEdgeDoc, name: 'IncomingEdgeDoc' },
-  chrono: { schema: IncomingChronoDoc, name: 'IncomingChronoDoc' },
-  links: { schema: IncomingLinkDoc, name: 'IncomingLinkDoc' },
-  // `.partial()` keeps `.strict()` and the `never` on `parentFileId`: only the requirement goes.
-  filemeta: { schema: IncomingFileMetaDoc, name: 'IncomingFileMetaDoc', fill: IncomingFileMetaDoc.partial() },
-};
+export { INCOMING_SCHEMA_OF };
 {
   const keys: readonly string[] = REPLICATED_FAMILIES.map(f => f.payloadKey);
   const missing = keys.filter(k => !(k in INCOMING_SCHEMA_OF));

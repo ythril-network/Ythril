@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build, PEER_TOKEN, peerToken } from './_push-door.mjs';
-import { FORK_KINDS, initForkFixtures, seedFork, forkIdOf } from './_q624-fork-fixtures.mjs';
+import { FORK_KINDS, initForkFixtures, seedFork, forkIdOfBody } from './_fork-kinds.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'q624delete';
@@ -121,7 +121,7 @@ describe('a delete takes its forks', { skip }, () => {
         const parent = randomUUID();
         await door.push('/tombstones', { tombstones: [wire(parent, kind, 9)] }, { spaceId: S, token: PEER_TOKEN });
         const row = { ...k.row(S, 'late', 5, kind === 'edge' ? { from: randomUUID(), to: randomUUID(), label: 'knows', ...k.alt } : k.alt), forkOf: parent };
-        row._id = forkIdOf(k.family, parent, row);
+        row._id = forkIdOfBody(k.family, parent, row);
         const r = await door.push('/batch-upsert', { [k.family]: [row] }, { spaceId: S });
         assert.equal(r.code, 200, JSON.stringify(r.body));
         assert.equal(await stillStored(k.family, [row._id]), 0, 'a fork of a tombstoned parent was stored');

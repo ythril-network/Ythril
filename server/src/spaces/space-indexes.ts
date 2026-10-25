@@ -57,7 +57,7 @@ import { buildKeysetIndex, type KeysetBuild } from './keyset-indexes.js';
 import { EDGE_GUARD_INDEXES, ensureEdgeGuardIndex } from './edge-guard-index.js';
 import { VECTOR_INDEXED_COLLECTIONS } from './vector-index.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
-import { FORK_INDEXES } from '../sync/upsert-plan.js';
+import { FORK_INDEXES, FORKING_FAMILIES } from '../sync/upsert-plan.js';
 import { TTL_COLLECTIONS } from '../brain/ttl.js';
 import { MEDIA_JOB_INDEXES } from '../files/media/job-queue.js';
 import { EMBED_JOB_INDEXES } from '../brain/embed-queue.js';
@@ -139,8 +139,9 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
    */
   ...SEQ_CARRYING.map((part): SpaceIndex => positionIndexOf(part)),
   plain('facts', { tags: 1 }),
-  // The fork caps' indexes (`sync/upsert-plan.ts`).
-  ...FORK_INDEXES.map(ix => plain('facts', ix.keys, declaredOptions(ix))),
+  // The fork caps' indexes (`sync/upsert-plan.ts`), on the collection of EVERY family that forks. The facts one is as old as fact forks and is built at every
+  // boot, as it was; the others are new on collections that may be large, so on an existing one they are the background pass's (built at init on a new one).
+  ...FORKING_FAMILIES.flatMap(part => FORK_INDEXES.map((ix): SpaceIndex => ({ ...plain(part, ix.keys, declaredOptions(ix)), bootSafe: part === 'facts' }))),
   // `{ type: 1 }` on the four record collections. MEASURED, not assumed: every list endpoint exposes a `type` filter and `total`
   // counts with it, and `explain()` on a live instance returned COLLSCAN for `{type: …}` on facts, entities, edges and chrono.
   // Entities looked covered by `{ name: 1, type: 1 }` and are not: `type` is not a prefix of it. Quality-neutral by construction:

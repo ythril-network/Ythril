@@ -146,7 +146,9 @@ export function setUnlessDeleted(
     delete $set[field];
     return;
   }
-  if (requested) $set[field] = value;
+  // A value that is `undefined` is not set: the driver stores it as `null`, and a record that never had the field then holds a null its `Incoming*` schema
+  // refuses (`description`, `weight`), so a peer refuses the row on push. The rule is inside, so no caller can bring the null back (Q-624, side defects).
+  if (requested && value !== undefined) $set[field] = value;
 }
 
 /**

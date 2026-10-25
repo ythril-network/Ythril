@@ -1444,6 +1444,18 @@ for (const outcome of SYNC_ITEM_OUTCOMES) {
 }
 
 /**
+ * Fork rows a peer offered that were refused as malformed (`invalidFork`: an id that does not derive from the subject, the seq and the body, a row that is
+ * its own fork, or an edge that changed whether it is one), by family. A malformed fork row is never stored and never a silent `rejected`; this is the
+ * count of them, beside the receiver's one line per page (Q-624, design section 13).
+ */
+export const syncInvalidForksTotal = new Counter({
+  name: 'ythril_sync_invalid_forks_total',
+  help: 'Fork rows refused as malformed (id does not derive from the body), by family',
+  labelNames: ['family'] as const,
+  registers: [register],
+});
+
+/**
  * A puller whose mark for a member is ABOVE that member's `head` (its settled cap less one): the peer's positions went backwards (a database restore
  * with the wall clock set back across a start that also lost its stored maximum). The puller forgets the receive mark and re-reads, sorting by id and
  * version (D-48): one count per forgotten mark, by network (rev 8 §4).

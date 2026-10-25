@@ -62,6 +62,7 @@ import { col, asFilter, asUpdate, asDoc } from '../db/mongo.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { FILE_HASH_PROJECTION } from '../brain/merkle.js';
 import { RETAGGED_FIELDS } from '../sync/retagged-fields.js';
+import { MACHINE_MADE_SOURCES, type MachineMadeSource } from './machine-made-sources.js';
 import { NOT_A_FLAGGED_ROW } from './live-file-row.js';
 import { versionsFor, type VersionAllocation } from '../util/version-stamp.js';
 import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
@@ -140,18 +141,12 @@ export function isLocalFileField(key: string): boolean {
 /** What a write of derived fields did. `gone` is a success: the file was deleted, so there was nothing to record. */
 export type DerivedWriteOutcome = 'written' | 'superseded' | 'gone';
 
-/**
- * The `descriptionSource` values that say THIS instance made the `description` from the bytes — the only way to tell one from a
- * person's. The one list: the predicate, the Mongo `$in`s, the wire enum and the types all read it, so a third source cannot be
- * added to some and not the others (a description read as a person's, a stamp report that calls a machine's text "edited here").
+/*
+ * `MACHINE_MADE_SOURCES`, `MachineMadeSource` and `isMachineMadeSource` are defined in `files/machine-made-sources.ts` (an import-free module, so
+ * the `Incoming*` schema leaf can read the wire enum without loading the media pipeline and the space hash) and re-exported here: this module is
+ * where every other reader has always found them.
  */
-export const MACHINE_MADE_SOURCES = Object.freeze(['generated', 'extracted'] as const);
-export type MachineMadeSource = typeof MACHINE_MADE_SOURCES[number];
-
-/** Whether `value` is a `descriptionSource` that marks a machine-made description. Anything else — absent, a person's — is not. */
-export function isMachineMadeSource(value: unknown): value is MachineMadeSource {
-  return MACHINE_MADE_SOURCES.some(s => s === value);
-}
+export { MACHINE_MADE_SOURCES, isMachineMadeSource, type MachineMadeSource } from './machine-made-sources.js';
 
 /** The fields a deleted file's row loses outright: what the bytes made, and the fingerprint of bytes that are gone. */
 const STRIPPED = ['embedding', 'embeddingModel', 'matchedText', 'excerpt', 'sha256', 'embeddingStatus'];

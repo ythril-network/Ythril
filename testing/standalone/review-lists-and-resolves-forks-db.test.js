@@ -242,7 +242,7 @@ describe('Review lists and resolves forks, on both doors', { skip }, () => {
 
   /**
    * Q-624 (design §9, §10, test 10): one capability, EVERY kind, both doors, the same refusals. Driven through `reviewDoors`
-   * (`_q624-fork-fixtures.mjs`), which states the five parameters from the store; `over` replaces any of them.
+   * (`_fork-kinds.mjs`), which states the five parameters from the store; `over` replaces any of them.
    *
    * Not driven, and why: "a fork tombstone with the fork re-delivered at another seq in between" is a race INSIDE the resolve's transaction, and
    * the design names no seam to hold it open: the stale `ifMatchSeq` case below is its outside view. The REST door's audit entry is written by the
@@ -251,7 +251,7 @@ describe('Review lists and resolves forks, on both doors', { skip }, () => {
   describe('every kind, both doors (Q-624)', () => {
     let rd; let fx; let forkMods;
     before(async () => {
-      fx = await import('./_q624-fork-fixtures.mjs');
+      fx = await import('./_fork-kinds.mjs');
       await fx.initForkFixtures();
       rd = await fx.reviewDoors(door, S);
       forkMods = await import('../../server/dist/brain/forks.js');

@@ -46,7 +46,7 @@ const S = 'q624mesh';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // The parent only DERIVES ids (never loads a config), but the server modules read CONFIG_PATH when imported.
 process.env.CONFIG_PATH = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'q624-mesh-parent-')), 'config.json');
-const fixtures = await import('./_q624-fork-fixtures.mjs');
+const fixtures = await import('./_fork-kinds.mjs');
 
 const NAMES = ['a', 'b', 'c'];
 const idOf = (n) => `q624t3_mesh_${n}-receiver`;
@@ -126,7 +126,7 @@ describe('a fork resolved elsewhere is decided here', { skip }, () => {
     const author = (n) => ({ instanceId: idOf(n), instanceLabel: n.toUpperCase() });
     const parent = k.row(S, pId, 5, { ...idn, author: author('a'), pos: 5, posAtSeq: 5 });
     const fork = { ...k.row(S, 'x', 5, { ...idn, ...k.alt, author: author('c'), pos: 5, posAtSeq: 5 }), forkOf: pId };
-    fork._id = fixtures.forkIdOf(k.family, pId, fork);
+    fork._id = fixtures.forkIdOfBody(k.family, pId, fork);
     for (const n of NAMES) await inst[n].call('seed', { family: k.family, rows: n === 'c' ? [parent, fork] : [parent] });
     return { k, parentId: pId, forkId: fork._id };
   }

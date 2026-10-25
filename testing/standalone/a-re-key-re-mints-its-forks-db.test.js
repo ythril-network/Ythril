@@ -35,7 +35,7 @@ import { randomUUID } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { snapshotParts, changedParts, RECORD_PARTS } from './_space-snapshot.mjs';
-import { FORK_KINDS, initForkFixtures, assertCoversForkingFamilies, bodyText, forkIdOf, seedFork, reviewDoors } from './_q624-fork-fixtures.mjs';
+import { FORK_KINDS, initForkFixtures, assertCoversForkingFamilies, bodyText, forkIdOfBody, seedFork, reviewDoors } from './_fork-kinds.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'q624rekey';
@@ -81,7 +81,7 @@ describe('a re-key re-mints its forks under ids that verify', { skip }, () => {
     assert.equal(rows.length, 1, `${what}: ${rows.length} fork(s) of the new subject '${subject}', expected the one re-minted fork`);
     const [fork] = rows;
     assert.equal(fork[k.main], body[k.main], `${what}: the re-minted fork lost its body (${k.main})`);
-    assert.equal(fork._id, forkIdOf(k.family, subject, fork), `${what}: the re-minted fork's id does not recompute from (forkOf, seq, body): every peer refuses it`);
+    assert.equal(fork._id, forkIdOfBody(k.family, subject, fork), `${what}: the re-minted fork's id does not recompute from (forkOf, seq, body): every peer refuses it`);
     assert.notEqual(fork._id, oldForkId, `${what}: the fork kept its old id, so it was edited in place`);
     assert.equal(await door.coll(S, k.family).countDocuments({ _id: oldForkId }), 0, `${what}: the old fork id is still stored`);
     assert.ok(await tombstoneIssuedHere(oldForkId), `${what}: no tombstone issued here for the old fork id`);

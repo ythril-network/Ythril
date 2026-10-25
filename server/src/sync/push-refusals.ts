@@ -38,9 +38,11 @@ import { PeerPagesBySeq } from '../util/errors.js';
 
 /**
  * The per-type counters `batch-upsert` returns. `rejected` is every record of the family the peer neither stored nor
- * already held (Q-59); `forkDepthRefused` is what a peer before 5.5 sends instead, and the only refusal it counted.
+ * already held (Q-59); `forkDepthRefused` is what a peer before 5.5 sends instead, and the only refusal it counted. `invalidFork` is the
+ * malformed fork rows of a family that forks (Q-624: an id that does not derive from the body), which the peer refuses on its own count: they are
+ * added, because a malformed row cannot become well-formed by waiting and so is never offered again.
  */
-type BatchUpsertReply = Record<string, { rejected?: number; forkDepthRefused?: number } | undefined> | null;
+type BatchUpsertReply = Record<string, { rejected?: number; forkDepthRefused?: number; invalidFork?: number } | undefined> | null;
 
 /**
  * The answer a 2xx push got, read as the 6.0 answer it must be: the body with `positions: 1`, or a THROWN `PeerPagesBySeq` for a 200 without it.
@@ -96,7 +98,7 @@ export async function countPushRefusals(resp: Response, payloadKey: string, peer
       resp, `batch-upsert ${payloadKey} response from ${peerLabel}`);
     const stats = body?.[payloadKey];
     // Clamped: a peer's number is a claim, and one larger than the batch must not make `pushed` negative.
-    return Math.min(Math.max(0, Number(stats?.rejected ?? stats?.forkDepthRefused ?? 0) || 0), batchSize);
+    return Math.min(Math.max(0, (Number(stats?.rejected ?? stats?.forkDepthRefused ?? 0) || 0) + (Number(stats?.invalidFork ?? 0) || 0)), batchSize);
   } catch { return 0; /* a diagnostic must never fail a push the peer accepted */ }
 }
 
@@ -104,7 +106,7 @@ export async function countPushRefusals(resp: Response, payloadKey: string, peer
 export function warnPushRefusals(payloadKey: string, peerLabel: string, spaceId: string, refused: number, batchSize: number): void {
   if (refused <= 0) return;
   log.warn(`Batch push ${peerText(payloadKey)} to ${peerText(peerLabel)}: ${refused} of ${batchSize} record(s) DROPPED, refused by the peer `
-    + `in space '${peerText(spaceId)}' (invalid for its schema, an undeclared type, an implausible seq, or a fork chain at `
+    + `in space '${peerText(spaceId)}' (invalid for its schema, an undeclared type, an implausible seq, a malformed fork row, or a fork chain at `
     + 'its cap). They are not counted as pushed and will not be offered again — the log on the peer names the records.');
 }
 

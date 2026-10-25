@@ -187,6 +187,14 @@ const pusherOf = (req: Request): string | undefined => peerBoundTo(req.authToken
 const peerOf = (req: Request): string => pusherOf(req) ?? 'unknown';
 const forkCapError = (id: string) => ({ error: `Fork depth limit (${MAX_FORK_DEPTH}) exceeded for _id '${peerText(id)}'` });
 /**
+ * The 400 of a malformed fork row, in the words of the rule it broke: its id does not derive from its subject, its seq and its body, or it is its own
+ * fork, or an edge changed whether it is one. Bounded by `peerText` because the id is the peer's. The route adds its code (`invalid_fork`) beside it.
+ */
+const invalidForkError = (id: string) => ({
+  error: `Malformed fork row '${peerText(id)}': its _id does not derive from its forkOf, its seq and its body (or it is its own fork, or an edge that changed whether it is one)`,
+  id: peerText(id),
+});
+/**
  * A refused document's 400, in the words of the rule that refused it — the arrival writer's shape check
  * (`arrivalRefusal`: an implausible seq answers `seq N is too close to the protocol ceiling and was refused`, as
  * it always did) or the store's. One source for the text, so a route cannot phrase a refusal of its own.
@@ -236,6 +244,7 @@ syncDocsRouter.post('/facts', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (verdict === 'forked') { res.status(200).json(pushAnswer(withSchemaViolations({ status: 'forked', forkId: facts.forkIds[0] }, recordedRows(facts)))); return; }
     if (verdict === 'tombstoned') { res.status(200).json(pushAnswer({ status: 'tombstoned' })); return; }
     if (verdict === 'forkRefused') { res.status(400).json(forkCapError(String(doc['_id']))); return; }
+    if (verdict === 'invalidFork') { res.status(400).json({ ...invalidForkError(String(doc['_id'])), code: 'invalid_fork' }); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(facts)); return; }
     res.status(200).json(pushAnswer({ status: 'skipped' }));
   } catch (err) {
@@ -255,8 +264,11 @@ syncDocsRouter.post('/entities', syncRateLimit, requireAuth, denyReadOnly, async
     if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const one = await acceptOne(req, res, 'entities', 'entity');
     if (!one) return;
-    const { r: entities } = one;
+    const { r: entities, doc } = one;
     const verdict = entities.verdicts[0];
+    if (verdict === 'forked') { res.status(200).json(pushAnswer(withSchemaViolations({ status: 'forked', forkId: entities.forkIds[0] }, recordedRows(entities)))); return; }
+    if (verdict === 'forkRefused') { res.status(400).json(forkCapError(String(doc['_id']))); return; }
+    if (verdict === 'invalidFork') { res.status(400).json({ ...invalidForkError(String(doc['_id'])), code: 'invalid_fork' }); return; }
     if (verdict === 'tombstoned') { res.status(200).json(pushAnswer({ status: 'tombstoned' })); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(entities)); return; }
     res.status(200).json(pushAnswer(withSchemaViolations({ status: 'ok' }, recordedRows(entities))));
@@ -278,8 +290,11 @@ syncDocsRouter.post('/edges', syncRateLimit, requireAuth, denyReadOnly, async (r
     if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const one = await acceptOne(req, res, 'edges', 'edge');
     if (!one) return;
-    const { r: edges } = one;
+    const { r: edges, doc } = one;
     const verdict = edges.verdicts[0];
+    if (verdict === 'forked') { res.status(200).json(pushAnswer(withSchemaViolations({ status: 'forked', forkId: edges.forkIds[0] }, recordedRows(edges)))); return; }
+    if (verdict === 'forkRefused') { res.status(400).json(forkCapError(String(doc['_id']))); return; }
+    if (verdict === 'invalidFork') { res.status(400).json({ ...invalidForkError(String(doc['_id'])), code: 'invalid_fork' }); return; }
     if (verdict === 'tombstoned') { res.status(200).json(pushAnswer({ status: 'tombstoned' })); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(edges)); return; }
     res.status(200).json(pushAnswer(withSchemaViolations({ status: verdict === 'duplicate' ? 'duplicate' : 'ok' }, recordedRows(edges))));
@@ -305,13 +320,16 @@ syncDocsRouter.post('/chrono', syncRateLimit, requireAuth, denyReadOnly, async (
     if (pushAllowed(res, spaceId, networkId, req.authToken) === null) return;
     const one = await acceptOne(req, res, 'chrono', 'chrono');
     if (!one) return;
-    const { r: chrono } = one;
+    const { r: chrono, doc } = one;
     const verdict = chrono.verdicts[0];
     if (verdict === 'unknownType') {
       const allowed = getAllowedChronoTypes(getConfig().spaces.find(sp => sp.id === spaceId)?.meta);
       res.status(400).json({ error: `\`type\` must be one of: ${[...allowed].join(', ')}` });
       return;
     }
+    if (verdict === 'forked') { res.status(200).json(pushAnswer(withSchemaViolations({ status: 'forked', forkId: chrono.forkIds[0] }, recordedRows(chrono)))); return; }
+    if (verdict === 'forkRefused') { res.status(400).json(forkCapError(String(doc['_id']))); return; }
+    if (verdict === 'invalidFork') { res.status(400).json({ ...invalidForkError(String(doc['_id'])), code: 'invalid_fork' }); return; }
     if (verdict === 'tombstoned') { res.status(200).json(pushAnswer({ status: 'tombstoned' })); return; }
     if (verdict === 'rejected') { res.status(400).json(refusedError(chrono)); return; }
     res.status(200).json(pushAnswer(withSchemaViolations({ status: 'ok' }, recordedRows(chrono))));
@@ -378,10 +396,16 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
      * (benign) and `forkDepthRefused` is a record DROPPED — one counter until 2026-08-19, which is why the lossy
      * one had never been seen. The accept names the dropped ones in the receiver's log.
      */
-    const memStats = { inserted: count('facts', 'inserted'), updated: count('facts', 'updated'), forked: count('facts', 'forked'), skipped: count('facts', 'skipped'), forkDepthRefused: count('facts', 'forkRefused'), tombstoned: count('facts', 'tombstoned'), schemaViolations: violated('facts') };
-    const entStats = { upserted: count('entities', 'upserted'), skipped: count('entities', 'skipped'), tombstoned: count('entities', 'tombstoned'), schemaViolations: violated('entities') };
-    const edgeStats = { upserted: count('edges', 'upserted'), skipped: count('edges', 'skipped'), tombstoned: count('edges', 'tombstoned'), schemaViolations: violated('edges'), duplicateTriplets: count('edges', 'duplicate') };
-    const chronoStats = { upserted: count('chrono', 'upserted'), skipped: count('chrono', 'skipped'), tombstoned: count('chrono', 'tombstoned'), schemaViolations: violated('chrono'), unknownType: count('chrono', 'unknownType') };
+    // Every family that forks counts `forked`, `forkDepthRefused` (a fork DROPPED at its cap) and `invalidFork` (a malformed fork row, refused and never stored) beside
+    // its own counters; `unverifiable` (a fork admitted although its id could not be derived: a legacy fact fork, a redacted chrono fork) is additive, said only when some were.
+    const unverifiable = (key: PushKey): { unverifiable?: number } => {
+      const n = out[key].unverifiable.filter(Boolean).length;
+      return n > 0 ? { unverifiable: n } : {};
+    };
+    const memStats = { inserted: count('facts', 'inserted'), updated: count('facts', 'updated'), forked: count('facts', 'forked'), skipped: count('facts', 'skipped'), forkDepthRefused: count('facts', 'forkRefused'), invalidFork: count('facts', 'invalidFork'), tombstoned: count('facts', 'tombstoned'), schemaViolations: violated('facts'), ...unverifiable('facts') };
+    const entStats = { upserted: count('entities', 'upserted'), forked: count('entities', 'forked'), skipped: count('entities', 'skipped'), forkDepthRefused: count('entities', 'forkRefused'), invalidFork: count('entities', 'invalidFork'), tombstoned: count('entities', 'tombstoned'), schemaViolations: violated('entities'), ...unverifiable('entities') };
+    const edgeStats = { upserted: count('edges', 'upserted'), forked: count('edges', 'forked'), skipped: count('edges', 'skipped'), forkDepthRefused: count('edges', 'forkRefused'), invalidFork: count('edges', 'invalidFork'), tombstoned: count('edges', 'tombstoned'), schemaViolations: violated('edges'), duplicateTriplets: count('edges', 'duplicate'), ...unverifiable('edges') };
+    const chronoStats = { upserted: count('chrono', 'upserted'), forked: count('chrono', 'forked'), skipped: count('chrono', 'skipped'), forkDepthRefused: count('chrono', 'forkRefused'), invalidFork: count('chrono', 'invalidFork'), tombstoned: count('chrono', 'tombstoned'), schemaViolations: violated('chrono'), unknownType: count('chrono', 'unknownType'), ...unverifiable('chrono') };
     // A link arriving under another id for endpoints already linked IS that link: skipped, never a fault.
     const linkStats = { upserted: count('links', 'upserted'), skipped: count('links', 'skipped') + count('links', 'duplicate'), tombstoned: count('links', 'tombstoned') };
     // `tombstoned` is additive (bundle-51): file metadata a held file tombstone covers — a deletion this instance holds for that
@@ -417,9 +441,9 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     res.status(200).json(pushAnswer({
       status: 'ok',
       facts: { ...memStats, rejected: rejected('facts', 'forkRefused') },
-      entities: { ...entStats, rejected: rejected('entities') },
-      edges: { ...edgeStats, rejected: rejected('edges') },
-      chrono: { ...chronoStats, rejected: rejected('chrono', 'unknownType') },
+      entities: { ...entStats, rejected: rejected('entities', 'forkRefused') },
+      edges: { ...edgeStats, rejected: rejected('edges', 'forkRefused') },
+      chrono: { ...chronoStats, rejected: rejected('chrono', 'forkRefused', 'unknownType') },
       links: { ...linkStats, rejected: rejected('links') },
       filemeta: { ...fileMetaStats, rejected: rejected('filemeta') },
     }));
