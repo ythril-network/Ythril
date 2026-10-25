@@ -53,6 +53,7 @@ import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { seedsInRequest, seedsInWalk, type SeedRunner } from './scan-seed-runner.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
+import { readStoredById } from '../db/read-by-id.js';
 
 /**
  * The step the scan's failures are reported and counted under: one name, declared once so its counters start at 0. Exported because
@@ -79,9 +80,8 @@ function clamp(n: number, lo: number, hi: number): number {
 /** Which of `ids` are fork rows (unchosen versions) of the record kind: one `_id` read of the collection, for the counterparts a seed found. */
 async function unchosenVersionsAmong(spaceId: string, type: DupeScanType, ids: readonly string[]): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
-  const rows = await col<{ _id: string }>(spaceCollection(spaceId, COLLECTION_SUFFIX[type]))
-    .find(asFilter<{ _id: string }>({ _id: { $in: [...ids] }, forkOf: { $type: 'string' } }), { projection: { _id: 1 } }).toArray();
-  return new Set(rows.map(r => r._id));
+  const rows = await readStoredById<{ forkOf?: unknown }>(spaceCollection(spaceId, COLLECTION_SUFFIX[type]), ids, { forkOf: 1 });
+  return new Set([...rows].filter(([, row]) => typeof row.forkOf === 'string').map(([id]) => id));
 }
 
 /** Canonical, collision-resistant candidate key. Length-prefixing aId disambiguates
