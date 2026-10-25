@@ -13,7 +13,7 @@
  * ## The one assumed seam
  *
  * The plan names the retry as `positionsOwedJob = intervalJob(...)`, every 60 s (§3), and names no function that runs one pass of it.
- * `runOwedJob` calls `positionsOwedTick` exported from `sync/positions-owed.js`, the module the plan gives the owed marker; if the
+ * `runOwedJob` calls `runPositionsOwedTick` exported from `sync/positions-owed.js`, the module the plan gives the owed marker; if the
  * implementation names its pass otherwise, this is the one line to change, and every case that runs the job changes with it.
  */
 import assert from 'node:assert/strict';
@@ -42,7 +42,7 @@ export async function oweDirectly(door, space, kind = 'carry') {
 /** One pass of the owed job over every space that owes. */
 export async function runOwedJob() {
   const owed = await import('../../server/dist/sync/positions-owed.js');
-  assert.equal(typeof owed.positionsOwedTick, 'function',
-    'sync/positions-owed.js has no positionsOwedTick: the plan names the job (positionsOwedJob) and no function that runs one pass of it (design rev 8 §3)');
-  await owed.positionsOwedTick();
+  assert.equal(typeof owed.runPositionsOwedTick, 'function',
+    'sync/positions-owed.js has no runPositionsOwedTick: the plan names the job (positionsOwedJob) and no function that runs one pass of it (design rev 8 §3)');
+  await owed.runPositionsOwedTick();
 }

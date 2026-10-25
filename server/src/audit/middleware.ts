@@ -220,6 +220,7 @@ export const ROUTE_RULES: RouteRule[] = [
   // every peer sync under a network that does not exist.
   { method: 'POST',   pattern: /^\/api\/networks\/peers\/([^/]+)\/sync$/,           operation: 'peer.sync_trigger' },
   { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/sync$/,                  operation: 'network.sync_trigger' },
+  { method: 'POST',   pattern: /^\/api\/networks\/([^/]+)\/reread$/,                operation: 'network.reread' },
 
   // ── Conflict resolution ──────────────────────────────────────────────────
   // Resolving a conflict picks a winning version of a record — a data mutation.

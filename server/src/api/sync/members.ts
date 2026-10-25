@@ -19,6 +19,8 @@ import { rosterIsAuthority } from '../../networks/member-introductions.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { liftDeclinesFromAnnounce } from '../../sync/space-exchange-set.js';
 import { requireNetworkStanding } from '../../auth/network-standing.js';
+import { stampLastSync } from '../../sync/member-status.js';
+import { memberView } from '../../networks/member-view.js';
 
 export const syncMembersRouter = Router();
 
@@ -49,11 +51,9 @@ syncMembersRouter.get('/networks/:networkId/members', syncRateLimit, requireAuth
     const net = cfg.networks.find(n => n.id === req.params['networkId']);
     if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
 
-    const safeMembers = net.members.map(m => {
-      // `declinedSpaces` is the publisher's own record of a subscriber's decline (X10): local, never served.
-      const { tokenHash: _th, skipTlsVerify: _sv, declinedSpaces: _ds, ...safe } = m;
-      return safe;
-    });
+    // Identity and topology, which is all a peer's roster merge reads (`networks/member-view.ts`): no mark, no status, and `declinedSpaces`
+    // (the publisher's own record of a subscriber's decline, X10) is local and never served.
+    const safeMembers = net.members.map(m => memberView(m, 'peer'));
     // Q-135: a club's removals travel beside its roster, so every member applies a removal made anywhere.
     res.json({ members: safeMembers, ...(rosterIsAuthority(net) ? { removed: net.removedMembers ?? [] } : {}), updatedAt: new Date().toISOString() });
   } catch (err) {
@@ -138,7 +138,7 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
          * and overwriting a known version with `undefined` on every gossip round would make a
          * previously-reported version disappear.
          */
-        const updated = {
+        const updated = stampLastSync({
           ...freshNet.members[idx]!,
           label: incoming.label ?? freshNet.members[idx]!.label,
           url: nextUrl,
@@ -151,8 +151,7 @@ syncMembersRouter.post('/networks/:networkId/members', syncRateLimit, requireAut
            * leave a pull-only peer permanently unjudgeable.
            */
           versionCheckedAt: new Date().toISOString(),
-          lastSyncAt: new Date().toISOString(),
-        };
+        });
         const belowFloor = peerFloorRefusal(updated.version, updated.versionCheckedAt);
         if (belowFloor) {
           log.warn(`Member ${peerText(incoming.instanceId)} on network ${peerText(net.id)} is below the peer floor: ${peerText(belowFloor)}`);

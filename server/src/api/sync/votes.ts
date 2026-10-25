@@ -15,6 +15,7 @@ import { roundToVoteOn } from '../../networks/vote-acts.js';
 import { settleRounds } from '../../networks/round-conclusion.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { requireNetworkStanding } from '../../auth/network-standing.js';
+import { memberView } from '../../networks/member-view.js';
 
 export const syncVotesRouter = Router();
 
@@ -44,10 +45,7 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, re
         // Strip sensitive key material before sending to a peer instance
         // This instance's own state never leaves (S-7, S-9).
         const { inviteKeyHash: _ikh, ...safeRound } = roundForPeer(r);
-        if (safeRound.pendingMember) {
-          const { tokenHash: _th, ...safeMember } = safeRound.pendingMember;
-          safeRound.pendingMember = safeMember as typeof safeRound.pendingMember;
-        }
+        if (safeRound.pendingMember) safeRound.pendingMember = memberView(safeRound.pendingMember, 'pending') as unknown as typeof safeRound.pendingMember;
         return safeRound;
       });
     res.json({ rounds: open });

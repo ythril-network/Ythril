@@ -1424,6 +1424,12 @@ export interface Config {
   retiredSpaceIds?: string[];
   /** What the upgrade migration did, kept so the admin door can report it after the boot log is gone (`GET /api/admin/views/migration`). */
   viewsMigration?: ViewsMigrationReport;
+  /**
+   * The instant this instance began its first 6.0 carry into position space (`detectReupgrade`, `sync/positions-owed.ts`), written once. Before it, a counter
+   * document with neither marker field owes its first carry; after it, such a document is one a 5.6 build created or replaced and owes a repair. No 5.6 build
+   * writes it, and it stays through a rollback.
+   */
+  positionsSince?: string;
 }
 
 /** A personal view as `config.json` holds it. */
@@ -2106,6 +2112,13 @@ export interface SpaceCounterDoc {
   seq: number;
   /** The counter as the build that last wrote it saw it, written with it; what the re-upgrade detector compares (bundle-81 §3). */
   seqSeenBy6?: number;
+  /**
+   * Present while the space owes work before its rows are paged by position (`sync/positions-owed.ts`): `'carry'` (its first carry into position space) or
+   * `'repair'` (a 5.6 build changed rows without a position). Every sync door of a space that owes answers `503 positions_building`.
+   */
+  positionsOwed?: 'carry' | 'repair';
+  /** ISO instant the space was recorded ready, written in ONE update with the removal of `positionsOwed` (`recordPositionsReady`). */
+  positionsReadyAt?: string;
 }
 
 /**

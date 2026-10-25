@@ -380,6 +380,8 @@ async function main(): Promise<void> {
     stopViewSweep();
     const { stopTombstonePrune } = await import('./brain/tombstone-prune.js');
     stopTombstonePrune();
+    const { stopPositionsOwedJob } = await import('./sync/positions-owed.js');
+    stopPositionsOwedJob();
     const { stopContradictionScanner } = await import('./brain/contradiction-scanner.js');
     stopContradictionScanner();
     const { stopAuditChangeRetention } = await import('./audit/change-retention.js');

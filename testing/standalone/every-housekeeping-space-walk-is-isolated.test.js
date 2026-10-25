@@ -84,6 +84,11 @@ const SUBJECT_EXEMPTIONS = [
       + 'failing space is skipped and never ends the warm-up. The per-space exchange moved to `sync/space-exchange.ts` (bundle-106 §3.4), the row below.',
   },
   {
+    key: 'server/src/sync/positions-owed.ts:runPositionsOwedTick', head: /await owingSpaces\(\)/,
+    why: 'The owed job\'s tick: each owing space is its own walk (`finishPositionsOf` runs `backfillSpaceOnce`, which is `eachSpace` over that one space: bounded, isolated, reported once per window, and it never '
+      + 'throws), so a failing or hung space cannot end the loop; the loop stops only when a walk says the store is not answering. It exists as a loop because the spaces that owe are read from the counter documents, not from the config.',
+  },
+  {
     key: 'server/src/sync/space-exchange.ts:exchangeSpacesWithMember', head: /\bexchange\b/,
     why: 'The sync cycle of one member over the network\'s spaces: its own question (a failed space makes the member\'s cycle incomplete and is '
       + 'reported in the cycle\'s result, push and pull are bounded by the fetch options), not a housekeeping walk. The plan names the sync '

@@ -131,7 +131,7 @@ describe('the loop visits every member the config holds', () => {
     lastPosReceived: { s: 5, other: 1 }, lastPosPushed: { s: 7, other: 1 }, lastPosServed: { s: 6, other: 1 },
     lastSeqReceived: { s: 5, other: 1 }, lastSeqPushed: { s: 7, other: 1 }, lastSeqServed: { s: 6, other: 1 },
     lastFileTombstoneAckedAt: { s: '2026-01-01T00:00:00.000Z', other: 'x' }, tombstoneRereadAt: { s: 'done', other: 'done' },
-    fileMetaRereadAt: { s: 'done', other: 'done' },
+    fileMetaRereadAt: { s: 'done', other: 'done' }, fullRereadState: { s: 'owed', other: 'catching' },
   });
   const netWith = () => ({ id: 'n', spaces: ['s'], members: [marked('member-1')], pendingRounds: [{ roundId: 'r1', pendingMember: marked('pending-1') }] });
 

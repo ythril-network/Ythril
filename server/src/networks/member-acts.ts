@@ -25,6 +25,7 @@ import { roundIsOpen } from './round-state.js';
 import { roundForOperator } from './vote-acts.js';
 import { joinOutcomesAbout, joinWasDenied } from './round-outcomes.js';
 import { stampAdmission, recordRemoval, acceptIntroduction } from './member-introductions.js';
+import { memberView } from './member-view.js';
 
 export const AddMemberBody = z.object({
   instanceId: z.string().min(1),
@@ -37,7 +38,7 @@ export const AddMemberBody = z.object({
 });
 
 const NOT_FOUND = { status: 404, error: 'Network not found' } as const;
-const safe = (m: NetworkMember): Record<string, unknown> => { const { tokenHash: _th, skipTlsVerify: _sv, ...rest } = m; return rest; };
+const safe = (m: NetworkMember): Record<string, unknown> => memberView(m, 'operator');
 
 /** Keep the plaintext peer token so the sync engine can call the member once it is one. */
 function storePeerToken(instanceId: string, token: string): void {

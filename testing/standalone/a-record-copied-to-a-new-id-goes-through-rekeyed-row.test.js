@@ -51,7 +51,8 @@ const NOT_A_RECORD = [
   ['server/src/files/media/job-queue.ts', 'rebuild: (j, to)', 'a media job row'],
   ['server/src/files/path-keyed-cache.ts', 'rebuild: (entry, to)', 'a cache entry'],
   ['server/src/metrics/space-activity-store.ts', 'document: { ...row, _id: activityDocId', 'an activity bucket row'],
-  ['server/src/spaces/rename.ts', 'const moved = { ...doc, _id:', 'the duplicate-scanner cursor, keyed by space and type'],
+  ['server/src/brain/scan-cursor.ts', 'const moved = { ...doc, _id:', 'the duplicate-scanner cursor, keyed by space and type (moved with a renamed space: `moveScanCursors`)'],
+  ['server/src/sync/positions-owed.ts', 'const moved: SpaceCounterDoc = { ...old, _id: newId, seq };', 'a space\'s counter document, moved whole with its marker fields on a rename (`moveCounterDoc`): not a record'],
   ['server/src/sync/upsert-plan.ts', 'plan.forks.push', 'a wire doc: the landing stamps it (decision 29)'],
 ];
 

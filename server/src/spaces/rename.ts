@@ -4,10 +4,11 @@
  * Split out of spaces.ts (A17.7 step 2). Renaming a space renames its `{spaceId}_*` collections and
  * then rewrites every config reference (networks, tokens, proxy members). Depends only on _shared.
  */
-import { escapeRegex } from '../util/redos.js';
+import { moveCounterDoc } from '../sync/positions-owed.js';
+import { moveScanCursors } from '../brain/scan-cursor.js';
 import fs from 'fs/promises';
 import path from 'path';
-import { getDb, col, asDoc, asFilter } from '../db/mongo.js';
+import { getDb } from '../db/mongo.js';
 import { getConfig, saveConfig, getDataRoot, mutateConfig } from '../config/loader.js';
 import { log, peerText, refusalOfParse } from '../util/log.js';
 import type { Config, SpaceConfig } from '../config/types.js';
@@ -137,39 +138,21 @@ export async function moveSpaceData(
   //   subsequent local write would then get a seq BELOW the watermark, and sync would skip
   //   it forever: the space keeps working locally while silently never pushing to peers.
   //
-  // `_id` is immutable in MongoDB, so these are copy-then-delete. Take the MAX of old and
-  // any pre-existing counter so a re-run can never move the sequence backwards.
+  // `_id` is immutable in MongoDB, so these are copy-then-delete. The WHOLE document moves (`moveCounterDoc`, `sync/positions-owed.ts`): the greater of the two
+  // versions and every marker field it carries (`positionsOwed`, `positionsReadyAt`, `seqSeenBy6`). A hand-built `{ _id, seq }` dropped them, and a renamed space
+  // then read as owing a repair or, worse, lost an owed marker and read as ready.
   try {
-    const counters = col<{ _id: string; seq: number }>('ythril_counters');
-    const oldCounter = await counters.findOne(asFilter<{ _id: string; seq: number }>({ _id: oldId }));
-    if (oldCounter) {
-      const newCounter = await counters.findOne(asFilter<{ _id: string; seq: number }>({ _id: newId }));
-      const seq = Math.max(oldCounter.seq ?? 0, newCounter?.seq ?? 0);
-      await counters.replaceOne(
-        asFilter<{ _id: string; seq: number }>({ _id: newId }),
-        asDoc({ _id: newId, seq }),
-        { upsert: true },
-      );
-      await counters.deleteOne(asFilter<{ _id: string; seq: number }>({ _id: oldId }));
-      log.debug(`Migrated seq counter ${peerText(oldId)} → ${peerText(newId)} (seq=${seq})`);
-    }
+    const moved = await moveCounterDoc(oldId, newId);
+    if (moved) log.debug(`Migrated the counter document ('ythril_counters') ${peerText(oldId)} → ${peerText(newId)} (seq=${moved.seq})`);
   } catch (err) {
-    stepFailed(`Could not migrate the seq counter ${oldId} → ${newId}`, err, errors);
+    stepFailed(`Could not migrate the counter document ('ythril_counters') ${oldId} → ${newId}`, err, errors);
   }
 
   // The duplicate-scanner cursor is keyed `${spaceId}:${type}`. Losing it is harmless
   // (the space simply re-scans from the start) but it leaves orphaned rows behind, so
   // move it across rather than stranding it.
   try {
-    const scanState = col<{ _id: string }>('ythril_dupe_scan_state');
-    const stale = await scanState
-      .find(asFilter<{ _id: string }>({ _id: { $regex: `^${escapeRegex(oldId)}:` } }))
-      .toArray() as Array<Record<string, unknown> & { _id: string }>;
-    for (const doc of stale) {
-      const moved = { ...doc, _id: `${newId}:${doc._id.slice(oldId.length + 1)}` };
-      await scanState.replaceOne(asFilter<{ _id: string }>({ _id: moved._id }), asDoc(moved), { upsert: true });
-      await scanState.deleteOne(asFilter<{ _id: string }>({ _id: doc._id }));
-    }
+    await moveScanCursors(oldId, newId);
   } catch (err) {
     // Non-fatal: worst case the renamed space re-scans for duplicates from scratch.
     log.warn(`Could not migrate the dupe-scan cursor ${peerText(oldId)} → ${peerText(newId)}: ${peerText(err)}`);

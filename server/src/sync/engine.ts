@@ -48,6 +48,7 @@ import { pinMemberSigningKey, castForWire } from '../util/signing.js';
 import { assertPeerAtFloor } from './peer-floor.js';
 import { roundCastsStillPropagate, pruneExpiredRounds } from './vote-round-retention.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { stampLastSync } from './member-status.js';
 
 // Every outbound fetch's budget, and the longer one for batch payloads — in their own module because the
 // receiver's hold deadline is derived from the batch one (`db/write-bound.ts`).
@@ -429,7 +430,7 @@ async function runSyncForMember(
   const freshNet = freshCfg.networks.find(n => n.id === net.id);
   const m = freshNet?.members.find(m => m.instanceId === member.instanceId);
   // Hot-path bookkeeping: a cosmetic timestamp written every member every cycle.
-  if (m) { m.lastSyncAt = new Date().toISOString(); saveConfigSoon(freshCfg); }
+  if (m) { stampLastSync(m); saveConfigSoon(freshCfg); }
 
   return exchanged;
 }

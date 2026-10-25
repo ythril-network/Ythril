@@ -49,6 +49,7 @@ const MARKS = ['lastPosReceived', 'lastPosPushed'];
 /** The callers of the third mark writer at 84f0b3cc, each reached only from inside the held iteration. */
 const SET_MARK_CALLERS = [
   { file: 'server/src/sync/file-tombstone-ack.ts', why: 'the file-tombstone acknowledgement is written by the file transfer the loop runs for a space it has just asked the hold about' },
+  { file: 'server/src/sync/full-reread.ts', why: 'the operator\'s full re-read (bundle-81, D-20): `beginFullReread` and `endFullReread` are called from the space\'s turn after the hold admitted it, and `requestFullReread` writes only the owed state of a re-read, never a watermark a transfer moved' },
   { file: 'server/src/sync/served-watermark.ts', why: 'what THIS instance served a peer: written by the inbound document doors, which ask refusePeerSpace before they serve' },
   { file: 'server/src/sync/space-exchange.ts', why: 'the receive and push marks of one network (bundle-81, decision 12: `{ networkId }` scope): each write sits inside an if that asks mayExchangeNow, which the mark rule below holds' },
 ];

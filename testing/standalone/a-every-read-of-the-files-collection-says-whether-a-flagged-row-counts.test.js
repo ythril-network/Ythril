@@ -93,10 +93,12 @@ const EXEMPT = {
   'server/src/spaces/lifecycle.ts:wipeSpaceUnqueued': 'the wipe body hands the collection to the runner\'s batched delete, which reads each batch\'s ids to delete EVERY row, flagged ones included, on purpose',
   'server/src/spaces/lifecycle.ts:initSpace': 'creates the space\'s collections and indexes and samples a fact for the embedding model; reads no file for any caller',
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': 'walks the typed record collections (`KnowledgeType`: entity, fact, edge, chrono — a file is none of them) to stamp a retention window; names a suffix, never the files collection',
-  'server/src/spaces/rename.ts:moveSpaceData': 'moves a whole space\'s collections to a new id: every row, flagged included, goes',
   // `ensure-query-indexes.ts:ensureQueryIndexes` came off with Q-445 (bundle-101): it names no collection now, the per-space
   // declaration (`spaces/space-indexes.ts`) does, by part.
   // bundle-81: `util/seq.ts:highestStoredSeq` is gone; its three questions are asked of every record collection, the files included, by part.
+  'server/src/spaces/record-count.ts:spaceRecordCount': 'an ESTIMATE of how many records a re-read of the space reads, from the collections\' metadata: a flagged file row is counted in it, which overstates a duration by a row and decides nothing',
+  'server/src/sync/positions-owed.ts:carryRows': 'gives EVERY row with a version its position, flagged ones included: a flagged row is local audit state that still has a version and sits in the collection the pager reads',
+  'server/src/sync/positions-rollback.ts:rollBackPositions': 'removes the 6.0 fields from EVERY row of the collection, flagged ones included: it runs against the store, with no instance up, and leaves no row 5.6 would hash differently',
   'server/src/util/version-stamp.ts:highestVersionBelowCap': 'the version the counter may continue from: the highest stored version at or below the cap in any row; a flagged row\'s version still counts',
   'server/src/util/version-stamp.ts:heldTermsOf': 'the version a local write must stand above: the stored row\'s own, flagged or not — a write over a flagged row is the revival of a deleted file, which sorts above it',
   'server/src/sync/record-position-stream.ts:positionFloor': 'the highest position the records stream has handed out: any row\'s, a flagged row\'s included, or the next stamp could fall below a position a peer holds a mark for',

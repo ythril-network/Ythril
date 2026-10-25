@@ -38,6 +38,13 @@ export interface NetworkMember {
   tokenHash: string;         // bcrypt of the token this instance uses to auth inbound from peer
   direction: SyncDirection;
   lastSyncAt?: string;       // ISO8601 — set only on successful sync
+  /**
+   * The same instant, written beside `lastSyncAt` by `stampLastSync` (`sync/member-status.ts`) and by nothing else of 6.0. A 5.6 build writes
+   * `lastSyncAt` and has never heard of this, so `lastSyncAt != lastSyncAtBy6` says "a 5.6 build synced with this member since 6.0 last did",
+   * which is what the re-upgrade detector looks for (`detectReupgrade`, `sync/positions-owed.ts`). Member status like `lastSyncAt`, never shown
+   * (`WITHHELD_MEMBER_KEYS`, `networks/member-view.ts`).
+   */
+  lastSyncAtBy6?: string;
   /** spaceId → the peer's position this instance is COMPLETE through (6.0: its clock stream, `through` of its last page). */
   lastPosReceived?: Record<string, number>;
   /** spaceId → this instance's own position the peer has been sent complete through (the position of OUR stream, per network). */
@@ -74,6 +81,14 @@ export interface NetworkMember {
    *  watermarks (a rename carries it; a counter wipe clears it, which here means not owed, so the next divergence
    *  arms it afresh), and never shown by `GET /api/networks`. */
   fileMetaRereadAt?: Record<string, string>;
+  /**
+   * spaceId -> where the OPERATOR'S full re-read of this member stands (`POST /api/networks/:id/reread`, MCP `network_reread`; `sync/full-reread.ts`):
+   * absent = none owed, `'owed'` = asked for and not begun, `'catching'` = begun (this network's receive and push marks for the space were cleared) and
+   * reading until the pull reaches the member's head. At most one space per member and network is `'catching'` at a time, so a re-read of many spaces
+   * costs one cycle per space at least. Kept per member and space like the marks (a rename carries it), forgotten by a restore with the receive marks (the
+   * restore re-reads anyway), and never shown by a network view: the admin view's `rereadOwed` lists it.
+   */
+  fullRereadState?: Record<string, string>;
   consecutiveFailures?: number;  // incremented on each failed sync; reset to 0 on success
   /**
    * LOCAL to a publisher: the network space ids this subscriber answered `423 space_declined` for — it left the space (design v5 §2.9,
@@ -164,7 +179,7 @@ export interface MemberRemoval {
  */
 export const PER_SPACE_WATERMARKS = [
   'lastPosReceived', 'lastPosPushed', 'lastPosServed', 'lastFileTombstoneAckedAt', 'tombstoneRereadAt',
-  'fileMetaRereadAt', 'lastSeqReceived', 'lastSeqPushed', 'lastSeqServed',
+  'fileMetaRereadAt', 'fullRereadState', 'lastSeqReceived', 'lastSeqPushed', 'lastSeqServed',
 ] as const satisfies readonly (keyof NetworkMember)[];
 
 /** One of the per-space marks a member carries. */
@@ -179,7 +194,7 @@ export type PerSpaceWatermark = (typeof PER_SPACE_WATERMARKS)[number];
  * (`receive-marks-and-kept-marks-classify-every-mark`), so a mark added to the member type is decided about here, once, and cannot be
  * forgotten by one door and kept by another.
  */
-export const RECEIVE_MARKS = ['lastPosReceived', 'tombstoneRereadAt', 'fileMetaRereadAt'] as const satisfies readonly PerSpaceWatermark[];
+export const RECEIVE_MARKS = ['lastPosReceived', 'tombstoneRereadAt', 'fileMetaRereadAt', 'fullRereadState'] as const satisfies readonly PerSpaceWatermark[];
 
 /**
  * The marks a RESTORE keeps, each with the reason. They describe what this instance SENT or what its peers acknowledged, which the
@@ -201,6 +216,13 @@ export const KEPT_ON_RESTORE = {
  * {@link KEPT_ON_RESTORE} they are exactly {@link PER_SPACE_WATERMARKS}.
  */
 export const ROLLBACK_MARKS = ['lastSeqReceived', 'lastSeqPushed', 'lastSeqServed'] as const satisfies readonly PerSpaceWatermark[];
+
+/** The 6.0 mark each frozen 5.6 mark is carried into at the first carry, by identity (a legacy row's position is its seq): `carryMarksToPositions`, `sync/receive-marks.ts`. */
+export const POSITION_TWIN = {
+  lastSeqReceived: 'lastPosReceived',
+  lastSeqPushed: 'lastPosPushed',
+  lastSeqServed: 'lastPosServed',
+} as const satisfies Record<(typeof ROLLBACK_MARKS)[number], PerSpaceWatermark>;
 
 export interface VoteCast {
   instanceId: string;

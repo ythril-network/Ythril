@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { NetworkConfig } from '../../config/types.js';
 import { isSsrfSafeUrl, SSRF_SAFE_MESSAGE } from '../../util/ssrf.js';
 import { isPeerSchemeAllowed, PEER_SCHEME_MESSAGE } from '../../config/transport-security.js';
+import { memberView } from '../../networks/member-view.js';
 
 export const BCRYPT_ROUNDS = 12;
 
@@ -28,7 +29,7 @@ export const SSRF_SAFE_URL = z
 export function safeMemberList(net: NetworkConfig, excludeInstanceId: string) {
   return net.members
     .filter(m => m.instanceId !== excludeInstanceId)
-    .map(({ tokenHash: _th, skipTlsVerify: _sv, ...m }) => m);
+    .map(m => memberView(m, 'joiner'));
 }
 
 /**

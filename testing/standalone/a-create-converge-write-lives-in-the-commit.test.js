@@ -107,6 +107,9 @@ const EXEMPT = {
   // CLAUDE.md, "What a receiver does after the write"). It replaced `ingestBrainDoc` (push, import) and the pull's
   // `batchUpsertBySeq`, and the routes' inline `$setOnInsert`, which is why the docs.ts orphan exemption is gone.
   'server/src/sync/arrivals.ts:writeArrivals': 'sync push, pull and admin import: the arrival writer',
+  'server/src/sync/positions-owed.ts:carryRows': 'the first carry into position space (bundle-81): local-only position fields on rows already held, once per space; never a create or a converge',
+  'server/src/sync/positions-owed.ts:repairRows': 'the repair after a 5.6 build (bundle-81): a fresh position and `writtenHere` on rows already held, under the landing hold; never a create or a converge',
+  'server/src/sync/positions-rollback.ts:rollBackPositions': 'the rollback tool (bundle-81): removes the 6.0 local fields from rows already held and raises the counter; runs with no instance up',
   'server/src/sync/delivered-by-backfill.ts:stampCollection':
     'the one-time stamp of who delivered the rows stored before `deliveredBy` existed (bundle-51): a migration of LOCAL state (a '
     + 'local-only field of rows already held) run once per space by the sync cycle, never a create or a converge',

@@ -532,6 +532,7 @@ inviteRouter.post('/finalize', authRateLimit, async (req, res) => {
       tokenHash,
       direction: isDirectionalNetwork(net) ? 'push' : 'both',
       lastSyncAt: undefined,
+      lastSyncAtBy6: undefined,   // a new member has neither stamp: `stampLastSync` writes both
       lastSeqReceived: {},
       children: net.type === 'braintree' ? [] : undefined,
       // The handshake was initiated by THIS instance's invite — the joiner

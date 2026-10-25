@@ -61,6 +61,8 @@ const EXEMPT = new Map([
   ['server/src/brain/tombstone-prune.ts', 'prunes tombstones past their retention: deletes only'],
   ['server/src/brain/chrono-redaction.ts', 'redacts and stamps the expiry of chrono entries that exist: updates existing rows only'],
   ['server/src/brain/suppression-sweep.ts', 'removes vectors from records that exist: updates existing rows only'],
+  ['server/src/sync/positions-owed.ts', 'gives rows that exist their position fields, once: updates existing rows only, and a restore calls it inside its own hold'],
+  ['server/src/sync/positions-rollback.ts', 'the rollback tool: runs with no instance up, so there is no gate to ask; updates existing rows only'],
   ['server/src/sync/delivered-by-backfill.ts', 'stamps deliveredBy on records that exist, once: updates existing rows only'],
   ['server/src/files/leaked-rows-repair.ts', 'removes derived rows and links a deleted file left behind: deletes only'],
   ['server/src/files/legacy-spill-sweep.ts', 'removes legacy read spills: deletes only'],

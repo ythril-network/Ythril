@@ -181,6 +181,10 @@ const EXEMPT = {
     + 'already held; no property is written',
   'server/src/spaces/_shared.ts:repairStaleSpaceIds':
     'space creation reached from membership gossip repairs a stale `spaceId` on records already stored: one field, no property',
+  'server/src/sync/positions-owed.ts:carryRows':
+    'the first carry: the carry and the repair of a space\'s positions (bundle-81): `pos`, `posAtSeq` and `writtenHere` on rows already held, local-only fields no peer overwrites; no property is written and no row is created',
+  'server/src/sync/positions-owed.ts:repairRows':
+    'the repair: the carry and the repair of a space\'s positions (bundle-81): `pos`, `posAtSeq` and `writtenHere` on rows already held, local-only fields no peer overwrites; no property is written and no row is created',
   'server/src/sync/delivered-by-backfill.ts:stampCollection':
     'the one-time stamp of who delivered rows stored before `deliveredBy` existed: a local-only field on rows already held',
   'server/src/db/restore.ts:backupLoader':

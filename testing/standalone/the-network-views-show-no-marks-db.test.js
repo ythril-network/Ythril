@@ -88,9 +88,9 @@ describe('the network views show no marks', { skip }, () => {
   const networkOf0 = (body) => (body.networks ? body.networks.find(n => n.id === NET) : body);
 
   /** The rule, for one answer: no mark key at any depth, no sentinel value, and still a view of the network. */
-  function assertNoMarks(what, body, members) {
+  function assertNoMarks(what, body, members, floor = 10) {
     const keys = keysDeep(body);
-    assert.ok(keys.length > 10, `${what}: the body is empty (${keys.length} keys) — the door answered nothing to check`);
+    assert.ok(keys.length > floor,`${what}: the body is empty (${keys.length} keys) — the door answered nothing to check`);
     const leaked = keys.filter(k => MARKS.includes(k.key) || k.key === 'lastSyncAtBy6').map(k => k.path);
     assert.deepEqual(leaked, [], `${what} hands out per-space marks or the 6.0 sync stamp: ${leaked.join(', ')}`);
     const text = JSON.stringify(body);
@@ -137,7 +137,9 @@ describe('the network views show no marks', { skip }, () => {
     saveConfig(cfg);
     const out = await admitByInviteKeyAct(NET, { instanceId: JOINER, inviteKey: KEY, label: 'Joiner', url: 'https://b1.example.com', token: 'a-plaintext-peer-token' });
     assert.equal(out.status, 200, `the join was not admitted, so there is no answer to check: ${JSON.stringify(out).slice(0, 300)}`);
-    assertNoMarks('the join answer', out.body, out.body.members);
+    // The joiner's list is identity and topology only (decision 17), so its body is a few keys by design: the floor is the answer's own shape (status, network id and a member
+    // with its four identity keys), and the member check below is the positive control that a view which shows nothing cannot pass.
+    assertNoMarks('the join answer', out.body, out.body.members, 5);
   });
 
   describe('the admin view (decisions 39 and 42)', () => {

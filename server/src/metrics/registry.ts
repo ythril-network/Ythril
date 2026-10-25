@@ -1456,6 +1456,33 @@ export const syncPositionBehindTotal = new Counter({
 });
 syncPositionBehindTotal.labels({ network: '' }).inc(0);
 
+/**
+ * How many spaces owe their positions right now, by what they owe (`carry`: the first carry into position space; `repair`: rows a 5.6 build changed without
+ * one): the spaces that answer `503 positions_building` to every sync door (`sync/positions-owed.ts`). Set by the owed job at each tick, and by the detector
+ * when it marks spaces. A value that stays above 0 for longer than a tick or two is a carry or an index build that does not finish; the walk reporter's line
+ * names the space and the unit.
+ */
+export const positionsBuildingSpaces = new Gauge({
+  name: 'ythril_positions_building_spaces',
+  help: 'Spaces that owe their positions (503 positions_building to every sync door), by what they owe: carry or repair',
+  labelNames: ['kind'] as const,
+  registers: [register],
+});
+positionsBuildingSpaces.labels({ kind: 'carry' }).set(0);
+positionsBuildingSpaces.labels({ kind: 'repair' }).set(0);
+
+/**
+ * Rows the first carry could NOT give a position because they carry no numeric version (pre-4.0 file rows): they were never served by a seq pager and are
+ * not served by the position pager. Counted per collection each time a carry of a space ends, so an operator sees what the carry left out (design rev 8 §3).
+ */
+export const positionsCarryUnpositionedTotal = new Counter({
+  name: 'ythril_positions_carry_unpositioned_total',
+  help: 'Rows the first carry into position space left without a position because they carry no version, by collection',
+  labelNames: ['collection'] as const,
+  registers: [register],
+});
+positionsCarryUnpositionedTotal.labels({ collection: '' }).inc(0);
+
 export const syncDurationSeconds = new Histogram({
   name: 'ythril_sync_duration_seconds',
   help: 'Time per sync cycle in seconds',
