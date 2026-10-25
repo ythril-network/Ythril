@@ -59,7 +59,9 @@ describe('closing the harness leaves a test\'s timers alone', { skip }, () => {
     await openTestMongo(SUITE);
     const { pollVectorIndexReady } = await import('../../server/dist/spaces/vector-index.js');
     const poll = pollVectorIndexReady('closetimers', 'entities', 'closetimers_entities_embedding', { vectorPath: 'embedding', dims: 4 }, { timeoutMs: 3000 });
-    const done = poll.catch(() => {});
+    // Never awaited: the poll is abandoned, as a restore abandons it, and its timers are unref'd, so awaiting it would
+    // leave nothing holding the event loop and node:test would cancel this case (Full run 40193787643).
+    poll.catch(() => {});
     await closeTestMongo();
     const seen = [];
     const outer = globalThis.setTimeout;
@@ -74,6 +76,5 @@ describe('closing the harness leaves a test\'s timers alone', { skip }, () => {
     } finally {
       globalThis.setTimeout = outer;
     }
-    await done;
   });
 });
