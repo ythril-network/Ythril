@@ -131,6 +131,58 @@ export function unitsOf(files, seconds = loadDbFileWeights()) {
 }
 
 /**
+ * Which files THIS process runs, when it is one shard of a `-db` third that CI spreads over several jobs (Q-623): the
+ * runner's `YTHRIL_TEST_DB_SHARDS` (the count) and `YTHRIL_TEST_DB_SHARD_INDEX` (this process's shard), numbers or the raw env
+ * strings, an empty string meaning unset (as `resolveDbShardConfig` reads it).
+ *
+ * Returns `null` when there is no index: this is not a one-shard run, and the runner's own modes (several local shard Mongos,
+ * or the one Mongo) apply. Returns `planDbShards(files, count)[index]` when both are valid.
+ *
+ * ## What it prevents
+ *
+ *  - **A silent full run.** An index with no count, or one the count does not reach, used to be exactly what a run with no
+ *    index looks like: every file, on every one of the four jobs, four times the work and the same Mongo load each was split to
+ *    avoid. It THROWS, so the process ends non-zero.
+ *  - **A silent empty run.** An index past the last shard selects nothing, and a job that ran nothing reports success about it.
+ *  - **A second partition rule.** The selection is `planDbShards`'s own, so the files CI's jobs run are the plan's and
+ *    `ci-runs-every-db-shard-exactly-once` proves coverage of the plan that actually runs.
+ *  - **A garbage value read as a number.** `abc`, `1.5`, `-1` and a blank are refused, never coerced to 0.
+ *
+ * @param {string[]} files
+ * @param {{ count?: number|string, index?: number|string }} given
+ * @returns {string[] | null}
+ */
+export function dbFilesThisProcessRuns(files, { count, index } = {}) {
+  const set = (raw) => raw !== undefined && raw !== null && raw !== '';
+  if (!set(index)) return null;
+  if (!set(count)) {
+    throw new Error(`YTHRIL_TEST_DB_SHARD_INDEX=${index} needs YTHRIL_TEST_DB_SHARDS: an index with no shard count would run every file, or none`);
+  }
+  const whole = (raw) => (typeof raw === 'string' && !/^\d+$/.test(raw.trim()) ? NaN : Number(raw));
+  const n = whole(count);
+  if (!Number.isInteger(n) || n < 1 || n > DB_SHARDS_MAX) {
+    throw new Error(`YTHRIL_TEST_DB_SHARDS=${count} is not a whole shard count from 1 to ${DB_SHARDS_MAX}`);
+  }
+  const i = whole(index);
+  if (!Number.isInteger(i) || i < 0 || i >= n) {
+    throw new Error(`YTHRIL_TEST_DB_SHARD_INDEX=${index} is not a shard index from 0 to ${n - 1} of ${n}`);
+  }
+  return planDbShards(files, n)[i];
+}
+
+/**
+ * The name of one batch's results file within a run, `db-s<shard>-<unit>`: the shard AND the unit's number.
+ *
+ * What it prevents: CI's `-db` shard jobs each upload `test-results/`, and the gate downloads every `test-results-*-<attempt>`
+ * with `merge-multiple` into ONE folder. Batches named by their number alone (`standalone-db-1.jsonl`) would be written by
+ * every shard, and the merge keeps one file of the four with nothing said, so `executed-tests` would read a quarter of the
+ * run as the whole of it. The local sharded run names its batches this way too, so one spelling serves both.
+ */
+export function dbBatchLabel(shardIndex, unitNumber) {
+  return `db-s${shardIndex}-${unitNumber}`;
+}
+
+/**
  * The files of each shard, by file name as `splitStandalone` lists them.
  *
  * It THROWS when the result is not a partition of the input (a file missing, repeated or in a shard that does not

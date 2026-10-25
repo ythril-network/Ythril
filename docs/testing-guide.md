@@ -71,6 +71,16 @@ four shards); a host the size of CI's runner (4 CPUs) gets one, which is the old
 its database is closed (`closeTestMongo`), because a restore leaves a server-side poll running that held twelve files for 60 s
 each after their tests had passed.
 
+**CI runs the database third as one job per shard, not as one job.** A runner has room for one MongoDB, so
+`Standalone (database, shard <i>)` is a matrix: each job starts the one `ythril-mongo-a` and runs
+`YTHRIL_TEST_DB_SHARDS=<count> YTHRIL_TEST_DB_SHARD_INDEX=<i> npm run test:standalone:db`, which runs exactly shard `<i>` of
+the plan (`dbFilesThisProcessRuns` in `testing/_shared/db-shard-plan.mjs`) against the MongoDB already at
+`YTHRIL_TEST_MONGO_PORT` and starts no container. An index with no count, or outside `0` to the count minus one, ends the run
+non-zero: it never falls back to every file or to none. Each job uploads `test-results-standalone-db-<i>-<attempt>`, and its
+results files are named by shard and unit (`dbBatchLabel`), so the merged download holds every shard's. You can run one the
+same way against your own MongoDB. `ci-runs-every-db-shard-exactly-once` holds that the matrix is exactly the plan's indices
+(every database-backed file runs once) and `a-db-runner-runs-one-shard-of-n` holds the runner's side.
+
 To print how many files each kind holds, and how many files a stack suite selects:
 
 ```bash
@@ -570,6 +580,7 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 |---|---|---|
 | `YTHRIL_TEST_MONGO_HOST`, `YTHRIL_TEST_MONGO_PORT` | `testing/_shared/test-mongo-address.mjs` | Where the database-backed standalone tests find the test MongoDB (CI's Full run and `npm run test:up`; local preflight runs none of them). Defaults are the test stack's loopback address and published port. |
 | `YTHRIL_TEST_DB_SHARDS`, `YTHRIL_TEST_DB_SHARD_WIDTH` | `testing/_init/db-shard-stack.mjs` | How many fresh MongoDBs the database third is spread over (1 is the one at `YTHRIL_TEST_MONGO_PORT`; default from the Docker VM, at most 4; up to 8) and how many files run at once on each (default 4). |
+| `YTHRIL_TEST_DB_SHARD_INDEX` | `testing/_shared/db-shard-plan.mjs` (`dbFilesThisProcessRuns`) | With `YTHRIL_TEST_DB_SHARDS`, run exactly one shard of the database third (the files of `planDbShards(files, count)[index]`) against the MongoDB at `YTHRIL_TEST_MONGO_PORT`, starting none; CI sets it from its matrix. An index with no count, or outside 0 to the count minus one, is refused (non-zero). Only with `--only=db`. |
 | `YTHRIL_TEST_DB_SHARD_PORT` | `testing/docker-compose.db-shard.yml` | The loopback port of one shard's MongoDB. Set by the runner for each shard; never by hand. |
 | `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs`, `scripts/trade.mjs` | The recorder's instance and token (trade: `--record` and `--history`). See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
 | `GH_TOKEN`, `GITHUB_API_URL` | `scripts/test-times.mjs` | Read access to this repository's Actions runs, and the API base. |
