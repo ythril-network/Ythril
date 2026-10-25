@@ -114,6 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | An unclosed resolve shows as `resolving`; after 10 minutes another choice takes it over, undoing what it recorded | Finish with the same choice, or dismiss |
 | A `filter` or `recall` predicate on a withheld field (`embedding`, `deliveredBy`, the write guard) other than `$exists` is `400` | Use `$exists` only |
 | A projection of withheld fields only (`{embedding: 1}`) answers `{_id}`, was every field | Project the fields you read |
+| Sync pages by landing position (`pos`): `afterPos` or `cursor` in, `positions: 1` in answers; `sinceSeq` and 5.x cursors are `400`; arrivals leave the seq counter alone; lists default to landing order | Upgrade every member: a 5.x peer shows as too old |
 
 ### Added
 
@@ -150,9 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Records:** A converge that loses a race is decided again against the current record; losing twice is `409` on a create door and an item error in a batch. `save_bulk` declares the `id` of fact and chrono items.
 - **Sync:** A fork's id derives from the parent's id, seq and text: a re-sent push upserts it; an older receiver accepts an eleventh. Documents past the 500-per-family cap and records the store refuses count in `rejected`.
 - **Sync:** A link under another id for linked endpoints is `skipped`. A space's Merkle root is not re-read when nothing changed: `GET /api/sync/merkle` and `merkle: true` cycles are far cheaper; root date: `computedAt`.
-- **Sync:** Each space gets a `(seq, _id)` index per record collection, built in the background on first start (paging stays tie-safe, slower). Each record stores its delivering peer (`deliveredBy`: local, never sent or shown).
+- **Sync:** Each space gets a `(pos, _id)` index per record collection, built in the background on first start (paging stays tie-safe, slower). Each record stores its delivering peer (`deliveredBy`: local, never sent or shown).
 - **Sync:** New `ythril_sync_tombstones_applied_total`, `ythril_sync_tombstones_declined_total` and gauge `ythril_sync_tombstone_rereads_owed`. New `ythril_sync_file_arrivals_total{door,outcome}` counts file arrivals.
-- **Sync:** Records take a local landing position (`pos`); arrivals no longer move the seq counter.
 - **Sync:** A subscriber that left a pub/sub space gets `423` `space_declined` once; the publisher stops sending it; sync history lists it `declined`, not held. A tombstone of a type the receiver does not know still answers `400`; the sender resends once upgraded.
 - **Embedding:** The bundled model runs in a supervised child process: embedding cannot block the server, nor a native fault take it down; it exits after 10 idle minutes.
 - **Embedding:** `mem_limit` or a pod memory limit counts both processes. The child holds no secrets. A lost process is replaced after a growing delay; a record killing it three times is `failed`, the crash in its `lastError`.
@@ -199,7 +199,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** A peer's edit no longer erases this instance's vector and retention stamps. A pull counts a file under a decomposed (NFD) name once, touching its bytes in place.
 - **Sync:** A duplicate link in a push is `skipped`; a refused document gets one warning per page naming ids and reason. A database fault writing a pulled page is not `PEER UNREACHABLE`: it holds the family's position and refetches.
 - **Sync:** A driver argument error drops only its own document (`rejected`; a single route `400`). A merge-dropped duplicate edge's or re-keyed link's tombstone carries `originalSeq`.
-- **Sync:** A tombstone page of refused elements no longer holds a peer's position for good, nor a refused element's seq move it; a tombstone `instanceId` over 256 characters is refused.
+- **Sync:** A tombstone page of refused elements no longer holds a peer's position for good; a tombstone `instanceId` blank or over 256 characters is refused.
 - **Sync:** A file deleted on one peer is removed on the others at the version it names; one re-created since is kept. An admin restore removes a file description, source, property, tag or mark its backup lacks (`keysRemoved`).
 - **Files:** A peer's file, pushed or pulled, is processed by this instance's rules (converted, chunked, media); a new version replaces old passages; a failed record write leaves no new file unless the database was down.
 - **Files:** A pushed file's later description and tag edits apply; arriving bytes revive a soft-deleted path with this instance's retention; a metadata arrival no longer overwrites a newer copy.
@@ -341,17 +341,17 @@ errors no longer exposing the database, and bounded one-line log values.**
 
 | Changes on upgrade | Action |
 |---|---|
-| Every start, once the server listens, sweeps the stored vectors of everything a space suppresses (records, files, chunks), one space at a time | Nothing; expect one scan per record kind per space at start, and `Suppression sweep: removed N <kind> vector(s) in <space>` where it removed any |
+| Every start, once the server listens, sweeps the stored vectors of everything a space suppresses (records, files, chunks), one space at a time | Nothing; expect a scan per record kind per space at start, logging `Suppression sweep: removed N <kind> vector(s) in <space>` |
 | Every log line is one line: a stack's breaks are written as `\n`, an `Error` renders as message and frames without the `Error:` prefix, a string extra argument is no longer JSON-quoted | Match a stack on its single line |
 | A log value is cut at 4096 characters and a list at 100 items, and the line says how much (`…(+N chars)`, `…(+N more)`) | Nothing; a value that fits is written as before |
-| A store failure's `error` text is a fixed sentence of ours at the status it already had; the driver's message is in the server log under the failed operation | Read `retryable`, not the prose; grep the log for the operation named in the failure line |
+| A store failure's `error` text is a fixed sentence of ours at the status it already had; the driver's message is in the server log under the failed operation | Read `retryable`, not the prose; the log names the operation |
 | An error of ours that only names the store (a path such as `notes/mongot-setup.md`) answers `400`, not a retryable `503`; a driver failure under a space rename or create answers `500`, not `404` or `409` | Nothing; a pooled connection cleared under a command keeps `400` |
 | A refusal listing references or unknown keys cuts each at 256 characters and ends `…(+N more)`, where it read `(+N more)` | A client matching the old tail text must match the new one |
 | A search right after a space's first write answers `200` and empty, not `503` | Retry logic that waited on that `503` can stop |
 | A duplicate merge needs `knowledge` write and `dataQuality` write in the space where the pair lives; a pair elsewhere answers `404` | Grant both rights to the token that merges |
-| A fork written from now on keeps the divergent copy's `createdAt` and `updatedAt`; a stored fork keeps its stamps | Nothing; on a mixed-version network the same fork differs in its timestamps until every member runs 5.6.4 |
-| A link violation 5.6.3 stored under a random id gets one derived twin on the next delivery of its document, announcing `link_violation.created` once | Nothing; dismiss the older row if you do not want both |
-| A duplicate pair stored with seq `0` (or none) is not re-fired by the first scan; its real seqs are stored as each pair is next scanned | Nothing; a merge that keeps the older record keeps it whichever end the scan started from |
+| A fork written from now on keeps the divergent copy's `createdAt` and `updatedAt`; a stored fork keeps its stamps | Nothing; on a mixed-version network a fork's timestamps differ until every member runs 5.6.4 |
+| A link violation 5.6.3 stored under a random id gets one derived twin on the next delivery of its document, announcing `link_violation.created` once | Nothing; dismiss the older row to keep one |
+| A duplicate pair stored with seq `0` (or none) is not re-fired by the first scan; its real seqs are stored as each pair is next scanned | Nothing; a merge keeps the older record whichever end the scan started from |
 | The reindex INFO line gains a field: `Reindex completed for space '<id>': reindexed=N, suppressed=N, superseded=N, errors=N` | A script reading that line reads the new field |
 
 ### Changed
@@ -415,7 +415,7 @@ tombstone deleting records in a space it was not admitted to.**
 | Changes on upgrade | Action |
 |---|---|
 | The first boot builds one index per space on its tombstones (`type`, `seq`) | Nothing |
-| A stray `<space>_filemeta` collection 5.6.2 had not dropped is recovered at most 2,000 records per space per cycle; a record whose file has not arrived waits up to 30 days | Nothing; where 5.6.2 already dropped it, nothing is left to recover |
+| A stray `<space>_filemeta` collection 5.6.2 had not dropped is recovered at most 2,000 records per space per cycle; a record whose file has not arrived waits up to 30 days | Nothing; nothing is left where 5.6.2 dropped it |
 | `POST /api/sync/tombstones` answers `{ applied, refused }` and takes at most 5000 tombstones per request (more is `400`) | Nothing for a Ythril peer (it sends 500); `applied` keeps its meaning |
 | First pulls after a long absence carry up to 5000 deletions per kind per request, 200 requests per cycle | Nothing; a peer on 5.6.2 or earlier pulls at most 1000 per kind |
 | A tombstone whose issuer is not the delivering peer, or whose record here another instance wrote, is refused and not stored | Nothing for an honest peer |
@@ -475,7 +475,7 @@ pushes could leave the counter behind, and file descriptions could miss subscrib
 | An import now moves this instance's counter past the records it restored | Nothing |
 | A duplicate link in a push is counted as `skipped` instead of answering `500` | Nothing; a sender that re-sent that page for ever now moves on |
 | A tombstone pushed with a seq too close to the protocol ceiling is refused and logged; the rest of the push applies | Nothing |
-| File metadata a pull stored in a stray `<space>_filemeta` collection since 4.0 is merged into the space's files and the collection dropped | Nothing; one log line per space says how many records were merged |
+| File metadata a pull stored in a stray `<space>_filemeta` collection since 4.0 is merged into the space's files and the collection dropped | Nothing; one log line per space counts them |
 
 ### Fixed
 
