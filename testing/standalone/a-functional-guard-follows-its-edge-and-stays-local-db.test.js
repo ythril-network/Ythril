@@ -348,7 +348,7 @@ describe('the functional guard marker follows its edge and stays on this instanc
         const id = await seedEdge(STRICT, { from: IDS.ALICE, to: IDS.BOB, label: LABELS.functional, peer: true, id: ID.R1, marker: SEEDED, seq: 5 });
         const arrived = build.edge(STRICT, id, 6, { from: IDS.ALICE, to: IDS.BOB, label: LABELS.functional, ...change });
         const r = await env.door.push('/edges', arrived, { spaceId: STRICT });
-        assert.deepEqual([r.code, r.body], [200, { status: 'ok' }], 'fixture: the arrival was not accepted');
+        assert.deepEqual([r.code, r.body], [200, { status: 'ok', positions: 1 }], 'fixture: the arrival was not accepted');
         const stored = await edgesOf(STRICT).findOne({ _id: id });
         assert.equal(stored.seq, 6, 'fixture: the stored row is not the arriving version');
         for (const [k, v] of Object.entries(change)) assert.equal(stored[k], v, `fixture: the arriving ${k} was not stored`);

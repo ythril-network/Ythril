@@ -11,6 +11,14 @@
  * the first page did not hold. Equal seqs are legitimate on the wire — a peer relays tombstones issued by several
  * instances, each with its own clock.
  *
+ * ## Bundle-81: what changed in this file, and why
+ *
+ * A deletion is an item of the position stream now: the route answers ONE page `{ items, nextCursor, through, head, positions: 1 }` (a total of at most
+ * 5000, not 5000 per type), paged by `(position, _id)`, and the pull's start is `afterPos` or the server's own cursor. The carried rows the fake peer holds
+ * have a position equal to their seq, so the runs of equal seqs below are runs of equal positions, which the pair cursor continues. Rule 3, a peer WITHOUT the
+ * cursor mode, is gone with the grouped answer it was about: a 5.6 peer's answer has no `positions: 1`, ends the member's turn and writes no mark
+ * (`a-5x-answer-ends-the-members-turn-db`), and the case below holds that for a tombstone page.
+ *
  * ## The rules, each against the real engine and a fake peer serving the real GET handler (`_pull-door.mjs`)
  *
  *  1. **Everything is applied**: more tombstones than one page holds, with a run of equal seqs across the boundary.
@@ -37,6 +45,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_LABEL, PEER_AUTHOR } from './_pull-door.mjs';
+import { positioned, readMark } from './_b81b-positions.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -63,8 +72,8 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
   it('the clamp this file pages around is the handler\'s', async () => {
     // Re-anchor rather than page around a number the handler no longer serves.
     await door.seedPeer(S, run(CLAMP + 1, i => i, 'clamp'));
-    const body = await door.pull('/tombstones', { spaceId: `peer-${S}`, sinceSeq: '0', limit: String(CLAMP * 10) });
-    assert.equal(body.facts.length, CLAMP, `GET /tombstones clamps at ${body.facts.length}, not ${CLAMP} — re-anchor`);
+    const body = await door.pull('/tombstones', { spaceId: `peer-${S}`, afterPos: '0', limit: String(CLAMP * 10) });
+    assert.equal(body.items.length, CLAMP, `GET /tombstones clamps at ${body.items.length}, not ${CLAMP} — re-anchor`);
   });
 
   describe('pull', () => {
@@ -87,10 +96,10 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
       // The first page's last element arrives malformed (its `instanceId` is not a string): the receiver refuses it, and the
       // next page is asked from the SERVER's position after it — the cursor is never read off an element it refused.
       door.state.tamper = (body, asked) => {
-        if (asked.sinceSeq !== '0' || !body.facts?.length) return body;
-        const facts = [...body.facts];
-        facts[facts.length - 1] = { ...facts[facts.length - 1], instanceId: 12 };
-        return { ...body, facts };
+        if (String(asked.afterPos) !== '0' || asked.cursor !== undefined || !body.items?.length) return body;
+        const items = [...body.items];
+        items[items.length - 1] = { ...items[items.length - 1], instanceId: 12 };
+        return { ...body, items };
       };
       await door.sync();
       const have = await storedIds();
@@ -100,38 +109,35 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
       assert.ok(!have.has(all[CLAMP - 1]._id), 'the malformed element was stored');
     });
 
-    it('a last element whose seq is not the one the peer\'s cursor names is not followed: the transfer stops and the counter does not move', async () => {
+    it('an element that claims a seq no counter can carry is refused alone: the server\'s cursor places the next ask, and neither the counter nor the mark is moved by the claim', async () => {
       const all = run(CLAMP + 1, i => i);
       await door.seedPeer(S, all);
-      // The first page's last element claims a seq far above its place, beside the peer's honest cursor: nothing the page says
-      // can be trusted to place the next ask, so the transfer holds below it and says so.
+      // The first page's last element claims a seq far above its place. The page's cursor and `through` are the SERVER's, never read off an element, so the
+      // transfer is not stopped by it: the element is refused (logged, counted), and the one after it on the next page lands.
       door.state.records[S] = { facts: [build.fact(S, 'rec', 100, { author: PEER_AUTHOR })] };
       door.state.tamper = (body, asked) => {
-        if (asked.sinceSeq !== '0' || !body.facts?.length) return body;
-        const facts = [...body.facts];
-        facts[facts.length - 1] = { ...facts[facts.length - 1], seq: MAX_INGEST_SEQ + 5 };
-        return { ...body, facts };
+        if (String(asked.afterPos) !== '0' || asked.cursor !== undefined || !body.items?.length) return body;
+        const items = [...body.items];
+        items[items.length - 1] = { ...items[items.length - 1], seq: MAX_INGEST_SEQ + 5 };
+        return { ...body, items };
       };
       const { lines } = await door.logsDuring(() => door.sync());
       assert.ok(await door.counter(S) < MAX_INGEST_SEQ, 'the refused seq moved the counter');
-      assert.ok((door.member().lastSeqReceived?.[S] ?? 0) < MAX_INGEST_SEQ, 'the refused seq moved the receive watermark');
-      assert.ok(lines.some(l => l.includes(S) && l.includes(PEER_LABEL) && /tombstone/i.test(l) && /stopped/.test(l)),
-        `no warning says the tombstone transfer stopped:\n${lines.join('\n')}`);
+      const have = await storedIds();
+      assert.ok(!have.has(all[CLAMP - 1]._id), 'the element with the implausible seq was stored');
+      assert.deepEqual(missing(all.slice(-1), have), [], 'the tombstone after the refused element was never applied: the transfer was stopped by a claim the server did not make');
+      assert.ok(lines.some(l => l.includes(all[CLAMP - 1]._id)), `the refusal is not logged by id:\n${lines.join('\n')}`);
     });
 
-    it('a whole page of one seq from a peer without the cursor mode answers truncated with a warning, and the record watermark is capped', async () => {
+    it('a tombstone page without `positions: 1` (a 5.x peer) ends the member\'s turn: no mark, nothing applied, and it is said to be too old', async () => {
       await door.seedPeer(S, run(CLAMP + 1, () => 7));
       door.state.records[S] = { facts: [build.fact(S, 'rec', 100, { author: PEER_AUTHOR })] };
-      // A 5.6 peer ignores `cursor` and sends no `nextCursor`: its page is what the per-type read gave, here one type's 5000.
-      // (A peer WITH the mode pages past the run: `a-tombstone-run-at-one-seq-does-not-wedge-db`.)
-      door.state.tamper = (body) => { const { nextCursor: _dropped, ...legacy } = body; return legacy; };
+      // A 5.x peer answers per type, with no stamp, no `through` and no `head`: here the page with its stamp taken off.
+      door.state.tamper = (body) => { const { positions: _stamp, through: _through, head: _head, ...legacy } = body; return legacy; };
       const { lines } = await door.logsDuring(() => door.sync());
-      const watermark = door.member().lastSeqReceived?.[S] ?? 0;
-      assert.ok(watermark < 7,
-        `the record watermark moved to ${watermark}, past seq-7 deletions the transfer could not page through — they are `
-        + 'never asked for again');
-      assert.ok(lines.some(l => l.includes(S) && l.includes(PEER_LABEL) && /\b7\b/.test(l) && /tombstone/i.test(l)),
-        `no warning names the space, the peer and the seq it stopped at:\n${lines.join('\n')}`);
+      assert.equal(readMark(door, 'received', S) ?? 0, 0, 'a mark was written from an answer that says nothing about positions');
+      assert.equal(await door.coll(S, 'tombstones').countDocuments(), 0, 'a tombstone of a page that could not be read as a position page was applied');
+      assert.ok(lines.some(l => /pre-6\.0|too old/i.test(l)), `nothing says the peer is too old:\n${lines.join('\n')}`);
     });
 
     it('the pull asks at the clamp, and a page with every type full arrives compressed, under the boundedJson cap', async () => {
@@ -142,7 +148,7 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
       await door.sync();
       const first = door.state.requests[0];
       assert.equal(first?.limit, String(CLAMP),
-        `the tombstone pull asked with limit ${first?.limit ?? '(none)'}, so the peer served ${first?.limit ?? 1000} per type`);
+        `the tombstone pull asked with limit ${first?.limit ?? '(none)'}, so the peer served ${first?.limit ?? 1000} in all`);
       const answer = door.state.answers[0];
       assert.match(String(answer.encoding), /^(gzip|br|deflate)$/, `a full tombstone page went out uncompressed (${answer.encoding})`);
       assert.ok(answer.bytes < door.maxUpstreamBytes,
@@ -160,7 +166,7 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
       await door.sync();
       assert.equal((await door.coll(S, 'facts').findOne({ _id: 'again' }))?.seq, 20, 'the re-created record did not land');
       // A capped watermark re-pulls the older tombstone next cycle, in the same order: tombstones, then records.
-      door.member().lastSeqReceived = {};
+      door.member().lastPosReceived = {};
       await door.sync();
       assert.equal((await door.coll(S, 'facts').findOne({ _id: 'again' }))?.seq, 20,
         'a re-pulled older tombstone deleted the record the peer re-created after it');
@@ -170,7 +176,7 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
   describe('push', () => {
     async function pushOnly(local) {
       await door.reset({ direction: 'push' });
-      await door.coll(S, 'tombstones').insertMany(local.map(t => ({ ...t, instanceId: 'tspage-receiver' })));
+      await door.coll(S, 'tombstones').insertMany(local.map(t => positioned({ ...t, instanceId: 'tspage-receiver' })));
       await door.raiseVersionTo(S, local.reduce((m, t) => Math.max(m, t.seq), 0));
       await door.sync();
       return new Set(door.state.received.map(t => t._id));
@@ -195,15 +201,15 @@ describe('a tombstone transfer delivers everything up to the horizon, or holds a
       // watermark reaches 100 only if the tombstone transfer is complete.
       const local = run(CLAMP + 1, () => 7, 'w');
       await door.reset({ direction: 'push' });
-      await door.coll(S, 'facts').insertOne(build.fact(S, 'mine', 100, { author: { instanceId: door.instanceId, instanceLabel: 'Receiver' } }));
-      await door.coll(S, 'tombstones').insertMany(local.map(t => ({ ...t, instanceId: door.instanceId })));
+      await door.coll(S, 'facts').insertOne(positioned(build.fact(S, 'mine', 100, { author: { instanceId: door.instanceId, instanceLabel: 'Receiver' } })));
+      await door.coll(S, 'tombstones').insertMany(local.map(t => positioned({ ...t, instanceId: door.instanceId })));
       await door.raiseVersionTo(S, 100);
       await door.sync();
       assert.ok(door.state.pushedRecords.some(r => r._id === 'mine'), 'the record was not pushed, so the watermark proves nothing');
       const lost = missing(local, new Set(door.state.received.map(t => t._id)));
       assert.deepEqual(lost, [], `${lost.length} tombstone(s) of a run longer than a page were never pushed`);
       assert.equal(door.state.received.length, local.length, 'a tombstone of the run was offered twice');
-      assert.equal(door.member().lastSeqPushed?.[S], 100, 'the push watermark was held below a run that was delivered whole');
+      assert.ok((readMark(door, 'pushed', S) ?? 0) >= 100, 'the push mark was held below a run that was delivered whole');
     });
   });
 });

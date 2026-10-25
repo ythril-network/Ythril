@@ -120,7 +120,10 @@ describe('query paging (real MongoDB)', { skip }, () => {
   it('compareQueryOrder agrees with the sort queryBrain gives MongoDB', async () => {
     // Two expressions of one rule. The proxy merge uses the comparator; a single space uses the driver. If they ever
     // disagree, a proxy space's page order silently stops matching a plain space's for the same query.
-    const fromDriver = await page(100, 0);
+    // The default order is by `pos`, which no answer carries (`ORDER_ONLY_FIELDS`): the rows are read from the collection with it, as a cross-space merge holds them
+    // until it has ordered by it (bundle-81, decisions 11 and 20).
+    const fromDriver = await mongo.col(`${SPACE}_facts`).find({}).sort({ ...query.DEFAULT_QUERY_SORT }).toArray();
+    assert.equal(fromDriver.length, TOTAL);
     const shuffled = [...fromDriver].reverse();
     const fromComparator = shuffled.sort(query.compareQueryOrder);
     assert.deepEqual(fromComparator.map(d => d._id), fromDriver.map(d => d._id),
@@ -129,9 +132,9 @@ describe('query paging (real MongoDB)', { skip }, () => {
 
   it('the comparator puts a record MISSING the sort key last, not first', async () => {
     // A descending sort on `undefined` must not win, or a partially projected document would lead a page it has no
-    // claim to. Constructed rather than queried, because a real record always has `seq`.
-    const sorted = [{ _id: 'a' }, { _id: 'b', seq: 5 }].sort(query.compareQueryOrder);
-    assert.equal(sorted[0]._id, 'b', 'the record with a seq comes first');
+    // claim to. Constructed rather than queried, because a real record always has `pos`.
+    const sorted = [{ _id: 'a' }, { _id: 'b', pos: 5 }].sort(query.compareQueryOrder);
+    assert.equal(sorted[0]._id, 'b', 'the record with a position comes first');
   });
 
   it('queryBrain itself pages past 100 — necessary, and NOT the regression guard', async () => {

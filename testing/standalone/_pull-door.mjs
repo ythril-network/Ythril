@@ -239,7 +239,8 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   app.post('/api/sync/tombstones', express.json({ limit: '100mb' }), (req, res) => {
     const page = Array.isArray(req.body?.tombstones) ? req.body.tombstones : [];
     state.received.push(...page);
-    res.json({ applied: page.length, refused: 0 });
+    // A 6.0 receiver stamps every push answer `positions: 1` (`sync/wire-answer.ts`): a sender reads one without it as a 5.x peer and ends the member's turn.
+    res.json({ applied: page.length, refused: 0, positions: 1 });
   });
   // A record page this instance pushes is accepted whole — what a push of records does is the push door's question.
   app.post('/api/sync/batch-upsert', express.json({ limit: '100mb' }), (req, res) => {
@@ -250,7 +251,8 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     for (const [key, items] of entries) state.batchRequests.push({ key, ids: items.map(d => d?._id), status });
     if (status !== 200) { res.status(status).json(scripted?.body ?? { error: 'scripted refusal' }); return; }
     for (const [key, items] of entries) state.pushedRecords.push(...items.map(d => ({ key, ...d })));
-    res.json(scripted?.body ?? { status: 'ok' });
+    // A scripted answer is a 6.0 receiver's too: it says `positions: 1` unless the case wrote its own (a 5.x-shaped answer is made by `_b81b-wire.mjs`, in front of this peer).
+    res.json(scripted?.body ? { positions: 1, ...scripted.body } : { status: 'ok', positions: 1 });
   });
   app.use('/api/sync/networks', express.json({ limit: '100mb' }), (req, res, next) => {
     if (state.network) state.network(req, res, next); else next();
@@ -327,7 +329,10 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
       return;
     }
     const items = state.records[req.query.spaceId]?.[req.params.family] ?? [];
-    res.json({ items: req.query.cursor ? [] : items, nextCursor: null });
+    // The 6.0 page shape (`sync/wire-answer.ts`): complete through the peer's head, which follows its clock, and stamped `positions: 1`. A scripted page names
+    // no position of its own, so the peer is taken as complete through now; a case about WHERE a page ends serves through the real handler (`serveFamily`).
+    const head = Date.now() * 1000;
+    res.json({ items: req.query.cursor ? [] : items, nextCursor: null, through: head, head, positions: 1 });
   });
   app.use((_req, res) => { res.status(404).json({ error: 'not served by the fake peer' }); });
   // own-listener: binds every interface so the LAN address answers, because the SSRF guards block loopback
@@ -363,10 +368,23 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   /** This instance's record of the fake peer, live. */
   const member = () => loader.getConfig().networks.find(n => n.id === NET).members.find(m => m.instanceId === PEER);
 
+  /**
+   * A row the fake peer holds is a CARRIED row (bundle-81): a page serves what has a position, and a row a case wrote by hand has none, so it takes its seq as its position
+   * (`pos = seq`, the legacy band, below every clock position) unless the case gave it one. The cases that are about WHERE a row sits give their own.
+   */
+  const carried = (d, remote) => {
+    if (d.pos !== undefined || typeof d.seq !== 'number') return { ...d };
+    // A row seeded AFTER the receiver has pulled to the peer's head is a write the peer made since: it lands above that head, at the peer's clock, as a real write does
+    // (a position below a mark the receiver already holds is a row a peer cannot create). Before any pull it is a carried row, at its seq.
+    if ((member().lastPosReceived?.[remote] ?? 0) >= d.seq) { clockPos = Math.max(Date.now() * 1000, clockPos + 1); return { ...d, pos: clockPos, posAtSeq: d.seq }; }
+    return { ...d, pos: d.seq, posAtSeq: d.seq };
+  };
+  let clockPos = 0;
+
   /** Store tombstones on the fake peer for the space it is asked for as `remote`, and settle them. */
   async function seedPeer(remote, tombstones) {
     if (tombstones.length === 0) return;
-    await door.mongo.col(`${peerSide(remote)}_tombstones`).insertMany(tombstones.map(t => ({ ...t })), { ordered: false });
+    await door.mongo.col(`${peerSide(remote)}_tombstones`).insertMany(tombstones.map(t => carried(t, remote)), { ordered: false });
     await stamp.raiseVersionTo(peerSide(remote), tombstones.reduce((m, t) => Math.max(m, t.seq), 0));
   }
 
@@ -480,10 +498,16 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     for (const k of Object.keys(initial.memberExtra)) m[k] = initial.memberExtra[k];
     delete m.tombstoneRereadAt;
     delete m.fileMetaRereadAt;
+    // A 5.x answer stamps the exchange (`versionCheckedAt`, "too old"): a case after it starts as one that never met such an answer.
+    if (!('versionCheckedAt' in initial.memberExtra)) delete m.versionCheckedAt;
     // The file-tombstone acknowledgement is a watermark too, and it only ever moves forward: left from a case that pushed
     // everything, it would stand in for the next case's own position and every "acknowledged up to here" row would read it.
     delete m.lastFileTombstoneAckedAt;
-    m.lastSeqReceived = {}; m.lastSeqPushed = {}; m.direction = d;
+    // The marks a 6.0 member holds are POSITIONS (`lastPos*`, bundle-81): left from a case that read the peer to its head they would stand above the rows the next case seeds
+    // at small positions, and only the one-time re-read would ever see them. The frozen 5.x names are emptied as before.
+    m.lastSeqReceived = {}; m.lastSeqPushed = {};
+    m.lastPosReceived = {}; m.lastPosPushed = {}; m.lastPosServed = {};
+    m.direction = d;
     for (const p of peerSpaces) for (const f of families) await door.mongo.col(`${p}_${familyCollection(f)}`).deleteMany({});
     Object.assign(state, {
       tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, failFamily: null, network: null, meta: null, metaRequests: [],
@@ -502,7 +526,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
    */
   async function seedPeerRecords(remote, payloadKey, docs) {
     if (docs.length === 0) return;
-    await door.mongo.col(`${peerSide(remote)}_${familyCollection(payloadKey)}`).insertMany(docs.map(d => ({ ...d })), { ordered: false });
+    await door.mongo.col(`${peerSide(remote)}_${familyCollection(payloadKey)}`).insertMany(docs.map(d => carried(d, remote)), { ordered: false });
     await stamp.raiseVersionTo(peerSide(remote), docs.reduce((m, d) => Math.max(m, d.seq), 0));
   }
 

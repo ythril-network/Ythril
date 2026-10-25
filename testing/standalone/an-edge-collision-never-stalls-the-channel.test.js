@@ -12,7 +12,7 @@
  * **The push side did not**, and it is the worse half:
  *
  *   1. `POST /api/sync/edges` (or the `batch-upsert` edges loop) lets E11000 reach the route's catch → `500`.
- *   2. On the sender, a refused batch stops the push (`pushFamily` hands the refusal to `pushSeqRuns`, which marks the
+ *   2. On the sender, a refused batch stops the push (`pushFamily` hands the refusal to `pushPositionRuns`, which marks the
  *      transfer truncated and returns) — **before** the position is advanced.
  *   3. `resolveWatermark` caps a truncated transfer at `deliveredThrough`, i.e. the last batch that landed.
  *   4. Next cycle re-selects the identical batch and fails identically.
@@ -149,12 +149,12 @@ describe('the sender still treats a non-ok push as a stall', () => {
   // loop ever advanced its cursor past a failed batch, a 500 would become silent data loss instead of a
   // visible stall — a different bug, and the reason the fix belongs on the receiving side.
   /*
-   * Re-anchored for bundle-52: the loop is `pushSeqRuns` (`sync/push-seq-runs.ts`), shared by the record push and the
+   * Re-anchored for bundle-81 to the position loop (the bundle-52 form named `push-seq-runs.ts`); for bundle-52: the loop is `pushPositionRuns` (`sync/push-position-runs.ts`), shared by the record push and the
    * tombstone push, and a family's send is `pushFamily` (`sync/push-family.ts`). The send answers WHY it stopped instead of
    * breaking, and the loop owns the cursor: so the two halves are asserted where they now live, each anchor found first.
    */
   const family = stripComments(readFileSync('server/src/sync/push-family.ts', 'utf8'));
-  const loop = stripComments(readFileSync('server/src/sync/push-seq-runs.ts', 'utf8'));
+  const loop = stripComments(readFileSync('server/src/sync/push-position-runs.ts', 'utf8'));
 
   it('the send answers a refusal and moves nothing', () => {
     /*

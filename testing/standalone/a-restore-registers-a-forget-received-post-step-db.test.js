@@ -36,13 +36,13 @@ import { clearActEntries, resetRunnerForTest, netFixture, seedActEntry } from '.
 const skip = await mongoSkipReason();
 
 const T = { timeout: 45_000 };
-const RECEIVED = ['lastSeqReceived', 'tombstoneRereadAt', 'fileMetaRereadAt'];
-const SENT = ['lastSeqPushed', 'lastSeqServed', 'lastFileTombstoneAckedAt'];
+const RECEIVED = ['lastPosReceived', 'tombstoneRereadAt', 'fileMetaRereadAt'];
+const SENT = ['lastPosPushed', 'lastPosServed', 'lastFileTombstoneAckedAt'];
 const SPACES = ['carried', 'plain', 'done-a', 'done-b'];
 
 const member = (instanceId, space) => ({
   instanceId, label: instanceId, url: `http://${instanceId}.invalid`, tokenHash: 'x', joinedAt: '2026-01-01T00:00:00.000Z',
-  lastSeqReceived: { [space]: 9 }, lastSeqPushed: { [space]: 8 }, lastSeqServed: { [space]: 7 },
+  lastPosReceived: { [space]: 9 }, lastPosPushed: { [space]: 8 }, lastPosServed: { [space]: 7 },
   lastFileTombstoneAckedAt: { [space]: '2026-02-02T00:00:00.000Z' }, tombstoneRereadAt: { [space]: 'done' }, fileMetaRereadAt: { [space]: 'done' },
 });
 

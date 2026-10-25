@@ -103,18 +103,18 @@ describe('"issued here" is asked through sync/issued-here.ts', () => {
 
   it('push selection reads the module filter for brain tombstones on closed, democratic and club networks', () => {
     assert.ok(existsSync(join(REPO_ROOT, PUSH_SELECTION)), `${PUSH_SELECTION} does not exist: the push selection is not one module yet`);
-    assert.match(codeOf(PUSH_SELECTION), /issuedHereFilter/,
+    assert.match(codeOf(PUSH_SELECTION), /\bissuedHereFilter\b/,
       `${PUSH_SELECTION} does not read issuedHereFilter for brain tombstones on closed, democratic and club networks`);
   });
 
   it('the mesh tombstone push asks the question (it sends every stored tombstone today, relayed ones included)', () => {
     const transfer = codeOf(TOMBSTONE_PUSH);
-    assert.match(transfer, /issuedHereFilter|pushSelection|selectForPush|push-selection/,
+    assert.match(transfer, /\bissuedHereFilter\b|\bpushSelection\b|\bselectForPush\b|push-selection/,
       `${TOMBSTONE_PUSH} selects tombstones to push with no issued-here question: a relayed tombstone is forwarded as if this instance issued it`);
   });
 
   it('the mark is spelled `issuedHere: true` nowhere but the module and the one local stamp (`tombstoneDoc`)', () => {
-    const spellers = sources.filter(f => f !== MODULE && /issuedHere\s*:\s*true/.test(codeOf(f)));
+    const spellers = sources.filter(f => f !== MODULE && /\bissuedHere\s*:\s*true\b/.test(codeOf(f)));
     assert.deepEqual(spellers.filter(f => f !== STAMP), [], 'the mark is spelled outside the module and the local stamp');
     assert.ok(spellers.includes(STAMP), `${STAMP} does not stamp \`issuedHere: true\` on a locally issued tombstone (\`tombstoneDoc\`): the mark has no writer`);
   });

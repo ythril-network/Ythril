@@ -5,7 +5,7 @@
  *
  * ## Why a repair at all
  *
- * The receive watermark (`lastSeqReceived`) moved past a tombstone the old rule declined, so no ordinary cycle will ever
+ * The receive watermark (`lastPosReceived`) moved past a tombstone the old rule declined, so no ordinary cycle will ever
  * ask for it again: the record stayed on the subscriber, and the publisher's deletion was lost for good. Deleting them
  * now needs the deletions the upstream STILL HOLDS, re-read from 0 — once (`tombstoneRereadAt[space]`: absent = owed,
  * `'done'` = never again) — through the same apply, with one extra bound only a re-read needs: a re-read tombstone deletes a
@@ -70,7 +70,8 @@ const here = async (space, id) => door.coll(space, 'facts').findOne({ _id: id })
  * first read). The other spaces of the network sync in the same cycle, and a member that has read nothing of them reads
  * from 0 as it always did — which is not what these rows ask.
  */
-const readsFromZero = () => door.state.requests.filter(q => q.spaceId === R && String(q.sinceSeq) === '0');
+// Bundle-81: a request that starts at position 0 names `afterPos=0` and no cursor (a later page of the same read names its cursor).
+const readsFromZero = () => door.state.requests.filter(q => q.spaceId === R && String(q.afterPos) === '0' && q.cursor === undefined);
 /** What the member holds for the one-time re-read of a space. */
 const rereadState = (space) => door.member().tombstoneRereadAt?.[space];
 
@@ -99,7 +100,7 @@ describe('a declined upstream tombstone is applied by a one-time re-read, after 
       // The upstream still holds the deletions of the two "doomed" rows, behind the receive watermark.
       await door.seedPeer(BF1, [tomb(BF1, 'bf1-doomed', 10)]);
       await door.seedPeer(BF2, [tomb(BF2, 'bf2-doomed', 10)]);
-      door.member().lastSeqReceived = { [BF1]: 10, [BF2]: 10, [R]: 0 };
+      door.member().lastPosReceived = { [BF1]: 10, [BF2]: 10, [R]: 0 };
 
       await door.sync();
 
@@ -130,7 +131,7 @@ describe('a declined upstream tombstone is applied by a one-time re-read, after 
     async function declinedEarlier(id, { seq = 3, tombSeq = 10 } = {}) {
       await door.coll(R, 'facts').insertOne(fact(R, id, seq, THIRD, PEER));
       await door.seedPeer(R, [tomb(R, id, tombSeq)]);
-      door.member().lastSeqReceived = { [R]: 10 };
+      door.member().lastPosReceived = { [R]: 10 };
     }
 
     it('deletes it on the next cycle, stores the tombstone for relay, and leaves the record watermark where it was', async () => {
@@ -138,7 +139,9 @@ describe('a declined upstream tombstone is applied by a one-time re-read, after 
       await door.sync();
       assert.equal(await here(R, 'rep-1'), null, 'the deletion the upstream still holds was never applied: the old release declined it and the watermark passed it');
       assert.equal((await door.coll(R, 'tombstones').findOne({ _id: 'rep-1' }))?.storedVia, PEER, 'the repaired tombstone is not stored for a middle node to relay');
-      assert.equal(door.member().lastSeqReceived[R], 10, 'the re-read moved the record watermark: a tombstone seq is not a position in the data stream');
+      // The mark is the ORDINARY pull's (the peer's head, after a cycle that read to its end); the re-read has its own state (`tombstoneRereadAt`) and moves no mark.
+      const mark = door.member().lastPosReceived[R];
+      assert.ok(Number.isSafeInteger(mark) && mark >= 10, `the receive mark after the cycle is ${String(mark)}: the ordinary pull's, never lowered by the re-read`);
       assert.equal(rereadState(R), 'done');
       assert.ok(readsFromZero().length >= 1, 'no request read the tombstones from 0');
     });
@@ -146,7 +149,7 @@ describe('a declined upstream tombstone is applied by a one-time re-read, after 
     it('a record re-created at a higher seq survives; one at the tombstone\'s own seq does not', async () => {
       await door.coll(R, 'facts').insertMany([fact(R, 'rep-recreated', 20, THIRD, PEER), fact(R, 'rep-equal', 10, THIRD, PEER)]);
       await door.seedPeer(R, [tomb(R, 'rep-recreated', 10), tomb(R, 'rep-equal', 10)]);
-      door.member().lastSeqReceived = { [R]: 25 };
+      door.member().lastPosReceived = { [R]: 25 };
       await door.sync();
       assert.ok(await here(R, 'rep-recreated'), 'the re-read deleted a record re-created AFTER the deletion (its seq is above the tombstone\'s)');
       assert.equal(await here(R, 'rep-equal'), null, 'the re-read kept a record that is not newer than the tombstone');
@@ -190,12 +193,12 @@ describe('a declined upstream tombstone is applied by a one-time re-read, after 
       // `pull-family.ts` counts a record whose author is the member), so a relayed third author's would leave it at 10.
       door.state.records[R] = { facts: [fact(R, 'fresh-15', 15, PEER)] };
       // Only the read from 0 fails: the ordinary pull (from 10) and the record pages are served.
-      door.state.tamper = (_body, asked) => { if (String(asked.sinceSeq) === '0') throw new Error('scripted failure of the re-read'); };
+      door.state.tamper = (_body, asked) => { if (String(asked.afterPos) === '0' && asked.cursor === undefined) throw new Error('scripted failure of the re-read'); };
       await door.logsDuring(() => door.sync());
       assert.ok(await here(R, 'rep-fail'), 'fixture: the re-read was not the failing step');
       assert.notEqual(rereadState(R), 'done', 'a failed re-read was marked done: the declined deletion is never retried');
-      assert.equal(door.member().lastSeqReceived[R], 15,
-        'a failed re-read held the record watermark: it is its own outcome and is not part of the ordinary pull\'s completeness');
+      assert.ok(door.member().lastPosReceived[R] >= 15,
+        'a failed re-read held the receive mark: it is its own outcome and is not part of the ordinary pull\'s completeness');
       door.state.tamper = null;
       await door.sync();
       assert.equal(await here(R, 'rep-fail'), null, 'the next cycle did not finish the repair');
@@ -215,7 +218,7 @@ describe('a declined upstream tombstone is applied by a one-time re-read, after 
         const upstream = peerIsUpstream(door, upstreamOf, PEER, R);
         await door.coll(R, 'facts').insertOne(fact(R, 'rep-topo', 3, THIRD, PEER));
         await door.seedPeer(R, [tomb(R, 'rep-topo', 10)]);
-        door.member().lastSeqReceived = { [R]: 10 };
+        door.member().lastPosReceived = { [R]: 10 };
         await door.sync();
         assert.equal(readsFromZero().length >= 1, upstream,
           upstream ? 'the upstream\'s tombstones were not re-read' : 'a peer that is no upstream was re-read from 0');

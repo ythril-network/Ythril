@@ -43,7 +43,7 @@ let mongo, recallMod, fresh, resolveRecallFilter, stub;
 const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
 const rec = (id, seq, deg, ageMs, extra = {}) => ({
   _id: id, spaceId: SPACE, name: id, type: 'thing', tags: [], properties: {},
-  embedding: unitAt(deg, DIMS), embeddingModel: 'stub', seq, createdAt: iso(ageMs), updatedAt: iso(ageMs), ...extra,
+  embedding: unitAt(deg, DIMS), embeddingModel: 'stub', seq, pos: seq, posAtSeq: seq, createdAt: iso(ageMs), updatedAt: iso(ageMs), ...extra,
 });
 const raw = (f) => {
   const r = resolveRecallFilter(f);
@@ -66,7 +66,7 @@ describe('the fresh-write scan keeps its guards', { skip }, () => {
     const vectorIndex = await import('../../server/dist/spaces/vector-index.js');
     await createSpaceCollections(mongo, SPACE);
     await insertAll(mongo, COLL, BASE);
-    await mongo.col(COLL).createIndex({ seq: 1 });
+    await mongo.col(COLL).createIndex({ pos: 1, _id: 1 });
     await (await import('../../server/dist/spaces/search-index-presence.js')).reconcileSpaceSearchIndexes(SPACE, { waitForReady: true });
     await waitUntilServing(mongo, COLL, `${COLL}_embedding`, { dims: DIMS, n: BASE.length });
     await mongo.checkVectorSearchAvailability();

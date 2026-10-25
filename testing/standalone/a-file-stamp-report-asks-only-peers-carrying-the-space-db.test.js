@@ -77,7 +77,7 @@ async function listener(label, { status = 200 } = {}) {
     requests.push({ path: url.pathname, spaceId: url.searchParams.get('spaceId'), networkId: url.searchParams.get('networkId'), authorization: req.headers['authorization'] });
     if (status !== 200) { res.writeHead(status, { 'content-type': 'application/json' }); res.end('{"error":"scripted"}'); return; }
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ items: [], nextCursor: null }));
+    res.end(JSON.stringify({ items: [], nextCursor: null, through: 0, head: 0, positions: 1 }));
   });
   // own-listener: binds every interface so the LAN address answers, because the SSRF guards block loopback
   await new Promise(resolve => server.listen(0, '0.0.0.0', resolve));

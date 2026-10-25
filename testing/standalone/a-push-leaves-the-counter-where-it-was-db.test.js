@@ -146,8 +146,7 @@ describe('a push leaves the counter where it was, whatever it carried', { skip }
       assert.ok(fork.seq > 50,
         `${label}: the fork took seq ${fork.seq}, below the seq 50 of the record it forks from — the stamp read the counter, not the parent's version`);
       assert.ok(typeof fork.pos === 'number' && fork.pos > 2 ** 50 && fork.posAtSeq === fork.seq, `${label}: the fork did not land at a position of its own: ${JSON.stringify([fork.pos, fork.posAtSeq])}`);
-      const bySeq = await door.pull('/facts', { spaceId: S, sinceSeq: '50' });
-      assert.ok(bySeq.items.some(i => i._id === fork._id), `${label}: a pull from seq cursor 50 does not serve the fork`);
+      // Re-pointed for bundle-81: a `sinceSeq` is refused (`400`, `syncPositionStart`), so "served to a pull from seq 50" is no longer a question; the position read below is.
       const byPosition = await door.pull('/facts', { spaceId: S, afterPos: '0' });
       assert.ok(byPosition.items.some(i => i._id === fork._id), `${label}: a pull by position does not serve the fork`);
     }

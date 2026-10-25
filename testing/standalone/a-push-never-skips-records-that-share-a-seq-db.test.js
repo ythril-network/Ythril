@@ -4,21 +4,22 @@
  *
  * ## The defect
  *
- * `pushCollection` (`sync/engine.ts`) reads `seq > cursor` in batches of `PUSH_BATCH_SIZE` (200) and moves its cursor to the
- * LAST seq of a batch. Records from several authors share seqs, so a batch that ends inside a run of equal seqs leaves the
- * rest of the run behind the cursor — never offered to the peer, and `lastSeqPushed` then moves past it. The same cursor is
+ * The push reads the rows after its cursor in batches of 200 and moves the cursor to the LAST position of a batch. Rows carried from 5.6
+ * (the legacy band, where a row's position is its seq) share positions, so a batch that ends inside a run of equal ones leaves the
+ * rest of the run behind the cursor — never offered to the peer, and `lastPosPushed` then moves past it. The same cursor is
  * what the transfer reports as `deliveredThrough`, so a stop (a 5xx on the next batch) inside a run claims the whole run was
- * delivered. Separately, the read projects nothing, so `embedding`, `matchedText` and the retention stamps — fields the docs
+ * delivered. (Bundle-81: re-pointed from `lastSeqPushed` and `pushCollection` to `lastPosPushed` and `pushPositionRuns`, `sync/push-position-runs.ts`;
+ * the rows are carried rows, whose position is their seq.) Separately, the read projects nothing, so `embedding`, `matchedText` and the retention stamps — fields the docs
  * promise never travel — go out on the wire (the receiver strips them; the sender should not send several hundred floats a record).
  *
  * ## The rules, each per replicated family (derived from `REPLICATED_FAMILIES`, floor 6) against a fake receiver
  *
- *  1. 201 local records whose last two share seq 200, the 200-record batch boundary between them: exactly 201 are offered,
- *     none twice, and `lastSeqPushed` reaches 200.
+ *  1. 201 local records whose last two share position 200, the 200-record batch boundary between them: exactly 201 are offered,
+ *     none twice, and `lastPosPushed` reaches the run.
  *  2. A record the receiver refuses is counted refused ONCE — a fix that re-sends the run's first record at the boundary
  *     (`seq >=`) would be refused, and counted, twice.
- *  3. A 5xx on the second batch, which starts inside the run at seq 200, leaves `lastSeqPushed` at 199 (the last COMPLETE seq);
- *     the next cycle sends seq 200 whole.
+ *  3. A 5xx on the second batch, which starts inside the run at position 200, leaves `lastPosPushed` at 199 (the last COMPLETE position);
+ *     the next cycle sends position 200 whole.
  *  4. No field of `LOCAL_ONLY_FIELDS` is on the wire.
  *
  * ## What "red at base" is
@@ -37,11 +38,12 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openPullDoor } from './_pull-door.mjs';
 import { replicatedFixtureFamilies, tieRun, missingAndRepeated } from './_seq-tie-families.mjs';
+import { readMark } from './_b81b-positions.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const S = 'tiepush';
-/** The sender's batch size (`PUSH_BATCH_SIZE` in `sync/engine.ts`): the fixtures put a run across it. */
+/** The sender's batch size (`PUSH_BATCH_SIZE` in `sync/push-family.ts`): the fixtures put a run across it. */
 const PUSH_BATCH = 200;
 const families = await replicatedFixtureFamilies();
 
@@ -72,8 +74,8 @@ async function seedLocal(family, docs) {
 /** The ids offered to the receiver for a family, in request order, accepted or not. */
 const offered = (family) => door.state.batchRequests.filter(r => r.key === family.payloadKey).flatMap(r => r.ids);
 
-/** The `lastSeqPushed` of the member for the space. */
-const watermark = () => door.member().lastSeqPushed?.[S] ?? 0;
+/** The `lastPosPushed` of the member for the space. */
+const watermark = () => readMark(door, 'pushed', S) ?? 0;
 
 describe('a push never skips a record that shares its seq', { skip }, () => {
   before(async () => {
@@ -103,7 +105,7 @@ describe('a push never skips a record that shares its seq', { skip }, () => {
         assert.deepEqual({ missing, repeated, unexpected }, { missing: [], repeated: [], unexpected: [] },
           `${family.payloadKey}: of ${run.ids.length} records, ${missing.length} were never offered to the peer (${missing.join(', ')}) and `
           + `${repeated.length} were offered twice (${repeated.join(', ')}); the batch ended inside the run at seq ${run.tieSeq}`);
-        assert.equal(watermark(), run.tieSeq, `${family.payloadKey}: a finished push leaves lastSeqPushed at the run's seq`);
+        assert.ok(watermark() >= run.tieSeq, `${family.payloadKey}: a finished push leaves lastPosPushed at or past the run's position (it is ${watermark()})`);
       });
 
       it('a record the receiver refuses is counted refused once, and the rest of its run is still offered', async () => {
@@ -137,16 +139,16 @@ describe('a push never skips a record that shares its seq', { skip }, () => {
         await door.logsDuring(() => door.sync());
         assert.equal(seen, 2, `${family.payloadKey}: the sender made ${seen} request(s) for the family — the fixture does not reach a second batch`);
         assert.equal(watermark(), run.tieSeq - 1,
-          `${family.payloadKey}: the push stopped inside the run at seq ${run.tieSeq} and left lastSeqPushed at ${watermark()}; `
-          + `only seq ${run.tieSeq - 1} is complete, so a watermark at ${run.tieSeq} never offers the rest of the run again`);
+          `${family.payloadKey}: the push stopped inside the run at position ${run.tieSeq} and left lastPosPushed at ${watermark()}; `
+          + `only position ${run.tieSeq - 1} is complete, so a mark at ${run.tieSeq} never offers the rest of the run again`);
 
         door.state.batchUpsert = null;
         door.state.batchRequests = [];
         await door.sync();
         const second = missingAndRepeated(run.tieIds, offered(family));
         assert.deepEqual({ missing: second.missing }, { missing: [] },
-          `${family.payloadKey}: the next cycle did not send seq ${run.tieSeq} whole (never offered: ${second.missing.join(', ')})`);
-        assert.equal(watermark(), run.tieSeq + 2, `${family.payloadKey}: the finished cycle reaches the last record`);
+          `${family.payloadKey}: the next cycle did not send position ${run.tieSeq} whole (never offered: ${second.missing.join(', ')})`);
+        assert.ok(watermark() >= run.tieSeq + 2, `${family.payloadKey}: the finished cycle reaches the last record (the mark is ${watermark()})`);
       });
 
       it('no local-only field is on the wire', async () => {

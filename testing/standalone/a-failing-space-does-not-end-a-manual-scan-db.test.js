@@ -51,7 +51,8 @@ const DOWN = (r) => `${r.prefix}-down`;
 const OK = 'manual-ok';
 const ALL = [...ROUTES.flatMap(r => [FAIL(r), DOWN(r)]), OK];
 
-const fact = (space, i) => ({ _id: `${space}-f${i}`, spaceId: space, fact: `fact ${i} of ${space}`, seq: i, createdAt: '2025-01-01T00:00:00.000Z' });
+// A scanner reads by POSITION (bundle-81), and a carried row's position is its seq.
+const fact = (space, i) => ({ _id: `${space}-f${i}`, spaceId: space, fact: `fact ${i} of ${space}`, seq: i, pos: i, posAtSeq: i, createdAt: '2025-01-01T00:00:00.000Z' });
 
 /** What the driver says about the failing view's stage: none of it may reach the answer. */
 const DRIVER_WORDS = /parse|convert|toInt|Bad digit|Mongo|\$|not a number/i;
@@ -113,7 +114,7 @@ describe('a failing space does not end a manual scan of every space', { skip }, 
       it('a space whose scan fails is named with a reason in our words, and the space behind it is scanned', { timeout: 60_000 }, async () => {
         const space = FAIL(route);
         const db = door.mongo.getDb();
-        await db.collection(`${space}_facts_src`).insertOne({ _id: 'bad', spaceId: space, seq: 1, f: 'not a number' });
+        await db.collection(`${space}_facts_src`).insertOne({ _id: 'bad', spaceId: space, seq: 1, pos: 1, posAtSeq: 1, f: 'not a number' });
         let outcome;
         try {
           // The stage sits on the SOURCE and the scanner's batch filter on the view: the read throws when the bad document reaches it.

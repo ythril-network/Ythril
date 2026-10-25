@@ -47,7 +47,9 @@ const S = 'scantie';
 /** seqs 1, 2, THREE records at seq 3, then 4. Ids sort in this order. */
 const SEQ_OF = { '1': 1, '2': 2, '3a': 3, '3b': 3, '3c': 3, '4': 4 };
 const ALL = Object.keys(SEQ_OF);
-const record = (id) => ({ _id: id, spaceId: S, fact: `fact ${id}`, seq: SEQ_OF[id], createdAt: '2025-01-01T00:00:00.000Z' });
+// Bundle-81: a scanner reads by POSITION (`readAfterPosition`), and a carried row's position is its seq, so the run at seq 3 is a run of equal positions. A row with no
+// position is invisible to the read, which is what a scanner pass over a space that still owes its positions must not mistake for "nothing to scan".
+const record = (id) => ({ _id: id, spaceId: S, fact: `fact ${id}`, seq: SEQ_OF[id], pos: SEQ_OF[id], posAtSeq: SEQ_OF[id], createdAt: '2025-01-01T00:00:00.000Z' });
 
 /** The two scanners: how each is run, configured, and where it keeps its cursor for facts. */
 const SCANNERS = [

@@ -20,6 +20,10 @@
  * forgotten by one door and kept by another: it fails here until somebody classifies it. The lists do not exist yet, so today this is red
  * because the export is missing.
  *
+ * bundle-81 (design rev 8 §3a): a third list, `ROLLBACK_MARKS` (`lastSeqReceived`, `lastSeqPushed`, `lastSeqServed`), holds the 5.6 marks frozen in
+ * `config.json` for a rollback: never read by 6.0, never forgotten by a restore (they describe 5.6's state, which a restore does not change). The union
+ * rule is then `RECEIVE_MARKS` ∪ `KEPT_ON_RESTORE` ∪ `ROLLBACK_MARKS` = `PER_SPACE_WATERMARKS`, pairwise disjoint; the 6.0 marks carry the position names.
+ *
  * ## Which module, and which shape (the design names the lists, not their home - the coordinator ruled it)
  *
  * Both lists are read from `config/types-networks.ts`, beside `PER_SPACE_WATERMARKS`. `RECEIVE_MARKS` is an array of mark names;
@@ -43,8 +47,9 @@ describe('every per-space mark is either forgotten on a restore or kept with a r
   });
 
   it('they are disjoint and together exactly PER_SPACE_WATERMARKS, which is the set the member type declares', () => {
-    const { PER_SPACE_WATERMARKS, RECEIVE_MARKS, KEPT_ON_RESTORE } = types;
+    const { PER_SPACE_WATERMARKS, RECEIVE_MARKS, KEPT_ON_RESTORE, ROLLBACK_MARKS } = types;
     const declared = memberWatermarks();
+    assert.ok(Array.isArray(ROLLBACK_MARKS) && ROLLBACK_MARKS.length >= 3, 'ROLLBACK_MARKS (the frozen 5.6 marks) is not exported from config/types-networks');
     assert.ok(PER_SPACE_WATERMARKS.length >= 4, `PER_SPACE_WATERMARKS has ${PER_SPACE_WATERMARKS.length} entries: the scan reads nothing`);
     assert.deepEqual([...PER_SPACE_WATERMARKS].sort(), [...declared].sort(), 'PER_SPACE_WATERMARKS is not the set the member type declares');
 
@@ -52,11 +57,12 @@ describe('every per-space mark is either forgotten on a restore or kept with a r
     const keptNames = Object.keys(KEPT_ON_RESTORE);
 
     assert.deepEqual(RECEIVE_MARKS.filter(m => keptNames.includes(m)), [], 'a mark is both forgotten and kept on a restore');
-    const unclassified = PER_SPACE_WATERMARKS.filter(m => !RECEIVE_MARKS.includes(m) && !keptNames.includes(m));
+    assert.deepEqual(ROLLBACK_MARKS.filter(m => keptNames.includes(m) || RECEIVE_MARKS.includes(m)), [], 'a frozen 5.6 mark is also classified as a 6.0 mark');
+    const unclassified = PER_SPACE_WATERMARKS.filter(m => !RECEIVE_MARKS.includes(m) && !keptNames.includes(m) && !ROLLBACK_MARKS.includes(m));
     assert.deepEqual(unclassified, [], 'a mark nobody decided about: add it to RECEIVE_MARKS, or to KEPT_ON_RESTORE with its reason');
-    const strangers = [...RECEIVE_MARKS, ...keptNames].filter(m => !PER_SPACE_WATERMARKS.includes(m));
+    const strangers = [...RECEIVE_MARKS, ...keptNames, ...ROLLBACK_MARKS].filter(m => !PER_SPACE_WATERMARKS.includes(m));
     assert.deepEqual(strangers, [], 'a restore list names something that is not a per-space mark');
-    assert.equal(RECEIVE_MARKS.length + keptNames.length, PER_SPACE_WATERMARKS.length, 'a mark is listed twice');
+    assert.equal(RECEIVE_MARKS.length + keptNames.length + ROLLBACK_MARKS.length, PER_SPACE_WATERMARKS.length, 'a mark is listed twice');
   });
 
   it('every kept mark says why, in a sentence', () => {
@@ -74,7 +80,8 @@ describe('every per-space mark is either forgotten on a restore or kept with a r
     // lastFileTombstoneAckedAt. A forgotten push mark would re-send restored records whose deletions peers already pruned.
     const { RECEIVE_MARKS, KEPT_ON_RESTORE } = types;
     assert.ok(Array.isArray(RECEIVE_MARKS) && KEPT_ON_RESTORE && typeof KEPT_ON_RESTORE === 'object', 'the two lists are not exported (see the first row)');
-    assert.deepEqual([...RECEIVE_MARKS].sort(), ['fileMetaRereadAt', 'lastSeqReceived', 'tombstoneRereadAt']);
-    assert.deepEqual(Object.keys(KEPT_ON_RESTORE).sort(), ['lastFileTombstoneAckedAt', 'lastSeqPushed', 'lastSeqServed']);
+    assert.deepEqual([...RECEIVE_MARKS].sort(), ['fileMetaRereadAt', 'lastPosReceived', 'tombstoneRereadAt']);
+    assert.deepEqual(Object.keys(KEPT_ON_RESTORE).sort(), ['lastFileTombstoneAckedAt', 'lastPosPushed', 'lastPosServed']);
+    assert.deepEqual([...types.ROLLBACK_MARKS].sort(), ['lastSeqPushed', 'lastSeqReceived', 'lastSeqServed'], 'the frozen 5.6 marks are the three lastSeq* maps');
   });
 });

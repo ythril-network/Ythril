@@ -102,7 +102,11 @@ describe('query sort and total (real MongoDB)', { skip }, () => {
     // The proxy merge depends on this. Asserted for a custom order, because the old hardcoded comparator was correct for
     // the default one and would have silently mis-merged every other.
     for (const sort of [{ name: 1, _id: 1 }, { name: -1, _id: -1 }, query.DEFAULT_QUERY_SORT]) {
-      const fromDriver = await q({ sort });
+      // The default order is by `pos`, which no answer carries (`ORDER_ONLY_FIELDS`), so its rows are read from the collection with it; a cross-space merge holds the
+      // same rows with `pos` until it has ordered by it and strips it after (`brain/read-projection.ts`).
+      const fromDriver = sort === query.DEFAULT_QUERY_SORT
+        ? await mongo.col(`${SPACE}_entities`).find({}).sort({ ...sort }).toArray()
+        : await q({ sort });
       const shuffled = [...fromDriver].reverse().sort(query.compareBySort(sort));
       assert.deepEqual(shuffled.map(r => r._id), fromDriver.map(r => r._id),
         `comparator disagreed with the driver for ${JSON.stringify(sort)}`);
@@ -135,7 +139,8 @@ describe('query sort and total (real MongoDB)', { skip }, () => {
 
   it('the default sort is still the documented one', () => {
     // It is now a value rather than an inline literal, so a reordering of these keys would change every page silently.
-    assert.deepEqual(query.DEFAULT_QUERY_SORT, { seq: -1, updatedAt: -1, createdAt: -1, _id: -1 });
+    // Landing order (bundle-81, decisions 11 and 20): the one constant every Brain list defaults to, `LANDING_ORDER` in `brain/list-sort.ts`.
+    assert.deepEqual(query.DEFAULT_QUERY_SORT, { pos: -1, _id: -1 });
     assert.equal(Object.keys(query.DEFAULT_QUERY_SORT).at(-1), '_id',
       '`_id` must be LAST, which is what makes the order total and therefore pageable');
   });

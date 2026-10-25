@@ -62,14 +62,16 @@ const READERS = [
     { name: `${f.payloadKey} page`, part: f.collection, extra: f.pushFilter ?? {}, want: COMPOUND },
     { name: `${f.payloadKey} push`, part: f.collection, extra: { 'author.instanceId': 'sender', ...(f.pushFilter ?? {}) }, want: COMPOUND },
   ]),
+  // Bundle-81: the tombstone route is one read of every type by position (`readAfterPosition`), so the typed `(type, seq, _id)` compound has no reader left and is not declared;
+  // the readers by POSITION are held to the `(pos, _id)` index by `every-position-read-is-index-served-db`. What stays here is the seq compound's own lifecycle.
   { name: 'tombstones typeless', part: 'tombstones', extra: {}, want: COMPOUND },
-  { name: 'tombstones typed', part: 'tombstones', extra: { type: 'fact' }, want: TYPED_COMPOUND },
 ];
 /** Each part that has a reader, with the compounds it must carry and the bare indexes it must not. */
 const PARTS = [...new Set(READERS.map(r => r.part))].map(part => ({
   part,
-  compounds: part === 'tombstones' ? [COMPOUND, TYPED_COMPOUND] : [COMPOUND],
-  bares: part === 'tombstones' ? [BARE, TYPED_BARE] : [BARE],
+  compounds: [COMPOUND],
+  // The typed bare `(type, seq)` of a 5.x tombstone collection has no reader and no declaration in 6.0 (nothing creates or drops it), so it is not held here.
+  bares: [BARE],
 }));
 
 let door, mongo, keyset, initSpace, ensureQueryIndexes, newSpaceKeys;
@@ -146,7 +148,7 @@ describe('every seq-keyset read is answered from its index', { skip }, () => {
   after(async () => { await door?.close(); });
 
   it('derives the readers and the parts, so an empty set cannot pass', () => {
-    assert.ok(READERS.length >= 14, `only ${READERS.length} readers: ${READERS.map(r => r.name).join(', ')}`);
+    assert.ok(READERS.length >= 13, `only ${READERS.length} readers: ${READERS.map(r => r.name).join(', ')}`);
     assert.ok(PARTS.length >= 7, `only ${PARTS.length} parts`);
   });
 
@@ -155,7 +157,7 @@ describe('every seq-keyset read is answered from its index', { skip }, () => {
     const declared = keyset.mod.SEQ_KEYSET_INDEXES;
     assert.ok(Array.isArray(declared) || (declared && typeof declared[Symbol.iterator] === 'function'), 'SEQ_KEYSET_INDEXES is not a list');
     const entries = [...declared].map(e => ({ part: e.part ?? e.collection ?? e.coll, keys: e.keys ?? e.key }));
-    assert.ok(entries.length >= 8, `SEQ_KEYSET_INDEXES declares ${entries.length} index(es); the readers need 8 (six families and two tombstone shapes)`);
+    assert.ok(entries.length >= 7, `SEQ_KEYSET_INDEXES declares ${entries.length} index(es); the readers need 7 (six families and the tombstones)`);
     for (const e of entries) assert.ok(e.part && e.keys, `an entry has no { part, keys }: ${JSON.stringify(e)}`);
     const missing = PARTS.flatMap(p => p.compounds.filter(c => !entries.some(e => e.part === p.part && keyName(e.keys) === keyName(c)))
       .map(c => `${p.part}(${keyName(c)})`));

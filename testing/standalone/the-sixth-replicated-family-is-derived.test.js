@@ -30,6 +30,13 @@
  * the truncation check but deliberately OUT of the pull candidate — so it is its own parameter now, not a name
  * on an exclusion list. An exclusion list is the shape this whole file is about.
  *
+ * ## Re-derived for bundle-81 (design rev 8 §6)
+ *
+ * The rule is one list still, and a simpler one: the mark is the MINIMUM of what every transfer is complete through (`deliveredThrough`), so no family is
+ * "outside the candidate" and there is no selector, no author guard and no `alsoCheck` (tombstones are a transfer of the same stream, passed with the
+ * families). The two differences the old rule had to carry (`highSeq` against `maxSeq`; tombstones counted for truncation only) are gone with the seq paging.
+ * `resolveWatermark` answers `{ at, errored, capped }`: where the mark may move, the transfers a fault stopped and the ones the cycle's cap did.
+ *
  * Run: node --test testing/standalone/the-sixth-replicated-family-is-derived.test.js
  */
 import { describe, it } from 'node:test';
@@ -46,87 +53,68 @@ const DOCS = 'server/src/api/sync/docs.ts';
 const WIPE = 'server/src/spaces/wipe-vote.ts';
 const code = (f) => stripComments(readFileSync(f, 'utf8'));
 
-const outcome = (seq, truncated = false) => ({ deliveredThrough: seq, truncated, highSeq: seq, maxSeq: seq });
+const outcome = (through, truncated = false, stoppedBy) => ({ deliveredThrough: through, truncated, ...(stoppedBy ? { stoppedBy } : {}) });
+const resolve = (from, transfers, direction = 'push') => {
+  const warned = [];
+  const resolution = resolveWatermark({ direction, peerLabel: 'peer', spaceId: 's', from, transfers, warn: (m) => warned.push(m) });
+  return { ...resolution, warned };
+};
 
-describe('the watermark candidate is computed from the transfers, not from a second list', () => {
-  it('every family in `transfers` raises the candidate', () => {
+describe('the mark is computed from the transfers, not from a second list', () => {
+  it('every family in `transfers` is a transfer the mark answers to: a file-metadata-only cycle advances it', () => {
     /*
-     * The defect, stated as a test: file metadata was in `transfers` and absent from the candidate, so its
-     * seq could HOLD THE WATERMARK BACK and never advance it. A cycle whose only change was file metadata
-     * re-pushed the same page for ever.
+     * The defect, stated as a test: file metadata was in `transfers` and absent from the candidate, so its seq could HOLD THE WATERMARK BACK and never advance
+     * it. A cycle whose only change was file metadata re-pushed the same page for ever. With the minimum over the transfers there is no candidate to forget a
+     * family from: every transfer that ran says where it is complete, a family with nothing new says the settled end of the stream it read, and the mark moves
+     * to the lowest of them.
      */
-    const warned = [];
-    const at = resolveWatermark({
-      direction: 'push',
-      peerLabel: 'peer',
-      spaceId: 's',
-      from: 100,
-      transfers: {
-        facts: outcome(0), entities: outcome(0), edges: outcome(0),
-        chrono: outcome(0), links: outcome(0), filemeta: outcome(400),
-      },
-      seqOf: (t) => t.maxSeq,
-      warn: (m) => warned.push(m),
+    const r = resolve(100, {
+      tombstones: outcome(400), facts: outcome(400), entities: outcome(400), edges: outcome(400),
+      chrono: outcome(400), links: outcome(400), filemeta: outcome(400),
     });
-    assert.equal(at, 400, 'a file-metadata-only cycle must advance the watermark');
-    assert.deepEqual(warned, [], 'nothing stopped early, so nothing should be reported as held back');
+    assert.equal(r.at, 400, 'a cycle in which every transfer is complete through 400 must move the mark there');
+    assert.deepEqual(r.warned, [], 'nothing stopped early, so nothing should be reported as held back');
+    assert.deepEqual([r.errored, r.capped], [[], []]);
   });
 
-  it('and a transfer that stopped early still holds it back', () => {
-    // The property the function exists for. Deriving the candidate must not lose it.
-    const warned = [];
-    const at = resolveWatermark({
-      direction: 'push',
-      peerLabel: 'peer',
-      spaceId: 's',
-      from: 0,
-      transfers: {
-        facts: outcome(500),
-        filemeta: { deliveredThrough: 120, truncated: true, maxSeq: 400, highSeq: 400 },
-      },
-      seqOf: (t) => t.maxSeq,
-      warn: (m) => warned.push(m),
-    });
-    assert.equal(at, 120, 'a truncated transfer bounds the advance to what it delivered');
-    assert.equal(warned.length, 1, 'and it says so, naming the transfer');
-    assert.match(warned[0], /filemeta/);
+  it('a transfer that stopped early still holds it back, and says so naming the transfer', () => {
+    // The property the function exists for. Deriving the mark from the transfers must not lose it.
+    const r = resolve(0, { facts: outcome(500), filemeta: outcome(120, true, 'error') });
+    assert.equal(r.at, 120, 'a truncated transfer bounds the advance to what it delivered');
+    assert.equal(r.warned.length, 1, 'and it says so, naming the transfer');
+    assert.match(r.warned[0], /filemeta/);
+    assert.deepEqual([r.errored, r.capped], [['filemeta'], []]);
   });
 
-  it('tombstones are their own parameter, counted for truncation and not for the candidate', () => {
+  it('the mark is the MINIMUM across the transfers, never the maximum (a write that landed between two families\' reads stays above it)', () => {
+    // A facts transfer read at 300 and an entities transfer read later at 500: the mark is 300, so a record at 400 that landed on the peer after facts was
+    // read is read next cycle. A maximum would claim 500 and lose it for good. This is the defect P2 names (`a-cross-family-cycle-loses-no-mid-cycle-write-db`).
+    assert.equal(resolve(0, { facts: outcome(300), entities: outcome(500) }).at, 300);
+    assert.equal(resolve(0, { entities: outcome(500), facts: outcome(300) }).at, 300, 'the order of the transfers does not decide it');
+  });
+
+  it('a mark never goes backwards: the result is not below where the cycle started', () => {
+    assert.equal(resolve(900, { facts: outcome(300) }).at, 900);
+    assert.equal(resolve(900, {}).at, 900, 'no transfer ran (the turn was stopped first): the mark stays');
+  });
+
+  it('tombstones are a transfer of the same stream: counted for the mark like a family, and a stopped one holds it back', () => {
     /*
-     * Pull includes tombstones in the truncation check and excludes them from the candidate. That asymmetry
-     * is real, so it is a parameter rather than a name on an exclusion list — the shape this file exists to
-     * remove.
+     * 5.6 passed tombstones as `alsoCheck`, which could only LOWER the mark: a cycle whose only content was a deletion moved nothing (Q-394). They are an ordinary
+     * transfer now, in the same position stream, so a cycle that moved only tombstones moves the mark — and one whose tombstone transfer stopped holds it.
      */
-    const at = resolveWatermark({
-      direction: 'receive',
-      peerLabel: 'peer',
-      spaceId: 's',
-      from: 0,
-      transfers: { facts: outcome(200) },
-      alsoCheck: { tombstones: outcome(9999) },
-      seqOf: (t) => t.highSeq,
-      warn: () => {},
-    });
-    assert.equal(at, 200, 'a tombstone seq must not raise the data watermark');
+    assert.equal(resolve(0, { tombstones: outcome(900), facts: outcome(900) }, 'receive').at, 900, 'a tombstone-only cycle moves the mark');
+    const held = resolve(0, { tombstones: outcome(50, true, 'error'), facts: outcome(200) }, 'receive');
+    assert.equal(held.at, 50);
+    assert.match(held.warned[0], /tombstones/);
   });
 
-  it('a truncated `alsoCheck` transfer DOES hold the watermark back', () => {
-    // Otherwise "excluded from the candidate" would quietly mean "not checked at all", which is how a
-    // tombstone loss went unreported before 3.2.0.
-    const warned = [];
-    const at = resolveWatermark({
-      direction: 'receive',
-      peerLabel: 'peer',
-      spaceId: 's',
-      from: 0,
-      transfers: { facts: outcome(200) },
-      alsoCheck: { tombstones: { deliveredThrough: 50, truncated: true, highSeq: 60, maxSeq: 60 } },
-      seqOf: (t) => t.highSeq,
-      warn: (m) => warned.push(m),
-    });
-    assert.equal(at, 50);
-    assert.match(warned[0], /tombstones/);
+  it('a stop at the cycle\'s page cap is told from a fault: `capped`, not `errored`', () => {
+    const r = resolve(0, { facts: outcome(120, true, 'cap'), entities: outcome(400), links: outcome(60, true, 'error') });
+    assert.equal(r.at, 60);
+    assert.deepEqual([r.errored, r.capped], [['links'], ['facts']]);
+    const capOnly = resolve(0, { facts: outcome(120, true, 'cap'), entities: outcome(400) });
+    assert.deepEqual([capOnly.errored, capOnly.capped], [[], ['facts']], 'a pull that only hit the cap is partial: nothing failed');
   });
 
   it('neither call site keeps a hand-written candidate list', () => {

@@ -44,12 +44,13 @@ import { parseSource, walkEveryNode, lineOf, ts } from '../_shared/syntax-tree.m
 const SYNC_DIR = 'server/src/sync';
 /** The calls that exchange one space with one member: the three transfers and the per-space turn the design moves them into. */
 const EXCHANGE_CALLS = ['pullFromPeer', 'pushToPeer', 'syncFiles', 'exchangeSpaceWithMember'];
-/** The marks whose writes the hold guards (one number per member per space, one per direction). */
-const MARKS = ['lastSeqReceived', 'lastSeqPushed'];
+/** The marks whose writes the hold guards (one number per member per space, one per direction). 6.0 names: positions, written through `setMemberSpaceMark` for one network. */
+const MARKS = ['lastPosReceived', 'lastPosPushed'];
 /** The callers of the third mark writer at 84f0b3cc, each reached only from inside the held iteration. */
 const SET_MARK_CALLERS = [
   { file: 'server/src/sync/file-tombstone-ack.ts', why: 'the file-tombstone acknowledgement is written by the file transfer the loop runs for a space it has just asked the hold about' },
   { file: 'server/src/sync/served-watermark.ts', why: 'what THIS instance served a peer: written by the inbound document doors, which ask refusePeerSpace before they serve' },
+  { file: 'server/src/sync/space-exchange.ts', why: 'the receive and push marks of one network (bundle-81, decision 12: `{ networkId }` scope): each write sits inside an if that asks mayExchangeNow, which the mark rule below holds' },
 ];
 
 const source = (file) => stripComments(readFileSync(`${REPO_ROOT}/${file}`, 'utf8'));
@@ -95,22 +96,35 @@ export function exchangingLoops(file, text) {
   return out;
 }
 
-/** Every assignment to `<x>.lastSeqReceived[...]` / `<x>.lastSeqPushed[...]`, with whether an enclosing `if` (within its function) asks `mayExchangeNow(`. */
+/**
+ * Every write of a mark in `MARKS`, with whether an enclosing `if` (within its function) asks `mayExchangeNow(`. Two shapes write one: an assignment to
+ * `<x>.<mark>[...]` (the 5.x shape, and what a test fixture spells) and a call of `setMemberSpaceMark(cfg, peer, space, '<mark>', scope, fold)` (the 6.0 writers,
+ * which share one loop over the networks and say their scope at the call). A removal (`fold` answering `undefined`) is a write of the mark too and asks the hold.
+ */
 export function markWrites(file, text) {
   const sf = parseSource(file, text);
   const out = [];
+  const guardedAt = (n) => {
+    for (let p = n.parent; p && !ts.isFunctionLike(p); p = p.parent) {
+      if (ts.isIfStatement(p) && /\bmayExchangeNow\s*\(/.test(p.expression.getText(sf))) return true;
+    }
+    return false;
+  };
   walkEveryNode(sf, (n) => {
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'setMemberSpaceMark') {
+      const arg = n.arguments[3];
+      if (arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) && MARKS.includes(arg.text)) {
+        out.push({ file, line: lineOf(sf, n), mark: arg.text, guarded: guardedAt(n) });
+      }
+      return;
+    }
     if (!ts.isBinaryExpression(n) || n.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return;
     const left = n.left;
     if (!ts.isElementAccessExpression(left)) return;
     const target = left.expression;
     const mark = ts.isPropertyAccessExpression(target) ? target.name.text : ts.isIdentifier(target) ? target.text : null;
     if (!MARKS.includes(mark)) return;
-    let guarded = false;
-    for (let p = n.parent; p && !ts.isFunctionLike(p); p = p.parent) {
-      if (ts.isIfStatement(p) && /\bmayExchangeNow\s*\(/.test(p.expression.getText(sf))) guarded = true;
-    }
-    out.push({ file, line: lineOf(sf, n), mark, guarded });
+    out.push({ file, line: lineOf(sf, n), mark, guarded: guardedAt(n) });
   });
   return out;
 }
@@ -129,11 +143,15 @@ describe('the classifiers are exercised before they are trusted', () => {
   });
   it('a mark write is guarded only by an enclosing if that asks mayExchangeNow, in its own function', () => {
     const writes = (src) => markWrites('snippet.ts', src).map(w => `${w.mark}:${w.guarded}`);
-    assert.deepEqual(writes(`function f() { if (highestSeq > sinceSeq) { if (m) { m.lastSeqReceived[s] = highestSeq; } } }`), ['lastSeqReceived:false']);
-    assert.deepEqual(writes(`function f() { if (mayExchangeNow(a, b, s) && highestSeq > sinceSeq) { m.lastSeqPushed[s] = max; } }`), ['lastSeqPushed:true']);
+    assert.deepEqual(writes(`function f() { if (highest > since) { if (m) { m.lastPosReceived[s] = highest; } } }`), ['lastPosReceived:false']);
+    assert.deepEqual(writes(`function f() { if (mayExchangeNow(a, b, s) && highest > since) { m.lastPosPushed[s] = max; } }`), ['lastPosPushed:true']);
     // a closure runs later than the if that encloses it: the guard of the outer function says nothing about the moment the closure writes
-    assert.deepEqual(writes(`function f() { if (mayExchangeNow(a, b, s)) { const g = () => { m.lastSeqPushed[s] = max; }; } }`), ['lastSeqPushed:false']);
-    assert.deepEqual(writes(`function f() { m.somethingElse[s] = 1; m.lastSeqReceived = {}; }`), []);
+    assert.deepEqual(writes(`function f() { if (mayExchangeNow(a, b, s)) { const g = () => { m.lastPosPushed[s] = max; }; } }`), ['lastPosPushed:false']);
+    assert.deepEqual(writes(`function f() { m.somethingElse[s] = 1; m.lastPosReceived = {}; }`), []);
+    // the 6.0 writers: a call of setMemberSpaceMark naming the mark, guarded or not by the same rule; a mark outside MARKS is another rule's
+    assert.deepEqual(writes(`function f() { if (mayExchangeNow(a, b, s)) { setMemberSpaceMark(cfg, p, s, 'lastPosReceived', { networkId }, g); } }`), ['lastPosReceived:true']);
+    assert.deepEqual(writes(`function f() { setMemberSpaceMark(cfg, p, s, 'lastPosPushed', { networkId }, () => undefined); }`), ['lastPosPushed:false']);
+    assert.deepEqual(writes(`function f() { setMemberSpaceMark(cfg, p, s, 'lastPosServed', 'every-network', g); }`), []);
   });
 });
 
@@ -162,7 +180,7 @@ describe('every watermark the data loop writes asks the hold first', () => {
 
   it('the derivation found the two mark writers', () => {
     const found = writes();
-    assert.ok(found.length >= 2 && MARKS.every(m => found.some(w => w.mark === m)), `found ${found.length} mark write(s) (${found.map(w => `${w.file}:${w.line} ${w.mark}`).join(', ')}): want at least one lastSeqReceived and one lastSeqPushed`);
+    assert.ok(found.length >= 2 && MARKS.every(m => found.some(w => w.mark === m)), `found ${found.length} mark write(s) (${found.map(w => `${w.file}:${w.line} ${w.mark}`).join(', ')}): want at least one lastPosReceived and one lastPosPushed`);
   });
 
   it('rule 3: each is inside an if that asks mayExchangeNow(', () => {

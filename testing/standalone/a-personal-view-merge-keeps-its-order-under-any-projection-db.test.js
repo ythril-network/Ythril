@@ -41,12 +41,14 @@ const N = 6;
 let d, admin, WITHHELD;
 const VIEW = '@q446merge';
 
-/** `_id` ascending where `seq` descends, and `createdAt` on a third order: any wrong key reorders the page. */
+/** `_id` ascending where `seq` and `pos` descend, and `createdAt` on a third order: any wrong key reorders the page. */
 const CREATED_ORDER = [3, 0, 5, 1, 4, 2];
 function factsOf(space, salt) {
   return Array.from({ length: N }, (_, i) => ({
     _id: `q446-${String(N - i).padStart(2, '0')}-${space}`,
     spaceId: space, fact: `fact ${i} of ${space}`, type: ['a', 'b', 'c'][i % 3], tags: [], seq: i + 1,
+    // Bundle-81: the default order is landing order, by `pos` (no answer carries it): its keys are read for the merge and stripped before the page is answered.
+    pos: i + 1, posAtSeq: i + 1,
     createdAt: new Date(Date.UTC(2026, 0, 1, 0, CREATED_ORDER[i] * 2 + salt)).toISOString(),
     updatedAt: '2026-01-01T00:00:00.000Z',
     // No withheld field on these rows: `a-withheld-field-is-never-answered-on-any-door-db` owns that rule, and a leak
@@ -57,7 +59,7 @@ function factsOf(space, salt) {
 
 /** The orders the filter tool documents, literally: the default and `{field, _id}` for a chosen sort. */
 const ORDERS = [
-  ['default (newest first)', {}, [['seq', -1], ['updatedAt', -1], ['createdAt', -1], ['_id', -1]]],
+  ['default (landing order)', {}, [['pos', -1], ['_id', -1]]],
   ['sort createdAt asc', { sort: 'createdAt', dir: 'asc' }, [['createdAt', 1], ['_id', 1]]],
   ['sort type desc', { sort: 'type', dir: 'desc' }, [['type', -1], ['_id', -1]]],
 ];
@@ -138,7 +140,8 @@ const DOORS = [
 describe('a personal view merge keeps its order under any projection', { skip }, () => {
   before(async () => {
     d = await openViewDoors({ suite: 'q446-view-merge', spaces: [QA, OPS] });
-    ({ NEVER_RETURNED_FIELDS: WITHHELD } = await import('../../server/dist/brain/recall-shape.js'));
+    // The answer withholds the never-returned fields AND the order-only `pos` (bundle-81): both are stripped from what the caller sees.
+    ({ WITHHELD_FROM_ANSWERS: WITHHELD } = await import('../../server/dist/brain/recall-shape.js'));
     admin = await d.mint('q446-admin', {}, { admin: true });
     const v = await d.rest(admin.key, 'POST', '/api/views', { name: VIEW.slice(1), members: [QA, OPS] });
     assert.equal(viewOf(v)?.id, VIEW, `POST /api/views answered ${v.status} ${v.text.slice(0, 200)}`);

@@ -106,10 +106,11 @@ async function seedPair(space, { survivorProps = {}, absorbedProps = {}, vector,
   let seq = 1;
   const survivorId = crypto.randomUUID();
   const absorbedId = crypto.randomUUID();
-  const entity = (_id, name, properties, type = TYPE) => ({
-    _id, spaceId: space, name, type, tags: [], properties, author: AUTHOR, createdAt: T0, updatedAt: T0, seq: seq++,
+  // A seeded row carries its landing position (a carried row's is its seq): the scanner that finds the pair reads by position (bundle-81).
+  const entity = (_id, name, properties, type = TYPE) => { const s = seq++; return {
+    _id, spaceId: space, name, type, tags: [], properties, author: AUTHOR, createdAt: T0, updatedAt: T0, seq: s, pos: s, posAtSeq: s,
     ...(vector ? { embedding: vector, embeddingModel: 'seeded' } : {}),
-  });
+  }; };
   const names = { survivor: 'North Service', absorbed: 'South Service' };
   await coll(space, 'entities').insertMany([
     entity(survivorId, names.survivor, survivorProps), entity(absorbedId, names.absorbed, absorbedProps),
@@ -129,7 +130,7 @@ async function seedPair(space, { survivorProps = {}, absorbedProps = {}, vector,
     });
     await coll(space, 'edges').insertOne({
       _id: edgeId, spaceId: space, from: absorbedId, to: thirdId, label: EDGE_LABEL, tags: [],
-      properties: edge.properties, author: AUTHOR, createdAt: T0, updatedAt: T0, seq: seq++,
+      properties: edge.properties, author: AUTHOR, createdAt: T0, updatedAt: T0, seq: seq, pos: seq, posAtSeq: seq++,
     });
     Object.assign(hub, { thirdId, edgeId, edgeTargets: [thirdId] });
   }

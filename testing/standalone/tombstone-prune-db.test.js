@@ -8,8 +8,8 @@
  *
  *   - `$lte` vs `$lt` — an off-by-one at the boundary deletes the tombstone the slowest peer is about to ask
  *     for. One document, and the record it protects comes back.
- *   - a filter that matches more than it should — a missing/`null` `seq`, a stringly-typed one, another space's
- *     collection. A hand-written matcher agrees with the author; the driver is the only authority.
+ *   - a filter that matches more than it should — a missing/`null` position, a stringly-typed one, another space's
+ *     collection. (Bundle-81: the prune is by POSITION, the place a tombstone landed on this instance, and a carried row's position is its seq.) A hand-written matcher agrees with the author; the driver is the only authority.
  *
  * The direction that matters is the survival assertion, not the removal one: a prune that deletes too little is
  * housekeeping left undone, and a prune that deletes too much resurrects deleted records on the next sync.
@@ -28,7 +28,7 @@ const OTHER = 'ospace';
 
 let mongo, pruneTombstonesToFloor, tombstoneFloor;
 
-/** One tombstone per seq, so "which survived" reads directly off the seqs. */
+/** One tombstone per position (a carried row's position is its seq), so "which survived" reads directly off the positions. */
 const tombstone = (seq, spaceId = SPACE) => ({
   _id: `${spaceId}-doc-${seq}`,
   spaceId,
@@ -36,11 +36,13 @@ const tombstone = (seq, spaceId = SPACE) => ({
   deletedAt: '2026-08-01T00:00:00.000Z',
   instanceId: 'self',
   seq,
+  pos: seq,
+  posAtSeq: seq,
 });
 
 const seqsIn = async (spaceId) => {
-  const rows = await mongo.col(`${spaceId}_tombstones`).find({}).sort({ seq: 1 }).toArray();
-  return rows.map(r => r.seq);
+  const rows = await mongo.col(`${spaceId}_tombstones`).find({}).sort({ pos: 1 }).toArray();
+  return rows.map(r => r.pos);
 };
 
 describe('tombstone prune (real MongoDB)', { skip }, () => {
@@ -102,7 +104,7 @@ describe('tombstone prune (real MongoDB)', { skip }, () => {
 
   it('leaves a space alone when one member has never pulled — through the real decision', async () => {
     const floor = tombstoneFloor(
-      [{ instanceId: 'a', lastSeqServed: { [SPACE]: 50 } }, { instanceId: 'b' }],
+      [{ instanceId: 'a', lastPosServed: { [SPACE]: 50 } }, { instanceId: 'b' }],
       SPACE,
     );
     assert.equal(floor.prune, false);
@@ -110,8 +112,8 @@ describe('tombstone prune (real MongoDB)', { skip }, () => {
     assert.deepEqual(await seqsIn(SPACE), [10, 20, 30, 40, 50]);
   });
 
-  it('ignores a tombstone with no seq rather than deleting it as if it were zero', async () => {
-    // A legacy or malformed document has no position, so it cannot be proven delivered. MongoDB does NOT match
+  it('ignores a tombstone with no position rather than deleting it as if it were zero', async () => {
+    // A legacy or malformed document has no position (a row a carry has not reached), so it cannot be proven delivered. MongoDB does NOT match
     // a missing field against `$lte`, which is the behaviour relied on here — and precisely the kind of thing a
     // JS matcher gets wrong in the other direction.
     await mongo.col(`${SPACE}_tombstones`).insertOne({
