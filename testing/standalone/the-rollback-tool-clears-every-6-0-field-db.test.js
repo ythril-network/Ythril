@@ -37,7 +37,7 @@
  *
  * Run: node --test testing/standalone/the-rollback-tool-clears-every-6-0-field-db.test.js  (requires a prior server build and the test MongoDB)
  */
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -233,6 +233,102 @@ describe('the rollback tool clears every 6.0 field', { skip }, () => {
         // The entry ran against the database `beforeEach` seeded with 6.0 fields: the settings it read named THAT database.
         for (const f of FIELDS) assert.equal(await col(SPACES[0], 'facts').countDocuments({ [f]: { $exists: true } }), 0, `${f} is still on a fact after the entry ran`);
       } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    });
+  });
+
+  /**
+   * Q-624 design §14 "Rollback to 5.6.x" and test 22's extension (three steps added to the one tool for leaving 6.0).
+   *
+   * 5.6 builds the full five-field unique edge identity at boot, which is an E11000 on a space holding a fork edge, and it shows entity,
+   * chrono and edge forks as ordinary records. So the tool, driven through its built entry (`--discard-unresolved-forks` is the one
+   * flag the design names; the core's signature for it is not stated, so the entry is what is held):
+   *
+   *  - step 5: with any row carrying `forkOf` in `entities`, `edges` or `chrono`, it REFUSES: exits non-zero, prints one line per space
+   *    with the counts per kind, says "resolve them in Review, or run with --discard-unresolved-forks", and changes NOTHING in that run.
+   *    Fact forks are not counted (5.6 knows them);
+   *  - with the flag, those rows are deleted with NO tombstones (5.6 peers would not hold them), and the tool says per space how many went;
+   *  - step 6: `edge_identity` and `{ from: 1 }` are dropped, so 5.6 builds its full index over rows it can index;
+   *  - step 7: `_resolvedElsewhere` is unset on all four forking collections (5.6 hashes every field it does not exclude);
+   *  - every step is idempotent: a second run changes nothing.
+   */
+  describe('rollback to 5.6 leaves no fork a 5.6 cannot read (Q-624 steps 5, 6 and 7)', () => {
+    const entry = path.resolve('server/dist/tools/positions-rollback.js');
+    const MARK = [{ by: 'peer-a', at: '2026-10-01T00:00:00.000Z', seq: 7, proven: true }];
+    const FORKING = ['facts', 'entities', 'edges', 'chrono'];
+
+    async function seedForks() {
+      const space = SPACES[0];
+      await col(space, 'facts').insertOne({ _id: 'q-fact-fork', spaceId: space, fact: 'f', seq: 5, forkOf: 'q-fact', _resolvedElsewhere: MARK });
+      await col(space, 'entities').insertMany([
+        { _id: 'q-ent-fork', spaceId: space, name: 'e', seq: 5, forkOf: 'q-ent', _resolvedElsewhere: MARK },
+        { _id: 'q-ent', spaceId: space, name: 'e', seq: 5, _resolvedElsewhere: MARK },
+      ]);
+      await col(space, 'chrono').insertOne({ _id: 'q-chr-fork', spaceId: space, title: 'c', seq: 5, forkOf: 'q-chr' });
+      // The base seed's edges carry no endpoints, so every one keys alike in a unique index: this space's edges are the subject and its fork.
+      await col(space, 'edges').deleteMany({});
+      await col(space, 'edges').insertMany([
+        { _id: 'q-edge', spaceId: space, from: 'a', to: 'b', label: 'l', seq: 5 },
+        { _id: 'q-edge-fork', spaceId: space, from: 'a', to: 'b', label: 'l', seq: 5, forkOf: 'q-edge' },
+      ]);
+      const edges = col(space, 'edges');
+      await edges.createIndex({ from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 }, { name: 'edge_identity', unique: true, partialFilterExpression: { forkOf: null } });
+      await edges.createIndex({ from: 1 }, { name: 'from_1' });
+    }
+    // The tool is what drops these two; when it did not (red), the next case's base seed must not collide with them.
+    afterEach(async () => { for (const name of ['edge_identity', 'from_1']) await col(SPACES[0], 'edges').dropIndex(name).catch(() => {}); });
+    const indexNames = async (space) => (await col(space, 'edges').indexes()).map(i => i.name);
+    const forkRows = async (space) => (await Promise.all(FORKING.map(p => col(space, p).countDocuments({ forkOf: { $exists: true } })))).reduce((a, b) => a + b, 0);
+    const marks = async (space) => (await Promise.all(FORKING.map(p => col(space, p).countDocuments({ _resolvedElsewhere: { $exists: true } })))).reduce((a, b) => a + b, 0);
+    const toolRun = (...args) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'q624-rollback-'));
+      try {
+        const configPath = path.join(dir, 'config.json');
+        fs.writeFileSync(configPath, JSON.stringify({ instanceId: 'rb', instanceLabel: 'rb', tokens: [], networks: [], spaces: SPACES.map(id => ({ id, label: id, folders: [] })) }, null, 3));
+        const out = spawnSync(process.execPath, [entry, ...args], {
+          env: { ...process.env, CONFIG_PATH: configPath, DATA_ROOT: path.join(dir, 'data'), MONGO_URI: testMongoUri(`ythril_harness_${SUITE}`) },
+          encoding: 'utf8', timeout: 60_000,
+        });
+        return { status: out.status, text: `${out.stdout}${out.stderr}` };
+      } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    };
+
+    it('refuses while an entity, chrono or edge fork exists, says what and how many, and changes nothing', async () => {
+      await seedForks();
+      const before = await snapshot();
+      const indexesBefore = await indexNames(SPACES[0]);
+      const out = toolRun();
+      assert.notEqual(out.status, 0, `the tool ran over a database holding ${await forkRows(SPACES[0])} fork rows a 5.6 cannot read`);
+      assert.match(out.text, new RegExp(`${SPACES[0]}:[^\\n]*(entit|chrono|edge)`, 'i'), `no line for ${SPACES[0]} with counts per kind: ${out.text.slice(0, 400)}`);
+      assert.match(out.text, /resolve them in Review, or run with --discard-unresolved-forks/, `the refusal does not name the way out: ${out.text.slice(0, 400)}`);
+      assert.deepEqual(await snapshot(), before, 'a refused run changed rows or counters');
+      assert.deepEqual(await indexNames(SPACES[0]), indexesBefore, 'a refused run dropped an index');
+    });
+
+    it('with --discard-unresolved-forks it deletes those rows with no tombstones, keeps fact forks, drops both indexes and unsets every mark', async () => {
+      await seedForks();
+      const tombstonesBefore = await col(SPACES[0], 'tombstones').countDocuments({});
+      const out = toolRun('--discard-unresolved-forks');
+      assert.equal(out.status, 0, `the tool refused with the flag: ${out.text.slice(0, 400)}`);
+      for (const part of ['entities', 'chrono', 'edges']) assert.equal(await col(SPACES[0], part).countDocuments({ forkOf: { $exists: true } }), 0, `a ${part} fork survived the discard`);
+      assert.equal(await col(SPACES[0], 'facts').countDocuments({ _id: 'q-fact-fork' }), 1, 'a fact fork was discarded: 5.6 knows them');
+      assert.equal(await col(SPACES[0], 'tombstones').countDocuments({}), tombstonesBefore, 'the discard issued tombstones: 5.6 peers would not hold the rows');
+      assert.match(out.text, new RegExp(`${SPACES[0]}:[^\\n]*\\b3\\b`), `the tool did not say per space how many forks went: ${out.text.slice(0, 400)}`);
+      const names = await indexNames(SPACES[0]);
+      assert.ok(!names.includes('edge_identity'), 'the partial edge identity index is still there: 5.6 cannot build its own');
+      assert.ok(!names.includes('from_1'), 'the { from: 1 } index is still there');
+      assert.equal(await marks(SPACES[0]), 0, 'a _resolvedElsewhere mark survived: 5.6 hashes every field it does not exclude');
+    });
+
+    it('is idempotent: a second run with the flag changes nothing', async () => {
+      await seedForks();
+      assert.equal(toolRun('--discard-unresolved-forks').status, 0);
+      const settled = await snapshot();
+      const indexesBefore = await indexNames(SPACES[0]);
+      const again = toolRun('--discard-unresolved-forks');
+      assert.equal(again.status, 0, `the second run failed: ${again.text.slice(0, 300)}`);
+      assert.deepEqual((await snapshot()).counters.map(c => c._id), settled.counters.map(c => c._id));
+      assert.equal(await forkRows(SPACES[0]), 1, 'the second run removed a fact fork or kept a row it should not');
+      assert.deepEqual(await indexNames(SPACES[0]), indexesBefore, 'the second run changed the indexes');
     });
   });
 });
