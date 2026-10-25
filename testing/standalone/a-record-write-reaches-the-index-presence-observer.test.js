@@ -168,6 +168,7 @@ describe('4. there is one door onto the database', () => {
     'server/src/ready.ts': 'A readiness probe: admin ping and listSearchIndexes, both reads.',
     'server/src/api/about.ts': 'serverInfo for the About page — a read of the admin database.',
     'server/src/db/bounded-transaction.ts': 'The seal of a transaction the bound ended (`Q-530`): a retryable updateOne that matches nothing on `transaction_seal` (never a record collection, never upserts) and `killSessions` on admin. Off getDb() on purpose: the plain-write door would add its comment, its maxTimeMS and the bound to a write whose own bound is SEAL_MS and which runs after the bound has ended.',
+    'server/src/tools/positions-rollback.ts': 'The rollback tool (`node dist/tools/positions-rollback.js`, bundle-81): a one-off process with no instance up, so no index lifecycle to reach. It `$unset`s the 6.0 local fields on rows that exist and raises a counter; it inserts no record, so no first record can land in a collection without its index.',
     'server/src/db/store-answers.ts':'storeAnswers: a ping of the admin database, writes nothing, and goes around getDb() on purpose: it carries its own timeoutMS, and a housekeeping scope\'s bound laid over a ping about the bound would be a bound about itself.',
   };
 

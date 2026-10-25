@@ -118,6 +118,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   network_vote_outcomes: null,
   network_sync_history: null,
   network_change_notes: null,
+  network_reread: 'network.reread',
   network_invite: 'network.invite',
   network_fork: 'network.fork',
   network_join_remote: 'network.join_remote',

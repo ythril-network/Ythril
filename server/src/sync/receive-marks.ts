@@ -12,7 +12,8 @@
  * that member joins holding a position in numbers about to be reused. `one-mark-loop` holds every walker of the mark set to this one.
  */
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
-import { PER_SPACE_WATERMARKS, RECEIVE_MARKS, type PerSpaceWatermark } from '../config/types-networks.js';
+import { PER_SPACE_WATERMARKS, RECEIVE_MARKS, ROLLBACK_MARKS, POSITION_TWIN, type PerSpaceWatermark } from '../config/types-networks.js';
+
 
 /**
  * Visit every mark map of every member `net` holds, the members AND the member each join round in flight carries, for the marks in
@@ -23,7 +24,7 @@ import { PER_SPACE_WATERMARKS, RECEIVE_MARKS, type PerSpaceWatermark } from '../
 export function eachMemberMarkOf(
   net: NetworkConfig,
   localSpaceId: string | null,
-  visit: (marks: Record<string, unknown>, mark: PerSpaceWatermark, who: string) => void,
+  visit: (marks: Record<string, unknown>, mark: PerSpaceWatermark, who: string, member: NetworkMember) => void,
   which: readonly PerSpaceWatermark[] = PER_SPACE_WATERMARKS,
 ): void {
   const carriers: [NetworkMember, string][] = (net.members ?? []).map(m => [m, m.instanceId]);
@@ -32,7 +33,7 @@ export function eachMemberMarkOf(
     for (const key of which) {
       const marks = member[key] as Record<string, unknown> | undefined;
       if (!marks || typeof marks !== 'object') continue;
-      if (localSpaceId === null ? Object.keys(marks).length > 0 : marks[localSpaceId] !== undefined) visit(marks, key, who);
+      if (localSpaceId === null ? Object.keys(marks).length > 0 : marks[localSpaceId] !== undefined) visit(marks, key, who, member);
     }
   }
 }
@@ -53,6 +54,28 @@ export function forgetEveryMark(net: NetworkConfig, localSpaceId: string): void 
  */
 export function forgetWhatWasReceived(net: NetworkConfig, localSpaceId: string): void {
   eachMemberMarkOf(net, localSpaceId, (marks) => { delete marks[localSpaceId]; }, RECEIVE_MARKS);
+}
+
+/**
+ * The first carry's marks (bundle-81, design rev 8 §3a): every frozen 5.6 mark (`ROLLBACK_MARKS`) becomes its 6.0 twin by IDENTITY, for each member and space
+ * where the twin is absent. A legacy row's position is its seq, so `{pos <= m}` is the set `{seq <= m}` was, ties included, and the first 6.0 cycle offers what
+ * 5.6's next would have. The frozen keys are left exactly as they are: a 5.6 started after a rollback finds its own marks. A twin that exists is never
+ * overwritten (it is 6.0's own, and a re-run must not move it back). Mutates `net`; the caller saves. Answers how many marks it carried.
+ */
+export function carryMarksToPositions(net: NetworkConfig): number {
+  let carried = 0;
+  // Through the one loop over the member marks, which hands the carrier too: a second walk over the members and the join rounds' candidates is a second set to miss.
+  eachMemberMarkOf(net, null, (marks, frozen, _who, member) => {
+    const twin = POSITION_TWIN[frozen as (typeof ROLLBACK_MARKS)[number]];
+    for (const [spaceId, value] of Object.entries(marks)) {
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) continue;
+      const to = (member[twin] ??= {}) as Record<string, number>;
+      if (to[spaceId] !== undefined) continue;
+      to[spaceId] = value;
+      carried++;
+    }
+  }, ROLLBACK_MARKS);
+  return carried;
 }
 
 /**

@@ -80,7 +80,8 @@ describe('every per-space mark is either forgotten on a restore or kept with a r
     // lastFileTombstoneAckedAt. A forgotten push mark would re-send restored records whose deletions peers already pruned.
     const { RECEIVE_MARKS, KEPT_ON_RESTORE } = types;
     assert.ok(Array.isArray(RECEIVE_MARKS) && KEPT_ON_RESTORE && typeof KEPT_ON_RESTORE === 'object', 'the two lists are not exported (see the first row)');
-    assert.deepEqual([...RECEIVE_MARKS].sort(), ['fileMetaRereadAt', 'lastPosReceived', 'tombstoneRereadAt']);
+    // bundle-81 (§7, decision 39): `fullRereadState`, where the operator's full re-read of a member stands, is the fourth RECEIVED mark: a restore re-reads the member anyway, so the request goes with the receive marks.
+    assert.deepEqual([...RECEIVE_MARKS].sort(), ['fileMetaRereadAt', 'fullRereadState', 'lastPosReceived', 'tombstoneRereadAt']);
     assert.deepEqual(Object.keys(KEPT_ON_RESTORE).sort(), ['lastFileTombstoneAckedAt', 'lastPosPushed', 'lastPosServed']);
     assert.deepEqual([...types.ROLLBACK_MARKS].sort(), ['lastSeqPushed', 'lastSeqReceived', 'lastSeqServed'], 'the frozen 5.6 marks are the three lastSeq* maps');
   });

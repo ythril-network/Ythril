@@ -133,7 +133,9 @@ describe('MCP tool schemas — universal invariants', () => {
     // `view_orphans`, `view_claim`, `view_purge_retired`, `view_migration`. Prerequisites done: each is classified in
     // `audit-map.ts` (`null`, because the shared view acts record `VIEW_OPERATIONS` themselves on both doors), the read-only
     // posture is the plan's (a token may manage its OWN views), and `16-mcp.md` carries a row for each.
-    assert.equal(ALL_TOOLS.length, 86);
+    // 86 -> 87: `network_reread` (bundle-81, D-20), the door onto `rereadNetworkAct` like `POST /api/networks/:id/reread`: `admin: true`, `mutating`, an
+    // audit-map entry under `network.reread`, a `NOT_AREA_SCOPED` row, a capability-map row, and `16-mcp.md` rows.
+    assert.equal(ALL_TOOLS.length, 87);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

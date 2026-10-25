@@ -20,7 +20,9 @@
  * cursor says the run at that position was read and it may have been read only in part. Scanning it once more is idempotent (a pair already recorded is
  * recorded again as itself), so the cost of doubt is one run, never a skip. A reset clears both.
  */
-import { col, asFilter, asUpdate } from '../db/mongo.js';
+import { col, asDoc, asFilter, asUpdate } from '../db/mongo.js';
+import { isDuplicateKey } from '../db/write-errors.js';
+import { escapeRegex } from '../util/redos.js';
 import type { DupeScanStateDoc, DupeScanType } from '../config/types.js';
 import { comparePositionStarts, type PositionStart } from '../util/position-keyset.js';
 
@@ -52,6 +54,38 @@ export async function writeScanPosition(
       : { $set: { ...ctx, cursorSeq: at.pos, cursorPos: { seq: at.pos, id: at.id as string }, updatedAt: now } }),
     { upsert: true },
   );
+}
+
+/**
+ * The first carry's scanner cursors (bundle-81, design rev 8 §3a): a cursor stored by 5.6 holds only `cursorSeq`, and a legacy row's position IS its seq, so it
+ * is carried by identity into the new field: `cursorPos = { seq: cursorSeq, id: '' }`. The empty id says "the place in the run at `cursorSeq` is not known",
+ * which {@link readScanStart} reads as the legacy start (the run at `cursorSeq` is read again, never skipped), exactly what a 5.6 cursor always meant. A
+ * cursor that already has its pair, or none to carry (`cursorSeq` 0), is left alone. Answers how many it carried.
+ */
+export async function carryScanCursors(): Promise<number> {
+  const r = await col<DupeScanStateDoc>(SCAN_STATE).updateMany(
+    asFilter<DupeScanStateDoc>({ cursorSeq: { $type: 'number', $gt: 0 }, cursorPos: { $exists: false } }),
+    [{ $set: { cursorPos: { seq: '$cursorSeq', id: '' } } }] as unknown as ReturnType<typeof asUpdate<DupeScanStateDoc>>,
+  );
+  return r.modifiedCount;
+}
+
+/**
+ * A renamed space's scan cursors follow it: each is keyed `<space>:<type>`, `_id` is immutable, so it is copy then delete. Idempotent on a resumed rename. Losing a
+ * cursor would only re-scan the space, but it would also leave a row behind that nothing reads.
+ */
+export async function moveScanCursors(oldId: string, newId: string): Promise<void> {
+  const state = col<DupeScanStateDoc>(SCAN_STATE);
+  const stale = await state.find(asFilter<DupeScanStateDoc>({ _id: { $regex: `^${escapeRegex(oldId)}:` } })).toArray();
+  for (const doc of stale) {
+    const moved = { ...doc, _id: `${newId}:${doc._id.slice(oldId.length + 1)}` };
+    await state.insertOne(asDoc(moved)).catch(async (err: unknown) => {
+      if (!isDuplicateKey(err)) throw err;
+      await state.deleteOne(asFilter<DupeScanStateDoc>({ _id: moved._id }));   // a re-run: the moved copy of the earlier attempt is replaced by this one
+      await state.insertOne(asDoc(moved));
+    });
+    await state.deleteOne(asFilter<DupeScanStateDoc>({ _id: doc._id }));
+  }
 }
 
 /** `current`, moved to `rec` when `rec` is further on — a pair compared as the store orders them. A record with no position never moves it. */

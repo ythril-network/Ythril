@@ -5,7 +5,7 @@
  */
 import { Router } from 'express';
 import { refusalOfParse } from '../../util/log.js';
-import { requireAdmin, requireAuth, denyReadOnly } from '../../auth/middleware.js';
+import { requireAdmin, requireAdminMfa, requireAuth, denyReadOnly } from '../../auth/middleware.js';
 import { visibleNetworks } from '../../auth/network-rights.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { getConfig } from '../../config/loader.js';
@@ -19,6 +19,7 @@ import {
   CreateNetworkBody, UpdateNetworkBody, AddNetworkSpaceBody, ResolvePendingSpaceBody, resolvePendingSpaceAct,
 } from '../../networks/network-acts.js';
 import { sendCaughtFailure } from '../send-failure.js';
+import { RereadBody, rereadNetworkAct } from '../../networks/reread-act.js';
 
 export const crudRouter = Router();
 
@@ -26,20 +27,28 @@ export const crudRouter = Router();
 
 // F-34: the networks this token may see — `networks: read` on every space each carries. Same filter as MCP
 // `network_peers`, so the two doors list the same networks.
-crudRouter.get('/', globalRateLimit, requireAuth, (req, res) => {
+crudRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   const visible = visibleNetworks(req.authToken as Parameters<typeof visibleNetworks>[0], getConfig().networks);
   // `version`, `belowFloor` and `minPeerVersion` per MEMBER, spelled as MCP spells them — see `networkView`; the owed acts for an
   // instance administrator only — see `networkAnswer`, which `GET /:id` and MCP `network_get` answer through too.
   const cfg = getConfig();
-  res.json({ networks: visible.map(net => networkAnswer(net, req.authToken as Parameters<typeof networkAnswer>[1], cfg)) });
+  try {
+    res.json({ networks: await Promise.all(visible.map(net => networkAnswer(net, req.authToken as Parameters<typeof networkAnswer>[1], cfg))) });
+  } catch (err) {
+    sendCaughtFailure(res, 'GET /api/networks', err);
+  }
 });
 
 
 // ── GET /api/networks/:id ──────────────────────────────────────────────────
 
 // F-34: readable with `networks: read` on every space it carries; otherwise a 404, because a 403 says it exists.
-crudRouter.get('/:id', globalRateLimit, requireAuth, (req, res) => {
-  sendAct(res, readNetworkAct(req.authToken as Parameters<typeof readNetworkAct>[0], req.params['id'] as string));
+crudRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
+  try {
+    sendAct(res, await readNetworkAct(req.authToken as Parameters<typeof readNetworkAct>[0], req.params['id'] as string));
+  } catch (err) {
+    sendCaughtFailure(res, 'GET /api/networks/:id', err);
+  }
 });
 
 
@@ -144,6 +153,16 @@ crudRouter.patch('/:id', globalRateLimit, requireAuth, denyReadOnly, (req, res) 
   // The three fields this act can change, never the record: it also holds invite and member token hashes.
   if (r.audit) req.auditSnapshots = r.audit;
   sendAct(res, r);
+});
+
+// ── POST /api/networks/:id/reread — the operator's full re-read (D-20) ─────
+
+// Admin with the second factor, like the restore and the wipe (`requireAdminMfa`): it can bring back records peers deleted and forgot. Shared with MCP `network_reread`
+// (`networks/reread-act.ts`); that door refuses where it cannot present a code, as a personal-view copy does.
+crudRouter.post('/:id/reread', globalRateLimit, requireAdminMfa, (req, res) => {
+  const parsed = RereadBody.safeParse(req.body ?? {});
+  if (!parsed.success) { res.status(400).json(refusalOfParse(parsed.error)); return; }
+  sendAct(res, rereadNetworkAct(req.authToken as Parameters<typeof rereadNetworkAct>[0], req.params['id'] as string, parsed.data));
 });
 
 // ── POST /api/networks/:id/pending-spaces — accept or dismiss a space an upstream announced (S-9) ──

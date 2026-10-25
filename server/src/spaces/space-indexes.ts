@@ -114,6 +114,9 @@ const TTL_INDEXES: readonly SpaceIndex[] = [
   { part: 'files', keys: { deletedAt: 1 }, options: { name: 'ttl_deletedAt', sparse: true }, policy: 'report', bootSafe: false, sweep: true },
 ];
 
+/** The `(pos, _id)` index of one collection the position stream covers: see the comment where {@link SPACE_INDEXES} spreads it. */
+const positionIndexOf = (part: SpacePart): SpaceIndex => ({ part, keys: { pos: 1, _id: 1 }, options: {}, policy: 'report', bootSafe: false });
+
 /**
  * THE declaration of every per-space index, in the order `initSpace` builds them.
  *
@@ -134,7 +137,7 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
    * Not boot-safe: a build over a large existing collection reads every row, so it is the background pass's. `report`: a space without it is read by a scan that
    * is slow and correct, said through the shared reporter and tried again; `every-position-read-is-index-served-db` holds every reader to it.
    */
-  ...SEQ_CARRYING.map((part): SpaceIndex => ({ part, keys: { pos: 1, _id: 1 }, options: {}, policy: 'report', bootSafe: false })),
+  ...SEQ_CARRYING.map((part): SpaceIndex => positionIndexOf(part)),
   plain('facts', { tags: 1 }),
   // The fork caps' indexes (`sync/upsert-plan.ts`).
   ...FORK_INDEXES.map(ix => plain('facts', ix.keys, declaredOptions(ix))),
@@ -206,6 +209,13 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
   })),
   ...TTL_INDEXES,
 ]);
+
+/**
+ * The indexes the carry and the repair of a space's positions READ through: the `(seq, _id)` keyset compounds that chunk them, and the `(pos, _id)`
+ * compounds that find rows without a position and serve every position read (`sync/positions-owed.ts`: built before any row is touched, retried by the
+ * owed job every tick while one is missing).
+ */
+export const POSITION_WORK_INDEXES: readonly SpaceIndex[] = SPACE_INDEXES.filter(ix => ix.builder === 'keyset' || 'pos' in ix.keys);
 
 /** The TTL sweep's part of {@link SPACE_INDEXES}. */
 export const SWEEP_INDEXES: readonly SpaceIndex[] = SPACE_INDEXES.filter(ix => ix.sweep === true);

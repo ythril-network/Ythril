@@ -3,6 +3,7 @@ import { getConfig, saveConfig } from '../config/loader.js';
 import { eachMemberMarkOf } from '../sync/receive-marks.js';
 import { RECEIVE_MARKS } from '../config/types-networks.js';
 import { log } from './log.js';
+import { highestStored } from './index-top.js';
 import type { SpaceCounterDoc } from '../config/types.js';
 import type { SpacePart } from '../db/space-collection.js';
 
@@ -66,6 +67,15 @@ export const MAX_INGEST_SEQ = MAX_SYNC_SEQ - SEQ_CEILING_RESERVE;
  * `SEQ_CEILING_RESERVE` creates of headroom.
  */
 export const VERSION_FLOOR_CAP = MAX_INGEST_SEQ - SEQ_CEILING_RESERVE;
+
+/**
+ * The highest version stored in any of `collections` that is at or below {@link VERSION_FLOOR_CAP}, or 0 when they hold none: what a counter may continue from. The ONE
+ * reading of the version maximum, over the collections it is handed: `highestVersionBelowCap` (`util/version-stamp.ts`) hands it a space's own, and the rollback tool
+ * (`sync/positions-rollback.ts`, which runs with no instance up and so holds a driver `Db` of its own) hands it that database's.
+ */
+export async function highestVersionBelowCapOf(collections: ReadonlyArray<{ readonly find: unknown }>): Promise<number> {
+  return await highestStored<number>(collections, 'seq', { $type: 'number', $lte: VERSION_FLOOR_CAP }) ?? 0;
+}
 
 /**
  * True when `seq` is out of range or so close to the protocol ceiling that

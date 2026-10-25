@@ -108,7 +108,7 @@ describe('what a caller who may read a network is handed', () => {
 
   it('readNetworkAct (REST GET /:id and MCP network_get)', async () => {
     const { readNetworkAct } = await import('../../server/dist/networks/network-acts.js');
-    const res = readNetworkAct(ADMIN, 'n');
+    const res = await readNetworkAct(ADMIN, 'n');   // async since the admin view carries the spaces' record counts (decision 42)
     assert.equal(res.status, 200);
     verify('readNetworkAct', res.body);
   });

@@ -58,6 +58,7 @@ import {
 import type { SpaceActKind, SpaceActSet } from '../config/types.js';
 import { currentSeq } from '../util/seq.js';
 import { highestVersionBelowCap, raiseVersionTo } from '../util/version-stamp.js';
+import { owePositions, finishPositionsOf } from '../sync/positions-owed.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { RESTORE_ABANDONED_OPERATION, RESTORE_COMPLETED_OPERATION } from '../audit/act-set-operations.js';
 import { log, peerText } from '../util/log.js';
@@ -297,6 +298,13 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
   const counters = manifest.collections.find(c => c.name === COUNTERS);
   const target = Math.max(floor, await backupCounterOf(dir, counters, spaceId), await highestVersionBelowCap(spaceId));
   await raiseVersionTo(spaceId, target);
+
+  // The restored rows may carry no position (a pre-6.0 backup, or one taken mid-carry) or no `writtenHere`: the space owes its carry, and it runs inline, before the
+  // hold lifts. A 6.0 backup keeps its own positions (the carry fills only rows that have none). No mark moves: a restore forgets receive marks and keeps the rest
+  // (`KEPT_ON_RESTORE`), and the carry's marks are the first boot's. A failure leaves the marker, and the owed job finishes it; the space answers `positions_building`
+  // to every sync door meanwhile.
+  await owePositions(spaceId, 'carry');
+  await finishPositionsOf(spaceId);
 
   // Every declared unique index stands before the hold lifts (`Q-439`, `Q-445`): built on the empty collections above, asserted
   // here. One that does not is a plain error naming it - not an input failure: the act stays owed, the space held, and it is

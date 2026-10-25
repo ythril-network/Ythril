@@ -17,6 +17,11 @@ import { castVoteAct, listOpenVotesAct, syncHistoryAct, voteOutcomesAct, VOTE_OU
 import { changeNotesAct } from '../../sync/change-notes.js';
 import { forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
 import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
+import { rereadNetworkAct, REREAD_COST } from '../../networks/reread-act.js';
+import { mfaRequiredFor } from '../../auth/mfa-policy.js';
+import { isMfaEnabled } from '../../auth/totp.js';
+import { isOidc } from '../../auth/oidc-caller.js';
+import { ToolRefusal } from '../../util/errors.js';
 
 /** The caller an act sees: this connection's matrix, and the token id memberships are recorded against. */
 export const callerOf = (ctx: ToolContext) => ({ ...(ctx.rights ? { rights: ctx.rights } : {}), ...(ctx.actor?.tokenId ? { id: ctx.actor.tokenId } : {}) });
@@ -52,7 +57,7 @@ export const network_getTool: ToolHandler = {
     type: 'object', properties: { id: networkIdSchema }, required: ['id'], additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    return toResult(readNetworkAct(callerOf(ctx), String(ctx.args['id'])), '');
+    return toResult(await readNetworkAct(callerOf(ctx), String(ctx.args['id'])), '');
   },
 };
 
@@ -286,6 +291,40 @@ export const network_sync_historyTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     return toResult(await syncHistoryAct(String(ctx.args['id']), ctx.args['limit']), '');
+  },
+};
+
+export const network_rereadTool: ToolHandler = {
+  name: 'network_reread',
+  description: 'Instance admin: re-read a network from its members, in full. Same parameters and refusals as `POST /api/networks/:id/reread`. It marks each space asked '
+    + '(default: every space the network carries) as owed a re-read from every member; the sync engine then forgets this network\'s receive and push marks for ONE space '
+    + 'per member per cycle and reads and sends that space again from the start, skipping every copy held by version. It moves nothing itself.\n\n'
+    + 'WHEN: a record was shadowed under 5.6 (below an author-guarded mark the reader never saw) and the first 6.0 carry kept it so: this is the one recovery. '
+    + `THE COST (D-20): ${REREAD_COST}. Progress is \`rereadOwed\` on \`network_get\` (state \`owed\` or \`catching\`); a space that is catching counts its cycles `
+    + '`partial`, never a member failure.\n\n'
+    + 'NEEDS THE SECOND FACTOR where the instance asks one for the token: this door has no place for a code, so it then answers that it needs MFA step-up and to use the web '
+    + 'UI (Settings > Networks), as `view_copy` does. REST asks for the code.',
+  admin: true,
+  mutating: true,
+  inputSchema: (_s: ToolSchemas) => ({
+    type: 'object',
+    properties: {
+      id: networkIdSchema,
+      confirm: { type: 'boolean', const: true, description: 'Must be true: the re-read can bring back records peers deleted and have since forgotten.' },
+      spaces: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 1, maxItems: MAX_SPACE_IDS, description: 'Local ids of the network\'s spaces to re-read; omit it for every space the network carries. A space the network does not carry is refused.' },
+    },
+    required: ['id', 'confirm'],
+    additionalProperties: false,
+  }),
+  async handle(ctx: ToolContext): Promise<ToolResult> {
+    // The second factor, answered honestly: MCP has no channel for a code, so a caller who would need one on REST is told to use the web UI. The same rule as REST's
+    // (`mfaRequiredFor`), the personal-view copy's precedent (`mcp/tools/views.ts`), not a third divergence.
+    const record = ctx.callerRecord;
+    if (record && !isOidc(record) && mfaRequiredFor({ mfa: record.mfa }, isMfaEnabled())) {
+      throw new ToolRefusal(403, 'Re-reading a network needs MFA step-up, which this door cannot present; use the web UI (Settings > Networks)');
+    }
+    const { id, ...body } = ctx.args;
+    return toResult(rereadNetworkAct(callerOf(ctx), String(id), body), '');
   },
 };
 

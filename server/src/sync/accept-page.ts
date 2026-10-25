@@ -68,7 +68,7 @@ import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey } from '
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from './push-reads.js';
 import { watchArrivals, recordedOf, sayRecorded, summarise, type ArrivalWatch, type RecordedSummary } from './arrival-recording.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
-import { assertPositionsReady } from './positions-owed.js';
+import { assertPositionsReady } from './positions-ready.js';
 
 type Arrived = Record<string, unknown> & ArrivalDoc;
 

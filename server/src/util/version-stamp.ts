@@ -41,9 +41,9 @@ import { BRAIN_COLLECTIONS, type BrainCollection, type SpaceCounterDoc } from '.
 import { countBrainWriteSeq } from '../metrics/brain-write-count.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
 import { withinWriteBound } from '../db/write-bound.js';
-import { highestStored } from './index-top.js';
+import { readyWhenCreated } from '../sync/positions-ready.js';
 import { log, peerText } from './log.js';
-import { MAX_INGEST_SEQ, SEQ_CARRYING, VERSION_FLOOR_CAP } from './seq.js';
+import { MAX_INGEST_SEQ, SEQ_CARRYING, VERSION_FLOOR_CAP, highestVersionBelowCapOf } from './seq.js';
 import type { ClientSession } from 'mongodb';
 
 /** The version a local write of one id takes, and the version the stamp read (what the write's filter names: `writeFilterFor`). */
@@ -158,6 +158,7 @@ async function allocateBounded(
     const before = await col<SpaceCounterDoc>('ythril_counters').findOneAndUpdate(
       asFilter<SpaceCounterDoc>({ _id: spaceId }),
       [
+        readyWhenCreated(),
         { $set: { seq: { $max: [{ $add: [{ $ifNull: ['$seq', 0] }, n] }, raiseTo] } } },
         { $set: { seqSeenBy6: '$seq' } },
       ] as unknown as ReturnType<typeof asUpdate<SpaceCounterDoc>>,
@@ -205,7 +206,7 @@ export async function versionsForRows(
  * reads the version maximum.
  */
 export async function highestVersionBelowCap(spaceId: string): Promise<number> {
-  return await highestStored<number>(SEQ_CARRYING.map(part => col(spaceCollection(spaceId, part))), 'seq', { $type: 'number', $lte: VERSION_FLOOR_CAP }) ?? 0;
+  return highestVersionBelowCapOf(SEQ_CARRYING.map(part => col(spaceCollection(spaceId, part))));
 }
 
 /**
@@ -222,9 +223,25 @@ export async function raiseVersionTo(spaceId: string, target: number): Promise<v
   await col<SpaceCounterDoc>('ythril_counters').updateOne(
     asFilter<SpaceCounterDoc>({ _id: spaceId }),
     [
+      readyWhenCreated(),
       { $set: { seq: { $max: [{ $ifNull: ['$seq', 0] }, to] } } },
       { $set: { seqSeenBy6: '$seq' } },
     ] as unknown as ReturnType<typeof asUpdate<SpaceCounterDoc>>,
     { upsert: true },
   );
+}
+
+/**
+ * Bring a POISONED counter back to what the space holds: a counter above `VERSION_FLOOR_CAP` (a 5.6 build that took a received version near the ceiling
+ * into it) cannot stamp anything a peer accepts, so it becomes {@link highestVersionBelowCap}. The first carry's counter repair (design rev 8 §3 step 2);
+ * the only place the counter goes DOWN, and only from above the cap, so a healthy counter is never lowered. Answers whether it repaired one.
+ */
+export async function repairPoisonedCounter(spaceId: string): Promise<boolean> {
+  // The target is read first, and the write names the poison in its own filter, so a counter that is no longer above the cap by the time it lands is left as it is
+  // (one atomic compare-and-set, never a read of the counter and a write after an await).
+  const to = await highestVersionBelowCap(spaceId);
+  const r = await col<SpaceCounterDoc>('ythril_counters').updateOne(
+    asFilter<SpaceCounterDoc>({ _id: spaceId, seq: { $gt: VERSION_FLOOR_CAP } }), asUpdate<SpaceCounterDoc>({ $set: { seq: to } }));
+  if (r.modifiedCount > 0) log.warn(`Space '${peerText(spaceId)}': the version counter was above the cap; it is now ${to}, the highest version the space holds below it.`);
+  return r.modifiedCount > 0;
 }

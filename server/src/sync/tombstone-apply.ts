@@ -53,7 +53,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { writeInOneCommands, operationBytes, bulkCommandOf, SlicedBulkWriteError } from '../db/one-command.js';
 import { readBackDuplicates } from './duplicate-readback.js';
-import { assertPositionsReady } from './positions-owed.js';
+import { assertPositionsReady } from './positions-ready.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } from '../config/types.js';
 import type { TombstoneDoc } from '../config/types.js';

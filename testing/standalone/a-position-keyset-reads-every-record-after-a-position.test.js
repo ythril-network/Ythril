@@ -92,13 +92,15 @@ describe('the cursor is a pair, opaque, and survives hostile ids', () => {
     assert.deepEqual(decodePositionCursor(cursorOf('5:12:34')), { pos: 5, id: '12:34' });
   });
 
-  it('an id longer than 1024 characters is encoded as a BARE position, which still reads', () => {
-    const { encodePositionCursor, decodePositionCursor } = mod('over-long id', ['encodePositionCursor', 'decodePositionCursor']);
+  it('an id longer than 1024 characters is named by its DIGEST, never by the bare position (decision 68: the bare position skips the rest of its run)', () => {
+    const { encodePositionCursor, decodePositionCursor, idDigestOf } = mod('over-long id', ['encodePositionCursor', 'decodePositionCursor', 'idDigestOf']);
     for (const length of [1025, 2000]) {
-      const cursor = encodePositionCursor({ pos: 42, id: 'p'.repeat(length) });
-      assert.equal(cursor, cursorOf('42'), `a ${length}-character id must degrade to the bare position`);
+      const id = 'p'.repeat(length);
+      const cursor = encodePositionCursor({ pos: 42, id });
+      assert.notEqual(cursor, cursorOf('42'), `a ${length}-character id degraded to the bare position, which continues from the next position and loses the rest of its run`);
+      assert.equal(cursor, cursorOf(`42~${idDigestOf(id)}`), 'the cursor names the id by the digest of it');
       const read = decodePositionCursor(cursor);
-      assert.deepEqual(read, { pos: 42 });
+      assert.deepEqual(read, { pos: 42, idDigest: idDigestOf(id) });
       assert.equal(read.id, undefined);
     }
     assert.ok(encodePositionCursor({ pos: 42, id: 'x'.repeat(1024) }) !== cursorOf('42'), 'exactly 1024 is still a pair');

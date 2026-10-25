@@ -48,6 +48,10 @@ import { actEntryView, spaceActsOfNetwork } from '../spaces/space-act-runner.js'
 import type { NetworkRefusalCode } from './refusal-codes.js';
 import type { SpaceWriteClosedCode } from '../config/types-space-acts.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
+import { memberView } from './member-view.js';
+import { warnOnce } from '../util/warn-once.js';
+import { rereadOwedOf } from '../sync/full-reread.js';
+import { spaceRecordCount } from '../spaces/record-count.js';
 import { askerOwnerKey, unknownSpaceAnswer } from '../spaces/unknown-space.js';
 
 type Caller = Parameters<typeof visibleNetworks>[0] & { id?: string };
@@ -118,11 +122,10 @@ export function networkView(net: NetworkConfig): Record<string, unknown> {
   return {
     ...rest,
     myRole,
-    // `tombstoneRereadAt` and `fileMetaRereadAt` are this instance's repair bookkeeping about a peer
-    // (`sync/deletion-authority.ts`), not network state. Every per-space repair mark is
-    // destructured out here: one left in leaks a cursor into the body of `GET /api/networks`.
-    members: net.members.map(({ tokenHash: _th, skipTlsVerify: _sv, tombstoneRereadAt: _tr, fileMetaRereadAt: _fr, ...m }) => ({
-      ...m,
+    // Built by ADDITION (`networks/member-view.ts`): the marks this instance keeps about a peer (the positions it has read and sent, the frozen 5.6 ones, the
+    // re-read cursors and state) are its own bookkeeping, not network state, and a key nobody listed is not shown.
+    members: net.members.map(m => ({
+      ...memberView(m, 'admin'),
       belowFloor: peerFloorRefusal(m.version, m.versionCheckedAt),
       minPeerVersion: MIN_PEER_VERSION,
     })),
@@ -139,8 +142,12 @@ const notFound = { status: 404 as const, error: 'Network not found' };
  * here — the client says "acts now" or "opens a vote" from it), plus, for an INSTANCE ADMINISTRATOR only, `owedSpaceActs`: the deletions
  * and wipes this instance still has to carry out for the network, with their retry clock. Every pointer a refusal or a `queued` answer
  * gives leads here. A token that may only read the network sees no such field at all — an instance's debts are not the network's state.
+ *
+ * The same administrator also reads `rereadOwed` (the operator's full re-reads this instance still has to run, one `{ instanceId, space, state }` per member and space, `state`
+ * `owed` or `catching`; always present, empty when none) and `spaceRecordCounts` (the records each of the network's spaces holds, an estimate from the collections'
+ * metadata): what the member row and the re-read dialog's duration estimate are drawn from (`sync/full-reread.ts`, `spaces/record-count.ts`; decisions 39, 42, 64).
  */
-export function networkAnswer(net: NetworkConfig, caller: Caller, cfg: Config = getConfig()): Record<string, unknown> {
+export async function networkAnswer(net: NetworkConfig, caller: Caller, cfg: Config = getConfig()): Promise<Record<string, unknown>> {
   const view = networkView(net);
   view['ownYesCarries'] = ownYesCarries(net, cfg);
   if (!isInstanceAdmin(caller)) return view;
@@ -151,13 +158,30 @@ export function networkAnswer(net: NetworkConfig, caller: Caller, cfg: Config = 
       rounds: e.rounds.filter(r => r.networkId === net.id).map(r => ({ roundId: r.roundId })),
       ...actEntryView(e),
     }));
+  view['rereadOwed'] = rereadOwedOf(net);
+  view['spaceRecordCounts'] = await recordCountsOf(net.spaces);
   return view;
 }
 
+const countFailedOnce = warnOnce<string>({ max: 1_000, every: 10 * 60_000 });
+
+/**
+ * The estimated record count of each space, for the admin view. A space whose count could not be read is LEFT OUT, not answered as 0: the view is read for much more than
+ * this and must not fail with the store, and a client that finds no count for a space says so rather than estimating from nothing. Said once per window.
+ */
+async function recordCountsOf(spaces: readonly string[]): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  await Promise.all(spaces.map(async (id) => {
+    try { counts[id] = await spaceRecordCount(id); }
+    catch (err) { countFailedOnce(id, () => log.warn(`Network view: the record count of space '${peerText(id)}' could not be read (${peerText(err)}); it is left out of spaceRecordCounts.`)); }
+  }));
+  return counts;
+}
+
 /** One network the caller may see. */
-export function readNetworkAct(caller: Caller, id: string): NetworkActResult {
+export async function readNetworkAct(caller: Caller, id: string): Promise<NetworkActResult> {
   const net = visibleNetworks(caller, getConfig().networks).find(n => n.id === id);
-  return net ? { status: 200, body: networkAnswer(net, caller) } : notFound;
+  return net ? { status: 200, body: await networkAnswer(net, caller) } : notFound;
 }
 
 /** Create a network carrying `spaces`; the membership is recorded as the caller's. */

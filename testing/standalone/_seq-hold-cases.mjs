@@ -67,6 +67,8 @@ export async function loadHolderModules() {
     // The record stream's hold, asked whether one is open (`lowestHeldRecordPosition`).
     clock: await import('../../server/dist/util/position-clock.js'),
     recordStream: await import('../../server/dist/sync/record-position-stream.js'),
+    // The repair of a space whose rows a 5.6 build left without a position (bundle-81): its block of fresh positions is a record-position holder.
+    owed: await import('../../server/dist/sync/positions-owed.js'),
   };
 }
 
@@ -200,6 +202,18 @@ export function holderCases(ctx, S) {
       label: 'a merge: its stamps, inside its held transaction', lock: 'counter',
       run: async () => ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
         await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {}),
+    }],
+    // The repair (`sync/positions-owed.ts`): every row with no position takes a fresh clock position, one block per chunk, held until its write ends. The seeded rows carry
+    // a version and no position, which is exactly what a 5.6 build leaves; the space is made to owe a repair and the write of one fact's position stalls.
+    'server/src/sync/positions-owed.ts:repairRows': [{
+      label: 'the repair of rows 5.6 left without a position: the block of fresh positions, inside its landing hold',
+      collection: `${S}_facts`,
+      lock: async () => {
+        await mongo().col('ythril_counters').updateOne({ _id: S }, { $set: { positionsOwed: 'repair' }, $unset: { positionsReadyAt: '' } }, { upsert: true });
+        ctx.mods.owed.forgetPositionsReady(S);
+        return recordLock('facts', F)();
+      },
+      run: () => ctx.mods.owed.finishPositionsOf(S),
     }],
     // `writeTombstone` is one tombstone through `writeTombstones`, whose landing this is.
     'server/src/brain/tombstones.ts:writeTombstones': [{

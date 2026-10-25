@@ -46,6 +46,7 @@ const EXEMPT = {
   'server/src/brain/queue-embed-sweep.ts:kindsFrom': 'the embed sweep resumes per kind with `_id > lastId` inside ONE aggregate stream that computes `holdsVector` and carries a total `$limit` across kinds; a page per kind would be a different walk. Whether it converts is the owner\'s D-57',
   'server/src/util/seq-keyset.ts:isoKeysetFilters': 'the `_id` is the TIE under another primary key (an ISO time): the page is ordered by that key, and `_id` only breaks a tie inside one value of it',
   'server/src/util/position-keyset.ts:positionKeysetFilters': 'the `_id` is the TIE under another primary key (`pos`, a record\'s position): the page is ordered by position, and `_id` only breaks a tie inside one position (the legacy band has them)',
+  'server/src/sync/positions-owed.ts:chunksBySeq': 'the `_id` is the TIE under another primary key (a row\'s version, `seq`): the carry reads rows in `(seq, _id)` order through `tieThenRange`, and `_id` only breaks a tie inside one version',
   'server/src/spaces/space-act-runner.ts:deleteInBatches': 'it re-reads from the start until the filter matches nothing, deleting each batch it read, so it has no cursor: a batch whose delete was ended is read again rather than passed',
 };
 

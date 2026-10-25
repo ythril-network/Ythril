@@ -150,9 +150,9 @@ describe('a version travels, in both directions of one exchange', () => {
 
   it('and we STORE what the caller announced', () => {
     const src = code(MEMBERS);
-    const at = src.indexOf('const updated = {');
+    const at = src.indexOf('const updated = stampLastSync({');
     assert.ok(at > 0, 'the member self-update is gone — re-point this gate');
-    const block = src.slice(at, src.indexOf('};', at));
+    const block = src.slice(at, src.indexOf('});', at));
     assert.match(block, /version/,
       'an announced version is dropped on ingest, so the stored record stays blank and the floor never bites');
   });
@@ -265,8 +265,8 @@ describe('the evidence stamp is written on both directions of the exchange', () 
   it('and inbound, when a peer announces itself to us', () => {
     // Without this a pull-only peer — one that dials us and is never dialled — stays unjudgeable.
     const src = code(MEMBERS);
-    const at = src.indexOf('const updated = {');
-    const block = src.slice(at, src.indexOf('};', at));
+    const at = src.indexOf('const updated = stampLastSync({');
+    const block = src.slice(at, src.indexOf('});', at));
     assert.match(block, /versionCheckedAt/,
       'an announce records no stamp, so a peer that only ever dials us can never be judged');
   });

@@ -100,15 +100,16 @@ export function readMemberSpaceMark<K extends MemberSpaceMarkKey>(
  *
  * @returns the state before and after on the first row visited, so a caller can say a transition exactly once
  */
-export function foldRepairMark(
+export function foldRepairMark<K extends RepairMarkKey = 'tombstoneRereadAt' | 'fileMetaRereadAt'>(
   peerInstanceId: string,
   spaceId: string,
-  key: 'tombstoneRereadAt' | 'fileMetaRereadAt',
-  next: (current: string | undefined) => string | undefined,
-): { before: string | undefined; after: string | undefined } | null {
+  key: K,
+  next: (current: MemberSpaceMark<K> | undefined) => MemberSpaceMark<K> | undefined,
+  scope: MarkScope = 'every-network',
+): { before: MemberSpaceMark<K> | undefined; after: MemberSpaceMark<K> | undefined } | null {
   const cfg = getConfig();
-  let seen: { before: string | undefined; after: string | undefined } | null = null;
-  const changed = setMemberSpaceMark(cfg, peerInstanceId, spaceId, key, 'every-network', (current) => {
+  let seen: { before: MemberSpaceMark<K> | undefined; after: MemberSpaceMark<K> | undefined } | null = null;
+  const changed = setMemberSpaceMark(cfg, peerInstanceId, spaceId, key, scope, (current) => {
     const after = next(current);
     seen ??= { before: current, after };
     return after === current ? null : after;
@@ -116,6 +117,9 @@ export function foldRepairMark(
   if (changed) saveConfig(cfg);
   return seen;
 }
+
+/** The marks a repair's state is folded through `foldRepairMark`: the two one-time re-reads, and the operator's full re-read (`sync/full-reread.ts`). */
+export type RepairMarkKey = 'tombstoneRereadAt' | 'fileMetaRereadAt' | 'fullRereadState';
 
 // The pure half of the marks (forget every mark, forget what was received, carry) is written once, in `receive-marks.ts`, a leaf the
 // proxy migration reaches without the loader; every caller imports it from there.

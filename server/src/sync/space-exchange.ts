@@ -31,7 +31,7 @@ import { pushFamily } from './push-family.js';
 import { pushTombstones } from './tombstone-transfer.js';
 import { pullSpaceTombstones } from './pull-space-tombstones.js';
 import { refusedTransfers } from './push-refusals.js';
-import { assertPositionsReady } from './positions-owed.js';
+import { assertPositionsReady } from './positions-ready.js';
 import { ownPositionMark } from './served-watermark.js';
 import { syncItemsPulledTotal, syncPositionBehindTotal } from '../metrics/registry.js';
 import { PositionsBuilding } from '../util/errors.js';
@@ -43,6 +43,7 @@ import { syncFiles } from './file-sync.js';
 import { checkMerkleWithPeer } from './merkle-check.js';
 import { recordFileMetaMerkleComparison, rereadFileMeta } from './file-meta-reread.js';
 import { readMemberSpaceMark, setMemberSpaceMark } from './member-space-mark.js';
+import { RereadSlot, beginFullReread, endFullReread } from './full-reread.js';
 import { REPLICATED_FAMILIES, type PayloadKey } from './replicated-families.js';
 import { reverseSpaceMap, localToRemote } from './space-map.js';
 import { exchangeVerdicts, mayExchangeNow, enterSpaceTransfer, spaceHold } from './space-exchange-set.js';
@@ -123,13 +124,15 @@ export async function exchangeSpacesWithMember(
   if (exchangeDirections(liveNet, member).shouldPull) for (const h of heldNow) await pullSpaceMetaFromUpstream(liveNet, member, h.spaceId, localToRemote(liveNet, h.spaceId), fetchOpts);
   // FIRST match, as `localToRemote` answers (Q-133): a later key for the same space is an inbound alias a rename left behind.
   const toNetworkId = reverseSpaceMap(liveNet);
+  // One space of this member may BEGIN a full re-read per cycle (`sync/full-reread.ts`); the rest go on as usual, their marks intact.
+  const slot = new RereadSlot(net.id, liveNet.members.find(m => m.instanceId === member.instanceId) ?? member);
   for (const spaceId of exchange) {
     if (!mayExchangeNow(net.id, member.instanceId, spaceId)) {
       const reason = spaceHold(getConfig(), spaceId, member.instanceId, net.id);
       if (reason) out.held.push({ spaceId, reason });
       continue;
     }
-    const turn = await exchangeSpaceWithMember(liveNet, member, spaceId, toNetworkId.get(spaceId) ?? spaceId, headers, fetchOpts, batchFetchOpts);
+    const turn = await exchangeSpaceWithMember(liveNet, member, spaceId, toNetworkId.get(spaceId) ?? spaceId, headers, fetchOpts, batchFetchOpts, slot);
     for (const k of Object.keys(out.pulled) as (keyof SyncCounts)[]) { out.pulled[k] += turn.pulled[k]; out.pushed[k] += turn.pushed[k]; }
     out.incomplete.push(...turn.incomplete); out.capped.push(...turn.capped); out.refused.push(...turn.refused); out.recorded.push(...turn.recorded);
     if (turn.held) out.held.push({ spaceId, reason: turn.held });
@@ -146,7 +149,7 @@ type Turn = Omit<MemberExchange, 'held' | 'declined'> & { held?: string; decline
 /** One space's turn with one member: meta, records, file rows, files and merkle, in the fence, stopped by an act or a refusal. */
 async function exchangeSpaceWithMember(
   net: NetworkConfig, member: NetworkMember, spaceId: string, remoteSpaceId: string,
-  headers: Record<string, string>, fetchOpts: () => RequestInit, batchFetchOpts: () => RequestInit,
+  headers: Record<string, string>, fetchOpts: () => RequestInit, batchFetchOpts: () => RequestInit, slot: RereadSlot,
 ): Promise<Turn> {
   const out: Turn = { pulled: zero(), pushed: zero(), incomplete: [], capped: [], refused: [], recorded: [] };
   // Skip spaces that don't exist in local config — prevents orphan data and collection access for space ids that were
@@ -162,10 +165,18 @@ async function exchangeSpaceWithMember(
   // Push to this member if the direction allows it (push or both); pull if bidirectional, or for non-directional networks.
   // Braintree/pubsub with direction='push': parent/publisher pushes down, child/subscriber never pushes up.
   const { shouldPull, shouldPush } = exchangeDirections(net, member);
+  // A full re-read this turn takes part in (begins, or continues): finished when every leg this turn runs reached the end, with no cycle cap and no early stop.
+  let reread: 'begin' | 'continue' | undefined;
+  let pullEnded = !shouldPull;
+  let pushEnded = !shouldPush;
   try {
     // A space that owes its positions is not exchanged (design rev 8 §3): the turn is HELD for the cycle and counts no failure. Asked here so no
     // transfer starts on rows that are not paged yet; the readers and the writers ask it again inside, for a space that began to owe meanwhile.
     await assertPositionsReady(spaceId);
+    reread = slot.phaseOf(spaceId);
+    if (reread === 'begin') {
+      if (beginFullReread(net.id, member.instanceId, spaceId)) slot.begun(); else reread = undefined;
+    }
     if (shouldPull) {
       await pullSpaceMetaFromUpstream(net, member, spaceId, remoteSpaceId, fetchOpts, turn); // F-39.1: only from upstream, never throws
       if (turn.mayContinue()) {
@@ -174,6 +185,7 @@ async function exchangeSpaceWithMember(
         if (pc.recorded.records > 0) out.recorded.push({ spaceId, ...pc.recorded });
         if (pc.stoppedEarly.length > 0) out.incomplete.push(`space '${spaceId}' receive: ${pc.stoppedEarly.join(', ')}`);
         if (pc.capped.length > 0) out.capped.push(`space '${spaceId}' receive: ${pc.capped.join(', ')} read up to the cycle's cap and continue next cycle`);
+        pullEnded = pc.stoppedEarly.length === 0 && pc.capped.length === 0 && turn.mayContinue();
       }
       // A drifted file row is behind the watermark the ordinary pull starts from; a merkle divergence owes it a re-read.
       if (turn.mayContinue()) await rereadFileMeta({ member, spaceId, remoteSpaceId, networkId: net.id, requestInit: batchFetchOpts, turn });
@@ -184,6 +196,7 @@ async function exchangeSpaceWithMember(
       if (pc.stoppedEarly.length > 0) out.incomplete.push(`space '${spaceId}' push: ${pc.stoppedEarly.join(', ')}`);
       if (pc.capped.length > 0) out.capped.push(`space '${spaceId}' push: ${pc.capped.join(', ')} sent up to the cycle's bound and continue next cycle`);
       if (pc.refused.length > 0) out.refused.push(`space '${spaceId}' push: ${pc.refused.join(', ')}`);
+      pushEnded = pc.stoppedEarly.length === 0 && pc.capped.length === 0 && turn.mayContinue();
     }
     // File manifest, tombstones and bytes — the same direction guards as above. A pulled file is processed where it is recorded.
     if ((shouldPull || shouldPush) && turn.mayContinue()) {
@@ -203,6 +216,7 @@ async function exchangeSpaceWithMember(
   } finally {
     transfer.release();
   }
+  if (reread !== undefined && !building && turn.refusal === null && !turn.cut && pullEnded && pushEnded) endFullReread(net.id, member.instanceId, spaceId);
   if (building) return { ...out, incomplete: [], capped: [], held: POSITIONS_BUILDING_REASON };
   if (turn.refusal === 'declined') return { ...out, incomplete: [], capped: [], declined: true };
   if (turn.refusal === 'held') return { ...out, incomplete: [], capped: [], held: HELD_BY_THE_MEMBER };

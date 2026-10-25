@@ -49,8 +49,9 @@ export interface PageAnswer<I> {
 /**
  * Where a page of `pageSize` rows ends when one more follows: at `pageSize`, unless the run of equal positions continues across the boundary and the last row's
  * id is too long for a cursor to name. A bare-position cursor there would continue from the NEXT position and lose the rest of the run for good, so the page ends
- * at the last row of the run whose id a cursor can name (the rows after it, long ids included, are the next page's). A page that is all long ids keeps its size:
- * the one case a cursor cannot help, and a run of more than a page of ids over 1024 characters.
+ * at the last row of the run whose id a cursor can name (the rows after it, long ids included, are the next page's). A page that is all long ids keeps its size, and
+ * so does a page of ONE long-id row: the cursor then names the id by a digest the reader resolves (`encodePositionCursor`, `readAfterPosition`), so the rest of the run
+ * is still after it. The earlier cut is kept because it leaves the cheaper cursor (no resolution) whenever one exists.
  */
 function pageEnd(rows: ReadonlyArray<{ pos: number; row: { _id: string } }>, pageSize: number): number {
   const next = rows[pageSize];

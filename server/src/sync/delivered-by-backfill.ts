@@ -34,8 +34,9 @@
  * Residual, stated: a record an admin pushed or restored into such a space BEFORE this release, authored by someone else, is
  * stamped as the upstream's — nothing stored says it came any other way.
  *
- * A failure is the space's: `eachSpace` bounds every operation, reports a failure once per window through the shared reporter
- * and goes on, and the marker is set only when every collection was stamped, so the next cycle finishes what this one did not.
+ * A failure is the space's: the pass (`util/space-backfill-pass.ts`, shared with the carry into position space) bounds every operation, reports a
+ * failure once per window through the shared reporter and goes on, and the marker is set only when every collection was stamped, so the next cycle
+ * finishes what this one did not.
  */
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -43,7 +44,7 @@ import { distinctStringsOf } from '../db/distinct-strings.js';
 import { getConfig } from '../config/loader.js';
 import { changeSpaceEntries } from '../config/change-space-entries.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
-import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
+import { backfillSpaceOnce } from '../util/space-backfill-pass.js';
 import { log, peerText } from '../util/log.js';
 import { backfillStamp } from './deletion-authority.js';
 
@@ -79,15 +80,18 @@ async function stampCollection(spaceId: string, part: (typeof BRAIN_COLLECTIONS)
  */
 export async function stampDeliveriesOnce(spaceId: string): Promise<void> {
   if (getConfig().spaces.find(s => s.id === spaceId)?.deliveredByBackfilled === true) return;
-  await eachSpace(STEP, [spaceId], async () => {
-    let total = 0;
-    const { failed } = await eachUnit([...BRAIN_COLLECTIONS], async (part) => { total += await stampCollection(spaceId, part); });
-    if (failed.length > 0) return;   // a collection is still owed: the marker waits, and the next cycle finishes it
-    // On the live entry, read after the awaits above (`changeSpaceEntries`); a space deleted meanwhile has none, and nothing is said.
-    if (!changeSpaceEntries([spaceId], space => { space.deliveredByBackfilled = true; return true; })) return;
-    if (total > 0) {
-      log.info(`Stamped ${total} record(s) of space '${peerText(spaceId)}' with who delivered them (one time, after upgrading); `
-        + 'a record written from now on carries its own stamp.');
-    }
+  await backfillSpaceOnce({
+    step: STEP,
+    spaceId,
+    units: [...BRAIN_COLLECTIONS],
+    unit: (part) => stampCollection(spaceId, part),
+    // On the live entry, read after the awaits of the units (`changeSpaceEntries`); a space deleted meanwhile has none, and nothing is said.
+    markDone: () => changeSpaceEntries([spaceId], space => { space.deliveredByBackfilled = true; return true; }),
+    onFinished: (total) => {
+      if (total > 0) {
+        log.info(`Stamped ${total} record(s) of space '${peerText(spaceId)}' with who delivered them (one time, after upgrading); `
+          + 'a record written from now on carries its own stamp.');
+      }
+    },
   });
 }

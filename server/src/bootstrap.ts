@@ -83,6 +83,10 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   })().catch((err: unknown) => { log.warn(`Webhook retry queue indexes could not be ensured (the retry poll reads the queue unindexed until they are): ${err}`); });
 
   // ── Phase 1: DB initialisation (best-effort) ──────────────────────────────
+  // Every space reads as owing its positions until the re-upgrade detector has run (`sync/positions-owed.ts`): armed here, before anything else can fail, so a
+  // phase-1 hiccup leaves the spaces held and the job retries the detector, and never leaves a position a 5.6 build left stale to be served.
+  const { holdPositionsUntilDetected, detectReupgradeAtBoot } = await import('./sync/positions-owed.js');
+  holdPositionsUntilDetected();
   try {
     // Ensure the built-in general space exists BEFORE initAllSpaces() so its
     // collections get created.
@@ -104,6 +108,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     const { forgetWhatWasReceivedAfterCounterWipe } = await import('./util/seq.js');
     await forgetWhatWasReceivedAfterCounterWipe();
 
+    // What a 5.6 build left (the first carry, or a repair): marked here, done by the owed job. Before the sync scheduler starts and before the server listens.
+    await detectReupgradeAtBoot();
+
     // Per-space usefulness counters: the TTL index above all. An activity log without one becomes the largest
     // collection in the instance, which is the standard way a metrics table stops being worth having.
     const { ensureActivityIndexes } = await import('./metrics/space-activity-store.js');
@@ -119,6 +126,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   const { startRetryWorker } = await import('./webhooks/dispatcher.js');
   startRetryWorker();
 
+  // The work every space that owes its positions needs (the first carry, a repair, a failed index build), retried every minute; retries the detector while it is held.
+  const { startPositionsOwedJob } = await import('./sync/positions-owed.js');
+  startPositionsOwedJob();
   const { startSyncScheduler } = await import('./sync/scheduler.js');
   startSyncScheduler();
   // Names a hold that has stalled while it is still open (`Q-200`); the release line names it when it ends.
