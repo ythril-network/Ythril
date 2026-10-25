@@ -20,6 +20,11 @@
  *   2`), and the write is the final winner. `[9, 3]` is the fixture that matters: `[3, 9]` passes even if two
  *   ops are sent for one id, because the last op wins in an unordered bulk write whatever its seq (probe `P1b`).
  *
+ * Q-624 re-anchors three rows (every kind forks, D-23): a fork's id is the one its BODY derives; the batch counters of the four forking
+ * families carry `forked`, `forkDepthRefused` and `invalidFork`; and an equal-seq divergent entity, chrono entry or edge is FORKED, where the
+ * row used to say "skipped, never forked". Seen red on the base (b857da8f): the fork id is the text-derived one, the counters lack the three
+ * keys, and those copies are skipped.
+ *
  * What it deliberately does NOT pin: the counter, embed jobs and fork seqs — those are what the rewrite changes,
  * and they are held by the red-first files beside this one (`a-push-*-db.test.js`).
  *
@@ -31,6 +36,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
+import { forkIdOf } from './_fork-kinds.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -98,6 +104,8 @@ describe('the push door answers as it did (characterization, green before Q-107 
       assert.equal(r.code, 200);
       assert.equal(r.body.status, 'forked');
       assert.match(r.body.forkId, UUID);
+      // Q-624 re-anchor: the id is the one the BODY derives (design section 3), not the text-derived one a fact fork had.
+      assert.equal(r.body.forkId, await forkIdOf('facts', 'f', 5, build.fact(S, 'f', 5, { fact: 'theirs' })));
       assert.deepEqual(Object.keys(r.body).sort(), ['forkId', 'status']);
       const fork = await stored(S, 'facts', r.body.forkId);
       assert.deepEqual([fork.forkOf, fork.fact], ['f', 'theirs']);
@@ -239,8 +247,11 @@ describe('the push door answers as it did (characterization, green before Q-107 
 
   describe('P2: batch-upsert in-page outcomes, as sequential processing counts them', () => {
     const batch = (body) => pushed('/batch-upsert', body, { spaceId: S });
-    const zeroFacts = { inserted: 0, updated: 0, forked: 0, skipped: 0, forkDepthRefused: 0, tombstoned: 0, schemaViolations: 0, rejected: 0 };
-    const zeroEnt = { upserted: 0, skipped: 0, tombstoned: 0, schemaViolations: 0, rejected: 0 };
+    // Q-624 re-anchor: every kind that forks counts `forked`, `forkDepthRefused` and the malformed-fork row's own `invalidFork`
+    // (design section 4, "Door answers and stats"), so the four families' counters carry the same three beside their own.
+    const forkCounts = { forked: 0, forkDepthRefused: 0, invalidFork: 0 };
+    const zeroFacts = { inserted: 0, updated: 0, skipped: 0, tombstoned: 0, schemaViolations: 0, rejected: 0, ...forkCounts };
+    const zeroEnt = { upserted: 0, skipped: 0, tombstoned: 0, schemaViolations: 0, rejected: 0, ...forkCounts };
     const zeroEdge = { ...zeroEnt, duplicateTriplets: 0 };
 
     it('the response carries all six families with their counters', async () => {
@@ -283,10 +294,30 @@ describe('the push door answers as it did (characterization, green before Q-107 
       assert.deepEqual(down.body.entities, { ...zeroEnt, upserted: 1, skipped: 1 });
     });
 
-    it('an entity at an equal seq with divergent content is skipped, never forked', async () => {
+    // Q-624: INVERTED. An entity at an equal seq with divergent content was "skipped, never forked"; every kind forks now (D-23), so the
+    // first copy stands and the second is kept beside it as a fork, counted `forked`.
+    it('an entity at an equal seq with divergent content is forked, and the first copy stands', async () => {
       const r = await batch({ entities: [build.entity(S, 'e', 5, { name: 'one' }), build.entity(S, 'e', 5, { name: 'two' })] });
-      assert.deepEqual(r.body.entities, { ...zeroEnt, upserted: 1, skipped: 1 });
+      assert.deepEqual(r.body.entities, { ...zeroEnt, upserted: 1, forked: 1 });
       assert.equal((await stored(S, 'entities', 'e')).name, 'one');
+      const forks = await door.coll(S, 'entities').find({ forkOf: 'e' }).toArray();
+      assert.deepEqual(forks.map(f => f.name), ['two']);
+    });
+
+    it('chrono and edges at an equal seq with divergent content fork the same way, and each single door answers forked', async () => {
+      const c = await batch({ chrono: [build.chrono(S, 'c', 5, { title: 'one' }), build.chrono(S, 'c', 5, { title: 'two' })] });
+      assert.deepEqual(c.body.chrono, { ...zeroEnt, unknownType: 0, upserted: 1, forked: 1 });
+      const e = await batch({ edges: [build.edge(S, 'g', 5, { description: 'one' }), build.edge(S, 'g', 5, { description: 'two' })] });
+      assert.deepEqual(e.body.edges, { ...zeroEdge, upserted: 1, forked: 1 });
+      await door.wipe(S);
+      for (const [path, doc, family] of [['/entities', build.entity(S, 'e', 5, { name: 'one' }), 'entities'],
+        ['/chrono', build.chrono(S, 'c', 5, { title: 'one' }), 'chrono'], ['/edges', build.edge(S, 'g', 5, { description: 'one' }), 'edges']]) {
+        await single(path, doc);
+        const field = { entities: 'name', chrono: 'title', edges: 'description' }[family];
+        const r = await single(path, { ...doc, [field]: 'two' });
+        assert.deepEqual([r.code, r.body.status], [200, 'forked'], `${family}: ${JSON.stringify(r.body)}`);
+        assert.equal(r.body.forkId, await forkIdOf(family, doc._id, 5, { ...doc, [field]: 'two' }), `${family}: the fork id is not the one its body derives`);
+      }
     });
 
     it('edges: one id 5 then 6 is upserted 2; two ids on one triplet are upserted 1, duplicateTriplets 1', async () => {
