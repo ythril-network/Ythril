@@ -25,10 +25,9 @@
  *
  * Every door applies a page through `applyPeerTombstones` (`sync/tombstone-apply.ts`); what differs is the `Delivery` it builds. Driven:
  * the peer POST (`/api/sync/tombstones`, a peer token), the trusted relay (the same route, an admin token), the pull (a member's
- * delivery) and the repair re-read (`{ repair: true }`). NOT driven: the upstream ground (needs a directional network and a held record
- * the upstream stamped; its delivery differs only in `upstream: true`, and the verdict for an ABSENT record does not read it) and the
- * restore act (it loads tombstones raw from a backup, not through the apply; a planted row in a backup is the restore-act suite's).
- * The derivation below fails if a caller of `applyPeerTombstones` appears that this file does not name.
+ * delivery), the repair re-read (`{ repair: true }`) and the UPSTREAM ground (a delivery with `upstream: true`: the space is carried by a pub/sub network whose
+ * publisher is the planting peer; the verdict for an ABSENT record does not read it, so the rows behave as on the other doors, which is what is held). The restore
+ * act loads tombstones raw from a backup and not through the apply, so it is its own file (`a-planted-tombstone-in-a-backup-blocks-no-create-db.test.js`; decision 53). The derivation below fails if a caller of `applyPeerTombstones` appears that this file does not name.
  *
  * Database `b81tC_planted`, dropped on entry and exit.
  *
@@ -52,7 +51,7 @@ const U = (n) => `aaaaaaaa-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const END1 = U(1), END2 = U(2);
 const SELF = 'b81c-planted';
 const EDGE_ID = edgeIdFor(END1, END2, 'knows');
-const DOORS = ['peer POST', 'trusted relay', 'pull', 'repair re-read'];
+const DOORS = ['peer POST', 'trusted relay', 'pull', 'repair re-read', 'upstream ground'];
 /** The issuer spellings a planted tombstone carries; `undefined` is "no `instanceId` key". */
 const ISSUERS = [
   { name: 'absent', value: undefined, blank: true },
@@ -62,14 +61,22 @@ const ISSUERS = [
   { name: 'this instance', value: SELF, blank: false },
 ];
 const planted = DOORS.flatMap(d => ISSUERS.map(i => `p-${d.replace(/\s/g, '').toLowerCase()}-${ISSUERS.indexOf(i)}`));
+/** The planting peer of the 'upstream ground' door: its own id, so being a member of the subscriber's network changes nothing for the other doors' `planting-peer`. */
+const PLANTING_PEER = 'planting-upstream';
 const SPACES = ['b', 'c', 'quiet', 'relay', ...planted];
+/** A subscriber's network: the planting peer is the PUBLISHER of the spaces the 'upstream ground' door uses, so a delivery from it is the upstream's. */
+const UPSTREAM_NETWORK = {
+  id: 'b81c-planted-upstream-net', label: 'Planted upstream network', type: 'pubsub', origin: 'joined', votes: [], votingDeadlineHours: 24,
+  spaces: planted.filter(s => s.startsWith('p-upstreamground-')),
+  members: [{ instanceId: PLANTING_PEER, label: 'Planting peer', url: 'http://192.0.2.1:9', tokenHash: 'x', direction: 'pull' }],   // a member this instance PULLS from is its publisher (`networkRole`), so the upstream
+};
 
 describe('a planted tombstone blocks no create', { skip }, () => {
   let door, edges, apply, authority, appliedBy;
   const peerB = peerToken(SELF);
 
   before(async () => {
-    door = await openB81cDoor({ name: 'planted', spaces: SPACES, instanceId: SELF });
+    door = await openB81cDoor({ name: 'planted', spaces: SPACES, instanceId: SELF, networks: [UPSTREAM_NETWORK] });
     edges = await import('../../server/dist/brain/edges.js');
     apply = await import('../../server/dist/sync/tombstone-apply.js');
     authority = await import('../../server/dist/sync/deletion-authority.js');
@@ -96,6 +103,15 @@ describe('a planted tombstone blocks no create', { skip }, () => {
       },
       'pull': async (space, raws) => {
         const out = await apply.applyPeerTombstones(space, raws, authority.deliveryOfMember(space, { instanceId: 'planting-peer' }), 'b81c pull');
+        return { refused: out.refused.length };
+      },
+      // The upstream's delivery (`upstream: true`: the space is carried by a pub/sub network whose publisher is the planting peer): the ground a held record's
+      // deletion is honoured on (D-14). The verdict for an ABSENT record does not read it, so a planted tombstone for a record nobody holds is stored or refused as on the
+      // other doors, and what is asserted below (never `issuedHere`, never lifts V, never blocks a create) holds on this door too.
+      'upstream ground': async (space, raws) => {
+        const delivery = authority.deliveryOfMember(space, { instanceId: PLANTING_PEER });
+        assert.equal(delivery.upstream, true, 'the fixture does not make the planting peer the upstream of the space: this door would prove nothing');
+        const out = await apply.applyPeerTombstones(space, raws, delivery, 'b81c upstream');
         return { refused: out.refused.length };
       },
       'repair re-read': async (space, raws) => {
