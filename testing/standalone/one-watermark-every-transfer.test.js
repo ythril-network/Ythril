@@ -40,7 +40,7 @@ import { statementFrom } from './_structural-window.mjs';
 // the way every other gate that needs a server value does — preflight builds it first for exactly this.
 import { BRAIN_COLLECTIONS } from '../../server/dist/config/types.js';
 
-const { safeWatermark, stoppedTransfers, completeThrough } = await import('../../server/dist/sync/watermark.js');
+const { safeWatermark, stoppedTransfers, completeThrough, stopTransfer, resolveWatermark } = await import('../../server/dist/sync/watermark.js');
 
 /** A transfer that ran to the end and is complete through `n`. */
 const done = (n = 0) => ({ deliveredThrough: n, truncated: false });
@@ -104,6 +104,70 @@ describe('the mark stops at what the slowest transfer is complete through', () =
     assert.deepEqual(stoppedTransfers(all, 'cap'), ['tombstones']);
     assert.deepEqual(stoppedTransfers([{ ...done(5), label: 'facts' }], 'error'), [], 'a healthy cycle must produce no message at all');
     assert.deepEqual(stoppedTransfers([{ deliveredThrough: 1, truncated: true, label: 'x' }], 'error'), ['x'], 'a truncated transfer that says nothing is read as a fault');
+  });
+});
+
+/*
+ * Q-624 (design rev 4 section 5.4, re-anchor table): a family a peer HOLDS (the receiver is building its edge identity index) is a third stop reason beside the
+ * page cap and a fault. `stopTransfer(outcome, stopped, why, 'held')` is the one call that sets it, on the push and the pull side. It stops the family at its
+ * last landed position and moves the shared mark no further (it is a transfer like any other under `safeWatermark`), but it is NOT a fault: a transfer that
+ * stops with a stop string and no reason is filed as a failure, and a failure of the member approaches `PEER UNREACHABLE` for a hold that lasts one owed-job tick.
+ * `resolveWatermark` therefore reports it apart, in a `held` list, and says so in its warning.
+ */
+describe('a held family stops like a capped one, is told from a fault and from a cap, and is named', () => {
+  it('stopTransfer(…, held) marks the transfer truncated and says it was held', () => {
+    const outcome = { deliveredThrough: 40, truncated: false };
+    const said = [];
+    stopTransfer(outcome, (why, heldAt) => said.push([why, heldAt]), 'the receiver is building its edge identity index', 'held');
+    assert.deepEqual([outcome.truncated, outcome.stoppedBy], [true, 'held']);
+    assert.deepEqual(said, [['the receiver is building its edge identity index', 40]], 'the stop says why, at the position it is held at');
+    const capped = { deliveredThrough: 1, truncated: false };
+    stopTransfer(capped, () => {}, 'bound', 'cap');
+    assert.equal(capped.stoppedBy, 'cap', 'the cap is unchanged');
+    const faulted = { deliveredThrough: 1, truncated: false };
+    stopTransfer(faulted, () => {}, 'refused');
+    assert.equal(faulted.stoppedBy, 'error', 'the default stays a fault');
+  });
+
+  it('the third reason is part of the type, not only of what the JavaScript happens to accept', () => {
+    // The two functions above take any string at run time, so the cases pass on a build that never declared the reason: the declaration is what makes
+    // `held` something a caller may write, and what the member-exchange types (`MemberExchange.held`) are read from.
+    const wm = stripComments(readFileSync('server/src/sync/watermark.ts', 'utf8'));
+    assert.match(wm, /stoppedBy\?:\s*'cap'\s*\|\s*'held'\s*\|\s*'error'/, 'TransferOutcome.stoppedBy does not declare the held reason');
+    assert.match(wm, /function stopTransfer\([^)]*by:\s*'cap'\s*\|\s*'held'\s*\|\s*'error'/, 'stopTransfer does not take the held reason');
+    assert.match(wm, /function stoppedTransfers\([^)]*by:\s*'cap'\s*\|\s*'held'\s*\|\s*'error'/s, 'stoppedTransfers cannot list the held families');
+  });
+
+  it('stoppedTransfers names the held families, and a held one is neither an error nor a cap', () => {
+    const all = [
+      { ...stopped(1, 'held'), label: 'edges' }, { ...done(5), label: 'facts' },
+      { ...stopped(2, 'cap'), label: 'tombstones' }, { ...stopped(3), label: 'links' },
+    ];
+    assert.deepEqual(stoppedTransfers(all, 'held'), ['edges']);
+    assert.deepEqual(stoppedTransfers(all, 'error'), ['links'], 'a held family is not counted a fault: the member would approach PEER UNREACHABLE');
+    assert.deepEqual(stoppedTransfers(all, 'cap'), ['tombstones']);
+  });
+
+  it('the mark stops at the held family\'s position, exactly as it stops at a capped one', () => {
+    assert.equal(safeWatermark(100, [stopped(300, 'held'), done(500), done(500)]), 300);
+    assert.equal(safeWatermark(100, [stopped(300, 'held')]), safeWatermark(100, [stopped(300, 'cap')]), 'held is treated as cap by the mark');
+    assert.equal(safeWatermark(400, [stopped(100, 'held'), done(500)]), 400, 'and never goes backwards');
+  });
+
+  it('resolveWatermark returns a held list apart from errored and capped, and its warning names the held family', () => {
+    const warnings = [];
+    const r = resolveWatermark({
+      direction: 'receive', peerLabel: 'peer', spaceId: 's', from: 100, warn: m => warnings.push(m),
+      transfers: { facts: done(500), edges: stopped(300, 'held'), links: stopped(400, 'cap'), chrono: stopped(450) },
+    });
+    assert.equal(r.at, 300, 'the mark stops at the lowest position: the held family\'s');
+    assert.deepEqual(r.held, ['edges'], 'resolveWatermark does not report the held families');
+    assert.deepEqual(r.capped, ['links']);
+    assert.deepEqual(r.errored, ['chrono']);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /edges/, 'the warning does not name the held family');
+    const quiet = resolveWatermark({ direction: 'push', peerLabel: 'peer', spaceId: 's', from: 0, warn: m => warnings.push(m), transfers: { facts: done(5) } });
+    assert.deepEqual(quiet.held, [], 'a healthy cycle holds nothing');
   });
 });
 

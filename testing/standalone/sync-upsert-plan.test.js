@@ -26,21 +26,29 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { base, ALTERNATE, MAIN_FIELD, REDACTION_MARKS, AUTHOR, OTHER_AUTHOR, T0, T1 } from './_fork-body-fixtures.mjs';
 
-let planArrivals, retagToLocalSpace;
+let planArrivals, retagToLocalSpace, authored;
 
 before(async () => {
   ({ planArrivals, retagToLocalSpace } = await import('../../server/dist/sync/upsert-plan.js'));
+  // Q-624: the hash leaf the door reads a stored copy's body through. Absent before it is written, which these cases then do not need; once
+  // it is written, a stored copy at an equal seq must carry it (see `writes`), and the cases below that need it say so.
+  try { authored = await import('../../server/dist/sync/authored-content.js'); } catch { authored = undefined; }
 });
 
 const doc = (id, seq, extra = {}) => ({ _id: id, seq, ...extra });
 const ids = (list) => list.map(d => d._id);
 /**
- * The ids a PULLED page writes, given the seq each id has locally: the accepted winners, in page order. An entity
- * never forks, so last-writer-wins by seq is the whole of its rule — the rule the pull's `planSeqUpserts` was.
+ * The ids a PULLED page writes, given the seq each id has locally: the accepted winners, in page order. These cases
+ * hold the last-writer-wins half of the rule — the rule the pull's `planSeqUpserts` was — for a copy that says what the
+ * stored one says; what an equal seq with another body does is the Q-624 block at the end of this file.
  */
 const writes = (docs, existing) => {
-  const stored = new Map([...existing].map(([id, seq]) => [id, { seq }]));
+  // Re-anchored for Q-624 (not in the design's re-anchor table, and it must be): a stored copy at an EQUAL seq carries the hash of its body, because the
+  // planner throws `BodyNotRead` for one that does not (decision D8) — the door reads the body at an equal seq. This fixture is a copy that says what the
+  // arriving document says (`doc(id, seq)` against itself), which the raw fallback of the hash makes equal by construction.
+  const stored = new Map([...existing].map(([id, seq]) => [id, { seq, ...(authored ? { bodyHash: authored.authoredContentHash('entities', doc(id, seq)) } : {}) }]));
   const p = planArrivals(docs, { kind: 'entities', door: 'pull', stored, tombstones: new Map(), deliveredBy: undefined });
   return [...p.accepts.values()].map(list => list.at(-1).doc);
 };
@@ -216,14 +224,20 @@ describe('the fork caps\' index is declared once', () => {
     const { stripComments } = await import('./_strip-comments.mjs');
     const { readTrackedSources } = await import('./_sources.mjs');
     const { requireSpaceIndexDeclaration } = await import('./_space-index-declaration.mjs');
-    const { FORK_INDEXES } = await import('../../server/dist/sync/upsert-plan.js');
+    const { FORK_INDEXES, FORKING_FAMILIES } = await import('../../server/dist/sync/upsert-plan.js');
     assert.ok(FORK_INDEXES.length >= 1, 'FORK_INDEXES read as empty');
+    // Re-anchored for Q-624 (design rev 4 section 5.5, section 16 re-anchor table): one declaration per FORKING_FAMILIES member, not facts alone.
+    assert.ok(Array.isArray(FORKING_FAMILIES) && FORKING_FAMILIES.length >= 4, 'FORKING_FAMILIES is not exported by sync/upsert-plan.ts: the families that fork are not declared once');
     const declared = await requireSpaceIndexDeclaration(assert);
-    for (const ix of FORK_INDEXES) {
-      const e = declared.find(d => d.suffix === 'facts' && JSON.stringify(d.raw.keys) === JSON.stringify(ix.keys));
-      assert.ok(e, `${JSON.stringify(ix.keys)} of FORK_INDEXES is not declared on facts`);
-      assert.equal(e.spec.sparse, ix.sparse === true, `${JSON.stringify(ix.keys)} is declared with another sparseness than FORK_INDEXES says`);
-      assert.equal(e.bootSafe, true, `${JSON.stringify(ix.keys)} is not built at every boot`);
+    for (const family of FORKING_FAMILIES) {
+      for (const ix of FORK_INDEXES) {
+        const e = declared.find(d => d.part === family && JSON.stringify(d.raw.keys) === JSON.stringify(ix.keys));
+        assert.ok(e, `${JSON.stringify(ix.keys)} of FORK_INDEXES is not declared on ${family}`);
+        assert.equal(e.spec.sparse, ix.sparse === true, `${family}: ${JSON.stringify(ix.keys)} is declared with another sparseness than FORK_INDEXES says`);
+        assert.equal(typeof e.bootSafe, 'boolean', `${family}: ${JSON.stringify(ix.keys)} leaves bootSafe to the default`);
+        // Facts keeps what it did at df2e7534 (built at every boot, held by every-pre-existing-space-index-says-whether-it-is-boot-safe); the others are new.
+        if (family === 'facts') assert.equal(e.bootSafe, true, `${JSON.stringify(ix.keys)} is not built at every boot on facts`);
+      }
     }
     const spelled = readTrackedSources('server/src', { ext: ['.ts'], floor: 200, specs: false, untracked: true })
       .filter(s => /createIndex\(\s*\{\s*forkOf\b/.test(stripComments(s.text))).map(s => s.file);
@@ -239,15 +253,26 @@ describe('one fork rule: divergesFrom', () => {
     const { stripComments } = await import('./_strip-comments.mjs');
     const { bodyOf } = await import('./_structural-window.mjs');
     const P = await import('../../server/dist/sync/upsert-plan.js');
-    assert.deepEqual([P.divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'b' }), P.divergesFrom({ seq: 5, fact: 'a' }, { seq: 5, fact: 'a' }),
-      P.divergesFrom({ seq: 5, fact: 'a' }, { seq: 4, fact: 'b' }), P.divergesFrom({ seq: 5, fact: 'a' }, undefined)], [true, false, false, false]);
+    // Re-anchored for Q-624 (design rev 4 section 2, re-anchor table :215-217): the rule takes the family (`divergesFrom(kind, d, held)`) and compares the
+    // BODY of two copies, so it is asked of a document that says something, with the hash of the stored copy's body beside its seq.
+    const H = await import('../../server/dist/sync/authored-content.js');
+    const held = (kind, d) => ({ seq: d.seq, bodyHash: H.authoredContentHash(kind, d) });
+    const a = base('facts', { fact: 'a' });
+    assert.deepEqual([
+      P.divergesFrom('facts', a, held('facts', base('facts', { fact: 'b' }))),
+      P.divergesFrom('facts', a, held('facts', base('facts', { fact: 'a' }))),
+      P.divergesFrom('facts', a, held('facts', base('facts', { fact: 'b', seq: 4 }))),
+      P.divergesFrom('facts', a, undefined),
+    ], [true, false, false, false]);
     const src = stripComments(readFileSync('server/src/sync/upsert-plan.ts', 'utf8'));
     for (const fn of ['forkCandidates', 'planArrivals']) assert.match(bodyOf(src, fn), /divergesFrom\(/, `${fn} no longer asks divergesFrom`);
     // Q-232: the writer's read-back asks it too, so a same-seq copy with other text is a divergence, never "landed".
     const writer = bodyOf(stripComments(readFileSync('server/src/sync/arrivals.ts', 'utf8')), 'writeArrivals');
-    assert.match(writer, /divergesFrom\(d, held\)/, 'the writer\'s read-back no longer asks divergesFrom');
+    assert.match(writer, /divergesFrom\(\s*[\w.]+\s*,\s*d\s*,\s*held\s*\)/, 'the writer\'s read-back no longer asks divergesFrom with the family');
+    // Re-anchored (:250-251): the text comparison is gone, replaced by the body-hash comparison, which lives in the hash leaf and is asked here.
     const inline = [...src.matchAll(/\.fact\s*!==\s*[\w.]+\.fact/g)].length;
-    assert.equal(inline, 1, 'a fact-text comparison is written outside divergesFrom');
+    assert.equal(inline, 0, 'a fact-text comparison is written in upsert-plan.ts: the one fork rule compares the whole body through the hash leaf');
+    assert.match(bodyOf(src, 'divergesFrom'), /\bauthoredContentHash\b|\bbodyHash\b/, 'divergesFrom does not compare the body hash');
   });
 });
 
@@ -295,12 +320,19 @@ describe('planArrivals — the page accept, decided as sequential processing dec
     assert.equal(p.accepts.get('f').at(-1).doc.seq, 6);
   });
 
-  it('an equal seq: equal text is skipped, divergent text forks; an entity never forks', () => {
-    assert.deepEqual(plan('facts', [doc('f', 5, { fact: 'x' }), doc('f', 5, { fact: 'x' })]).verdicts, ['inserted', 'skipped']);
-    const split = plan('facts', [doc('f', 5, { fact: 'x' }), doc('f', 5, { fact: 'y' })]);
-    assert.deepEqual(split.verdicts, ['inserted', 'forked']);
-    assert.equal(split.forks[0].doc.forkOf, 'f');
-    assert.deepEqual(plan('entities', [doc('e', 5), doc('e', 5)]).verdicts, ['upserted', 'skipped']);
+  it('an equal seq: equal body is skipped, a different body forks, for every forking kind; a family that never forks is still skipped', () => {
+    // Inverted for Q-624 (design rev 4 section 4, re-anchor table :298-303): it read "an entity never forks".
+    for (const kind of P.FORKING_FAMILIES) {
+      const field = MAIN_FIELD[kind];
+      const x = base(kind), y = base(kind, { [field]: 'something else' });
+      assert.deepEqual(plan(kind, [x, { ...x }]).verdicts, [kind === 'facts' ? 'inserted' : 'upserted', 'skipped'], `${kind}: an equal copy is not skipped`);
+      const split = plan(kind, [x, y]);
+      assert.deepEqual(split.verdicts, [kind === 'facts' ? 'inserted' : 'upserted', 'forked'], `${kind}: a different body at an equal seq does not fork`);
+      assert.equal(split.forks[0].doc.forkOf, 'p');
+    }
+    // Links and file metadata carry no body of their own to disagree about (a link's body is its identity), so an equal seq is a skip.
+    const link = { _id: 'l', seq: 5, from: 'a', fromKind: 'fact', to: 'b', toKind: 'entity', author: AUTHOR, createdAt: T0, spaceId: 's' };
+    assert.deepEqual(plan('links', [link, { ...link, createdAt: T1 }]).verdicts, ['upserted', 'skipped']);
   });
 
   it('a tombstone at or above the seq tombstones; one below is cleaned only when the record lands', () => {
@@ -341,8 +373,11 @@ describe('planArrivals — the page accept, decided as sequential processing dec
     assert.deepEqual(plan('edges', [doc('g1', 5, t), doc('g2', 6, t)]).verdicts, ['upserted', 'duplicate']);
   });
 
-  it('the fan-out cap counts stored and in-page siblings together; an existing fork is the same fork', () => {
-    const stored = new Map([['f', { seq: 5, fact: 'root' }]]);
+  it('the fan-out cap counts stored and in-page siblings together; an existing fork is the same fork', async () => {
+    // Re-anchored for Q-624 (not in the design's re-anchor table, and it must be): a stored copy at an EQUAL seq now carries the hash of its body, because
+    // `divergesFrom` throws `BodyNotRead` for one that does not (decision D8), so the fixture reads the body the way the door does.
+    const H = await import('../../server/dist/sync/authored-content.js');
+    const stored = new Map([['f', { seq: 5, fact: 'root', bodyHash: H.authoredContentHash('facts', { _id: 'f', seq: 5, fact: 'root' }) }]]);
     const variants = Array.from({ length: 4 }, (_, i) => doc('f', 5, { fact: `v${i}` }));
     const p = plan('facts', variants, { stored, siblings: new Map([['f', P.MAX_FORK_DEPTH - 2]]) });
     assert.deepEqual(p.verdicts, ['forked', 'forked', 'forkRefused', 'forkRefused']);
@@ -364,5 +399,118 @@ describe('planArrivals — the page accept, decided as sequential processing dec
     assert.equal(P.forkDepth('a', id => ring.get(id)), 2);
     const long = (id) => (Number(id) < 100 ? String(Number(id) + 1) : undefined);
     assert.equal(P.forkDepth('0', long), P.MAX_FORK_DEPTH + 1);
+  });
+});
+
+/*
+ * Q-624 (design rev 4 sections 2 to 4, section 16 test 1): every forking kind forks on a difference of BODY at an equal seq, and skips a copy that says
+ * the same thing. Facts forked on `fact` text alone and an entity, edge or chrono entry never forked, so two instances that edited one record at one
+ * version each kept their own edit for ever and the space hash called them different for ever. The rule is the body hash (`sync/authored-content.ts`):
+ * the family's body fields, normalised through its `Incoming*` schema, with the version metadata removed at the top level only.
+ *
+ * What a stored copy is, to the planner: its seq, whether it is a fork, and (at an equal seq) the hash of its body, read by the door (`StoredCopy.bodyHash`).
+ * The fixture builds it the way the door does, from the hash leaf.
+ */
+describe('an equal-seq copy that says something different forks, for every forking kind; one that says the same thing is skipped', () => {
+  let P, H;
+  before(async () => {
+    P = await import('../../server/dist/sync/upsert-plan.js');
+    try { H = await import('../../server/dist/sync/authored-content.js'); } catch (err) { H = { __missing: String(err?.code ?? err?.message) }; }
+  });
+  const leaf = () => {
+    assert.ok(!H.__missing, `dist/sync/authored-content.js is not built (${H.__missing}): there is no body hash for the planner to decide a fork by`);
+    assert.ok(Array.isArray(P.FORKING_FAMILIES) && P.FORKING_FAMILIES.length >= 4, 'FORKING_FAMILIES is not exported by sync/upsert-plan.ts');
+    return H;
+  };
+  const held = (kind, d) => ({ seq: d.seq, ...(d.forkOf ? { forkOf: d.forkOf } : {}), bodyHash: H.authoredContentHash(kind, d) });
+  const plan = (kind, docs, over = {}) => P.planArrivals(docs, { kind, door: 'push', stored: new Map(), tombstones: new Map(), deliveredBy: undefined, ...over });
+  const against = (kind, stored, arriving, over = {}) => plan(kind, [arriving], { stored: new Map([['p', held(kind, stored)]]), ...over });
+  const FIRST = (kind) => (kind === 'facts' ? 'inserted' : 'upserted');
+  /** A fork row of `kind` under the subject `p`, its id derived the way a sender derives it. */
+  const forkRow = (kind, over) => {
+    const row = base(kind, { forkOf: 'p', ...over });
+    return { ...row, _id: P.forkIdFor('p', row.seq, H.authoredContentHash(kind, row).text) };
+  };
+
+  it('a body field that differs: forked, with the derived fork id and the shared seq, for every body field of every kind', () => {
+    leaf();
+    for (const kind of P.FORKING_FAMILIES) {
+      const fields = [...H.BODY_FIELDS_OF[kind]];
+      assert.ok(fields.length >= 7, `${kind}: only ${fields.length} body field(s): the field table did not derive`);
+      const unknown = fields.filter(f => !(f in ALTERNATE[kind]) && !REDACTION_MARKS.includes(f));
+      assert.deepEqual(unknown, [], `${kind}: body field(s) the cases here know no alternate value for: add one, or the field escapes the divergence test`);
+      for (const field of fields.filter(f => f in ALTERNATE[kind])) {
+        const arriving = base(kind, { [field]: ALTERNATE[kind][field] });
+        const p = against(kind, base(kind), arriving);
+        assert.deepEqual(p.verdicts, ['forked'], `${kind}.${field}: a different value at an equal seq does not fork`);
+        assert.equal(p.forks.length, 1);
+        assert.equal(p.forks[0].doc.forkOf, 'p');
+        assert.equal(p.forks[0].doc.seq, 5, 'the fork keeps the shared seq its id is derived from');
+        assert.equal(p.forks[0].doc._id, P.forkIdFor('p', 5, H.authoredContentHash(kind, arriving).text), `${kind}.${field}: the fork id is not derived from the body`);
+        assert.equal(p.forkIds[0], p.forks[0].doc._id);
+      }
+    }
+  });
+
+  it('the same body with another updatedAt, createdAt, author, space, position, vector or local stamp is skipped', () => {
+    leaf();
+    const local = { pos: 9, posAtSeq: 5, embedding: [0.1, 0.2], embeddingModel: 'm', matchedText: 't', _expireAt: new Date(0), syncBase: { seq: 1 }, deliveredBy: 'i9' };
+    for (const kind of P.FORKING_FAMILIES) {
+      const stored = base(kind);
+      for (const [what, over] of [['updatedAt', { updatedAt: T1 }], ['createdAt', { createdAt: T1 }], ['author', { author: { ...OTHER_AUTHOR } }],
+        ['spaceId', { spaceId: 'elsewhere' }], ['position, vector and local stamps', local]]) {
+        assert.deepEqual(against(kind, stored, base(kind, over)).verdicts, ['skipped'], `${kind}: a copy that differs only in ${what} is not skipped`);
+      }
+    }
+  });
+
+  it('a property spelled author, seq or pos is body: a difference in one forks', () => {
+    leaf();
+    for (const kind of P.FORKING_FAMILIES) {
+      for (const key of ['author', 'seq', 'pos']) {
+        const p = against(kind, base(kind, { properties: { [key]: 'a' } }), base(kind, { properties: { [key]: 'b' } }));
+        assert.deepEqual(p.verdicts, ['forked'], `${kind}: a property named '${key}' that differs is read as version metadata and the copies are skipped`);
+      }
+    }
+  });
+
+  it('a copy without tags is the copy with [], and an entity without properties is the entity with {}: skipped, both ways round', () => {
+    leaf();
+    const without = (d, key) => Object.fromEntries(Object.entries(d).filter(([k]) => k !== key));
+    for (const kind of ['chrono', 'facts', 'edges']) {
+      assert.deepEqual(against(kind, base(kind, { tags: [] }), without(base(kind, { tags: [] }), 'tags')).verdicts, ['skipped'], `${kind}: no tags against []`);
+      assert.deepEqual(against(kind, without(base(kind, { tags: [] }), 'tags'), base(kind, { tags: [] })).verdicts, ['skipped'], `${kind}: [] against no tags`);
+    }
+    assert.deepEqual(against('entities', base('entities', { properties: {} }), without(base('entities', { properties: {} }), 'properties')).verdicts, ['skipped'], 'no properties against {}');
+    assert.deepEqual(against('entities', without(base('entities', { properties: {} }), 'properties'), base('entities', { properties: {} })).verdicts, ['skipped'], '{} against no properties');
+  });
+
+  it('the 11th is refused: the cap counts stored and in-page siblings together, for every kind', () => {
+    leaf();
+    for (const kind of P.FORKING_FAMILIES) {
+      const variants = Array.from({ length: 4 }, (_, i) => base(kind, { [MAIN_FIELD[kind]]: `variant ${i}` }));
+      const p = plan(kind, variants, { stored: new Map([['p', held(kind, base(kind))]]), siblings: new Map([['p', P.MAX_FORKS_PER_RECORD - 2]]) });
+      assert.deepEqual(p.verdicts, ['forked', 'forked', 'forkRefused', 'forkRefused'], `${kind}: the cap is not applied`);
+      assert.equal(p.forks.length, 2);
+    }
+  });
+
+  it('a fork row and its subject in one page are both accepted: a fork edge shares its subject\'s five identity fields and is no duplicate', () => {
+    leaf();
+    for (const kind of P.FORKING_FAMILIES) {
+      const subject = base(kind);
+      const fork = forkRow(kind, { [MAIN_FIELD[kind]]: 'the other side' });
+      const p = plan(kind, [subject, fork]);
+      assert.deepEqual(p.verdicts, [FIRST(kind), FIRST(kind)], `${kind}: a fork row beside its subject is refused (an edge: as a duplicate of the identity it shares)`);
+    }
+  });
+
+  it('a fork row whose parent is tombstoned is tombstoned: the deletion wins, whatever the seq', () => {
+    leaf();
+    for (const kind of P.FORKING_FAMILIES) {
+      const p = plan(kind, [forkRow(kind, { [MAIN_FIELD[kind]]: 'the other side' })], { tombstones: new Map([['p', { seq: 3 }]]) });
+      assert.deepEqual(p.verdicts, ['tombstoned'], `${kind}: a fork row of a deleted record is stored: an orphan that nothing will ever remove`);
+      assert.equal(p.accepts.size + p.forks.length, 0);
+    }
   });
 });

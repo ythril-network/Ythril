@@ -129,3 +129,28 @@ describe('every edge writer says what it does with the functional guard', () => 
     }
   });
 });
+
+/*
+ * Q-624 (design rev 4 sections 6 and 7, re-anchor table): the fork module is a NEW writer of the edges collection. A fork edge row is inserted under its own
+ * derived id, never stamped (`_functionalGuard` locks a subject's slot, and a fork is not the subject), and the re-mint that re-points it onto a re-keyed
+ * subject builds its row through the fork module and never through `rekeyedRow`, whose copy of `forkOf` and guard is the trap (reliability lens 3). So the
+ * fork module's edge writers say `drop`: they remove the marker and write none. The rule is stated for the MODULE, not for one function name, because
+ * the design names the re-mint and the keep-writer by what they do and not by an identifier.
+ */
+describe('the fork module writes edge rows and says it drops the functional guard', () => {
+  const FORKS = 'server/src/brain/forks.ts';
+
+  it('brain/forks.ts has at least one writer of the edges collection (the re-mint of a fork edge)', () => {
+    const own = KEYS.filter(k => k.startsWith(`${FORKS}:`));
+    assert.ok(own.length >= 1, `${FORKS} writes no edge row: there is no re-mint that inserts a fork edge under a derived id and removes the old one`);
+  });
+
+  it('every edge writer of the fork module is mapped as drop, and its body names the marker', () => {
+    const own = KEYS.filter(k => k.startsWith(`${FORKS}:`));
+    assert.ok(own.length >= 1, `${FORKS} writes no edge row`);
+    const wrong = own.filter(k => WRITERS[k]?.marker !== 'drop').map(k => `${k} (${WRITERS[k]?.marker ?? 'no entry'})`);
+    assert.deepEqual(wrong, [], 'a fork module writer of the edges collection must say `drop`: a fork row is never stamped, and one that carried its subject\'s marker would hold the subject\'s slot for ever');
+    const silent = own.filter(k => !NAMES_THE_MARKER.test(INDEX.bodies.get(k)?.body ?? ''));
+    assert.deepEqual(silent, [], 'these claim to drop the marker and never name it');
+  });
+});

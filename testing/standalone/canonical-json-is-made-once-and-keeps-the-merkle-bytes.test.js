@@ -34,6 +34,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom } from './_structural-window.mjs';
@@ -82,28 +83,66 @@ function oldLibraryCanonical(v) {
 
 const sha = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
-describe('the canonical JSON text keeps the bytes the space hash was computed over', () => {
-  it('the corpus is the one the pins were computed from', () => {
+/*
+ * Q-624 (design rev 4 section 2, probe correction 1): the space hash leaves a derived field out at the TOP LEVEL of a record only,
+ * so a nested key spelled like one is content (`merkle-hashes-a-nested-key-whatever-its-name.test.js`). The rule this file holds is
+ * therefore not "the bytes never change" but "the bytes change only for a document with a nested derived-named key": every other
+ * pin below stays, and the one corpus entry that carries such keys is held to the NEW bytes, computed by an oracle written here
+ * (top-level omission, then the replaced canonicalize with nothing omitted), and to not being its old pin.
+ */
+const { LOCAL_ONLY_FIELDS } = await import('../../server/dist/sync/local-only-fields.js');
+const { RETAGGED_FIELDS } = await import('../../server/dist/sync/retagged-fields.js');
+const DERIVED = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS]);
+
+/** Does a document carry a key spelled like a derived field BELOW its top level, in an object or in an array? */
+function hasNestedDerivedKey(value, top = true) {
+  if (Array.isArray(value)) return value.some(v => hasNestedDerivedKey(v, false));
+  if (value && typeof value === 'object') {
+    return Object.keys(value).some(k => (!top && DERIVED.has(k)) || hasNestedDerivedKey(value[k], false));
+  }
+  return false;
+}
+/** The derived fields dropped at the top level alone. */
+const withoutTopLevel = (doc) => Object.fromEntries(Object.entries(doc).filter(([k]) => !DERIVED.has(k)));
+/** The leaf the 6.0 rule produces, written independently of the module under test. */
+const leafOf = (coll, doc) => sha(`doc:${coll}:${String(doc._id)}:${String(doc.seq)}:${sha(JSON.stringify(oldMerkleCanonicalize(withoutTopLevel(doc), new Set())))}`);
+
+describe('the canonical JSON text keeps the bytes the space hash was computed over, but for a nested derived-named key', () => {
+  it('the corpus is the one the pins were computed from, and some of it carries a nested derived-named key', () => {
     assert.deepEqual([...CORPUS.map(([name]) => name), 'file'].sort(), Object.keys(PINNED).sort());
+    assert.ok(DERIVED.size >= 5, `only ${DERIVED.size} derived fields: the set did not load`);
+    assert.ok(CORPUS.filter(([, , doc]) => hasNestedDerivedKey(doc)).length >= 1, 'no corpus entry carries a nested derived-named key: the change this file allows is never exercised');
+    assert.ok(CORPUS.filter(([, , doc]) => !hasNestedDerivedKey(doc)).length >= 8, 'too few corpus entries are held to the old pins');
   });
 
-  it('docLeaf and fileContentHash answer the pinned pre-extraction hashes', async () => {
+  it('docLeaf answers the pinned hash of every document with no nested derived-named key, and fileContentHash its pin', async () => {
     const { docLeaf, fileContentHash } = await import('../../server/dist/brain/merkle.js');
-    for (const [name, coll, doc] of CORPUS) assert.equal(docLeaf(coll, doc), PINNED[name], `docLeaf moved for: ${name}`);
+    for (const [name, coll, doc] of CORPUS) {
+      if (!hasNestedDerivedKey(doc)) assert.equal(docLeaf(coll, doc), PINNED[name], `docLeaf moved for: ${name}`);
+    }
     assert.equal(fileContentHash(FILE_DOC), PINNED.file, 'fileContentHash moved');
   });
 
-  it('canonicalJsonHash equals the replaced canonicalize, derived fields omitted at every level', async () => {
+  it('a document with a nested derived-named key answers the top-level-only bytes, and no longer its old pin', async () => {
+    const { docLeaf } = await import('../../server/dist/brain/merkle.js');
+    for (const [name, coll, doc] of CORPUS) {
+      if (!hasNestedDerivedKey(doc)) continue;
+      assert.equal(docLeaf(coll, doc), leafOf(coll, doc), `docLeaf is not the top-level-only leaf for: ${name}`);
+      assert.notEqual(docLeaf(coll, doc), PINNED[name], `docLeaf still answers the every-level pin for: ${name}`);
+    }
+  });
+
+  it('canonicalJson omits nothing: the every-level omitKeys is gone with its only caller, and the text is the replaced canonicalize with nothing omitted', async () => {
     const { canonicalJsonHash, canonicalJson } = await import('../../server/dist/util/canonical-json.js');
-    const { LOCAL_ONLY_FIELDS } = await import('../../server/dist/sync/local-only-fields.js');
-    const { RETAGGED_FIELDS } = await import('../../server/dist/sync/retagged-fields.js');
-    const derived = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS]);
-    assert.ok(derived.size >= 5, `only ${derived.size} derived fields — the omitted set did not load`);
+    const sample = { a: 1, b: { a: 2, c: 3 } };
+    assert.equal(canonicalJson(sample, { omitKeys: new Set(['a']) }), canonicalJson(sample),
+      'canonicalJson still drops the keys it is asked to omit, at every level: nothing needs it and a nested key is content');
+    assert.ok(!/omitKeys/.test(readFileSync('server/src/util/canonical-json.ts', 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')),
+      'util/canonical-json.ts still has an omitKeys option');
     for (const [name, , doc] of CORPUS) {
-      const before = JSON.stringify(oldMerkleCanonicalize(doc, derived));
-      assert.equal(canonicalJson(doc, { omitKeys: derived }), before, `the text moved for: ${name}`);
-      assert.equal(canonicalJsonHash(doc, { omitKeys: derived }), sha(before), `the hash moved for: ${name}`);
-      assert.equal(canonicalJson(doc), JSON.stringify(oldMerkleCanonicalize(doc, new Set())), `the unomitted text moved for: ${name}`);
+      const text = JSON.stringify(oldMerkleCanonicalize(doc, new Set()));
+      assert.equal(canonicalJson(doc), text, `the unomitted text moved for: ${name}`);
+      assert.equal(canonicalJsonHash(doc), sha(text), `the unomitted hash moved for: ${name}`);
     }
   });
 

@@ -119,3 +119,36 @@ describe('every non-2xx a space transfer reads is classified by one function', (
       + bare.join('\n  '));
   });
 });
+
+/*
+ * Q-624 (design rev 4 section 5.4, re-anchor table): a peer building its edge identity index answers a push of the edges family with
+ * `503 { code: 'edge_identity_building', retryable: true }`. That is neither a held space nor a failed transfer: it holds ONE family, so the turn and every
+ * other family go on, and nothing counts as a member failure. The classifier says it with a fourth word, `'family-held'`, and the push family does not hand
+ * that word to the turn (`refusedBy` would end the whole space's exchange, which is what `PositionsBuilding` did and the design refuses to reuse).
+ */
+describe('a peer that holds one family is classified, and does not end the space\'s turn', () => {
+  const answer = (status, body) => ({ status, clone: () => ({ text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) }) });
+
+  it('transferRefusal reads 503 edge_identity_building as family-held, and every other 503 as before', async () => {
+    const errors = await import('../../server/dist/util/errors.js');
+    assert.equal(errors.EDGE_IDENTITY_BUILDING, 'edge_identity_building', 'util/errors.ts does not export EDGE_IDENTITY_BUILDING');
+    const { transferRefusal } = await import('../../server/dist/sync/held-answer.js');
+    assert.equal(await transferRefusal(answer(503, { error: 'x', code: errors.EDGE_IDENTITY_BUILDING, retryable: true })), 'family-held');
+    assert.equal(await transferRefusal(answer(503, { error: 'x' })), 'failed', 'a bare 503 stays a failure');
+    assert.equal(await transferRefusal(answer(503, { error: 'x', code: 'something_else' })), 'failed');
+    assert.equal(await transferRefusal(answer(503, { error: 'x', code: errors.POSITIONS_BUILDING })), 'held', 'the space-wide hold is unchanged');
+  });
+
+  it('TransferRefusal names family-held, and the push of a family does not hand it to the turn', () => {
+    const answerSrc = readFileSync(`${REPO_ROOT}/${HELD_ANSWER}`, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+    const union = answerSrc.match(/export type TransferRefusal\s*=([^;]*);/);
+    assert.ok(union, 'TransferRefusal is not declared in sync/held-answer.ts');
+    assert.ok([...union[1].matchAll(/'([\w-]+)'/g)].map(m => m[1]).includes('family-held'), 'TransferRefusal does not name family-held');
+    // The one consumer that hands a verdict to the turn for a family's push: `push-family.ts`. Its non-2xx branch must name the word, so it is a decision there.
+    const push = readFileSync(`${REPO_ROOT}/server/src/sync/push-family.ts`, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+    const at = push.indexOf('await transferRefusal(resp)');
+    assert.ok(at > -1, 'push-family.ts no longer classifies a refusal of its push');
+    const branch = push.slice(at, push.indexOf('return `the peer answered', at));
+    assert.ok(/'family-held'/.test(branch), 'push-family.ts does not decide what a family-held refusal does: handed to refusedBy it ends the whole space\'s turn for this member');
+  });
+});

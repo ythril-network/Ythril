@@ -126,7 +126,7 @@ describe('the creation path uses it', () => {
     assert.match(plan, /_id:\s*edgeIdFor\(/, 'the creation path must derive the id from the triplet');
   });
 
-  it('the derivation and the unique index are fed the SAME fields', () => {
+  it('the derivation and the unique index are fed the SAME fields', async () => {
     /*
      * Derived from the index rather than hardcoded against it. A derivation over a different set produces ids
      * that collide where the index does not, or differ where it does — worse than random ids, because it looks
@@ -139,10 +139,18 @@ describe('the creation path uses it', () => {
      */
     // Re-anchored by Q-445 (bundle-101): the index is declared in the one per-space declaration (`spaces/space-indexes.ts`), which
     // every builder reads, and no longer written as a `createIndex` call in `lifecycle.ts`.
-    const lifecycle = src('server/src/spaces/space-indexes.ts');
-    const idx = lifecycle.match(/plain\('edges', \{([^}]*)\}, \{ unique: true \}\)/);
-    assert.ok(idx, 'the unique index on the edges collection was not found — re-anchor this gate');
-    const indexed = [...idx[1].matchAll(/(\w+):\s*1/g)].map(m => m[1]);
+    // Re-anchored for Q-624 (design rev 4 section 5.2, re-anchor table :143): the identity index is the PARTIAL `edge_identity` (unique over the same five
+    // fields, `partialFilterExpression: { forkOf: null }`, so a fork row beside its subject is outside it), declared as an entry with a name and options and
+    // no longer a `plain('edges', {...}, { unique: true })` call. Read from the declaration itself rather than from its spelling, and the rule widens by one
+    // clause: no FULL unique edge index may stay declared beside it, or a fork row (which shares the five fields) would collide with its own subject.
+    const { requireSpaceIndexDeclaration } = await import('./_space-index-declaration.mjs');
+    const uniqueEdgeIndexes = (await requireSpaceIndexDeclaration(assert)).filter(e => e.part === 'edges' && e.spec.unique);
+    const identity = uniqueEdgeIndexes.filter(e => e.spec.name === 'edge_identity');
+    assert.equal(identity.length, 1, `the unique index named edge_identity on the edges collection is declared ${identity.length} times (declared unique edge indexes: ${uniqueEdgeIndexes.map(e => e.id).join(', ')}) — re-anchor this gate`);
+    assert.deepEqual(identity[0].spec.partialFilterExpression, { forkOf: null }, 'the edge identity index is not partial on forkOf: null, so a fork row collides with its subject');
+    assert.deepEqual(uniqueEdgeIndexes.filter(e => e.spec.partialFilterExpression === null).map(e => e.id), [],
+      'a FULL unique index over edge fields is still declared beside the partial one: a fork row shares its subject\'s identity and would be refused by it');
+    const indexed = Object.keys(identity[0].raw.keys);
     assert.ok(indexed.length >= 3, `only ${indexed.length} fields in the unique index`);
 
     const derivation = src('server/src/brain/edge-id.ts');

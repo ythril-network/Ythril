@@ -37,7 +37,7 @@ const AT_BASE = Object.freeze({
   bootSafe: [
     'chrono:lexical_text', 'chrono:startsAt_1', 'chrono:status_1', 'chrono:type_1', 'conflicts:detectedAt_-1',
     'contradiction_candidates:status_1_confidence_-1_detectedAt_-1', 'contradiction_candidates:type_1',
-    'dupe_candidates:status_1_score_-1_detectedAt_-1', 'edges:from_1_to_1_label_1_fromKind_1_toKind_1', 'edges:lexical_text',
+    'dupe_candidates:status_1_score_-1_detectedAt_-1', 'edges:lexical_text',
     'edges:to_1', 'edges:type_1', 'embed_jobs:rebuild_1_status_1', 'embed_jobs:status_1_priority_1_claimableAfter_1_createdAt_1',
     'embed_jobs:status_1_progressAt_1', 'embed_jobs:status_1_revivedForVersion_1', 'entities:lexical_text', 'entities:name_1_type_1',
     'entities:type_1', 'facts:forkOf_1', 'facts:lexical_text', 'facts:tags_1', 'facts:type_1', 'file_tombstones:move.from_1_move.to_1',
@@ -55,9 +55,31 @@ const AT_BASE = Object.freeze({
   ],
 });
 
+/**
+ * DECLARED CHANGES since df2e7534, each with its reason (Q-624, design rev 4 sections 5.2 and 5.5, re-anchor table). Not a weakening: the index
+ * that was boot-safe and `throw` at the base is REPLACED, and the replacement is held to the explicit values the design gives it.
+ *
+ *  - `edges:from_1_to_1_label_1_fromKind_1_toKind_1` was a full unique index over the five identity fields, built at every boot. It is replaced by the
+ *    partial `edge_identity` (`partialFilterExpression: { forkOf: null }`), so a fork row (same five fields as its subject, a `forkOf`) is outside it.
+ *    Its build over an existing collection is a swap that holds the edges family of sync (`ensurePartialEdgeIdentity`, the owed job), never a boot step:
+ *    `bootSafe: false`. A failed build on a new or empty collection still stops the space initialising: `policy: 'throw'`.
+ *  - `edges:from_1` is new: the partial index serves only a read that names `forkOf: null`, and the full one served every `from`-prefixed read through
+ *    its prefix, so the swap drops the full index only once this stands. Not boot-safe: it reads the whole collection.
+ *  - the fork index of every forking family beyond facts is new (`FORK_INDEXES` over `FORKING_FAMILIES`): not boot-safe on an existing collection.
+ */
+const DECLARED_CHANGES = Object.freeze({
+  replaced: [{
+    was: 'edges:from_1_to_1_label_1_fromKind_1_toKind_1', now: 'edges:edge_identity', bootSafe: false, policy: 'throw',
+    partialFilterExpression: { forkOf: null }, unique: true,
+  }],
+  added: [
+    { id: 'edges:from_1', bootSafe: false },
+    { id: 'entities:forkOf_1', bootSafe: false }, { id: 'edges:forkOf_1', bootSafe: false }, { id: 'chrono:forkOf_1', bootSafe: false },
+  ],
+});
+
 /** The policies premise R4 names, each by the index it governs. */
 const POLICY_AT_BASE = Object.freeze({
-  'edges:from_1_to_1_label_1_fromKind_1_toKind_1': 'throw',
   'edges:_functionalGuard_1': 'report',
   ...Object.fromEntries(['facts', 'entities', 'edges', 'chrono', 'files'].map(c => [indexId(c, 'lexical_text'), 'best-effort'])),
   ...Object.fromEntries(AT_BASE.notBootSafe.filter(id => id.includes(':ttl_')).map(id => [id, 'report'])),
@@ -90,7 +112,27 @@ describe('every pre-existing space index says whether it is boot-safe', () => {
     assert.deepEqual(findings, [], findings.join('; '));
   });
 
-  it('the failure policies carry today\'s behaviour: identity throws, the guard and the TTL indexes are reported, lexical_text is best effort', async () => {
+  it('the declared changes: the full identity index is replaced by the partial one, which is not boot-safe and still throws; the new indexes say so', async () => {
+    const declared = new Map((await requireSpaceIndexDeclaration(assert)).map(e => [e.id, e]));
+    const findings = [];
+    for (const r of DECLARED_CHANGES.replaced) {
+      if (declared.has(r.was)) findings.push(`${r.was} is still declared: the full unique identity index must go, a fork row shares its subject's five fields`);
+      const e = declared.get(r.now);
+      if (!e) { findings.push(`${r.now} is not declared`); continue; }
+      if (e.bootSafe !== r.bootSafe) findings.push(`${r.now}: bootSafe is ${JSON.stringify(e.bootSafe)}, the design says ${r.bootSafe}`);
+      if (e.policy !== r.policy) findings.push(`${r.now}: policy is ${JSON.stringify(e.policy)}, the design says ${r.policy}`);
+      if (e.spec.unique !== r.unique) findings.push(`${r.now}: unique is ${e.spec.unique}`);
+      if (JSON.stringify(e.spec.partialFilterExpression) !== JSON.stringify(r.partialFilterExpression)) findings.push(`${r.now}: partialFilterExpression is ${JSON.stringify(e.spec.partialFilterExpression)}`);
+    }
+    for (const a of DECLARED_CHANGES.added) {
+      const e = declared.get(a.id);
+      if (!e) findings.push(`${a.id} is not declared`);
+      else if (e.bootSafe !== a.bootSafe) findings.push(`${a.id}: bootSafe is ${JSON.stringify(e.bootSafe)}, the design says ${a.bootSafe}`);
+    }
+    assert.deepEqual(findings, [], findings.join('; '));
+  });
+
+  it('the failure policies carry today\'s behaviour: the guard and the TTL indexes are reported, lexical_text is best effort', async () => {
     const declared = new Map((await requireSpaceIndexDeclaration(assert)).map(e => [e.id, e]));
     const findings = Object.entries(POLICY_AT_BASE)
       .filter(([id, policy]) => declared.get(id)?.policy !== policy)

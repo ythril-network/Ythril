@@ -74,7 +74,12 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
 const TYPES = 'server/src/config/types.ts';
-const SHARED = 'server/src/api/sync/_shared.ts';
+/*
+ * The `Incoming*` schemas live in the schema leaf (Q-624, design rev 4 section 2, D11): `api/sync/_shared.ts` re-exports them and holds none, because the
+ * module that held them also re-exported the planner's constants, which closed an import cycle through the space hash. Re-anchored, not weakened: the
+ * rule is still "every `Incoming*` schema", read out of the module that holds them, with the same floors.
+ */
+const SHARED = 'server/src/sync/incoming-schemas.ts';
 const MERKLE = 'server/src/brain/merkle.ts';
 /*
  * The exclusion SET left `merkle.ts` for `sync/local-only-fields.ts`, which has two consumers: the hash
@@ -504,4 +509,32 @@ describe('the gate sees a field taken away from the schema or the hash', () => {
         + 'that disagree about it report themselves identical for ever. Add it to the hash (FILE_HASH_PROJECTION for a file), or stop declaring it.');
     });
   }
+});
+
+/**
+ * ## `forkOf` is a hashed field of every forking family, so every forking family's schema declares it (Q-624, design rev 4 section 4)
+ *
+ * `forkOf` is on the fact schema alone at b857da8f. The merkle hash sees every field of a record that is not derived, `forkOf` among them, so a fork row
+ * of an entity, an edge or a chrono entry that replicates (it is an ordinary replicated row) with a schema that strips `forkOf` loses its parent link on
+ * push and keeps it on pull: the direction-dependent loss this file exists to catch. The families are read from the planner's `FORKING_FAMILIES` and
+ * their schemas from the leaf's `INCOMING_SCHEMA_OF`, never listed here.
+ */
+describe('a forking family\'s schema declares forkOf, which the hash sees', () => {
+  it('forkOf is hashed (not a derived field), and declared by the Incoming schema of every forking family', async () => {
+    const { FORKING_FAMILIES } = await import('../../server/dist/sync/upsert-plan.js');
+    assert.ok(Array.isArray(FORKING_FAMILIES) && FORKING_FAMILIES.length >= 4, 'FORKING_FAMILIES is not exported by sync/upsert-plan.ts');
+    const leaf = await import('../../server/dist/sync/incoming-schemas.js');
+    const shared = readFileSync(SHARED, 'utf8');
+    const localOnly = readFileSync(LOCAL_ONLY, 'utf8') + '\n' + readFileSync(RETAGGED, 'utf8');
+    const { fromSet } = merkleExcluded(readFileSync(MERKLE, 'utf8'), null, localOnly);
+    assert.equal(fromSet.includes('forkOf'), false, 'forkOf is excluded from the hash: a fork row would hash alike with and without its parent link');
+    const missing = [];
+    for (const family of FORKING_FAMILIES) {
+      const schema = leaf.INCOMING_SCHEMA_OF[family]?.schema;
+      const name = Object.entries(leaf).find(([, v]) => v === schema)?.[0];
+      assert.ok(name, `INCOMING_SCHEMA_OF has no schema object for ${family}, or the leaf does not export it by name`);
+      if (!(incomingKeys(shared, name) ?? []).includes('forkOf')) missing.push(`${family} (${name})`);
+    }
+    assert.deepEqual(missing, [], `${missing.join(', ')} do not declare forkOf, which the divergence hash sees: a pushed fork row loses its parent link while a pulled one keeps it`);
+  });
 });
