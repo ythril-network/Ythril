@@ -33,7 +33,12 @@ concurrency:
 #
 #   client-tests        the client's unit tests and its production build (its own `npm ci`)
 #   standalone-pure     the standalone files that need nothing but `server/dist` (and `client/dist`)
-#   standalone-db       the standalone files that open the harness MongoDB: ythril-mongo-a and nothing else
+#   standalone-db       the standalone files that open the harness MongoDB: ythril-mongo-a and nothing else. A MATRIX, one
+#                       job per shard of the `-db` plan (`testing/_shared/db-shard-plan.mjs`), each with its own fresh Mongo:
+#                       the runner's one-shard mode (`YTHRIL_TEST_DB_SHARDS` with `YTHRIL_TEST_DB_SHARD_INDEX`) runs only that
+#                       shard's files. A runner has room for one Mongo, so the shards run as jobs and not as containers of
+#                       one job. Held by `ci-runs-every-db-shard-exactly-once`: the matrix is exactly the plan's indices,
+#                       each upload carries its index, and `Build & Test` waits for the job and checks its result.
 #   prepare             the changelog check, the docs lint, and the one build of the test image
 #
 # Everything that drives a running Ythril waits for `prepare`, loads the image it built and starts ONLY the services
@@ -177,9 +182,18 @@ jobs:
           retention-days: 30
 
   standalone-db:
-    name: Standalone (database)
+    name: Standalone (database, shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    # Measured 253-267 s of tests at width 4 plus about 100 s of setup. 30 minutes bounds a wedged Mongo.
+    # One shard of the `-db` plan per job, against a Mongo of its own. `fail-fast` is off so one red shard does not hide
+    # the verdict of the others; `Build & Test` fails when any of them failed (a matrix job's result is the worst of its
+    # jobs). The matrix must be exactly 0 to the count minus one, and the count must be the one the test step sets: a short
+    # matrix is files that run nowhere, a repeated index is files that run twice (held by `ci-runs-every-db-shard-exactly-once`).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    # Each job carries one shard, so the old bound for the whole third is far more than a shard needs; 30 minutes is what
+    # bounds a wedged Mongo.
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -218,13 +232,19 @@ jobs:
             --no-build --pull never ythril-mongo-a
 
       - name: Standalone tests that open the database
+        # This job's shard of the plan, against the Mongo started above: the runner starts no container of its own, and
+        # refuses (non-zero) an index outside 0 to the count minus one rather than running everything or nothing.
         run: npm run test:standalone:db
+        env:
+          YTHRIL_TEST_DB_SHARDS: 4
+          YTHRIL_TEST_DB_SHARD_INDEX: ${{ matrix.shard }}
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-standalone-db-${{ github.run_attempt }}
+          # The index is in the name: uploads from every shard under one name would be refused, or overwrite each other.
+          name: test-results-standalone-db-${{ matrix.shard }}-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: error
           retention-days: 30

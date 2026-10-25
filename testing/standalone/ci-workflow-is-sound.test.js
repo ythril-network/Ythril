@@ -727,6 +727,18 @@ function uploadNameViolations(doc) {
       const name = String(s.with?.name ?? '');
       seen++;
       const named = resultsNameJob(name);
+      // A MATRIX job uploads once per axis value, so its name is the id and then each axis, `<id>-${{ matrix.<axis> }}`: without
+      // the axes its jobs upload under one name, and the recorder keys one record by it. The axes are the matrix's own keys.
+      const axes = Object.keys(job.strategy?.matrix ?? {}).filter((k) => k !== 'include' && k !== 'exclude');
+      const matrixRef = /-\$\{\{\s*matrix\.([\w-]+)\s*\}\}/g;
+      const referenced = named == null ? [] : [...named.matchAll(matrixRef)].map((m) => m[1]);
+      if (axes.length > 0 && named != null && named.replace(matrixRef, '') === id) {
+        const missing = axes.filter((a) => !referenced.includes(a));
+        const unknown = referenced.filter((a) => !axes.includes(a));
+        if (missing.length) v.push(`${id}: the results artifact "${name}" does not carry matrix axis ${missing.join(', ')}, so the jobs of the matrix upload under one name`);
+        if (unknown.length) v.push(`${id}: the results artifact "${name}" carries matrix.${unknown.join(', ')}, which the job's matrix does not have`);
+        continue;
+      }
       if (named == null) {
         v.push(`${id}: the results artifact "${name}" is not test-results-<job id>-\${{ github.run_attempt }}; the recorder reads the job from that segment`);
       } else if (named !== id) {
@@ -1396,6 +1408,13 @@ const BREAKAGES = [
     delete d.jobs.sync;
     d.jobs.test.needs = d.jobs.test.needs.map((n) => (n === 'sync' ? 'sync-2' : n));
   }, 'results upload names', /sync-2: .*names `sync`, not `sync-2`/],
+  ['a matrix job uploads under the job id alone (its jobs would share one name)', (d) => {
+    job(d, 'sync').strategy = { matrix: { shard: [0, 1] } };
+  }, 'results upload names', /does not carry matrix axis shard/],
+  ['a matrix job names an axis it does not have', (d) => {
+    job(d, 'sync').strategy = { matrix: { shard: [0, 1] } };
+    stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/upload-artifact').with.name = 'test-results-sync-${{ matrix.os }}-${{ github.run_attempt }}';
+  }, 'results upload names', /carries matrix\.os, which the job's matrix does not have/],
   ['an upload name has no job segment', (d) => {
     stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/upload-artifact').with.name = 'test-results-${{ github.run_attempt }}';
   }, 'results upload names', /is not test-results-<job id>/],

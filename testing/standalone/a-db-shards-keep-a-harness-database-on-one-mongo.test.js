@@ -139,7 +139,10 @@ describe('the -db shards keep a harness database on one Mongo', () => {
 
   it('the runner pins each shard\'s children to that shard\'s Mongo through the variable the harness reads', () => {
     const src = stripComments(readFileSync('testing/_init/run-standalone.mjs', 'utf8'));
-    assert.match(src, /YTHRIL_TEST_MONGO_PORT:\s*String\(dbShardPort\(i\)\)/, 'a shard child is not given its own shard\'s port');
+    // A shard child gets the port it is handed, and the sharded run hands each shard its own. A one-shard CI job hands none and
+    // keeps the Mongo the environment already names.
+    assert.match(src, /YTHRIL_TEST_MONGO_PORT:\s*String\(port\)/, 'a shard child is not given the port its shard was handed');
+    assert.match(src, /runShardUnits\(files,\s*i,\s*width,\s*dbShardPort\(i\)/, 'a shard is not handed its own shard\'s port');
     const addr = readFileSync('testing/_shared/test-mongo-address.mjs', 'utf8');
     assert.match(addr, /YTHRIL_TEST_MONGO_PORT/, 'the harness no longer reads the variable the runner sets');
   });
