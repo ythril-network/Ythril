@@ -53,7 +53,7 @@ describe('the tombstone doors share one vocabulary', () => {
     // which is the failure mode a source-reading gate dies of.
     assert.match(apply, /const TombstoneShape = z\.object\(\{/, 'the ingest element schema was not found — re-anchor');
     assert.match(code, /applyPeerTombstones\(/, 'the POST door no longer hands its page to the shared apply — re-anchor');
-    assert.match(code, /listTombstones\(/, 'the GET door\'s read was not found — re-anchor');
+    assert.match(code, /listTombstonesAfterPosition\(/, 'the GET door\'s read was not found — re-anchor');
   });
 
   it('the ingest validates against the TOMBSTONE vocabulary, not the knowledge one', () => {
@@ -72,9 +72,12 @@ describe('the tombstone doors share one vocabulary', () => {
     }
   });
 
-  it('the serving door still DERIVES what it sends, so the two cannot drift apart by one', () => {
-    // If the GET door ever hand-listed its types, this gate would be asserting agreement with a literal.
-    assert.match(code, /TOMBSTONE_TYPES\.map|for \(const t of TOMBSTONE_TYPES/,
-      'the GET door must derive its groups from the tuple, or "both doors agree" stops being checkable');
+  it('the serving door lists NO type, so the two cannot drift apart by one (bundle-81: a page of the position stream, each item with its own type)', () => {
+    // The grouped per-type answer derived its keys from the tuple. The page of the position stream is one read of everything stored, each tombstone
+    // carrying its own `type`: there is no list of types in the GET door to leave one out of, and a hand-written one would be the defect returning.
+    const get = code.slice(code.indexOf("syncTombstonesRouter.get('/tombstones'"), code.indexOf("syncTombstonesRouter.post('/tombstones'"));
+    assert.ok(get.length > 200, 'the GET door was not found — re-anchor');
+    assert.doesNotMatch(get, /TOMBSTONE_TYPES|TOMBSTONE_COLLECTION|'fact'|'entity'|'edge'|'chrono'|'link'/,
+      'the GET door spells a tombstone type: it serves what the stream holds, and a list here is the one that can omit a kind');
   });
 });

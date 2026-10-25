@@ -1,9 +1,9 @@
 /**
- * Where does server code ORDER or RANGE by `seq`? - the one answer, read from the type-checked program.
+ * Where does server code ORDER or RANGE by one field (`seq`, or since bundle-81 `pos`)? - the one answer, read from the type-checked program.
  *
  * ## The question, and why it is not a regex
  *
- * `every-seq-paged-reader-goes-through-the-keyset` used to read four text shapes (`.sort({ seq`, `sort: { seq`, `seq: { $gt`,
+ * `every-seq-paged-reader-goes-through-the-keyset` (now `every-position-paged-reader-goes-through-readAfterPosition`, which asks this module about `pos`) used to read four text shapes (`.sort({ seq`, `sort: { seq`, `seq: { $gt`,
  * `settledSeqRange`) and concluded about EVERY reader. It missed a ternary (`brain/edges.ts`:
  * `.sort(sort ? toMongoSort(sort) : { seq: -1, ... })`) and a constant that reaches `.sort` through a default parameter
  * (`DEFAULT_QUERY_SORT`: declared in `brain/query.ts`, defaulted into `queryBrain`'s `sort`, imported by `mcp/tools/filter.ts` and
@@ -33,7 +33,7 @@
  *
  * - Not a projection finder: a slot is a place a value is ORDERED by, so `readStoredById(coll, ids, { seq: 1 })` never enters. Walking
  *   only ordering slots is what keeps a projection from being read as an ordering.
- * - Not a verdict: whether an ordering is allowed is the gate's question (`every-seq-paged-reader-goes-through-the-keyset`).
+ * - Not a verdict: whether an ordering is allowed is the gate's question (`every-position-paged-reader-goes-through-readAfterPosition`).
  *
  * Lines are from `lineOf` against the original source. `function` is the OUTERMOST named function around the slot.
  */
@@ -41,8 +41,12 @@ import ts from 'typescript';
 import { serverProgram } from '../_shared/server-program.mjs';
 import { lineOf, walkEveryNode, unwrapExpression, outermostFunctionOf, walkOwnCode } from '../_shared/syntax-tree.mjs';
 
-/** The module every seq position is built by. A literal DECLARED here is the allowed origin of an ordering or a range. */
-export const KEYSET_FILE = 'server/src/util/seq-keyset.ts';
+/**
+ * The field being read and the module its position is built by, set by `fieldOrderings` for the length of one (synchronous) walk. A literal DECLARED
+ * in the module is the allowed origin of an ordering or a range. Bundle-81: the walk was written for `seq` and its gate now asks it about `pos` too.
+ */
+let FIELD = 'seq';
+let KEYSET_FILE = 'server/src/util/seq-keyset.ts';
 
 /** Properties and parameters whose value is an ordering. */
 const SORT_PROPERTIES = new Set(['sort', '$sort', 'sortBy']);
@@ -51,7 +55,7 @@ const PASS_NAMES = new Set(['sort', 'sortBy']);
 /** The Mongo reads whose options object carries a `sort`: an unresolved `sort` there is reported, not assumed harmless. */
 const MONGO_READS = new Set(['find', 'findOne', 'aggregate', 'findOneAndUpdate', 'findOneAndDelete', 'findOneAndReplace', 'distinct']);
 const RANGE_OPERATORS = new Set(['$gt', '$gte', '$lt', '$lte', '$not']);
-const SEQ_STRING = /^[+-]?seq(?:\s|:|$)/;
+const fieldString = (text) => new RegExp(`^[+-]?${FIELD}(?:\\s|:|$)`).test(text);
 const MAX_DEPTH = 12;
 
 const { checker, repoPath, serverSources } = serverProgram();
@@ -118,7 +122,7 @@ function resolve(expr, state = { depth: 0, seen: new Set(), via: [] }) {
 
   if (ts.isObjectLiteralExpression(e)) return [analyseObject(e, state)];
   if (ts.isArrayLiteralExpression(e)) return [analyseArray(e, state)];
-  if (ts.isStringLiteralLike(e)) return [{ t: 'str', node: e, hasSeq: SEQ_STRING.test(e.text), unresolved: [], via: state.via }];
+  if (ts.isStringLiteralLike(e)) return [{ t: 'str', node: e, hasSeq: fieldString(e.text), unresolved: [], via: state.via }];
   if (ts.isNumericLiteral(e) || ts.isBigIntLiteral(e) || e.kind === ts.SyntaxKind.TrueKeyword || e.kind === ts.SyntaxKind.FalseKeyword
     || e.kind === ts.SyntaxKind.NullKeyword || ts.isFunctionLike(e) || ts.isPrefixUnaryExpression(e) || ts.isVoidExpression(e)
     || ts.isTypeOfExpression(e) || ts.isClassExpression(e) || ts.isRegularExpressionLiteral(e)) return [{ t: 'ignore', via: state.via }];
@@ -147,7 +151,7 @@ function analyseObject(node, state) {
       if (key === null) out.unresolved.push(`${at(p)}: a computed key the checker cannot read as a string (${p.name.getText().slice(0, 40)})`);
       else {
         out.keys.push(key);
-        if (key === 'seq') out.hasSeq = true;
+        if (key === FIELD) out.hasSeq = true;
       }
     } else if (ts.isSpreadAssignment(p)) {
       for (const r of resolve(p.expression, { depth: state.depth + 1, seen: state.seen, via: [...state.via, `...${p.expression.getText().slice(0, 30)}`] })) {
@@ -186,7 +190,7 @@ function firstIsSeq(arrayNode) {
   const a = strip(arrayNode);
   if (!a || !ts.isArrayLiteralExpression(a) || a.elements.length === 0) return false;
   const first = strip(a.elements[0]);
-  return !!first && ts.isStringLiteralLike(first) && /^[+-]?seq$/.test(first.text);
+  return !!first && ts.isStringLiteralLike(first) && new RegExp(`^[+-]?${FIELD}$`).test(first.text);
 }
 
 function resolveSymbol(node, sym, name, state) {
@@ -368,33 +372,36 @@ function rangesOf(sf) {
         if (k !== null) keys.set(k, p);
       }
     }
-    const seqProp = keys.get('seq');
-    if (seqProp && holdsComparison(seqProp.initializer)) add(seqProp, 'a comparison on seq');
-    else if (seqProp || [...n.properties].some((p) => ts.isShorthandPropertyAssignment(p) && p.name.text === 'seq')) {
+    const seqProp = keys.get(FIELD);
+    if (seqProp && holdsComparison(seqProp.initializer)) add(seqProp, `a comparison on ${FIELD}`);
+    else if (seqProp || [...n.properties].some((p) => ts.isShorthandPropertyAssignment(p) && p.name.text === FIELD)) {
       const idProp = keys.get('_id');
-      if (idProp && holdsComparison(idProp.initializer)) add(idProp, 'a tie page: seq equal and _id compared');
+      if (idProp && holdsComparison(idProp.initializer)) add(idProp, `a tie page: ${FIELD} equal and _id compared`);
     }
     const expr = keys.get('$expr');
     if (expr) {
       let names = false;
-      walkEveryNode(expr.initializer, (m) => { if (ts.isStringLiteralLike(m) && m.text === '$seq') names = true; });
-      if (names) add(expr, '$expr naming $seq');
+      walkEveryNode(expr.initializer, (m) => { if (ts.isStringLiteralLike(m) && m.text === `$${FIELD}`) names = true; });
+      if (names) add(expr, `$expr naming $${FIELD}`);
     }
   });
   return out;
 }
 
-let cached = null;
+const cache = new Map();
 
 /**
- * Every place server code orders or ranges by seq.
+ * Every place server code orders or ranges by `field` (`seq` or `pos`), and the module (`keysetFile`) whose literals are the allowed origin.
  *
  * @returns {{ entries: Array<{ file: string, line: number, function: string, kind: 'ordering'|'range'|'unresolved', origin: string,
  *   literalAt: string, via: string[], slot?: string, why?: string, viaModule?: boolean }>, slotCount: number, sourceCount: number }}
  *   `origin` is the file the literal (or the unresolved thing) is declared in, by the checker's symbol - NOT the file the slot is in.
  */
-export function seqOrderings() {
-  if (cached) return cached;
+export function fieldOrderings(field, keysetFile) {
+  const memo = `${field}@${keysetFile}`;
+  if (cache.has(memo)) return cache.get(memo);
+  FIELD = field;
+  KEYSET_FILE = keysetFile;
   const entries = [];
   const seenKey = new Set();
   let slotCount = 0;
@@ -417,6 +424,7 @@ export function seqOrderings() {
     }
   }
   entries.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
-  cached = { entries, slotCount, sourceCount: sources.length };
-  return cached;
+  const result = { entries, slotCount, sourceCount: sources.length };
+  cache.set(memo, result);
+  return result;
 }

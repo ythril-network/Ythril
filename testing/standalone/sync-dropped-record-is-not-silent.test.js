@@ -125,7 +125,8 @@ describe('the sender reads the body instead of trusting the status', () => {
   it('still advances the watermark — the fix is visibility, not delivery', () => {
     // Holding `lastSeqPushed` back would re-offer a record the peer refuses identically every cycle, stalling
     // the space. This asserts the advance is unconditional on the refusal, so nobody "fixes" it into a stall.
-    const at = sender.indexOf('maxSeqPushed > lastSeqPushed');
+    // bundle-81: the push mark is a position, written where `pushToPeer` persists it (cut at this instance's own cap, `ownPositionMark`).
+    const at = sender.indexOf('own !== null && own > from');
     assert.ok(at > -1, 'anchor missing — re-point this gate');
     /*
      * The condition AND the branch, each bounded by its own closing bracket. The version this replaces read 400

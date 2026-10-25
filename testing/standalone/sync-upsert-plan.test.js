@@ -191,7 +191,10 @@ describe('one accept rule: isNewerCopy', () => {
     for (const [where, body] of [['planArrivals', bodyOf(plan, 'planArrivals')]]) {
       assert.match(body, /isNewerCopy\(/, `${where} no longer asks isNewerCopy`);
     }
-    assert.equal((writer.match(/isNewerCopy\(/g) ?? []).length, 2, 'the writer\'s collapse and read-back do not both ask isNewerCopy');
+    // bundle-81 (decision 55): the read-back of a duplicate key is `sync/duplicate-readback.ts`, which the tombstone apply asks too; it asks isNewerCopy once.
+    assert.equal((writer.match(/isNewerCopy\(/g) ?? []).length, 1, 'the writer\'s collapse does not ask isNewerCopy');
+    assert.match(writer, /readBackDuplicates</, 'the writer\'s read-back of a duplicate is not the shared one');
+    assert.equal((stripComments(readFileSync('server/src/sync/duplicate-readback.ts', 'utf8')).match(/isNewerCopy\(/g) ?? []).length, 1, 'the shared read-back does not ask isNewerCopy');
     // Any `x.seq > y` / `seq > z.seq` left is a second accept rule. The tombstone and counter comparisons are
     // about different things (a deletion's seq, the counter's high-water mark) and are named, not hidden.
     const ALLOWED = /tomb\s*>=\s*doc\.seq|curSeq\s*>\s*tomb|seq\s*>\s*out\.maxReceived|incoming\s*>\s*held/;

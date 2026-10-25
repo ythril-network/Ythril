@@ -23,14 +23,14 @@
  *
  * ## The stub, and why there is none
  *
- * Nothing here needs an embedder: the scan walks records by `seq` and a record with no stored vector is skipped per seed
+ * Nothing here needs an embedder: the scan walks records by position and a record with no stored vector is skipped per seed
  * (`findSimilar` throws `NotFoundError`), which is the cheapest honest stand-in for "the model has not embedded it yet". What the
  * test observes is the CURSOR (`ythril_dupe_scan_state`), which moves past a seed that was asked, and the log.
  *
  * ## What a stall costs
  *
  * `withStalledReads` makes a source document cost a read one sleep, but only for a document that matches the READER's filter; the
- * scanner's batch read is `{ seq in the settled range }` (no `spaceId`: the collection is the space's own, and a constant field would
+ * scanner's batch read is `{ pos in the settled range }` (no `spaceId`: the collection is the space's own, and a constant field would
  * stop the keyset index covering the read), so the hung space is stalled over `seed` documents that match it and the guard reads with
  * that filter (`readerFilter`), built by the keyset module as the scanners build it. The fixture's own default seeds carry no `seq`
  * in range and would cost the scan nothing.
@@ -79,7 +79,8 @@ const SEEDFAIL = (s) => `${s.prefix}-seedfail`;
 const OK = 'scan-ok';
 const ALL = [...SCANNERS.flatMap(s => [FAIL(s), HANG(s), SEEDTO(s), SEEDFAIL(s)]), OK];
 
-const fact = (space, i) => ({ _id: `${space}-f${i}`, spaceId: space, fact: `fact ${i} of ${space}`, seq: i, createdAt: '2025-01-01T00:00:00.000Z' });
+// A scanner reads by POSITION (bundle-81), and a carried row's position is its seq.
+const fact = (space, i) => ({ _id: `${space}-f${i}`, spaceId: space, fact: `fact ${i} of ${space}`, seq: i, pos: i, posAtSeq: i, createdAt: '2025-01-01T00:00:00.000Z' });
 
 describe('a failing or hung space does not stop the scanners', { skip }, () => {
   let door; let restoreBound; let proto; let realFindOne; let StoreTimeout;
@@ -131,7 +132,7 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
       it('a space whose read FAILS is reported once in the shared words, and the space behind it is scanned', { timeout: 60_000 }, async () => {
         const space = FAIL(scanner);
         const db = door.mongo.getDb();
-        await db.collection(`${space}_facts_src`).insertOne({ _id: 'bad', spaceId: space, seq: 1, f: 'not a number' });
+        await db.collection(`${space}_facts_src`).insertOne({ _id: 'bad', spaceId: space, seq: 1, pos: 1, posAtSeq: 1, f: 'not a number' });
         let first; let second;
         try {
           // The stage sits on the SOURCE and the scanner's batch filter on the view: the read throws when the bad document reaches it.
@@ -153,11 +154,13 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
       it('a space whose read HANGS ends at the housekeeping bound, is reported once, and the space behind it is scanned', { timeout: 60_000 }, async () => {
         const space = HANG(scanner);
         const db = door.mongo.getDb();
-        // The scanner's own batch read, built by the function the scanners' reader builds it with (`settledSeqKeysetFilters`,
-        // `util/seq-keyset.ts`, reached by `brain/dupe-scanner.ts` and `brain/contradiction-scanner.ts`), from the cursor a fresh
-        // space starts at: not a copy of what the seeds happen to match.
-        const { settledSeqKeysetFilters } = await import('../../server/dist/util/seq-keyset.js');
-        const readerFilter = (await settledSeqKeysetFilters(space, { seq: 0 })).range;
+        // The scanner's own batch read, built by the function the scanners' reader builds it with (`positionKeysetFilters`,
+        // `util/position-keyset.ts`, reached through `readAfterPosition` by `brain/dupe-scanner.ts` and `brain/contradiction-scanner.ts`), from the cursor a fresh
+        // space starts at and below the settled cap: not a copy of what the seeds happen to match.
+        const { positionKeysetFilters } = await import('../../server/dist/util/position-keyset.js');
+        const { settledPositionCap } = await import('../../server/dist/util/position-clock.js');
+        const { recordPositions } = await import('../../server/dist/sync/record-position-stream.js');
+        const readerFilter = positionKeysetFilters({ pos: 0 }, await settledPositionCap(recordPositions, space)).range;
         // Documents that filter lets through, so each one pays the sleep (the fixture's own default seeds carry no `spaceId`).
         const seed = Array.from({ length: Math.ceil(STALL_MS / STALL_STEP_MS) }, (_, i) => fact(space, i + 1));
         let outcome; let lines;

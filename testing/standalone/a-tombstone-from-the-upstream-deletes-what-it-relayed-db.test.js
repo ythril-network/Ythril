@@ -57,6 +57,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { topologies as allTopologies, peerIsUpstream as peerIsUpstreamOf } from './_network-topologies.mjs';
 import { build, peerToken, ADMIN_TOKEN } from './_push-door.mjs';
 import { openPullDoor, PEER, LATERAL } from './_pull-door.mjs';
+import { positioned } from './_b81b-positions.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -230,8 +231,8 @@ describe('the upstream deletes what it relayed, and nothing else (D-14 = C)', { 
 
   describe('a tombstone stored under the upstream ground', () => {
     // Held as an earlier B-apply left it: issued by the third author, stored via the upstream.
-    const heldViaUpstream = (id) => ({ ...tomb(id, 20, THIRD), storedVia: PEER });
-    const heldPlain = (id) => tomb(id, 20, THIRD);
+    const heldViaUpstream = (id) => positioned({ ...tomb(id, 20, THIRD), storedVia: PEER });
+    const heldPlain = (id) => positioned(tomb(id, 20, THIRD));
     const later = (id) => build.fact(S, id, 10, { author: { instanceId: THIRD, instanceLabel: THIRD } });
 
     it('push: does not refuse a later version of the record delivered by that same upstream', async () => {
@@ -253,7 +254,7 @@ describe('the upstream deletes what it relayed, and nothing else (D-14 = C)', { 
 
     // The deletion the upstream superseded is not served on: a child whose copy this node delivered would otherwise be
     // handed a tombstone for an id whose newer version this node holds, and delete it there.
-    const servedFacts = async () => (await door.pull('/tombstones', { spaceId: S, sinceSeq: '0' })).facts.map(t => t._id);
+    const servedFacts = async () => (await door.pull('/tombstones', { spaceId: S, afterPos: '0' })).items.filter(t => t.type === 'fact').map(t => t._id);
 
     it('pull: the held tombstone is REMOVED when the upstream\'s newer version lands, and is no longer served', async () => {
       await door.coll(S, 'tombstones').insertOne(heldViaUpstream('gone-pull'));
@@ -359,10 +360,10 @@ describe('the upstream deletes what it relayed, and nothing else (D-14 = C)', { 
       await door.coll(S, 'facts').insertMany([fact('d-ok', 3, PEER, undefined), fact('d-no', 3, THIRD, OTHER_PEER)]);
       const mixed = await door.push('/tombstones', { tombstones: [tomb('d-ok', 30, PEER), tomb('d-no', 31, PEER)] },
         { spaceId: S, token: peerToken(PEER) });
-      assert.deepEqual([mixed.code, mixed.body], [200, { applied: 2, refused: 0, declined: 1 }],
+      assert.deepEqual([mixed.code, mixed.body], [200, { applied: 2, refused: 0, declined: 1, positions: 1 }],
         'a tombstone the receiver declined on authority is answered as if it had landed, and the sender prunes it believing so');
       const clean = await door.push('/tombstones', { tombstones: [tomb('never-held', 32, PEER)] }, { spaceId: S, token: peerToken(PEER) });
-      assert.deepEqual(clean.body, { applied: 1, refused: 0 }, 'an absent target is applied-nothing and is never counted as declined');
+      assert.deepEqual(clean.body, { applied: 1, refused: 0, positions: 1 }, 'an absent target is applied-nothing and is never counted as declined');
     });
 
     it('applied is counted by the ground it stood on, and declined by the reason it did not', async () => {

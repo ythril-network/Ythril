@@ -253,8 +253,10 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
       const { authorRef } = await import('../../server/dist/config/author.js');
       const author = who === 'self' ? authorRef() : who === 'peer' ? OTHER_INSTANCE : undefined;
       const _id = linkIdFor(from, 'file', to, 'entity');
+      // A row a write left carries its landing position (bundle-81): the scans read by position, and a row with none is not yet paged. Its position is its seq, a carried row's.
+      const seq = 1_000 + (++linkSeq);
       await door.coll(S, 'links').insertOne({ _id, spaceId: S, from, fromKind: 'file', to, toKind: 'entity', ...(author ? { author } : {}),
-        createdAt, updatedAt: createdAt, seq: 1_000 + (++linkSeq) });
+        createdAt, updatedAt: createdAt, seq, pos: seq, posAtSeq: seq });
       return _id;
     },
     /** {@link links.put} for many sources at once (one insert): `from` is each of `froms`, `to` the same entity. Returns the ids. */
@@ -263,7 +265,7 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
       const { authorRef } = await import('../../server/dist/config/author.js');
       const author = who === 'self' ? authorRef() : who === 'peer' ? OTHER_INSTANCE : undefined;
       const rows = froms.map(from => ({ _id: linkIdFor(from, 'file', to, 'entity'), spaceId: S, from, fromKind: 'file', to, toKind: 'entity',
-        ...(author ? { author } : {}), createdAt: T0, updatedAt: T0, seq: 1_000 + (++linkSeq) }));
+        ...(author ? { author } : {}), createdAt: T0, updatedAt: T0, seq: 1_000 + (++linkSeq) })).map(r => ({ ...r, pos: r.seq, posAtSeq: r.seq }));
       if (rows.length > 0) await door.coll(S, 'links').insertMany(rows);
       return rows.map(r => r._id);
     },

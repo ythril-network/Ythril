@@ -81,6 +81,8 @@ export async function openWireProxy(targetUrl, { mode = '6.0' } = {}) {
       up.end(Buffer.concat(chunks));
     });
   });
+  // own-listener: the engine under test reaches this proxy through the host's private address (`privateHostAddress`, which the SSRF policy admits and
+  // 127.0.0.1 it does not), so it must bind every interface; the sockets a client left open are ended by `close()` below.
   await new Promise(resolve => server.listen(0, '0.0.0.0', resolve));
   const url = `http://${host}:${server.address().port}`;
   return {

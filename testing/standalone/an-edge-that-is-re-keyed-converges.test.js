@@ -239,10 +239,12 @@ describe('the delete has to be one a PEER will actually apply', () => {
      * narrower than the one it replaces and is stated in the docblock.
      */
     const b = body();
-    assert.match(b, /author\?\.instanceId|author\.instanceId/,
-      'the re-key must compare the document author against this instance, or a peer silently keeps both rows');
-    assert.match(b, /getConfig\(\)\.instanceId/, 'it has to know which instance it is');
-    const at = b.search(/author[^\n]*instanceId/);
+    // bundle-81: "authored here" is one predicate (`sync/written-here.ts`, delivery first, then the author), so the re-key asks it and spells neither the
+    // author nor this instance's id (a peer's row that NAMES this instance as author is still the peer's, and stays put).
+    assert.match(b, /isWrittenHere\(existing\)/,
+      'the re-key must ask whether the row was written here, or a peer silently keeps both rows');
+    assert.doesNotMatch(b, /getConfig\(\)\.instanceId|author\??\.instanceId/, 'the re-key spells the question itself: the second implementation of "written here"');
+    const at = b.search(/isWrittenHere\(/);
     assert.ok(at > 0 && at < b.search(/\bdelete(One|Many)\(|removeWithTombstones\(/),
       'the authorship check runs after the delete, so the row is gone before the decision is made');
   });
@@ -251,7 +253,7 @@ describe('the delete has to be one a PEER will actually apply', () => {
     // Not a throw and not a silent no-op: `null` already means "identity unchanged, carry on", and a
     // declined re-key needs exactly the same fallback. A second signal would be a second branch to forget.
     const b = body();
-    const decline = b.slice(b.search(/author[^\n]*instanceId/));
+    const decline = b.slice(b.search(/isWrittenHere\(/));
     assert.match(decline.slice(0, 400), /return null/,
       'declining must return null, which is what both callers already handle');
   });

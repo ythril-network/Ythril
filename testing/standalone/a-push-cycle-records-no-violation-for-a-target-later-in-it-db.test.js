@@ -30,6 +30,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor } from './_pull-door.mjs';
+import { positioned } from './_b81b-positions.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -48,7 +49,7 @@ async function seedLocal(byPart) {
   let top = 0;
   for (const [part, docs] of Object.entries(byPart)) {
     if (docs.length === 0) continue;
-    await door.mongo.col(`${S}_${part}`).insertMany(docs.map(d => ({ ...d })));
+    await door.mongo.col(`${S}_${part}`).insertMany(docs.map(d => positioned(d)));   // a pushed row has a landing position (bundle-81)
     for (const d of docs) top = Math.max(top, d.seq);
   }
   await door.raiseVersionTo(S, top);

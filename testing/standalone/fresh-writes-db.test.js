@@ -55,7 +55,8 @@ const agoIso = (ms) => new Date(NOW - ms).toISOString();
 /** Insert straight into the collection: the scan reads documents, so documents are what it needs. */
 const put = async (id, seq, embedding, ageMs = 1000) => {
   await mongo.col(COLL).insertOne({
-    _id: id, spaceId: SPACE, name: id, type: 'machine', seq,
+    // `pos` is where the record landed (a carried row's position is its seq): the scan reads the NEWEST landings, by position (bundle-81).
+    _id: id, spaceId: SPACE, name: id, type: 'machine', seq, pos: seq, posAtSeq: seq,
     ...(embedding === null ? {} : { embedding }),
     createdAt: agoIso(ageMs), updatedAt: agoIso(ageMs),
   });
@@ -72,7 +73,7 @@ describe('scoring the records the index has not ingested', { skip }, () => {
     fresh = await import('../../server/dist/brain/fresh-writes.js');
     ({ FRESH_WINDOW_MS, FRESH_SCAN_CAP } = fresh);
     ({ atlasVectorScore: score } = await import('../../server/dist/brain/vector-score.js'));
-    await mongo.col(COLL).createIndex({ seq: 1 });
+    await mongo.col(COLL).createIndex({ pos: 1, _id: 1 });
   });
 
   after(async () => {

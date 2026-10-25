@@ -9,6 +9,10 @@
  * or at a stop. A fixture with distinct seqs — which is what every record seeded one by one with `raiseVersionTo` has — can
  * never show it, so this one builds the run on purpose: where it starts, how long it is, and what follows it.
  *
+ * Bundle-81: a record is paged by the POSITION it landed at, and a carried row's position is its seq, so a run of equal seqs is a run of equal
+ * positions: the legacy band, where a cursor has to be a pair. Every document `tieRun` builds carries `pos` and `posAtSeq` for that reason (a row with
+ * none is invisible to a position read), and the names here stay `seq` because the run is still built by the seq the rows share.
+ *
  * ## What it derives and what it declares
  *
  * The families are READ from `REPLICATED_FAMILIES` (floor 6), so a seventh cannot go unchecked; the one thing declared is
@@ -17,6 +21,7 @@
  */
 import assert from 'node:assert/strict';
 import { build } from './_push-door.mjs';
+import { positioned } from './_b81b-positions.mjs';
 
 const MAKE = Object.freeze({
   facts: build.fact, entities: build.entity, chrono: build.chrono, filemeta: build.filemeta, edges: build.edge, links: build.link,
@@ -50,12 +55,13 @@ export function tieRun(family, space, { before, tie, after = 0, extra = {}, tieI
   const pad = (n) => String(n).padStart(5, '0');
   const stem = family.payloadKey === 'filemeta' ? (id) => `notes/${id}.md` : (id) => id;
   const docs = [];
-  for (let s = 1; s <= before; s++) docs.push(family.make(space, stem(`r-${pad(s)}`), s, extra));
+  const make = (id, seq) => positioned(family.make(space, id, seq, extra));
+  for (let s = 1; s <= before; s++) docs.push(make(stem(`r-${pad(s)}`), s));
   const tieSeq = before + 1;
   const names = tieIds ?? Array.from({ length: tie }, (_, k) => `r-${pad(tieSeq)}-${String.fromCharCode(97 + k)}`);
-  const ties = names.map(id => family.make(space, stem(id), tieSeq, extra));
+  const ties = names.map(id => make(stem(id), tieSeq));
   docs.push(...ties);
-  for (let k = 0; k < after; k++) docs.push(family.make(space, stem(`r-${pad(tieSeq + 1 + k)}`), tieSeq + 1 + k, extra));
+  for (let k = 0; k < after; k++) docs.push(make(stem(`r-${pad(tieSeq + 1 + k)}`), tieSeq + 1 + k));
   return { docs, tieSeq, tieIds: ties.map(d => d._id), ids: docs.map(d => d._id) };
 }
 

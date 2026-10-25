@@ -48,12 +48,16 @@ describe('both ends are wired', () => {
   });
   it('the engine subtracts the refused count and makes the cycle partial — without failing the member', () => {
     // The cycle is the engine plus the per-space turn it hands each space to (`sync/space-exchange.ts`, bundle-106 §3.4).
-    const src = ['server/src/sync/engine.ts', 'server/src/sync/space-exchange.ts'].map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
+    // bundle-81: how a member's refusals and catch-up fold into the cycle's status moved beside the engine (`sync/cycle-outcome.ts`, which the frozen engine asks).
+    const src = ['server/src/sync/engine.ts', 'server/src/sync/space-exchange.ts', 'server/src/sync/cycle-outcome.ts'].map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
     // The per-batch subtraction moved with the family push (bundle-52: `pushCollection` -> `pushFamily`, `sync/push-family.ts`).
     const family = stripComments(readFileSync('server/src/sync/push-family.ts', 'utf8'));
     assert.match(family, /pushed \+= batch\.length - r;/);
     assert.match(src, /const refused = refusedTransfers\(pushed\)/);
     assert.doesNotMatch(src, /stoppedEarly\.push\(\.\.\.refusedTransfers/, 'a refusal in the incomplete list fails the member and raises its failure count');
-    assert.match(src, /errors === 0 && refusals === 0 \? 'success'/);
+    assert.match(src, /cycle\.fold\(member, counts, errorMessages\)/, 'the engine no longer folds a member\'s refusals into the cycle');
+    assert.match(src, /if \(counts\.refused\.length > 0\) \{ this\.refusals\+\+;/, 'a refusal no longer makes the cycle partial with the reason');
+    assert.match(src, /errors > 0 \|\| this\.refusals > 0 \|\| this\.catchingUp > 0\) return synced === 0 && members > 0 \? 'failed' : 'partial'/, 'the cycle status no longer reads refusals beside errors');
+    assert.match(src, /return 'success'/);
   });
 });

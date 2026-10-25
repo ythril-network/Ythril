@@ -49,6 +49,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
+import { positioned } from './_b81b-positions.mjs';
 import { IncomingFileMetaDocV569 } from './_fixtures/incoming-file-meta-doc-v5.6.9.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -94,7 +95,8 @@ const removed = (space, keep = {}, extra = {}) => ({
 /** What a publisher KEEPS when it removes the description, its source and the properties: the tags only. */
 const KEEPS_TAGS = { tags: FIRST.tags };
 
-const plant = (space, doc) => door.coll(space, 'files').insertOne({ ...doc });
+// A row a write left carries its landing position (bundle-81): the page serves, and the push reads, what has one.
+const plant = (space, doc) => door.coll(space, 'files').insertOne(positioned({ ...doc }));
 
 /** The authored set as THIS build knows it: the optional keys of the wire schema minus identity and order (plan D3). */
 function authoredSet() {
@@ -126,7 +128,7 @@ const wireOfFiles = () => door.state.pushedRecords
 /** This instance as the PUBLISHER: its row is stored, the peer is a subscriber of `version`, and one cycle runs. */
 async function publish(row, { version } = {}) {
   door.configure({ direction: 'push', ...(version === undefined ? {} : { memberExtra: { version } }) });
-  await door.mongo.col(`${S}_files`).insertOne({ ...row, author: { ...ME } });
+  await door.mongo.col(`${S}_files`).insertOne(positioned({ ...row, author: { ...ME } }));
   await door.raiseVersionTo(S, row.seq);
   await door.sync();
   return wireOfFiles().filter(d => d._id === row._id);

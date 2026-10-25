@@ -74,7 +74,9 @@ const SUPPRESSING = 'muted';     // a type whose schema says suppressEmbeddings:
 const UNSUPPRESSING = 'loud';    // a type whose schema says suppressEmbeddings: false
 const BRIEF = 'brief';           // a type whose schema has its own retention window
 
-let mongo, engine, seqMod, families, recordTypeOf, typeField, peer, peerUrl, logMod, encodeSeqCursor;
+let mongo, engine, seqMod, families, recordTypeOf, typeField, peer, peerUrl, logMod, encodePositionCursor;
+/** The peer's head: above every seq a case serves, below every clock position. */
+const PEER_HEAD = 2 ** 52;
 const coll = (space, c) => mongo.col(`${space}_${c}`);
 
 /** What the fake peer serves: space -> payloadKey -> pages (arrays of items). */
@@ -89,17 +91,20 @@ function startPeer() {
     const send = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
     if (req.method !== 'GET' || !m) return send(404, { error: 'not served by the fake peer' });
     const space = url.searchParams.get('spaceId');
-    if (m[1] === 'tombstones') return send(200, {});
+    // The 6.0 answer (`sync/wire-answer.ts`): one `items` page, complete through a position, with the peer's head. This peer holds carried rows only, so a position is a seq.
+    if (m[1] === 'tombstones') return send(200, { items: [], nextCursor: null, through: PEER_HEAD, head: PEER_HEAD, positions: 1 });
     const pages = served[space]?.[m[1]];
     if (!families.some(f => f.payloadKey === m[1])) return send(404, { error: 'not a family' });
-    // The cursor is the real codec's, naming the LAST item of the page it follows (`util/seq-keyset.ts`): a pager that follows
+    // The cursor is the real codec's, naming the LAST item of the page it follows (`util/position-keyset.ts`): a pager that follows
     // a peer's cursor reads it back, and takes it only when it names the page's last element.
-    const cursorOf = (page) => encodeSeqCursor({ seq: page[page.length - 1].seq, id: page[page.length - 1]._id });
+    const cursorOf = (page) => encodePositionCursor({ pos: page[page.length - 1].seq, id: page[page.length - 1]._id });
     const asked = url.searchParams.get('cursor');
     const at = asked === null ? 0 : (pages ?? []).findIndex(p => cursorOf(p) === asked) + 1;
     if (onServe) await onServe(space, m[1], at);
     const items = pages?.[at] ?? [];
-    send(200, { items, nextCursor: pages && at + 1 < pages.length ? cursorOf(items) : null });
+    const more = pages && at + 1 < pages.length;
+    const last = items.length > 0 ? items[items.length - 1].seq : 0;
+    send(200, { items, nextCursor: more ? cursorOf(items) : null, through: more ? Math.max(0, last - 1) : (items.length > 0 ? last : PEER_HEAD), head: PEER_HEAD, positions: 1 });   // a family with nothing is complete through the head
   });
   // own-listener: binds every interface so the LAN address answers, because the SSRF guards block loopback
   return new Promise(resolve => server.listen(0, '0.0.0.0', () => resolve(server)));
@@ -176,7 +181,7 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
     peer = await startPeer();
     peerUrl = `http://${privateHostAddress()}:${peer.address().port}`;
     ({ REPLICATED_FAMILIES: families } = await import('../../server/dist/sync/replicated-families.js'));
-    ({ encodeSeqCursor } = await import('../../server/dist/util/seq-keyset.js'));
+    ({ encodePositionCursor } = await import('../../server/dist/util/position-keyset.js'));
     const kinds = await import('../../server/dist/config/types-knowledge.js');
     recordTypeOf = Object.fromEntries(families.map(f => [f.collection,
       Object.entries(kinds.RECORD_COLLECTION).find(([, c]) => c === f.collection)?.[0] ?? null]));
@@ -195,7 +200,8 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
-  beforeEach(() => { served = {}; onServe = null; });
+  // A case starts from no mark: a mark is a position of the peer's stream and the previous case's cycles moved it to the peer's head, above every seq this one serves.
+  beforeEach(() => { served = {}; onServe = null; const m = member(); m.lastPosReceived = {}; m.lastPosPushed = {}; });
 
   it('the derivation finds the replicated families and a record type for each brain family', () => {
     assert.ok(families.length >= 6, `only ${families.length} replicated families — the registry moved`);
@@ -333,7 +339,7 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
       Object.assign(proto, originals);
     }
     assert.ok(faults > 0, 'fixture check: the injected fault was never reached — the page was not written');
-    const through = member().lastSeqReceived?.[S.fault] ?? 0;
+    const through = member().lastPosReceived?.[S.fault] ?? 0;
     assert.ok(through < 701, `the watermark moved to ${through}, past a page that never landed`);
     assert.equal(await coll(S.fault, fam.collection).countDocuments({}), 0, 'fixture check: something landed');
 
@@ -348,7 +354,7 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
     const out = await engine.runSyncForPeer(PEER);
     assert.equal(out.errors, 0, JSON.stringify(out));
     assert.equal(await coll(S.fault, fam.collection).countDocuments({}), 2);
-    assert.ok((member().lastSeqReceived?.[S.fault] ?? 0) >= 702, 'the healed page did not move the watermark');
+    assert.ok((member().lastPosReceived?.[S.fault] ?? 0) >= 702, 'the healed page did not move the watermark');
   });
 
   it('D-9: an arrival with no receiver stamp is stamped from its createdAt by THIS instance\'s schema > space', async () => {

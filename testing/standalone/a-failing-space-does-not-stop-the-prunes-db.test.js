@@ -67,7 +67,7 @@ let mongo, candidate, tombstone, signals;
 const iso = (day) => `2026-08-${String(day).padStart(2, '0')}T00:00:00.000Z`;
 /** A finding about two records that do not exist: the pruner removes it. */
 const orphan = (id) => ({ _id: id, type: 'fact', aId: `${id}-a`, bId: `${id}-b`, status: 'open' });
-const recordTombstone = (space, seq) => ({ _id: `${space}-t${seq}`, spaceId: space, type: 'fact', deletedAt: iso(1), instanceId: 'self', seq });
+const recordTombstone = (space, seq) => ({ _id: `${space}-t${seq}`, spaceId: space, type: 'fact', deletedAt: iso(1), instanceId: 'self', seq, pos: seq, posAtSeq: seq });
 const fileTombstone = (space, day) => ({ _id: `${space}-f${day}`, spaceId: space, path: `p/report-${day}.pdf`, deletedAt: iso(day) });
 const idsIn = async (collection) => (await mongo.col(collection).find({}, { projection: { _id: 1 } }).toArray()).map(d => d._id).sort();
 /**

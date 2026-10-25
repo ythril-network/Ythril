@@ -102,7 +102,7 @@ describe('a top-level file named a#b.txt is not a derived row of a (real MongoDB
     // `a` was deleted here (this instance published its tombstone) and nothing stands at it; `a#b.txt` is a live file of its own.
     await acts.seed(OWN);
     await files().insertOne(derivedRow(S, 'a#chunk0', 'a', { createdAt: T0, updatedAt: T0 }));
-    await acts.door.coll(S, 'file_tombstones').insertOne({ _id: randomUUID(), spaceId: S, path: 'a', deletedAt: T0, positionAt: T0, writtenAt: T0, origin: 'own', issuer: SELF });
+    await acts.door.coll(S, 'file_tombstones').insertOne({ _id: randomUUID(), spaceId: S, path: 'a', deletedAt: T0, positionAt: T0, writtenAt: T0, origin: 'own', issuedHere: true, issuer: SELF });
     const own = await acts.links.putMany([OWN], 'e1', 'self');
     const ofA = [await acts.links.put('a', 'e1', 'self'), await acts.links.put('a', 'e2', 'none')];
 

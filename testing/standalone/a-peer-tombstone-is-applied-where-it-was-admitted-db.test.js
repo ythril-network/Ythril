@@ -123,7 +123,7 @@ describe('a peer tombstone is applied where it was admitted, element by element'
         const poison = MAX_INGEST_SEQ + 5;
         const page = [tomb(S, 'p-ok', 5, d.issuer), tomb(S, 'p-poison', name === 'push' ? poison : 6, d.issuer)];
         if (name === 'pull') {
-          door.state.tamper = (body) => ({ ...body, facts: body.facts.map(t => (t._id === 'p-poison' ? { ...t, seq: poison } : t)) });
+          door.state.tamper = (body) => ({ ...body, items: body.items.map(t => (t._id === 'p-poison' ? { ...t, seq: poison } : t)) });   // the 6.0 answer is one `items` page
         }
         const { result, lines } = await door.logsDuring(() => d.deliver(S, page));
         assert.ok(await door.counter(S) < 1000,
@@ -144,7 +144,7 @@ describe('a peer tombstone is applied where it was admitted, element by element'
           assert.equal(result.code, 200, `one malformed element refused the whole page: ${JSON.stringify(result.body)}`);
           assert.deepEqual([result.body.applied, result.body.refused], [2, 1], JSON.stringify(result.body));
         } else {
-          door.state.tamper = (body) => ({ ...body, facts: [body.facts[0], malformed, ...body.facts.slice(1)] });
+          door.state.tamper = (body) => ({ ...body, items: [body.items[0], malformed, ...body.items.slice(1)] });
           await d.deliver(S, page);
         }
         for (const t of page) assert.ok(await stored(S, 'tombstones', t._id), `${t._id} beside the malformed element was not applied`);
@@ -252,7 +252,7 @@ describe('a peer tombstone is applied where it was admitted, element by element'
     it('applied keeps its meaning for an honest page; refused is additive', async () => {
       const res = await door.push('/tombstones', { tombstones: [tomb(S, 'h1', 40, PEER_TOKEN.peerInstanceId),
         tomb(S, 'h2', 41, PEER_TOKEN.peerInstanceId)] }, { spaceId: S });
-      assert.deepEqual([res.code, res.body], [200, { applied: 2, refused: 0 }]);
+      assert.deepEqual([res.code, res.body], [200, { applied: 2, refused: 0, positions: 1 }]);
     });
 
     it('an element of an unknown type answers 400, so the sender holds and re-sends after an upgrade', async () => {

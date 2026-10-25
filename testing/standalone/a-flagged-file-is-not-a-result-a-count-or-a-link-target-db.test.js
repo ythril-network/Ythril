@@ -84,7 +84,7 @@ async function viaRoute(handler, { params = {}, query = {}, body = {} } = {}) {
   return { status: res.code, body: res.body };
 }
 
-const row = (id, extra = {}) => ({ _id: id, spaceId: S, path: id, sizeBytes: 10, tags: [], createdAt: T0, updatedAt: T0, seq: 1, ...extra });
+const row = (id, extra = {}) => ({ _id: id, spaceId: S, path: id, sizeBytes: 10, tags: [], createdAt: T0, updatedAt: T0, seq: 1, pos: 1, posAtSeq: 1, ...extra });
 
 describe('a flagged file is not a result, a count or a link target', { skip }, () => {
   before(async () => {

@@ -127,7 +127,7 @@ describe('a push forks once, within the fan-out cap, on both doors', { skip }, (
             : await door.push('/batch-upsert', { facts: [variant(1)] }, { spaceId: S });
           assert.equal(await forks(), before, 'fixture check: the re-send made a second fork');
           if (via === 'single') {
-            assert.deepEqual([r.code, r.body], [200, { status: 'forked', forkId }],
+            assert.deepEqual([r.code, r.body], [200, { status: 'forked', forkId, positions: 1 }],
               `a re-sent push at the ${cap} cap was answered ${r.code} ${JSON.stringify(r.body)} although its fork ${forkId} `
               + 'is stored: the sender is told a record it delivered was refused');
           } else {

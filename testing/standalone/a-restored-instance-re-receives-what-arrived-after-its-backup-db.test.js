@@ -9,7 +9,7 @@
  * restored instance is silently behind its peers for good.
  *
  * The rule (rev 2): the restore act's completion forgets the RECEIVE marks of the space in every network that carries it
- * (`lastSeqReceived`, `tombstoneRereadAt`, `fileMetaRereadAt`), and KEEPS the send-side marks (`lastSeqPushed`, `lastSeqServed`,
+ * (`lastPosReceived`, `tombstoneRereadAt`, `fileMetaRereadAt`), and KEEPS the send-side marks (`lastPosPushed`, `lastPosServed`,
  * `lastFileTombstoneAckedAt`): clearing what was pushed would re-send restored records whose deletions peers already pruned.
  *
  * ## What is asserted, by identity
@@ -27,7 +27,7 @@
  *
  * ## Seen red
  *
- * On 14005a5c the route restores inline and forgets nothing: `lastSeqReceived` still names the post-backup seq.
+ * On 14005a5c the route restores inline and forgets nothing: `lastPosReceived` still names the post-backup seq.
  *
  * Run: a Mongo the harness accepts, then `node --test testing/standalone/a-restored-instance-re-receives-what-arrived-after-its-backup-db.test.js`
  * (a prior `npm run build` in server/).
@@ -45,11 +45,12 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const SUITE = 'rereceive';
 const S = 'rerecv';
-const RECEIVE = ['lastSeqReceived', 'tombstoneRereadAt', 'fileMetaRereadAt'];
-const KEPT = ['lastSeqPushed', 'lastSeqServed', 'lastFileTombstoneAckedAt'];
-const SENTINEL = { lastSeqPushed: 77, lastSeqServed: 88, lastFileTombstoneAckedAt: '2026-10-01T00:00:00.000Z', tombstoneRereadAt: '2026-10-02T00:00:00.000Z', fileMetaRereadAt: '2026-10-03T00:00:00.000Z' };
+const RECEIVE = ['lastPosReceived', 'tombstoneRereadAt', 'fileMetaRereadAt'];
+const KEPT = ['lastPosPushed', 'lastPosServed', 'lastFileTombstoneAckedAt'];
+const SENTINEL = { lastPosPushed: 77, lastPosServed: 88, lastFileTombstoneAckedAt: '2026-10-01T00:00:00.000Z', tombstoneRereadAt: '2026-10-02T00:00:00.000Z', fileMetaRereadAt: '2026-10-03T00:00:00.000Z' };
 
 let door, mods;
+// The fake peer gives a seeded row its position (a carried row's seq before the first pull, the peer's clock after it: `seedPeerRecords`), bundle-81.
 const fact = (id, seq) => build.fact(S, id, seq, { author: PEER_AUTHOR });
 const stored = (part, id) => door.coll(S, part).findOne({ _id: id });
 
@@ -81,7 +82,7 @@ describe('a restored instance re-receives what arrived after its backup (real Mo
     assert.ok(await stored('facts', 'p2'), 'fixture: the post-backup exchange did not store p2');
     assert.equal(await stored('facts', 'p3'), null, 'fixture: the post-backup tombstone did not delete p3');
     assert.ok(await stored('tombstones', 'p3'), 'fixture: the post-backup tombstone was not stored');
-    const received = door.member().lastSeqReceived?.[S];
+    const received = door.member().lastPosReceived?.[S];
     assert.ok(received >= 3, `fixture: the receive mark did not reach the post-backup seq: ${received}`);
     mods.loader.mutateConfig(cfg => {
       const m = cfg.networks.find(n => n.id === door.NET).members[0];

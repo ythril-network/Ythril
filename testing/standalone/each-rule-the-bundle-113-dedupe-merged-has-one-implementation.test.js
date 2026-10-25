@@ -65,7 +65,9 @@ describe('the links a file delete owes are selected and removed in one place', (
     const remover = bodyOf('server/src/brain/links.ts', 'removeFileLinksThisInstanceWrote');
     assert.ok(callsIn(remover).has('fileLinksThisInstanceWrote'), 'the remover no longer selects through the one author rule');
     assert.ok(callsIn(remover).has('removeWithTombstones'), 'the remover no longer writes a tombstone per removed link');
-    assert.match(textOf('server/src/brain/link-adjacency.ts'), /author: \{ \$exists: false \}/, 'the one rule lost its missing-author clause');
+    // bundle-81: "written here" is ONE predicate (`sync/written-here.ts`, delivery first, then authored here or author-less); the link selection asks it.
+    assert.match(textOf('server/src/brain/link-adjacency.ts'), /writtenHereFilter\(\)/, 'the link selection no longer asks the one written-here predicate');
+    assert.match(textOf('server/src/sync/written-here.ts'), /author: \{ \$exists: false \}/, 'the one rule lost its missing-author clause');
   });
 
   it('no other source that reads the links collection spells the link author test', () => {
@@ -73,7 +75,7 @@ describe('the links a file delete owes are selected and removed in one place', (
     assert.ok(readsLinks.length >= 5, `only ${readsLinks.length} sources read the links collection: the scan reads none`);
     const AUTHOR_TEST = /author\??\.instanceId\s*===|author: \{ \$exists: false \}|'author\.instanceId'\s*:\s*(?:self|authorRef)/;
     const spellers = readsLinks.filter(f => AUTHOR_TEST.test(textOf(f)));
-    assert.deepEqual(spellers, ['server/src/brain/link-adjacency.ts'], 'a source that reads links spells the author test itself: the second copy of "which links are this instance\'s"');
+    assert.deepEqual(spellers, [], 'a source that reads links spells the author test itself: the second copy of "which links are this instance\'s" (ask `writtenHereFilter`, sync/written-here.ts)');
   });
 });
 

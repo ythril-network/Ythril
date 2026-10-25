@@ -48,7 +48,8 @@ const AT_BASE = Object.freeze({
   ],
   notBootSafe: [
     'chrono:seq_1__id_1', 'edges:seq_1__id_1', 'entities:seq_1__id_1', 'facts:seq_1__id_1', 'files:seq_1__id_1', 'links:seq_1__id_1',
-    'tombstones:seq_1__id_1', 'tombstones:type_1_seq_1__id_1', 'edges:_functionalGuard_1',
+    // `tombstones:type_1_seq_1__id_1` (the typed twin) is gone with the grouped per-type answer it served (bundle-81, design rev 8 §3 step 7).
+    'tombstones:seq_1__id_1', 'edges:_functionalGuard_1',
     'chrono:ttl_expireAt', 'chrono:ttl_contentExpireAt', 'edges:ttl_expireAt', 'entities:ttl_expireAt', 'facts:ttl_expireAt',
     'files:ttl_expireAt', 'files:ttl_deletedAt',
   ],

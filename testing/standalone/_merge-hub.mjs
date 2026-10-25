@@ -42,6 +42,7 @@ export function vectorOf(dims, salt = 1) {
  *   case can tell which one a refusal names
  * @returns the ids, the names, the targets each relinked record names, `relinks`, and the highest seq used
  */
+// Every row carries its landing position (a carried row's is its seq): the duplicate scanner that finds a pair reads by position, and a row with none is not paged (bundle-81).
 export async function seedHub({ coll, space, author, edges = 0, links = 0, faces = 0, vectorDims = 0, entityVector, seqFrom = 1,
   names = { survivor: 'Hub', absorbed: 'Hub' } }) {
   let seq = seqFrom;
@@ -49,7 +50,7 @@ export async function seedHub({ coll, space, author, edges = 0, links = 0, faces
   const absorbedId = randomUUID();
   const entity = (_id, name) => ({
     _id, spaceId: space, name, type: 'thing', tags: [], properties: {}, author,
-    createdAt: T0, updatedAt: T0, seq: seq++,
+    createdAt: T0, updatedAt: T0, seq, pos: seq, posAtSeq: seq++,
     ...(entityVector ? { embedding: entityVector, embeddingModel: 'seeded' } : {}),
   });
   // The survivor is the OLDER record (lower seq), which is who the duplicate routes pick under the default policy.
@@ -64,7 +65,7 @@ export async function seedHub({ coll, space, author, edges = 0, links = 0, faces
       edgeTargets.push(to);
       batch.push({
         _id: randomUUID(), spaceId: space, from: absorbedId, to, label: 'rel', tags: [], author,
-        createdAt: T0, updatedAt: T0, seq: seq++,
+        createdAt: T0, updatedAt: T0, seq, pos: seq, posAtSeq: seq++,
         ...(vector ? { embedding: vector, embeddingModel: 'seeded' } : {}),
       });
     }
@@ -78,7 +79,7 @@ export async function seedHub({ coll, space, author, edges = 0, links = 0, faces
       const from = randomUUID();
       linkSources.push(from);
       return { _id: linkIdFor(from, 'fact', absorbedId, 'entity'), spaceId: space, from, fromKind: 'fact',
-        to: absorbedId, toKind: 'entity', author, createdAt: T0, updatedAt: T0, seq: seq++ };
+        to: absorbedId, toKind: 'entity', author, createdAt: T0, updatedAt: T0, seq, pos: seq, posAtSeq: seq++ };
     });
     await coll('links').insertMany(rows, { ordered: false });
   }
@@ -89,7 +90,7 @@ export async function seedHub({ coll, space, author, edges = 0, links = 0, faces
       const _id = `photos/hub-${absorbedId}.jpg#face${i}`;
       faceIds.push(_id);
       return { _id, spaceId: space, path: _id, parentFileId: `photos/hub-${absorbedId}.jpg`, faceEntityId: absorbedId,
-        tags: [], author, createdAt: T0, updatedAt: T0, seq: seq++ };
+        tags: [], author, createdAt: T0, updatedAt: T0, seq, pos: seq, posAtSeq: seq++ };
     });
     await coll('files').insertMany(rows, { ordered: false });
   }

@@ -152,5 +152,7 @@ export async function maxAncestry() {
  */
 export const fileTombstoneRow = (space, p, { issuer, origin = 'own', move, at = '2026-08-01T00:00:00.000Z' } = {}) => ({
   _id: randomUUID(), spaceId: space, path: p, deletedAt: at, positionAt: at, writtenAt: at, origin, issuer,
+  // A tombstone this instance PUBLISHED carries the local mark its writer stamps (`issuedHere`, bundle-81 decision 59): the repair asks that mark, never the `issuer` text.
+  ...(origin === 'own' ? { issuedHere: true } : {}),
   ...(origin === 'relayed' ? { storedVia: issuer } : {}), ...(move ? { move } : {}),
 });

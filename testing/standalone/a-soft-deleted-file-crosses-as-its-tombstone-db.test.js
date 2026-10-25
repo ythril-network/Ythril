@@ -72,7 +72,7 @@ async function seedFile(space, p, { author = ME, seq = SEQ_BEFORE, content = `by
   await files.writeFile(space, p, content);
   await door.mongo.col(`${space}_files`).insertOne({
     _id: p, spaceId: space, path: p, sizeBytes: content.length, tags: ['t'], author: { ...author },
-    createdAt: T_OLD, updatedAt: T_OLD, seq,
+    createdAt: T_OLD, updatedAt: T_OLD, seq, pos: seq, posAtSeq: seq,   // a row a write left has its landing position (bundle-81)
   });
   await door.raiseVersionTo(space, seq);
 }

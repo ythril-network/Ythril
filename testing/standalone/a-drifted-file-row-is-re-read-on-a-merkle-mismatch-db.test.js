@@ -67,7 +67,7 @@ async function driftedRow() {
     tags: ['t'], description: 'd', createdAt: CREATED_AT, updatedAt: AUTHORS_AT, author: PEER_AUTHOR, sizeBytes: 11, sha256: 'a'.repeat(64),
   })]);
   door.state.family = door.serveFamily;
-  door.member().lastSeqReceived = { [S]: WATERMARK };
+  door.member().lastPosReceived = { [S]: WATERMARK };
   return id;
 }
 const updatedAtOf = async (id) => (await files().findOne({ _id: id }))?.updatedAt;
@@ -134,9 +134,10 @@ describe('a drifted file row is re-read on a merkle mismatch (real MongoDB, fake
       await door.sync();
 
       assert.equal(await updatedAtOf(id), AUTHORS_AT, 'the re-read did not converge the drifted row on its author\'s value');
-      assert.equal(door.member().lastSeqReceived[S], WATERMARK,
-        'the re-read moved the receive watermark: a repair is not a position in the stream, and the ordinary pull\'s place must survive it');
-      assert.ok(door.state.familyRequests.some(q => q.family === 'filemeta' && String(q.sinceSeq) === '0'),
+      // The ordinary pull of the same cycle reads to the peer's head and moves the mark there; what the re-read must not do is move it itself, or lower it.
+      assert.ok(door.member().lastPosReceived[S] >= WATERMARK,
+        'the re-read moved the receive mark backwards: a repair is not a position in the stream, and the ordinary pull\'s place must survive it');
+      assert.ok(door.state.familyRequests.some(q => q.family === 'filemeta' && String(q.afterPos) === '0' && q.cursor === undefined),
         'no request read the member\'s file rows from the start');
       assert.equal(mark(), undefined, 'the roots matched after the re-read, so the mark is cleared');
     });
@@ -163,7 +164,7 @@ describe('a drifted file row is re-read on a merkle mismatch (real MongoDB, fake
       door.state.familyRequests.length = 0;
       const second = await door.logsDuring(() => door.sync());
       assert.equal(second.lines.filter(l => /re-?read/i.test(l) && l.includes(S)).length, 0, 'the spent cap was said again on the next cycle');
-      assert.ok(!door.state.familyRequests.some(q => q.family === 'filemeta' && String(q.sinceSeq) === '0'),
+      assert.ok(!door.state.familyRequests.some(q => q.family === 'filemeta' && String(q.afterPos) === '0' && q.cursor === undefined),
         'a spent re-read read from the start again');
     });
   });

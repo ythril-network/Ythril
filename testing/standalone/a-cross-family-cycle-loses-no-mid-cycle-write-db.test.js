@@ -81,12 +81,14 @@ describe('a cross-family pull cycle loses no mid-cycle write', { skip }, () => {
 
       // The write under test: a seq between the two (below the carrier's, so a watermark at the maximum covers it) and a clock
       // position (what a real writer stamps, which is above everything the peer has settled when `first` was read).
-      const mid = peerRecord(first, `p2-${first.payloadKey}-mid`, 20, { pos: Date.now() * 1000 });
+      // The position is taken WHEN THE WRITE LANDS, inside the hook: a position taken at setup is below what the peer settles
+      // when the cycle reads `first`, which no writer can stamp (a stamp is at or above the cap the earlier read saw).
+      const mid = peerRecord(first, `p2-${first.payloadKey}-mid`, 20);
       let injected = false;
       door.state.family = async (req, res, family) => {
         if (family === second.payloadKey && !injected) {
           injected = true;
-          await door.coll(door.peerSide(S), first.collection).insertOne({ ...mid });
+          await door.coll(door.peerSide(S), first.collection).insertOne({ ...mid, pos: Date.now() * 1000 });
         }
         await door.serveFamily(req, res, family);
       };

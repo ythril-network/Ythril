@@ -53,7 +53,8 @@ const FAILURE = 'ythril_housekeeping_space_failures_total';
 const RECORDS = 'ythril_housekeeping_records_failed_total';
 const SKIPPED = 'ythril_interval_tick_skipped_total';
 const QUARANTINED = 'ythril_housekeeping_quarantined_spaces';
-const KINDS = ['failure', 'timeout', 'store_down', 'stalled'];
+// `not_ready` (bundle-81): a space that owes its positions is skipped by a walk and counted, not failed.
+const KINDS = ['failure', 'timeout', 'store_down', 'stalled', 'not_ready'];
 
 const SOURCE = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'server', 'src', 'metrics', 'registry.ts');
 

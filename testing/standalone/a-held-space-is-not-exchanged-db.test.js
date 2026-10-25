@@ -140,7 +140,7 @@ describe('a held space is not exchanged', { skip }, () => {
     assert.deepEqual({ pages: held.pages, tombstones: held.tombstones, manifest: held.manifest, fileTombstones: held.fileTombstones, pushes: held.pushes },
       { pages: 0, tombstones: 0, manifest: 0, fileTombstones: 0, pushes: 0 },
       'this instance applied a wipe of the space and the peer has not concluded it, yet the cycle exchanged it: the peer\'s pre-wipe records and files come back');
-    assert.equal(door.member().lastSeqReceived?.[HELD], undefined, 'a receive watermark was written for a held space');
+    assert.equal(door.member().lastPosReceived?.[HELD], undefined, 'a receive watermark was written for a held space');
   });
 
   it('R6-b: the peer serving the wipe concluded and passed is persisted as evidence and the exchange resumes', async () => {
@@ -235,7 +235,7 @@ describe('a held space is not exchanged', { skip }, () => {
     served = [];
     await cycle();
     assert.ok(requestsFor(HELD).pages > 0 && requestsFor(HELD).manifest > 0, 'the twin failed: the carried space sent no requests');
-    assert.ok(door.member().lastSeqReceived?.[HELD] > 0, 'the twin failed: the carried space\'s receive watermark did not move');
+    assert.ok(door.member().lastPosReceived?.[HELD] > 0, 'the twin failed: the carried space\'s receive watermark did not move');
 
     // The rule: the tick, the relay or an operator's cast applies a passed deletion while the loop is between two spaces. The loop reads the carried spaces
     // once; removeSpaceFromNetwork REPLACES the array on the live config, so the list the loop holds still names the removed space. The removal fires from
@@ -256,7 +256,7 @@ describe('a held space is not exchanged', { skip }, () => {
     assert.ok(removed, 'the scenario is void: the removal never fired');
     assert.ok(!loader.getConfig().networks.find(n => n.id === door.NET).spaces.includes(HELD), 'the scenario is void: the space is still carried');
     assert.equal(requestsFor(HELD).total, 0, 'the loop kept exchanging a space removed from the network between two turns (it iterates the list it read at the start)');
-    assert.equal(door.member().lastSeqReceived?.[HELD], undefined, 'a receive watermark was written back for a removed space, after the removal cleared them');
+    assert.equal(door.member().lastPosReceived?.[HELD], undefined, 'a receive watermark was written back for a removed space, after the removal cleared them');
     assert.ok(requestsFor(FREE).pages > 0, 'the space still carried was not exchanged');
   });
 });

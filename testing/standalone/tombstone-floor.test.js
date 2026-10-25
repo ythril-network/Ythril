@@ -27,13 +27,13 @@ import { memberWatermarks } from '../_shared/member-watermarks.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-let tombstoneFloor, tombstoneFloorForSpace, foldServedSeq, peerTokensReaching, membersServing, applyServedSeq;
+let tombstoneFloor, tombstoneFloorForSpace, foldServedPosition, peerTokensReaching, membersServing, applyServedPosition;
 
 /** Repo root — vitest-style `import.meta.url` URL building is not portable here, and this file is run by node. */
 const ROOT = process.cwd();
 
 before(async () => {
-  ({ tombstoneFloor, tombstoneFloorForSpace, foldServedSeq, peerTokensReaching, membersServing, applyServedSeq } =
+  ({ tombstoneFloor, tombstoneFloorForSpace, foldServedPosition, peerTokensReaching, membersServing, applyServedPosition } =
     await import('../../server/dist/sync/served-watermark.js'));
 });
 
@@ -41,7 +41,7 @@ const SPACE = 'kb';
 
 /** A member that has pulled up to `seq`. */
 const served = (instanceId, seq, spaceId = SPACE) => ({
-  instanceId, label: instanceId, lastSeqServed: { [spaceId]: seq },
+  instanceId, label: instanceId, lastPosServed: { [spaceId]: seq },
 });
 
 describe('tombstone floor — when a deletion record may be dropped', () => {
@@ -79,14 +79,14 @@ describe('tombstone floor — when a deletion record may be dropped', () => {
   });
 
   it('a record for a DIFFERENT space does not count as this space', () => {
-    const f = tombstoneFloor([{ instanceId: 'a', lastSeqServed: { other: 5_000 } }], SPACE);
+    const f = tombstoneFloor([{ instanceId: 'a', lastPosServed: { other: 5_000 } }], SPACE);
     assert.equal(f.prune, false);
     assert.equal(f.reason, 'member-never-pulled');
   });
 
   it('rejects a non-numeric or non-finite record instead of coercing it', () => {
     for (const bad of [undefined, null, NaN, Infinity, '900', {}]) {
-      const f = tombstoneFloor([{ instanceId: 'a', lastSeqServed: { [SPACE]: bad } }], SPACE);
+      const f = tombstoneFloor([{ instanceId: 'a', lastPosServed: { [SPACE]: bad } }], SPACE);
       assert.equal(f.prune, false, `${String(bad)} was treated as a position`);
     }
   });
@@ -247,51 +247,51 @@ describe('recording where a peer has been served', () => {
 
   it('records the position for the member that pulled', () => {
     const c = cfg();
-    assert.equal(applyServedSeq(c, 'p1', SPACE, 400), true);
-    assert.equal(c.networks[0].members[0].lastSeqServed[SPACE], 400);
+    assert.equal(applyServedPosition(c, 'p1', SPACE, 400), true);
+    assert.equal(c.networks[0].members[0].lastPosServed[SPACE], 400);
   });
 
   it('records nothing for a caller with no peer identity', () => {
     // An admin token, the UI, a manual curl. Treating a local read as a peer having caught up is exactly how a
     // tombstone a real peer still needs would get dropped.
     const c = cfg();
-    assert.equal(applyServedSeq(c, undefined, SPACE, 400), false);
-    assert.equal(c.networks[0].members[0].lastSeqServed, undefined);
+    assert.equal(applyServedPosition(c, undefined, SPACE, 400), false);
+    assert.equal(c.networks[0].members[0].lastPosServed, undefined);
   });
 
   it('records nothing for a peer we do not list as a member', () => {
     const c = cfg();
-    assert.equal(applyServedSeq(c, 'stranger', SPACE, 400), false);
+    assert.equal(applyServedPosition(c, 'stranger', SPACE, 400), false);
   });
 
   it('records nothing for a space the network does not carry', () => {
     const c = cfg();
-    assert.equal(applyServedSeq(c, 'p1', 'elsewhere', 400), false);
-    assert.equal(c.networks[0].members[0].lastSeqServed, undefined);
+    assert.equal(applyServedPosition(c, 'p1', 'elsewhere', 400), false);
+    assert.equal(c.networks[0].members[0].lastPosServed, undefined);
   });
 
   it('reports no change when the value would not move — so the config is not rewritten per request', () => {
     // This runs on the sync hot path. A write on every pull would rewrite config.json for nothing.
     const c = cfg();
-    applyServedSeq(c, 'p1', SPACE, 400);
-    assert.equal(applyServedSeq(c, 'p1', SPACE, 400), false);
-    assert.equal(applyServedSeq(c, 'p1', SPACE, 399), false);
-    assert.equal(c.networks[0].members[0].lastSeqServed[SPACE], 400);
+    applyServedPosition(c, 'p1', SPACE, 400);
+    assert.equal(applyServedPosition(c, 'p1', SPACE, 400), false);
+    assert.equal(applyServedPosition(c, 'p1', SPACE, 399), false);
+    assert.equal(c.networks[0].members[0].lastPosServed[SPACE], 400);
   });
 
   it('records the same member in every network that carries the space', () => {
     const c = cfg();
     c.networks.push({ id: 'n2', spaces: [SPACE], members: [{ instanceId: 'p1', label: 'p1' }] });
-    assert.equal(applyServedSeq(c, 'p1', SPACE, 12), true);
-    assert.equal(c.networks[1].members[0].lastSeqServed[SPACE], 12);
+    assert.equal(applyServedPosition(c, 'p1', SPACE, 12), true);
+    assert.equal(c.networks[1].members[0].lastPosServed[SPACE], 12);
   });
 
   it('keeps other spaces\' positions when one advances', () => {
     const c = cfg();
     c.networks[0].spaces.push('second');
-    applyServedSeq(c, 'p1', SPACE, 10);
-    applyServedSeq(c, 'p1', 'second', 99);
-    assert.deepEqual(c.networks[0].members[0].lastSeqServed, { [SPACE]: 10, second: 99 });
+    applyServedPosition(c, 'p1', SPACE, 10);
+    applyServedPosition(c, 'p1', 'second', 99);
+    assert.deepEqual(c.networks[0].members[0].lastPosServed, { [SPACE]: 10, second: 99 });
   });
 });
 
@@ -302,15 +302,16 @@ describe('the pull handler is actually wired to record it', () => {
   const src = readFileSync(join(ROOT, 'server/src/api/sync/tombstones.ts'), 'utf8');
 
   it('the tombstone GET records the served position, keyed by the authenticated peer', () => {
-    assert.match(src, /recordServedSeq\(\s*peerBoundTo\(/,
-      'GET /api/sync/tombstones no longer records lastSeqServed, so the prune floor can never rise');
+    // bundle-81: recorded as a position, cut at this instance's own cap (`recordServedPosition` -> `ownPositionMark`), and awaited (it never throws).
+    assert.match(src, /recordServedPosition\(\s*peerBoundTo\(/,
+      'GET /api/sync/tombstones no longer records lastPosServed, so the prune floor can never rise');
   });
 
   it('records AFTER the tombstones are read', () => {
     // Ordering is the claim that a bookkeeping failure cannot cost the peer its tombstones.
-    const read = src.indexOf('listTombstones(spaceId');
-    const record = src.indexOf('recordServedSeq(');
-    assert.ok(read > 0 && record > read, `listTombstones at ${read}, recordServedSeq at ${record}`);
+    const read = src.indexOf('listTombstonesAfterPosition(spaceId');
+    const record = src.indexOf('recordServedPosition(');
+    assert.ok(read > 0 && record > read, `listTombstonesAfterPosition at ${read}, recordServedPosition at ${record}`);
   });
 
   it('the space rename carries this watermark, because it carries every one of them', async () => {
@@ -334,29 +335,29 @@ describe('the pull handler is actually wired to record it', () => {
     moveEveryMark({ members: [{ instanceId: 'm', ...carried }], pendingRounds: [] }, 'old', 'new');
     assert.deepEqual(PER_SPACE_WATERMARKS.filter(k => carried[k].new !== 1 || 'old' in carried[k]), [],
       'the rename carries its watermarks by name again, so the next one added is carried by nobody');
-    assert.ok(memberWatermarks().includes('lastSeqServed'),
-      'lastSeqServed is no longer a per-space map on NetworkMember — this floor has moved, re-anchor here');
+    assert.ok(memberWatermarks().includes('lastPosServed'),
+      'lastPosServed is no longer a per-space map on NetworkMember — this floor has moved, re-anchor here');
   });
 });
 
 describe('the served watermark only ever moves forward', () => {
   it('accepts a higher position', () => {
-    assert.equal(foldServedSeq(10, 40), 40);
-    assert.equal(foldServedSeq(undefined, 1), 1);
+    assert.equal(foldServedPosition(10, 40), 40);
+    assert.equal(foldServedPosition(undefined, 1), 1);
   });
 
   it('refuses to go BACKWARDS', () => {
     // A peer legitimately re-requests from an older position — a retry, a restarted pull, a peer that lost its
     // own watermark. Taking that at face value drops the floor and re-serves tombstones we already dropped.
-    assert.equal(foldServedSeq(500, 20), null);
-    assert.equal(foldServedSeq(500, 500), null, 'an unchanged value must not trigger a config write');
+    assert.equal(foldServedPosition(500, 20), null);
+    assert.equal(foldServedPosition(500, 500), null, 'an unchanged value must not trigger a config write');
   });
 
   it('refuses a malformed value instead of poisoning the record', () => {
     // `sinceSeq` is a query-string integer from a remote caller. `parseInt('abc')` is NaN, which compares false
     // against everything — stored, it would make the member look permanently un-advanceable.
     for (const bad of [NaN, Infinity, -1, 0, 1.5]) {
-      assert.equal(foldServedSeq(10, bad), null, `${String(bad)} was accepted`);
+      assert.equal(foldServedPosition(10, bad), null, `${String(bad)} was accepted`);
     }
   });
 });

@@ -64,7 +64,17 @@ describe('the push door answers as it did (characterization, green before Q-107 
   after(async () => { await door?.close(); });
   beforeEach(async () => { await door.wipe(S); await door.wipe(SCHEMAED); });
 
-  const single = (route, body, space = S) => door.push(route, body, { spaceId: space });
+  /**
+   * Every 2xx a 6.0 push door answers carries `positions: 1` (`sync/wire-answer.ts`, bundle-81 decision 23): ADDED to the body this file pins, never
+   * changing a word of it. It is asserted here once, for every answer, and taken off, so each literal below is still the body the door always answered.
+   */
+  const unstamped = (r) => {
+    if (r.code >= 200 && r.code < 300) { assert.equal(r.body?.positions, 1, `a ${r.code} push answer says it pages by position: ${JSON.stringify(r.body)}`); const { positions, ...rest } = r.body; void positions; return { ...r, body: rest }; }
+    assert.equal(r.body?.positions, undefined, 'a refusal carries no stamp');
+    return r;
+  };
+  const pushed = async (route, body, opts) => unstamped(await door.push(route, body, opts));
+  const single = (route, body, space = S) => pushed(route, body, { spaceId: space });
 
   describe('POST /facts', () => {
     it('a new id is inserted, stored at the sender\'s seq', async () => {
@@ -218,17 +228,17 @@ describe('the push door answers as it did (characterization, green before Q-107 
     it('answers applied with the count it admitted and refused with the rest; an unknown type is a 400', async () => {
       // Bundle-46 (plan row 8): `refused` is additive, and a malformed element is refused on its own rather than
       // refusing the page. An element of a type this receiver does not know (a newer peer's) still answers 400.
-      const ok = await door.push('/tombstones', { tombstones: [build.tombstone(S, 'x', 'fact', 3)] }, { spaceId: S });
+      const ok = await pushed('/tombstones', { tombstones: [build.tombstone(S, 'x', 'fact', 3)] }, { spaceId: S });
       assert.deepEqual([ok.code, ok.body], [200, { applied: 1, refused: 0 }]);
-      const bad = await door.push('/tombstones', { tombstones: [{ _id: 'y' }] }, { spaceId: S });
+      const bad = await pushed('/tombstones', { tombstones: [{ _id: 'y' }] }, { spaceId: S });
       assert.deepEqual([bad.code, bad.body], [200, { applied: 0, refused: 1 }]);
-      const newer = await door.push('/tombstones', { tombstones: [build.tombstone(S, 'z', 'a-newer-type', 4)] }, { spaceId: S });
+      const newer = await pushed('/tombstones', { tombstones: [build.tombstone(S, 'z', 'a-newer-type', 4)] }, { spaceId: S });
       assert.deepEqual([newer.code, newer.body], [400, { error: 'Invalid tombstone format' }]);
     });
   });
 
   describe('P2: batch-upsert in-page outcomes, as sequential processing counts them', () => {
-    const batch = (body) => door.push('/batch-upsert', body, { spaceId: S });
+    const batch = (body) => pushed('/batch-upsert', body, { spaceId: S });
     const zeroFacts = { inserted: 0, updated: 0, forked: 0, skipped: 0, forkDepthRefused: 0, tombstoned: 0, schemaViolations: 0, rejected: 0 };
     const zeroEnt = { upserted: 0, skipped: 0, tombstoned: 0, schemaViolations: 0, rejected: 0 };
     const zeroEdge = { ...zeroEnt, duplicateTriplets: 0 };

@@ -111,7 +111,9 @@ describe('a tombstone-only cycle moves the marks', { skip }, () => {
       `lastPosReceived is ${readMark(door, 'received', S)}: a tombstone-only cycle left the mark at or below the tombstone's position ${TOMBSTONE_SEQ}`);
 
     // Positive control: what the peer writes after the tombstone-only cycle is pulled, by id, and the tombstone is not pulled with it.
-    const F = positioned(build.fact(S, 'q394-pull-f', RECORD_SEQ, { author: PEER_AUTHOR }));
+    // A clock position, taken now: what a real writer stamps after the cycle (at or above the cap the cycle read). A fixture at the legacy position
+    // RECORD_SEQ is below the peer's settled cap and is no write a peer can make after it.
+    const F = positioned(build.fact(S, 'q394-pull-f', RECORD_SEQ, { author: PEER_AUTHOR }), { pos: Date.now() * 1000 });
     await door.seedPeerRecords(S, 'facts', [F]);
     const third = await cycle();
     assert.ok(await door.coll(S, 'facts').findOne({ _id: F._id }), 'positive control: the record the peer wrote after the cycle was not pulled');
@@ -134,7 +136,8 @@ describe('a tombstone-only cycle moves the marks', { skip }, () => {
       `lastPosPushed is ${readMark(door, 'pushed', S)}: a tombstone-only cycle left the mark at or below the tombstone's position ${TOMBSTONE_SEQ}`);
 
     // Positive control: a record written here after the tombstone-only cycle is sent, identified by id, and the tombstone is not.
-    const F = positioned(build.fact(S, 'q394-push-f', RECORD_SEQ, { author: ME }), { writtenHere: true });
+    // A clock position, taken now (see the pull case): below the cap the cycle read it would be behind the mark no writer can put a record behind.
+    const F = positioned(build.fact(S, 'q394-push-f', RECORD_SEQ, { author: ME }), { writtenHere: true, pos: Date.now() * 1000 });
     await door.coll(S, 'facts').insertOne({ ...F });
     await door.raiseVersionTo(S, RECORD_SEQ);
     const third = await cycle();

@@ -145,9 +145,10 @@ describe('an arriving record that breaks the schema, as push, pull and import re
           const bad = await door.push(f.single, f.bad(space, `${name}-bad`, 5), at(space));
           assert.equal(bad.code, 200, JSON.stringify(bad.body));
           // bundle-23: R6-9 Q-93 (an off space records nothing, so no rows) — was the rows in every mode, off included
-          assert.deepEqual(bad.body, mode === 'off' ? { status: f.statusOnSingle } : { status: f.statusOnSingle, schemaViolations: [f.row] });
+          // Every 2xx push answer of a 6.0 door carries `positions: 1` (bundle-81, `sync/wire-answer.ts`), ADDED to the body this file pins.
+          assert.deepEqual(bad.body, mode === 'off' ? { status: f.statusOnSingle, positions: 1 } : { status: f.statusOnSingle, schemaViolations: [f.row], positions: 1 });
           const good = await door.push(f.single, f.ok(space, `${name}-ok`, 6), at(space));
-          assert.deepEqual(good.body, { status: f.statusOnSingle }, 'a conforming document was reported');
+          assert.deepEqual(good.body, { status: f.statusOnSingle, positions: 1 }, 'a conforming document was reported');
           assert.equal(await door.coll(space, f.collection).countDocuments({ _id: `${name}-bad` }), 1, 'a violating document was not stored');
         });
       }
@@ -160,7 +161,7 @@ describe('an arriving record that breaks the schema, as push, pull and import re
         const space = spaceOf('strict');
         door.state.records[space] = { [f.key]: [f.bad(space, `${name}-pulled-bad`, 20), f.ok(space, `${name}-pulled-ok`, 21)] };
         const { result, lines } = await door.logsDuring(() => door.sync());
-        assert.deepEqual(result, { networksSynced: 1, errors: 0, notFound: false });
+        assert.deepEqual(result, { networksSynced: 1, errors: 0, refused: 0, notFound: false });
         assert.deepEqual(ids(await door.coll(space, f.collection).find({}).toArray()), [`${name}-pulled-bad`, `${name}-pulled-ok`].sort(),
           'a pulled violating document was not stored');
         // bundle-23: R6-9 Q-93 (a pulled record is recorded: one warnOnce line per (space, peer) per window, by names and counts, never values) — was no line.

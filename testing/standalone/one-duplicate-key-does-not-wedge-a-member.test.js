@@ -52,7 +52,8 @@ const ARRIVALS = 'server/src/sync/arrivals.ts';
 const ENGINE = 'server/src/sync/engine.ts';
 /** Where a pulled family's page is accepted and its failure caught (bundle-52: out of the engine, into the per-family pull). */
 const PULL = 'server/src/sync/pull-family.ts';
-const PAGER = 'server/src/sync/seq-run-pager.ts';
+// bundle-81: the pager pages by position (`sync/position-run-pager.ts`, the successor of `seq-run-pager.ts`).
+const PAGER = 'server/src/sync/position-run-pager.ts';
 const writerSrc = stripComments(readFileSync(ARRIVALS, 'utf8'));
 const engine = stripComments(readFileSync(ENGINE, 'utf8'));
 const pull = stripComments(readFileSync(PULL, 'utf8'));
@@ -83,7 +84,8 @@ describe('one duplicate key does not wedge a member', () => {
       'the bulkWrite is unguarded, so a duplicate key escapes the writer');
     assert.match(body, /code === DUPLICATE_KEY\)\s*dupes\.push\(d\)/,
       'a duplicate is not set apart from the other failures, so it cannot be answered as the record it is');
-    assert.match(body, /readStoredById<Doc>\(collName, dupes\.map/,
+    // Re-pointed for bundle-81 (decision 55): the read-back of a duplicate is `sync/duplicate-readback.ts`, which the tombstone apply asks too.
+    assert.match(body, /readBackDuplicates<Doc, Doc>\(collName, dupes/,
       'a duplicate is not read back, so a newer stored copy cannot be told from a unique-index collision');
     assert.match(body, /warnArrivalsNotStored\([^;]*out\.duplicates\)/,
       'a duplicate handled silently is the dropped-record defect again: report it with the ids');
@@ -136,14 +138,15 @@ describe('one duplicate key does not wedge a member', () => {
     // handed. Both halves, each anchor found first.
     const write = pull.search(/=\s*\(?await acceptArrivingPage\(/);
     assert.ok(write > 0, `${PULL} no longer writes a pulled page through the page accept — re-point this gate`);
-    const end = pull.indexOf('for (const [i, doc] of docs.entries())', write);
+    const end = pull.indexOf('for (const verdict of written.verdicts)', write);
     assert.ok(end > write, `${PULL}: the verdict loop after the page write is gone — re-point this gate`);
     const after = pull.slice(write, end);
-    assert.match(after, /catch \(err\) \{\s*\n\s*return `a record write failed[\s\S]*?\}\s*$/,
+    assert.match(after, /catch \(err\) \{\s*\n\s*(?:if \(isPositionsBuilding\(err\)\) throw err;\s*\n\s*)?return `a record write failed[\s\S]*?\}\s*$/,
       'a failed page write must be caught in the transfer — and handed back as a record-write failure that stops it, '
       + 'not rethrown into the member-level catch, which counts it toward PEER UNREACHABLE');
-    assert.doesNotMatch(after, /\bthrow\b/, 'the page-write catch rethrows');
-    const refusal = pager.search(/const refusal = await o\.deliver\(fresh\);/);
+    // The one rethrow is a space that owes its positions: that is the member's HOLD (the turn catches it), never a failure to count.
+    assert.doesNotMatch(after.replace('if (isPositionsBuilding(err)) throw err;', ''), /\bthrow\b/, 'the page-write catch rethrows');
+    const refusal = pager.search(/const refusal = await o\.deliver\(page\.items\);/);
     assert.notEqual(refusal, -1, `${PAGER} no longer asks \`deliver\` for a refusal — re-point this gate`);
     const refusalAt = pager.indexOf('if (refusal !== null)', refusal);
     assert.notEqual(refusalAt, -1, `${PAGER} no longer checks what \`deliver\` handed back — re-point this gate`);

@@ -3,7 +3,7 @@
  *
  * ## The defect this holds
  *
- * A network member carries six `spaceId -> position` maps (`PER_SPACE_WATERMARKS`). Forgetting them for a space (a wipe, a leave, now a
+ * A network member carries nine `spaceId -> position` maps (`PER_SPACE_WATERMARKS`: six, and the three 5.6 marks kept frozen for a rollback). Forgetting them for a space (a wipe, a leave, now a
  * restore) and carrying them to a new id (a rename) is ONE loop, `eachMemberMarkOf` in `sync/receive-marks.ts`. A second loop over the same
  * maps is the defect this repo produces most: `resetStaleWatermarksIfNeeded` (`util/seq.ts`) walks the list itself and visits
  * `pendingRounds[].pendingMember` by hand, which the shared loop does not, so a wipe forgets every member's marks and leaves the ones a
@@ -127,6 +127,8 @@ describe('the loop visits every member the config holds', () => {
   const move = receiveMarks.moveEveryMark ?? receiveMarks.moveReceiveMarks;
   const marked = (instanceId) => ({
     instanceId,
+    // bundle-81: the 6.0 position marks, and the three 5.6 marks kept frozen for a rollback (`ROLLBACK_MARKS`): all nine are per-space maps the loop visits.
+    lastPosReceived: { s: 5, other: 1 }, lastPosPushed: { s: 7, other: 1 }, lastPosServed: { s: 6, other: 1 },
     lastSeqReceived: { s: 5, other: 1 }, lastSeqPushed: { s: 7, other: 1 }, lastSeqServed: { s: 6, other: 1 },
     lastFileTombstoneAckedAt: { s: '2026-01-01T00:00:00.000Z', other: 'x' }, tombstoneRereadAt: { s: 'done', other: 'done' },
     fileMetaRereadAt: { s: 'done', other: 'done' },

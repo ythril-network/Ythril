@@ -1,31 +1,29 @@
 /**
- * When the seq counters are wiped, EVERY watermark measured against them is cleared — not one of the four.
+ * When the counters are wiped, a counter wipe forgets only the marks that say what was RECEIVED (bundle-81, design rev 8 section 3a).
  *
- * ## The defect
+ * ## The state, and the rule it was written for
  *
- * `resetStaleWatermarksIfNeeded` exists for a real and reachable state: `docker compose down -v` wipes the
- * MongoDB volume while `config.json` survives on a host bind-mount. The counter restarts at 1; the watermarks in
- * the config still describe a history of numbers that are about to be handed to entirely different records.
+ * `forgetWhatWasReceivedAfterCounterWipe` (`util/seq.ts`, once `resetStaleWatermarksIfNeeded`) exists for a real and reachable state:
+ * `docker compose down -v` wipes the MongoDB volume while `config.json` survives on a host bind-mount. The records are gone; the marks in the
+ * config still say they were received.
  *
- * It cleared `lastSeqReceived` and left the other three, and they fail in different directions:
+ * Until bundle-81 EVERY mark was a seq of this instance's counter, so the counter restarting at 1 made every one of them a lie and the reset had to
+ * clear all of them (it once cleared one of four, and the other three failed in different directions: a stale-high `lastSeqPushed` never sent our
+ * new records, a stale-high `lastSeqServed` pruned tombstones a peer never took). The marks are positions now, stamped from a clock that is seeded
+ * from the store, so:
  *
- * | watermark | stale-high costs |
+ * | mark | after a wipe |
  * |---|---|
- * | `lastSeqReceived` | we pull `sinceSeq=47` and silently miss the peer's 1..47 — the one it was written for |
- * | `lastSeqPushed` | we push `seq > 47` and NEVER send our own new 1..47 |
- * | `lastSeqServed` | we believe a peer applied deletions it has not, and prune the tombstones |
- * | `lastFileTombstoneAckedAt` | the same for files: prune, and a deleted file comes back from the peer |
+ * | `lastPosReceived`, `tombstoneRereadAt`, `fileMetaRereadAt` (`RECEIVE_MARKS`) | a lie: the peer must send it all again |
+ * | `lastPosPushed`, `lastPosServed`, `lastFileTombstoneAckedAt` (`KEPT_ON_RESTORE`) | true: the next position is above them, and a mark that is too low costs a re-send, never a miss |
+ * | `lastSeqReceived`, `lastSeqPushed`, `lastSeqServed` (`ROLLBACK_MARKS`) | not read by 6.0, never touched: a rollback needs them as they were |
  *
- * The second is the same defect pointing the other way, and it is the worse one to diagnose: the sender's cycles
- * complete normally, because `seq > 47` genuinely matches nothing. A healthy idle cycle and a permanent failure
- * to deliver look identical from outside — which is the shape X-20 has been chasing.
+ * ## Why this is asserted from the classification and not from a list
  *
- * ## Why this is asserted as ALL-OR-NONE
- *
- * `two-surfaces-one-rule-weaker-version` is the lesson: a gate that checks "the reset handles
- * `lastSeqReceived`" passes on exactly the code that had the bug. So this derives the field list from the member
- * TYPE — every `spaceId -> position` map on a network member — and requires the reset to cover all of them. A
- * fifth watermark added tomorrow fails this test until somebody decides whether it is stale on a wipe.
+ * A gate that checks "the reset handles `lastPosReceived`" passes on exactly the code that forgot the others. So the reset's list is the SAME
+ * declared list a restore forgets (`RECEIVE_MARKS`), `receive-marks-and-kept-marks-classify-every-mark` holds that every member mark is in exactly one
+ * of the three lists, and this asserts the reset walks the one loop with that list (so a pending member of a join round in flight is visited), says
+ * what it forgot, and still fires only when the counters are gone.
  *
  * Run: node --test testing/standalone/counter-wipe-clears-every-watermark.test.js
  */
@@ -37,108 +35,74 @@ import { bodyOf } from './_structural-window.mjs';
 import { memberWatermarks } from '../_shared/member-watermarks.mjs';
 
 const seqSrc = stripComments(readFileSync('server/src/util/seq.ts', 'utf8'));
-const typesSrc = stripComments(readFileSync('server/src/config/types-networks.ts', 'utf8'));
-
-/**
- * Every per-space position map declared on `NetworkMember`, read from the type.
- *
- * Derived rather than listed, because a hand-written list is the thing that produced the bug: the reset's author
- * knew about one field and there was nothing to tell them about the others.
- *
- * The derivation itself moved to `testing/_shared/member-watermarks.mjs` when a SECOND gate needed the same
- * question — the rename gate, which asks whether every one of these is carried across. Two copies of one
- * regex over one interface is the defect this repo produces most, one level up from the bug below.
- */
-const memberWatermarkFields = () => memberWatermarks();
+const FUNCTION = 'forgetWhatWasReceivedAfterCounterWipe';
 
 describe('the field list this reset is built from', () => {
   it('finds the per-space position maps on NetworkMember', () => {
-    // A scan that found none would make every assertion below vacuous — the failure this whole suite keeps
-    // rediscovering.
-    const fields = memberWatermarkFields();
-    assert.ok(fields.length >= 4,
-      `expected at least four per-space watermark maps on NetworkMember, found ${fields.length}: ${fields}`);
-    for (const expected of ['lastSeqReceived', 'lastSeqPushed', 'lastSeqServed']) {
-      assert.ok(fields.includes(expected), `${expected} is no longer a Record on NetworkMember — re-anchor this`);
+    // A scan that found none would make every assertion below vacuous.
+    const fields = memberWatermarks();
+    assert.ok(fields.length >= 6, `expected at least six per-space mark maps on NetworkMember, found ${fields.length}: ${fields}`);
+    for (const expected of ['lastPosReceived', 'lastPosPushed', 'lastPosServed', 'lastSeqReceived']) {
+      assert.ok(fields.includes(expected), `${expected} is no longer a Record on NetworkMember - re-anchor this`);
     }
   });
 });
 
-describe('the wipe recovery covers every one of them', () => {
-  it('names all of them, and names them in ONE place', async () => {
-    /*
-     * ALL-OR-NONE, which is the only assertion that would have failed on the buggy version. "It handles
-     * lastSeqReceived" was true the whole time the other three were being ignored.
-     */
-    /*
-     * The list IS `PER_SPACE_WATERMARKS` (bundle-51): the rename carries that list and the wipe clears it, so a map is
-     * added to one place and both rules cover it. Since bundle-157 the reset walks it through the ONE loop over the member
-     * marks, `eachMemberMarkOf` (`sync/receive-marks.ts`), for every space (`null`) and with no list of its own (no fourth
-     * argument, so the helper's default, the declared list). So this asserts the two halves — the wipe walks the declared
-     * list and nothing else, and the declared one names every per-space map on the member type. An exclusion (a map that
-     * must survive a wipe) would be written in `util/seq.ts` by name and the first assertion would see it.
-     */
-    const body = bodyOf(seqSrc, 'resetStaleWatermarksIfNeeded');
+describe('the wipe recovery forgets what was received, and only that', () => {
+  it('walks the one loop over the member marks, for every space, with RECEIVE_MARKS as its list', () => {
+    const body = bodyOf(seqSrc, FUNCTION);
     const walk = body.match(/eachMemberMarkOf\(\s*net\s*,\s*null\s*,\s*\(([^)]*)\)\s*=>/);
-    assert.ok(walk, 'the reset does not walk every space\'s marks through eachMemberMarkOf — a loop of its own is a second list of carriers');
-    // What follows the callback's closing brace: `)` ends the call (the helper's own list); `, <name>` is a list of the reset's own.
+    assert.ok(walk, 'the reset does not walk every space\'s marks through eachMemberMarkOf - a loop of its own is a second list of carriers');
+    // What follows the callback's closing brace: `, RECEIVE_MARKS)` is the list the restore forgets; `)` alone would be every mark.
     let at = body.indexOf('{', body.indexOf(walk[0]) + walk[0].length - 2);
     for (let depth = 0; at < body.length; at++) {
       if (body[at] === '{') depth++;
       else if (body[at] === '}' && --depth === 0) break;
     }
-    assert.match(body.slice(at + 1), /^\s*\)/,
-      'the reset hands eachMemberMarkOf a list of its own — a second list of the same maps is the omission this gate exists to catch');
-    const { PER_SPACE_WATERMARKS } = await import('../../server/dist/config/types-networks.js');
-    const missing = memberWatermarkFields().filter(f => !PER_SPACE_WATERMARKS.includes(f));
-    assert.deepEqual(missing, [],
-      'these per-space watermarks are measured against the seq counter and are NOT cleared when it is wiped. '
-      + 'Each one that survives describes numbers about to be reused by different records. If one genuinely '
-      + 'should survive a wipe, exclude it deliberately with the reason beside it.');
+    assert.match(body.slice(at + 1), /^\s*,\s*RECEIVE_MARKS\s*\)/,
+      'the reset does not hand eachMemberMarkOf RECEIVE_MARKS: forgetting every mark re-sends our whole history to every peer, and a list of its own is a second list of the same maps');
   });
 
-  it('the reset iterates the list rather than repeating field names', () => {
-    // Four hand-written clears is how the fifth gets forgotten. The loop is what makes the list authoritative.
-    const body = bodyOf(seqSrc, 'resetStaleWatermarksIfNeeded');
-    assert.match(body, /\beachMemberMarkOf\(/,
-      'the reset must walk the declared list, through the one loop over the member marks');
-    for (const f of memberWatermarkFields()) {
-      assert.doesNotMatch(body, new RegExp(`member\\.${f}\\s*=`),
-        `${f} is cleared by name inside the reset — that is a second copy of the list`);
+  it('the reset iterates the list rather than naming fields', () => {
+    const body = bodyOf(seqSrc, FUNCTION);
+    for (const f of memberWatermarks()) {
+      assert.doesNotMatch(body, new RegExp(`member\\.${f}\\s*=`), `${f} is cleared by name inside the reset - that is a second copy of the list`);
     }
   });
 
-  it('a vote round in flight is covered too', async () => {
-    // `pendingMember` is a whole member with its own watermarks, and it was the one place the original DID
-    // remember a second site — for one field. The reset reaches it through the one loop (bundle-157), so this asks the
-    // loop: walked for every space, it hands out the pending member's maps as well as the members'.
-    const { PER_SPACE_WATERMARKS } = await import('../../server/dist/config/types-networks.js');
+  it('forgets the receive marks of a vote round in flight and of the members, and leaves the sent, served and frozen marks as they were', async () => {
+    // `pendingMember` is a whole member with its own marks; the one loop reaches it, so the reset does. Walk it with the reset's list.
+    const { PER_SPACE_WATERMARKS, RECEIVE_MARKS, ROLLBACK_MARKS } = await import('../../server/dist/config/types-networks.js');
     const { eachMemberMarkOf } = await import('../../server/dist/sync/receive-marks.js');
     const marked = () => Object.fromEntries(PER_SPACE_WATERMARKS.map(k => [k, { s: 1 }]));
     const net = { members: [{ instanceId: 'm', ...marked() }], pendingRounds: [{ roundId: 'r', pendingMember: { instanceId: 'p', ...marked() } }] };
-    const seen = [];
-    eachMemberMarkOf(net, null, (_marks, mark, who) => { seen.push(`${who}.${mark}`); });
-    assert.deepEqual(PER_SPACE_WATERMARKS.filter(k => !seen.includes(`pendingMember.${k}`)), [],
-      'a pending member carries its own watermarks and is stale for the same reason');
+    eachMemberMarkOf(net, null, (marks) => { for (const spaceId of Object.keys(marks)) delete marks[spaceId]; }, RECEIVE_MARKS);
+    for (const [who, member] of [['m', net.members[0]], ['pendingMember', net.pendingRounds[0].pendingMember]]) {
+      for (const k of PER_SPACE_WATERMARKS) {
+        const forgotten = Object.keys(member[k]).length === 0;
+        assert.equal(forgotten, RECEIVE_MARKS.includes(k), `${who}.${k} ${forgotten ? 'was forgotten' : 'was kept'}: a counter wipe forgets exactly the receive marks`);
+      }
+      for (const k of ROLLBACK_MARKS) assert.deepEqual(member[k], { s: 1 }, `${who}.${k}, the frozen 5.6 mark, was touched: a rollback needs it as it was`);
+    }
   });
 
   it('it still only fires when the counters are actually gone', () => {
-    // The guard is what makes this safe at every startup. Without it, a normal restart would wipe every
-    // watermark and re-push the entire history to every peer on every boot.
-    const body = bodyOf(seqSrc, 'resetStaleWatermarksIfNeeded');
+    // The guard is what makes this safe at every startup. Without it, a normal restart would forget what was received and re-pull the whole history on every boot.
+    const body = bodyOf(seqSrc, FUNCTION);
     assert.match(body, /estimatedDocumentCount\(\)/, 'it must check whether the counters exist');
     assert.match(body, /if \(count > 0\) return;/, 'and do nothing when they do');
   });
 
-  it('and says WHICH watermarks it cleared', () => {
-    /*
-     * The original logged "reset all lastSeqReceived to 0" — which was accurate about what it did and wrong
-     * about what was needed, and an operator reading it had no way to know three other maps were untouched. A
-     * recovery that silently does part of its job is the hardest kind to notice.
-     */
-    const body = bodyOf(seqSrc, 'resetStaleWatermarksIfNeeded');
-    assert.match(body, /cleared\.join\(/, 'the warning must enumerate what it reset, not describe it in prose');
-    assert.doesNotMatch(body, /reset all lastSeqReceived/,
-      'the old message named one field as though it were the whole job');
+  it('and says WHICH marks it forgot', () => {
+    // A recovery that silently does part of its job is the hardest kind to notice: the warning enumerates what it did, it does not describe it in prose.
+    const body = bodyOf(seqSrc, FUNCTION);
+    assert.match(body, /cleared\.join\(/, 'the warning must enumerate what it forgot, not describe it in prose');
+  });
+
+  it('bootstrap calls the one function by its new name, and nothing calls the old one', () => {
+    const boot = stripComments(readFileSync('server/src/bootstrap.ts', 'utf8'));
+    assert.match(boot, new RegExp(`\\b${FUNCTION}\\(\\)`), 'bootstrap does not run the counter-wipe recovery');
+    assert.doesNotMatch(boot, /resetStaleWatermarksIfNeeded/, 'bootstrap still names the retired function');
+    assert.doesNotMatch(seqSrc, /resetStaleWatermarksIfNeeded/, 'util/seq.ts still names the retired function');
   });
 });
