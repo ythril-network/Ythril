@@ -52,6 +52,7 @@ import { NotFoundError } from '../util/errors.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { seedsInRequest, seedsInWalk, type SeedRunner } from './scan-seed-runner.js';
+import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 
 /**
  * The step the scan's failures are reported and counted under: one name, declared once so its counters start at 0. Exported because
@@ -73,6 +74,14 @@ const TOPK = 5;                          // similar records fetched per seed
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(Math.max(n, lo), hi);
+}
+
+/** Which of `ids` are fork rows (unchosen versions) of the record kind: one `_id` read of the collection, for the counterparts a seed found. */
+async function unchosenVersionsAmong(spaceId: string, type: DupeScanType, ids: readonly string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await col<{ _id: string }>(spaceCollection(spaceId, COLLECTION_SUFFIX[type]))
+    .find(asFilter<{ _id: string }>({ _id: { $in: [...ids] }, forkOf: { $type: 'string' } }), { projection: { _id: 1 } }).toArray();
+  return new Set(rows.map(r => r._id));
 }
 
 /** Canonical, collision-resistant candidate key. Length-prefixing aId disambiguates
@@ -308,8 +317,10 @@ async function evalOneRecord(spaceId: string, type: DupeScanType, recordId: stri
   let n = 0;
   try {
     const { source, results } = await findSimilar(spaceId, recordId, type as RecallKnowledgeType, TOPK, [type as RecallKnowledgeType], threshold);
+    // A fork is an unchosen version of a record, not a duplicate of it, and automerge would absorb it with nobody having chosen (Q-624): never a counterpart.
+    const unchosen = await unchosenVersionsAmong(spaceId, type, results.filter(m => m.type === type).map(m => m._id));
     for (const match of results) {
-      if (match.type !== type) continue;
+      if (match.type !== type || unchosen.has(match._id)) continue;
       await handlePair(spaceId, type, source, match);
       n++;
     }
@@ -385,8 +396,9 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
       // The collection is the space's own, so no `spaceId` in the filter: the keyset index leads with `pos`, and a filter on a
       // constant field would stop it covering the read. Ties at the cursor's position are read by `_id` (`util/position-keyset.ts`), and a
       // space that owes its positions throws `PositionsBuilding` here: the walk reads it as "not ready, skipped this tick".
+      // Never a fork row as a seed: an unchosen version is not a duplicate candidate (Q-624, `CHOSEN_VERSION_ROWS`).
       const read = await readAfterPosition<{ _id: string }>(spaceId, COLLECTION_SUFFIX[type], cursor,
-        { limit: take, projection: { _id: 1 } });
+        { limit: take, projection: { _id: 1 }, extra: CHOSEN_VERSION_ROWS });
       const batch = read.rows.map(r => ({ _id: r.row._id, pos: r.pos }));
       if (batch.length === 0) break;
 

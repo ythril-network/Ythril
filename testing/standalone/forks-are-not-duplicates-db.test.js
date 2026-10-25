@@ -15,7 +15,8 @@
  * ## The rule, for each reader and each kind it serves
  *
  *  - `findEntitiesByName` answers the subject alone;
- *  - an upsert by the subject's name lands on the subject and writes nothing on the fork (dedupe-on-insert);
+ *  - an upsert by the subject's name (no id) mints a record as it always did, and its warning counts the subject ALONE: the fork is not a second
+ *    entity of that name and type, and nothing is written on it (the read set's name count carries the clause);
  *  - the duplicate scanner never reads a fork row as a seed, for entity and for chrono (observed as a read of the row by id, the way
  *    `a-scanner-reads-every-record-of-a-tie-db` observes a scan), and records no candidate naming one;
  *  - `graph_merge` with a fork as survivor, and with a fork as absorbed, is refused `fork_row_read_only` and writes nothing.
@@ -61,16 +62,20 @@ describe('a fork is not a duplicate', { skip }, () => {
   /** The kinds the duplicate readers serve and that fork: derived from the fixture table, minus the two with no name to resolve. */
   const NAMED = ['entity', 'chrono'];
 
-  it('findEntitiesByName answers the subject alone, and an upsert by that name lands on the subject', async () => {
+  it('findEntitiesByName answers the subject alone, and the name count of an upsert by that name counts the subject alone', async () => {
     const { findEntitiesByName, upsertEntity } = await import('../../server/dist/brain/entities.js');
     const subject = randomUUID();
     await door.coll(S, 'entities').insertOne(build.entity(S, subject, 5, { name: 'Acme', description: 'the subject' }));
     const fork = await seedFork(door, S, 'entity', subject, 5, { name: 'Acme', description: 'the other version' });
     assert.deepEqual((await findEntitiesByName(S, 'Acme')).map(e => e._id), [subject], `the name 'Acme' resolves to ${(await findEntitiesByName(S, 'Acme')).length} records: the fork makes it ambiguous`);
     const before = await door.coll(S, 'entities').findOne({ _id: fork._id });
-    const saved = await upsertEntity(S, 'Acme', 'concept', [], {}, 'edited by name');
-    assert.equal(saved.entity._id, subject, 'an insert by the subject\'s name was written onto another record');
-    assert.deepEqual(await door.coll(S, 'entities').findOne({ _id: fork._id }), before, 'dedupe-on-insert wrote the fork row');
+    // Re-anchored (Q-624 I2): an upsert with no id has always MINTED a record ("a name is a non-unique label") and warned how many of that name and type exist;
+    // it never landed on an existing one, so the rule this holds is that the count does not include the unchosen version.
+    const { type } = await door.coll(S, 'entities').findOne({ _id: subject });
+    const saved = await upsertEntity(S, 'Acme', type, [], {}, 'edited by name');
+    assert.notEqual(saved.entity._id, fork._id, 'an insert by the subject\'s name was written onto the fork');
+    assert.match(String(saved.warning ?? ''), /^1 existing entity with name 'Acme'/, `the warning counts the fork as a second entity of that name: ${saved.warning}`);
+    assert.deepEqual(await door.coll(S, 'entities').findOne({ _id: fork._id }), before, 'the upsert wrote the fork row');
   });
 
   for (const kind of NAMED) {

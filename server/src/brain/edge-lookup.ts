@@ -23,6 +23,7 @@ import { storedEdgeKind } from './entity-refs.js';
 import type { EdgeDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 
 /**
  * The stored edge with this identity, or `null`.
@@ -54,6 +55,9 @@ export async function findEdgeByTriplet(
  * The exact match for one identity triplet, kinds included, as a filter clause. Shared with the write planners'
  * batched read, which `$or`s one clause per triplet: the `?? null` below is the line a hand-written copy drops,
  * and without it the clause matches an edge of ANY kind (see `findEdgeByTriplet`).
+ *
+ * **The identity holder is the SUBJECT, never a fork of it** (Q-624): a fork edge carries the same five fields as its subject, so the clause names
+ * `forkOf: null` (`CHOSEN_VERSION_ROWS`), which is also the predicate of the partial identity index that serves this read.
  */
 export function tripletClause(
   t: { from: string; to: string; label: string; fromKind?: RefKind; toKind?: RefKind },
@@ -62,5 +66,6 @@ export function tripletClause(
     from: t.from, to: t.to, label: t.label,
     fromKind: storedEdgeKind(t.fromKind) ?? null,
     toKind: storedEdgeKind(t.toKind) ?? null,
+    ...CHOSEN_VERSION_ROWS,
   };
 }

@@ -26,6 +26,7 @@ import { readRecordsById, type RecordsById } from '../walk-reads.js';
 import { NEVER_RETURNED_PROJECTION } from '../read-projection.js';
 import { edgeIdFor } from '../edge-id.js';
 import { tripletClause } from '../edge-lookup.js';
+import { CHOSEN_VERSION_ROWS } from '../chosen-versions.js';
 import { SubjectEdges, functionalSubjectKey } from '../functional-subject.js';
 import { inChunks } from '../../util/chunks.js';
 import { missingRefs } from '../entity-refs.js';
@@ -149,8 +150,9 @@ export class ReadSet {
     const subjectsWanted = (want.functional ?? []).filter(s => !this.loadedSubjects.has(functionalSubjectKey(s.from, s.label))
       && !this.mintedIds.has(s.from));
     for (const chunk of inChunks(subjectsWanted, CHUNK)) {
+      // A fork edge under the label is not a second edge from the subject (`CHOSEN_VERSION_ROWS`, Q-624).
       const found = await edges.find(asFilter<EdgeDoc>({
-        $or: chunk.map(s => ({ from: s.from, label: s.label })),
+        $or: chunk.map(s => ({ from: s.from, label: s.label })), ...CHOSEN_VERSION_ROWS,
       } as never), { projection: { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 } }).toArray() as EdgeDoc[];
       for (const s of chunk) this.loadedSubjects.add(functionalSubjectKey(s.from, s.label));
       for (const e of found) this.subjectEdges.add(e);
@@ -159,8 +161,9 @@ export class ReadSet {
     const namesWanted = (want.nameTypes ?? []).filter(n => !this.nameTypeCounts.has(nameTypeKey(n.name, n.type)));
     const entities = col<{ name: string; type: string }>(spaceCollection(this.spaceId, 'entities'));
     for (const chunk of inChunks(namesWanted, CHUNK)) {
+      // An unchosen version carries its subject's name and type and is not another entity of them (`CHOSEN_VERSION_ROWS`, Q-624).
       const found = await entities.find(asFilter<{ name: string; type: string }>({
-        spaceId: this.spaceId, $or: chunk.map(n => ({ name: n.name, type: n.type })),
+        spaceId: this.spaceId, $or: chunk.map(n => ({ name: n.name, type: n.type })), ...CHOSEN_VERSION_ROWS,
       } as never), { projection: { _id: 0, name: 1, type: 1 } }).toArray();
       for (const n of chunk) this.nameTypeCounts.set(nameTypeKey(n.name, n.type), 0);
       for (const e of found) {

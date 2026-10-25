@@ -40,6 +40,7 @@ import { webhookToken } from './brain/_shared.js';
 import type { ContradictionCandidateDoc, ContradictionChoice, ContradictionClaim, ContradictionResolveNote } from '../config/types.js';
 import { edgeIdFor } from '../brain/edge-id.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { CHOSEN_VERSION_ROWS } from '../brain/chosen-versions.js';
 import { pageMemberList } from '../brain/list-page.js';
 import { defaultBudgetChars } from '../brain/result-budget.js';
 import { sendCaughtFailure, sendStoreFailure } from './send-failure.js';
@@ -356,6 +357,8 @@ async function undoClaim(
     if (marked) {
       const edgeInto = await col<{ _id: string }>(spaceCollection(spaceId, 'edges')).findOne(asFilter<{ _id: string }>({
         to: markedId, label: SUPERSEDES_LABEL, ...(wrote.edgeId ? { _id: { $ne: wrote.edgeId } } : {}),
+        // A fork of a supersedes edge is an unchosen version of one, not another edge into the record: it must not keep the mark (Q-624).
+        ...CHOSEN_VERSION_ROWS,
       }), { projection: { _id: 1 } });
       const pairOn = edgeInto ? null : await collectionFor(spaceId).findOne(asFilter<ContradictionCandidateDoc>({
         _id: { $ne: candidate._id }, status: 'resolved', supersededId: markedId,
@@ -539,7 +542,8 @@ async function resolveCandidate(
       if (winner && loser) {
         if (edgeId) {
           const edges = col<{ _id: string; from: string; to: string; label: string }>(spaceCollection(spaceId, 'edges'));
-          const there = await edges.findOne(asFilter<{ _id: string }>({ _id: edgeId }), { projection: { _id: 1, from: 1, to: 1, label: 1 } });
+          // The edge THIS claim draws is the subject under its derived id, never a fork row (`CHOSEN_VERSION_ROWS`, Q-624).
+          const there = await edges.findOne(asFilter<{ _id: string }>({ _id: edgeId, ...CHOSEN_VERSION_ROWS }), { projection: { _id: 1, from: 1, to: 1, label: 1 } });
           if (there) {
             edge = { id: there._id, from: there.from, to: there.to, label: there.label };
             written.edge = true;
