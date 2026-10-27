@@ -59,6 +59,7 @@ import { TOMBSTONE_TYPE_OF, type TombstoneType } from '../config/types-knowledge
 import { MAX_SYNC_SEQ } from '../util/seq-ceiling.js';
 import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
 import { ForkRowReadOnly, ForkCapRefusal, EdgeIdentityBuilding } from '../util/errors.js';
+import { SchemaViolationError } from './write-validation.js';
 import { invalidArgumentsSentence, missingArgumentDetail } from '../mcp/argument-sentence.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { limitRefusal, skipRefusal } from '../util/strict-limit.js';
@@ -329,7 +330,7 @@ export const KEEP_REFUSAL = `keep must be one of ${FORK_KEEPS.map(k => `'${k}'`)
 
 /** A refusal of a Review call: the one sentence a caller reads on whichever door, with the status REST answers it by. */
 export class ForkRefusal extends Error {
-  constructor(readonly status: 400 | 404 | 409, message: string) {
+  constructor(readonly status: 400 | 404 | 409 | 422, message: string) {
     super(message);
     this.name = 'ForkRefusal';
   }
@@ -655,7 +656,9 @@ export async function resolveFork(spaceId: string, raw: Readonly<Record<string, 
   const redacted = kind === 'chrono' && (fork['contentRedacted'] === true || parent['contentRedacted'] === true);
   const blank = redacted ? [...REDACTED_CHRONO_FIELDS, 'contentRedacted', 'contentRedactedAt'] : [];
   const keptBody = keep === 'fork' ? fork : parent;
-  const written = await writeKeptBody(spaceId, family, parent, keptBody, { aboveVersion: Math.max(fork.seq ?? 0, parent.seq ?? 0), ifMatchSeq: ifMatchParentSeq, blank });
+  // The type's schema refuses what the keep would leave: a 422 in the schema's own sentence, before anything is written (design §9).
+  const written = await writeKeptBody(spaceId, family, parent, keptBody, { aboveVersion: Math.max(fork.seq ?? 0, parent.seq ?? 0), ifMatchSeq: ifMatchParentSeq, blank })
+    .catch((err: unknown) => { throw err instanceof SchemaViolationError ? new ForkRefusal(422, err.check.message) : err; });
   if (!written) throw new ForkRefusal(409, `the parent '${peerText(parentId)}' of ${word.toLowerCase()} fork '${peerText(forkId)}' changed while it was being resolved; list again`);
 
   // ── 2. Siblings of the same body, what named the forks, and the forks behind tombstones issued here ─────────────────────────────────────

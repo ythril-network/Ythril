@@ -173,10 +173,6 @@ function doorsWithoutAValidator({ index, routes, exempt }) {
  * A row no door reaches, or whose function writes no governed collection, fails (`every exemption still excuses a write`).
  */
 const EXEMPT = {
-  // Q-624 slice I3. A resolve chooses between two versions ALREADY stored here (each written by a validated door or admitted by an arrival, which records
-  // a type-schema violation rather than refusing): it introduces no property of its own, and keeps it as the local edit of the parent.
-  'server/src/brain/fork-keep.ts:writeKeptBody':
-    'Review\'s keep writes a stored version\'s body onto its parent; every property it writes was stored here already, by a door that validated it or an arrival that recorded it',
   'server/src/brain/forks.ts:resolveOrphan':
     'Review keeps an orphaned fork: the stored row is unmarked (`forkOf` removed) or an edge re-keyed onto its own identity, its properties untouched',
   'server/src/sync/resolved-elsewhere.ts:writeResolvedElsewhere':
