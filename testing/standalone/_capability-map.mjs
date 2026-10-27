@@ -222,7 +222,7 @@ export const NOT_A_CAPABILITY = new Map(Object.entries({
   '/api/sync': 'the peer-to-peer wire protocol. Spoken by instances, never by an agent — a tool here would '
     + "let a caller forge another instance's replication traffic.",
   '/api/admin': 'instance administration: backups, restores, offsite targets, audit retention, the model '
-    + 'registry. An operator surface behind instanceAdmin, deliberately not reachable by an agent holding '
+    + 'registry, webhook subscriptions. An operator surface behind instanceAdmin, deliberately not reachable by an agent holding '
     + 'space rights.',
   '/api/schema-library': 'the instance-wide schema library. Owner ruling: read is instance-wide and helps '
     + "nobody without write on a space's schema; write, manage and govern are instance-admin. A "
