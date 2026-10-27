@@ -52,6 +52,15 @@ describe('ForkMarkerComponent', () => {
     expect(a.getAttribute('aria-label')).toContain('brain.review.forks.markerOpen');
   });
 
+  it("stays on one line in a narrow column, in the app's own badge style, and sets no width of its own", () => {
+    const f = render('parent-id', 'edge');
+    const a: HTMLAnchorElement = f.nativeElement.querySelector('a');
+    expect(a.classList.contains('badge'), "the app's badge class").toBe(true);
+    expect(getComputedStyle(a).whiteSpace, "the marker wrapped to two lines in the Edges list's narrow column (b81 drive)").toBe('nowrap');
+    expect(getComputedStyle(a).width, 'a width of its own would widen the column for rows that carry no marker').not.toMatch(/\d/);
+    expect(getComputedStyle(a).minWidth).not.toMatch(/[1-9]/);
+  });
+
   it('every one of the four record tabs puts the marker on its rows, with its own kind', () => {
     const tabs: Array<[string, ForkKind, string]> = [
       ['entities-tab', 'entity', 'ent'], ['edges-tab', 'edge', 'edge'], ['facts-tab', 'fact', 'mem'], ['chrono-tab', 'chrono', 'entry'],
