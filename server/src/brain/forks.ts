@@ -44,6 +44,8 @@ import { removeWithTombstones, stampTombstones } from './tombstones.js';
 import { retireEmbedJobs, enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { listReadMaxMs } from './tag-filter.js';
 import { LANDING_ORDER } from './list-sort.js';
+import { PROXY_PAGE_CEILING } from './query.js';
+import { pageAcrossMembers } from '../spaces/page-across-members.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { linksPointingAt, linksStartingFrom } from './link-adjacency.js';
@@ -459,6 +461,8 @@ export interface ResolvedElsewhereShown {
 /** One row of the list: a fork beside its parent (null when the parent is gone), what points at the fork, how many forks the parent holds, and its marks. */
 export interface ForkRow {
   kind: ForkKind;
+  /** The space the fork lives in: the one a resolve names. Through a personal view, one of its members. */
+  space: string;
   forkId: string;
   parentId: string;
   fork: Version;
@@ -521,8 +525,12 @@ async function referencesTo(spaceId: string, kind: ForkKind, ids: readonly strin
  * One page of the space's forks, newest landing first, each beside its parent (or marked orphaned), paged BEFORE any body is read: the ids, versions,
  * positions and marks of every forking collection are unioned, sorted by the space's one position stream, paged, and only the page's bodies and
  * parents are read. `counts` holds every kind whatever `kind` asked.
+ *
+ * `members` are the spaces the caller reads (`readSpacesOfRequest` / `readSpacesOfCall`): one for a space, a personal view's readable members for a
+ * view. A view's id is never read as a space — that answered an empty page, or a 500, with no word that anything was skipped. Each row names the
+ * `space` it lives in, which is what a resolve names. Several members are merged by `pageAcrossMembers`, the one paging rule for a merge.
  */
-export async function listForks(spaceId: string, opts: { kind?: unknown; skip?: unknown; limit?: unknown }): Promise<ForkPage> {
+export async function listForks(members: readonly string[], opts: { kind?: unknown; skip?: unknown; limit?: unknown }): Promise<ForkPage> {
   const kindRaw = opts.kind === '' ? undefined : opts.kind;
   const asked = ForkListParams.safeParse({ kind: kindRaw, skip: asNumber(opts.skip), limit: asNumber(opts.limit) });
   if (!asked.success) {
@@ -533,6 +541,42 @@ export async function listForks(spaceId: string, opts: { kind?: unknown; skip?: 
   const skip = asked.data.skip ?? 0;
   const limit = asked.data.limit ?? DEFAULT_FORK_PAGE;
   const only = asked.data.kind;
+  const ofMember = new Map<string, MemberForks>();
+  const read = await pageAcrossMembers<OrderedForkRow>({
+    members, limit, skip, ceiling: PROXY_PAGE_CEILING,
+    // Newest landing first, `_id` breaking a tie: the order each member's own page is read in (`LANDING_ORDER`).
+    compare: (a, b) => (b.order.pos - a.order.pos) || (a.order.id < b.order.id ? 1 : a.order.id > b.order.id ? -1 : 0),
+    readMember: async (space, lim, sk) => {
+      const got = await forksOfSpace(space, only, sk, lim);
+      ofMember.set(space, got);
+      return got.rows;
+    },
+    finish: ({ order: _order, ...row }) => row as OrderedForkRow,
+  });
+  if (!read.ok) throw new ForkRefusal(400, read.error);
+  const all = [...ofMember.values()];
+  const sum = (pick: (m: MemberForks, k: ForkKind) => number) => perKind(k => all.reduce((n, m) => n + pick(m, k), 0));
+  return {
+    forks: read.rows as ForkRow[], total: all.reduce((n, m) => n + m.total, 0), skip, limit,
+    counts: { ...sum((m, k) => m.counts[k]), resolvedElsewhere: sum((m, k) => m.marked[k]) },
+    kinds: perKind(k => ({ fields: [...BODY_FIELDS_OF[rowOf(k).family]!], mainField: rowOf(k).mainField })),
+    maxForksPerRecord: MAX_FORKS_PER_RECORD,
+  };
+}
+
+/** A listed fork with the keys the merge orders by, which `finish` takes off before anything else reads the row. */
+type OrderedForkRow = ForkRow & { order: { pos: number; id: string } };
+
+/** One member's page of forks, with the counts the whole answer sums. */
+interface MemberForks {
+  rows: OrderedForkRow[];
+  total: number;
+  counts: Record<ForkKind, number>;
+  marked: Record<ForkKind, number>;
+}
+
+/** One space's forks: the page `skip`/`limit` name (of `only`'s kind, or every kind), and the counts of every kind. See {@link listForks}. */
+async function forksOfSpace(spaceId: string, only: ForkKind | undefined, skip: number, limit: number): Promise<MemberForks> {
   const stagesOf = (k: ForkKind) => [
     { $match: { forkOf: { $exists: true } } },
     { $project: { _id: 1, forkOf: 1, pos: 1, seq: 1, marked: { $gt: [{ $size: { $ifNull: [`$${RESOLVED_ELSEWHERE}`, []] } }, 0] }, kind: { $literal: k } } },
@@ -540,7 +584,7 @@ export async function listForks(spaceId: string, opts: { kind?: unknown; skip?: 
   const [first, ...rest] = FORK_KIND_NAMES;
   const pick = only ? [{ $match: { kind: only } }] : [];
   const [agg] = await col(spaceCollection(spaceId, rowOf(first!).family)).aggregate<{
-    page: Array<{ _id: string; kind: ForkKind; forkOf: string }>; total: Array<{ n: number }>; counts: Array<{ _id: ForkKind; n: number; marked: number }>;
+    page: Array<{ _id: string; kind: ForkKind; forkOf: string; pos?: number }>; total: Array<{ n: number }>; counts: Array<{ _id: ForkKind; n: number; marked: number }>;
   }>([
     ...stagesOf(first!),
     ...rest.map(k => ({ $unionWith: { coll: spaceCollection(spaceId, rowOf(k).family), pipeline: stagesOf(k) } })),
@@ -556,7 +600,7 @@ export async function listForks(spaceId: string, opts: { kind?: unknown; skip?: 
 
   const cfg = getConfig();
   // The page's bodies, parents, references and sibling counts: one read of each per kind.
-  const forks: ForkRow[] = [];
+  const forks: OrderedForkRow[] = [];
   const rowsByKind = new Map<ForkKind, Map<string, ForkRow>>();
   for (const kind of FORK_KIND_NAMES) {
     const ids = page.filter(p => p.kind === kind).map(p => p._id);
@@ -579,7 +623,7 @@ export async function listForks(spaceId: string, opts: { kind?: unknown; skip?: 
       const parentId = String(forkOf);
       const parent = parentOf.get(parentId) ?? null;
       rows.set(f._id, {
-        kind, forkId: f._id, parentId, fork: fork as Version, parent, orphaned: parent === null,
+        kind, space: spaceId, forkId: f._id, parentId, fork: fork as Version, parent, orphaned: parent === null,
         ...refs.get(f._id)!, siblings: siblingsOf.get(parentId) ?? 1,
         resolvedElsewhere: ((marks as ResolvedElsewhereEntry[] | undefined) ?? []).map(m => {
           const stamped = [(fork as Version)['author'], parent?.['author']] as { instanceId?: unknown; instanceLabel?: unknown }[];
@@ -606,12 +650,13 @@ export async function listForks(spaceId: string, opts: { kind?: unknown; skip?: 
     }
     rowsByKind.set(kind, rows);
   }
-  for (const p of page) { const row = rowsByKind.get(p.kind)?.get(p._id); if (row) forks.push(row); }
+  for (const p of page) {
+    const row = rowsByKind.get(p.kind)?.get(p._id);
+    if (row) forks.push({ ...row, order: { pos: typeof p.pos === 'number' ? p.pos : 0, id: p._id } });
+  }
   return {
-    forks, total: agg?.total[0]?.n ?? 0, skip, limit,
-    counts: { ...perKind(k => counted.get(k)?.n ?? 0), resolvedElsewhere: perKind(k => counted.get(k)?.marked ?? 0) },
-    kinds: perKind(k => ({ fields: [...BODY_FIELDS_OF[rowOf(k).family]!], mainField: rowOf(k).mainField })),
-    maxForksPerRecord: MAX_FORKS_PER_RECORD,
+    rows: forks, total: agg?.total[0]?.n ?? 0,
+    counts: perKind(k => counted.get(k)?.n ?? 0), marked: perKind(k => counted.get(k)?.marked ?? 0),
   };
 }
 

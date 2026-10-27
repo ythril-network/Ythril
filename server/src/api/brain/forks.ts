@@ -11,6 +11,7 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { answeredUnknownSpace, writeSpaceOf } from '../write-target-answer.js';
 import { listForks, resolveFork, ForkRefusal } from '../../brain/forks.js';
 import { webhookToken } from './_shared.js';
+import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 
 export const forksRouter = Router();
 
@@ -20,7 +21,7 @@ forksRouter.get('/spaces/:spaceId/forks', globalRateLimit, requireSpaceAuth, asy
   const spaceId = req.params['spaceId'] as string;
   if (answeredUnknownSpace(req, res, spaceId)) return;
   try {
-    res.json(await listForks(spaceId, { kind: req.query['kind'], skip: req.query['skip'], limit: req.query['limit'] }));
+    res.json(await listForks(readSpacesOfRequest(req, spaceId), { kind: req.query['kind'], skip: req.query['skip'], limit: req.query['limit'] }));
   } catch (err) {
     if (err instanceof ForkRefusal) { res.status(err.status).json({ error: err.message }); return; }
     throw err;

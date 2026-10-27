@@ -607,6 +607,7 @@ that many drops the next differing copy (logged and counted), so resolve one bef
 | Field | |
 |---|---|
 | `kind`, `forkId`, `parentId` | the kind and the two records |
+| `space` | the space the fork lives in, the one a resolve names. Through a personal view the list reads every member you may read and merges them, so this names the member |
 | `fork`, `parent` | each version as a reader compares them: `_id`, the kind's body fields, `author`, `createdAt`, `updatedAt`, `seq`. `parent` is `null` and `orphaned` is `true` when the parent is gone |
 | `edgeCount`, `linkCount` | the edges (either end) and links (either side) that point at the fork: a resolve moves them to the parent (`0` for an edge) |
 | `siblings` | how many forks the parent holds, this one included |

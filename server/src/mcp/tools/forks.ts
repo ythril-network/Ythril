@@ -11,6 +11,7 @@
  */
 import { listForks, resolveFork, FORK_KEEPS, FORK_KIND_NAMES, DEFAULT_FORK_PAGE, MAX_FORK_PAGE, MAX_FORKS_PER_RECORD } from '../../brain/forks.js';
 import { MAX_SYNC_SEQ } from '../../util/seq-ceiling.js';
+import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
 
 /** What a version's main field is shown as in the one-line summary of a row. */
@@ -45,7 +46,7 @@ export const list_forksTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const page = await listForks(ctx.callSpace, { kind: ctx.args['kind'], skip: ctx.args['skip'], limit: ctx.args['limit'] });
+    const page = await listForks(readSpacesOfCall(ctx, ctx.callSpace), { kind: ctx.args['kind'], skip: ctx.args['skip'], limit: ctx.args['limit'] });
     const head = `Forks of '${ctx.callSpace}': ${page.total} in all, ${page.forks.length} on this page.`;
     const body = page.forks.length === 0
       ? ' None on this page.'
