@@ -53,10 +53,25 @@ async function bAuthoredRecordInS2(id) {
 }
 
 /** The ids A holds tombstones for in `space`, read through A's own tombstone door. */
+// Bundle-81 (design rev 8, the wire contract): the tombstone door pages by POSITION (`afterPos`, or the `p1.` cursor a page hands back) and answers
+// `{ items, nextCursor, through, head, positions: 1 }`; a `sinceSeq` is a 400 and the grouped-by-type body is gone.
 async function tombstoneIdsOnA(space) {
-  const r = await get(INSTANCES.a, tokenA, `/api/sync/tombstones?spaceId=${space}&sinceSeq=0&limit=5000`);
-  assert.equal(r.status, 200, JSON.stringify(r.body));
-  return new Set(Object.values(r.body).flat().map(t => t._id));
+  return tombstoneIdsServed(INSTANCES.a, tokenA, space);
+}
+
+/** Every tombstone id an instance serves for `space`, page after page from position 0. */
+async function tombstoneIdsServed(base, token, space) {
+  const ids = new Set();
+  let start = 'afterPos=0';
+  for (let page = 0; page < 100; page++) {
+    const r = await get(base, token, `/api/sync/tombstones?spaceId=${space}&${start}&limit=500`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(Array.isArray(r.body?.items), `the tombstone door answered no items array: ${JSON.stringify(r.body).slice(0, 240)}`);
+    for (const t of r.body.items) ids.add(t._id);
+    if (!r.body.nextCursor) return ids;
+    start = `cursor=${encodeURIComponent(r.body.nextCursor)}`;
+  }
+  assert.fail(`the tombstone door of '${space}' handed back a next page 100 times`);
 }
 
 /** Run mongosh in B's database. */
@@ -101,14 +116,16 @@ describe('a peer tombstone lands in the space its door admitted, between real in
   it('pull: a tombstone B serves for S1 that names S2 neither deletes nor stores in S2 on A', async () => {
     const id = `pull-${Date.now()}`;
     await bAuthoredRecordInS2(id);
-    // Planted on B under S1 with S2's id, at seq 1; a write on B in S1 then settles seq 1 so B's GET serves it.
+    // Planted on B under S1 with S2's id, at seq 1 and at a position below the marker's (bundle-81: the door serves a tombstone by its position, and a
+    // row with none is never served); the write on B in S1 then lands above it, so B's GET serves it.
+    const plantedAt = (Date.now() - 60_000) * 1000;
     mongoB(`db.getCollection(${JSON.stringify(`${s1.id}_tombstones`)}).insertOne(${JSON.stringify({
-      _id: id, type: 'fact', spaceId: s2.id, deletedAt: new Date().toISOString(), instanceId: idB, seq: 1 })})`);
+      _id: id, type: 'fact', spaceId: s2.id, deletedAt: new Date().toISOString(), instanceId: idB, seq: 1, pos: plantedAt, posAtSeq: 1 })})`);
     const marker = await post(INSTANCES.b, tokenB, `/api/brain/spaces/${s1.id}/facts`, { fact: `marker ${id}`, tags: [] });
     assert.equal(marker.status, 201, JSON.stringify(marker.body));
     const markerId = marker.body._id ?? marker.body.id;
-    const served = await get(INSTANCES.b, tokenB, `/api/sync/tombstones?spaceId=${s1.id}&sinceSeq=0`);
-    assert.ok(Object.values(served.body).flat().some(t => t._id === id), `B does not serve the planted tombstone: ${JSON.stringify(served.body)}`);
+    const served = await tombstoneIdsServed(INSTANCES.b, tokenB, s1.id);
+    assert.ok(served.has(id), `B does not serve the planted tombstone: ${JSON.stringify([...served])}`);
 
     // A pulls S1 from B; the marker arriving on A is the evidence that the pull (tombstones first) ran.
     await waitFor(async () => {
