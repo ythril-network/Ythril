@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Webhooks:** The webhook admin routes are listed as instance-admin in the rights table. No user-facing effect: managing webhooks still needs instance admin with MFA.
+
 ## [6.0.0] — 2026-10-27
 
 **6.0 turns proxy spaces into personal views, pages sync by landing position (5.x and 6.0 peers do not sync; upgrade every instance of a network together) and keeps both edits of every record kind; a failing store answers a retryable `503`.**
