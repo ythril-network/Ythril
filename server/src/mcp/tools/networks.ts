@@ -18,9 +18,7 @@ import { changeNotesAct } from '../../sync/change-notes.js';
 import { forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
 import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
 import { rereadNetworkAct, REREAD_COST } from '../../networks/reread-act.js';
-import { mfaRequiredFor } from '../../auth/mfa-policy.js';
-import { isMfaEnabled } from '../../auth/totp.js';
-import { isOidc } from '../../auth/oidc-caller.js';
+import { callerIsAskedForMfa } from '../../auth/mfa-asked.js';
 import { ToolRefusal } from '../../util/errors.js';
 
 /** The caller an act sees: this connection's matrix, and the token id memberships are recorded against. */
@@ -320,7 +318,7 @@ export const network_rereadTool: ToolHandler = {
     // The second factor, answered honestly: MCP has no channel for a code, so a caller who would need one on REST is told to use the web UI. The same rule as REST's
     // (`mfaRequiredFor`), the personal-view copy's precedent (`mcp/tools/views.ts`), not a third divergence.
     const record = ctx.callerRecord;
-    if (record && !isOidc(record) && mfaRequiredFor({ mfa: record.mfa }, isMfaEnabled())) {
+    if (callerIsAskedForMfa(record)) {
       throw new ToolRefusal(403, 'Re-reading a network needs MFA step-up, which this door cannot present; use the web UI (Settings > Networks)');
     }
     const { id, ...body } = ctx.args;

@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output, si
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import type { Network } from '../../core/api.types';
 import { NetworksApi } from '../../core/networks-api.service';
+import { AuthApi } from '../../core/auth-api.service';
 import { ToastService } from '../../core/toast.service';
 import { cronIntervalMinutes } from '../../core/cron-interval';
 import { refusalText } from '../../core/refusal-text';
@@ -60,7 +61,7 @@ const CHIPS_SHOWN = 4;
           <p class="hint block">{{ 'networks.reread.none' | transloco }}</p>
         }
         <div style="margin-top:10px;">
-          <button type="button" class="btn-danger btn btn-sm" [disabled]="noSpaces()" [attr.aria-describedby]="noSpaces() ? 'reread-nospaces-' + network().id : null" (click)="open.set(true)">{{ 'networks.reread.button' | transloco }}</button>
+          <button type="button" class="btn-danger btn btn-sm" [disabled]="noSpaces()" [attr.aria-describedby]="noSpaces() ? 'reread-nospaces-' + network().id : null" (click)="openDialog()">{{ 'networks.reread.button' | transloco }}</button>
         </div>
         @if (noSpaces()) {
           <div class="hint" style="margin-top:6px;" [id]="'reread-nospaces-' + network().id">{{ 'networks.reread.noSpaces' | transloco }}</div>
@@ -72,6 +73,7 @@ const CHIPS_SHOWN = 4;
             [cycleMinutes]="cycleMinutes()"
             [schedule]="network().syncSchedule ?? ''"
             [alreadyOwed]="owed().length > 0"
+            [mfaAsked]="mfaAsked()"
             [busy]="busy()"
             [error]="error()"
             (confirmed)="start($event.spaces)"
@@ -83,6 +85,7 @@ const CHIPS_SHOWN = 4;
 })
 export class NetworkRereadSectionComponent {
   private readonly networksApi = inject(NetworksApi);
+  private readonly authApi = inject(AuthApi);
   private readonly transloco = inject(TranslocoService);
   private readonly toast = inject(ToastService);
 
@@ -93,6 +96,8 @@ export class NetworkRereadSectionComponent {
   protected readonly open = signal(false);
   protected readonly busy = signal(false);
   protected readonly error = signal('');
+  /** Will the confirm ask for an MFA code? What the instance says when the dialog opens (`asked`); false while it is not known, so no prompt is promised that may not come. */
+  protected readonly mfaAsked = signal(false);
 
   protected readonly administered = computed(() => isAdministeredView(this.network()));
   protected readonly noSpaces = computed(() => this.network().spaces.length === 0);
@@ -111,6 +116,12 @@ export class NetworkRereadSectionComponent {
       moreSpaces: entries.slice(CHIPS_SHOWN).map(e => e.space).join(', '),
     }));
   });
+
+  protected openDialog(): void {
+    this.mfaAsked.set(false);
+    this.open.set(true);
+    this.authApi.getMfaStatus().subscribe({ next: s => this.mfaAsked.set(s.asked === true), error: () => this.mfaAsked.set(false) });
+  }
 
   protected close(): void {
     this.open.set(false);

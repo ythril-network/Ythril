@@ -87,8 +87,9 @@ export class AuthApi {
 
   // ── MFA ───────────────────────────────────────────────────────────────────
 
-  getMfaStatus(): Observable<{ enabled: boolean }> {
-    return this.http.get<{ enabled: boolean }>('/api/mfa/status');
+  /** `enabled`: a second factor is set up; `asked`: this token will be asked for a code on an MFA-gated act (its own setting weighed against `enabled`). */
+  getMfaStatus(): Observable<{ enabled: boolean; asked?: boolean }> {
+    return this.http.get<{ enabled: boolean; asked?: boolean }>('/api/mfa/status');
   }
 
   setupMfa(): Observable<{ secret: string; otpauth: string }> {

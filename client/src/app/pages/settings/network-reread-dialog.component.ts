@@ -13,7 +13,7 @@ import { rereadCycles } from './network-reread-estimate';
  *
  * It opens on the spaces and what the choice costs: a checklist with each space's record count, every space ticked, and a live estimate
  * (cycles, and a time when the schedule has an interval) that moves as spaces are ticked. Below it the cost in words (records peers deleted
- * and forgot can come back), the typed confirmation of the network's name, and the note that an MFA code is asked on confirm. The host owns
+ * and forgot can come back), the typed confirmation of the network's name, and, when the confirm will ask for one, the note that an MFA code is asked. The host owns
  * the request: this emits the spaces chosen and shows the refusal the host hands back.
  *
  * Keyboard and focus, on the model of the restore dialog: a modal dialog (`ModalDirective`: role, `aria-modal`, Escape, focus restored to the
@@ -103,7 +103,9 @@ import { rereadCycles } from './network-reread-estimate';
             {{ 'networks.reread.confirm' | transloco }}
           </button>
         </div>
-        <div class="hint">{{ 'networks.reread.mfa' | transloco }}</div>
+        @if (mfaAsked()) {
+          <div class="hint">{{ 'networks.reread.mfa' | transloco }}</div>
+        }
       </div>
     </div>
   `,
@@ -121,6 +123,11 @@ export class NetworkRereadDialogComponent implements AfterViewInit {
   readonly schedule = input('');
   /** Some member still owes a re-read: starting again restarts it for them. */
   readonly alreadyOwed = input(false);
+  /**
+   * The confirm will ask for an MFA code: the sentence that says so is shown only then. The host answers it from the instance (`GET /api/mfa/status`, `asked`, the policy
+   * the gates enforce), so it is false until known: a dialog that promised a prompt on an instance with no second factor was wrong (b81 drive).
+   */
+  readonly mfaAsked = input(false);
   /** The request is in flight: confirming again is not offered. */
   readonly busy = input(false);
   /** The refusal of the last request, already worded by the host; empty when there is none. */

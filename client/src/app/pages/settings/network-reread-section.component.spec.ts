@@ -12,6 +12,7 @@ import { of, throwError } from 'rxjs';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { NetworkRereadSectionComponent } from './network-reread-section.component';
 import { NetworksApi } from '../../core/networks-api.service';
+import { AuthApi } from '../../core/auth-api.service';
 import { ToastService } from '../../core/toast.service';
 import type { Network } from '../../core/api.types';
 
@@ -22,12 +23,12 @@ const net = (over: Partial<Network> = {}): Network => ({
   ...over,
 });
 
-function make(network: Network, rereadNetwork: (...a: unknown[]) => unknown = () => of({})) {
+function make(network: Network, rereadNetwork: (...a: unknown[]) => unknown = () => of({}), mfa: unknown = of({ enabled: false, asked: false })) {
   TestBed.resetTestingModule();
   const success = vi.fn();
   TestBed.configureTestingModule({
     imports: [NetworkRereadSectionComponent, getTranslocoModule()],
-    providers: [{ provide: NetworksApi, useValue: { rereadNetwork } }, { provide: ToastService, useValue: { success, error: vi.fn() } }],
+    providers: [{ provide: NetworksApi, useValue: { rereadNetwork } }, { provide: AuthApi, useValue: { getMfaStatus: () => mfa } }, { provide: ToastService, useValue: { success, error: vi.fn() } }],
   });
   const f = TestBed.createComponent(NetworkRereadSectionComponent);
   f.componentRef.setInput('network', network);
@@ -68,6 +69,19 @@ describe('NetworkRereadSectionComponent', () => {
     const { el } = make(net({ rereadOwed: many }));
     expect(el.querySelectorAll('.badge').length).toBe(4);
     expect(el.textContent).toContain('networks.reread.more');
+  });
+
+  it("says an MFA code is asked only when the instance will ask this token for one (the status's `asked`), and not while it does not know", () => {
+    const none = make(net(), undefined, of({ enabled: false, asked: false }));
+    none.open();
+    expect(none.el.textContent).not.toContain('networks.reread.mfa');
+    const yes = make(net(), undefined, of({ enabled: true, asked: true }));
+    yes.open();
+    expect(yes.el.textContent).toContain('networks.reread.mfa');
+    const unknown = make(net(), undefined, throwError(() => new Error('down')));
+    unknown.open();
+    expect(unknown.el.textContent, 'a status that could not be read promises nothing').not.toContain('networks.reread.mfa');
+    expect(unknown.el.textContent).toContain('networks.reread.cost');
   });
 
   it('offers no control for a network with no space, and says why', () => {

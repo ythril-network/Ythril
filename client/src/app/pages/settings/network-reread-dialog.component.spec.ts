@@ -39,13 +39,14 @@ const FOUR_SPACES = [
 ];
 const NAME = 'Field offices';
 
-function make(overrides: { spaces?: { id: string; records: number }[]; cycleMinutes?: number } = {}) {
+function make(overrides: { spaces?: { id: string; records: number }[]; cycleMinutes?: number; mfaAsked?: boolean } = {}) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({ imports: [NetworkRereadDialogComponent, getTranslocoModule()] });
   const fixture = TestBed.createComponent(NetworkRereadDialogComponent);
   fixture.componentRef.setInput('networkName', NAME);
   fixture.componentRef.setInput('spaces', overrides.spaces ?? FOUR_SPACES);
   fixture.componentRef.setInput('cycleMinutes', overrides.cycleMinutes ?? 5);
+  if (overrides.mfaAsked !== undefined) fixture.componentRef.setInput('mfaAsked', overrides.mfaAsked);
   fixture.detectChanges();
   return fixture;
 }
@@ -111,10 +112,13 @@ describe('NetworkRereadDialogComponent (layout B)', () => {
     expect(confirmed).toHaveBeenCalledWith({ spaces: FOUR_SPACES.map(s => s.id) });
   });
 
-  it('names the cost and the MFA step', () => {
-    const text = el(make()).textContent ?? '';
-    expect(text).toContain('networks.reread.cost');
-    expect(text).toContain('networks.reread.mfa');
+  it('names the cost, and the MFA step only when the confirm will ask for a code (b81 drive: no MFA prompt appeared on an instance with none enrolled)', () => {
+    const asked = el(make({ mfaAsked: true })).textContent ?? '';
+    expect(asked).toContain('networks.reread.cost');
+    expect(asked).toContain('networks.reread.mfa');
+    expect(el(make({ mfaAsked: false })).textContent, 'the sentence promised a prompt that never comes').not.toContain('networks.reread.mfa');
+    expect(el(make()).textContent, 'until the host says a code is asked, none is promised').not.toContain('networks.reread.mfa');
+    expect(el(make()).textContent).toContain('networks.reread.cost');
   });
 
   describe('keyboard', () => {
