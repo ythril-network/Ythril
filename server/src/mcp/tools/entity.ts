@@ -303,7 +303,7 @@ export const update_entityTool: ToolHandler = {
     if (!updatedEnt) throw new NotFoundError(`Entity '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both
     // semantics live in `applyConnections`, after the record write, exactly as the create does it.
-    // `updated.spaceId` rather than `callSpace`: a proxy write lands where the record actually is.
+    // `updated.spaceId` rather than `callSpace`: the space the record was written in, read from the record.
     const connected = await applyConnections(updatedEnt.spaceId, updatedEnt._id, 'entity', a, updatedEnt.author, ctx.actor);
     // What a `warn` space says about the record as the update leaves it, and about its inline edges — from the classification the
     // writer handed back (create says the same, `schemaWarningAnswer`).

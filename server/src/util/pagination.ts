@@ -22,14 +22,14 @@ export function parseSkip(raw: unknown): number {
 }
 
 /**
- * Cap a merged, cross-space (proxy) list result to `limit`. Each member space is
- * already limited to `limit`, so a proxy of N members can return up to N × limit
+ * Cap a merged, cross-space (view) list result to `limit`. Each member space is
+ * already limited to `limit`, so a view of N members can return up to N × limit
  * rows; this bounds the response to the requested page size. Only re-sorts when it
  * actually overflows, so single-space results — already sorted and limited by the
  * query — are returned untouched.
  *
  * The re-sort must agree with what the query asked for: when the route requested a
- * `sort`, a proxy overflow re-sorts by that same field/direction, otherwise it would
+ * `sort`, a view overflow re-sorts by that same field/direction, otherwise it would
  * silently reorder the merged page against the caller's sort. With no requested sort
  * it falls back to `createdAt` desc — the collections' natural default.
  */

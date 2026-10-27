@@ -1,5 +1,5 @@
 /**
- * One paging rule for every listing that spans the members of a proxy space.
+ * One paging rule for every listing that spans the members of a personal view.
  *
  * ## Why this is a shared function and not a pattern to copy
  *
@@ -14,7 +14,7 @@
  * ## The rule
  *
  * **One member: push `skip` down to the database.** Correct at any depth, no window, no slicing. This is the case for
- * every non-proxy space, which is nearly every request.
+ * every request that is not a view, which is nearly every request.
  *
  * **Several members: fetch `skip + limit` from each, merge, sort, take the window.** Rows `[skip, skip+limit)` of a merged
  * set genuinely require `skip + limit` from every member — there is no way to know which member holds row 200 without
@@ -33,7 +33,7 @@ export interface PageRequest<T> {
    * way — it flagged this file the moment it existed. A name that misleads a gate misleads a reader too.
    */
   readMember: (memberId: string, limit: number, skip: number) => Promise<T[]>;
-  /** Comparator for the merge, which must match the order `readMember` applies, or a proxy page is ordered differently. */
+  /** Comparator for the merge, which must match the order `readMember` applies, or a view page is ordered differently. */
   compare: (a: T, b: T) => number;
   limit: number;
   skip: number;
