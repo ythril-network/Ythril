@@ -542,6 +542,9 @@ describe('the functional guard marker follows its edge and stays on this instanc
 
     it('initSpace does not build it over an EXISTING edges collection: that build reads every edge before the server listens, so it is the background pass\'s', async () => {
       await dropGuardIndex(STRICT);
+      // An edges collection that holds NO row is as free to build over as a new one, and initSpace treats it as one (Q-624, design rev 4 section 5.2, D1),
+      // so the collection this case is about holds an edge: the build that would read every edge before the server listens.
+      await edgesOf(STRICT).insertOne(build.edge(STRICT, 'existing-edge', 4, { from: IDS.ALICE, to: IDS.BOB, label: LABELS.plain }));
       const value = await initSpace(STRICT, { waitForVectorReady: false }).then(() => 'completed', err => err);
       assert.equal(value, 'completed', `initSpace threw: ${value?.message ?? value}`);
       assert.equal(await guardIndex(STRICT), undefined, 'initSpace built the guard index over an existing collection: a boot that scans every edge of every space before listening');
