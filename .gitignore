@@ -5,6 +5,9 @@ node_modules/
 dist/
 .angular/
 
+# Scratch for agents and tools - never committed; anything under it is registered (scripts/unregistered-local-files.mjs)
+tmp/
+
 # Local Docker data volumes - bind mounts, never committed
 local-data/
 

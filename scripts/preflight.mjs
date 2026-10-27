@@ -90,6 +90,14 @@ function gate(name, why, file) {
 
 console.log('Preflight — the checks that catch failures with no error message.\n');
 
+// A file git does not track that only a catch-all rule (*.log, *.txt) hides is clutter nobody is told about: agent runs left logs,
+// a stack dump, test output and stray worktree copies in the checkout this way (Q-626). Scratch goes to tmp/, a rule that names a
+// place. It asks git alone, so it is the cheapest step here and runs first, in both modes.
+console.log('\n── no untracked file hidden only by a catch-all ignore rule ──');
+try { run('node scripts/unregistered-local-files.mjs'); } catch {
+  failures.push({ name: 'unregistered-local-files', why: 'a file git does not track that no rule naming a place registers: clutter the catch-all ignore rules hide' });
+}
+
 for (const [file, why] of SOURCE_GATES) gate(file, why, file);
 
 // Build UNCONDITIONALLY before anything that imports from server/dist.
