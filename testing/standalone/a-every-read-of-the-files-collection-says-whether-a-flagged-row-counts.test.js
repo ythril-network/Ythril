@@ -102,7 +102,7 @@ const EXEMPT = {
   'server/src/sync/positions-owed.ts:carryRows': 'gives EVERY row with a version its position, flagged ones included: a flagged row is local audit state that still has a version and sits in the collection the pager reads',
   'server/src/sync/positions-rollback.ts:rollBackPositions': 'removes the 6.0 fields from EVERY row of the collection, flagged ones included: it runs against the store, with no instance up, and leaves no row 5.6 would hash differently',
   // Q-624 slice I3: the fork module's computed collection is always one of FORKING_FAMILIES (facts, entities, edges, chrono), never the files.
-  ...Object.fromEntries(['refuseForkRowsNamed', 'forkRowsUnder', 'remintForks', 'assertForksFitTogether', 'listForks', 'resolveFork', 'resolveOrphan'].map(f => [
+  ...Object.fromEntries(['refuseForkRowsNamed', 'forkRowsUnder', 'remintForks', 'assertForksFitTogether', 'forksOfSpace', 'resolveFork', 'resolveOrphan'].map(f => [
     `server/src/brain/forks.ts:${f}`, 'its collection is a FORKING_FAMILIES member (facts, entities, edges, chrono) and never the files: a file does not fork',
   ])),
   'server/src/brain/fork-counts.ts:forkCountsOf': 'counts the fork rows of the forking families (facts, entities, edges, chrono), by a computed collection that is never the files: a file does not fork',

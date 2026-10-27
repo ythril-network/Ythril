@@ -63,7 +63,7 @@ const ALLOWED = new Map([
   ['server/src/brain/forks.ts:remintForks',
     'a re-mint asks whether ANY row or tombstone stands at the ids it is about to insert (an existence probe that aborts the transaction), and'
     + ' reads the receiving subjects WITH their forks (`$or` of `_id` and `forkOf`) to compare bodies: neither is the stored copy of each id.'],
-  ['server/src/brain/forks.ts:listForks',
+  ['server/src/brain/forks.ts:forksOfSpace',
     'Review\'s page: the fork rows and their parents by `$in` with a projection of the version fields, inside the list\'s read bound; the parents'
     + ' may be absent (an orphan) and the answer says so per row, which the reader\'s map would equally say, but the read is the list\'s own page.'],
   ['server/src/brain/predicate-recall.ts:indexIsBehind',
