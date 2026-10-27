@@ -32,6 +32,7 @@ import { holdForkLock, DIVERGENT } from './_stalled-write-doors.mjs';
 import { holdDocumentLock } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 import { seedClaim } from './_media-claim.mjs';
+import { forkIdOf } from './_fork-kinds.mjs';
 
 export const AUTHOR = { instanceId: 'push-door-peer', instanceLabel: 'Peer' };
 export const T0 = '2026-09-01T00:00:00.000Z';
@@ -73,8 +74,6 @@ export async function loadHolderModules() {
     owed: await import('../../server/dist/sync/positions-owed.js'),
     // The fork module (Q-624): Review's resolve of an orphan and the re-mint a merge or a re-key runs both land rows under their own hold.
     forks: await import('../../server/dist/brain/forks.js'),
-    // The body text a fork id derives from (`forkIdFor(forkOf, forkAt, authoredContentHash(family, body).text)`, design rev 4 section 3).
-    authored: await import('../../server/dist/sync/authored-content.js'),
   };
 }
 
@@ -237,7 +236,7 @@ export function holderCases(ctx, S) {
       label: 'a merge\'s fork re-mint, inside the merge\'s held transaction', lock: 'counter',
       run: async () => {
         const fork = { ...(await ctx.door.coll(S, 'entities').findOne({ _id: E2 })), description: 'the absorbed record, as a peer tells it', forkOf: E2, forkAt: 2 };
-        fork._id = ctx.mods.plan.forkIdFor(E2, 2, ctx.mods.authored.authoredContentHash('entities', fork).text);
+        fork._id = await forkIdOf('entities', E2, 2, fork);
         await ctx.door.coll(S, 'entities').insertOne(fork);
         return ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
           await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {});
@@ -250,7 +249,7 @@ export function holderCases(ctx, S) {
       collection: `${S}_facts`,
       lock: async () => {
         const fork = { ...build.fact(S, 'orphan', 5, { fact: 'what the gone parent was told' }), forkOf: GONE_PARENT, forkAt: 5 };
-        fork._id = ctx.mods.plan.forkIdFor(GONE_PARENT, 5, ctx.mods.authored.authoredContentHash('facts', fork).text);
+        fork._id = await forkIdOf('facts', GONE_PARENT, 5, fork);
         await (ctx.fixture ?? ctx.door).coll(S, 'facts').insertOne(fork);
         orphanOf.set(S, fork._id);
         return holdDocumentLock(mongo(), `${S}_facts`, { filter: { _id: fork._id } });
