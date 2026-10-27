@@ -374,6 +374,20 @@ button:disabled, .btn:disabled {
   background: var(--error-dim);
 }
 
+/* `.btn-danger-solid` — the filled button that CONFIRMS an irreversible act (resolving a fork, a network re-read), where `.btn-danger` only offers one. */
+.btn-danger-solid {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+.btn-danger-solid:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.btn-danger-solid:not(:disabled):hover {
+  opacity: .9;
+}
+
 /*
  * `.btn.danger` — the same treatment, for the spelling four buttons already use.
  *

@@ -42,9 +42,6 @@ import { rereadCycles } from './network-reread-estimate';
     .name-input { width: 100%; box-sizing: border-box; font-family: var(--font-mono, monospace); margin-bottom: 16px; }
     .actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
     .hint { font-size: 12px; color: var(--text-muted); margin-top: 10px; text-align: right; }
-    .btn-danger-solid { background: var(--danger); color: #fff; border-color: var(--danger); }
-    .btn-danger-solid:disabled { opacity: .5; cursor: not-allowed; }
-    .btn-danger-solid:not(:disabled):hover { opacity: .9; }
     .alert { margin-bottom: 12px; }
     /* The app has no global focus ring, so the dialog draws its own on every control (decision 41). */
     .dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
