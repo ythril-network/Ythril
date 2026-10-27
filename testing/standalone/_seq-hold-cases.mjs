@@ -318,6 +318,10 @@ export function holderCases(ctx, S) {
       // The two variants of the landing experiment put ONE odd clock on every statement (a client `timeoutMS` of 1500 ms; every command a lateness late), which ends
       // the move before it reaches the stall or after it — not the question they ask. The base experiment reads this case.
       baseOnly: true,
+      // The carry's insert meets the lock INSIDE a transaction, where a write conflict is answered at once and the whole transaction retried until the bound:
+      // the write is alive for a moment per retry, and a 50 ms sample of `currentOp` missed it on every attempt of a CI repetition. The server's own account
+      // is the proof instead: the move's hold (`file.move`) ended by the bound, which a carry no lock holds up never reaches.
+      stallSaidBy: 'file.move',
       lock: async () => {
         // The bytes and the row first (a move needs both), then the lock on the id the move creates.
         // A move a stalled repetition left owed is remembered in this process by its pair of paths (`MoveStillOwed`), so every repetition moves a pair of its own.
