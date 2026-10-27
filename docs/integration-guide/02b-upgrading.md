@@ -279,8 +279,8 @@ The contract is in the [schema guide](06a-schema-api.md); what an integrator or 
   refusal body (`introduced`, `preExisting`, …), was `{ error, violations }`, still `400`; a bulk row carries `violation`.
 - **A body that fails validation answers `{ "error", "issues" }`** and never reflects a received value; `error` is bounded
   prose, no longer a JSON document. Match on `issues[].code` and `path`, not on the old sentence.
-- **`POST /api/spaces/:id/validate-schema` pages by `after` / `nextAfter`**: `skip`, `count`, `total`, `truncated`, `nextSkip` and `totalViolations`
-  are gone (a call stops reading when its page holds `limit` violating records, so it no longer counts the ones it does not show;
+- **`POST /api/spaces/:id/validate-schema` pages by `after` / `nextAfter`**: `skip`, `count`, `total`, `nextSkip` and `totalViolations`
+  are gone, and `truncated` now says only that the byte budget cut the page (a call stops reading when its page holds `limit` violating records, so it no longer counts the ones it does not show;
   `progress.checked` is what that call read), `limit` and `after` are body parameters, one call reads at most 10,000 records, and a stored `value` is shown only to a
   caller who may read the space's knowledge. It also takes `sample` (one record) and is MCP `schema_validate`.
 - **MCP write tools answer `warnings`** where `save_edge` answered `violations` on success, `save_entity`, `save_fact` and

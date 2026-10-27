@@ -70,7 +70,7 @@ changes, and an empty body is `400` (`view_nothing_to_change`).
 
 **Which doors take a view.** A door takes a view in place of a space when it reads data and its area is not the
 schema: `recall`, `similar`, `filter` (`POST /api/filter`), graph reads (`graph_traverse`, `traverse`), `space_stats` and the
-stats routes, the embed-job and ingest status reads, file reads and listings (`read_file`, `list_dir`), the
+stats routes, the embed-job and ingest status reads, the forks list (`GET /api/brain/spaces/:id/forks`, `list_forks`), file reads and listings (`read_file`, `list_dir`), the
 `delete_entity_preview` read, and the live-event stream of a view (`GET /api/brain/spaces/:id/events`). Their `space`
 parameter (REST: the path segment or the body field) accepts the owner's `@view`. A write, admin or schema door never
 does.
@@ -93,7 +93,7 @@ The ten `view_*` tools are the twins of the doors above, with the same parameter
 `view_migration` are admin tools, hidden from a token that is not an instance admin.
 
 - **The `space` enum lists your views.** The `inputSchema` of exactly the read tools that take a view (`recall`,
-  `similar`, `filter`, `graph_traverse`, `space_stats`, `list_embed_jobs`, `ingest_status`, `read_file`, `list_dir`,
+  `similar`, `filter`, `graph_traverse`, `space_stats`, `list_embed_jobs`, `ingest_status`, `list_forks`, `read_file`, `list_dir`,
   `delete_entity_preview`) offers your views beside the spaces; the write enum does not. `tools/list` advertises
   `listChanged`, and `view_create`, `view_update` and `view_delete` send `notifications/tools/list_changed`, so a
   client that honours it refetches the schemas.

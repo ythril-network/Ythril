@@ -461,7 +461,7 @@ line, escaped, after the message.
 
 **`record position held …` names a write that held up replication.** While a write is being stored it holds the position it took for
 its record, and every peer pulling that space is served nothing past that position until the write
-ends. A write that took longer than half its limit (`YTHRIL_HOLD_DEADLINE_MS`) is named once while it is still
+ends. Each database operation inside that hold is ended after `YTHRIL_WRITE_TIMEOUT_MS` (30 seconds by default). A write that took longer than half its limit (`YTHRIL_HOLD_DEADLINE_MS`) is named once while it is still
 open — `record position held 23.0s and still open: space=… pos=… holder=…` — and again when it ends:
 `record position held 45.1s space=… pos=… holder=… ended=timeout`. `holder` says which kind of write it was
 (`fact.update`, `sync.push.fork`, `entity.merge`, …); `ended=` says how it ended: `ok` (slow, but it finished),
