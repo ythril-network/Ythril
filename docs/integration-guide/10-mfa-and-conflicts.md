@@ -15,8 +15,10 @@ GET /api/mfa/status
 **Response** `200`:
 
 ```json
-{ "enabled": false }
+{ "enabled": false, "asked": false }
 ```
+
+`enabled` is whether the instance has a second factor enrolled. `asked` is whether the calling token will be asked for a code on an MFA-gated act: its own `mfa` setting (`inherit`, `exempt`, `required`) weighed against `enabled`, and never for an OIDC session. A screen that says "you will be asked for a code" goes by `asked`.
 
 ---
 

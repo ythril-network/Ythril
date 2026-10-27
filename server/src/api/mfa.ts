@@ -11,7 +11,7 @@
  * enrolment works without a code. Break-glass recovery when the authenticator is
  * lost is an operator action: remove `totpSecret` from secrets.json on disk.
  *
- * GET  /api/mfa/status          — { enabled: boolean }
+ * GET  /api/mfa/status          — { enabled: boolean, asked: boolean }
  * POST /api/mfa/setup           — generate & store secret; returns { secret, otpauth }
  * POST /api/mfa/verify          — verify a code without a state-changing side-effect
  * DELETE /api/mfa               — disable MFA (removes secret from secrets.json)
@@ -21,6 +21,7 @@ import { Router } from 'express';
 import { refusalOfParse } from '../util/log.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
+import { callerIsAskedForMfa } from '../auth/mfa-asked.js';
 import { enableMfa, disableMfa, isMfaEnabled, verifyMfaCode } from '../auth/totp.js';
 import { getConfig } from '../config/loader.js';
 import { z } from 'zod';
@@ -29,9 +30,10 @@ export const mfaRouter = Router();
 
 export const VerifyBody = z.object({ code: z.string().min(4).max(8) });
 
-// GET /api/mfa/status
-mfaRouter.get('/status', globalRateLimit, requireAdmin, (_req, res) => {
-  res.json({ enabled: isMfaEnabled() });
+// GET /api/mfa/status — `enabled`: the instance has a second factor; `asked`: THIS token will be asked for a code on an MFA-gated act (its own `mfa`
+// setting weighed against the switch, `callerIsAskedForMfa`), which is what a dialog that says "you are asked for a code" must go by.
+mfaRouter.get('/status', globalRateLimit, requireAdmin, (req, res) => {
+  res.json({ enabled: isMfaEnabled(), asked: callerIsAskedForMfa(req.authToken as Parameters<typeof callerIsAskedForMfa>[0]) });
 });
 
 // POST /api/mfa/setup — generate and store a new TOTP secret.
