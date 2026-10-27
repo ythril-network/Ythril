@@ -22,6 +22,35 @@ import type { NetworkConfig, NetworkMember } from '../config/types.js';
 /** What one check concluded: the roots are equal, they differ, or the check could not tell. */
 export type MerkleComparison = 'match' | 'mismatch' | 'unknown';
 
+/** What the divergence line says about one disagreement. */
+export interface DivergenceFacts {
+  spaceId: string; peerLabel: string; peerInstanceId: string; networkLabel: string;
+  localRoot: string; localLeaves: number; peerRoot: string; peerLeaves: number | undefined;
+}
+
+/**
+ * The `MERKLE_DIVERGENCE` line of one disagreement, naming the versions that await a decision when there are some (Q-624, design §9a, S8).
+ *
+ * A fork another instance resolved, behind a tombstone this instance's deletion rules declined, stays here until this instance's user decides it, and the
+ * two roots differ by exactly that row. That is the cost of the owner's decision, so the line says so ("N unresolved versions here were resolved on another
+ * instance and await a decision in Review") rather than leaving a divergence an operator reads as lost data. The count is read HERE, in the mismatch
+ * branch only: a match asks nothing of the store. A count that cannot be read leaves the line as it was, because a failure to explain a divergence is not a
+ * reason to say less about it.
+ */
+export async function divergenceLine(f: DivergenceFacts): Promise<string> {
+  let awaiting = 0;
+  try {
+    const { forksAwaitingADecision } = await import('../brain/fork-counts.js');
+    awaiting = await forksAwaitingADecision(f.spaceId);
+  } catch { /* the line stands without the count */ }
+  return `MERKLE_DIVERGENCE: space '${peerText(f.spaceId)}', peer '${peerText(f.peerLabel)}' (${peerText(f.peerInstanceId)}), ` +
+    `network '${peerText(f.networkLabel)}'. ` +
+    `local root=${peerText(f.localRoot)} (${f.localLeaves} leaves), ` +
+    `peer root=${peerText(f.peerRoot)} (${f.peerLeaves ?? '?'} leaves). ` +
+    `The space contents differ after sync — possible data loss, concurrent write, or sync bug.` +
+    (awaiting > 0 ? ` ${awaiting} unresolved versions here were resolved on another instance and await a decision in Review, which accounts for part of the difference.` : '');
+}
+
 export async function checkMerkleWithPeer(
   net: NetworkConfig,
   member: NetworkMember,
@@ -57,13 +86,10 @@ export async function checkMerkleWithPeer(
     }
 
     if (localResult.root !== peerRoot) {
-      log.warn(
-        `MERKLE_DIVERGENCE: space '${peerText(spaceId)}', peer '${peerText(member.label)}' (${peerText(member.instanceId)}), ` +
-        `network '${peerText(net.label)}'. ` +
-        `local root=${peerText(localResult.root)} (${localResult.leafCount} leaves), ` +
-        `peer root=${peerText(peerRoot)} (${peerResult.leafCount ?? '?'} leaves). ` +
-        `The space contents differ after sync — possible data loss, concurrent write, or sync bug.`,
-      );
+      log.warn(await divergenceLine({
+        spaceId, peerLabel: member.label, peerInstanceId: member.instanceId, networkLabel: net.label,
+        localRoot: localResult.root, localLeaves: localResult.leafCount, peerRoot, peerLeaves: peerResult.leafCount,
+      }));
       return 'mismatch';
     }
     log.info(`Merkle OK: space '${peerText(spaceId)}', peer '${peerText(member.label)}' root=${peerText(localResult.root.slice(0, 12))}…`);
