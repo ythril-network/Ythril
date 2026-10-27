@@ -26,5 +26,5 @@ Carrying a resolution on the parent so that every instance deletes its own copy 
 - `server/src/brain/forks.ts` — the read-only refusal, the removal with the subject, the re-mint, Review's list and resolve.
 - `server/src/brain/fork-keep.ts` — the one keep-writer.
 - `server/src/sync/resolved-elsewhere.ts` and `server/src/sync/tombstone-apply.ts` — the mark a declined fork tombstone leaves.
-- `server/src/sync/upsert-plan.ts` — `FORKING_FAMILIES`, the fork id and the arrival half of the mark.
+- `server/src/sync/upsert-plan.ts` — the list of forking families, the fork id and the arrival half of the mark.
 - `docs/integration-guide/04-brain-api.md` — the routes; `docs/userguide/02-brain.md` — Review > Forks.
