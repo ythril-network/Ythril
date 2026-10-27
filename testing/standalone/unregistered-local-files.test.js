@@ -83,8 +83,7 @@ describe('unregistered-local-files', () => {
     assert.match(r.out, /notes\.md.*untracked/);
   });
 
-  it('a catch-all hides nothing under tmp/, and a log in a registered directory is still registered by the directory', () => {
-    // Each failure is named by its own path: the two strays above are reported, the registered paths are not.
+  it('only the strays are reported, never a registered path', () => {
     const r = runScript(['--root', repo.dir]);
     assert.equal(r.status, 1, r.out);
     assert.doesNotMatch(r.out, /tmp\/run\/output\.txt/);
@@ -134,7 +133,7 @@ describe('unregistered-local-files', () => {
     // A rule that names a place is not one, whatever it says about the paths under it.
     const text = readFileSync(join(REPO_ROOT, '.gitignore'), 'utf8');
     for (const place of ['node_modules/', 'dist/', 'tmp/', 'test-results/']) {
-      assert.ok(text.split('\n').includes(place), `.gitignore must hold the place rule ${place}`);
+      assert.ok(text.split(/\r?\n/).includes(place), `.gitignore must hold the place rule ${place}`);
       assert.ok(!derived.includes(place), `${place} names a place and must not be a catch-all`);
     }
   });
