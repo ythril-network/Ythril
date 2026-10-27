@@ -14,7 +14,7 @@
  * | `bulkWrite` / `insertMany` + `maxTimeMS` | code 50 `MaxTimeMSExpired`, as `MongoBulkWriteError` |
  * | `bulkWrite` / `insertMany` + `timeoutMS`, client side first | `MongoBulkWriteError`, NO code, message `Timed out during socket read (<n>ms)` |
  * | the same, server side first | `MongoBulkWriteError`, NO code, message `Server reported a timeout error` |
- * | `withTransaction` under a session `defaultTimeoutMS` | the LAST attempt's error: `MongoServerError` 112 `WriteConflict`, labelled `TransientTransactionError` |
+ * | `withTransaction` under a session `defaultTimeoutMS` | the LAST attempt's error: `MongoServerError` 112 `WriteConflict`, or 251 `NoSuchTransaction` when the server aborted it first, labelled `TransientTransactionError` |
  *
  * A classifier keyed on `instanceof MongoOperationTimeoutError` answers "not a timeout" for a timed-out batched
  * write — and the arrival writer then reads it as one document's refusal or a generic fault. Today
@@ -66,6 +66,11 @@ const TIMEOUTS = [
     () => bulkError({ message: 'Server reported a timeout error' })],
   ['MongoServerError 112 WriteConflict, TransientTransactionError (withTransaction under a session timeout)',
     () => serverError({ code: 112, codeName: 'WriteConflict', errmsg: 'Write conflict during plan execution and yielding is disabled.' },
+      ['TransientTransactionError'])],
+  // The other last attempt: the server had already aborted the transaction (a statement's deadline ended it there), so the retry's first statement names a
+  // transaction that no longer exists. Seen from the merge relink's lane of the landing experiment, bundle-81.
+  ['MongoServerError 251 NoSuchTransaction, TransientTransactionError (withTransaction under a session timeout, the server aborted first)',
+    () => serverError({ code: 251, codeName: 'NoSuchTransaction', errmsg: 'Given transaction number 15 on session x using txnRetryCounter 0 does not match any in-progress transactions.' },
       ['TransientTransactionError'])],
 ];
 
