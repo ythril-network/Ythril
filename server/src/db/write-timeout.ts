@@ -72,7 +72,12 @@ export class StoreTimeout extends Error {
 
 /** The `MongoBulkWriteError` messages a `timeoutMS` produces, by which side of the socket fired first (probe P1). */
 const BULK_TIMEOUT_MESSAGE = /^(Timed out during socket read|Server reported a timeout error)/;
-const WRITE_CONFLICT = 112;
+/**
+ * The codes `withTransaction` hands back when its retries of a TRANSIENT failure ran into the session's deadline: a write conflict (a lock held
+ * elsewhere), or a transaction the server had already aborted (a statement's own deadline ended it there, so the next statement names a
+ * transaction that no longer exists). Either one, with the transient label, says the retrying was ended by the bound.
+ */
+const RETRIED_TO_THE_BOUND = new Set([112 /* WriteConflict */, 251 /* NoSuchTransaction */]);
 
 /** True when this error, or one it wraps (`errorChain`), is a bound ending the operation. */
 export function isWriteTimeout(err: unknown): boolean {
@@ -88,6 +93,7 @@ function isTimeoutItself(e: object): boolean {
   if (isMaxTimeExpired(e)) return true;
   if (name === 'MongoBulkWriteError' && BULK_TIMEOUT_MESSAGE.test((e as Error).message ?? '')) return true;
   const labelled = (e as { hasErrorLabel?: (l: string) => boolean }).hasErrorLabel;
-  return writeErrorCode(e) === WRITE_CONFLICT && typeof labelled === 'function'
+  const code = writeErrorCode(e);
+  return code !== undefined && RETRIED_TO_THE_BOUND.has(code) && typeof labelled === 'function'
     && labelled.call(e, 'TransientTransactionError');
 }
