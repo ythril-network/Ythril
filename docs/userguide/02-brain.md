@@ -78,11 +78,11 @@ tags, linked entities and properties.
 
 **Deleting:** Each row has a **✕** button. A small inline confirmation appears — click **Yes** to confirm, **No** to cancel.
 
-**Conflict copies:** when two connected brains change the same fact to different texts before they sync, both
-texts are kept — the second arrives as its own fact (a conflict copy that names the fact it diverged from). It is
-an ordinary fact from then on: deleting or expiring the original does not remove it, and you delete it the same way.
-To remove a text everywhere it was kept, first find its copies: the **Query** tab, Filter mode, collection **facts**,
-filter `{"forkOf": "<the original's id>"}`.
+**Conflict copies:** when two connected brains change the same record (a fact, an entity, a chrono entry or an edge) differently
+before they sync, both versions are kept: the second arrives as a **fork**, a conflict copy that names the record it diverged from
+(`forkOf`). Forks are listed, embedded and found by search like any record, and settled in **Review > Forks**. A fork cannot be edited,
+only kept there or deleted; deleting or expiring the original deletes its forks with it. To list them here: the **Query** tab, Filter
+mode, filter `{"forkOf": "<the original's id>"}`, or `{"forkOf": null}` to leave every fork out.
 
 **Wiping everything:** There is no "Wipe all" button on the Brain toolbar. To clear a space's data, go to **Settings → Spaces → (space) → Danger tab** and use **Wipe all data**. You will be asked to type the space ID to confirm.
 
@@ -764,18 +764,23 @@ The **Review** tab inside a space's Brain is that space's record-QA queue, split
 **Duplicates**, **Contradictions**, **Forks** and **Suggestions**. (Contradictions needs an NLI model configured
 under **Settings → Media Processing**; until the scanner has run, the tab explains what it needs.)
 
-**Forks** lists the facts that two instances wrote *differently* while both held the same version of them. Ythril
-does not pick one silently: it keeps both, the second as a **fork** beside the first, and this tab is where you choose.
-Each card shows the fork beside the fact it forks with the differing words marked in place (words only in the fork,
-words only in the other version; each mark also says so in words, so colour is never the only signal), who wrote each
-version and when, and how many edges and links point at the fork. **Show both versions in full** opens both texts whole.
-**Keep this version** puts the fork's text, tags, description, properties and type on the fact; **Keep the other
-version** leaves the fact as it is. Both ask for a confirmation that names what is deleted, and both do the same three things:
-the fact is saved as a new edit of its own, newer than both versions, so any peer holding either one takes it; the fork is
-deleted and peers are told; and every edge and link that pointed at the fork points at the fact instead. A fact may hold
-only so many forks; the card says when it is at that number, because the next differing copy of it would be dropped until one
-is resolved (the Server Log names the dropped record). A fork whose original has been deleted is not listed: it is an ordinary
-fact now. The same two actions are the API's `GET`/`POST …/forks` routes and the `list_forks` and `resolve_fork` tools.
+**Forks** lists the records (facts, entities, chrono entries and edges, chosen with the kind switch) that two instances wrote
+*differently* while both held the same version of them. Ythril does not pick one silently: it keeps both, the second as a **fork**
+beside the first, and this tab is where you choose. Each card shows the fork beside the record it forks with the differing words marked
+in place (words only in the fork, words only in the other version; each mark also says so in words, so colour is never the only signal),
+every other differing field on its own line, who wrote each version and when, and how many edges and links point at the fork.
+**Show both versions in full** opens both texts whole. **Keep this version** writes the fork's whole content onto the record; **Keep the
+other version** leaves the record as it is. Both ask for a confirmation that names what is deleted, and both do the same three things:
+the record is saved as a new edit of its own, newer than both versions, so any peer holding either one takes it; this instance's copy of
+the fork is deleted; and every edge and link that pointed at the fork points at the record instead. A record may hold only so many forks;
+the card says when it is at that number, because the next differing copy of it would be dropped until one is resolved (the Server Log
+names the dropped record). A fork whose original has been deleted is listed too, marked as such: keep it to make it the record, or let
+the deletion stand.
+
+**Resolved elsewhere.** A resolve removes this instance's copy only. Another instance whose deletion rules do not accept that removal
+keeps its copy and lists it here as "resolved on" that instance, with the side that instance kept, until its own user decides; keeping the
+other side there overrides the first choice on every instance. The audit entry of each resolve keeps both versions for as long as audit
+entries are kept. The same two actions are the API's `GET`/`POST …/forks` routes and the `list_forks` and `resolve_fork` tools.
 
 **Suggestions** is the space's completeness report, worked as a queue. A space is "set up" long before
 it is *usable* — schemas declare types nothing instantiates and properties nothing fills, entities pile

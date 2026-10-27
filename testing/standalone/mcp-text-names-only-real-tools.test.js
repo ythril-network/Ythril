@@ -74,8 +74,11 @@ before(async () => {
   assert.ok(actCodes.length >= 5, `only ${actCodes.length} space act refusal codes were read`);
   // And the `code` a write at its version ceiling answers (`409`, the four update tools and the fork resolve name it), from the constant the doors answer with.
   const { RECORD_VERSION_AT_CEILING } = await import('../../server/dist/brain/write-precondition.js');
+  // And the `code` an ordinary edit of a fork row, or a re-key past the fork cap, answers (Q-624: `fork_row_read_only`, `fork_cap`), from their one list.
+  const { FORK_REFUSAL_CODES } = await import('../../server/dist/util/errors.js');
+  assert.ok(FORK_REFUSAL_CODES?.length >= 2, 'the fork refusal codes were not read');
   ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
-    ...actCodes, RECORD_VERSION_AT_CEILING];
+    ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 

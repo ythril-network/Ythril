@@ -581,53 +581,63 @@ DELETE /api/brain/spaces/:spaceId/facts/:id
 > **Changed in 4.0:** a linked chrono entry or file blocks this delete, so a script that deleted such a fact
 > on an older version now gets `409` — clear the link first. With `strictLinkage` off it always succeeds.
 
-Deleting a fact does not delete its forks — the facts sync created when a peer sent a different text for it at the
-same version (they carry `forkOf` naming this fact). To erase a text everywhere it was kept, list them first with
-[`POST /api/filter`](04d-brain-ops-api.md#structured-query-read-only) on `facts`, `{"forkOf": "<id>"}`. A fork is its own record, deleted like any other fact.
+Deleting a record deletes its **forks** too: the versions sync kept when a peer wrote it differently at the same version (they carry `forkOf` naming it).
+Each goes behind a tombstone of its own, for facts, entities, chrono entries and edges alike, and the entity delete preview counts them (`forks`). A
+fork alone is deleted by its own id, like any record.
 
 ### Forks: list them and keep one side
 
-Two copies of a fact that carry one version and different text are both kept: the second as a **fork** of the first (its `forkOf` names the
-first, its **parent**), rather than one silently replacing the other. Two routes read and settle them; the same two capabilities are the MCP tools
-`list_forks` and `resolve_fork`, with these parameters and these refusals.
+Two copies of a record that carry one version and different bodies are both kept: the second as a **fork** of the first (its `forkOf` names the
+first, its **parent**), rather than one silently replacing the other. Facts, entities, chrono entries and edges fork; links and files do not. A fork
+row is an unresolved version: an update, a relabel, a save by its id or a merge naming it is `409` `fork_row_read_only`. Two routes read and settle
+forks; the same two capabilities are the MCP tools `list_forks` and `resolve_fork`, with these parameters and these refusals.
 
 ```http
-GET /api/brain/spaces/:spaceId/forks?limit=25&skip=0
+GET /api/brain/spaces/:spaceId/forks?kind=entity&limit=25&skip=0
 ```
 
-`limit` runs from 1 to 200 (default 25) and a value outside that is `400 limit must be an integer from 1 to 200`, not a smaller page; `skip` is a
-non-negative integer. Newest first (landing order).
+`kind` is `fact`, `entity`, `chrono` or `edge`, and optional (every kind when omitted). `limit` runs from 1 to 200 (default 25) and a value outside that
+is `400 limit must be an integer from 1 to 200`, not a smaller page; `skip` is a non-negative integer. Newest first (landing order, across kinds).
 
-**Response** `200` `{ forks, total, skip, limit, maxForksPerRecord }`. `total` counts every fork of the space whose parent is still stored (a fork whose parent
-is gone is an ordinary fact and is not listed). `maxForksPerRecord` is how many forks one record may hold: a record at that many drops the next differing copy
-(logged and counted), so resolve one before another version can be kept. Each row of `forks`:
+**Response** `200` `{ forks, total, skip, limit, counts, kinds, maxForksPerRecord }`. `total` counts the forks of the kind asked. `counts` holds every
+kind's count whatever `kind` asked, and `counts.resolvedElsewhere` per kind how many of them another instance already resolved. `kinds` gives, per kind,
+the `fields` two versions are compared by and the `mainField` shown word by word. `maxForksPerRecord` is how many forks one record may hold: a record at
+that many drops the next differing copy (logged and counted), so resolve one before another version can be kept. Each row of `forks`:
 
 | Field | |
 |---|---|
-| `forkId`, `parentId` | the two records |
-| `fork`, `parent` | each version as a reader compares them: `_id`, `type`, `fact`, `description`, `tags`, `properties`, `author`, `createdAt`, `updatedAt` |
-| `edgeCount`, `linkCount` | the edges (either end) and links (either side) that point at the fork: a resolve moves them to the parent |
+| `kind`, `forkId`, `parentId` | the kind and the two records |
+| `fork`, `parent` | each version as a reader compares them: `_id`, the kind's body fields, `author`, `createdAt`, `updatedAt`, `seq`. `parent` is `null` and `orphaned` is `true` when the parent is gone |
+| `edgeCount`, `linkCount` | the edges (either end) and links (either side) that point at the fork: a resolve moves them to the parent (`0` for an edge) |
 | `siblings` | how many forks the parent holds, this one included |
+| `resolvedElsewhere` | the other instances that resolved THEIR copy, each `{ by, at, proven, via?, kept }`; `kept` is `original`, `this version` or `not yet known`. Empty when none |
 
 ```http
 POST /api/brain/spaces/:spaceId/forks/:forkId/resolve
 Content-Type: application/json
 
-{ "keep": "fork" }
+{ "kind": "entity", "keep": "fork", "ifMatchSeq": 12, "ifMatchParentSeq": 9 }
 ```
 
-`keep` is `"fork"` (the fork's `fact`, `tags`, `description`, `properties` and `type` replace the parent's) or `"parent"` (the parent's stay). Either way:
+All five parameters are required: `kind`, the `forkId` in the path, `keep`, and both versions as listed (`ifMatchSeq` is the fork's `seq`,
+`ifMatchParentSeq` the parent's; send `0` for an orphaned fork, and only then). `keep` is `"fork"` (the fork's whole body replaces the parent's) or
+`"parent"` (the parent's stays). Either way:
 
 - the **parent is written as a new edit of its own**, with a version above both the parent's and the fork's, so a peer holding either one takes this as the newer;
-- the **fork is deleted** and a tombstone is issued for it by this instance, so peers that accept its deletion are told;
+- **this instance's copy of the fork is deleted** behind a tombstone this instance issues, with any fork of the same body under another id. A peer applies that
+  tombstone only where its deletion rules accept it (the fork's author's own, on a mesh); every other instance keeps its copy, lists it as resolved elsewhere,
+  and its own user decides it with the same call;
 - every **edge and link that pointed at the fork points at the parent** instead (one the parent already has is not duplicated, and an edge is re-keyed onto the id its new endpoints derive).
 
-The parent is written first, so a failure part-way leaves the fork stored and the same call resolves it again; no text is lost to a half-done resolve.
+For an orphan, `keep: "parent"` lets the deletion stand (the fork goes as an ordinary delete) and `keep: "fork"` makes the fork the record (an edge is
+re-keyed onto the id its identity derives). The parent is written first, so a failure part-way leaves the fork stored and the same call resolves it again.
 
-**Response** `200` `{ resolved: true, keep, forkId, parentId, parent, edgesRepointed, linksRepointed }`, `parent` being the stored parent without its vector.
-Refused: `400` for a `keep` that is neither side (`keep must be one of 'fork' or 'parent'`); `404` for an id that is not stored; `409` for a record that
-is not a fork, for a fork whose parent is no longer stored, or for a parent property whose name holds a dot (it cannot be removed by a path, so edit it first);
-and the write refusals of an ordinary edit (a schema violation, `record_version_at_ceiling`). A token needs `knowledge: read` to list and `knowledge: write` to resolve.
+**Response** `200` `{ resolved: true, kind, keep, forkId, parentId, parent, edgesRepointed, linksRepointed, siblingsRemoved }`, `parent` being the stored
+parent without its vector (`null` when an orphan's deletion stood). Refused: `400` for a missing parameter (`Invalid arguments for 'resolve_fork': (arguments):
+missing required property '<name>'`, the MCP validator's words on both doors), a `keep` that is neither side, or `ifMatchParentSeq: 0` while the parent is
+stored; `404` for an id that is not stored; `409` for a record that is not a fork, a fork whose id does not derive from its parent, or a fork or parent that
+changed since it was listed (list again); and the write refusals of an ordinary edit (`record_version_at_ceiling`). The audit entry `fork.resolve` records
+the kind, the side kept, both ids, the mark the fork carried and both bodies. A token needs `knowledge: read` to list and `knowledge: write` to resolve.
 Both are audited (`fork.list` as a read, `fork.resolve` naming the fork).
 
 ---

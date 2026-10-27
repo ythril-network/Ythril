@@ -78,8 +78,28 @@ describe('a restore keeps the backup\'s stamps, never the replaced copy\'s (Q-23
     // (`db/restore-act.ts`, which keeps it as the backup had it). An admin IMPORT is not that: it is not a restore of positions, so it lands each row at a
     // fresh position and stamps `writtenHere` afresh from the one predicate (`sync/written-here.ts`), never from the backup or the replaced copy — which is
     // why no import row below carries a sentinel for it.
-    assert.deepEqual([...RESTORED].sort(), ['_contentExpireAt', '_expireAt', 'deliveredBy', 'syncBase', 'writtenHere'],
+    // Q-624: `_resolvedElsewhere` — a decision owed here on a fork row — joins the class; its sentinel is the case below.
+    assert.deepEqual([...RESTORED].sort(), ['_contentExpireAt', '_expireAt', '_resolvedElsewhere', 'deliveredBy', 'syncBase', 'writtenHere'],
       'RESTORED_LOCAL_FIELDS changed — give the new field a sentinel here before trusting this file');
+  });
+
+  it('_resolvedElsewhere: the backup\'s mark is stored, and a backup with none keeps none of the replaced copy\'s (Q-624)', async () => {
+    const MARK = [{ by: 'the-backups-resolver', at: '2026-10-01T00:00:00.000Z', seq: 7, proven: true }];
+    const STALE = [{ by: 'the-replaced-copys-resolver', at: '2026-10-02T00:00:00.000Z', seq: 8, proven: true }];
+    const wrong = [];
+    for (const fam of families.filter(f => ['facts', 'entities', 'chrono'].includes(f.collection))) {
+      const own = idFor(fam, 're-own');
+      await door.coll(S, fam.collection).insertOne({ ...backupOf(fam, own), seq: 39, _resolvedElsewhere: STALE });
+      await importMod.importDocuments(S, { [fam.collection]: [backupOf(fam, own, { _resolvedElsewhere: MARK })] });
+      const none = idFor(fam, 're-none');
+      await door.coll(S, fam.collection).insertOne({ ...backupOf(fam, none), seq: 39, _resolvedElsewhere: STALE });
+      await importMod.importDocuments(S, { [fam.collection]: [backupOf(fam, none)] });
+      const [a, b] = await Promise.all([own, none].map(id => door.coll(S, fam.collection).findOne({ _id: id })));
+      if (a?.seq !== 40 || b?.seq !== 40) { wrong.push(`${fam.collection}: fixture check — a restore did not land`); continue; }
+      if (JSON.stringify(a._resolvedElsewhere) !== JSON.stringify(MARK)) wrong.push(`${fam.collection}: the backup carried a mark and the restore stored ${show(a._resolvedElsewhere)}`);
+      if (b._resolvedElsewhere !== undefined) wrong.push(`${fam.collection}: the backup carried none and the restore kept ${show(b._resolvedElsewhere)}`);
+    }
+    assert.deepEqual(wrong, [], 'a restore stored the wrong decision mark: a decision owed before the export must be owed after it, and only that one');
   });
 
   it('deliveredBy: the backup\'s value is stored; a backup with none stores the empty string, never the replaced copy\'s — on every family', async () => {

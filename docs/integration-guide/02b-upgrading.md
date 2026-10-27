@@ -231,7 +231,7 @@ oplog, so an index on an empty collection costs the database on every write anyw
 collection keeps the index it has, untouched. Expect the instance's index count to fall by the number of empty record
 collections — about half, on a measured production instance. An index comes back by itself with its collection's
 first record, and goes a minute after its last one is deleted (`SEARCH_INDEX_DROP_DELAY_MS`, default `60000`). A
-rollback needs nothing: the older build recreates every index at boot.
+rollback recreates every one of these indexes at boot; the edge identity index is the exception, and the rollback tool (`server/dist/tools/positions-rollback.js`) drops the 6.0 one and refuses while entity, edge or chrono forks are stored (`--discard-unresolved-forks` deletes them), or a 5.6 build cannot index the edges.
 
 **Upgrading past 5.6.8 strips the records of files deleted under `softDeleteFileMeta` by an earlier build.** The flag
 write removes everything the bytes made in the same operation now — the vector, its model, the matched text, the

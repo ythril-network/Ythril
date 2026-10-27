@@ -407,6 +407,7 @@ const SITES = [
   { file: 'server/src/sync/tombstone-apply.ts', sites: 1, kind: 'sliced', reason: 'a peer\'s tombstone page: 5000 counted, each op carries an unbounded id twice' },
   { file: 'server/src/brain/edge-rekey.ts', sites: 1, kind: 'chunked', cap: 'ROWS_PER_BULK_COMMAND', reason: 'edge rows, 1000 at a time; an edge document is nowhere near 16 KiB' },
   { file: 'server/src/brain/tombstones.ts', sites: 1, kind: 'chunked', cap: 'ROWS_PER_BULK_COMMAND', reason: 'tombstones, 1000 at a time; a tombstone is an id and four fields' },
+  { file: 'server/src/sync/resolved-elsewhere.ts', sites: 1, kind: 'chunked', cap: 'ROWS_PER_BULK_COMMAND', reason: 'decision marks on fork rows (Q-624), 1000 at a time; each op is an id and one bounded array' },
   { file: 'server/src/brain/forks.ts', sites: 1, kind: 'chunked', cap: 'ROWS_PER_BULK_COMMAND', reason: 're-minted fork rows (Q-624), 1000 at a time; a subject holds at most MAX_FORKS_PER_RECORD of them' },
   { file: 'server/src/brain/embed-queue.ts', sites: 1, kind: 'chunked', cap: 'SWEEP_BATCH', reason: 'job rows, 500 records at a time; a job is an id and a few fields' },
   // The conversion's commit moved into the one writer of a file's derived rows (bundle-89, Q-418), which reads the

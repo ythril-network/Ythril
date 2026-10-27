@@ -1,6 +1,6 @@
 # 15 — Two copies at one version with different text are both kept, and the owner settles them in Review
 
-**Status:** accepted, 2026-10 (D-23) · **Scope:** a fact that two instances wrote differently at one `seq` (the fork), Review's Forks list and resolve on REST (`GET /api/brain/spaces/:spaceId/forks`, `POST .../forks/:forkId/resolve`) and MCP (`list_forks`, `resolve_fork`), and the per-record fork cap
+**Status:** accepted, 2026-10 (D-23); points 1, 2 and 5 superseded by decision 18, which forks every kind · **Scope:** a fact that two instances wrote differently at one `seq` (the fork), Review's Forks list and resolve on REST (`GET /api/brain/spaces/:spaceId/forks`, `POST .../forks/:forkId/resolve`) and MCP (`list_forks`, `resolve_fork`), and the per-record fork cap
 
 ## Context
 

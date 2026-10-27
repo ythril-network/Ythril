@@ -36,6 +36,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { handlerFor, fakeRes } from './_vote-round-instance.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'b81forks';
@@ -362,13 +363,13 @@ describe('Review lists and resolves forks, on both doors', { skip }, () => {
       const before = await door.mongo.col('audit_log').countDocuments({});
       const r = await rd.resolve.MCP('entity', fork._id, 'parent');
       assert.ok(r.ok, r.sentence);
-      // The audit row is written after the call answers (`logAuditEntry` is not awaited by the door), so it is read until it lands, for at most 2 s.
+      // The audit row is written after the call answers (`logAuditEntry` is not awaited by the door), so it is read until it lands.
       let entry;
-      for (let i = 0; i < 40 && !entry; i++) {
+      await waitFor(async () => {
         const rows = (await door.mongo.col('audit_log').find({}).toArray()).slice(before);
         entry = rows.find(x => JSON.stringify(x).includes('fork.resolve'));
-        if (!entry) await new Promise(r => setTimeout(r, 50));
-      }
+        return entry !== undefined;
+      }, 3000, 50).catch(() => undefined);
       assert.ok(entry, 'no fork.resolve row in the audit log');
       const text = JSON.stringify(entry);
       for (const part of [fork._id, parent, 'entity', 'parent', k.alt.name, `Entity ${parent}`]) assert.ok(text.includes(part), `the audit row does not carry ${part}: ${text.slice(0, 400)}`);
