@@ -34,7 +34,7 @@ function forksWords(): Record<string, any> {
 }
 
 const row = (id: string, kind: ForkRow['kind'] = 'fact'): ForkRow => ({
-  kind, forkId: `fork-${id}`, parentId: `parent-${id}`,
+  kind, space: 's', forkId: `fork-${id}`, parentId: `parent-${id}`,
   fork: { _id: `fork-${id}`, seq: 7, fact: 'theirs', type: 'note' }, parent: { _id: `parent-${id}`, seq: 9, fact: 'mine', type: 'note' },
   orphaned: false, edgeCount: 0, linkCount: 0, siblings: 1, resolvedElsewhere: [],
 });
