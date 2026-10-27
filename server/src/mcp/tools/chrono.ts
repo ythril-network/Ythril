@@ -435,7 +435,7 @@ export const update_chronoTool: ToolHandler = {
     if (audit.prior) {
       await assertConnections(audit.home!, 'chrono', await connectionSubject(audit.home!, 'chrono', a, { stored: audit.prior }), a);
     }
-    // Through the members, as REST's PATCH and every other update tool do: a write target may itself be a proxy, and the
+    // Through the members, as REST's PATCH and every other update tool do: a write target is resolved to its member, and the
     // entry lives in the member the audit read just found — updating the target as though it held it answered "not found".
     let updCheck: UpdateValidation | undefined;
     const entry = await findFirstAcrossMembers([callSpace], mid => updateChrono(mid, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a), undefined, c => { updCheck = c; }));
@@ -443,7 +443,7 @@ export const update_chronoTool: ToolHandler = {
     { const s = audit.snapshots(entry); ctx.recordChanges?.(s.before, s.after); }
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
-    // `entry.spaceId` rather than `callSpace`: a proxy write lands where the record actually is.
+    // `entry.spaceId` rather than `callSpace`: the space the record was written in, read from the record.
     const connected = await applyConnections(entry.spaceId, entry._id, 'chrono', a, entry.author, ctx.actor);
     const schemaWarnings = schemaWarningAnswer(getSpaceMeta(entry.spaceId), updCheck, connected.warnings);
     return { content: [{ type: 'text' as const, text: [`Chrono entry '${entry.title}' updated (seq ${entry.seq}).`, ...schemaWarnings.lines].join('\n') }],

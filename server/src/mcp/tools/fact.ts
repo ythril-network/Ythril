@@ -360,7 +360,7 @@ export const update_factTool: ToolHandler = {
     if (!updated) throw new NotFoundError(`Fact '${id}' not found`);
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
-    // `updated.spaceId` rather than `callSpace`: a proxy write lands where the record actually is.
+    // `updated.spaceId` rather than `callSpace`: the space the record was written in, read from the record.
     const connected = await applyConnections(updated.spaceId, updated._id, 'fact', a, updated.author, ctx.actor);
     const schemaWarnings = schemaWarningAnswer(getSpaceMeta(updated.spaceId), updCheck, connected.warnings);
     return {

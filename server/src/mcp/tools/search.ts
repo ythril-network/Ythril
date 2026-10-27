@@ -42,7 +42,7 @@ import { MAX_TAGS } from '../../util/request-bounds.js';
 /**
  * Space scope for find_similar — mirrors recall's omit-space idiom (F1 consistency).
  *
- * - **ONE space, without `crossSpace`**: locate the source in that proxy-resolved space and search only
+ * - **ONE space, without `crossSpace`**: locate the source in that view-resolved space and search only
  *   there (searchIds `undefined` → findSimilar searches just the base space).
  * - **SEVERAL spaces** (a list, since 5.0): search exactly those, proxies expanded, and probe each for the
  *   source — the first base holding the entry wins, as in the omitted case. Deliberately NOT the same as
@@ -59,7 +59,7 @@ import { MAX_TAGS } from '../../util/request-bounds.js';
  * request omitting `space` cannot express, because omitting it also looks for the source everywhere. (Its earlier
  * reason, a REST route with the space in its path, stopped being true at 5.0; REST answers through this tool now.)
  *
- * Pure (proxy resolver injected) so the scope logic is unit-testable without a database.
+ * Pure (view resolver injected) so the scope logic is unit-testable without a database.
  */
 export function resolveFindSimilarScope(
   callSpaces: readonly string[] | undefined,
@@ -70,12 +70,12 @@ export function resolveFindSimilarScope(
    *
    * Injected rather than imported so this stays testable without a config — and that injection is what made the Q-6
    * narrowing a one-line change here instead of a signature rewrite. It is also why the parameter is documented: a
-   * caller passing the raw `resolveMemberSpaces` would compile, run, and quietly widen a proxy back to every member.
+   * caller passing the raw `resolveMemberSpaces` would compile, run, and quietly widen a view back to every member.
    */
   resolveMembers: (space: string) => string[],
 ): { candidateBases: string[]; searchIds: string[] | undefined } {
   if (callSpaces && callSpaces.length > 0 && !crossSpace) {
-    // Each named space expanded and DEDUPLICATED: a caller may name a proxy and one of its members, and
+    // Each named space expanded and DEDUPLICATED: a caller may name a view and one of its members, and
     // searching a space twice doubles every match it contributes.
     const seen = new Set<string>();
     for (const sp of callSpaces) for (const m of resolveMembers(sp)) seen.add(m);
@@ -359,17 +359,17 @@ export const recallTool: ToolHandler = {
     let seeds: RecallResult[];
     let traverseSpaces: string[];
     if (ctx.callSpaces.length > 0) {
-      // Narrowed to what this connection may see, not every member of the proxy. `accessibleSpaceIds` is built
+      // Narrowed to what this connection may see, not every member of the view. `accessibleSpaceIds` is built
       // once per connection from the rights matrix (#786), so intersecting with it is the same answer the HTTP side
       // gets from `memberSpacesForRequest` — without threading rights down into every tool.
       //
-      // EVERY named space, deduplicated: a caller may name a proxy and one of its members, and reading a
+      // EVERY named space, deduplicated: a caller may name a view and one of its members, and reading a
       // space twice doubles every match it contributes to the merged ranking.
       const memberIds = readSpacesOfCallAcross(ctx, ctx.callSpaces);
       /*
        * THE SAME MERGE as the no-space branch, not a copy of it (`Q-81`). This was a hand-written fan-out —
        * `recall` per member, then a sort and a slice here — which skipped the ONE query embedding and the ONE
-       * rerank pass `recallGlobal` makes: after P-35 fixed the no-space branch, a recall on a proxy of thirteen
+       * rerank pass `recallGlobal` makes: after P-35 fixed the no-space branch, a recall on a view of thirteen
        * members still sent thirteen rerank requests. `recallGlobal` also re-applies `maxPerType` to the merged
        * set, which this branch did by hand.
        */

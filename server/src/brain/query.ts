@@ -48,7 +48,7 @@ const ALLOWED_COLLECTIONS = new Set<string>(BRAIN_COLLECTIONS);
  */
 export const QUERY_BODY_FIELDS: ReadonlySet<string> = new Set([
   // `space` is a BODY field since 5.0, and omitting it reads across every space the token may read.
-  // The fan-out is not new — this route already paged across the members of a proxy space.
+  // The fan-out is not new — this route already paged across the members of a personal view.
   'space',
   'collection', 'filter', 'projection', 'limit', 'skip', 'sort', 'dir', 'maxTimeMS',
   /*
@@ -194,10 +194,10 @@ export function unknownBodyFields(
  * **What actually bounds an answer, now that the row count does not.** The clamp was never the protection:
  *   - the BYTE budget (`maxChars` / `maxBytes`) trims the page and says so, with `nextSkip` to continue;
  *   - `maxTimeMS`, hard-capped at 10 000, bounds the query's duration whatever `limit` says;
- *   - on a PROXY space `skip + limit` must stay under `PROXY_PAGE_CEILING`, which is an explicit 400 naming
+ *   - on a VIEW `skip + limit` must stay under `PROXY_PAGE_CEILING`, which is an explicit 400 naming
  *     the limit rather than a silent trim.
  *
- * So an absurd `limit` is refused loudly on a proxy, bounded in time on a single space, and trimmed with
+ * So an absurd `limit` is refused loudly on a view, bounded in time on a single space, and trimmed with
  * disclosure either way. A silent clamp added nothing those three do not do, and hid the one thing they
  * report.
  */
@@ -252,9 +252,9 @@ export function parseQueryPaging(
 
 
 /**
- * The ceiling on a PROXY space's merged window.
+ * The ceiling on a VIEW's merged window.
  *
- * A proxy page needs `skip + limit` rows from EACH member, so a deep page on a fleet multiplies. The ceiling makes that
+ * A view page needs `skip + limit` rows from EACH member, so a deep page on a fleet multiplies. The ceiling makes that
  * cost bounded and, more importantly, makes exceeding it an explicit 400 naming the limit — the alternative, which shipped
  * in 2.8.0, was an empty page for any `skip` past the window while `total` reported the true count.
  *
@@ -275,11 +275,11 @@ export { LANDING_ORDER };
 export const DEFAULT_QUERY_SORT: Record<string, 1 | -1> = LANDING_ORDER;
 
 /**
- * A comparator for a given sort document, for merging pages across the members of a proxy space.
+ * A comparator for a given sort document, for merging pages across the members of a personal view.
  *
  * Built FROM the sort that was handed to MongoDB rather than written out separately. The previous version hardcoded the
  * default keys, which was correct only for as long as `/query` had no `sort` parameter: the moment a caller could choose
- * an order, a proxy space would have merged its members by the OLD one and returned a page in an order it did not ask
+ * an order, a personal view would have merged its members by the OLD one and returned a page in an order it did not ask
  * for — a wrong answer with a 200, which is the defect class this route was just fixed for.
  */
 export function compareBySort(sort: Record<string, 1 | -1>): (a: unknown, b: unknown) => number {
@@ -355,13 +355,13 @@ export async function queryBrain(
   skip = 0,
   /**
    * Order to apply, defaulting to `DEFAULT_QUERY_SORT`. Passed in rather than chosen here so the caller can hand the
-   * SAME value to `compareBySort` when merging a proxy space's members — two expressions of one order is the drift this
+   * SAME value to `compareBySort` when merging a personal view's members — two expressions of one order is the drift this
    * codebase keeps paying for.
    */
   sort: Record<string, 1 | -1> = DEFAULT_QUERY_SORT,
   /**
    * The answer budget, when the caller wants the READ bounded by it (`readWithinBound`), and what to call when the
-   * read stopped early. A proxy merge must NOT pass it: a member cut short would drop rows the merged order needs.
+   * read stopped early. A view merge must NOT pass it: a member cut short would drop rows the merged order needs.
    */
   read?: { bound: { chars: number; bytes: number | null }; onCut: () => void },
 ) {
@@ -383,7 +383,7 @@ export async function queryBrain(
     // Skip BEFORE limit, which is the order the driver applies regardless of call order — spelled out here because
     // the reverse reading (limit the page, then drop rows from it) would silently return short pages.
     .skip(Math.max(Math.floor(skip) || 0, 0))
-    // Clamped by the CALLERS (both routes cap the caller-facing page at 100) rather than here, because the proxy merge
+    // Clamped by the CALLERS (both routes cap the caller-facing page at 100) rather than here, because the view merge
     // legitimately needs a larger internal fetch: to return rows [skip, skip+limit) of a MERGED set it must read
     // skip+limit from each member. Clamping at 100 here is what made every page past row 100 come back EMPTY while
     // `total` reported the true count — a wrong answer that looked right, shipped in 2.8.0 and caught by auditing the

@@ -64,9 +64,9 @@ export const delete_entity_previewTool: ToolHandler = {
      * scope, and it is not one surface offering less.
      *
      * The first version of this used `resolveMemberSpaces` to match `delete_entity`, and that was the wrong
-     * twin: that one resolves a WRITE TARGET. This is a READ across a proxy's members, so it must narrow by
+     * twin: that one resolves a WRITE TARGET. This is a READ across a view's members, so it must narrow by
      * what the connection reaches — otherwise a scoped token previews an entity in a member space it cannot
-     * see. `proxy-fanout-inventory.test.js` caught it, which is what that inventory is for.
+     * see. A read through a view that skipped this narrowing would answer more than the token may see.
      */
     for (const mid of readSpacesOfCall(ctx, callSpace)) {
       if (!(await getEntityById(mid, id))) continue;
