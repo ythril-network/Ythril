@@ -70,7 +70,9 @@ const REQUESTS = {
   'DELETE /api/brain/spaces/:spaceId/links/:id': { params: { id: 'aaaaaaaa-0000-4000-8000-0000000000b1' }, gone: { coll: 'links', _id: 'aaaaaaaa-0000-4000-8000-0000000000b1' } },
   'PATCH /api/brain/spaces/:spaceId/files': { query: { path: 'held.txt' }, body: { tags: ['changed-during'] }, coll: 'files', match: { tags: 'changed-during' } },
   // Review's fork resolve (bundle-81): the fork of the fact seeded below as `f1`; a refused resolve neither deletes it nor writes its text on the parent.
-  'POST /api/brain/spaces/:spaceId/forks/:forkId/resolve': { params: { forkId: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, body: { keep: 'fork' }, gone: { coll: 'facts', _id: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, coll: 'facts', match: { _id: 'aaaaaaaa-0000-4000-8000-0000000000f1', fact: 'the fork text, resolved during the restore' } },
+  // Q-624 (design rev 4 section 9): the resolve takes five parameters, all required, so the body names the kind and both versions as listed (the fork
+  // at 3, its parent `f1` at 1); `{ keep }` alone is a 400 before the act is asked.
+  'POST /api/brain/spaces/:spaceId/forks/:forkId/resolve': { params: { forkId: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, body: { kind: 'fact', keep: 'fork', ifMatchSeq: 3, ifMatchParentSeq: 1 }, gone: { coll: 'facts', _id: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, coll: 'facts', match: { _id: 'aaaaaaaa-0000-4000-8000-0000000000f1', fact: 'the fork text, resolved during the restore' } },
   'POST /api/brain/spaces/:spaceId/bulk': { body: { facts: [{ fact: 'bulk during the restore' }] }, coll: 'facts', match: { fact: 'bulk during the restore' } },
 };
 
