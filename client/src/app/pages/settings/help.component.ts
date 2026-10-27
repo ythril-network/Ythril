@@ -136,6 +136,7 @@ export const HELP_DOCS = [
       'decisions/15-two-copies-at-one-version-are-kept-and-settled-in-review.md',
       'decisions/16-a-peers-numbering-may-start-over-and-positions-continue-above-everything-handed-out.md',
       'decisions/17-the-first-carry-is-an-owed-job-and-a-space-answers-positions-building-until-it-ends.md',
+      'decisions/18-every-kind-keeps-both-edits-and-each-instance-decides-its-own-copy.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },
