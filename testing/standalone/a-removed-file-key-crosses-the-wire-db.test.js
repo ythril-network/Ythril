@@ -64,7 +64,18 @@ const SEQ_OLD = 5;
 const SEQ_NEW = 9;
 /** A version above every release: a peer this new takes the new wire. A peer on 5.6.9 or reporting none takes today's. */
 const NEWER = '99.0.0';
-const OLD_VERSIONS = [undefined, '5.6.9'];
+/**
+ * The older wire is owed only to a peer the version floor admits. From 6.0 the floor (`MIN_PEER_VERSION`, our own major at `.0.0`)
+ * refuses a 5.x peer before anything is offered, so a peer reporting 5.6.9 gets no wire at all and is held to that instead; a peer that
+ * reports no version is still admitted and still gets the older wire. Read from the floor, so the cases follow the major we are on.
+ */
+const FLOOR_REFUSED = '5.6.9';
+// The floor's own source, our version (`sync/peer-floor.ts` takes its major at `.0.0`); peer-floor itself is not imported here,
+// because loading it at module time starts server state before the harness has opened its door.
+const { SERVER_VERSION } = await import('../../server/dist/util/server-version.js');
+const MIN_PEER_VERSION = `${Number.parseInt(SERVER_VERSION, 10)}.0.0`;
+const majorOf = (v) => Number(v.split('.')[0]);
+const OLD_VERSIONS = [undefined, ...(majorOf(FLOOR_REFUSED) < majorOf(MIN_PEER_VERSION) ? [] : [FLOOR_REFUSED])];
 
 /**
  * What is wired and never an authored key: the identity and the order of a record, and the wire's own word about the
@@ -361,6 +372,11 @@ describe('a key removed from a file\'s metadata is removed everywhere it was rec
         assert.equal(wire[0].description, 'kept');
       });
     }
+
+    it(`a peer reporting ${FLOOR_REFUSED} below the version floor is offered nothing`, { skip: !OLD_VERSIONS.includes(FLOOR_REFUSED) ? false : `the floor (${MIN_PEER_VERSION}) admits ${FLOOR_REFUSED}` }, async () => {
+      const wire = await publish(removed(S), { version: FLOOR_REFUSED });
+      assert.equal(wire.length, 0, `a peer below the floor (${MIN_PEER_VERSION}) was offered the file ${wire.length} time(s)`);
+    });
 
     it('a peer on a newer version is sent the new wire, which the frozen schema REFUSES — the gate is what separates them', async () => {
       const wire = await publish(removed(S, KEEPS_TAGS), { version: NEWER });
