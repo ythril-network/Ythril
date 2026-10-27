@@ -179,7 +179,11 @@ describe('the changelog is written for its reader', () => {
   it('finds the sections and entries to check at all (the check itself works)', () => {
     // A regex that stopped matching would turn every assertion below into a pass over nothing.
     assert.ok(sections.some(s => s.name === '[Unreleased]'), '`## [Unreleased]` is missing');
-    assert.ok(releases.length >= 10, `only ${releases.length} release sections found; a heading format changed?`);
+    // Counted independently of `sectionsOf`, so a reader that drops a heading fails here. Not a fixed number: right after a
+    // major is cut the current file holds that one release, and a floor of ten failed every 6.0 cut for no fault of the reader.
+    const headings = (src.match(/^## \[\d+\.\d+\.\d+\]/gm) ?? []).length;
+    assert.ok(headings >= 1 && releases.length === headings,
+      `the reader found ${releases.length} release sections of the ${headings} headings in the file; a heading format changed?`);
     const entries = sections.flatMap(entriesOf);
     assert.ok(entries.filter(e => e.kind === 'bullet').length >= 100,
       'fewer than 100 list entries found across the whole file; the entry reader stopped working');
