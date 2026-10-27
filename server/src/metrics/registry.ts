@@ -20,6 +20,7 @@ import { COLLECTION_SUFFIX, TOMBSTONE_TYPES } from '../config/types-knowledge.js
 import { POSTURE_LEVELS } from '../config/posture-levels.js';
 import { DEGRADED_REASONS } from '../brain/degraded-reasons.js';
 import { col, getMongo } from '../db/mongo.js';
+import { forkCountsOf, COUNTED_FORK_KINDS, type ForkCounts } from '../brain/fork-counts.js';
 import { isStoreUnreachable } from '../db/store-condition.js';
 import { getConfig, getStorageConfig } from '../config/loader.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
@@ -99,7 +100,7 @@ const collectDuration = new Histogram({
  */
 export const TIMED_COLLECTORS = [
   'facts_total', 'entities_total', 'edges_total', 'chrono_entries_total', 'storage_used_bytes',
-  'media_jobs_pending', 'media_jobs_processing', 'media_jobs_failed', 'media_job_phase', 'webhooks_failing',
+  'media_jobs_pending', 'media_jobs_processing', 'media_jobs_failed', 'media_job_phase', 'webhooks_failing', 'unresolved_forks',
 ] as const;
 
 /**
@@ -1466,6 +1467,35 @@ export const forksResolvedElsewhereTotal = new Counter({
   help: 'Fork rows marked resolved elsewhere (a peer resolved its copy, the removal was declined here), by kind',
   labelNames: ['kind'] as const,
   registers: [register],
+});
+
+/**
+ * The unresolved versions the instance holds, by kind and by whether another instance already decided them (Q-624, design §13): every fork row of every
+ * space, split by the `_resolvedElsewhere` mark (`resolvedElsewhere="true"`: a decision owed here that the resolving instance has made). Read at scrape
+ * time from `forkCountsOf` (the sparse `{ forkOf: 1 }` index, a count of the forks and never of the collection) inside the collectors' own budget, and
+ * summed over the spaces: a space whose read failed keeps the value it had (the `collectEachSpace` rule), so one bad space never blanks the others.
+ * Every kind and both labels are always present, zero included.
+ */
+const forkCountsSeen = new Map<string, Record<string, ForkCounts>>();
+export const unresolvedForks = new Gauge({
+  name: 'ythril_unresolved_forks',
+  help: 'Unresolved versions (fork rows) held, by kind, split by whether another instance already resolved them (resolvedElsewhere), summed over spaces, at scrape time',
+  labelNames: ['kind', 'resolvedElsewhere'] as const,
+  registers: [register],
+  async collect() {
+    await withCollectBudget('unresolved_forks', async () => {
+      const live = new Set(configuredSpaces().map(s => s.id));
+      await collectEachSpace('unresolved_forks', async (id) => { forkCountsSeen.set(id, await forkCountsOf(id)); });
+      for (const id of [...forkCountsSeen.keys()]) if (!live.has(id)) forkCountsSeen.delete(id);
+      this.reset();
+      for (const { kind } of COUNTED_FORK_KINDS) {
+        let unresolved = 0; let marked = 0;
+        for (const counts of forkCountsSeen.values()) { unresolved += counts[kind]?.unresolved ?? 0; marked += counts[kind]?.resolvedElsewhere ?? 0; }
+        this.set({ kind, resolvedElsewhere: 'true' }, marked);
+        this.set({ kind, resolvedElsewhere: 'false' }, unresolved - marked);
+      }
+    }, () => this.reset());
+  },
 });
 
 /**
