@@ -60,6 +60,9 @@ const LOCAL_VALUE = {
   _functionalGuard: '4:from5:label',
   // bundle-81: where this instance stored the record and whether it wrote it — its own, never sent.
   pos: 1_700_000_000_000_000, posAtSeq: 1, writtenHere: true,
+  // Q-624 (design rev 4 section 9a): a decision owed here, the fifth local-only class: who resolved this fork elsewhere behind a tombstone this
+  // instance declined. A literal entry in the mark's own shape; the field SET is still the module's.
+  _resolvedElsewhere: [{ by: 'instance-that-resolved-it', at: '2026-10-25T00:00:00.000Z', seq: 4, proven: true }],
 };
 
 /** Store records as this instance's own writes would, so the engine's push cycle offers them. */

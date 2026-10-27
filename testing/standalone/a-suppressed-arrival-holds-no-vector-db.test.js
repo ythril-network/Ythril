@@ -67,6 +67,9 @@ const LOCAL_VALUES = {
   pos: 1_700_000_000_000_000,
   posAtSeq: 5,
   writtenHere: true,
+  // Q-624 (design rev 4 section 9a): a decision owed here, the fifth local-only class: who resolved this fork elsewhere behind a tombstone this
+  // instance declined. A literal entry in the mark's own shape; the field SET is still the module's.
+  _resolvedElsewhere: [{ by: 'instance-that-resolved-it', at: '2026-10-25T00:00:00.000Z', seq: 4, proven: true }],
 };
 /**
  * The local-only fields that exist on ONE family only: a write guard is an edge's marker, and a fact or an entity has no
