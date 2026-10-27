@@ -95,6 +95,12 @@ const SPACE_ROUTERS = [
    */
   { glob: 'server/src/api/views.ts', mount: '/api/views', router: 'viewsRouter' },
   { glob: 'server/src/api/views.ts', mount: '/api/admin/views', router: 'adminViewsRouter' },
+  /*
+   * THE WEBHOOKS ROUTER, added by Q-589. A subscription names spaces and sends their events out, so the router's reach is
+   * a question this gate must put. Owner ruling 2026-10-27: instance-admin, exempted with a reason as the admin views
+   * routes are, not rated in a space's area.
+   */
+  { glob: 'server/src/api/webhooks.ts', mount: '/api/admin/webhooks' },
 ];
 
 function filesUnder(p) {

@@ -560,6 +560,12 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
   { route: '/api/admin/views/claim', why: 'instance-admin: copies a migrated, ownerless view to the calling admin' },
   { route: '/api/admin/views/retired/:id/purge', why: 'instance-admin: drops what a retired proxy id still holds and releases the id; names a retired id, never a live space' },
   { route: '/api/admin/views/migration', why: 'instance-admin: reports what the 6.0 proxy-to-view upgrade did' },
+  // Webhooks (Q-589, owner ruling 2026-10-27): a subscription names spaces and sends their events out, which is why only
+  // an instance admin with MFA manages one. That is the instance's reach, not a view of one space's data.
+  { route: '/api/admin/webhooks', why: 'instance-admin: lists subscriptions or creates one. A subscription may name spaces whose events leave the instance, so it is managed by the instance admin, not rated in any space\'s area' },
+  { route: '/api/admin/webhooks/:id', why: 'instance-admin: reads, changes or deletes one subscription, under the same instance-admin MFA guard as its creation' },
+  { route: '/api/admin/webhooks/:id/test', why: 'instance-admin: sends a test ping to one subscription\'s endpoint; carries no space data' },
+  { route: '/api/admin/webhooks/:id/deliveries', why: 'instance-admin: lists one subscription\'s delivery attempts and their outcomes' },
   {
     route: '/api/brain/spills/:id',
     why: 'A read spill (Q-92) is found by its id and names no space, so a path scope would resolve to none '
