@@ -179,6 +179,9 @@ export async function rekeyEdges(
 ): Promise<Array<EdgeRekey | null>> {
   // Refused before the plan is read; the write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'edges');
+  // A FORK edge is never re-keyed onto its subject's derived id (Q-624 §7, §8): the relink partitions forks out and re-mints them (`remintForks`).
+  const fork = moves.find(m => typeof (m.existing as { forkOf?: unknown }).forkOf === 'string');
+  if (fork) throw new Error(`rekeyEdges was handed the fork edge '${fork.existing._id}' (forkOf set): a fork follows its subject by a re-mint, never by a re-key`);
   const planned = moves.map(({ existing, next }) => {
     const from = next.from ?? existing.from;
     const to = next.to ?? existing.to;

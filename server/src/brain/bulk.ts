@@ -46,6 +46,7 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { MAX_FACT_LENGTH } from '../util/request-bounds.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import { RequestRefusal } from '../util/errors.js';
+import { refuseForkRowsNamed } from './forks.js';
 import { unknownBodyFields } from './query.js';
 // TYPES ONLY, on purpose: the judge (`bulk-unknown-fields.ts`) is loaded inside `bulkWrite`, and nothing here may import
 // `contract/write-accepts.ts` at module load — see the comment at that `import()`.
@@ -342,6 +343,13 @@ export async function bulkWrite(
   // its reason; `reject` records a `$ref` it declared as failed, so a dependant is told why.
   for (const r of unknown.refusedItems(input)) reject(r.type, r.index, r.item, r.reason);
 
+  // A batch that names an unresolved version by id is refused WHOLE, before any item is judged or written (Q-624 §8): an ordinary write never edits
+  // a fork row, and a per-item row would leave the rest of the batch landing around an edit the caller believed it made. (`ReadSet.stored()` refuses
+  // one too, for a planner that reads one another way.)
+  for (const [kind, items] of [['fact', input.facts], ['entity', input.entities], ['chrono', input.chrono]] as const) {
+    const ids = slice(items).map(i => (i as Record<string, unknown>)['id']).filter((id): id is string => typeof id === 'string').map(id => id.trim());
+    await refuseForkRowsNamed(spaceId, kind, ids);
+  }
   const prepared = prepareItems(spaceId, input, meta, strict, reject, warn, trusted.instanceWrittenKeys, unknown);
   const view = new ReadSet(spaceId);
   await view.load(mergeWants([...prepared.map(p => p.want), ...slice(input.edges).map(e => topLevelEdgeWant(spaceId, e))]));

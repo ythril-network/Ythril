@@ -45,12 +45,15 @@ import { deleteEntity } from './entities.js';
 import type { BacklinkEntry } from './entities.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import { removeEdges } from './edge-removal.js';
+import { countForksOf } from './forks.js';
 
 /** What a preview answers: the set, and the token that authorises removing exactly it. */
 export interface CascadePreview {
   entityId: string;
   /** Every record the cascade would remove. Face labels are absent — see the module header. */
   removes: BacklinkEntry[];
+  /** How many unresolved versions of the entity go with it (Q-624 §7): a delete takes its forks, each behind a tombstone. */
+  forks: number;
   token: string;
 }
 
@@ -79,7 +82,8 @@ export function cascadeTokenFor(spaceId: string, entityId: string, removes: read
 export async function previewEntityCascade(spaceId: string, entityId: string): Promise<CascadePreview> {
   const block = await entityDeleteBlockers(spaceId, entityId);
   const removes = block?.blocking ?? [];
-  return { entityId, removes, token: cascadeTokenFor(spaceId, entityId, removes) };
+  const forks = await countForksOf(spaceId, 'entity', entityId);
+  return { entityId, removes, forks, token: cascadeTokenFor(spaceId, entityId, removes) };
 }
 
 /** Either the cascade ran, or it was refused and the caller is told which list moved. */

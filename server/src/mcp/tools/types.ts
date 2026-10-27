@@ -91,6 +91,11 @@ export interface ToolContext {
    * left a thinner entry on MCP. Called once, after a successful write. `callTool` supplies it on every call.
    */
   recordChanges?: (before: Record<string, unknown>, after: Record<string, unknown>) => void;
+  /**
+   * Hand the audit entry its `changes` built EXPLICITLY, for an act whose snapshots differ in nothing the diff records (Review's resolve, Q-624
+   * R12): the twin of a REST route's `req.auditChangesExplicit`. Wins over {@link recordChanges}.
+   */
+  recordAuditChanges?: (changes: Array<{ field: string; from?: string | number | boolean | null; to?: string | number | boolean | null }>) => void;
 }
 
 /**

@@ -62,7 +62,9 @@ import { withLandingStamp, arrivalRow } from './record-position-stream.js';
 import { log, logSafe, peerList, peerText, refusalOfParse } from '../util/log.js';
 import { seqRefusal, arrivalId, warnArrivalsNotStored, type ArrivalRefusal } from './arrivals.js';
 import { recordDecline, sayDeclines, saidDeletions } from './decline-report.js';
-import { retagToLocalSpace } from './upsert-plan.js';
+import { retagToLocalSpace, FORKING_FAMILIES } from './upsert-plan.js';
+import { resolvedElsewhereEntry, writeResolvedElsewhere, type ResolvedElsewhereMark } from './resolved-elsewhere.js';
+import { forkRowsUnder } from '../brain/forks.js';
 import { authorises, deleteBound, MAX_ISSUER, type Delivery, type DeletionGround, type DeletionTarget } from './deletion-authority.js';
 import { unlabelFacesForEntities } from '../brain/entities.js';
 import { syncTombstonesAppliedTotal } from '../metrics/registry.js';
@@ -136,7 +138,7 @@ export interface TombstoneApplyOptions {
 }
 
 /** The target as the apply reads it: what authority reads, and the seq the repair bounds by. */
-type HeldTarget = DeletionTarget & { seq?: number };
+type HeldTarget = DeletionTarget & { seq?: number; forkOf?: string };
 
 /**
  * Apply a page of tombstones a peer delivered, to the space the door ADMITTED — see the module docblock.
@@ -214,10 +216,15 @@ export async function applyPeerTombstones(
      * row of one group carries the same bound, so a group is ONE `deleteMany` (per `ROWS_PER_BULK_COMMAND` ids).
      */
     const deletes: Array<{ type: TombstoneDoc['type']; ground: DeletionGround; issuer: string; rows: TombstoneDoc[] }> = [];
+    /** Declined tombstones of FORK rows: each a mark, never a delete (Q-624 §9a). */
+    const marks: ResolvedElsewhereMark[] = [];
+    /** The ids of a forking kind the authority accepted a tombstone for: their forks go with them here, no tombstone issued (§7, R7). */
+    const cascade: Array<{ type: TombstoneDoc['type']; id: string }> = [];
     for (const [type, list] of byCollection) {
       const targets = await readStoredById<HeldTarget>(
         spaceCollection(localSpaceId, TOMBSTONE_COLLECTION[type]), list.map(t => t._id),
-        { 'author.instanceId': 1, deliveredBy: 1, seq: 1 });
+        { 'author.instanceId': 1, deliveredBy: 1, seq: 1, forkOf: 1 });
+      const forking = (FORKING_FAMILIES as readonly string[]).includes(TOMBSTONE_COLLECTION[type]);
       const groups = new Map<string, { ground: DeletionGround; issuer: string; rows: TombstoneDoc[] }>();
       for (const t of list) {
         const target = targets.get(t._id);
@@ -225,8 +232,18 @@ export async function applyPeerTombstones(
         const verdict = authorises(delivery, t.instanceId, target ?? null, selfId);
         if (!verdict.ok) {
           recordDecline(ledger, { id: t._id, reason: verdict.reason, kind: type, what: 'record', issuer: t.instanceId, delivery, target });
+          // A FORK another instance resolved behind a tombstone this authority declines: kept, and marked for a decision here (Q-624 §9a). Nothing is deleted.
+          if (forking && typeof target?.forkOf === 'string') {
+            const proven = delivery.trustedRelay || (delivery.peerInstanceId !== undefined && delivery.peerInstanceId === t.instanceId);
+            marks.push({
+              collection: TOMBSTONE_COLLECTION[type], kind: type, id: t._id,
+              entry: resolvedElsewhereEntry(t, { proven, ...(delivery.peerInstanceId !== undefined ? { deliverer: delivery.peerInstanceId } : {}) }),
+            });
+          }
           continue;
         }
+        // Every element the authority accepted: its subject's forks go with it here, whatever this page deletes (R7).
+        if (forking) cascade.push({ type, id: t._id });
         if (verdict.ground === 'absent') { queue({ t, ground: 'absent', proven: false }); continue; }
         // The re-read only: a record newer than the deletion is a re-creation. It is kept, and so is its tombstone
         // unstored — a held tombstone beside a live record would be served on as a deletion of it.
@@ -298,6 +315,8 @@ export async function applyPeerTombstones(
         if (deleted > 0) syncTombstonesAppliedTotal.labels({ kind: d.type, ground: d.ground, outcome: 'deleted' }).inc(deleted);
         if (d.type === 'entity') await unlabelRemoved(localSpaceId, d.rows.map(t => t._id), deleted);
       }
+      if (marks.length > 0) await writeResolvedElsewhere(localSpaceId, marks);
+      await cascadeToForks(localSpaceId, cascade);
     });
     // The re-read says what it deleted once, in its own completion line over every page (`sync/tombstone-reread.ts`): a line
     // per page here would state the same deletions a second time.
@@ -363,6 +382,28 @@ function duplicateKeysOf(err: unknown, slices: ReadonlyArray<ReadonlyArray<{ ent
     }
   }
   return out;
+}
+
+/**
+ * The forks of every tombstoned subject that is no longer held here, removed with NO tombstone (Q-624 §7, R7): every instance that holds the subject
+ * applies the same tombstone and removes its own forks, so nothing crosses. Keyed on the TOMBSTONED ids, not the rows this page deleted, so an
+ * `absent` subject's stored forks go too; minus every subject still held (a delete the bound refused, a re-creation the re-read kept), whose forks are
+ * still its unresolved versions. Idempotent, so a re-delivery repeats it at no cost.
+ */
+async function cascadeToForks(spaceId: string, cascade: ReadonlyArray<{ type: TombstoneDoc['type']; id: string }>): Promise<void> {
+  const byType = new Map<TombstoneDoc['type'], string[]>();
+  for (const c of cascade) {
+    if (!byType.has(c.type)) byType.set(c.type, []);
+    byType.get(c.type)!.push(c.id);
+  }
+  for (const [type, ids] of byType) {
+    const family = TOMBSTONE_COLLECTION[type];
+    const still = await readStoredById<object>(spaceCollection(spaceId, family), ids, { _id: 1 });
+    const forks = await forkRowsUnder(spaceId, family, ids.filter(id => !still.has(id)));
+    if (forks.length === 0) continue;
+    // A delete frees each fork's local fields with it, the write guard included.
+    await col<{ _id: string }>(spaceCollection(spaceId, family)).deleteMany(asFilter<{ _id: string }>({ _id: { $in: forks.map(f => f._id) } }));
+  }
 }
 
 /**

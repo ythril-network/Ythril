@@ -1,7 +1,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
 import { CHRONO_STATUSES } from '../../config/types.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, recurrenceSchema, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, FORKS_GO_WITH_THEIR_SUBJECT, FORK_ROWS_ARE_READ_ONLY } from './shared.js';
 import { createChrono, deleteChrono, getChronoById, updateChrono, parseRecurrence } from '../../brain/chrono.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
@@ -228,7 +228,7 @@ function chronoTypeGate(spaceId: string): { meta: ReturnType<typeof resolveMetaR
 
 export const update_chronoTool: ToolHandler = {
   name: 'update_chrono',
-  description: 'Update one chrono entry by its ID. Every field except `id` is optional; a field you omit is '
+  description: 'Update one chrono entry by its ID. ' + FORK_ROWS_ARE_READ_ONLY + 'Every field except `id` is optional; a field you omit is '
     + 'left exactly as it was.\n\n'
     + 'ONE FIELD MERGES AND THE REST REPLACE, and the split is not guessable. `properties` MERGES key by key, '
     + 'so patching one key keeps the others. `tags`, `linkEntities` and `linkFacts` REPLACE — send the FULL list '
@@ -474,6 +474,7 @@ export const delete_chronoTool: ToolHandler = {
     + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync: ' + DELETION_REACH + ' The entry is '
     + 'not quietly resurrected from a peer that still has it. That is also why re-creating it with the same '
     + 'id does not undo this — the tombstone outranks it.\n\n'
+    + FORKS_GO_WITH_THEIR_SUBJECT + '\n\n'
     + 'PARAMETERS:\n'
     + '- `id` — the entry\'s `_id`, as `filter` reports it. Required. An id that does not '
     + 'exist is an ERROR, not a silent success.\n'

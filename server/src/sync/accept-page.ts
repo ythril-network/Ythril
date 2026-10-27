@@ -61,6 +61,7 @@ import { withinWriteBound } from '../db/write-bound.js';
 import { TOMBSTONE_TYPE_OF } from '../config/types.js';
 import type { LinkageCheck } from './linkage-check.js';
 import { writeArrivals, warnArrivalsNotStored, convergeFileStamps, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
+import { writeResolvedElsewhere } from './resolved-elsewhere.js';
 import { admitArrivals } from './arrival-shape.js';
 import { planArrivals, type ArrivalPlan, type StoredCopy, bodyHashesOf, isForkingFamily, FORKING_FAMILIES, MAX_FORK_DEPTH, MAX_FORKS_PER_RECORD, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
@@ -272,6 +273,12 @@ export async function acceptArrivingPage(
         if (tombType !== undefined) {
           for (const [id, c] of plan.tombstoneCleanups) if (!c.onLanding) cleanups.push({ id, below: c.below });
           await deleteSupersededTombstones(spaceId, tombType, cleanups);
+        }
+        // Forks admitted past another instance's tombstone (Q-624 §9a, the arrival half): marked once they landed, as the decline branch marks a fork held first.
+        if (plan.marks.length > 0) {
+          const landedIds = new Set(landed.filter(l => l.key === key).map(l => l.doc._id));
+          const marks = plan.marks.map(m => ({ id: sound[key][m.index]!.doc._id, entry: m.entry })).filter(m => landedIds.has(m.id));
+          await writeResolvedElsewhere(spaceId, marks.map(m => ({ collection, kind: tombType ?? collection, id: m.id, entry: m.entry })));
         }
         if (diverged.length > 0) forks.push(...await forkDiverged(spaceId, key, diverged, res, { door, deliveredBy }));
       }

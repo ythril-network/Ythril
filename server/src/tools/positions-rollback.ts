@@ -15,7 +15,7 @@ import { effectiveMongoUri, readConfiguredMongoUriFrom } from '../config/mongo-u
 import { dbNameFromUri } from '../db/db-name.js';
 import { mongoClientOptions } from '../db/client-options.js';
 import { decryptEnvelope, isEnvelope, resolveMasterSecret } from '../config/secretbox.js';
-import { rollBackPositions } from '../sync/positions-rollback.js';
+import { rollBackPositions, UnresolvedForksRefusal } from '../sync/positions-rollback.js';
 import { log } from '../util/log.js';
 
 /** The `mongo.uri` of the config file, or `undefined` when there is no file, it names none, or it cannot be read (the tool then uses the environment or the bundled database). */
@@ -42,13 +42,18 @@ async function main(): Promise<void> {
   try {
     await client.connect();
     console.log(`positions rollback: database '${dbNameFromUri(uri)}' (address from ${source})`);
-    await rollBackPositions(client.db(dbNameFromUri(uri)), { log: (line) => console.log(line) });
+    await rollBackPositions(client.db(dbNameFromUri(uri)), {
+      log: (line) => console.log(line),
+      discardUnresolvedForks: process.argv.includes('--discard-unresolved-forks'),
+    });
   } finally {
     await client.close().catch(() => { /* nothing left to say */ });
   }
 }
 
 main().then(() => { process.exitCode = 0; }, (err: unknown) => {
+  // A refusal of the tool's own (unresolved forks 5.6 cannot read): its sentence says what to do, and it names no address.
+  if (err instanceof UnresolvedForksRefusal) { log.error(`positions rollback REFUSED: ${err.message}`); process.exitCode = 1; return; }
   // The store's message can carry the address (a refused connection names it): the driver's class and code only.
   const e = err as { name?: unknown; code?: unknown };
   log.error(`positions rollback FAILED: ${typeof e?.name === 'string' ? e.name : 'Error'}${e?.code !== undefined ? ` ${String(e.code)}` : ''}; nothing was lost, run it again.`);

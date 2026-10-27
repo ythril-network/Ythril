@@ -40,6 +40,7 @@ import { SubjectEdges } from './functional-subject.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
 import { admitSpaceWrite } from '../spaces/space-write-gate.js';
+import { refuseForkEdit, assertForksFitTogether, remintForks } from './forks.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -692,6 +693,11 @@ export async function executeMerge(
   mergedProperties: Record<string, string | number | boolean>,
   actor?: WebhookActor,
 ): Promise<{ entity: EntityDoc; deletedDuplicateEdgeIds: string[] }> {
+  // An unresolved version is merged with nothing, as either side (Q-624 §8, D4): it changes only by resolve, delete, arrival or re-mint. And the
+  // absorbed entity's forks follow the survivor (§7), so the two together may not pass the fork cap: both refused here, before anything is written.
+  refuseForkEdit('entity', survivor);
+  refuseForkEdit('entity', absorbed);
+  await assertForksFitTogether(spaceId, 'entity', survivor._id, absorbed._id);
   const now = new Date().toISOString();
   const mergedTags = mergeTags(survivor.tags, absorbed.tags);
 
@@ -856,6 +862,9 @@ async function relinkAndAbsorb(
    */
   await relinkLinksOfRecord(spaceId, { absorbedId: absorbed._id, survivorId: survivor._id, kind: 'entity' }, { now, session });
 
+  // ── 3b. The absorbed entity's unresolved versions become the survivor's, re-minted under ids that derive (Q-624 §7), before its tombstone ──
+  await remintForks(spaceId, 'entity', [{ oldSubject: absorbed._id, newSubject: survivor._id }], { session, now });
+
   // ── 4. Update the survivor, delete the absorbed entity + its tombstone ──
   const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
   const seq = await withLandingStamp(spaceId, [localRow(survivorVersion!.version)], async ([patch]) => {
@@ -891,6 +900,9 @@ export async function mergeEntities(
   const result = await computeMergePlan(spaceId, survivorId, absorbedId, resolutions);
   if ('error' in result) return { kind: 'not-found', status: result.status, error: result.error };
   const { plan, fullyResolved, survivor, absorbed } = result;
+  // Before the plan is answered: a fork named as either side is refused whatever its properties say (Q-624 §8); `executeMerge` asks again.
+  refuseForkEdit('entity', survivor);
+  refuseForkEdit('entity', absorbed);
   for (const c of plan.propertyConflicts) {
     if (!c.resolved) continue;
     const err = validateResolution(c.resolution!, c.type, c.customValue !== undefined);

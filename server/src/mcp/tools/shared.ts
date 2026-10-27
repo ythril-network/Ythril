@@ -79,6 +79,25 @@ export const DELETION_REACH =
   'it reaches every peer that holds a copy THIS instance wrote and, on a pub/sub or tree network, everything '
   + 'downstream of this instance; a delete of a copy another instance wrote stays local on a mesh peer.';
 
+/**
+ * What a record delete does to the record's FORKS (Q-624, design rev 4 §7 and §15): the one sentence the four delete tools carry, written once,
+ * because four copies of a sentence about one behaviour is how `delete_fact` came to say the opposite of what the server did.
+ */
+export const FORKS_GO_WITH_THEIR_SUBJECT =
+  'ITS UNRESOLVED VERSIONS ARE DELETED WITH IT. A fork is a version sync kept when a peer wrote this record differently at the same version (its '
+  + '`forkOf` names this record); deleting or expiring the record deletes every unresolved version of it too, each behind its own tombstone. One '
+  + 'version alone can be deleted by its id, and the versions are listed in Review (`list_forks`), where `resolve_fork` keeps one side instead.';
+
+/** What an ordinary write does with a FORK row (Q-624 §8): the one sentence the update tools, `save_bulk` and `graph_merge` carry. */
+export const FORK_ROWS_ARE_READ_ONLY =
+  'A FORK ROW IS READ-ONLY: a record whose `forkOf` is set is an unresolved version of another record, and an update, a relabel, a save by its id '
+  + 'or a merge naming it is refused with 409 `fork_row_read_only`. Settle it with `resolve_fork`, or delete it by its id. ';
+
+/** What a read returns of FORK rows (Q-624 §6, §15): the one sentence `filter`, `query` and `recall` carry. */
+export const FORK_ROWS_IN_READS =
+  'Rows carrying `forkOf` are unresolved versions of the record `forkOf` names (every kind but links and files can fork); '
+  + 'they are returned like any record, and `{ "forkOf": null }` in a filter leaves them out. ';
+
 export const SUPPRESS_EMBEDDINGS_SCHEMA = {
   type: 'boolean',
   description:

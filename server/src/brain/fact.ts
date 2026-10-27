@@ -21,6 +21,7 @@ import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.j
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { FactDoc } from '../config/types.js';
 import { writeTombstone, stampTombstones } from './tombstones.js';
+import { refuseForkEdit, removeForksOf } from './forks.js';
 import type { SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { listReadMaxMs } from './tag-filter.js';
@@ -126,6 +127,8 @@ export async function updateFact(
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as FactDoc | null;
   if (!existing) return null;
+  // An unresolved version is read-only (Q-624 §8): refused before anything this update prepares, and again where the version is read.
+  refuseForkEdit('fact', existing);
 
   // Refused BEFORE the update lands, or a bad link id leaves every other field already changed.
   if (updates.linkEntities !== undefined) {
@@ -276,6 +279,8 @@ export async function deleteFact(
   // and that refusal must leave the record where it is (`record_version_at_ceiling`).
   const tombstone = { _id: memoryId, type: 'fact' as const, originalSeq: existing?.seq };
   const versions = await stampTombstones(spaceId, [tombstone]);
+  // Its unresolved versions go first, each behind a tombstone issued here (Q-624 §7): a refusal there leaves the fact and its forks both standing.
+  if (existing) await removeForksOf(spaceId, 'fact', [memoryId]);
   // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and link cascade are admitted writers of their own.
   const result = await admitSpaceWrite(spaceId, 'facts', () => col<FactDoc>(spaceCollection(spaceId, 'facts')).deleteOne({
     _id: memoryId,

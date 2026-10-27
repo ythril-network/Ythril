@@ -113,6 +113,13 @@ const EXEMPT = {
   'server/src/sync/positions-owed.ts:carryRows': 'the first carry into position space (bundle-81): local-only position fields on rows already held, once per space; never a create or a converge',
   'server/src/sync/positions-owed.ts:repairRows': 'the repair after a 5.6 build (bundle-81): a fresh position and `writtenHere` on rows already held, under the landing hold; never a create or a converge',
   'server/src/sync/positions-rollback.ts:rollBackPositions': 'the rollback tool (bundle-81): removes the 6.0 local fields from rows already held and raises the counter; runs with no instance up',
+  // Q-624 slice I3: the fork module's writers, the decline mark and the rollback's fork steps. None creates or converges a record a caller wrote.
+  'server/src/sync/positions-rollback.ts:rollBackForks': 'the rollback tool\'s fork steps (Q-624): discards unresolved forks 5.6 cannot read and unsets their marks; runs with no instance up',
+  'server/src/brain/forks.ts:remintForks': 'a fork follows its re-keyed subject (Q-624 §7): an existing fork row re-inserted under the id its new subject derives, in the re-key\'s transaction; never a caller\'s create',
+  'server/src/brain/forks.ts:resolveOrphan': 'Review keeps an orphaned fork (Q-624 §9): the stored row is unmarked, or an edge re-keyed onto its identity; a resolve, never a caller\'s create',
+  'server/src/brain/fork-keep.ts:writeKeptBody': 'Review\'s keep-writer (Q-624 §9): writes a stored version\'s body onto the parent through the local-edit loop (writeAtReadVersion); an edit, never a create',
+  'server/src/sync/tombstone-apply.ts:cascadeToForks': 'an applied peer tombstone removes its subject\'s forks here (Q-624 §7); a delete',
+  'server/src/sync/resolved-elsewhere.ts:writeResolvedElsewhere': 'the local decision mark on a fork row a peer resolved elsewhere (Q-624 §9a): a local-only field, never body',
   'server/src/sync/delivered-by-backfill.ts:stampCollection':
     'the one-time stamp of who delivered the rows stored before `deliveredBy` existed (bundle-51): a migration of LOCAL state (a '
     + 'local-only field of rows already held) run once per space by the sync cycle, never a create or a converge',

@@ -8,7 +8,7 @@
  */
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema, FORK_ROWS_ARE_READ_ONLY } from './shared.js';
 import { bulkWrite, bulkWriteTotal, bulkBodyRefusal, BULK_BODY_KEYS, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
 import { writeDoorOfTransport } from '../../contract/judged-write-operations.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
@@ -24,7 +24,7 @@ const MCP_BULK_KEYS: ReadonlySet<string> = new Set([...BULK_BODY_KEYS, 'space'])
 
 export const save_bulkTool: ToolHandler = {
   name: 'save_bulk',
-  description: 'Write facts, entities, edges and chrono entries in one call. Every array is optional; send '
+  description: 'Write facts, entities, edges and chrono entries in one call. ' + FORK_ROWS_ARE_READ_ONLY + 'A batch naming one by id is refused whole. Every array is optional; send '
     + 'any combination.\n\n'
     + 'A SUCCESSFUL CALL MAY HAVE WRITTEN NOTHING. This is partial-success by design: a bad item is reported '
     + 'in `errors` and the rest of the batch proceeds, so there is no failure status to check. ALWAYS read '

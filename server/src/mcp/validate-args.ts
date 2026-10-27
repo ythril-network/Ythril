@@ -22,6 +22,7 @@ import { toolValidatorCacheTotal } from '../metrics/registry.js';
 import { log, peerText, NAME_QUOTED } from '../util/log.js';
 import { LruMap } from '../util/lru-map.js';
 import { warnOnce } from '../util/warn-once.js';
+import { invalidArgumentsSentence, missingArgumentDetail } from './argument-sentence.js';
 
 /** How a call is validated beyond the advertised schema. */
 export interface ValidateOptions {
@@ -99,13 +100,13 @@ export function makeArgsValidator(schemas: ToolSchemas, accessibleSpaceIds: read
             const retired = retiredWriteFieldHint(prop);
             return retired ?? `${at}: unexpected property '${peerText(prop, { max: NAME_QUOTED })}'`;
           }
-          case 'required':             return `(arguments): missing required property '${String(p['missingProperty'])}'`;
+          case 'required':             return missingArgumentDetail(String(p['missingProperty']));
           case 'enum':                 return `${at}: ${e.message} (${(p['allowedValues'] as unknown[] ?? []).join(', ')})`;
           case 'propertyNames':        return `${at}: property name is not allowed here`;
           default:                     return `${at}: ${e.message}`;
         }
       }).join('; ');
-      return `Invalid arguments for '${tool.name}': ${detail}`;
+      return invalidArgumentsSentence(tool.name, detail);
     },
   };
 }

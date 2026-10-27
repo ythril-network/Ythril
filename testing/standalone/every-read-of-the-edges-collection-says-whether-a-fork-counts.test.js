@@ -97,6 +97,16 @@ const EXEMPT = {
     'brain/ttl-sweep.ts:isStored', 'brain/queue-embed-sweep.ts:countUnswept', 'brain/queue-embed-sweep.ts:queueEmbedSweep',
     'brain/candidate-prune.ts:pruneCandidateCollection', 'brain/chrono-redaction.ts:backfillTypedExpiry',
   ]),
+  // Q-624 slice I3: the readers whose subject IS the fork rows, or a row's fork status.
+  ...reasoned('the fork module itself: it reads fork rows on purpose (Review\'s list and resolve, the re-mint, the cascade, the cap) and names `forkOf` in every read', [
+    'brain/forks.ts:refuseForkRowsNamed', 'brain/forks.ts:forkRowsUnder', 'brain/forks.ts:remintForks', 'brain/forks.ts:assertForksFitTogether',
+    'brain/forks.ts:listForks', 'brain/forks.ts:resolveFork', 'brain/forks.ts:resolveOrphan',
+  ]),
+  ...reasoned('it reads one row by id to ask whether it IS a fork (the refusal of an ordinary edit), or removes fork rows a 5.6 build cannot read', [
+    'brain/write-at-read-version.ts:writeAtReadVersion', 'sync/positions-rollback.ts:rollBackForks',
+    // An applied tombstone's cascade asks which tombstoned subjects are still held before it removes their forks (Q-624 §7, R7).
+    'sync/tombstone-apply.ts:cascadeToForks',
+  ]),
   // ── the planner's own read of the unchosen versions: it exists to find the forks
   ...reasoned('it reads the FORK rows of the candidate parents on purpose (their count, their ids, the chain above them): the arrival planner needs every unchosen version, so a clause would blind the cap and the match by id', [
     'sync/push-reads.ts:readForkContext',

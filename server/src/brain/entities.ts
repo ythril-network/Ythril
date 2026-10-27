@@ -4,6 +4,7 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
 import { writeTombstone, stampTombstones } from './tombstones.js';
+import { refuseForkEdit, removeForksOf } from './forks.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
@@ -209,6 +210,8 @@ export async function updateEntityById(
   const existing = await collection.findOne(asFilter<EntityDoc>({ _id: id, spaceId }),
     { projection: NEVER_RETURNED_PROJECTION }) as EntityDoc | null;
   if (!existing) return null;
+  // An unresolved version is read-only (Q-624 §8): refused before anything this update prepares, and again where the version is read.
+  refuseForkEdit('entity', existing);
 
   // The version is stamped and the position taken AT the write (`writeAtReadVersion` below), not here (`Q-196`).
   const now = new Date().toISOString();
@@ -370,6 +373,8 @@ export async function deleteEntity(
   // instance, and that refusal must leave the record where it is (`record_version_at_ceiling`).
   const tombstone = { _id: entityId, type: 'entity' as const, originalSeq: existing?.seq };
   const versions = await stampTombstones(spaceId, [tombstone]);
+  // Its unresolved versions go first, each behind a tombstone issued here (Q-624 §7): a refusal there leaves the entity and its forks both standing.
+  if (existing) await removeForksOf(spaceId, 'entity', [entityId]);
   // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and cascades are admitted writers of their own.
   const result = await admitSpaceWrite(spaceId, 'entities', () => col<EntityDoc>(spaceCollection(spaceId, 'entities')).deleteOne({
     _id: entityId,

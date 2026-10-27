@@ -66,6 +66,11 @@ declare global {
        */
       auditSnapshots?: { before?: unknown; after?: unknown };
       /**
+       * The entry's `changes` built EXPLICITLY by the act, for an act whose before and after snapshots differ in nothing the diff records (Review's
+       * resolve: `kind`, `keep` and the parent are the same before and after, and the bodies are objects; Q-624 R12). Wins over `auditSnapshots`.
+       */
+      auditChangesExplicit?: Array<{ field: string; from?: string | number | boolean | null; to?: string | number | boolean | null }>;
+      /**
        * The record a request acted on when the PATH cannot name it — a create has no id in its URL, and a create
        * whose record landed and whose connections then failed is still a write of that record (`Q-170`). Set by the
        * error handler that answers it; the audit middleware prefers it to the path's own.

@@ -59,7 +59,8 @@ const subjectOf = (family) => copyOf(family, S, SUBJECT, 5, 'what this instance 
 /** A fork row of `family` as a peer replicates it: another author's body, under the id its body derives. */
 async function forkRowOf(family, text, author) {
   const body = copyOf(family, S, SUBJECT, 5, text, { author: { ...author } });
-  return { ...body, _id: await forkIdOf(family, SUBJECT, 5, body), forkOf: SUBJECT };
+  // `forkAt` is the version the id derives from (parent decision, 2026-10-25): an entity, edge or chrono fork without it is malformed.
+  return { ...body, _id: await forkIdOf(family, SUBJECT, 5, body), forkOf: SUBJECT, forkAt: 5 };
 }
 const tombstoneOf = (family, id, issuer, extra = {}) =>
   build.tombstone(S, id, TYPE_OF[family], 7, { instanceId: issuer, deletedAt: DECIDED_AT, ...extra });

@@ -101,6 +101,13 @@ const EXEMPT = {
   'server/src/spaces/record-count.ts:spaceRecordCount': 'an ESTIMATE of how many records a re-read of the space reads, from the collections\' metadata: a flagged file row is counted in it, which overstates a duration by a row and decides nothing',
   'server/src/sync/positions-owed.ts:carryRows': 'gives EVERY row with a version its position, flagged ones included: a flagged row is local audit state that still has a version and sits in the collection the pager reads',
   'server/src/sync/positions-rollback.ts:rollBackPositions': 'removes the 6.0 fields from EVERY row of the collection, flagged ones included: it runs against the store, with no instance up, and leaves no row 5.6 would hash differently',
+  // Q-624 slice I3: the fork module's computed collection is always one of FORKING_FAMILIES (facts, entities, edges, chrono), never the files.
+  ...Object.fromEntries(['refuseForkRowsNamed', 'forkRowsUnder', 'remintForks', 'assertForksFitTogether', 'listForks', 'resolveFork', 'resolveOrphan'].map(f => [
+    `server/src/brain/forks.ts:${f}`, 'its collection is a FORKING_FAMILIES member (facts, entities, edges, chrono) and never the files: a file does not fork',
+  ])),
+  'server/src/sync/tombstone-apply.ts:cascadeToForks': 'an applied tombstone\'s fork cascade (Q-624 §7): its collection is a FORKING_FAMILIES member, never the files',
+  'server/src/sync/positions-rollback.ts:rollBackForks': 'its collections are the forking families and the edges indexes, never the files: a file does not fork',
+  'server/src/brain/write-at-read-version.ts:writeAtReadVersion': 'reads the stored copy\'s `forkOf` to refuse an edit of a fork row; a flagged file row is no fork, and the edit\'s own write decides what a flagged row means',
   'server/src/util/version-stamp.ts:highestVersionBelowCap': 'the version the counter may continue from: the highest stored version at or below the cap in any row; a flagged row\'s version still counts',
   'server/src/util/version-stamp.ts:heldTermsOf': 'the version a local write must stand above: the stored row\'s own, flagged or not — a write over a flagged row is the revival of a deleted file, which sorts above it',
   'server/src/sync/record-position-stream.ts:positionFloor': 'the highest position the records stream has handed out: any row\'s, a flagged row\'s included, or the next stamp could fall below a position a peer holds a mark for',

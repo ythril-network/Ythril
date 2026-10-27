@@ -297,6 +297,22 @@ agreeing they match, for ever, with nothing to contradict. A file field must be 
   nothing on the receiver) or the two chrono redaction marks. A reason once written is never re-read; a rule
   read out of the code that governs the behaviour cannot go stale the same way.
 
+## My instance = my data
+
+Owner principle, restated 2026-10-25 after a design broke it: **no action on one instance decides what another
+instance holds.** A peer's write arrives and the receiver applies its own rules to it; a peer's delete is honoured only
+where the deletion authority (`sync/deletion-authority.ts`) says this instance agreed to it; and a choice a user makes on
+one instance (resolving a conflict, keeping one version) settles THAT instance's copy. Where a peer's choice cannot be
+applied here, it becomes something this instance's user decides, shown as a conflict in Review, never a silent
+override and never a silent drop.
+
+**The case that made it explicit.** Q-624: a resolve's tombstone for a fork another instance wrote is declined by mesh
+peers. The first fix proposed carried the resolution on the parent so every instance deleted its own copy, which widened
+who may delete another instance's record. The rule above answers it instead: resolve deletes the local copy, and on each
+other instance the declined delete becomes a conflict marked as resolved elsewhere, decided there. **Any design that
+reaches across instances to change or delete stored data is checked against this section first**; the sections below
+are its consequences for writes and arrivals.
+
 ## What a receiver does after the write is the RECEIVER's decision
 
 Owner's ruling, 2026-09-01: *"dont transfer embeddings... on transfer the receiver applies its rules. if the
@@ -319,12 +335,14 @@ arrival writer drops them from whatever arrives, by push or by pull, and decides
 receiver's own values crosses the replace (`carriedFields`): every local-only field for an ordinary arrival (a
 peer's edit used to erase this instance's vector and retention stamps); the record tier and the write guard, no vector,
 model or `matchedText`, for an arrival this instance suppresses (Q-230); NOTHING from the replaced copy for a restore,
-which keeps the backup's own record-tier half (`RESTORED_LOCAL_FIELDS`: `_expireAt`, `_contentExpireAt`, `syncBase`
-and `deliveredBy`) and never the derived half (`embedding`, `embeddingModel`, `matchedText`; Q-234). The
+which keeps the backup's own record-tier half (`RESTORED_LOCAL_FIELDS`: `_expireAt`, `_contentExpireAt`, `syncBase`,
+`deliveredBy`, `writtenHere` and `_resolvedElsewhere`) and never the derived half (`embedding`, `embeddingModel`, `matchedText`; Q-234). The
 equivalence that makes it ONE list is the rule two sections above — a field that is hashed must replicate — read backwards: a field that must not
 replicate must not be hashed, or every cycle reports a divergence for a space where nothing is wrong.
 
 **Bundle-81 adds two more local classes and one answer rule, and this section names them.** A record's **landing position** — `pos` and `posAtSeq` (`POSITION_FIELDS`) — is where THIS instance stored it, in its own clock band, and the version the position was taken for: the number a pull pages by, so it is never a peer's, never hashed, never restored (a landing takes a fresh one) and never carried across a replace. `writtenHere` (in `RESTORED_LOCAL_FIELDS`) says this instance wrote the record's current version itself: a restore keeps it, an arrival does not. A **tombstone** has a local class of its own (`TOMBSTONE_LOCAL_FIELDS`): `storedVia`, `issuedHere`, `pos` and `posAtSeq` — how this instance came to hold the deletion, whether it issued it, and where it landed. And `pos` is the one **order-only** field (`ORDER_ONLY_FIELDS`, `brain/recall-shape.ts`): a read may order by it, and no answer returns it.
+
+**Q-624 adds a fifth class: a decision owed here (`DECISION_OWED_FIELDS`: `_resolvedElsewhere`).** It sits on a FORK row when a peer resolved its own copy of that unchosen version behind a tombstone this instance's deletion authority declined: who decided, when, at which version, whether the delivery proved it. It is local-only (never hashed, a peer's copy dropped on arrival), carried across an ordinary arrival so a re-delivery never clears a decision still owed, restored (it is in `RESTORED_LOCAL_FIELDS`, so an export and its import keep it), and never derived. It lives and dies with the fork row, which is why it is a field and not a list: every path that removes the fork removes the mark.
 
 **The third class is the write guard (`WRITE_GUARD_FIELDS`: `_functionalGuard`, Q-439).** It is local-only like the
 rest and a different thing: a lock in THIS instance's unique index, not a fact about the record. Never restored (a

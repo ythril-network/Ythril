@@ -19,7 +19,7 @@ import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
 import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, FORKS_GO_WITH_THEIR_SUBJECT, FORK_ROWS_ARE_READ_ONLY } from './shared.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
@@ -191,7 +191,7 @@ export const save_factTool: ToolHandler = {
 
 export const update_factTool: ToolHandler = {
   name: 'update_fact',
-  description: 'Update one fact by its ID. Every field except `id` is optional; a field you omit is left '
+  description: 'Update one fact by its ID. ' + FORK_ROWS_ARE_READ_ONLY + 'Every field except `id` is optional; a field you omit is left '
     + 'exactly as it was. Changing content re-embeds the record automatically — you never queue that '
     + 'yourself.\n\n'
     + 'TAGS REPLACE HERE. THEY MERGE ON `update_entity` AND `update_edge`. Read that twice: it is one word of '
@@ -386,10 +386,7 @@ export const delete_factTool: ToolHandler = {
     + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync: ' + DELETION_REACH + ' The '
     + 'record is not quietly resurrected from a peer that still has it. That is also why this cannot be undone by '
     + 'writing the record back with the same id — the tombstone outranks it.\n\n'
-    + 'ITS FORKS ARE OWN RECORDS AND ARE NOT DELETED WITH IT. A fork is a fact sync made when a peer sent a different '
-    + 'text at the same version (its `forkOf` names this fact); deleting or expiring this fact leaves every fork in '
-    + 'place, and each one is deleted the same way, by its own id. To erase a text everywhere it was kept, find its '
-    + 'forks first with `filter` on facts, `{ "forkOf": "<this id>" }`, and delete each.\n\n'
+    + FORKS_GO_WITH_THEIR_SUBJECT + '\n\n'
     + 'PARAMETERS:\n'
     + '- `id` — the fact\'s `_id`. Required. An id that does not exist is an ERROR, not a silent success, '
     + 'so a successful reply means a record really was deleted.\n'

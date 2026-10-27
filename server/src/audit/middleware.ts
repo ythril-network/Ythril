@@ -483,9 +483,11 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       durationMs: Math.round(durationMs),
       // Only for a request that actually succeeded: a rejected PATCH changed nothing, and recording its
       // intended values would make the log claim an edit that never happened.
-      ...(res.statusCode < 400 && req.auditSnapshots
-        ? { changes: auditChanges(matched.operation, req.auditSnapshots.before, req.auditSnapshots.after) }
-        : {}),
+      ...(res.statusCode < 400 && req.auditChangesExplicit
+        ? { changes: req.auditChangesExplicit }
+        : res.statusCode < 400 && req.auditSnapshots
+          ? { changes: auditChanges(matched.operation, req.auditSnapshots.before, req.auditSnapshots.after) }
+          : {}),
     });
   });
 

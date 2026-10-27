@@ -38,6 +38,7 @@ import { linkIdFor } from '../brain/link-id.js';
 import { fileContentHash } from '../brain/merkle.js';
 import { authorRef } from '../config/author.js';
 import type { BrainCollection, RefKind } from '../config/types-knowledge.js';
+import type { ResolvedElsewhereEntry } from './resolved-elsewhere.js';
 import { authoredContentHash, bodiesDiffer, BodyNotRead, BODY_FIELDS_OF, type AuthoredContent } from './authored-content.js';
 
 /** The minimum shape this module needs: everything sync replicates carries an id and a seq. */
@@ -191,6 +192,10 @@ export interface HeldTombstone {
   seq: number;
   issuer?: string;
   storedVia?: string;
+  /** This instance issued it (its own delete or resolve): its own decision, which a re-delivered fork never escapes (Q-624 §9a, S4). */
+  issuedHere?: boolean;
+  /** When the issuer decided: what a fork admitted past this tombstone is marked with. */
+  deletedAt?: string;
 }
 
 /** What the planner needs to know of a stored copy. */
@@ -288,6 +293,11 @@ export interface ArrivalPlan<T extends ArrivalDoc> {
    * stored parent, and a chrono fork whose bytes a redaction took. They are stored as ordinary arrivals and counted `unverifiable`.
    */
   unverifiable: Array<{ index: number; reason: 'legacy' | 'redacted' }>;
+  /**
+   * Fork rows admitted past a tombstone held here whose issuer does not govern their author (Q-624 §9a, the arrival half): each is written and then
+   * marked `_resolvedElsewhere` with this entry, exactly as the decline branch of the tombstone apply marks a fork that was here first.
+   */
+  marks: Array<{ index: number; entry: ResolvedElsewhereEntry }>;
   /**
    * Stale tombstones to delete: those below `below`. `onLanding` means only once the record lands — a tombstone
    * deleted before a write that then fails leaves the record absent and its deletion gone. Without it, the stored
@@ -579,6 +589,15 @@ export function tombstoneGoverns(issuer: string | undefined, author: string | un
 }
 
 /**
+ * Does a tombstone held here for a FORK row's own id leave that fork to be admitted and marked resolved elsewhere (Q-624 §9a, the arrival half)?
+ * Only when this instance did not issue it (its own resolve refuses the fork whoever re-delivers it, S4) and its issuer does not govern the fork's
+ * author: another instance's decision about ITS copy, which the decline branch of the tombstone apply would have marked had the fork been here first.
+ */
+export function heldTombstoneLeavesFork(held: HeldTombstone, author: string | undefined): boolean {
+  return held.issuedHere !== true && !tombstoneGoverns(held.issuer, author);
+}
+
+/**
  * Decide an arriving page — PUSHED or PULLED, one rule (`Q-204`) — the way processing it one document at a time
  * decided it: pure, so every outcome is testable without a database, and so the WRITE can be one bulk operation
  * instead of one per document. The pull used to accept by seq alone, so the same document delivered the other way
@@ -620,7 +639,7 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
   const forking = (FORKING_FAMILIES as readonly string[]).includes(kind);
   const hashOf = input.hashOf ?? bodyHashesOf(kind);
   const plan: ArrivalPlan<T> = {
-    verdicts: [], forkIds: [], accepts: new Map(), forks: [], converges: [], unverifiable: [], tombstoneCleanups: new Map(),
+    verdicts: [], forkIds: [], accepts: new Map(), forks: [], converges: [], unverifiable: [], marks: [], tombstoneCleanups: new Map(),
   };
   /** The version of each id this page has accepted so far — what a later copy is compared against. */
   const overlay = new Map<string, T>();
@@ -701,8 +720,17 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     }
 
     const held = superseded.has(doc._id) ? undefined : tombstones.get(doc._id);
-    const tomb = tombSeqFor(doc, held, input.deliveredBy);
-    const via = held === undefined ? undefined : supersededVia(held, input.deliveredBy);
+    /*
+     * The ARRIVAL half of Q-624 §9a, so arrival order does not decide the outcome. A fork row's own tombstone held here is asked the authority's
+     * question: one this instance ISSUED is its own resolution, and refuses the fork whoever re-delivers it (S4); one whose issuer does not govern
+     * the fork's author is another instance's decision about ITS copy, so the fork is admitted and marked resolved elsewhere, as the decline branch
+     * of the tombstone apply marks a fork that was here first. Anything else is judged as every record is.
+     */
+    const forkRow = forking && doc.forkOf !== undefined && held !== undefined;
+    if (forkRow && held!.issuedHere === true) { plan.verdicts[i] = 'tombstoned'; return; }
+    const pastTombstone = forkRow && heldTombstoneLeavesFork(held!, doc.author?.instanceId);
+    const tomb = pastTombstone ? undefined : tombSeqFor(doc, held, input.deliveredBy);
+    const via = held === undefined || pastTombstone ? undefined : supersededVia(held, input.deliveredBy);
     if (tomb !== undefined && tomb >= doc.seq) { plan.verdicts[i] = 'tombstoned'; return; }
 
     const curSeq = cur?.seq;
@@ -734,6 +762,8 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
       const holder = key === undefined ? undefined : keyOwner.get(key);
       if (holder !== undefined && holder !== doc._id) { plan.verdicts[i] = 'duplicate'; return; }
       if (admittedAs !== undefined) plan.unverifiable.push({ index: i, reason: admittedAs });
+      // A stored tombstone does not record how its issuer was proven, so the mark says unproven.
+      if (pastTombstone) plan.marks.push({ index: i, entry: { by: held!.issuer ?? '', at: held!.deletedAt ?? '', seq: held!.seq, proven: false } });
       // The facts family's own spelling of the two outcomes; every other family says `upserted`.
       return accept(i, doc, kind === 'facts' ? (cur === undefined ? 'inserted' : 'updated') : 'upserted', tomb, via);
     }

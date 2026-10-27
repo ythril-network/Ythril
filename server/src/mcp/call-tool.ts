@@ -54,7 +54,7 @@ import { spaceActAnswer } from '../spaces/space-act-answer.js';
 import { NotFoundError, ToolRefusal } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
-import { PositionClockUnusable, PositionsSeedUnavailable } from '../util/errors.js';
+import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal } from '../util/errors.js';
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 import { mergeRefusal } from '../brain/merge.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
@@ -66,10 +66,10 @@ import { judgedOperationOfTool, isBatchWriteOperation } from '../contract/judged
 import type { UnknownFieldRow } from '../contract/unknown-field-rows.js';
 import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
 import { logAuditEntry } from '../audit/audit.js';
-import { auditChanges } from '../audit/audit-changes.js';
+import { auditChanges, type AuditChange } from '../audit/audit-changes.js';
 
 /** What a tool hands the audit entry through `recordChanges` (Q-50) — the pair a REST route sets as `req.auditSnapshots`. */
-type AuditSnapshots = { before: Record<string, unknown>; after: Record<string, unknown> };
+type AuditSnapshots = { before: Record<string, unknown>; after: Record<string, unknown> } | { explicit: AuditChange[] };
 import { mcpAuditOperation, mcpActOperation, isMcpReadOperation } from './audit-map.js';
 import { toolCallsTotal, toolFailuresTotal } from '../metrics/registry.js';
 /** Who is calling, for the rung checks and the audit trail. Snapshotted by the door at its own edge. */
@@ -461,7 +461,9 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     // The refusals of a local write's stamp (`record_version_at_ceiling`, a clock before the first usable instant, a position seed the store could
     // not read): the status and body REST answers (`writeRefusalAnswer`), carried as `structuredContent` beside the same sentence.
     // (A seed the store could not read is the store's failure and falls through to it below: `writeRefusalAnswer` answers null for that one.)
+    // And a fork row named by an ordinary edit, or a re-key or merge past the fork cap (Q-624): the REST door's 409, `fork_row_read_only` or `fork_cap`.
     const stampRefusal = err instanceof RecordVersionAtCeiling || err instanceof PositionClockUnusable || err instanceof PositionsSeedUnavailable
+      || err instanceof ForkRowReadOnly || err instanceof ForkCapRefusal
       ? writeRefusalAnswer(err, 'update') : null;
     if (stampRefusal) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...stampRefusal.body } }, status: stampRefusal.status, callSpace };
@@ -583,6 +585,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
       actor: { tokenId: caller.tokenId, tokenLabel: caller.tokenLabel },
       auditIdentity: { authMethod: caller.authMethod, oidcSubject: caller.oidcSubject },
       recordChanges: (before, after) => { snapshots = { before, after }; },
+      recordAuditChanges: (changes) => { snapshots = { explicit: changes }; },
     });
     // A tool that returns `isError` failed on its own terms, so the status has to come from the RESULT or
     // every rejected write would be logged as a success. 422: the call was well-formed and it was refused.
@@ -657,7 +660,8 @@ function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, s
     durationMs,
     // Q-50: the same `changes` the REST twin's entry carries, and on the same condition — only a call that
     // succeeded, because a refused edit changed nothing and its intended values would claim one.
-    ...(status < 400 && snapshots ? { changes: auditChanges(operation, snapshots.before, snapshots.after) } : {}),
+    ...(status < 400 && snapshots
+      ? { changes: 'explicit' in snapshots ? snapshots.explicit : auditChanges(operation, snapshots.before, snapshots.after) } : {}),
   });
 }
 

@@ -120,6 +120,34 @@ export class EdgeIdentityBuilding extends Error {
 }
 
 /**
+ * An ordinary edit (an update, a relabel, a save by id, a merge) named a FORK row: an unchosen version of another record (Q-624, design rev 4 §8). A fork
+ * changes only by resolve, delete, arrival or re-mint, so every other write is refused BEFORE it writes, with `409 fork_row_read_only`. Thrown by the one
+ * refusal, `refuseForkEdit` (`brain/forks.ts`, which re-exports this class); declared here so the doors' shared mappers can name it without importing the
+ * fork module. What it prevents: a relabelled fork edge re-keyed onto its subject's derived id, colliding in the identity slot for ever.
+ */
+export class ForkRowReadOnly extends Error {
+  override readonly name = 'ForkRowReadOnly';
+  readonly code = 'fork_row_read_only' as const;
+  readonly status = 409 as const;
+  constructor(readonly kindWord: string, readonly id: string, readonly forkOf: string) {
+    super(`${kindWord} '${id}' is an unresolved version of '${forkOf}'. Resolve it in Review (resolve_fork) or delete it; it cannot be edited (fork_row_read_only).`);
+  }
+}
+
+/**
+ * A re-key or merge would leave one record holding more unresolved versions than `MAX_FORKS_PER_RECORD` (Q-624, design rev 4 §7). A peer would refuse the
+ * forks past the cap and that would lose them there, so the act is refused before anything is written (`409 fork_cap`), and the caller resolves some first.
+ */
+export class ForkCapRefusal extends Error {
+  override readonly name = 'ForkCapRefusal';
+  readonly code = 'fork_cap' as const;
+  readonly status = 409 as const;
+  constructor(readonly count: number, readonly cap: number) {
+    super(`the two records hold ${count} unresolved versions together, more than ${cap}; resolve some in Review first`);
+  }
+}
+
+/**
  * A peer answered a sync request in the 5.x shape: a page with no `through`, `head` or `positions`, or a push answer without `positions: 1`. 6.0 pages
  * by position and a 5.x peer cannot be synced with by these rules, so the client THROWS this from both parsers (`sync/wire-answer.ts`); the engine ends
  * that member's turn on it, counts no failure and shows the member as too old.

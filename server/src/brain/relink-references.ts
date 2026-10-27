@@ -38,12 +38,13 @@ import { enqueueWriteEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from './embed-
 import { removeWithTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
+import { remintForks, type ForkRepoint } from './forks.js';
 import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { EdgeDoc, LinkDoc } from '../config/types.js';
 
 /** What kind of record is absorbed: it decides which links are on the end of it. */
-export type RelinkKind = Extract<RefKind, 'entity' | 'fact'>;
+export type RelinkKind = Extract<RefKind, 'entity' | 'fact' | 'chrono'>;
 
 /**
  * The edges of a record, either end, FORK ROWS INCLUDED. ONE definition for what a record's removal must deal with: the fork resolve, and the entity delete's
@@ -68,9 +69,11 @@ export function relationshipEdgesOfRecord(spaceId: string, id: string) {
  * name it. Never the links an entity or a fact HOLDS as array fields: those are the deprecated 4.x spellings, refused on write.
  */
 export function linksOfRecord(spaceId: string, id: string, kind: RelinkKind) {
+  // A chrono entry is the `from` of its links, as a fact is (Q-624: a chrono fork resolved moves its links to the parent). An entity is a `to`; a link
+  // FROM one is written by no door, and is moved too when one arrived (a peer's link from a fork entity).
   return kind === 'entity'
-    ? asFilter<LinkDoc>({ spaceId, to: id, toKind: 'entity' })
-    : asFilter<LinkDoc>({ spaceId, $or: [{ from: id, fromKind: 'fact' }, { to: id, toKind: 'fact' }] });
+    ? asFilter<LinkDoc>({ spaceId, $or: [{ to: id, toKind: 'entity' }, { from: id, fromKind: 'entity' }] })
+    : asFilter<LinkDoc>({ spaceId, $or: [{ from: id, fromKind: kind }, { to: id, toKind: kind }] });
 }
 
 /** How many identities one collision read asks for: an `$or` of this many exact tuples. */
@@ -175,6 +178,34 @@ export async function relinkEdgesOfRecord(
       if (r.edge.to === absorbedId) updates['to'] = survivorId;
       return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: UNSET_GUARD } } };
     }), (slice, { ordered }) => edgeColl.bulkWrite(asBulk<EdgeDoc>(slice), { ordered, session }), { ordered: true }), 'relink.edge');
+  }
+
+  /*
+   * The FORK edges of the absorbed record follow what their subject became (Q-624, design rev 4 §7): the re-keyed id, the surviving holder when the
+   * subject was deleted as a duplicate, or the subject's own id when it was written in place. They were partitioned out of the read above (a fork is
+   * not a relationship of the record), and they are never edited in place: `remintForks` inserts each under an id that derives from its new subject,
+   * version and body, and removes the old id behind a tombstone, in this transaction. Past the fork cap it throws, and the transaction writes nothing.
+   */
+  const forkEdges = await edgeColl.find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }], forkOf: { $exists: true } }),
+    { session, projection: { _id: 1, forkOf: 1, from: 1, to: 1, label: 1 } }).toArray() as unknown as Array<Pick<EdgeDoc, '_id' | 'from' | 'to' | 'label'> & { forkOf: string }>;
+  if (forkEdges.length > 0) {
+    const becameOf = new Map<string, string>();
+    toRelink.forEach((r, i) => becameOf.set(r.edge._id, moved[i]?.edge._id ?? r.edge._id));
+    for (const d of duplicates) {
+      const from = d.from === absorbedId ? survivorId : d.from;
+      const to = d.to === absorbedId ? survivorId : d.to;
+      const holder = await edgeColl.findOne(asFilter<EdgeDoc>({ spaceId, from, to, label: d.label, ...CHOSEN_VERSION_ROWS }), { session, projection: { _id: 1 } });
+      if (holder) becameOf.set(d._id, holder._id);
+    }
+    const repoints = new Map<string, ForkRepoint>();
+    for (const f of forkEdges) {
+      if (repoints.has(f.forkOf)) continue;
+      repoints.set(f.forkOf, {
+        oldSubject: f.forkOf, newSubject: becameOf.get(f.forkOf) ?? f.forkOf,
+        patch: { ...(f.from === absorbedId ? { from: survivorId } : {}), ...(f.to === absorbedId ? { to: survivorId } : {}) },
+      });
+    }
+    await remintForks(spaceId, 'edge', [...repoints.values()], { session, now });
   }
   return { rekeyed: moved.filter((m): m is EdgeRekey => m !== null), deletedDuplicateEdgeIds: duplicates.map(e => e._id) };
 }

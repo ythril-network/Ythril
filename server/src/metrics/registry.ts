@@ -1456,6 +1456,19 @@ export const syncInvalidForksTotal = new Counter({
 });
 
 /**
+ * Marks written on a fork row because another instance resolved its own copy and this instance's deletion authority declined the removal (Q-624, design
+ * rev 4 §9a and §13): by the decline branch of the tombstone apply, and by the arrival half of the planner (a fork arriving after such a tombstone). The fork
+ * stays, listed in Review as resolved elsewhere, for this instance's user to decide. The decline itself is still counted on
+ * `ythril_sync_tombstones_declined_total`; this counts the decisions it left owed here.
+ */
+export const forksResolvedElsewhereTotal = new Counter({
+  name: 'ythril_forks_resolved_elsewhere_total',
+  help: 'Fork rows marked resolved elsewhere (a peer resolved its copy, the removal was declined here), by kind',
+  labelNames: ['kind'] as const,
+  registers: [register],
+});
+
+/**
  * Stored copies of a record that failed their `Incoming*` schema when they were compared with an arriving copy at an equal seq, by family (Q-624, design
  * section 2). Such a copy (a row `deleteFields` wrote with `description: null` before the fix, or one an old version stored) is hashed RAW, so it forks only when its
  * raw body really differs; this is the count an operator reads to know how many there are. A gauge, as the design names it, that only rises within a process: it

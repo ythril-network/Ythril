@@ -104,7 +104,8 @@ describe('a re-key re-mints its forks under ids that verify', { skip }, () => {
   it('a relabel re-mints the subject\'s fork edges onto the re-keyed subject, and the fork keeps its own label', async () => {
     const subject = edgeIdFor('a1', 'b1', 'knows', 'entity', 'entity');
     await door.coll(S, 'entities').insertMany([build.entity(S, 'a1', 1), build.entity(S, 'b1', 1)]);
-    await door.coll(S, 'edges').insertOne(edgeRow(subject, 5, 'a1', 'b1', 'knows', { description: 'mine' }));
+    // Written HERE: only an edge this instance wrote is re-keyed by a relabel (`rekeyEdges`); a peer's is relabelled in place and keeps its id.
+    await door.coll(S, 'edges').insertOne(edgeRow(subject, 5, 'a1', 'b1', 'knows', { description: 'mine', author: { instanceId: 'q624t3_rekey-receiver', instanceLabel: 'Receiver' } }));
     const fork = await seedFork(door, S, 'edge', subject, 5, { from: 'a1', to: 'b1', label: 'knows', ...FORK_KINDS.edge.alt });
     await mods.edges.updateEdgeById(S, subject, { label: 'employs' });
     const renamed = edgeIdFor('a1', 'b1', 'employs', 'entity', 'entity');

@@ -48,6 +48,7 @@ const COMPUTED_BULK_WRITES = {
   // Was `sync/engine.ts:batchUpsertBySeq`, the pull's page write, until the arrival writer took every door's
   // record write (`Q-107` part 1). It queues its landed records through `enqueueIngestedRecords`, not a bulkWrite.
   'server/src/sync/positions-owed.ts:repairRows': 'the repair of a space\'s positions: the collection is a record family\'s, updates positions of rows held; queues no job',
+  'server/src/sync/resolved-elsewhere.ts:writeResolvedElsewhere': 'the decision mark on fork rows (Q-624 §9a): the collection is a forking family\'s, one local-only field on rows held; queues no job',
   'server/src/sync/arrivals.ts:writeArrivals': 'sync push, pull and import store brain documents a peer or a restore '
     + 'sent; the collection is a replicated family\'s, and embed jobs are local and never replicated',
   'server/src/brain/write-plan/commit.ts:writeStage': 'the write commit\'s record stage: the collection is a record kind\'s '
