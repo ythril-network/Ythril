@@ -81,7 +81,8 @@ tags, linked entities and properties.
 **Conflict copies:** when two connected brains change the same record (a fact, an entity, a chrono entry or an edge) differently
 before they sync, both versions are kept: the second arrives as a **fork**, a conflict copy that names the record it diverged from
 (`forkOf`). Forks are listed, embedded and found by search like any record, and settled in **Review > Forks**. A fork cannot be edited,
-only kept there or deleted; deleting or expiring the original deletes its forks with it. To list them here: the **Query** tab, Filter
+only kept there or deleted; deleting or expiring the original deletes its forks with it. In the Entities, Edges, Facts and Chrono lists a fork
+carries a **Fork in Review** marker that opens Review > Forks on that kind. To list them here: the **Query** tab, Filter
 mode, filter `{"forkOf": "<the original's id>"}`, or `{"forkOf": null}` to leave every fork out.
 
 **Wiping everything:** There is no "Wipe all" button on the Brain toolbar. To clear a space's data, go to **Settings → Spaces → (space) → Danger tab** and use **Wipe all data**. You will be asked to type the space ID to confirm.
@@ -769,7 +770,8 @@ under **Settings → Media Processing**; until the scanner has run, the tab expl
 beside the first, and this tab is where you choose. Each card shows the fork beside the record it forks with the differing words marked
 in place (words only in the fork, words only in the other version; each mark also says so in words, so colour is never the only signal),
 every other differing field on its own line, who wrote each version and when, and how many edges and links point at the fork.
-**Show both versions in full** opens both texts whole. **Keep this version** writes the fork's whole content onto the record; **Keep the
+**Show both versions in full** opens both texts whole. **Keep this version** writes the fork's whole content onto the record (a space whose schema is strict refuses a version that breaks it, names the
+property, and writes nothing); **Keep the
 other version** leaves the record as it is. Both ask for a confirmation that names what is deleted, and both do the same three things:
 the record is saved as a new edit of its own, newer than both versions, so any peer holding either one takes it; this instance's copy of
 the fork is deleted; and every edge and link that pointed at the fork points at the record instead. A record may hold only so many forks;

@@ -636,7 +636,7 @@ re-keyed onto the id its identity derives). The parent is written first, so a fa
 parent without its vector (`null` when an orphan's deletion stood). Refused: `400` for a missing parameter (`Invalid arguments for 'resolve_fork': (arguments):
 missing required property '<name>'`, the MCP validator's words on both doors), a `keep` that is neither side, or `ifMatchParentSeq: 0` while the parent is
 stored; `404` for an id that is not stored; `409` for a record that is not a fork, a fork whose id does not derive from its parent, or a fork or parent that
-changed since it was listed (list again); and the write refusals of an ordinary edit (`record_version_at_ceiling`). The audit entry `fork.resolve` records
+changed since it was listed (list again); `422` when the record type's schema refuses the body that would be kept (the schema's own sentence; the kept body is judged as the kind's own update judges its patch, so a violation the parent already had is not the keep's, and nothing is written); and the write refusals of an ordinary edit (`record_version_at_ceiling`). The audit entry `fork.resolve` records
 the kind, the side kept, both ids, the mark the fork carried and both bodies. A token needs `knowledge: read` to list and `knowledge: write` to resolve.
 Both are audited (`fork.list` as a read, `fork.resolve` naming the fork).
 

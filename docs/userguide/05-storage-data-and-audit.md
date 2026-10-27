@@ -144,6 +144,8 @@ file bytes) — and the import puts them back. What to expect from a restore:
   newer one — that is what restoring a backup means.
 - **Retention survives the round trip.** Each record keeps the expiry it had when it was exported. A record that
   had none is given this space's retention window, counted from when the record was created.
+- **Unresolved versions travel with the space.** A fork (the other instance's version of a fact, entity, chrono entry or edge, kept for you to decide in Review) is an ordinary row of its collection, so the export carries it and the import restores it, still unresolved. A version another instance already resolved, which this instance still owes a decision on (Review lists it as "resolved elsewhere"), comes back with that mark. A restore into a space whose edge index is still being rebuilt after an upgrade may answer that it is not ready for a version of an edge: run it again once the rebuild has finished.
+- **Restoring an export that holds unresolved versions into an older (5.x) instance is not supported.** Those versions would show there as ordinary duplicate records. Resolve them in Review, or delete them, before the export.
 - **A one-per-subject label's lock is not exported.** Edges come back without Ythril's internal lock for such a label.
   That is harmless: the label's rule still refuses a second edge written after them.
 - **Search comes back on its own.** Vectors are not exported; every restored record is queued for embedding on
@@ -393,6 +395,8 @@ field, from, to. Two things are worth reading carefully:
   a secret into a log that admins can read and that is retained for months. When you need to know exactly
   what a request contained, the resource's own history or your reverse proxy's logs are the place to look;
   the audit log deliberately does not keep it.
+
+**Keeping one side of a fork is recorded with both sides.** The entry for Review's resolve (`fork.resolve`) names the kind, which side was kept, the record and the fork, and holds the body that was kept and the body that was discarded. When you keep the other version, the discarded text survives only there, so it follows the audit log's own retention (Settings → Logs): once those entries are cleared, it is gone.
 
 **A change to a space's schema is listed by name.** An edit of a space (operation `space.update`, whichever way it was
 made — the settings dialog, the API or an assistant) shows which **types, properties and rules** were added or removed

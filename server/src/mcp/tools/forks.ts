@@ -70,7 +70,7 @@ export const resolve_forkTool: ToolHandler = {
     + 'that tombstone only where its deletion rules accept it; another instance keeps its copy, lists it as resolved elsewhere and decides it there. '
     + 'For an orphan, `keep: \'parent\'` lets the deletion stand and `keep: \'fork\'` makes the fork the record. Refused: a missing parameter (400), an '
     + 'id that is not stored (404), a row that is not a fork or does not derive from its parent (409), a fork or parent changed since it was listed '
-    + '(409: list again), `ifMatchParentSeq: 0` while the parent is stored (400), a `keep` that is neither side (400).',
+    + '(409: list again), `ifMatchParentSeq: 0` while the parent is stored (400), a `keep` that is neither side (400), and a body the record type\'s schema refuses (422, the schema\'s own sentence; nothing is written).',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
