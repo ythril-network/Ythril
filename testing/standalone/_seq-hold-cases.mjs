@@ -40,6 +40,8 @@ export const E2 = 'aaaaaaaa-0000-4000-8000-0000000000e2';
 export const F = 'bbbbbbbb-0000-4000-8000-0000000000f1';
 export const ED = 'cccccccc-0000-4000-8000-0000000000ed';
 export const C = 'dddddddd-0000-4000-8000-0000000000c1';
+/** The parent an orphaned fact fork names: never stored, so the fork is an orphan (Q-624 section 9). */
+export const GONE_PARENT = 'bbbbbbbb-0000-4000-8000-0000000000f0';
 export const HELD_FILE = 'held.md';
 export const LEGACY_FILE = 'legacy.md';
 
@@ -69,6 +71,10 @@ export async function loadHolderModules() {
     recordStream: await import('../../server/dist/sync/record-position-stream.js'),
     // The repair of a space whose rows a 5.6 build left without a position (bundle-81): its block of fresh positions is a record-position holder.
     owed: await import('../../server/dist/sync/positions-owed.js'),
+    // The fork module (Q-624): Review's resolve of an orphan and the re-mint a merge or a re-key runs both land rows under their own hold.
+    forks: await import('../../server/dist/brain/forks.js'),
+    // The body text a fork id derives from (`forkIdFor(forkOf, forkAt, authoredContentHash(family, body).text)`, design rev 4 section 3).
+    authored: await import('../../server/dist/sync/authored-content.js'),
   };
 }
 
@@ -154,6 +160,9 @@ export async function seedHolderSpace(door, space) {
  * client, when its test has one), read when a case RUNS, so the table can be built when the tests are registered, before the door is open.
  * Fixtures are literal on purpose — the derivation decides a case is owed, not this table.
  */
+/** The orphaned fork each space's `resolveOrphan` case seeded, by space: its id is derived when the lock seeds it, and the run resolves that row. */
+const orphanOf = new Map();
+
 export function holderCases(ctx, S) {
   const mongo = () => (ctx.fixture ?? ctx.door).mongo;
   /** A lock on a document the write updates. */
@@ -220,6 +229,33 @@ export function holderCases(ctx, S) {
         return ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
           await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {});
       },
+    }],
+    // Q-624: the re-mint (`brain/forks.ts`) moves a subject's forks onto its new id inside the CALLER's held transaction, landing the new rows under their own
+    // hold. Driven through the merge, the same way and on the same stall as the relink cases above (the counter row, inside the floor): an entity fork of the
+    // absorbed record is seeded, so the merge re-mints it onto the survivor. Its rows land inside the transaction, whose bound ends a stalled write.
+    'server/src/brain/forks.ts:remintForks': [{
+      label: 'a merge\'s fork re-mint, inside the merge\'s held transaction', lock: 'counter',
+      run: async () => {
+        const fork = { ...(await ctx.door.coll(S, 'entities').findOne({ _id: E2 })), description: 'the absorbed record, as a peer tells it', forkOf: E2, forkAt: 2 };
+        fork._id = ctx.mods.plan.forkIdFor(E2, 2, ctx.mods.authored.authoredContentHash('entities', fork).text);
+        await ctx.door.coll(S, 'entities').insertOne(fork);
+        return ctx.mods.merge.executeMerge(S, await ctx.door.coll(S, 'entities').findOne({ _id: E1 }),
+          await ctx.door.coll(S, 'entities').findOne({ _id: E2 }), {});
+      },
+    }],
+    // Q-624 section 9: Review keeps a fact fork whose parent is gone. The fork is unmarked in place, at a fresh version, under its own landing hold and outside any
+    // transaction, so a lock on the fork row stalls the write inside the hold. The lock seeds the orphan first: the row exists only for this case.
+    'server/src/brain/forks.ts:resolveOrphan': [{
+      label: 'an orphaned fact fork kept: the fork unmarked in place, inside its landing hold',
+      collection: `${S}_facts`,
+      lock: async () => {
+        const fork = { ...build.fact(S, 'orphan', 5, { fact: 'what the gone parent was told' }), forkOf: GONE_PARENT, forkAt: 5 };
+        fork._id = ctx.mods.plan.forkIdFor(GONE_PARENT, 5, ctx.mods.authored.authoredContentHash('facts', fork).text);
+        await (ctx.fixture ?? ctx.door).coll(S, 'facts').insertOne(fork);
+        orphanOf.set(S, fork._id);
+        return holdDocumentLock(mongo(), `${S}_facts`, { filter: { _id: fork._id } });
+      },
+      run: () => ctx.mods.forks.resolveFork(S, { kind: 'fact', forkId: orphanOf.get(S), keep: 'fork', ifMatchSeq: 5, ifMatchParentSeq: 0 }),
     }],
     // The repair (`sync/positions-owed.ts`): every row with no position takes a fresh clock position, one block per chunk, held until its write ends. The seeded rows carry
     // a version and no position, which is exactly what a 5.6 build leaves; the write of one fact's position stalls.

@@ -43,12 +43,17 @@ export const DIVERGENT = 'the same fact, as the peer tells it';
  * `forkIdFor`, so it follows the server and not this table.
  *
  * @param {object} mongo  the server's `db/mongo.js` module (`door.mongo`)
- * @param {{ forkIdFor: (id: string, seq: number, text: string) => string }} plan  `server/dist/sync/upsert-plan.js`
+ * @param {{ forkIdFor: (id: string, seq: number, text: string) => string }} plan  `server/dist/sync/upsert-plan.js` (the body text is `authoredContentHash`'s)
  * @param {string} space
  * @param {string} factId  the fact the push forks; the seed's fact (`seedDoorSpace`, `_seq-hold-cases.mjs` `F`)
  */
-export const holdForkLock = (mongo, plan, space, factId) => holdDocumentLock(mongo, `${space}_facts`,
-  { insert: { _id: plan.forkIdFor(factId, 3, DIVERGENT), spaceId: space, fact: 'lock', seq: 0 } });
+export const holdForkLock = async (mongo, plan, space, factId) => {
+  // Q-624 (design rev 4 section 3): a fork's id derives from its whole BODY, `forkIdFor(forkOf, forkAt, authoredContentHash(family, body).text)`,
+  // no longer from the fact's text, so the id is asked of the module that owns the body text, for the very document the push sends.
+  const { authoredContentHash } = await import('../../server/dist/sync/authored-content.js');
+  const body = authoredContentHash('facts', build.fact(space, factId, 3, { fact: DIVERGENT })).text;
+  return holdDocumentLock(mongo, `${space}_facts`, { insert: { _id: plan.forkIdFor(factId, 3, body), spaceId: space, fact: 'lock', seq: 0 } });
+};
 
 /**
  * Open a push door with `spaces` registered, plus the app (REST) and the MCP dispatch on it — everything the doors
