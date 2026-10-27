@@ -811,7 +811,7 @@ A record that 5.6 shadowed (it sat below a position this brain had already marke
 
 **Read the cost before you confirm.** Records that peers deleted and have since forgotten can come back, because the peer no longer holds the deletion that would stop them. It is an instance administrator's action and asks the second factor where your instance requires one (the dialog says so only when you will be asked: with no second factor set up, or with a token that is exempt, it does not); the AI tool for it (`network_reread`) cannot present a code, so it tells you to use this screen. The control is not part of any automatic repair: nothing starts it but you.
 
-**It takes time, one space at a time.** A member reads one space per cycle and at most 10,000 records of it per cycle, so a space of 25,000 records takes three cycles and a network of four small spaces takes four. The member row shows **Re-read owed** while a space waits and **Catching up (re-read)** while it is being read, and a cycle that stopped at its cap is shown as partial, never as a failing member. A second click while a re-read is owed changes nothing.
+**It takes time, one space at a time.** A member reads one space per cycle and at most 10,000 records of each kind (entities, facts, and so on) per cycle, so a space with 25,000 facts takes three cycles and a network of four small spaces takes four. The member row shows **Re-read owed** while a space waits and **Catching up (re-read)** while it is being read, and a cycle that stopped at its cap is shown as partial, never as a failing member. A second click while a re-read is owed changes nothing.
 
 ### The version a peer has to be running
 

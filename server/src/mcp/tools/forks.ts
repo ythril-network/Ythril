@@ -25,10 +25,10 @@ const KIND_LIST = FORK_KIND_NAMES.map(k => `'${k}'`).join(', ');
 export const list_forksTool: ToolHandler = {
   name: 'list_forks',
   description: `List the forks of a space: records (${KIND_LIST}) that two instances wrote DIFFERENTLY at one version, which sync kept both of `
-    + 'instead of choosing one silently. Each row is `{ kind, forkId, parentId, fork, parent, orphaned, edgeCount, linkCount, siblings, resolvedElsewhere }`: '
+    + 'instead of choosing one silently. Takes a personal view, and then reads every member you may read. Each row is `{ kind, space, forkId, parentId, fork, parent, orphaned, edgeCount, linkCount, siblings, resolvedElsewhere, fromName?, toName? }`: `space` is where the fork lives (the space to resolve it in), '
     + 'the fork beside the record it forks (`parent: null, orphaned: true` when that record is gone), how many edges and links point at the fork, how '
-    + 'many forks the record holds, and `resolvedElsewhere`: the other instances that already resolved THEIR copy of this fork, each `{ by, at, proven, '
-    + 'via?, kept }` where `kept` is `original`, `this version` or `not yet known`. A resolve elsewhere never removes the copy here: this instance decides '
+    + 'many forks the record holds, an edge fork\'s endpoint names, and `resolvedElsewhere`: the other instances that already resolved THEIR copy of this fork, each `{ by, byLabel?, at, proven, '
+    + 'via?, viaLabel?, kept }` where `kept` is `original`, `this version` or `not yet known`. A resolve elsewhere never removes the copy here: this instance decides '
     + 'its own. Newest first; `kind` narrows the page to one kind. The answer carries `total`, `skip`, `limit`, `counts` (every kind, with '
     + '`counts.resolvedElsewhere` per kind), `kinds` (per kind, the compared `fields` and the `mainField`) and `maxForksPerRecord`: a record may hold '
     + `${MAX_FORKS_PER_RECORD} forks, and the next differing copy is dropped. A fork row is an unchosen version: it cannot be edited, only resolved or deleted.`,
