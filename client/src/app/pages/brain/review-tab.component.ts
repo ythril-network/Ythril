@@ -20,6 +20,8 @@ import { MergeRefusals } from './merge-refusals';
 import { PluralText } from '../../core/plural-text.service';
 import { ReviewForksPanelComponent } from './review-forks-panel.component';
 import { ReviewForksState } from './review-forks-state';
+import { ActivatedRoute } from '@angular/router';
+import { FORK_KINDS, type ForkKind } from '../../core/forks.types';
 import { ReviewCompletenessState } from './review-completeness-state';
 
 /** The family a failed contradiction resolve's `code` is said under (`resolvedOtherwise`, and the codes every family carries). */
@@ -929,7 +931,22 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   scorePct(s: number): number { return Math.round(Math.min(Math.max(s, 0), 1) * 100); }
   scoreVariant(s: number): 'high' | 'mid' | 'low' { return s >= 0.95 ? 'high' : s >= 0.85 ? 'mid' : 'low'; }
 
-  ngOnInit(): void { if (!this.isView) { this.load(); this.loadContradictions(); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); } }
+  /** The link a fork row's marker makes (`?section=forks&forkKind=<kind>`); absent where the tab is hosted without a router. */
+  private readonly route = inject(ActivatedRoute, { optional: true });
+
+  /**
+   * Open on what a link asked for: a fork row's marker in a Brain list links here with the section and the row's kind (`shared/fork-marker.component`). Read once,
+   * when the tab opens; a kind that is not one the server lists is ignored rather than trusted, so a hand-edited URL lands on the default section.
+   */
+  private openAsLinked(): void {
+    const qp = this.route?.snapshot.queryParamMap;
+    if (qp?.get('section') !== 'forks') return;
+    this.sub.set('forks');
+    const kind = qp.get('forkKind');
+    if (kind !== null && (FORK_KINDS as readonly string[]).includes(kind)) this.forksState.kind.set(kind as ForkKind);
+  }
+
+  ngOnInit(): void { if (!this.isView) { this.openAsLinked(); this.load(); this.loadContradictions(); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); } }
   /** Switching space in the Brain re-points this tab rather than leaving another space's pairs on screen. A view reads none of it. */
   ngOnChanges(ch: SimpleChanges): void {
     if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.loadContradictions(); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); }

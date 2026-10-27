@@ -756,7 +756,8 @@ export class BrainComponent implements OnInit, OnDestroy {
   private writeTabToUrl(tab: BrainTab): void {
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { tab },
+      // The Review link's own parameters (`section`, `forkKind`) belong to the arrival it made: a tab chosen by hand clears them, so a later visit opens the default section.
+      queryParams: { tab, section: null, forkKind: null },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });

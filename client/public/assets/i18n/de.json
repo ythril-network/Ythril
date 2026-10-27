@@ -2389,6 +2389,8 @@
   "review.sub.contradictions": "Widersprüche",
   "review.sub.suggestions": "Vorschläge",
   "brain.review.forks.tab": "Abspaltungen",
+  "brain.review.forks.marker": "Abspaltung in der Prüfung",
+  "brain.review.forks.markerOpen": "In der Prüfung öffnen, Abspaltungen",
   "brain.review.forks.intro": "Zwei Peers haben für denselben Datensatz in derselben Version unterschiedliche Fassungen geschrieben, deshalb wurden beide Kopien behalten. Wählen Sie bei jeder Abspaltung die Version, die dieser Space behält. Die andere wird gelöscht.",
   "brain.review.forks.count.one": "{{range}} von {{count}} Abspaltung",
   "brain.review.forks.count.few": "{{range}} von {{count}} Abspaltungen",

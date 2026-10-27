@@ -349,6 +349,8 @@ export interface TokenRecord {
 }
 
 export interface Fact {
+  /** The id of the record this row is an unresolved version of (Q-624): set on a fork row only, which Review's Forks section decides. */
+  forkOf?: string;
   _id: string;
   fact: string;
   type?: string;
@@ -378,6 +380,8 @@ export interface Fact {
 }
 
 export interface Entity {
+  /** The id of the record this row is an unresolved version of (Q-624): set on a fork row only, which Review's Forks section decides. */
+  forkOf?: string;
   _id: string;
   name: string;
   type?: string;
@@ -404,6 +408,8 @@ export interface Entity {
 }
 
 export interface Edge {
+  /** The id of the record this row is an unresolved version of (Q-624): set on a fork row only, which Review's Forks section decides. */
+  forkOf?: string;
   _id: string;
   from: string;
   fromName?: string;
@@ -438,6 +444,8 @@ export type ChronoType = 'event' | 'deadline' | 'plan' | 'prediction' | 'milesto
 export type ChronoStatus = 'upcoming' | 'active' | 'completed' | 'overdue' | 'cancelled';
 
 export interface ChronoEntry {
+  /** The id of the record this row is an unresolved version of (Q-624): set on a fork row only, which Review's Forks section decides. */
+  forkOf?: string;
   _id: string;
   spaceId: string;
   title: string;

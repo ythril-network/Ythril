@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, output, signal } from '@angular/core';
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
+import { ForkMarkerComponent } from '../../shared/fork-marker.component';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
@@ -43,7 +44,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
   selector: 'app-edges-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, RefusalAlertComponent, WriteWarningsComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -226,7 +227,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                   } @else {
                     <tr style="vertical-align:top;">
                       <td style="font-size:12px; white-space:nowrap;">{{ edge.fromName || edge.from }}</td>
-                      <td><span class="badge badge-blue">{{ edge.label }}</span> <app-superseded-badge [superseded]="edge.superseded" /></td>
+                      <td><span class="badge badge-blue">{{ edge.label }}</span> <app-superseded-badge [superseded]="edge.superseded" /> <app-fork-marker [forkOf]="edge.forkOf" kind="edge" /></td>
                       <td style="font-size:12px; white-space:nowrap;">{{ edge.toName || edge.to }}</td>
                       <td style="color:var(--text-muted);">{{ edge.weight ?? '—' }}</td>
                       <td style="font-size:11px; white-space:nowrap;">{{ edge.type || '—' }}</td>
