@@ -26,13 +26,16 @@ const B = 'q624countsb';
 const MARK = [{ by: 'other-instance', at: '2026-10-01T00:00:00.000Z', seq: 9, proven: true }];
 
 describe('the unresolved versions are counted', { skip }, () => {
-  let door; let counts; let registry; let line;
+  let door; let counts; let registry; let report; let say;
   before(async () => {
     door = await openPushDoor({ suite: 'q624_forkcounts', spaces: [{ id: A, label: 'A', folders: [], meta: {} }, { id: B, label: 'B', folders: [], meta: {} }] });
     await initForkFixtures();
     counts = await import('../../server/dist/brain/fork-counts.js').catch(() => ({}));
     registry = await import('../../server/dist/metrics/registry.js');
-    ({ divergenceLine: line } = await import('../../server/dist/sync/merkle-check.js').catch(() => ({})));
+    ({ reportDivergence: report } = await import('../../server/dist/sync/merkle-check.js').catch(() => ({})));
+    const { subscribeLogLines } = await import('../../server/dist/util/log.js');
+    /** The MERKLE_DIVERGENCE line `reportDivergence` says for `facts`, captured from the log. */
+    say = async (facts) => { const out = []; const off = subscribeLogLines(l => out.push(String(l))); try { await report(facts); } finally { off(); } return out.find(l => l.includes('MERKLE_DIVERGENCE')) ?? ''; };
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => { await door.wipe(A); await door.wipe(B); });
@@ -82,26 +85,26 @@ describe('the unresolved versions are counted', { skip }, () => {
   });
 
   it('the divergence line says how many versions await a decision, and is the old line when none does', async () => {
-    assert.equal(typeof line, 'function', 'sync/merkle-check.js exports no divergenceLine: the line is built inline in the mismatch branch');
+    assert.equal(typeof report, 'function', 'sync/merkle-check.js exports no reportDivergence: the line is not said by one function');
     const facts = { spaceId: A, peerLabel: 'P', peerInstanceId: 'p1', networkLabel: 'N', localRoot: 'aaa', localLeaves: 3, peerRoot: 'bbb', peerLeaves: 4 };
-    const none = await line(facts);
-    assert.match(none, /^MERKLE_DIVERGENCE: space 'q624countsa'/);
+    const none = await say(facts);
+    assert.match(none, /MERKLE_DIVERGENCE: space 'q624countsa'/);
     assert.doesNotMatch(none, /await a decision/, 'a space with no marked fork says forks await a decision');
     await seedKinds(A, { marked: true });
-    const some = await line(facts);
+    const some = await say(facts);
     const n = Object.keys(FORK_KINDS).length;
     assert.match(some, new RegExp(`${n} unresolved versions here were resolved on another instance and await a decision in Review`), some);
   });
 
   it('a store that cannot answer the count does not change the verdict: the line is the old one', async () => {
     const facts = { spaceId: 'no-such-space-for-the-count', peerLabel: 'P', peerInstanceId: 'p1', networkLabel: 'N', localRoot: 'aaa', localLeaves: 3, peerRoot: 'bbb', peerLeaves: 4 };
-    assert.doesNotMatch(await line(facts), /await a decision/);
+    assert.doesNotMatch(await say(facts), /await a decision/);
   });
 
   it('the count is read in the mismatch branch alone', () => {
     const src = stripComments(fs.readFileSync('server/src/sync/merkle-check.ts', 'utf8'));
     const matchBranch = src.slice(src.indexOf("log.info(`Merkle OK"));
-    assert.doesNotMatch(matchBranch, /forkCountsOf|divergenceLine/, 'the match branch reads the forks');
-    assert.match(src, /await divergenceLine\(/, 'the mismatch branch does not build its line through divergenceLine');
+    assert.doesNotMatch(matchBranch, /forkCountsOf|reportDivergence/, 'the match branch reads the forks');
+    assert.match(src, /await reportDivergence\(/, 'the mismatch branch does not build its line through reportDivergence');
   });
 });

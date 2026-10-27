@@ -105,6 +105,7 @@ const EXEMPT = {
   ...Object.fromEntries(['refuseForkRowsNamed', 'forkRowsUnder', 'remintForks', 'assertForksFitTogether', 'listForks', 'resolveFork', 'resolveOrphan'].map(f => [
     `server/src/brain/forks.ts:${f}`, 'its collection is a FORKING_FAMILIES member (facts, entities, edges, chrono) and never the files: a file does not fork',
   ])),
+  'server/src/brain/fork-counts.ts:forkCountsOf': 'counts the fork rows of the forking families (facts, entities, edges, chrono), by a computed collection that is never the files: a file does not fork',
   'server/src/sync/tombstone-apply.ts:cascadeToForks': 'an applied tombstone\'s fork cascade (Q-624 §7): its collection is a FORKING_FAMILIES member, never the files',
   'server/src/sync/positions-rollback.ts:rollBackForks': 'its collections are the forking families and the edges indexes, never the files: a file does not fork',
   'server/src/brain/write-at-read-version.ts:writeAtReadVersion': 'reads the stored copy\'s `forkOf` to refuse an edit of a fork row; a flagged file row is no fork, and the edit\'s own write decides what a flagged row means',
