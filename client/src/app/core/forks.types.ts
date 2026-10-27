@@ -59,6 +59,8 @@ export interface ForkResolvedElsewhere {
 
 export interface ForkRow {
   kind: ForkKind;
+  /** The space the fork lives in; through a personal view, the member it was read from. */
+  space: string;
   forkId: string;
   parentId: string;
   fork: ForkVersion;
