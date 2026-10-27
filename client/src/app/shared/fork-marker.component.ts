@@ -34,7 +34,8 @@ import type { ForkKind } from '../core/forks.types';
       </a>
     }
   `,
-  styles: [`.fork-marker { text-decoration: none; }`],
+  // `nowrap`: the Edges list's label column is narrow and the pill wrapped to two lines in it (b81 drive). No width is set, so a list with no marker is not widened.
+  styles: [`.fork-marker { text-decoration: none; white-space: nowrap; }`],
 })
 export class ForkMarkerComponent {
   /** The row's `forkOf`: the id of the record it is a version of. Anything but a non-empty string means the row is no fork. */
