@@ -40,7 +40,7 @@ import { ToastService } from '../../core/toast.service';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 
 import { ActivatedRoute, Router } from '@angular/router';
-import { BrainTab, CollectionTab, BRAIN_TABS, RECORD_TABS, type RecordTab } from './brain-tabs';
+import { BrainTab, CollectionTab, BRAIN_TABS, RECORD_TABS, RECORD_TAB_FACES } from './brain-tabs';
 import { PluralPipe } from '../../core/plural.pipe';
 
 interface SpaceView {
@@ -431,28 +431,8 @@ export class BrainComponent implements OnInit, OnDestroy {
   private toast = inject(ToastService);
 
   // File Meta merged into the Files tab (rendered separately, after these, in the same group).
-  /**
-   * The record-collection tabs.
-   *
-   * `label` is an i18n KEY now, not a literal. These four were the only tabs in the strip rendering a
-   * hard-coded English string — the translations existed the whole time and were simply never used, so
-   * the strip read half-German in a German UI and nothing flagged it.
-   *
-   * `icon` likewise: Overview, Query, Graph, Review and Files each carried one and these four did not,
-   * leaving a strip where some tabs have an icon and some do not. The icons match the Overview tiles
-   * that link here, because the tiles and the tabs are the same five things.
-   */
-  /** What the strip shows for each record tab. The ORDER is not here: it is `RECORD_TABS`, which Review's Forks kind switch reads as well. */
-  private readonly recordTabs: Record<RecordTab, { label: string; icon: string; statsKey: keyof SpaceStats }> = {
-    entities: { label: 'brain.tab.entities', icon: 'stack', statsKey: 'entities' },
-    // `link` and not `graph`: the Graph tab already owns that glyph, and two different tabs wearing the
-    // same icon in one strip is worse than a slightly less literal one.
-    edges: { label: 'brain.tab.edges', icon: 'link', statsKey: 'edges' },
-    facts: { label: 'brain.tab.facts', icon: 'brain', statsKey: 'facts' },
-    chrono: { label: 'brain.tab.chrono', icon: 'timer', statsKey: 'chrono' },
-  };
-
-  collectionTabs: { key: BrainTab; label: string; icon: string; statsKey?: keyof SpaceStats }[] = RECORD_TABS.map(key => ({ key, ...this.recordTabs[key] }));
+  /** The record-collection tabs: their order is `RECORD_TABS`, and what each shows is `RECORD_TAB_FACES` (both in `brain-tabs.ts`). */
+  collectionTabs: { key: BrainTab; label: string; icon: string; statsKey?: keyof SpaceStats }[] = RECORD_TABS.map(key => ({ key, ...RECORD_TAB_FACES[key] }));
 
   readonly pageSize = 20;
 
