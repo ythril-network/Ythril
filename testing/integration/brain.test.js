@@ -693,7 +693,6 @@ describe('Brain — bulk memory wipe', () => {
   // the suite in parallel (Q4). Namespaced per run and torn down in `after`.
   const WIPE_SPACE = `wipe-${RUN}`;
   let seededIds;
-  let seqBefore;
   /*
    * ITS OWN TOKEN, and the reason is a real rail rather than a test convenience.
    *
@@ -739,13 +738,6 @@ describe('Brain — bulk memory wipe', () => {
       });
       assert.equal(r.status, 200, `Seed wipe-${i}: ${JSON.stringify(r.body)}`);
     }
-
-    // Create one more memory via brain API to capture the current seq counter
-    const marker = await post(INSTANCES.a, tokenA, `/api/brain/spaces/${WIPE_SPACE}/facts`, {
-      fact: 'Seq marker for wipe test', tags: ['wipe-marker'],
-    });
-    assert.equal(marker.status, 201);
-    seqBefore = marker.body.seq;
 
     // Verify they exist
     const list = await readCollection(INSTANCES.a, tokenA, WIPE_SPACE, 'facts', { limit: 500 });
@@ -799,9 +791,18 @@ describe('Brain — bulk memory wipe', () => {
      * Asserted rather than dropped, because "no tombstones" is indistinguishable from "the tombstone code
      * broke" unless somebody wrote down which one is intended.
      */
-    const r = await get(INSTANCES.a, tokenA, `/api/sync/tombstones?spaceId=${WIPE_SPACE}&sinceSeq=${seqBefore}&limit=5000`);
-    assert.equal(r.status, 200, JSON.stringify(r.body));
-    const written = (r.body.facts ?? []).filter(t => seededIds.includes(t._id));
+    // Bundle-81 (design rev 8, the wire contract): the tombstone door pages by position (`afterPos`, then the `p1.` cursor it hands back) and answers
+    // `{ items, ... }` of every type; a `sinceSeq` is a 400. Read from position 0: a seeded id is the subject, whatever else the space holds.
+    const written = [];
+    let start = 'afterPos=0';
+    for (let page = 0; start; page++) {
+      assert.ok(page < 100, 'the tombstone door handed back a next page 100 times');
+      const r = await get(INSTANCES.a, tokenA, `/api/sync/tombstones?spaceId=${WIPE_SPACE}&${start}&limit=500`);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.ok(Array.isArray(r.body?.items), `the tombstone door answered no items array: ${JSON.stringify(r.body).slice(0, 240)}`);
+      written.push(...r.body.items.filter(t => seededIds.includes(t._id)));
+      start = r.body.nextCursor ? `cursor=${encodeURIComponent(r.body.nextCursor)}` : null;
+    }
     assert.deepEqual(written, [],
       `the wipe wrote ${written.length} tombstone(s). If that is deliberate, the networked-space vote is `
       + 'now redundant and should go with it — the two are alternatives, not layers.');

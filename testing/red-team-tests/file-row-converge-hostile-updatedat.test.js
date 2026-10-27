@@ -58,10 +58,19 @@ const fileDoc = (id, extra = {}) => ({
 });
 
 /** The stored row's `updatedAt` as the sync read serves it, or undefined when it is not served. */
+// Bundle-81 (design rev 8, the wire contract and its test table): the sync read pages by POSITION, `afterPos` and then the `p1.` cursor a page hands back;
+// a `sinceSeq` is a 400. Read from position 0, page after page, so a row is found wherever the space's other rows put it.
 async function storedUpdatedAt(id) {
-  const r = await get(INSTANCES.a, token, `/api/sync/filemeta?spaceId=${SPACE}&sinceSeq=${SEQ - 1}&limit=500&full=true`);
-  assert.equal(r.status, 200, `the sync read of file rows answered ${r.status} ${JSON.stringify(r.body)?.slice(0, 200)}`);
-  return (r.body?.items ?? []).find(d => d._id === id)?.updatedAt;
+  let start = 'afterPos=0';
+  for (let page = 0; start; page++) {
+    assert.ok(page < 100, 'the sync read of file rows handed back a next page 100 times');
+    const r = await get(INSTANCES.a, token, `/api/sync/filemeta?spaceId=${SPACE}&${start}&limit=500&full=true`);
+    assert.equal(r.status, 200, `the sync read of file rows answered ${r.status} ${JSON.stringify(r.body)?.slice(0, 200)}`);
+    const row = (r.body?.items ?? []).find(d => d._id === id);
+    if (row) return row.updatedAt;
+    start = r.body?.nextCursor ? `cursor=${encodeURIComponent(r.body.nextCursor)}` : null;
+  }
+  return undefined;
 }
 
 async function seed(id) {

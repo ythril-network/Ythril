@@ -157,11 +157,13 @@ describe('Entity/edge sync — cross-instance (A→B)', () => {
 
     // Test the tombstone propagation via the sync tombstones endpoint:
     // 1. Check tombstones on A before any sync
-    const tombBefore = await reqJson(INSTANCES.b, tokenB, `/api/sync/tombstones?spaceId=${SPACE}`);
+    // Bundle-81 (design rev 8, the wire contract): one position-paged stream of every type, `{ items, nextCursor, through, head, positions: 1 }`, each
+    // item carrying its `type`; the grouped-by-type body is gone.
+    const tombBefore = await reqJson(INSTANCES.b, tokenB, `/api/sync/tombstones?spaceId=${SPACE}&afterPos=0`);
     assert.equal(tombBefore.status, 200, `Get tombstones on B: ${JSON.stringify(tombBefore.body)}`);
-    assert.ok(Array.isArray(tombBefore.body?.entities), 'tombstones.entities must be an array');
-    assert.ok(Array.isArray(tombBefore.body?.edges), 'tombstones.edges must be an array');
-    assert.ok(Array.isArray(tombBefore.body?.facts), 'tombstones.facts must be an array');
+    assert.ok(Array.isArray(tombBefore.body?.items), 'the tombstone page must carry an items array');
+    assert.equal(tombBefore.body?.positions, 1, 'the tombstone page must say it is position-paged (positions: 1)');
+    assert.ok(tombBefore.body.items.every(t => typeof t.type === 'string'), 'every served tombstone must carry its type');
   });
 
   it('GET /api/sync/entities requires spaceId', async () => {
@@ -250,7 +252,8 @@ describe('POST /api/sync/tombstones — apply incoming tombstones', () => {
       tombstones: [{ _id: 'x' }],  // missing required fields
     });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.deepEqual(r.body, { applied: 0, refused: 1 });
+    // Every 2xx push answer of a 6.0 door carries `positions: 1` (bundle-81, `sync/wire-answer.ts`), ADDED to the body this case pins.
+    assert.deepEqual(r.body, { applied: 0, refused: 1, positions: 1 });
     const u = await post(INSTANCES.a, token, `/api/sync/tombstones?spaceId=${SPACE}`, {
       tombstones: [{ _id: 'y', type: 'a-newer-type', spaceId: SPACE, deletedAt: new Date().toISOString(), instanceId: 'i', seq: 3 }],
     });
