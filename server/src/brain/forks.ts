@@ -55,6 +55,9 @@ import { BODY_FIELDS_OF, authoredContentHash, bodiesDiffer } from '../sync/autho
 import { REDACTED_CHRONO_FIELDS } from './redacted-chrono-fields.js';
 import { RESOLVED_ELSEWHERE, FUNCTIONAL_GUARD, rekeyedRow } from '../sync/local-only-fields.js';
 import type { ResolvedElsewhereEntry } from '../sync/resolved-elsewhere.js';
+import { instanceLabelOf } from '../sync/instance-label.js';
+import { withEndpointNames } from './edge-endpoint-names.js';
+import { getConfig } from '../config/loader.js';
 import { TOMBSTONE_TYPE_OF, type TombstoneType } from '../config/types-knowledge.js';
 import { MAX_SYNC_SEQ } from '../util/seq-ceiling.js';
 import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
@@ -443,9 +446,13 @@ type Version = Record<string, unknown> & { _id: string; seq?: number };
 /** One entry of a row's `resolvedElsewhere`: the mark as stored, and which side that instance kept, derived when the list is read. */
 export interface ResolvedElsewhereShown {
   by: string;
+  /** The label this instance knows `by` under; absent when it knows none (the reader shows the short id then). */
+  byLabel?: string;
   at: string;
   proven: boolean;
   via?: string;
+  /** The same for `via`. */
+  viaLabel?: string;
   kept: 'original' | 'this version' | 'not yet known';
 }
 
@@ -461,6 +468,9 @@ export interface ForkRow {
   linkCount: number;
   siblings: number;
   resolvedElsewhere: ResolvedElsewhereShown[];
+  /** An edge fork's endpoint names, the ones the Edges list shows (`withEndpointNames`); absent for another kind and for an end that is gone. */
+  fromName?: string;
+  toName?: string;
 }
 
 export interface ForkPage {
@@ -544,6 +554,7 @@ export async function listForks(spaceId: string, opts: { kind?: unknown; skip?: 
   const page = agg?.page ?? [];
   const counted = new Map((agg?.counts ?? []).map(c => [c._id, c] as const));
 
+  const cfg = getConfig();
   // The page's bodies, parents, references and sibling counts: one read of each per kind.
   const forks: ForkRow[] = [];
   const rowsByKind = new Map<ForkKind, Map<string, ForkRow>>();
@@ -570,10 +581,28 @@ export async function listForks(spaceId: string, opts: { kind?: unknown; skip?: 
       rows.set(f._id, {
         kind, forkId: f._id, parentId, fork: fork as Version, parent, orphaned: parent === null,
         ...refs.get(f._id)!, siblings: siblingsOf.get(parentId) ?? 1,
-        resolvedElsewhere: ((marks as ResolvedElsewhereEntry[] | undefined) ?? []).map(m => ({
-          by: m.by, at: m.at, proven: m.proven, ...(m.via !== undefined ? { via: m.via } : {}), kept: keptBy(kind, m, fork as Version, parent),
-        })),
+        resolvedElsewhere: ((marks as ResolvedElsewhereEntry[] | undefined) ?? []).map(m => {
+          const stamped = [(fork as Version)['author'], parent?.['author']] as { instanceId?: unknown; instanceLabel?: unknown }[];
+          const byLabel = instanceLabelOf(cfg, m.by, stamped);
+          const viaLabel = m.via === undefined ? undefined : instanceLabelOf(cfg, m.via, stamped);
+          return {
+            by: m.by, ...(byLabel !== undefined ? { byLabel } : {}), at: m.at, proven: m.proven,
+            ...(m.via !== undefined ? { via: m.via } : {}), ...(viaLabel !== undefined ? { viaLabel } : {}),
+            kept: keptBy(kind, m, fork as Version, parent),
+          };
+        }),
       });
+    }
+    if (kind === 'edge') {
+      const named = await withEndpointNames(
+        [...rows.values()].map(r => ({ id: r.forkId, from: String(r.fork['from']), to: String(r.fork['to']), fromKind: r.fork['fromKind'] as never, toKind: r.fork['toKind'] as never })),
+        async read => await read(spaceId),
+      );
+      for (const n of named) {
+        const r = rows.get(n.id)!;
+        if (n.fromName !== undefined) r.fromName = n.fromName;
+        if (n.toName !== undefined) r.toName = n.toName;
+      }
     }
     rowsByKind.set(kind, rows);
   }

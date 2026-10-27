@@ -407,3 +407,51 @@ describe('a row resolved on another instance (section 9a)', () => {
     expect((el.querySelector('[role="alertdialog"], [role="dialog"]') as HTMLElement).textContent).not.toMatch(/every instance/i);
   });
 });
+
+/**
+ * What a row names, in words and not ids (bundle-81 drive finds 1 and 2).
+ *
+ * The drive read "Resolved on bfec149d" beside "Written on Peer B", and an edge row that gave the raw ids of both ends where the Edges list gives names. The server sends the
+ * label it knows an instance under (`byLabel`, `viaLabel`) and an edge fork's `fromName` and `toName`; the row shows them, and the short id or the raw id only where none came.
+ */
+describe('a row names instances and edge ends the way the rest of the app does', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+  afterEach(() => document.body.replaceChildren());
+
+  const at = '2026-10-21T09:00:00.000Z';
+  const ID = 'bfec149d-2090-426a-a809-95718b79df43';
+  const marked = (entries: Row[]) => row('fact', 'n1', {}, {}, { resolvedElsewhere: entries });
+
+  it('says the member\'s label where the instance knows it, in the line, in the unproven line and in the override warning', () => {
+    const { el, click, button } = make([marked([
+      { by: ID, byLabel: 'Peer B', at, proven: true, kept: 'original' },
+      { by: '5d8621ae-7be7-4c30-b3f4-baeeea403c70', byLabel: 'Peer A', via: ID, viaLabel: 'Peer B', at, proven: false, kept: 'original' },
+    ])]);
+    const text = el.querySelector('article')!.textContent ?? '';
+    expect(text).toMatch(/Resolved on Peer B, kept the original/);
+    expect(text).toMatch(/reported by Peer B as resolved on Peer A/i);
+    expect(text).not.toMatch(/bfec149d|5d8621ae/);
+    click(button(/keep this version/i));
+    expect((el.querySelector('[role="alertdialog"], [role="dialog"]') as HTMLElement).textContent).toMatch(/Peer B and Peer A/);
+    expect((el.querySelector('[role="alertdialog"], [role="dialog"]') as HTMLElement).textContent).not.toMatch(/bfec149d|5d8621ae/);
+  });
+
+  it('falls back to the first eight characters of the id for an instance the server knows no label for', () => {
+    const { el } = make([marked([{ by: ID, at, proven: true, kept: 'this version' }])]);
+    expect(el.querySelector('article')!.textContent).toMatch(/Resolved on bfec149d, kept this version/);
+  });
+
+  it('shows an edge fork\'s endpoint names, and the raw id only for an end that is gone', () => {
+    const edge = row('edge', 'g1', { from: 'ea-id', to: 'eb-id', label: 'knows' }, { from: 'ea-id', to: 'eb-id', label: 'knows' }, { fromName: 'Alpha', toName: 'Beta' });
+    const { el } = make([edge]);
+    const ends = (el.querySelector('.l3-ends') as HTMLElement).textContent!;
+    expect(ends).toContain('Alpha');
+    expect(ends).toContain('Beta');
+    expect(ends).not.toMatch(/ea-id|eb-id/);
+    const gone = row('edge', 'g2', { from: 'ea-id', to: 'gone-id', label: 'knows' }, {}, { fromName: 'Alpha' });
+    const second = make([gone]);
+    const text = (second.el.querySelector('.l3-ends') as HTMLElement).textContent!;
+    expect(text).toContain('Alpha');
+    expect(text).toContain('gone-id');
+  });
+});

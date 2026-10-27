@@ -610,7 +610,8 @@ that many drops the next differing copy (logged and counted), so resolve one bef
 | `fork`, `parent` | each version as a reader compares them: `_id`, the kind's body fields, `author`, `createdAt`, `updatedAt`, `seq`. `parent` is `null` and `orphaned` is `true` when the parent is gone |
 | `edgeCount`, `linkCount` | the edges (either end) and links (either side) that point at the fork: a resolve moves them to the parent (`0` for an edge) |
 | `siblings` | how many forks the parent holds, this one included |
-| `resolvedElsewhere` | the other instances that resolved THEIR copy, each `{ by, at, proven, via?, kept }`; `kept` is `original`, `this version` or `not yet known`. Empty when none |
+| `resolvedElsewhere` | the other instances that resolved THEIR copy, each `{ by, byLabel?, at, proven, via?, viaLabel?, kept }`; `kept` is `original`, `this version` or `not yet known`. `byLabel` and `viaLabel` are the names this instance knows those instances under (its own label, a member of one of its networks, or the label stamped on one of the row's versions), absent for an instance it does not know. Empty when none |
+| `fromName`, `toName` | an edge fork's endpoint names, as the edges list gives them (`fromName`/`toName`); absent for another kind and for an end that is gone |
 
 ```http
 POST /api/brain/spaces/:spaceId/forks/:forkId/resolve

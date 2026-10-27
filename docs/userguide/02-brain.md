@@ -769,7 +769,7 @@ under **Settings → Media Processing**; until the scanner has run, the tab expl
 *differently* while both held the same version of them. Ythril does not pick one silently: it keeps both, the second as a **fork**
 beside the first, and this tab is where you choose. Each card shows the fork beside the record it forks with the differing words marked
 in place (words only in the fork, words only in the other version; each mark also says so in words, so colour is never the only signal),
-every other differing field on its own line, who wrote each version and when, and how many edges and links point at the fork.
+every other differing field on its own line, who wrote each version and when, and how many edges and links point at the fork. An edge shows the names of its two ends, as the Edges list does (an end that is gone shows its id). A card that another instance already resolved says which one by the name this instance knows it under (the same name the author line uses), and by the first eight characters of its id only when it knows none.
 **Show both versions in full** opens both texts whole. **Keep this version** writes the fork's whole content onto the record (a space whose schema is strict refuses a version that breaks it, names the
 property, and writes nothing); **Keep the
 other version** leaves the record as it is. Both ask for a confirmation that names what is deleted, and both do the same three things:

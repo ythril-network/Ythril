@@ -44,11 +44,15 @@ export interface ForkVersion {
 export interface ForkResolvedElsewhere {
   /** The instance that issued the decision. */
   by: string;
+  /** The label this instance knows `by` under, when it knows one: shown in place of the short id. */
+  byLabel?: string;
   at?: string;
   /** False when the delivering peer did not prove the issuer: the entry is a report, not a fact. */
   proven: boolean;
   /** The delivering peer, when it is not the issuer. */
   via?: string;
+  /** The label this instance knows `via` under, when it knows one. */
+  viaLabel?: string;
   /** Which side that instance kept, read by the server when the list is read; never stored. */
   kept: 'original' | 'this version' | 'not yet known';
 }
@@ -68,6 +72,9 @@ export interface ForkRow {
   siblings: number;
   /** The other instances that decided this fork already; empty when none did. */
   resolvedElsewhere: ForkResolvedElsewhere[];
+  /** An edge fork's endpoint names, as the Edges list shows them; absent for another kind and for an end that is gone. */
+  fromName?: string;
+  toName?: string;
 }
 
 /** Which version a resolve keeps: the fork's body on the parent id, or the parent as it is. Either way the fork is deleted. */
