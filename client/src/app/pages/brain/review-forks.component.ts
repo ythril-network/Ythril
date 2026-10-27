@@ -364,6 +364,9 @@ export class ReviewForksComponent {
   /** The name an instance goes by in a sentence: its label, or the start of its id when all it has is an id. */
   private instance(name: string): string { return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(name) ? name.slice(0, 8) : name; }
 
+  /** The instance that decided a fork elsewhere, by the label the server knows it under (the one the author line shows), else by its short id. */
+  private resolver(e: ForkResolvedElsewhere): string { return e.byLabel || this.instance(e.by); }
+
   private written(v: ForkVersion): string {
     const at = v.updatedAt ?? v.createdAt;
     const when = at ? this.dates.relative(at) : '';
@@ -377,9 +380,9 @@ export class ReviewForksComponent {
 
   /** One line per instance that decided this fork already: who, and which side they kept; an unproven entry is worded as reported. */
   private elsewhereLine(e: ForkResolvedElsewhere): string {
-    const by = this.instance(e.by);
+    const by = this.resolver(e);
     if (!e.proven) {
-      return e.via ? this.tr('brain.review.forks.resolvedElsewhere.reported', { via: this.instance(e.via), by })
+      return e.via ? this.tr('brain.review.forks.resolvedElsewhere.reported', { via: e.viaLabel || this.instance(e.via), by })
         : this.tr('brain.review.forks.resolvedElsewhere.reportedNoVia', { by });
     }
     return this.tr(e.kept === 'original' ? 'brain.review.forks.resolvedElsewhere.keptOriginal'
@@ -423,7 +426,7 @@ export class ReviewForksComponent {
       label: `${this.tr('brain.review.forks.forkOf', { id: this.short(row.forkId) })}, ${this.tr(`brain.review.forks.kindOne.${row.kind}`)}`,
       thisWho: this.written(row.fork),
       otherWho: orphan ? '' : this.written(row.parent!),
-      ends: row.kind === 'edge' ? { from: this.text(row.fork['from']), label: this.text(row.fork['label']), to: this.text(row.fork['to']) } : null,
+      ends: row.kind === 'edge' ? { from: row.fromName || this.text(row.fork['from']), label: this.text(row.fork['label']), to: row.toName || this.text(row.fork['to']) } : null,
       main: comparison?.main ? textSegments(this.text(comparison.main.a), this.text(comparison.main.b)) : [{ kind: 'same', text: own }],
       fullThis: own,
       fullOther: orphan ? '' : this.text(row.parent![mainField]),
@@ -500,6 +503,6 @@ export class ReviewForksComponent {
   protected confirmElsewhere(p: { row: ForkRow; keep: ForkKeep }): string {
     const entries = p.row.resolvedElsewhere ?? [];
     if (p.keep !== 'fork' || entries.length === 0) return '';
-    return this.tr('brain.review.forks.resolvedElsewhere.overrides', { instances: formatList(entries.map(e => this.instance(e.by)), this.active.language()) });
+    return this.tr('brain.review.forks.resolvedElsewhere.overrides', { instances: formatList(entries.map(e => this.resolver(e)), this.active.language()) });
   }
 }

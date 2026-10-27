@@ -388,7 +388,37 @@ describe('Review lists and resolves forks, on both doors', { skip }, () => {
         assert.ok(row, `${n}: the marked fork is not listed`);
         assert.deepEqual(row.resolvedElsewhere?.map(m => [m.by, m.proven, m.kept]), [['peer-a', true, 'original']], `${n}: ${JSON.stringify(row.resolvedElsewhere)}`);
       }
+      // The resolver is named by the label this instance knows it under (here: the stamp on the parent it wrote), the short id being the reader's fallback only.
+      for (const [n, r] of Object.entries(answers)) {
+        const row = fx.rowsOf(r.body).find(x => fx.forkIdOfRow(x) === fork._id);
+        assert.equal(row.resolvedElsewhere[0].byLabel, 'A', `${n}: the entry names peer-a by id only: ${JSON.stringify(row.resolvedElsewhere)}`);
+      }
+      await door.coll(S, 'facts').updateOne({ _id: fork._id }, { $set: { _resolvedElsewhere: [{ by: 'peer-unknown', at: '2026-10-25T00:00:00.000Z', seq: 9, proven: true }] } });
+      for (const [n, r] of Object.entries(await both((m) => rd.list[m]({ kind: 'fact' })))) {
+        const row = fx.rowsOf(r.body).find(x => fx.forkIdOfRow(x) === fork._id);
+        assert.equal(row.resolvedElsewhere[0].byLabel, undefined, `${n}: an instance nobody here knows was given a label: ${JSON.stringify(row.resolvedElsewhere)}`);
+      }
       assert.equal(typeof forkMods.parseResolveParams, 'function', 'brain/forks.js exports no parseResolveParams (the one builder of the 400 sentence, design §9)');
+    });
+  });
+
+  describe('an edge fork names its endpoints (Q-624, b81 drive)', () => {
+    it('the list gives the endpoint names the Edges list shows, and nothing for an end that is gone, on both doors', async () => {
+      const fx = await import('./_fork-kinds.mjs');
+      await fx.initForkFixtures();
+      const rd = await fx.reviewDoors(door, S);
+      await door.wipe(S);
+      await door.coll(S, 'entities').insertMany([build.entity(S, 'ea', 2, { name: 'Alice' }), build.entity(S, 'eb', 2, { name: 'Bob' })]);
+      const k = fx.FORK_KINDS.edge;
+      const parent = 'p-edge';
+      await door.coll(S, 'edges').insertOne(k.row(S, parent, 5, { pos: 5, posAtSeq: 5, from: 'ea', to: 'eb' }));
+      const fork = await fx.seedFork(door, S, 'edge', parent, 5, { ...k.alt, from: 'ea', to: 'gone-entity' });
+      for (const [n, r] of Object.entries({ REST: await rd.list.REST({ kind: 'edge' }), MCP: await rd.list.MCP({ kind: 'edge' }) })) {
+        const row = fx.rowsOf(r.body).find(x => fx.forkIdOfRow(x) === fork._id);
+        assert.ok(row, `${n}: the edge fork is not listed`);
+        assert.equal(row.fromName, 'Alice', `${n}: the fork's from end is shown by id: ${JSON.stringify(row).slice(0, 300)}`);
+        assert.equal(row.toName, undefined, `${n}: an end that is gone was given a name`);
+      }
     });
   });
 

@@ -52,7 +52,7 @@ export const list_forksTool: ToolHandler = {
       : '\n' + page.forks.map(r => {
         const main = page.kinds[r.kind].mainField;
         const against = r.parent ? `"${snippet(r.parent[main])}"` : 'a deleted record';
-        const elsewhere = r.resolvedElsewhere.length > 0 ? `; resolved elsewhere by ${r.resolvedElsewhere.map(m => `${m.by} (${m.kept})`).join(', ')}` : '';
+        const elsewhere = r.resolvedElsewhere.length > 0 ? `; resolved elsewhere by ${r.resolvedElsewhere.map(m => `${m.byLabel ?? m.by} (${m.kept})`).join(', ')}` : '';
         return `- ${r.kind} ${r.forkId} forks ${r.parentId}: "${snippet(r.fork[main])}" against ${against}`
           + ` (edges pointing at the fork: ${r.edgeCount}, links: ${r.linkCount}; forks of the record: ${r.siblings}${elsewhere})`;
       }).join('\n');
