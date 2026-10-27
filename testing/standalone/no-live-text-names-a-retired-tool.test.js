@@ -57,7 +57,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
-import { previousMajorTag, toolNamesAt } from './_previous-major-tools.mjs';
+import { toolNamesOfEarlierMajors } from './_previous-major-tools.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { mountedRoutes } from './_routes.mjs';
 
@@ -76,8 +76,9 @@ function ambiguous() {
   return out;
 }
 
-const TAG = previousMajorTag();
-const WAS = toolNamesAt(TAG);
+const WAS_AT = toolNamesOfEarlierMajors();
+const WAS = new Set(WAS_AT.keys());
+const TAG = `the earlier majors (${[...new Set(WAS_AT.values())].join(', ')})`;
 const AMBIGUOUS = ambiguous();
 const RETIRED = [...WAS].filter(n => !live.has(n) && !AMBIGUOUS.has(n)).sort();
 
@@ -201,7 +202,7 @@ describe('a schema description names a live tool, even when the name is also a p
         const hit = new RegExp('`' + name + '`');
         lines.forEach((line, i) => {
           if (!hit.test(line) || OBITUARY.test(line) || excusedInDescription(file, name, line)) return;
-          offenders.push(`${file}:${i + 1} names \`${name}\`, retired since ${TAG}`);
+          offenders.push(`${file}:${i + 1} names \`${name}\`, retired since ${WAS_AT.get(name)}`);
         });
       }
     }
@@ -222,7 +223,7 @@ describe('no live text names a retired tool', () => {
         const hit = new RegExp('`' + name + '`');
         lines.forEach((line, i) => {
           if (!hit.test(line) || OBITUARY.test(line)) return;
-          offenders.push(`${file}:${i + 1} names \`${name}\`, retired since ${TAG}`);
+          offenders.push(`${file}:${i + 1} names \`${name}\`, retired since ${WAS_AT.get(name)}`);
         });
       }
     }
