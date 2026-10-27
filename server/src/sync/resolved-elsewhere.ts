@@ -25,7 +25,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { RESOLVED_ELSEWHERE } from './local-only-fields.js';
 import { forksResolvedElsewhereTotal } from '../metrics/registry.js';
-import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite } from '../spaces/space-write-gate.js';
 
 /** The most entries one fork's mark holds: past it, the lowest versions are dropped. A peer that names issuers it is not can add at most this many hints. */
 export const MAX_RESOLVED_ELSEWHERE = 16;
@@ -100,14 +100,13 @@ export interface ResolvedElsewhereMark {
  */
 export async function writeResolvedElsewhere(spaceId: string, marks: readonly ResolvedElsewhereMark[]): Promise<void> {
   if (marks.length === 0) return;
-  // Its callers write inside an admitted unit; the gate is asked here too, so a mark never lands in a space a standing act refuses.
-  assertSpaceTakesWrites(spaceId);
   const byCollection = new Map<string, ResolvedElsewhereMark[]>();
   for (const m of marks) {
     if (!byCollection.has(m.collection)) byCollection.set(m.collection, []);
     byCollection.get(m.collection)!.push(m);
   }
-  for (const [collection, list] of byCollection) {
+  // One admitted and counted unit of its own (its callers' units hold it too), so a mark never lands in a space a standing act refuses, nor after its drain.
+  await admitSpaceWrite(spaceId, undefined, async () => { for (const [collection, list] of byCollection) {
     const coll = col<{ _id: string }>(spaceCollection(spaceId, collection as never));
     for (const chunk of inChunks(list, ROWS_PER_BULK_COMMAND)) {
       const res = await coll.bulkWrite(asBulk<{ _id: string }>(chunk.map(m => ({
@@ -116,5 +115,5 @@ export async function writeResolvedElsewhere(spaceId: string, marks: readonly Re
       const kind = chunk[0]!.kind;
       if ((res.matchedCount ?? 0) > 0) forksResolvedElsewhereTotal.labels({ kind }).inc(res.matchedCount);
     }
-  }
+  } });
 }

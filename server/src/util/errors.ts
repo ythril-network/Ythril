@@ -119,6 +119,9 @@ export class EdgeIdentityBuilding extends Error {
   }
 }
 
+/** The codes the two fork refusals below answer with, in this order: the one list a door, a tool text and its gate read them from. */
+export const FORK_REFUSAL_CODES = Object.freeze(['fork_row_read_only', 'fork_cap'] as const);
+
 /**
  * An ordinary edit (an update, a relabel, a save by id, a merge) named a FORK row: an unchosen version of another record (Q-624, design rev 4 §8). A fork
  * changes only by resolve, delete, arrival or re-mint, so every other write is refused BEFORE it writes, with `409 fork_row_read_only`. Thrown by the one
@@ -127,7 +130,7 @@ export class EdgeIdentityBuilding extends Error {
  */
 export class ForkRowReadOnly extends Error {
   override readonly name = 'ForkRowReadOnly';
-  readonly code = 'fork_row_read_only' as const;
+  readonly code = FORK_REFUSAL_CODES[0];
   readonly status = 409 as const;
   constructor(readonly kindWord: string, readonly id: string, readonly forkOf: string) {
     super(`${kindWord} '${id}' is an unresolved version of '${forkOf}'. Resolve it in Review (resolve_fork) or delete it; it cannot be edited (fork_row_read_only).`);
@@ -140,7 +143,7 @@ export class ForkRowReadOnly extends Error {
  */
 export class ForkCapRefusal extends Error {
   override readonly name = 'ForkCapRefusal';
-  readonly code = 'fork_cap' as const;
+  readonly code = FORK_REFUSAL_CODES[1];
   readonly status = 409 as const;
   constructor(readonly count: number, readonly cap: number) {
     super(`the two records hold ${count} unresolved versions together, more than ${cap}; resolve some in Review first`);

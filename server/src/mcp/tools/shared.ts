@@ -91,7 +91,7 @@ export const FORKS_GO_WITH_THEIR_SUBJECT =
 /** What an ordinary write does with a FORK row (Q-624 §8): the one sentence the update tools, `save_bulk` and `graph_merge` carry. */
 export const FORK_ROWS_ARE_READ_ONLY =
   'A FORK ROW IS READ-ONLY: a record whose `forkOf` is set is an unresolved version of another record, and an update, a relabel, a save by its id '
-  + 'or a merge naming it is refused with 409 `fork_row_read_only`. Settle it with `resolve_fork`, or delete it by its id. ';
+  + 'or a merge naming it is refused with 409 (code fork_row_read_only). Settle it with `resolve_fork`, or delete it by its id. ';
 
 /** What a read returns of FORK rows (Q-624 §6, §15): the one sentence `filter`, `query` and `recall` carry. */
 export const FORK_ROWS_IN_READS =
