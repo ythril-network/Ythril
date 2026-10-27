@@ -132,6 +132,41 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
     assert.deepEqual(refused, [], 'read doors that answer an own view as an unknown space');
   });
 
+  // Accepting a view is half the rule; READING its members is the other. A door that accepts the view id and then reads it as a space
+  // answers an empty page with no error (the fork list did, bundle-81 lens sweep). So a view of ONE member must answer every read door
+  // exactly as that member does. A fork is planted in the member first, so the fork list has rows to lose.
+  it('a view of one member answers every derived read door exactly as the member does', async () => {
+    const { ROUTE_RIGHTS, TOOL_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
+    const db = (await import('../../server/dist/db/mongo.js')).getDb();
+    const parent = await d.rest(admin.key, 'POST', `/api/brain/spaces/${QA}/facts`, { fact: 'vp-solo parent' });
+    assert.equal(parent.status, 201, `seeding the parent fact: ${fmt(parent)}`);
+    const stored = await db.collection(`${QA}_facts`).findOne({ _id: parent.body._id });
+    await db.collection(`${QA}_facts`).insertOne({ ...stored, _id: `${parent.body._id}-vp-fork`, fact: 'vp-solo fork', forkOf: parent.body._id, forkAt: stored.seq });
+    await mustCreate(owner.key, 'solo', [QA]);
+    // Only the doors that take no id but the space's: one with a record id would read 'x' on both sides and agree about nothing.
+    const paths = ROUTE_RIGHTS.filter(r => r.needs === 'read' && r.method === 'GET' && r.area !== 'schema' && r.scope === 'path'
+      && /^[^:]*:spaceId[^:]*$/.test(r.route) && !r.route.endsWith('/events'));
+    const tools = TOOL_RIGHTS.filter(r => r.needs === 'read' && r.area !== 'schema' && r.tool !== 'read_spill');
+    assert.ok(paths.length >= 6 && tools.length >= 9, `derived ${paths.length} path read route(s) and ${tools.length} read tool(s); the derivation is broken`);
+    assert.ok(paths.some(r => r.route.endsWith('/forks')) && tools.some(t => t.tool === 'list_forks'), 'the fork list is not among the derived read doors');
+    // The space's own name and the view's members list are the two things that differ by design; everything else must not.
+    const same = (a) => JSON.stringify(a, (k, v) => (k === 'viewMembers' ? undefined : v)).replaceAll('@solo', '<space>').replaceAll(QA, '<space>');
+    const differ = [];
+    for (const r of paths) {
+      const at = (space) => d.rest(owner.key, 'GET', r.route.replace(':spaceId', encodeURIComponent(space)));
+      const member = await at(QA); const view = await at('@solo'); const again = await at(QA);
+      if (same(member.body) !== same(again.body)) continue; // the answer moves between two reads of the member: nothing to compare against
+      if (member.status !== view.status || same(member.body) !== same(view.body)) differ.push(`GET ${r.route}: member ${fmt(member)} | view ${fmt(view)}`);
+    }
+    for (const t of tools) {
+      const at = async (space) => (await d.mcp(owner.key, t.tool, { space })).text;
+      const member = await at(QA); const view = await at('@solo'); const again = await at(QA);
+      if (same(member) !== same(again)) continue;
+      if (same(member) !== same(view)) differ.push(`MCP ${t.tool}: member ${member.slice(0, 160)} | view ${view.slice(0, 160)}`);
+    }
+    assert.deepEqual(differ, [], 'read doors that answer a one-member view differently from its member');
+  });
+
   it('a mixed-rung owner reads the readable member\'s marker and not the other\'s; viewMembers names only the one read', async () => {
     await mustCreate(mixedOwner.key, 'mix', [QA, OPS]);
     d.setRights(mixedOwner.id, r => { r.perSpace[OPS].knowledge = 'none'; });
