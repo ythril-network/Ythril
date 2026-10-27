@@ -29,7 +29,7 @@ export interface DivergenceFacts {
 }
 
 /**
- * The `MERKLE_DIVERGENCE` line of one disagreement, naming the versions that await a decision when there are some (Q-624, design §9a, S8).
+ * Say the `MERKLE_DIVERGENCE` line of one disagreement, naming the versions that await a decision when there are some (Q-624, design §9a, S8).
  *
  * A fork another instance resolved, behind a tombstone this instance's deletion rules declined, stays here until this instance's user decides it, and the
  * two roots differ by exactly that row. That is the cost of the owner's decision, so the line says so ("N unresolved versions here were resolved on another
@@ -37,18 +37,19 @@ export interface DivergenceFacts {
  * branch only: a match asks nothing of the store. A count that cannot be read leaves the line as it was, because a failure to explain a divergence is not a
  * reason to say less about it.
  */
-export async function divergenceLine(f: DivergenceFacts): Promise<string> {
+export async function reportDivergence(f: DivergenceFacts): Promise<void> {
   let awaiting = 0;
   try {
     const { forksAwaitingADecision } = await import('../brain/fork-counts.js');
     awaiting = await forksAwaitingADecision(f.spaceId);
   } catch { /* the line stands without the count */ }
-  return `MERKLE_DIVERGENCE: space '${peerText(f.spaceId)}', peer '${peerText(f.peerLabel)}' (${peerText(f.peerInstanceId)}), ` +
+  // Said here, not returned: every slot of a line a peer can cause is bounded where it is logged (`a-steerable-value-reaches-a-log-line-only-bounded`).
+  log.warn(`MERKLE_DIVERGENCE: space '${peerText(f.spaceId)}', peer '${peerText(f.peerLabel)}' (${peerText(f.peerInstanceId)}), ` +
     `network '${peerText(f.networkLabel)}'. ` +
     `local root=${peerText(f.localRoot)} (${f.localLeaves} leaves), ` +
     `peer root=${peerText(f.peerRoot)} (${f.peerLeaves ?? '?'} leaves). ` +
     `The space contents differ after sync — possible data loss, concurrent write, or sync bug.` +
-    (awaiting > 0 ? ` ${awaiting} unresolved versions here were resolved on another instance and await a decision in Review, which accounts for part of the difference.` : '');
+    (awaiting > 0 ? ` ${awaiting} unresolved versions here were resolved on another instance and await a decision in Review, which accounts for part of the difference.` : ''));
 }
 
 export async function checkMerkleWithPeer(
@@ -86,10 +87,10 @@ export async function checkMerkleWithPeer(
     }
 
     if (localResult.root !== peerRoot) {
-      log.warn(await divergenceLine({
+      await reportDivergence({
         spaceId, peerLabel: member.label, peerInstanceId: member.instanceId, networkLabel: net.label,
         localRoot: localResult.root, localLeaves: localResult.leafCount, peerRoot, peerLeaves: peerResult.leafCount,
-      }));
+      });
       return 'mismatch';
     }
     log.info(`Merkle OK: space '${peerText(spaceId)}', peer '${peerText(member.label)}' root=${peerText(localResult.root.slice(0, 12))}…`);

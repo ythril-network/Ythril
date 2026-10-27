@@ -135,9 +135,13 @@ describe('the doors reach the WRITER, and the writer holds the rule', () => {
      * everything else in the server is asked. Since Q-99 part 3 the writer is two modules: `chrono.ts` keeps
      * the update, and the create/converge decision is the planner `write-plan/plan-chrono.ts`, which
      * `createChrono` and the bulk importer both run — so the planner is the writer for that half, not a door.
+     *
+     * Q-624 slice I4: `brain/fork-keep.ts` is a writer too, and the third: Review's keep writes a stored version's whole body onto its parent, and judges
+     * it by the family's own classifier BEFORE it writes (design §9). It is one module with one caller (`resolveFork`), reachable from no door, so it is the
+     * place the rule lives for that write, not a door's copy of it.
      */
     const OWNS_IT = [
-      'server/src/brain/write-validation.ts', 'server/src/brain/chrono.ts', 'server/src/brain/write-plan/plan-chrono.ts',
+      'server/src/brain/write-validation.ts', 'server/src/brain/chrono.ts', 'server/src/brain/write-plan/plan-chrono.ts', 'server/src/brain/fork-keep.ts',
     ];
     const files = trackedSources('server/src', { exclude: OWNS_IT });
 
