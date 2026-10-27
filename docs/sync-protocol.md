@@ -345,10 +345,9 @@ Accepts `{ facts?: FactDoc[], entities?: EntityDoc[], edges?: EdgeDoc[], chrono?
 
 | Type | Rule |
 |------|------|
-| Facts | no stored copy → `inserted`; `incoming.seq > stored.seq` → `updated`; equal seq and different `fact` text → **fork**; anything else (a lower seq, or an equal seq with equal text) → `skipped` |
-| Entities | no stored copy or `incoming.seq > stored.seq` → `upserted`; else `skipped`. An equal seq never forks |
-| Edges | same as entities. Another id already holding the edge's `(from, to, label, fromKind, toKind)` → `duplicateTriplets`, and the local copy is kept |
-| Chrono | same as entities, after the vocabulary check (an unknown `type` → `unknownType`) |
+| Facts, entities, edges, chrono entries | no stored copy → `inserted` (`upserted` for the three that are not facts); `incoming.seq > stored.seq` → `updated` / `upserted`; equal seq and a different **body** (every authored field of the kind, `authoredContentHash`; never the version metadata or the local-only fields) → **fork**; anything else (a lower seq, or an equal seq with an equal body) → `skipped` |
+| Edges, in addition | another id (not a fork of it) already holding the edge's `(from, to, label, fromKind, toKind)` → `duplicateTriplets`, and the local copy is kept. A fork edge shares its subject's identity by design and is outside the identity index |
+| Chrono, in addition | the vocabulary check first (an unknown `type` → `unknownType`) |
 | Links | same as entities. Another id already holding the link's endpoints is that same link → `skipped` |
 | File metadata | `incoming.seq > stored.seq` (or no stored seq) → merged (`$set` of the authored keys, and `$unset` of the authored keys the sender's `authoredKeys` lists and the document lacks, in one update under the same write guard as every family; [removal](#a-removed-file-key-crosses-the-wire)) → `upserted`; else `skipped`. A row at an [instance-local](#file-sync) path (a conversion's sidecar, a conflict copy, a schema snapshot) is ignored and counted `skipped`. A held file tombstone whose `rowSeq` is at or above `incoming.seq` → `tombstoned` ([the version rule](#file-tombstones-who-may-delete-which-version-and-what-is-removed)) |
 
@@ -398,28 +397,35 @@ After a successful batch push, `lastPosPushed[spaceId]` is advanced to the posit
 
 ## Conflict resolution
 
-### Facts — fork on equal sequence
+### Every kind — fork on equal sequence
 
-Facts are the primary content type. If two brains independently edit the same document (same `_id`) and their changes produce the same `seq` counter:
+Facts, entities, edges and chrono entries all fork (the planner's one list, `FORKING_FAMILIES`; a link carries no content and never forks). If two brains independently edit the same document (same `_id`) and their changes produce the same `seq` counter:
 
 ```text
 Brain A:  { _id: "abc", seq: 5, fact: "The sky is blue" }
 Brain B:  { _id: "abc", seq: 5, fact: "The sky is cerulean" }   ← concurrent edit
 ```
 
-The receiving brain detects `incoming.seq === existing.seq && incoming.fact !== existing.fact` and creates a **fork**: a new fact with `forkOf: "abc"`, stamped as a local version above the parent's. Both versions coexist and are listed in Review's **Forks**, where the user keeps one.
+The receiving brain detects `incoming.seq === existing.seq` with a different body (for a fact the `fact` text, and the same for every other authored field of every kind) and creates a **fork**: a new record of the same kind with `forkOf: "abc"`, stamped as a local version above the parent's. Both versions coexist and are listed in Review's **Forks**, where the user keeps one.
 
-**The fork's id is derived** from the parent's id, the shared seq and the incoming text (a v4-shaped UUID). So a push whose response was lost and is re-sent upserts the fork it already made instead of forking again, and an identical divergence forks once.
+**The fork's id is derived** from the parent's id, the version the copies diverged at (`forkAt`) and the incoming body (a v4-shaped UUID). So a push whose response was lost and is re-sent upserts the fork it already made instead of forking again, and an identical divergence forks once.
 
 **The fork keeps the divergent copy's `createdAt` and `updatedAt`** — when its text was written, not when this instance forked it — so its retention window counts from its own age and two receivers forking one divergence store one document under the one derived id.
 
-**A fork is its own record.** `forkOf` names the parent it diverged from and is read only by the two caps below and by
-the planner; nothing follows it on a delete. Deleting or expiring the parent leaves its forks in place, and a fork is
-deleted, expires and replicates like any other fact.
+**A fork is a replicated row that no ordinary door edits.** `forkOf` names the parent it diverged from. It is read by the two caps below, the planner, the readers that must not count an unchosen version (a relationship, a duplicate, a contradiction) and Review. A fork is changed only by a resolve, a delete or an arriving copy; every ordinary update, merge and bulk write refuses it (`409 fork_row_read_only`). Deleting or expiring the subject deletes its forks with it, each behind a tombstone issued here, and an arriving tombstone removes the forks of the record it buries.
 
-**Review settles a fork** (`GET /api/brain/spaces/:spaceId/forks`, `POST .../forks/:forkId/resolve`, the MCP tools `list_forks` and `resolve_fork`; [Brain API](integration-guide/04-brain-api.md#forks-list-them-and-keep-one-side)). Keeping a side writes the kept text on the parent as a **local edit stamped above both versions**, so a peer holding either copy takes it as the newer; the fork is deleted behind a tombstone this instance issues (`issuedHere`, so a mesh peer is told) and the edges and links that named it are pointed at the parent. One row of the truth table is not a conflict: two copies of a chrono entry at one seq whose bodies differ only by redaction (one has `contentRedacted` and the other has more of the fields redaction removes) are the same copy, so nothing forks and nothing is written. Only facts fork: an equal seq never forks an entity, an edge, a chrono entry or a link, and the edge and link identity indexes would refuse a second row for one identity.
+**Review settles a fork** (`GET /api/brain/spaces/:spaceId/forks`, `POST .../forks/:forkId/resolve`, the MCP tools `list_forks` and `resolve_fork`; [Brain API](integration-guide/04-brain-api.md#forks-list-them-and-keep-one-side)). The call takes `kind`, `forkId`, `keep`, `ifMatchSeq` and `ifMatchParentSeq`, all required. Keeping a side writes the kept **whole body** on the parent (every authored field of the kind, an absent one removed, validated against the type's schema first) as a **local edit stamped above both versions**, so a peer holding either copy takes it as the newer; the fork is deleted behind a tombstone this instance issues (`issuedHere`, so a mesh peer is told) and the edges and links that named it are pointed at the parent. One row of the truth table is not a conflict: two copies of a chrono entry at one seq whose bodies differ only by redaction (one has `contentRedacted` and the other has more of the fields redaction removes) are the same copy, so nothing forks and nothing is written. A link is the one record that never forks: it is two endpoints and their kinds, so two copies at one id are the same copy.
 
-**Two caps, on every door — both push routes and the pull.** A fork is refused when the parent's `forkOf` chain is already 10 deep, or when the parent already has 10 forks — stored ones and the ones the same request is creating, counted together. `POST /facts` answers `400 Fork depth limit (10) exceeded for _id '…'`; `batch-upsert` counts it in `forkDepthRefused` and `rejected`; a pull names it in the receiver's log and moves past it, as the push sender does. **Mixed versions:** the fan-out cap on `batch-upsert` is new in this release — an older receiver accepts an eleventh fork of one parent that a newer one refuses, so a network mixing the two can hold different fork sets for such a record.
+**Two caps, on every door — both push routes and the pull.** A fork is refused when the parent's `forkOf` chain is already 10 deep, or when the parent already has 10 forks — stored ones and the ones the same request is creating, counted together. each single push route (`POST /facts`, `/entities`, `/edges`, `/chrono`) answers `400 Fork depth limit (10) exceeded for _id '…'`; `batch-upsert` counts it in `forkDepthRefused` and `rejected`; a pull names it in the receiver's log and moves past it, as the push sender does. **Mixed versions:** the fan-out cap on `batch-upsert` is new in this release — an older receiver accepts an eleventh fork of one parent that a newer one refuses, so a network mixing the two can hold different fork sets for such a record.
+
+### What every forking kind shares (Q-624)
+
+- **`forkOf` and `forkAt` are declared on every forking `Incoming*` schema** (facts, entities, edges, chrono), so a fork survives the strip on both the push and the pull door. An arriving row is a fork only if its `_id` derives: `forkIdFor(forkOf, forkAt, authoredContentHash(kind, body).text)`. Two stated exceptions: a legacy fact fork whose id derives from the text alone (the 5.x derivation, still recognised, so a real 5.6 row is never refused), and a chrono fork whose bodies differ only by redaction (not a fork at all, below). A row that does not derive is `invalidFork`: refused, never stored, never offered again.
+- **A fork arriving after its parent's tombstone is dropped** (the tombstone wins); a fork arriving before its parent is stored and listed as an orphan until the parent arrives or is deleted. An **applied tombstone removes the forks of every id it buries** that is no longer held here, without issuing fork tombstones: every instance that holds the subject applies the same tombstone and removes its own.
+- **A re-key re-mints, never edits.** When a subject moves to a new id (a relabelled edge, an edge whose endpoint a merge moved, an entity merge), each of its forks is inserted under `forkIdFor(newSubject, newSeq, body')` and the old id is removed behind a tombstone issued here, so every re-pointed fork still verifies at a peer. What names an old fork id (an edge end, a link target) follows it. A re-mint that would take the receiving subject past the cap is refused before anything is written.
+- **Arriving forks count against the cap** (10 per record, the request's own new forks counted); past it the copy is dropped and counted in `forkDepthRefused`. A dropped copy is a permanent difference in the space's merkle root until the forks are resolved, and the log line says so.
+- **`503 edge_identity_building` holds the edges family** of a space whose edge identity index is not yet partial, and the held page keeps the sender's mark (above).
+- **A tombstone that is not issued here and does not govern a fork's author does not refuse that fork; one issued here always does** (a fork this instance resolved stays resolved). A declined tombstone for a fork marks it `_resolvedElsewhere` instead of only counting.
 
 ### Receiver retention applies to arrivals
 
@@ -613,9 +619,9 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 | Method | Path | Body | Returns |
 |--------|------|------|---------|
 | `POST` | `/api/sync/facts` | `FactDoc` | `200 { status: 'inserted'\|'updated'\|'forked'\|'skipped'\|'tombstoned' }` — the `'forked'` case also returns `forkId` (the new fork document's `_id`, derived, so a re-sent push answers the same id); `400` for a fork at either cap, or a document the receiver's store refuses |
-| `POST` | `/api/sync/entities` | `EntityDoc` | `200 { status:'ok' }` (or `'tombstoned'`); `400` for a document the receiver's store refuses |
-| `POST` | `/api/sync/edges` | `EdgeDoc` | `200 { status:'ok' }`, `'tombstoned'`, or **`'duplicate'`** when the unique `(from, to, label, fromKind, toKind)` index already holds the edge under another id (an insert, or an update moving onto it); `400` for a document the store refuses |
-| `POST` | `/api/sync/chrono` | `ChronoEntry` | `200 { status:'ok' }` (or `'tombstoned'`); `400` for a `type` outside this space's vocabulary, or a document the store refuses |
+| `POST` | `/api/sync/entities` | `EntityDoc` | `200 { status:'ok' }` (or `'tombstoned'`, or `'forked'` with `forkId`); `400` for a document the receiver's store refuses |
+| `POST` | `/api/sync/edges` | `EdgeDoc` | `200 { status:'ok' }`, `'tombstoned'`, `'forked'` with `forkId`, or **`'duplicate'`** when the unique `(from, to, label, fromKind, toKind)` index already holds the edge under another id (an insert, or an update moving onto it); `400` for a document the store refuses |
+| `POST` | `/api/sync/chrono` | `ChronoEntry` | `200 { status:'ok' }` (or `'tombstoned'`, or `'forked'` with `forkId`); `400` for a `type` outside this space's vocabulary, or a document the store refuses |
 | `POST` | `/api/sync/batch-upsert` | `{ facts?, entities?, edges?, chrono?, links?, filemeta? }` | `200 { status:'ok', facts:{…}, entities:{…}, edges:{…}, chrono:{…}, links:{…}, filemeta:{…} }` — six arrays in, six sets of counters out |
 | `POST` | `/api/sync/tombstones` | `{ tombstones[] }`, at most 5000 (`400` above) | `200 { applied: N, refused: R, declined: D }` — `N` is the elements admitted by shape and seq (applied, or declined on authorisation and not stored); `R` is the elements refused on their own for their shape or seq (logged), never the page; `D` is how many of the `N` were declined under the [deletion authority](#tombstone-deletion-authorisation), omitted when zero. `refused` and `declined` are additive. An element of an unknown `type` answers `400 { error: 'Invalid tombstone format' }` and nothing of the page is applied. Applied to the space the query admitted, never the `spaceId` an element carries. The counter is bumped past the highest admitted seq, awaited, before the answer; a counter that could not move answers `500` |
 | `POST` | `/api/sync/file-tombstones` | **`{ spaceId, tombstones[] }`** — `spaceId` in the BODY, not the query; absent it answers `400 { error: 'spaceId required' }`; at most as many per request as the record route takes (`400` above), each `{ _id, path, deletedAt, issuer?, rowSeq? }` | `200 { applied: N, refused?: R, declined?: D }` — counts, as on the record route. A `200` is an acknowledgement, not a promise the file was deleted: a declined tombstone would be declined again, so the sender may stop sending it |
@@ -634,7 +640,7 @@ All incoming documents are validated against Zod schemas before any database wri
 Two additional ingest safety caps protect the local seq counter and fork chains from a malicious or corrupted peer:
 
 - **Implausible seq** — the schema bound on `seq` is 2^50, but ingest applies a stricter ceiling of `2^50 − 2^40` (`arrivalRefusal` in the arrival writer, and `seqRefusal` for a tombstone); a document above it is refused so a poisoned seq can never exhaust the counter's headroom.
-- **Fork limits** — fork chain depth and fan-out (no more than 10 forks pointing at the same parent, the request's own new forks counted) are each capped at 10 on both paths: exceeding either returns `400` on the single `POST /facts` endpoint and counts `forkDepthRefused` (and `rejected`) in `batch-upsert`, with the refused ids in the receiver's log.
+- **Fork limits** — fork chain depth and fan-out (no more than 10 forks pointing at the same parent, the request's own new forks counted) are each capped at 10 on both paths: exceeding either returns `400` on each single push endpoint and counts `forkDepthRefused` (and `rejected`) in `batch-upsert`, with the refused ids in the receiver's log.
 
 ### Gossip endpoints
 

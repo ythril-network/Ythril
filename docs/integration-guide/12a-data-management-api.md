@@ -212,6 +212,8 @@ space, like a [deletion or wipe](06c-space-deletion-and-wipe-api.md): the reques
 anything is replaced, and each space is then replaced in the background under a hold. [`GET /api/admin/data/restore`](#get-apiadmindatarestore)
 reports the progress and the outcome.
 
+**Unresolved versions are rows like any other.** A fork of a fact, entity, chrono entry or edge is a row of its collection: a backup carries it and a restore brings it back unresolved, with the `_resolvedElsewhere` mark it carried (a decision still owed here). Restoring a backup that holds an entity, chrono or edge fork into a 5.x build is unsupported: 5.x strips `forkOf` and stores the version as a duplicate, or refuses an edge version against its full identity index. Count them first with the rollback tool (`node server/dist/tools/positions-rollback.js`, step 5 refuses while they exist), then resolve or discard them.
+
 ```http
 POST /api/admin/data/restore
 Authorization: Bearer <admin-token>
