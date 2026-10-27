@@ -139,10 +139,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Writes:** `seq` is a record's version: an edit stores a higher one only if its read version is current; over the ceiling `409` `record_version_at_ceiling`, clock before 2005 `503` `positions_clock_unusable`. Every list defaults to landing order.
 - **Brain:** Review lists and settles forks: `GET /api/brain/spaces/:id/forks`, `POST …/forks/:forkId/resolve`, MCP `list_forks`, `resolve_fork`, every kind. Keeping a side writes its body onto the parent above both versions, deletes this instance's copy and repoints its edges and links.
 - **Brain:** A fork another instance resolved, whose removal this instance's deletion rules decline, stays in Review marked `resolvedElsewhere` for this instance to decide.
-- **Brain:** Keeping a version in Review is judged by the record type's schema before anything is written: a body a `strict` space's schema refuses is `422` in the schema's own sentence on both doors (`resolve_fork`, `POST …/forks/:forkId/resolve`), and a violation the parent already had is not the keep's.
-- **Brain:** A fork row in the Facts, Entities, Edges and Chrono lists carries a "Fork in Review" marker that opens Review > Forks on its kind (en, de, pl).
-- **Brain:** An entity merge points what named an absorbed entity's fork (an edge end, a link target) at the fork's new id, and those references count toward the 2500-record merge bound.
-- **Observability:** `ythril_unresolved_forks{kind,resolvedElsewhere}` counts the unresolved versions at scrape time, and the `MERKLE_DIVERGENCE` line of a space holding forks resolved on another instance says how many await a decision in Review.
+- **Brain:** Keeping a version in Review is refused `422` in the schema's own words when a `strict` space's schema refuses its body, and nothing is written; a fork row in the Facts, Entities, Edges and Chrono lists carries a "Fork in Review" marker that opens Review > Forks.
+- **Brain:** An entity merge points what named an absorbed entity's fork at its new id, counted in the merge bound; `ythril_unresolved_forks` counts unresolved versions by kind, and the `MERKLE_DIVERGENCE` line says how many await a decision.
 
 ### Changed
 

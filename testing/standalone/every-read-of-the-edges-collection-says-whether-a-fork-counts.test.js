@@ -100,7 +100,7 @@ const EXEMPT = {
   // Q-624 slice I3: the readers whose subject IS the fork rows, or a row's fork status.
   ...reasoned('the fork module itself: it reads fork rows on purpose (Review\'s list and resolve, the re-mint, the cascade, the cap) and names `forkOf` in every read', [
     'brain/forks.ts:refuseForkRowsNamed', 'brain/forks.ts:forkRowsUnder', 'brain/forks.ts:remintForks', 'brain/forks.ts:assertForksFitTogether',
-    'brain/forks.ts:listForks', 'brain/forks.ts:resolveFork', 'brain/forks.ts:resolveOrphan',
+    'brain/forks.ts:listForks', 'brain/forks.ts:resolveFork', 'brain/forks.ts:resolveOrphan', 'brain/fork-counts.ts:forkCountsOf',
   ]),
   ...reasoned('it reads one row by id to ask whether it IS a fork (the refusal of an ordinary edit), or removes fork rows a 5.6 build cannot read', [
     'brain/write-at-read-version.ts:writeAtReadVersion', 'sync/positions-rollback.ts:rollBackForks',
