@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
+import { UUID_V4_RE, TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, uuidSchema, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, FORKS_GO_WITH_THEIR_SUBJECT, FORK_ROWS_ARE_READ_ONLY } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEntity, getEntityById, updateEntityById, upsertEntity } from '../../brain/entities.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -153,7 +153,7 @@ export const save_entityTool: ToolHandler = {
 
 export const update_entityTool: ToolHandler = {
   name: 'update_entity',
-  description: 'Update one entity by its ID. Every field except `id` is optional; a field you omit is left '
+  description: 'Update one entity by its ID. ' + FORK_ROWS_ARE_READ_ONLY + 'Every field except `id` is optional; a field you omit is left '
     + 'exactly as it was.\n\n'
     + 'MERGE, NOT REPLACE, for `tags` and `properties` — this is the trap. Sending `tags: ["b"]` on an entity '
     + 'tagged `["a"]` leaves it tagged `["a","b"]`, and sending `properties: {"colour":"red"}` keeps every '
@@ -335,7 +335,7 @@ function appendEndpointRuleWarnings(lines: string[], warnings: readonly Endpoint
 
 export const graph_mergeTool: ToolHandler = {
   name: 'graph_merge',
-  description: 'Merge two entities into one. IRREVERSIBLE: the survivor keeps its identity and id, every reference to the absorbed entity is relinked to it, and the absorbed record is then DELETED. There is no unmerge.\n\n'
+  description: 'Merge two entities into one. ' + FORK_ROWS_ARE_READ_ONLY + 'The absorbed entity\'s unresolved versions become the survivor\'s (re-minted), and a merge that would leave one record holding more than the fork cap is refused with 409 `fork_cap`. IRREVERSIBLE: the survivor keeps its identity and id, every reference to the absorbed entity is relinked to it, and the absorbed record is then DELETED. There is no unmerge.\n\n'
     + 'TWO-PHASE BY DESIGN, and the conflict plan is the feature rather than an error. Call it with an empty or partial `resolutions` and you get a CONFLICT PLAN back as an error result (status 422 on `POST /api/graph_merge`; the REST merge route answers the same plan 409): every property where the two disagree, with both values. Call it again with a fully resolved map and it executes. A plan on the first call is the expected path — treat it as the question being asked, not as a failure to retry.\n\n'
     + 'REFUSED BEFORE ANYTHING IS WRITTEN, on every door alike: `merge_too_large` (status 422, with `relinks` and `bound` in structuredContent) when the absorbed entity has more edges, links and face labels than one merge relinks (' + MERGE_MAX_RELINKS + '), and status 400 when the merged survivor would break a `strict` space\'s schema. The `merge_too_large` text names both entities and what would fit: deleting edges or links the absorbed entity no longer needs (an edge cannot be moved; its ends are not editable), or merging the other way round, offered only when that merge fits the bound. A merge that runs relinks everything in ONE transaction: it lands whole or not at all.\n\n'
     + 'RESOLVE EVERY CONFLICT OR NOTHING HAPPENS. A partial map returns the plan again rather than merging what it can, because a half-merge would leave two records that are neither separate nor one.\n\n'
@@ -483,7 +483,8 @@ export const delete_entityTool: ToolHandler = {
   description: 'Delete an entity by id. IRREVERSIBLE, and it is a DELETE rather than a retire — if you want the record to stop appearing in semantic search while staying readable and traversable, set `suppressEmbeddings` on it instead.\n\n'
     + 'A REFUSAL HERE IS USUALLY CORRECT. With `strictLinkage` on, an entity is refused while an edge, fact, chrono entry or file still references it, and the refusal names each one — for an EDGE, including which of its ends this entity is, because that is the end you have to clear. Note that BOTH ends count: an edge pointing FROM this entity blocks the delete exactly as one pointing at it does, since either would be left dangling. Resolve them first, or `graph_merge` into the record that should have held them.\n\n'
     + 'OR DELETE IT WITH ITS BLOCKING EDGES, in one call: pass the `token` from `delete_entity_preview` as `cascadeToken`. The cascade removes those edges, each with its tombstone, a chunk at a time — a chunk lands whole or not at all, so a failure never leaves an edge gone without the tombstone that tells peers — and then the entity. A fact, chrono entry or file that still names the entity refuses the cascade BEFORE anything is removed.\n\n'
-    + 'It writes a TOMBSTONE, so the deletion propagates to peer instances on the next sync: ' + DELETION_REACH + ' A space that syncs will not quietly resurrect the record from a peer, and the tombstone is why.',
+    + 'It writes a TOMBSTONE, so the deletion propagates to peer instances on the next sync: ' + DELETION_REACH + ' A space that syncs will not quietly resurrect the record from a peer, and the tombstone is why.\n\n'
+    + FORKS_GO_WITH_THEIR_SUBJECT,
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({

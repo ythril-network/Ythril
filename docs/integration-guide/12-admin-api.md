@@ -113,8 +113,9 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   exported data is model-independent; the import re-embeds. So is an edge's write guard (`_functionalGuard`): this
   instance's own lock on a functional label's subject, never a backup's to carry.
 - The record's own local state is kept: the retention stamps (`_expireAt`, `_contentExpireAt`), a file's
-  `syncBase`, who delivered the record (`deliveredBy`) and whether this instance wrote its current version
-  (`writtenHere`). The record's landing position (`pos`, `posAtSeq`) is not kept: a restore takes a fresh one, so it
+  `syncBase`, who delivered the record (`deliveredBy`), whether this instance wrote its current version
+  (`writtenHere`), and on a fork row the decision still owed here (`_resolvedElsewhere`: another instance resolved its own
+  copy and this one has not decided yet). The record's landing position (`pos`, `posAtSeq`) is not kept: a restore takes a fresh one, so it
   is not exported, and a tombstone's own local fields (`storedVia`, `issuedHere`, `pos`, `posAtSeq`) are this instance's alone. JSON writes the stamps as ISO strings; the import turns
   them back into dates.
 - Binary file content is **not** included — only file metadata. Use the Files API to download actual files.

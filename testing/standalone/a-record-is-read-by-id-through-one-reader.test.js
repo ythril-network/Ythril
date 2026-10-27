@@ -57,6 +57,15 @@ const READER = 'server/src/db/read-by-id.ts';
  * function that defines them.
  */
 const ALLOWED = new Map([
+  // Q-624 slice I3: the fork module's by-id reads, each a different question than "the stored copy of each id".
+  ['server/src/brain/forks.ts:refuseForkRowsNamed',
+    'an existence PROBE (`findOne`): is any of the ids a batch names a FORK row (`forkOf` exists), so the batch is refused whole. Not the copies.'],
+  ['server/src/brain/forks.ts:remintForks',
+    'a re-mint asks whether ANY row or tombstone stands at the ids it is about to insert (an existence probe that aborts the transaction), and'
+    + ' reads the receiving subjects WITH their forks (`$or` of `_id` and `forkOf`) to compare bodies: neither is the stored copy of each id.'],
+  ['server/src/brain/forks.ts:listForks',
+    'Review\'s page: the fork rows and their parents by `$in` with a projection of the version fields, inside the list\'s read bound; the parents'
+    + ' may be absent (an orphan) and the answer says so per row, which the reader\'s map would equally say, but the read is the list\'s own page.'],
   ['server/src/brain/predicate-recall.ts:indexIsBehind',
     'an existence PROBE (`findOne`, one row or none) over the ids a vector batch did not return, ANDed with a vector-'
     + 'presence and freshness predicate; the caller chunks the ids by ID_CHUNK. It asks "is any of these missing from '

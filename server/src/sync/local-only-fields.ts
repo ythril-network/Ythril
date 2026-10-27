@@ -14,6 +14,14 @@ export const FUNCTIONAL_GUARD = '_functionalGuard' as const;
 export const WRITTEN_HERE = 'writtenHere' as const;
 
 /**
+ * The name of the mark a FORK row carries when a peer's tombstone for it was declined here (Q-624, design rev 4 §9a): another instance
+ * resolved its own copy of this unchosen version, this instance's deletion authority did not accept that removal, so the decision is owed
+ * HERE, by this instance's user, in Review. Spelled once, as the guard is, so the decline writer, the list's projection, the rollback and
+ * the hash exclusion cannot drift apart. Classified in {@link DECISION_OWED_FIELDS}.
+ */
+export const RESOLVED_ELSEWHERE = '_resolvedElsewhere' as const;
+
+/**
  * The fields a record holds that belong to THIS INSTANCE and must never be taken from a peer.
  *
  * ## Why they are one list with two consumers
@@ -70,6 +78,9 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
   // Whether this instance wrote the record, or only holds a peer's copy of it: the bit mesh push selection reads (`sync/written-here.ts`).
   // A peer's would claim the receiver's own authorship, which a deliverer's text cannot prove.
   WRITTEN_HERE,
+  // A decision owed here (Q-624, design rev 4 §9a): who resolved this fork elsewhere, behind a tombstone this instance declined. It is a fact
+  // about THIS instance's copy and what its user still has to decide; a peer's copy of it would decide for this instance.
+  RESOLVED_ELSEWHERE,
 ]);
 
 /**
@@ -103,7 +114,22 @@ export const WRITE_GUARD_FIELDS: ReadonlySet<string> = new Set([FUNCTIONAL_GUARD
  * The default is not allowed to classify a field: `every-local-only-field-is-classified-on-purpose` holds that each
  * local-only name is here or is named derived, with a reason, in the gate.
  */
-export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt', 'syncBase', 'deliveredBy', WRITTEN_HERE]);
+export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt', 'syncBase', 'deliveredBy', WRITTEN_HERE, RESOLVED_ELSEWHERE]);
+
+/**
+ * The fifth class of local-only field: A DECISION OWED HERE (Q-624, design rev 4 §9a). `_resolvedElsewhere` on a fork row says that another
+ * instance resolved its own copy of this unchosen version behind a tombstone this instance's deletion authority declined, so the fork stays
+ * here, listed in Review as resolved elsewhere, until THIS instance's user decides it (owner, 2026-10-25: my instance, my data).
+ *
+ * Against the other classes:
+ *  - **never hashed and never replicated**, as every local-only field: two instances that differ only in their marks agree, and a peer
+ *    cannot plant a mark by push (the arrival writer drops a peer's copy);
+ *  - **carried across an ordinary arrival** (`carriedFields`), so a re-delivered fork keeps a decision this instance still owes;
+ *  - **restored** ({@link RESTORED_LOCAL_FIELDS}), so an export and its import keep the decision owed;
+ *  - **not derived**: an embed never clears it.
+ * It lives and dies with the fork row: every path that removes the fork removes the mark with it, which is why it is a field and not a list.
+ */
+export const DECISION_OWED_FIELDS: ReadonlySet<string> = new Set([RESOLVED_ELSEWHERE]);
 
 /**
  * The fourth class of local-only field: where a record sits in THIS instance's stream (bundle-81, design rev 8 §2). `pos` is the position
@@ -183,6 +209,11 @@ for (const f of WRITE_GUARD_FIELDS) {
  * (`deliveredBy` is a peer's id, `syncBase` an object), and reading a peer's id as one deletes it.
  */
 export const RESTORED_DATE_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt']);
+
+for (const f of DECISION_OWED_FIELDS) {
+  // Not restored, a decision owed before an export would be gone after its import; derived, an embed would clear it.
+  if (!RESTORED_LOCAL_FIELDS.has(f)) throw new Error(`DECISION_OWED_FIELDS names '${f}', which a restore does not keep`);
+}
 
 for (const f of RESTORED_DATE_FIELDS) {
   if (!RESTORED_LOCAL_FIELDS.has(f)) throw new Error(`RESTORED_DATE_FIELDS names '${f}', which a restore does not keep`);

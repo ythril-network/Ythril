@@ -27,6 +27,7 @@ import { inChunks } from '../util/chunks.js';
 import { log, peerText } from '../util/log.js';
 import { inHeldTransaction } from './held-transaction.js';
 import { removeWithTombstones } from './tombstones.js';
+import { removeForksOf } from './forks.js';
 import { retireEmbedJobs } from './embed-queue.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc } from '../config/types.js';
@@ -61,6 +62,8 @@ async function removeEdgeChunk(spaceId: string, ids: readonly string[]): Promise
   return inHeldTransaction(spaceId, 'edge.remove', async (session) => {
     const stored = await readStoredById<Pick<EdgeDoc, '_id' | 'seq'>>(collName, ids, { seq: 1 }, { session, filter: { spaceId } });
     if (stored.size === 0) return new Set<string>();
+    // The edges' unresolved versions go with them, each behind a tombstone issued here, in this transaction (Q-624 §7).
+    await removeForksOf(spaceId, 'edge', [...stored.keys()], { session });
     await removeWithTombstones(spaceId, 'edges',
       [...stored.values()].map(e => ({ _id: e._id, type: 'edge' as const, originalSeq: e.seq })), { session, filter: { spaceId } });
     return new Set(stored.keys());

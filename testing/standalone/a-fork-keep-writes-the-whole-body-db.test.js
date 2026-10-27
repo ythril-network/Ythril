@@ -53,6 +53,9 @@ const CONTROL_ARGS = new Set(['space', 'id', 'ifMatchSeq', 'deleteFields', 'ttlD
 /** Always in the body and refused by the doors' SYSTEM_FIELDS, so the keep is the only writer of them. */
 const SYSTEM_BODY = ['superseded', 'suppressEmbeddings', 'type'];
 
+/** An edge row's five identity fields (empty for the other kinds): what a fork edge shares with its subject. */
+const identityOf = (row) => (row.from === undefined ? {} : { from: row.from, to: row.to, label: row.label, fromKind: row.fromKind, toKind: row.toKind });
+
 /** [parent's value, the fork's value] per field: the two differ in nothing else. */
 const SAMPLES = {
   fact: ['the parent says this', 'the fork says that'],
@@ -125,7 +128,8 @@ describe('a fork keep writes the whole body', { skip }, () => {
         const id = `p-${field}`;
         const parent = k.row(S, id, 5, { [field]: sample[0] });
         await door.coll(S, k.family).insertOne(parent);
-        const fork = await seedFork(door, S, kind, id, 5, { [field]: sample[1] });
+        // A fork edge holds its subject's five identity fields (design §1): the fixture's edge builder derives its ends from the row id, so they are named.
+        const fork = await seedFork(door, S, kind, id, 5, { ...identityOf(parent), [field]: sample[1] });
         const r = await doors.resolve.MCP(kind, fork._id, 'fork');
         assert.ok(r.ok, `${kind}.${field}: resolve refused: ${r.sentence}`);
         const stored = await door.coll(S, k.family).findOne({ _id: id });
@@ -140,7 +144,7 @@ describe('a fork keep writes the whole body', { skip }, () => {
       const id = 'p-keep-parent';
       const parent = k.row(S, id, 5, {});
       await door.coll(S, k.family).insertOne(parent);
-      const fork = await seedFork(door, S, kind, id, 5, k.alt);
+      const fork = await seedFork(door, S, kind, id, 5, { ...identityOf(parent), ...k.alt });
       const r = await doors.resolve.MCP(kind, fork._id, 'parent');
       assert.ok(r.ok, `${kind}: resolve refused: ${r.sentence}`);
       const stored = await door.coll(S, k.family).findOne({ _id: id });

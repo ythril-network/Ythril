@@ -66,6 +66,8 @@ const EXEMPT = {
   ]),
   ...reasoned('arrival is one of the four ways a fork changes, or a peer\'s deletion, or the local mark of a decline', [
     'sync/arrivals.ts:writeArrivals', 'sync/tombstone-apply.ts:applyPeerTombstones',
+    // Q-624 slice I3: the cascade an applied tombstone runs over the subject's forks, and the one writer of the decline mark (local-only, never body).
+    'sync/tombstone-apply.ts:cascadeToForks', 'sync/resolved-elsewhere.ts:writeResolvedElsewhere',
   ]),
   ...reasoned('it writes only ids the read set read, and `ReadSet.stored()` refused a fork row there; a WritePlan carries no field to assert on', [
     'brain/write-plan/commit.ts:writeStage',
@@ -93,10 +95,13 @@ const EXEMPT = {
     'spaces/_shared.ts:repairStaleSpaceIds',
   ]),
   ...reasoned('whole-collection removal, or an offline tool that unsets 6.0 fields on every row', [
-    'spaces/lifecycle.ts:wipeSpaceUnqueued', 'sync/positions-rollback.ts:rollBackPositions',
+    'spaces/lifecycle.ts:wipeSpaceUnqueued', 'sync/positions-rollback.ts:rollBackPositions', 'sync/positions-rollback.ts:rollBackForks',
   ]),
   ...reasoned('its collection name is computed and is never one of the four (candidate rows, a file move)', [
     'brain/candidate-prune.ts:pruneCandidateCollection', 'files/rekey-rows.ts:rekeyRows',
+  ]),
+  ...reasoned('the keep-writer writes the PARENT (never a fork row) through `writeAtReadVersion`, which refuses a fork row; the call is a callback the graph does not follow', [
+    'brain/fork-keep.ts:writeKeptBody',
   ]),
   // The fork module is the writer of fork rows: the keep-writer writes the PARENT, and the re-mint inserts a new row and removes the old one.
   'server/src/brain/forks.ts:*': 'the fork module itself: `writeKeptBody` and the re-mint, which change a fork only by resolve or re-mint',

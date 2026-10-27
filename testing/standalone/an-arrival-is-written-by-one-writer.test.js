@@ -77,6 +77,12 @@ const EXEMPT = {
     + 'that author\'s seq and with that author\'s content (Q-419). It stores no version — one field, no seq stamped, '
     + '`deliveredBy` untouched, nothing counted as landed and no embed queued — and it lives in this module rather than at a '
     + 'door because it IS an arrival\'s write, so no door may do it for itself',
+  // Q-624 slice I3: neither stores an arriving record.
+  'server/src/sync/tombstone-apply.ts:cascadeToForks':
+    'an applied peer tombstone removes its subject\'s fork rows here (Q-624 §7, R7), no tombstone issued: a delete, not an arrival',
+  'server/src/sync/resolved-elsewhere.ts:writeResolvedElsewhere':
+    'the local decision mark on a fork row whose peer tombstone this instance declined, or that arrived past such a tombstone (Q-624 §9a): '
+    + 'one local-only field on a row already stored, no version, no position, never body. Not the storage of an arriving record',
   'server/src/sync/tombstone-apply.ts:applyPeerTombstones':
     'a peer\'s tombstones delete their records — POST /api/sync/tombstones and the pull\'s tombstone transfer, one '
     + 'apply for both doors (bundle-46). A delete, not an arrival',

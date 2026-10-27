@@ -30,6 +30,7 @@ import { CONVENIENCE_SCHEMA } from '../../brain/list-conveniences.js';
 import { FILE_PATH_SCHEMA } from '../../brain/file-path-arg.js';
 import { decorateMemberRows, decoratePage, resolvePredicate, PAGE_DECORATION_SCHEMA } from '../../brain/list-decorations.js';
 import { withoutListDiagnostics } from '../../brain/read-projection.js';
+import { FORK_ROWS_IN_READS } from './shared.js';
 import { readSpacesOfCallAcross } from '../../spaces/read-scope.js';
 import { pageAcrossMembers } from '../../spaces/page-across-members.js';
 import { projectionForOrderedMerge } from '../../brain/projection.js';
@@ -39,7 +40,7 @@ import { budgetSizeSchema } from './_page-budget-schema.js';
 
 export const queryTool: ToolHandler = {
   name: 'filter',
-  description: 'Run a structured read-only query (MongoDB filter) against brain collections. This is the EXACT counterpart to `recall`: no embedding, no ranking, no score — a predicate, and every row that satisfies it. Reach for it when you know what you are looking for, and for `recall` when you know what it is about.\n\n'
+  description: 'Run a structured read-only query (MongoDB filter) against brain collections. ' + FORK_ROWS_IN_READS + 'This is the EXACT counterpart to `recall`: no embedding, no ranking, no score — a predicate, and every row that satisfies it. Reach for it when you know what you are looking for, and for `recall` when you know what it is about.\n\n'
     + 'A FILE THE OPERATOR DELETED IS STILL READABLE HERE, AND ONLY HERE. Where the instance keeps a record of deleted files, that record carries `deletedAt` and this door answers with it — on purpose, because every other way to it is closed: it is out of the file listing, out of every file count, out of `recall` and `similar`, not a graph node and not a link target. Ask for `deletedAt: {"$exists": false}` on `files` to see only the files the space has.\n\n'
     + 'It also reaches records `recall` cannot: a record retired from semantic ranking has no vector, and this reads the collection.\n\n'
     + 'PAY FOR THE FIELDS YOU BRANCH ON, AND NOTHING ELSE: `projection` is the field-selection lever, and '

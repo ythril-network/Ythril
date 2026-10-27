@@ -37,8 +37,8 @@ import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 export async function readPageTombstones(
   spaceId: string, ids: readonly string[], session?: ClientSession,
 ): Promise<Map<TombstoneType, Map<string, HeldTombstone>>> {
-  const rows = await readStoredById<{ type?: TombstoneType; seq?: number; instanceId?: string; storedVia?: string }>(
-    spaceCollection(spaceId, 'tombstones'), ids, { type: 1, seq: 1, instanceId: 1, storedVia: 1 }, session ? { session } : {});
+  const rows = await readStoredById<{ type?: TombstoneType; seq?: number; instanceId?: string; storedVia?: string; issuedHere?: boolean; deletedAt?: string }>(
+    spaceCollection(spaceId, 'tombstones'), ids, { type: 1, seq: 1, instanceId: 1, storedVia: 1, issuedHere: 1, deletedAt: 1 }, session ? { session } : {});
   const out = new Map<TombstoneType, Map<string, HeldTombstone>>();
   for (const [id, t] of rows) {
     if (t.type === undefined || typeof t.seq !== 'number') continue;
@@ -47,6 +47,9 @@ export async function readPageTombstones(
       seq: t.seq,
       ...(typeof t.instanceId === 'string' ? { issuer: t.instanceId } : {}),
       ...(typeof t.storedVia === 'string' ? { storedVia: t.storedVia } : {}),
+      // Whether THIS instance issued it (a resolve's or a delete's own tombstone), and when it was decided: the arrival half of Q-624 §9a reads both.
+      issuedHere: t.issuedHere === true,
+      ...(typeof t.deletedAt === 'string' ? { deletedAt: t.deletedAt } : {}),
     });
   }
   return out;

@@ -9,7 +9,7 @@
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { RECORD_TYPES } from '../../config/types.js';
-import { UUID_V4_RE, formatRecallSummary, toRecallRecord, uuidSchema, unitScoreSchema } from './shared.js';
+import { UUID_V4_RE, formatRecallSummary, toRecallRecord, uuidSchema, unitScoreSchema, FORK_ROWS_IN_READS } from './shared.js';
 import { MAX_RECALL_TRAVERSE } from '../../brain/recall-seed-traversal.js';
 import { mapGraphNodes, graphNodeRecord } from '../../brain/recall-graph.js';
 import { stripRecordMeta, stripGraphRecordMeta } from '../../brain/recall-record-meta.js';
@@ -139,6 +139,7 @@ export const recallTool: ToolHandler = {
   // Every other tool acts on exactly one space and refuses a list.
   spaceList: true,
   description: 'Search all knowledge types (facts, entities, edges, chrono entries, files) by MEANING and by exact tokens: a semantic vector ranking is fused with a lexical (BM25) ranking, so identifiers such as article numbers or form ids rank even though their embeddings carry little meaning. A cross-encoder refines the top candidates when the operator has configured one. Searches the specified space if provided, otherwise across all accessible spaces.\n\n'
+    + FORK_ROWS_IN_READS + '\n\n'
     + 'THE RESPONSE, because knowing the parameters is only half of it:\n'
     + '• `results` — the ranked matches. Each carries `_id`, its name/fact/title, type, tags, properties, `spaceId`, timestamps and `score` (vector similarity).\n'
     + '• WHAT THIS DOOR DOES NOT SEND YOU, so you do not go looking for a flag to switch it off: the embedding VECTOR (never returned by anything here, and no parameter can ask for it), `matchedText` (the pre-embedding source string — for a file chunk it is the passage a SECOND time), `embeddingModel` (identical for every record in a space), and `seq` (a sync counter that is not an input to any tool). Withheld on REST too, with the same default, since 3.1.0 — `includeDiagnostics: true` restores them on either door and applies recursively, so a `graph_traverse` answer\'s `_graph` follows it at every depth. Leave it off: each of these is multiplied by `topK` and paid for in your context, and you want them only to answer WHY something ranked where it did. The other size lever is `includeFileContent: false`, which drops file-passage bodies and keeps their locations.\n'

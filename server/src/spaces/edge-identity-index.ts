@@ -49,7 +49,7 @@ export const EDGE_IDENTITY_INDEX = Object.freeze({
 /** The plain `{ from: 1 }` index the swap waits for (see the module header, step 3). */
 export const EDGE_FROM_INDEX = Object.freeze({ keys: Object.freeze({ from: 1 } as const), options: Object.freeze({}) });
 
-type ListedIndex = Document & { name?: string; key?: Record<string, unknown>; unique?: boolean; partialFilterExpression?: unknown };
+export type ListedIndex = Document & { name?: string; key?: Record<string, unknown>; unique?: boolean; partialFilterExpression?: unknown };
 
 const edgesOf = (spaceId: string): string => spaceCollection(spaceId, 'edges');
 
@@ -69,13 +69,15 @@ const overIdentityFields = (ix: ListedIndex): boolean => {
   return keys.length === Object.keys(EDGE_IDENTITY_KEYS).length && keys.every(k => k in EDGE_IDENTITY_KEYS);
 };
 
-const isPartialIdentity = (ix: ListedIndex): boolean =>
+/** Is `ix` the partial identity index (five fields, unique, `{ forkOf: null }`)? Matched by shape; the rollback tool drops it by this question. */
+export const isPartialIdentity = (ix: ListedIndex): boolean =>
   overIdentityFields(ix) && ix.unique === true && JSON.stringify(ix.partialFilterExpression) === JSON.stringify(EDGE_IDENTITY_INDEX.options.partialFilterExpression);
 
 /** The full unique identity index: five fields, unique, and no partial filter. Matched by shape, never by name. */
 const isFullIdentity = (ix: ListedIndex): boolean => overIdentityFields(ix) && ix.unique === true && ix.partialFilterExpression === undefined;
 
-const isFromIndex = (ix: ListedIndex): boolean => {
+/** Is `ix` the plain `{ from: 1 }` index? The rollback tool drops it by this question. */
+export const isFromIndex = (ix: ListedIndex): boolean => {
   const keys = Object.keys(ix.key ?? {});
   return keys.length === 1 && keys[0] === 'from';
 };

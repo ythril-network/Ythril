@@ -25,6 +25,9 @@ import { versionsFor, type VersionAllocation } from '../util/version-stamp.js';
 import { withLandingStamp, localRow, type LocalLanding } from '../sync/record-position-stream.js';
 import { countBrainWriteSeq } from '../metrics/brain-write-count.js';
 import type { BrainCollection } from '../config/types.js';
+import { col, asFilter } from '../db/mongo.js';
+import { spaceCollection } from '../db/space-collection.js';
+import { refuseForkEdit } from './forks.js';
 
 /** How many times an edit without `If-Match` tries before it answers the precondition refusal. */
 export const MAX_ATTEMPTS = 3;
@@ -44,6 +47,11 @@ export async function writeAtReadVersion<T>(
   /** A version of ANOTHER record the new one must also be above (Review's fork resolve: the parent is stamped above both versions). */
   above?: number,
 ): Promise<T | null> {
+  // The stored copy's version AND whether it is a fork (Q-624 §8): `forkOf` is in the projection, or the refusal is handed a row that never says it is
+  // one and passes everything. A fork row changes only by resolve, delete, arrival or re-mint, so an ordinary edit of one is refused before it writes.
+  const held = await col<{ _id: string; seq?: number; forkOf?: string }>(spaceCollection(spaceId, part))
+    .findOne(asFilter<{ _id: string }>({ _id: id }), { projection: { seq: 1, forkOf: 1 } });
+  refuseForkEdit(part, held);
   for (let attempt = 1; ; attempt++) {
     const [stamp] = await versionsFor(spaceId, [id], { parts: [part], ...(above !== undefined ? { known: new Map([[id, above]]) } : {}) });
     const at = stamp!;

@@ -362,8 +362,13 @@ describe('Review lists and resolves forks, on both doors', { skip }, () => {
       const before = await door.mongo.col('audit_log').countDocuments({});
       const r = await rd.resolve.MCP('entity', fork._id, 'parent');
       assert.ok(r.ok, r.sentence);
-      const rows = (await door.mongo.col('audit_log').find({}).toArray()).slice(before);
-      const entry = rows.find(x => JSON.stringify(x).includes('fork.resolve'));
+      // The audit row is written after the call answers (`logAuditEntry` is not awaited by the door), so it is read until it lands, for at most 2 s.
+      let entry;
+      for (let i = 0; i < 40 && !entry; i++) {
+        const rows = (await door.mongo.col('audit_log').find({}).toArray()).slice(before);
+        entry = rows.find(x => JSON.stringify(x).includes('fork.resolve'));
+        if (!entry) await new Promise(r => setTimeout(r, 50));
+      }
       assert.ok(entry, 'no fork.resolve row in the audit log');
       const text = JSON.stringify(entry);
       for (const part of [fork._id, parent, 'entity', 'parent', k.alt.name, `Entity ${parent}`]) assert.ok(text.includes(part), `the audit row does not carry ${part}: ${text.slice(0, 400)}`);

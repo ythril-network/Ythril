@@ -56,7 +56,7 @@ import { mergeTags, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
 import { WriteConflict } from './write-plan/types.js';
 import { RecordVersionAtCeiling } from './write-precondition.js';
-import { PositionClockUnusable, PositionsSeedUnavailable } from '../util/errors.js';
+import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal } from '../util/errors.js';
 import { classifyReadFailure } from './store-failure.js';
 import { tallySchemaRefusal, type SchemaRefusalDoor, type SchemaRefusalOutcome } from './schema-refusal-tally.js';
 
@@ -412,6 +412,8 @@ export function connectionRefusalAnswer(
     return { status: schemaRefusalStatus(verb), body: err.toStructured() };
   }
   if (err instanceof ReferenceRefusal) return { status: 400, body: { error: err.message } };
+  // A fork row named by an ordinary edit, or a re-key past the fork cap (Q-624): 409, the code beside the one sentence, on every door that asks here.
+  if (err instanceof ForkRowReadOnly || err instanceof ForkCapRefusal) return { status: err.status, body: { error: err.message, code: err.code } };
   return null;
 }
 

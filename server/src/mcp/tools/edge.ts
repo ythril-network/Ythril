@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { shapeError } from '../../brain/write-shape.js';
-import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH } from './shared.js';
+import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, FORKS_GO_WITH_THEIR_SUBJECT, FORK_ROWS_ARE_READ_ONLY } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
 import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge } from '../../brain/edges.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
@@ -157,7 +157,7 @@ export const save_edgeTool: ToolHandler = {
 
 export const update_edgeTool: ToolHandler = {
   name: 'update_edge',
-  description: 'Update one edge by its ID. Every field except `id` is optional; a field you omit is left '
+  description: 'Update one edge by its ID. ' + FORK_ROWS_ARE_READ_ONLY + 'Every field except `id` is optional; a field you omit is left '
     + 'exactly as it was.\n\n'
     + 'IT CANNOT REPOINT AN EDGE. There is no `from`/`to` here, deliberately: an edge that changes either end '
     + 'is a different relationship, not an edited one, and rewriting it in place would silently invalidate '
@@ -426,6 +426,7 @@ export const delete_edgeTool: ToolHandler = {
     + 'A TOMBSTONE IS WRITTEN, so the deletion propagates to peer instances on the next sync: ' + DELETION_REACH + ' The edge is '
     + 'not quietly resurrected from a peer that still has it. That is also why re-creating it with the same '
     + 'id does not undo this — the tombstone outranks it. Use a new id.\n\n'
+    + FORKS_GO_WITH_THEIR_SUBJECT + '\n\n'
     + 'PARAMETERS:\n'
     + '- `id` — the edge\'s `_id`, as `graph_traverse`, `filter` and recall\'s `_graph` report it. Required. An id '
     + 'that does not exist is an ERROR, not a silent success.\n'

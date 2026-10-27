@@ -181,7 +181,10 @@ describe('the rollback tool clears every 6.0 field', { skip }, () => {
   describe('a 5.6-shaped merkle over a cleared space matches its peer', () => {
     // 5.6's own list: today's local-only fields without the ones 6.0 adds. Its leaf is `doc:<collection>:<id>:<seq>:<hash>`, as `brain/merkle.ts` writes it.
     const OMIT_56 = () => new Set([...local, ...retagged].filter(f => !FIELDS.includes(f)));
-    const leaf56 = (part, doc) => createHash('sha256').update(`doc:${part}:${String(doc._id)}:${String(doc.seq)}:${canonicalJsonHash(doc, { omitKeys: OMIT_56() })}`).digest('hex');
+    // 5.6 dropped its omitted keys at every level; `canonicalJson` no longer takes that option (Q-624 §2), and the rows here carry them at the top
+    // level only, so the omission is made here before the hash.
+    const omit56 = (doc) => { const o = OMIT_56(); return Object.fromEntries(Object.entries(doc).filter(([k]) => !o.has(k))); };
+    const leaf56 = (part, doc) => createHash('sha256').update(`doc:${part}:${String(doc._id)}:${String(doc.seq)}:${canonicalJsonHash(omit56(doc))}`).digest('hex');
     const leaves = async (space) => {
       const out = [];
       for (const part of ['facts', 'entities', 'edges', 'chrono', 'links']) for (const d of await col(space, part).find({}).toArray()) out.push(leaf56(part, { ...d, _id: d._id.replace(space, 'x') }));

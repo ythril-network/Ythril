@@ -27,6 +27,7 @@ import { NEVER_RETURNED_PROJECTION } from '../read-projection.js';
 import { edgeIdFor } from '../edge-id.js';
 import { tripletClause } from '../edge-lookup.js';
 import { CHOSEN_VERSION_ROWS } from '../chosen-versions.js';
+import { refuseForkEdit } from '../forks.js';
 import { SubjectEdges, functionalSubjectKey } from '../functional-subject.js';
 import { inChunks } from '../../util/chunks.js';
 import { missingRefs } from '../entity-refs.js';
@@ -177,7 +178,10 @@ export class ReadSet {
   stored(kind: ReadKind, id: string): StoredRecord | null {
     const held = this.recordsOf(kind);
     if (!held.has(id)) throw new Error(`read set: ${kind} '${id}' was asked about but never loaded`);
-    return held.get(id)!;
+    const row = held.get(id)!;
+    // The one door every planner reads a stored copy through, so a save by id onto a FORK row is refused here (Q-624 §8, S7): the row is read whole.
+    refuseForkEdit(kind, row);
+    return row;
   }
 
   /**

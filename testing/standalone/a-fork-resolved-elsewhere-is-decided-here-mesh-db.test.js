@@ -125,7 +125,8 @@ describe('a fork resolved elsewhere is decided here', { skip }, () => {
     }
     const author = (n) => ({ instanceId: idOf(n), instanceLabel: n.toUpperCase() });
     const parent = k.row(S, pId, 5, { ...idn, author: author('a'), pos: 5, posAtSeq: 5 });
-    const fork = { ...k.row(S, 'x', 5, { ...idn, ...k.alt, author: author('c'), pos: 5, posAtSeq: 5 }), forkOf: pId };
+    // `forkAt` is the version the fork id derives from (parent decision, 2026-10-25): an entity, edge or chrono fork without it is malformed.
+    const fork = { ...k.row(S, 'x', 5, { ...idn, ...k.alt, author: author('c'), pos: 5, posAtSeq: 5 }), forkOf: pId, forkAt: 5 };
     fork._id = fixtures.forkIdOfBody(k.family, pId, fork);
     for (const n of NAMES) await inst[n].call('seed', { family: k.family, rows: n === 'c' ? [parent, fork] : [parent] });
     return { k, parentId: pId, forkId: fork._id };
@@ -149,9 +150,15 @@ describe('a fork resolved elsewhere is decided here', { skip }, () => {
         assert.equal(await inst.a.call('has', { family: k.family, id: forkId }), false, 'A still holds F after resolving it');
         assert.equal((await inst.a.call('serveTombstones')).some(t => t._id === forkId && t.instanceId === A), true, 'A holds no tombstone it issued for F');
         await cycle(schedule, [k.family]);
+        /*
+         * PARENT DECISION (2026-10-25): a declined tombstone is not relayed, so an instance A reaches only through B (which declined A's tombstone and
+         * stored nothing) never hears of A's resolve: it keeps F listed unmarked and decides it itself. Every instance A reaches directly is marked.
+         */
+        const reachedByA = schedule === 'C is reached only through B' ? ['b'] : ['b', 'c'];
         for (const n of ['b', 'c']) {
           assert.ok(await inst[n].call('has', { family: k.family, id: forkId }), `${n.toUpperCase()} lost F to a tombstone its authority declines: nothing is deleted on a peer's word that the authority refused`);
           const marks = await marksOn(n, kind, forkId);
+          if (!reachedByA.includes(n)) { assert.deepEqual(byOf(marks), [], `${n.toUpperCase()} is reached only through a peer that declined A's tombstone, and lists F marked ${JSON.stringify(marks)}`); continue; }
           assert.deepEqual(byOf(marks), [A], `${n.toUpperCase()} lists F marked ${JSON.stringify(marks)}, expected resolved on A`);
           assert.equal(marks[0].kept, 'original', `${n.toUpperCase()}: A kept the original, but the row says '${marks[0].kept}'`);
         }
@@ -162,7 +169,7 @@ describe('a fork resolved elsewhere is decided here', { skip }, () => {
         await cycle(schedule, [k.family]);
         assert.equal(await inst.b.call('has', { family: k.family, id: forkId }), false, 'B still holds F after resolving it');
         assert.ok(await inst.c.call('has', { family: k.family, id: forkId }), 'resolving on B removed C\'s copy against C\'s authority');
-        assert.deepEqual(byOf(await marksOn('c', kind, forkId)), [A, B].sort(), 'C does not list F resolved on both A and B');
+        assert.deepEqual(byOf(await marksOn('c', kind, forkId)), (reachedByA.includes('c') ? [A, B] : [B]).sort(), 'C does not list F resolved by every instance that reached it');
 
         // 5. Resolve on C: F is gone on all three and the three agree on the space's hash.
         const r5 = await inst.c.call('resolve', { kind, forkId, keep: 'parent' });

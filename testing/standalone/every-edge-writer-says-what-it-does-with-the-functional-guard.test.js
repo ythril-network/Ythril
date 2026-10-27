@@ -76,6 +76,17 @@ const WRITERS = {
   'server/src/db/rekey-memory-kind-to-fact.ts:rekeyMemoryKindToFact': { marker: 'none-by-design', why: 'boot migration of the memory kind' },
   'server/src/db/restore.ts:backupLoader': { marker: 'none-by-design', why: 'a dump restored verbatim into a collection emptied for it: every marker comes back with the from and label it was written with, and a restore act builds the guard index before it loads, so a duplicate marker in the backup fails the act' },
   'server/src/spaces/_shared.ts:repairStaleSpaceIds': { marker: 'none-by-design', why: 'rewrites a stale spaceId field in every collection' },
+  // Q-624 (slice I3): the fork module's writers of fork rows (section 7 and the orphan resolve of section 9), each a new row with no marker.
+  'server/src/brain/forks.ts:remintForks':
+    { marker: 'drop', why: 'a re-minted fork row is built by rekeyedRow and the guard removed by name: a fork is never stamped, its old subject\'s marker would hold that slot for ever' },
+  'server/src/brain/forks.ts:resolveOrphan':
+    { marker: 'drop', why: 'an orphan edge kept is re-keyed onto its identity\'s own id as a new row without forkOf and without any marker' },
+  // The keep-writer writes the PARENT (a record, never a fork row), and never its from or label, so the parent's own marker still names it.
+  'server/src/brain/fork-keep.ts:writeKeptBody':
+    { marker: 'carry-if-unchanged', why: 'the keep writes the parent\'s body and never an edge\'s identity, so the parent\'s marker is carried; it is skipped by name and never set or unset' },
+  'server/src/sync/tombstone-apply.ts:cascadeToForks': { marker: 'none-by-design', why: 'an applied tombstone\'s cascade deletes the subject\'s fork rows, markers (there are none on a fork) with them' },
+  'server/src/sync/resolved-elsewhere.ts:writeResolvedElsewhere': { marker: 'none-by-design', why: 'sets the local decision mark on a fork row; from, label and the marker are untouched' },
+  'server/src/sync/positions-rollback.ts:rollBackForks': { marker: 'none-by-design', why: 'the offline rollback deletes unresolved fork rows and unsets their decision marks; the write guard is never touched' },
 };
 
 const INDEX = moduleIndex('server/src');

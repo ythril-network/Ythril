@@ -40,7 +40,8 @@ describe('a delete takes its forks', { skip }, () => {
   let door; let deletes; let ttl;
 
   before(async () => {
-    door = await openPushDoor({ suite: 'q624t3_delete', spaces: [{ id: S, label: 'Delete', folders: [], meta: {} }] });
+    // `completeLinkage`: the space's links are records (every space after the boot conversion), so the cascade preview can read what points at an entity.
+    door = await openPushDoor({ suite: 'q624t3_delete', spaces: [{ id: S, label: 'Delete', folders: [], completeLinkage: true, meta: {} }] });
     await initForkFixtures();
     deletes = {
       fact: (await import('../../server/dist/brain/fact.js')).deleteFact,
@@ -120,7 +121,7 @@ describe('a delete takes its forks', { skip }, () => {
         const k = FORK_KINDS[kind];
         const parent = randomUUID();
         await door.push('/tombstones', { tombstones: [wire(parent, kind, 9)] }, { spaceId: S, token: PEER_TOKEN });
-        const row = { ...k.row(S, 'late', 5, kind === 'edge' ? { from: randomUUID(), to: randomUUID(), label: 'knows', ...k.alt } : k.alt), forkOf: parent };
+        const row = { ...k.row(S, 'late', 5, kind === 'edge' ? { from: randomUUID(), to: randomUUID(), label: 'knows', ...k.alt } : k.alt), forkOf: parent, forkAt: 5 };
         row._id = forkIdOfBody(k.family, parent, row);
         const r = await door.push('/batch-upsert', { [k.family]: [row] }, { spaceId: S });
         assert.equal(r.code, 200, JSON.stringify(r.body));

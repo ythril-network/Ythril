@@ -8,6 +8,7 @@ import { removeEdges } from './edge-removal.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
+import { refuseForkEdit, remintForks } from './forks.js';
 import { classifyEdgeUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
 import { applyExpiryToUpdate } from './ttl.js';
@@ -229,6 +230,8 @@ export async function updateEdgeById(
   const existing = await collection.findOne(asFilter<EdgeDoc>({ _id: id, spaceId }),
     { projection: NEVER_RETURNED_PROJECTION }) as EdgeDoc | null;
   if (!existing) return null;
+  // An unresolved version is read-only (Q-624 §8), the relabel above all: re-keyed onto its subject's derived id, a fork edge would take the identity slot.
+  refuseForkEdit('edge', existing);
 
   // The version is stamped and the position taken AT the write (`writeAtReadVersion` below), not here: everything awaited between the
   // position and the write holds every position-paged reader of the space (`Q-196`).
@@ -389,7 +392,12 @@ export async function updateEdgeById(
     // (`brain/held-transaction.ts`): the moved edge under its new id at the seq the re-key gave it IS the commit.
     // A duplicate key on the guard (or on the identity it moves onto) is answered by `writeRelabel`, never raised raw.
     const moved: EdgeRekey | null = await writeRelabel(spaceId, relabelTarget, functionalGuard, () => inHeldTransaction(spaceId, 'edge.relabel',
-      (session) => rekeyEdge(spaceId, existing, { label: newLabel }, carried, Object.keys($unset), session, functionalGuard),
+      async (session) => {
+        const rekeyed = await rekeyEdge(spaceId, existing, { label: newLabel }, carried, Object.keys($unset), session, functionalGuard);
+        // The subject's forks follow it onto the new id by a re-mint, in this transaction; their own label is authored body and stays (Q-624 §7).
+        if (rekeyed) await remintForks(spaceId, 'edge', [{ oldSubject: existing._id, newSubject: rekeyed.edge._id }], { session, now });
+        return rekeyed;
+      },
       { landed: async (r) => r === null || (await collection.countDocuments(
         asFilter<EdgeDoc>(atReadSeq(r.edge._id, r.edge.seq)), { limit: 1 })) === 1 }), classify);
     if (moved) {
