@@ -68,34 +68,36 @@ const meta = (validationMode) => ({
  * One violating document per family: how to build it, its push route, and the row it earns. `ok` is the same family conforming.
  * `collection` is where it is stored; `key` the batch body key.
  */
+// Q-624 (design rev 4 section 4, "Batch stats"): every kind forks, so every family's batch counts carry `forked`, `forkDepthRefused` and `invalidFork`
+// beside the counts this file pins; a fact's gained `invalidFork`. ADDED keys, each 0 here: no document of this file forks.
 const FAMILIES = {
   entities: {
     key: 'entities', collection: 'entities', single: '/entities', statusOnSingle: 'ok',
     bad: (s, id, seq) => build.entity(s, id, seq, { type: 'person', properties: { age: 'old' }, author: { ...PEER_AUTHOR } }),
     ok: (s, id, seq) => build.entity(s, id, seq, { type: 'person', properties: { age: 3 }, author: { ...PEER_AUTHOR } }),
     row: { field: 'properties.age', value: 'old', reason: NUMBER_GOT_STRING },
-    counts: (n) => ({ upserted: 2, skipped: 0, tombstoned: 0, schemaViolations: n, rejected: 0 }),
+    counts: (n) => ({ upserted: 2, skipped: 0, tombstoned: 0, schemaViolations: n, rejected: 0, forked: 0, forkDepthRefused: 0, invalidFork: 0 }),
   },
   facts: {
     key: 'facts', collection: 'facts', single: '/facts', statusOnSingle: 'inserted',
     bad: (s, id, seq) => build.fact(s, id, seq, { type: 'claim', properties: { confidence: 'high' }, author: { ...PEER_AUTHOR } }),
     ok: (s, id, seq) => build.fact(s, id, seq, { type: 'claim', properties: { confidence: 2 }, author: { ...PEER_AUTHOR } }),
     row: { field: 'properties.confidence', value: 'high', reason: NUMBER_GOT_STRING },
-    counts: (n) => ({ inserted: 2, updated: 0, forked: 0, skipped: 0, forkDepthRefused: 0, tombstoned: 0, schemaViolations: n, rejected: 0 }),
+    counts: (n) => ({ inserted: 2, updated: 0, forked: 0, skipped: 0, forkDepthRefused: 0, tombstoned: 0, schemaViolations: n, rejected: 0, invalidFork: 0 }),
   },
   edges: {
     key: 'edges', collection: 'edges', single: '/edges', statusOnSingle: 'ok',
     bad: (s, id, seq) => build.edge(s, id, seq, { label: 'knows', properties: { since: 'long ago' }, author: { ...PEER_AUTHOR } }),
     ok: (s, id, seq) => build.edge(s, id, seq, { label: 'knows', properties: { since: 1 }, author: { ...PEER_AUTHOR } }),
     row: { field: 'properties.since', value: 'long ago', reason: NUMBER_GOT_STRING },
-    counts: (n) => ({ upserted: 2, skipped: 0, tombstoned: 0, schemaViolations: n, duplicateTriplets: 0, rejected: 0 }),
+    counts: (n) => ({ upserted: 2, skipped: 0, tombstoned: 0, schemaViolations: n, duplicateTriplets: 0, rejected: 0, forked: 0, forkDepthRefused: 0, invalidFork: 0 }),
   },
   chrono: {
     key: 'chrono', collection: 'chrono', single: '/chrono', statusOnSingle: 'ok',
     bad: (s, id, seq) => build.chrono(s, id, seq, { type: 'event', properties: { priority: 'urgent' }, author: { ...PEER_AUTHOR } }),
     ok: (s, id, seq) => build.chrono(s, id, seq, { type: 'event', properties: { priority: 'low' }, author: { ...PEER_AUTHOR } }),
     row: { field: 'properties.priority', value: 'urgent', reason: 'must be one of: low, high' },
-    counts: (n) => ({ upserted: 2, skipped: 0, tombstoned: 0, schemaViolations: n, unknownType: 0, rejected: 0 }),
+    counts: (n) => ({ upserted: 2, skipped: 0, tombstoned: 0, schemaViolations: n, unknownType: 0, rejected: 0, forked: 0, forkDepthRefused: 0, invalidFork: 0 }),
   },
 };
 
