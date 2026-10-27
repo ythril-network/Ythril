@@ -69,6 +69,16 @@ let CAP_MS = BOUND.holdDeadlineMs + 2500;
 /** The server's `answered 5xx` log lines with the time they were said (`before` fills it, `after` stops it). */
 const answered5xx = [];
 
+/**
+ * The server's `record position held … ended=timeout` lines with the time they were said: a hold the bound ended, by space and holder. The proof of a
+ * stall for a lane whose write the 50 ms sample cannot see (`stallSaidBy` in `_seq-hold-cases.mjs`).
+ */
+const heldToTimeout = [];
+
+/** Did the server say, while this call waited, that the lane's own hold was ended by the bound? */
+const holdEndedByBound = (lane, startedAt, answeredAt) => !!lane.stallSaidBy && heldToTimeout.some(l => l.at >= startedAt - 50 && l.at <= answeredAt + 50
+  && new RegExp(`\\bspace=${lane.space}\\b.*\\bholder=${lane.stallSaidBy.replace(/\./g, '\\.')} ended=timeout`).test(l.line));
+
 /** Filled by `before`; the doors and the holder cases read them when they run. */
 const env = {};
 const ctx = {};
@@ -93,7 +103,7 @@ for (const [holder, cases] of HOLDERS) {
     const collection = mine.lock === 'counter' ? 'ythril_counters' : mine.collection;
     if (!collection) throw new Error(`holder case '${mine.label}' locks a document but names no collection in _seq-hold-cases.mjs`);
     LANES.push({
-      name: `holder ${holder}: ${mine.label}`, space, collection, expect503: false, endedAs: mine.endedAs, baseOnly: mine.baseOnly,
+      name: `holder ${holder}: ${mine.label}`, space, collection, expect503: false, endedAs: mine.endedAs, baseOnly: mine.baseOnly, stallSaidBy: mine.stallSaidBy,
       seed: () => seedHolderSpace(env.fixture, space),
       lock: mine.lock === 'counter' ? () => holdCounterLock(env.fixture.mongo, space) : mine.lock,
       call: mine.run,
@@ -147,7 +157,8 @@ async function stallAndRelease(lane) {
     await lock.release().catch(() => {});
   }
   if (!res.settled) await res.rest;
-  return { res, atAnswer, releaseError, sawStall: await step('the watch for a live write', () => watching), startedAt, answeredAt };
+  const sawLive = await step('the watch for a live write', () => watching);
+  return { res, atAnswer, releaseError, sawStall: sawLive || holdEndedByBound(lane, startedAt, answeredAt), startedAt, answeredAt };
 }
 
 /** Wait the settle window out, reading the lane every `POLL_MS`; the documents that differ from the answer's, by identity. */
@@ -399,6 +410,7 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
       const { subscribeLogLines } = await import('../../server/dist/util/log.js');
       stopListening = subscribeLogLines((line) => {
         if (/answered 5\d\d/.test(line)) { answered5xx.push({ at: Date.now(), line }); if (answered5xx.length > 500) answered5xx.shift(); }
+        if (/record position held .* ended=timeout/.test(line)) { heldToTimeout.push({ at: Date.now(), line }); if (heldToTimeout.length > 500) heldToTimeout.shift(); }
       });
       await runAll(lanes, results, REPS, discarded);
     },
