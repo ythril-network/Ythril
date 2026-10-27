@@ -314,9 +314,7 @@ export async function runSyncForPeer(
 
   if (matches.length === 0) return { networksSynced: 0, errors: 0, refused: 0, notFound: true };
 
-  let networksSynced = 0;
-  let errors = 0;
-  let refused = 0;
+  let networksSynced = 0; let errors = 0; let refused = 0;
   for (const { net, member } of matches) {
     try {
       await inCycle(() => runSyncForMember(net, member));

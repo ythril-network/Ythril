@@ -15,6 +15,8 @@
  * not import from its own parent — that edge would make the two mutually dependent for a string union.
  */
 
+import type { SpaceStats } from '../../core/api.types';
+
 /**
  * Tabs backed by a per-space collection. These are exactly the tabs an Overview stat tile can open,
  * because a tile shows a count and only a collection has one.
@@ -64,3 +66,23 @@ export const RECORD_TABS = ['entities', 'edges', 'facts', 'chrono'] as const sat
 
 /** A tab that browses one kind of record: a collection tab, by construction (`satisfies` fails the build on a name that is not one). */
 export type RecordTab = typeof RECORD_TABS[number];
+
+/**
+ * What the strip shows for each record tab, read by `brain.component`'s `collectionTabs`. The ORDER is not here: it is `RECORD_TABS`.
+ *
+ * `label` is an i18n KEY now, not a literal. These four were the only tabs in the strip rendering a
+ * hard-coded English string — the translations existed the whole time and were simply never used, so
+ * the strip read half-German in a German UI and nothing flagged it.
+ *
+ * `icon` likewise: Overview, Query, Graph, Review and Files each carried one and these four did not,
+ * leaving a strip where some tabs have an icon and some do not. The icons match the Overview tiles
+ * that link here, because the tiles and the tabs are the same five things.
+ */
+export const RECORD_TAB_FACES: Readonly<Record<RecordTab, { label: string; icon: string; statsKey: keyof SpaceStats }>> = {
+  entities: { label: 'brain.tab.entities', icon: 'stack', statsKey: 'entities' },
+  // `link` and not `graph`: the Graph tab already owns that glyph, and two different tabs wearing the
+  // same icon in one strip is worse than a slightly less literal one.
+  edges: { label: 'brain.tab.edges', icon: 'link', statsKey: 'edges' },
+  facts: { label: 'brain.tab.facts', icon: 'brain', statsKey: 'facts' },
+  chrono: { label: 'brain.tab.chrono', icon: 'timer', statsKey: 'chrono' },
+};
