@@ -662,7 +662,16 @@ async function relinkTally(spaceId: string, absorbedId: string): Promise<RelinkT
     col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(relinked.links, { limit }),
     col<FileMetaDoc>(spaceCollection(spaceId, 'files')).countDocuments(relinked.faces, { limit }),
   ]);
-  return { edges, links, faces };
+  // What names the absorbed record's unresolved versions follows them to the survivor (`remintForks`), so this merge relinks it and it counts toward the bound.
+  // At most `MAX_FORKS_PER_RECORD` versions, each count stopped at what is left of the bound.
+  const forkIds = (await col<{ _id: string }>(spaceCollection(spaceId, 'entities')).find(asFilter<{ _id: string }>({ forkOf: absorbedId }), { projection: { _id: 1 } }).toArray()).map(f => f._id);
+  let forkEdges = 0; let forkLinks = 0;
+  for (const id of forkIds) {
+    const f = relinkFilters(spaceId, id);
+    forkEdges += await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(f.edges, { limit: Math.max(1, limit - edges - forkEdges) });
+    forkLinks += await col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(f.links, { limit: Math.max(1, limit - links - forkLinks) });
+  }
+  return { edges: edges + forkEdges, links: links + forkLinks, faces };
 }
 
 /** What the merge transaction wrote, for the steps that run once it has committed. */
@@ -863,7 +872,10 @@ async function relinkAndAbsorb(
   await relinkLinksOfRecord(spaceId, { absorbedId: absorbed._id, survivorId: survivor._id, kind: 'entity' }, { now, session });
 
   // ── 3b. The absorbed entity's unresolved versions become the survivor's, re-minted under ids that derive (Q-624 §7), before its tombstone ──
-  await remintForks(spaceId, 'entity', [{ oldSubject: absorbed._id, newSubject: survivor._id }], { session, now });
+  // What named a fork (an edge end, a link target) follows it to its new id inside the re-mint, and its edge half's embeds and webhooks are this merge's too.
+  const reminted = await remintForks(spaceId, 'entity', [{ oldSubject: absorbed._id, newSubject: survivor._id }], { session, now });
+  rekeyed.push(...reminted.rekeyed);
+  deletedDuplicateEdgeIds.push(...reminted.deletedDuplicateEdgeIds);
 
   // ── 4. Update the survivor, delete the absorbed entity + its tombstone ──
   const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
