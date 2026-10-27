@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   changelogSection, sectionContentLines, releaseBody,
-  abridgeForRelease, RELEASE_BODY_MAX, RELEASE_BODY_TARGET, entriesWithSection, isBreaking,
+  abridgeForRelease, RELEASE_BODY_MAX, RELEASE_BODY_TARGET, entriesWithSection, isBreaking, releasePreamble,
 } from '../../scripts/changelog-section.mjs';
 
 const wf = readFileSync('.github/workflows/publish.yml', 'utf8');
@@ -280,10 +280,15 @@ describe('a body too long for GitHub is abridged, not refused', () => {
       + 'is nothing real to abridge — add a fixture of the shape instead of letting this pass on nothing');
     const { version, full, breaking } = withBreaking;
 
-    const out = abridgeForRelease(full, version, 20_000);
+    // Hard means the entries are cut, so the budget is the release's own opening and upgrade table plus room for a few
+    // entries. A fixed figure stopped meaning that at 6.0, whose table alone is over 20 000 characters: the abridger then
+    // answers only a link to the changelog (its designed fallback), and the case measured that instead of its subject.
+    const budget = releasePreamble(full).length + 4_000;
+    const out = abridgeForRelease(full, version, budget);
+    assert.ok(out.length < full.length, `${version} fits ${budget} characters whole, so nothing was abridged and nothing is measured`);
     const missing = breaking.filter(e => !out.includes(e.text.split('\n')[0]));
     assert.deepEqual(missing.map(e => e.text.slice(0, 60)), [],
-      `abridging ${version} to 20 000 characters dropped ${missing.length} breaking `
+      `abridging ${version} to ${budget} characters dropped ${missing.length} breaking `
       + `${missing.length === 1 ? 'entry' : 'entries'} of ${breaking.length}.`);
   });
 });

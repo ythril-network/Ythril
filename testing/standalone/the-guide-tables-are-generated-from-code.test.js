@@ -54,7 +54,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
-import { previousMajorTag, toolNamesAt } from './_previous-major-tools.mjs';
+import { toolNamesOfEarlierMajors } from './_previous-major-tools.mjs';
 import { GENERATED_REGIONS, regionMarkers, capabilityMapModel, rungCell, isToolDoorPath } from './_guide-tables.mjs';
 
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
@@ -143,8 +143,9 @@ describe('the rung cell states only what the code has', () => {
 // ── tool names in headings and tool tables ──────────────────────────────────────────────────────────────────────
 
 const LIVE = new Set(ALL_TOOLS.map(t => t.name));
-const TAG = previousMajorTag();
-const RETIRED = new Set([...toolNamesAt(TAG)].filter(n => !LIVE.has(n)));
+const WAS_AT = toolNamesOfEarlierMajors();
+const TAG = `the earlier majors (${[...new Set(WAS_AT.values())].join(', ')})`;
+const RETIRED = new Set([...WAS_AT.keys()].filter(n => !LIVE.has(n)));
 const KNOWN = new Set([...LIVE, ...RETIRED]);
 
 /** An identifier written the way a tool name is. */
@@ -208,7 +209,7 @@ describe('a heading or tool table names a tool that exists', () => {
     const offenders = NAMED
       .filter(n => !LIVE.has(n.name) && (n.strict || KNOWN.has(n.name)))
       .map(n => `${n.page}:${n.line} ${n.where} names \`${n.name}\`, `
-        + (RETIRED.has(n.name) ? `which was a tool at ${TAG} and is not one now` : 'which the registry has never had'));
+        + (RETIRED.has(n.name) ? `which was a tool at ${WAS_AT.get(n.name)} and is not one now` : 'which the registry has never had'));
     assert.deepEqual(offenders, [],
       'a guide heading or tool table names something that is not a tool:\n  ' + offenders.join('\n  ')
       + '\n\nAn integrator reads a heading as the name to call. Name the live tool (`filter` for `query`, `graph_traverse` for '
