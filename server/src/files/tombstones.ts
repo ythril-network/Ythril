@@ -198,7 +198,7 @@ const REPLACED_FILE_TOMBSTONE_INDEXES = ['pending_1_deletedAt_1'] as const;
 /**
  * THE position of a tombstone: its own `positionAt`, or — for one stored before positions existed — its `deletedAt`, which
  * was the position then. What an acknowledgement, a prune and a page compare, and nothing else is. Pure. Named for the
- * tombstone because `util/seq-keyset.ts` and `sync/seq-run-pager.ts` each read a position of their own kind.
+ * tombstone because `util/seq-keyset.ts` and `sync/position-run-pager.ts` each read a position of their own kind.
  */
 export const fileTombstonePosition = (t: { positionAt?: unknown; deletedAt?: unknown }): string | undefined =>
   typeof t.positionAt === 'string' ? t.positionAt : typeof t.deletedAt === 'string' ? t.deletedAt : undefined;

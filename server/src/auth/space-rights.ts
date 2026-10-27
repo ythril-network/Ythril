@@ -172,7 +172,7 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // A files-only token can read the media queue and must not read a listing of knowledge record ids.
   { route: '/api/brain/spaces/:spaceId/embedding-queue/records', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/records/retry', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
-  // Review's forks (bundle-81): the list is a view of the space's facts, so a reader may see it; the resolve rewrites one fact and deletes another, so it is a write.
+  // Review's forks (bundle-81): the list is a view of the space's records of the four kinds that fork, so a reader may see it; the resolve rewrites one record and deletes another, so it is a write.
   { route: '/api/brain/spaces/:spaceId/forks', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/forks/:forkId/resolve', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/files', method: 'PATCH', area: 'files', needs: 'write', scope: 'path' },

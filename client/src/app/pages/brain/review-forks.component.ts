@@ -128,8 +128,6 @@ interface RowView {
     .dialog .message { margin: 0 0 1.1rem; color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; }
     .dialog .message span { display: block; margin-top: 0.8rem; }
     .dialog .actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
-    .btn-danger-solid { background: var(--danger); color: #fff; border-color: var(--danger); }
-    .btn-danger-solid:not(:disabled):hover { opacity: .9; }
 
     /* The app has no global focus ring, so the keep actions and the confirmation draw their own (decision 41). */
     .fk-actions button:focus-visible, .dialog button:focus-visible, .l3-full summary:focus-visible, .kind-empty button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
