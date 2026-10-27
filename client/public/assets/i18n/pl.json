@@ -2389,6 +2389,8 @@
   "review.sub.contradictions": "Sprzeczności",
   "review.sub.suggestions": "Sugestie",
   "brain.review.forks.tab": "Rozwidlenia",
+  "brain.review.forks.marker": "Rozwidlenie w przeglądzie",
+  "brain.review.forks.markerOpen": "Otwórz w przeglądzie, Rozwidlenia",
   "brain.review.forks.intro": "Dwa węzły sieci zapisały różne wersje tego samego rekordu w tej samej wersji, więc zachowano obie kopie. Dla każdego rozwidlenia wybierz wersję, którą ta przestrzeń zachowuje. Druga zostanie usunięta.",
   "brain.review.forks.count.one": "{{range}} z {{count}} rozwidlenia",
   "brain.review.forks.count.few": "{{range}} z {{count}} rozwidleń",

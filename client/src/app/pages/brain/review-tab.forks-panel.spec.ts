@@ -18,6 +18,7 @@ import { BrainApi } from '../../core/brain-api.service';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import type { ForkRow } from '../../core/forks.types';
+import { ActivatedRoute, convertToParamMap } from '@angular/router';
 
 /** The real English words under brain.review.forks.*, as a tree, so the buttons read as a person reads them. */
 function forksWords(): Record<string, any> {
@@ -52,7 +53,7 @@ const answer = (rows: ForkRow[], counts?: Record<string, number>) => ({
   counts: counts ?? Object.fromEntries(['fact', 'entity', 'chrono', 'edge'].map(k => [k, rows.filter(r => r.kind === k).length])),
 });
 
-function setup(forksApi: Record<string, unknown>, isView = false) {
+function setup(forksApi: Record<string, unknown>, isView = false, query: Record<string, string> = {}) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     imports: [ReviewTabComponent, getTranslocoModule({ translation: { en: forksWords() } })],
@@ -62,6 +63,7 @@ function setup(forksApi: Record<string, unknown>, isView = false) {
       { provide: DuplicatesApi, useValue: { listDuplicates: () => of({ duplicates: [] }) } },
       { provide: ContradictionsApi, useValue: { listContradictions: () => of({ contradictions: [] }) } },
       { provide: ForksApi, useValue: forksApi },
+      { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap(query) } } },
       { provide: ToastService, useValue: { error: () => {}, success: () => {}, info: () => {}, show: () => {} } },
       { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(true) } },
     ],
@@ -180,5 +182,24 @@ describe('the Forks tab of Review', () => {
     const listForks = vi.fn(() => of({ forks: [], skip: 0, limit: 25 }));
     setup({ listForks }, true);
     expect(listForks).not.toHaveBeenCalled();
+  });
+
+  // A fork row's marker in a Brain list links to `?tab=review&section=forks&forkKind=<kind>` (`shared/fork-marker.component`): the tab opens on that section
+  // with that kind chosen, so the reader lands on the versions of the row they came from and not on the duplicates list.
+  it('opens on the Forks section with the linked kind chosen', () => {
+    const listForks = vi.fn(() => of(answer([row('e1', 'entity')])));
+    const { el } = setup({ listForks }, false, { section: 'forks', forkKind: 'entity' });
+    expect(listForks).toHaveBeenCalledWith('work', 0, expect.anything(), 'entity');
+    expect(el.querySelector('#review-tab-forks')?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('opens on the default section when the link names no section, or a kind that is none', () => {
+    const listForks = vi.fn(() => of(answer([])));
+    const plain = setup({ listForks });
+    expect(plain.el.querySelector('#review-tab-forks')?.getAttribute('aria-selected')).toBe('false');
+    expect(listForks).toHaveBeenLastCalledWith('work', 0, expect.anything(), undefined);
+    const odd = setup({ listForks }, false, { section: 'forks', forkKind: 'proto' });
+    expect(odd.el.querySelector('#review-tab-forks')?.getAttribute('aria-selected')).toBe('true');
+    expect(listForks).toHaveBeenLastCalledWith('work', 0, expect.anything(), undefined);
   });
 });

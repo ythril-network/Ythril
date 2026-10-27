@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
+import { ForkMarkerComponent } from '../../shared/fork-marker.component';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
@@ -47,7 +48,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
   selector: 'app-chrono-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, RefusalAlertComponent, WriteWarningsComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -229,7 +230,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                     </tr>
                   } @else {
                     <tr>
-                      <td>{{ entry.title }} <app-superseded-badge [superseded]="entry.superseded" /></td>
+                      <td>{{ entry.title }} <app-superseded-badge [superseded]="entry.superseded" /> <app-fork-marker [forkOf]="entry.forkOf" kind="chrono" /></td>
                       <td class="desc-cell" style="max-width:160px;" [title]="entry.description ?? ''">
                         <div class="desc-clamp">{{ entry.description || '—' }}</div>
                       </td>

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, output, signal } from '@angular/core';
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
+import { ForkMarkerComponent } from '../../shared/fork-marker.component';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
@@ -50,7 +51,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
   selector: 'app-facts-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntityRefFieldComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, RefusalAlertComponent, WriteWarningsComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntityRefFieldComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -230,7 +231,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                     </tr>
                   } @else {
                     <tr>
-                      <td style="max-width:300px; white-space:pre-wrap; word-break:break-word;">{{ mem.fact }} <app-superseded-badge [superseded]="mem.superseded" /></td>
+                      <td style="max-width:300px; white-space:pre-wrap; word-break:break-word;">{{ mem.fact }} <app-superseded-badge [superseded]="mem.superseded" /> <app-fork-marker [forkOf]="mem.forkOf" kind="fact" /></td>
                       <td class="desc-cell" style="max-width:180px;" [title]="mem.description ?? ''">
                         <div class="desc-clamp">{{ mem.description || '—' }}</div>
                       </td>

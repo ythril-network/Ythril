@@ -2389,6 +2389,8 @@
   "review.sub.contradictions": "Contradictions",
   "review.sub.suggestions": "Suggestions",
   "brain.review.forks.tab": "Forks",
+  "brain.review.forks.marker": "Fork in Review",
+  "brain.review.forks.markerOpen": "Open in Review, Forks",
   "brain.review.forks.intro": "Two peers wrote different versions of the same record at the same version, so both copies were kept. For each fork, choose the version this space keeps. The other one is deleted.",
   "brain.review.forks.count.one": "{{range}} of {{count}} fork",
   "brain.review.forks.count.few": "{{range}} of {{count}} forks",
