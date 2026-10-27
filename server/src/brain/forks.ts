@@ -206,10 +206,16 @@ export interface ForkRepoint {
   readonly patch?: Readonly<Record<string, unknown>>;
 }
 
-/** What a re-mint did: the old fork id and the new one, and the old ids whose body the receiving subject already held (removed, nothing inserted). */
+/**
+ * What a re-mint did: the old fork id and the new one, the old ids whose body the receiving subject already held (removed, nothing inserted), and what
+ * followed the old ids: the edges and links that NAMED a removed fork now name its new id, or the row that already held its body ({@link remintForks}).
+ * `rekeyed` and `deletedDuplicateEdgeIds` are the edge half's, for the steps a caller runs once its transaction has committed (embeds, webhooks).
+ */
 export interface ForkRemint {
   reminted: Array<{ from: string; to: string }>;
   alreadyHeld: string[];
+  rekeyed: Array<import('./edge-rekey.js').EdgeRekey>;
+  deletedDuplicateEdgeIds: string[];
 }
 
 /**
@@ -221,11 +227,16 @@ export interface ForkRemint {
  *  4. the old row goes behind a tombstone issued here and the new one is inserted, carrying a `_resolvedElsewhere` mark: the decision is still owed.
  * A body the receiving subject or one of its forks already holds is not inserted again. The receiving subject's forks plus the incoming ones may not
  * pass `MAX_FORKS_PER_RECORD`: {@link ForkCapRefusal}, thrown before anything is written, so the transaction aborts and the store is unchanged.
+ *
+ * **What named an old fork id follows it (design §7, "What else follows the old fork id").** A fork entity, fact or chrono entry is listed in Brain, so an
+ * edge or a link can name it. Each such reference is relinked, in the same transaction, from the old id to the re-minted one, or to the row that already
+ * held the body when none was inserted, by the relink a subject's own references go through (`relinkEdgesOfRecord`, `relinkLinksOfRecord`). It is inside the
+ * re-mint so no caller can leave it out: a removed id that a record still names is a dangling reference that no delete guard can see. An edge names nothing.
  */
 export async function remintForks(
   spaceId: string, kind: ForkKind, repoints: readonly ForkRepoint[], { session, now }: { session: ClientSession; now: string },
 ): Promise<ForkRemint> {
-  const out: ForkRemint = { reminted: [], alreadyHeld: [] };
+  const out: ForkRemint = { reminted: [], alreadyHeld: [], rekeyed: [], deletedDuplicateEdgeIds: [] };
   const moving = repoints.filter(r => r.oldSubject !== r.newSubject || (r.patch && Object.keys(r.patch).length > 0));
   if (moving.length === 0) return out;
   const { family, tombstoneType } = rowOf(kind);
@@ -237,21 +248,23 @@ export async function remintForks(
 
   // What each receiving subject already holds: its own body and its forks' bodies, and how many forks.
   const targets = [...new Set(forks.map(f => byOld.get(f.forkOf)!.newSubject))];
-  const heldBodies = new Map<string, Set<string>>();
+  const heldBodies = new Map<string, Map<string, string>>();
   const heldCount = new Map<string, number>();
   for (const t of targets) {
     const rows = await coll.find(asFilter<{ _id: string }>({ $or: [{ _id: t }, { forkOf: t }] }), { session, projection: NEVER_RETURNED_PROJECTION }).toArray() as Array<Record<string, unknown>>;
-    heldBodies.set(t, new Set(rows.map(r => authoredContentHash(family, r).hash)));
+    heldBodies.set(t, new Map(rows.map(r => [authoredContentHash(family, r).hash, String(r['_id'])] as const)));
     heldCount.set(t, rows.filter(r => typeof r['forkOf'] === 'string' && !byOld.has(String(r['forkOf']))).length);
   }
   const plan: Array<{ old: typeof forks[number]; target: string; body: Record<string, unknown> }> = [];
+  /** Per removed id whose body was already held: the row that held it (a planned fork is named by its old id here, and followed to its new one below). */
+  const holders = new Map<string, string>();
   for (const f of forks) {
     const rp = byOld.get(f.forkOf)!;
     const body = { ...f, ...(rp.patch ?? {}) };
     const hash = authoredContentHash(family, body).hash;
     const held = heldBodies.get(rp.newSubject)!;
-    if (held.has(hash)) { out.alreadyHeld.push(f._id); continue; }
-    held.add(hash);
+    if (held.has(hash)) { out.alreadyHeld.push(f._id); holders.set(f._id, held.get(hash)!); continue; }
+    held.set(hash, f._id);
     heldCount.set(rp.newSubject, (heldCount.get(rp.newSubject) ?? 0) + 1);
     plan.push({ old: f, target: rp.newSubject, body });
   }
@@ -289,6 +302,18 @@ export async function remintForks(
     }, 'fork.remint');
   }
   out.reminted = minted.map(m => ({ from: m.old._id, to: m.newId }));
+  if (kind !== 'edge') {
+    // What named a removed id now names its new one, or the holder of its body (itself followed to its new id when the holder was re-minted too).
+    const newIdOf = new Map(out.reminted.map(r => [r.from, r.to] as const));
+    const follow = [...out.reminted, ...[...holders].map(([from, to]) => ({ from, to: newIdOf.get(to) ?? to }))];
+    const relink = await relinkModule();
+    for (const { from, to } of follow) {
+      const edges = await relink.relinkEdgesOfRecord(spaceId, { absorbedId: from, survivorId: to }, { now, session });
+      out.rekeyed.push(...edges.rekeyed);
+      out.deletedDuplicateEdgeIds.push(...edges.deletedDuplicateEdgeIds);
+      await relink.relinkLinksOfRecord(spaceId, { absorbedId: from, survivorId: to, kind }, { now, session });
+    }
+  }
   return out;
 }
 
