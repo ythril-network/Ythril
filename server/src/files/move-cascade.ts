@@ -81,6 +81,7 @@ import { StaleRekeyPlan, rekeyRows } from './rekey-rows.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { inHeldTransaction } from '../brain/held-transaction.js';
 import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
+import { versionsFor } from '../util/version-stamp.js';
 import { isDuplicateKey } from '../db/write-errors.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { NotFoundError } from '../util/errors.js';
@@ -149,11 +150,16 @@ async function carryBatch(spaceId: string, plan: MovePlan, batch: MoveBatch, hel
     // not committed when its write returns, so no reader may be handed one above it until the transaction has.
     jobsMoved = await inHeldTransaction(spaceId, 'file.move', async (session) => {
       if (moves.length > 0) {
-        // Each moved row keeps its own version and takes a fresh position: read here, in the session, so what is stamped is the version the
-        // rebuild reads (one snapshot). A row with no version is given no position.
+        // Each moved row takes a NEW version and a fresh position. The version is above the one the row had (read here, in the session, so it is the
+        // one the rebuild reads: one snapshot) and above every deletion held for its new path, file tombstones included (`versionsFor`, the one stamper):
+        // a peer holding the path's tombstone refuses a row at or below it (`shadowDecision`), and a file moved back to a path it left would come back at the
+        // version that path's own tombstone names. A row with no version stays without one and is given no position. The author and `updatedAt` stay
+        // the row's (Q-419; `rebuiltFileRow`).
         const versions = await readStoredById<{ seq?: number }>(filesColl, moves.map(m => m.from), { seq: 1 }, { session });
         const stamped = moves.filter(m => typeof versions.get(m.from)?.seq === 'number');
-        await withLandingStamp(spaceId, stamped.map(m => localRow(versions.get(m.from)!.seq!)), async (patches) => {
+        const had = new Map(stamped.map(m => [m.to, versions.get(m.from)!.seq!] as const));
+        const stamps = await versionsFor(spaceId, stamped.map(m => m.to), { parts: ['files'], known: had, session });
+        await withLandingStamp(spaceId, stamps.map(s => localRow(s.version)), async (patches) => {
           const landingTo = new Map(stamped.map((m, i) => [m.to, patches[i]!] as const));
           await rekeyRows<FileMetaDoc>(filesColl, session, {
             moves,
