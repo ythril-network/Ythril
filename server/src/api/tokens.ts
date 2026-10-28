@@ -4,7 +4,7 @@ import { refusalOfParse } from '../util/log.js';
 import { requireAuth, requireAdminOrSpaceAdmin, requireAdminOrSpaceAdminMfa, isInstanceAdmin } from '../auth/middleware.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { rateLimitRefusal } from '../rate-limit/per-token.js';
-import { createToken, listTokens, revokeToken, regenerateToken, renameToken, setTokenRights, setTokenMfa, setTokenRateLimit } from '../auth/tokens.js';
+import { createToken, initialRightsOf, listTokens, revokeToken, regenerateToken, renameToken, setTokenRights, setTokenMfa, setTokenRateLimit } from '../auth/tokens.js';
 import { isMfaEnabled, verifyMfaCode } from '../auth/totp.js';
 import { z } from 'zod';
 import { SPACE_AREAS, RUNGS, RUNG_IMPLICATIONS, DERIVED_RUNGS } from '../config/rights-shape.js';
@@ -358,9 +358,14 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
    * outright and earlier, so the ambiguity it guarded cannot be expressed.
    */
 
+  // The matrix the token will be STORED with, resolved before any guard: a body without `rights` gets the default, and every
+  // check below judges that default. They judged only a `rights` the body carried, so leaving the field out skipped the
+  // cap and the scope check, and a space administrator minted a write floor on every space (Q-593).
+  const effective = rights ?? initialRightsOf(schemaLibrary ? { spaces: [], readOnly: true, schemaLibrary: true } : {});
+
   // A token may never mint above itself. Enforced HERE and not only in the UI: the grid is one API call away
   // from being bypassed, and the API is exactly where a token would be used to widen itself.
-  if (rights) {
+  {
     // OIDC records carry no `rights` — they are built per request and never pass through the config
     // backfill — so the minter's matrix is derived on the spot from the same legacy fields. Deriving is the
     // same answer, not a weaker one; treating a missing matrix as "unrestricted" would be the widening.
@@ -380,7 +385,7 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
      * `rights-reach-matches-legacy.test.js` holds it to the old semantics on purpose.
      */
     const minter = held ?? (req.authToken ? withInstanceAdminGrants(migrateToken(req.authToken)) : NO_RIGHTS);
-    const excess = capRights(minter as never, rights as never);
+    const excess = capRights(minter as never, effective as never);
     if (excess.length > 0) {
       res.status(403).json({
         error: `A token cannot mint rights it does not hold — ${describeExcess(excess)}`,
@@ -434,7 +439,7 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
    * most likely to exercise the form are exactly the ones the defect could not reach.
    */
   // The token being minted is the target: the same `refusalsToManageToken` PATCH, rotate and DELETE ask.
-  const scopeRefusals = refusalsToManageToken(req.authToken, { schemaLibrary, rights: (rights ?? null) as never }, rights as never);
+  const scopeRefusals = refusalsToManageToken(req.authToken, { schemaLibrary, rights: effective as never }, effective as never);
   if (scopeRefusals.length > 0) {
     res.status(403).json({
       error: `A space-restricted administrator cannot mint this token — ${scopeRefusals.join('; ')}.`,
@@ -455,7 +460,7 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
     peerInstanceId,
     schemaLibrary,
     mfa,
-    rights: rights as never,
+    rights: effective as never,
     rateLimitPerMinute,
   });
   // Return plaintext only on creation — never retrievable again
