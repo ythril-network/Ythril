@@ -130,8 +130,9 @@ describe('positions continue above every start', { skip }, () => {
     assert.ok(clockMod && served, 'util/position-clock.js or sync/served-watermark.js is missing');
     assert.equal(typeof served.ownPositionMark, 'function', 'sync/served-watermark.js exports no ownPositionMark(spaceId, value)');
     assert.equal(typeof clockMod.settledPositionCap, 'function', 'util/position-clock.js exports no settledPositionCap(stream, spaceId)');
-    const cap = await clockMod.settledPositionCap(stream(), 's-afterpos');
     const recorded = await served.ownPositionMark('s-afterpos', Number.MAX_SAFE_INTEGER);
+    // Read AFTER the mark: the cap grows with the clock, so one read before it can sit below a mark capped a moment later (Q-630).
+    const cap = await clockMod.settledPositionCap(stream(), 's-afterpos');
     assert.equal(typeof recorded, 'number', 'the mark of an over-large afterPos was not recorded at all: it must be capped, not dropped');
     assert.ok(recorded <= cap, `the mark ${recorded} is above our own settled cap ${cap}: a puller can drive the seed to the ceiling`);
     await fact.saveFact('s-afterpos', 'a write after the over-large afterPos', [], [], undefined, undefined, 'note');
