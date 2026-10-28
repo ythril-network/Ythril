@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.1] — 2026-10-28
+
+**A patch for defects present in 6.0.0, two of them security (a space administrator could mint a token that writes to every space, or take over a token that may create spaces); take it before or instead of 6.0.0.**
+
+| Changes on upgrade | Action |
+|---|---|
+| `config.json` gains `versionMarks`, written by the server; a space's version numbers (`seq`) can jump by up to 100,000 after a start or a restore | Nothing; keep `config.json` with your backups, and never copy `versionMarks` to another instance |
+| A space administrator minting a token must name its own spaces in `rights`; a request without `rights` is refused (`403`) unless an instance administrator sends it | Send `rights` from space-administrator integrations |
+
 ### Added
 
 - **Config:** `config.json` carries a new key, `versionMarks`, written by the server: per space, the highest version its counter may already have reached. Do not edit it and do not copy it to another instance. A version can jump by up to 100,000 after a server start or a restore.
