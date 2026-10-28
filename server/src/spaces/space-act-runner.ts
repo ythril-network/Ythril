@@ -48,14 +48,13 @@
  */
 import { randomUUID } from 'node:crypto';
 import { getConfig, mutateConfig, isConfigLoaded } from '../config/loader.js';
-import type { Config, SpaceActEntry, SpaceActKind, SpaceActRound, SpaceActSet, SpaceActState, SpaceConfig } from '../config/types.js';
+import type { Config, SpaceActEntry, SpaceActKind, SpaceActRound, SpaceActSet, SpaceActState } from '../config/types.js';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
 import { canonicalRoundWipeTypes } from '../networks/round-shape.js';
 import { getDb } from '../db/mongo.js';
-import { withinHousekeepingBound, housekeepingOpMs } from '../db/write-bound.js';
+import { withinHousekeepingBound } from '../db/write-bound.js';
 import { isWriteTimeout } from '../db/write-timeout.js';
 import { isStoreSide } from '../brain/store-failure.js';
-import { PEER_TRANSFER_TIMEOUT_MS } from '../sync/peer-fetch.js';
 import { abortTransfersOf, awaitSpaceTransfersDrained, resetSpaceTransfersForTest } from '../sync/space-transfer-fence.js';
 import { forgetEveryMark, forgetWhatWasReceived } from '../sync/receive-marks.js';
 import { SPACE_ACT_KINDS, isInstanceWide, perSpaceActKind, type SpaceActKeyField, type SpaceActLane } from '../config/types-space-acts.js';
@@ -69,6 +68,11 @@ import { log, peerText } from '../util/log.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { auditRoundEffect, ROUND_SPACE_ACT_OPERATION, SPACE_ACT_COMPLETED_OPERATION } from '../networks/round-audit.js';
 import type * as Registry from '../metrics/registry.js';
+import {
+  spaceActKnob, setSpaceActKnobs, SpaceActInputFailure, SpaceActsClosedError,
+  type SpaceActRequest, type SpaceRoundSettled, type SpaceActStanding, type SpaceActKnobs, type SpaceActBodyContext,
+  type SpaceActBodyOutcome, type SpaceActSetHooks, type SpaceActBody,
+} from './space-act-contract.js';
 
 /*
  * The counters, loaded when the first act runs and never at import: the registry imports half the server, and the write gate — which
@@ -87,105 +91,11 @@ async function countersLoaded(): Promise<typeof Registry> {
 let spaceRounds: typeof SpaceRounds | null = null;
 
 export type { SpaceActKind } from '../config/types.js';
-
-/** What a caller asks the runner to do. */
-export interface SpaceActRequest {
-  kind: SpaceActKind;
-  localId: string;
-  /** A wipe's covered collections; absent = all of them. */
-  types?: readonly BrainCollection[];
-  /** A deletion's network, whose round it carries out; absent = this instance's own deletion. */
-  networkId?: string;
-  /** A rename's new id. */
-  newId?: string;
-  /** The round the act carries out, appended to the entry's rounds. */
-  round?: SpaceActRound;
-  /** The act set the entry is a member of (`registerSpaceActSet`); never part of its key. */
-  setId?: string;
-  /** A restore's backup id; never part of its key (a second restore while one stands is refused by its door). */
-  backupId?: string;
-}
-
-/**
- * A body found that its INPUT cannot be acted on - a backup that is not whole, records a unique index refuses - so another attempt meets
- * the same input. The runner records it as owed and `needsAbandon`, retries it never, and keeps the space held until an operator abandons
- * the act (`abandonSpaceActSet`). The message is ours and is shown to the operator; a cause carrying a driver's text stays in the log.
- */
-export class SpaceActInputFailure extends Error {
-  override readonly name = 'SpaceActInputFailure';
-}
-
-/** What one run of an act came to. Never thrown: a run answers. */
-export interface SpaceRoundSettled {
-  entryId: string;
-  kind?: SpaceActKind;
-  localId?: string;
-  ok: boolean;
-  /** The rounds the act covered; `roundId` is the first of them. */
-  rounds: SpaceActRound[];
-  roundId?: string;
-  /** Our sentence when it did not complete — never a driver's text. */
-  error?: string;
-  /** What failed, for the caller that answers it (a store failure is answered as the store's); never written anywhere. */
-  cause?: unknown;
-  /** When the runner will try a failed act again. */
-  retryAt?: string;
-  /** The act was refused before it changed anything (a rename that met a standing deletion or wipe); its entry is gone. */
-  refused?: boolean;
-  /** Shutdown ended it; the entry is unchanged and resumes after the next start. */
-  interrupted?: boolean;
-  counts?: Record<string, number>;
-  removedHere?: boolean;
-  renamed?: SpaceConfig;
-}
-
-/** Does an act stand for a space, and which. */
-export interface SpaceActStanding {
-  entryId: string;
-  kind: SpaceActKind;
-  types: readonly BrainCollection[] | 'all';
-  state: SpaceActState;
-  /** A rename's new id. */
-  newId?: string;
-}
-
-/** The figures an act is bounded by. Each has a setter for tests (`setSpaceActKnobsForTest`). */
-export interface SpaceActKnobs {
-  /** How long one drain waits before the entry reads `draining` and waits again. */
-  EXCHANGE_DRAIN_MS: number;
-  /** How long a door waits for its act before answering `queued`. */
-  SPACE_ACT_ANSWER_MS: number;
-  /** One store operation of a body, its batch hooks included. */
-  SPACE_ACT_OP_MS: number;
-  /** Rows one wipe batch deletes. */
-  SPACE_ACT_BATCH: number;
-  /** One file-system step of a body. */
-  SPACE_ACT_FS_MS: number;
-  /** The wait for a space's media claims to be revoked. */
-  SPACE_ACT_CLAIM_MS: number;
-  /** An act running longer than this is reported (never cut). */
-  SLOW_SPACE_ACT_MS: number;
-  /** The longest one inbound transfer may stay open. */
-  INBOUND_TRANSFER_MS: number;
-}
-
-const DEFAULT_KNOBS: { readonly [K in keyof SpaceActKnobs]: () => number } = {
-  EXCHANGE_DRAIN_MS: () => 60_000,
-  SPACE_ACT_ANSWER_MS: () => 20_000,
-  SPACE_ACT_OP_MS: () => housekeepingOpMs(),
-  SPACE_ACT_BATCH: () => 5_000,
-  SPACE_ACT_FS_MS: () => 120_000,
-  SPACE_ACT_CLAIM_MS: () => 120_000,
-  SLOW_SPACE_ACT_MS: () => 10 * 60_000,
-  INBOUND_TRANSFER_MS: () => PEER_TRANSFER_TIMEOUT_MS,
-};
-
-let knobs: Partial<SpaceActKnobs> = {};
-
-/** The figure `name` stands at now. */
-export function spaceActKnob(name: keyof SpaceActKnobs): number {
-  return knobs[name] ?? DEFAULT_KNOBS[name]();
-}
+// What bodies, doors and tests are handed lives in the contract; every importer still reaches it through here.
+export type {
+  SpaceActRequest, SpaceRoundSettled, SpaceActStanding, SpaceActKnobs, SpaceActBodyContext, SpaceActBodyOutcome, SpaceActSetHooks, SpaceActBody,
+} from './space-act-contract.js';
+export { SpaceActInputFailure, SpaceActsClosedError, spaceActClosedAnswer, spaceActKnob } from './space-act-contract.js';
 
 /** How long a door waits for its act before answering `queued`. */
 export function spaceActAnswerMs(): number {
@@ -205,44 +115,6 @@ export interface SpaceActHooks {
 
 let hooks: Partial<SpaceActHooks> = {};
 
-/** What a body is handed: its entry as it stood when it started, and the bounded steps it does its work through. */
-export interface SpaceActBodyContext {
-  readonly entry: Readonly<SpaceActEntry>;
-  /**
-   * Delete the rows of `collection` matching `filter` in bounded batches; how many went. `remove` is the body's own delete of one
-   * batch's ids, so the collection a body empties is spelled where the body is read.
-   */
-  deleteInBatches(collection: string, filter: Record<string, unknown>, remove: (ids: unknown[]) => Promise<{ deletedCount?: number }>): Promise<number>;
-  /** One file-system step, raced against `SPACE_ACT_FS_MS`: past it the attempt fails and the lane is freed. */
-  fileTree<T>(fn: () => Promise<T>): Promise<T>;
-  /** The wait for the space's media claims, raced against `SPACE_ACT_CLAIM_MS`. */
-  claimWait<T>(fn: () => Promise<T>): Promise<T>;
-}
-
-/** What a body did. */
-export interface SpaceActBodyOutcome {
-  /** The space was not here to act on. */
-  absent?: boolean;
-  /** This instance's own copy was removed (a deletion). */
-  removedHere?: boolean;
-  counts?: Record<string, number>;
-  renamed?: SpaceConfig;
-  /** The act was refused before it changed anything; the entry is removed and nothing is retried. */
-  refusal?: Error;
-  /** What a member of an act set reports about its space (a restore's index results); kept on the set's record for its report. */
-  report?: Record<string, unknown>;
-}
-
-/** What a kind that runs as an act set does once, when the last member of a set ends: after the write that ends it, never inside it. */
-export interface SpaceActSetHooks {
-  onSetEnd(set: Readonly<SpaceActSet>): void;
-  /**
-   * What its COMPLETION changes in the same config write that ends the set (a migrate saves its target URI there, so the URI is saved
-   * exactly when every hold lifts). A throw aborts the write: nothing is removed, and the member that completed is recorded as failed.
-   */
-  inCompletionWrite?(cfg: Config, set: Readonly<SpaceActSet>): void;
-}
-
 const setHooks = new Map<SpaceActKind, SpaceActSetHooks>();
 
 /** A kind's module hands over what its set does when it ends, as it hands over its body. */
@@ -250,25 +122,11 @@ export function defineSpaceActSetHooks(kind: SpaceActKind, h: SpaceActSetHooks):
   setHooks.set(kind, h);
 }
 
-export type SpaceActBody = (ctx: SpaceActBodyContext) => Promise<SpaceActBodyOutcome>;
-
 const bodies = new Map<SpaceActKind, SpaceActBody>();
 
 /** `lifecycle.ts` and `rename.ts` hand their bodies over when they load: the runner runs them and never imports them. */
 export function defineSpaceActBody(kind: SpaceActKind, body: SpaceActBody): void {
   bodies.set(kind, body);
-}
-
-/** Shutdown has closed the runner: a new act is refused. Answered `503` by both doors (`spaceActClosedAnswer`). */
-export class SpaceActsClosedError extends Error {
-  override readonly name = 'SpaceActsClosedError';
-  constructor() { super('shutting down'); }
-}
-
-/** The answer to a refusal the closed runner made, or null for anything else. */
-export function spaceActClosedAnswer(err: unknown): { status: 503; body: { error: string } } | null {
-  const closed = err instanceof SpaceActsClosedError || (err instanceof Error && err.name === 'SpaceActsClosedError');
-  return closed ? { status: 503, body: { error: 'shutting down' } } : null;
 }
 
 // ── keys and the standing predicate ─────────────────────────────────────────────────────────────────────────────
@@ -322,11 +180,12 @@ let leavingFor: SpaceActKind | null = null;
 
 /**
  * Close every write of every space, on every door and for every caller (an instance admin, an exchange already in flight, an embed job, a
- * housekeeping pass), from now until this process ends - asked IN the completion write of an act that moves the instance to another
- * database (`saveTargetUri`, Q-564 F4). That write removes the act's entries, which alone would lift the gate; this process is still
- * connected to the OLD database until it exits, so a write admitted in between would land where the instance is leaving and be missing
- * from the new one. Called inside the same synchronous step as the removal, so no turn of the event loop sees the entries gone and the
- * gate open. The refusal is the act's own kind (`space_being_migrated`); there is no reopening it short of a restart.
+ * housekeeping pass), from now until this process ends - asked by the end hook of a set that moves the instance to another database
+ * (`onMigrateEnd`, Q-564 F4), as its first statement. The completion write removes the act's entries, which alone would lift the gate;
+ * this process is still connected to the OLD database until it exits, so a write admitted in between would land where the instance is
+ * leaving and be missing from the new one. The hook runs in the same synchronous step as that write, so no turn of the event loop sees
+ * the entries gone and the gate open. It is NOT asked inside the write (Q-569): a write that failed would leave the process closed for a
+ * migrate that did not complete. The refusal is the act's own kind (`space_being_migrated`); there is no reopening it short of a restart.
  */
 export function closeEveryWriteUntilExit(kind: SpaceActKind): void {
   leavingFor = kind;
@@ -1071,7 +930,7 @@ export function spaceActBodyRuns(): Readonly<Record<SpaceActKind, number>> {
 }
 
 export function setSpaceActKnobsForTest(k: Partial<SpaceActKnobs> | null): void {
-  knobs = k ? { ...knobs, ...k } : {};
+  setSpaceActKnobs(k);
 }
 
 export function setSpaceActHooksForTest(h: Partial<SpaceActHooks> | null): void {

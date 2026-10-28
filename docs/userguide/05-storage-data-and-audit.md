@@ -369,7 +369,9 @@ request is accepted at once and the copy runs in the background:
 
 1. The instance enters maintenance mode and every space stops taking writes; you, as an administrator, keep working.
 2. The current database is backed up like any other backup (it appears in the **Backups** table), and that backup is copied
-   into the new database with every index.
+   into the new database with every index. A copy that is tried again takes a fresh backup and removes the one its earlier
+   attempt took, so a migration leaves exactly the backup it names; an earlier attempt's offsite copy stays until the offsite
+   retention removes it.
 3. The new URI is saved to `config.json`, and the server process exits. From that moment until it exits, **no space takes a
    write**, not even from an administrator: any change to a space's data answers that the instance is being migrated,
    because it would land in the old database and be missing from the new one. Reading still works. When Docker or Kubernetes restarts the container,

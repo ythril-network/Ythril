@@ -18,10 +18,12 @@
  *   root (listed, pruned by retention, encrypted by the one backup setting), restores that backup into the target through the same
  *   replace code a restore uses (`restoreDatabase`: every collection dropped and reloaded), and builds every index of the source on the
  *   target. Re-run after a crash, it replaces what it copied, so a partly filled target is overwritten; the not-empty check is the door's.
- * - **The completion** is the runner's one write: every migrate entry leaves, and {@link saveTargetUri} saves the URI in that same write
- *   and closes every write of this process until it exits (`closeEveryWriteUntilExit`: `409 space_being_migrated` on every door, an
- *   admin's included; Q-564). Then {@link onMigrateEnd} puts this process in maintenance and ends it, so the next start connects to the
- *   new database.
+ *   A retried copy dumps again and removes the dump its earlier attempt took, so the set leaves the one backup its report names (Q-566).
+ * - **The completion** is the runner's one write: every migrate entry leaves, and {@link saveTargetUri} saves the URI in that same write.
+ *   Once that write has succeeded, {@link onMigrateEnd} closes every write of this process until it exits (`closeEveryWriteUntilExit`:
+ *   `409 space_being_migrated` on every door, an admin's included; Q-564), puts it in maintenance and ends it, so the next start connects
+ *   to the new database. The close is not made inside the write: a write that failed would leave the process closed for a migrate that
+ *   did not complete (Q-569).
  * - **An abandon** (`POST /api/admin/data/migrate/abandon`, `spaces/act-set-abandon.ts`) ends a set whose copy cannot finish - a target
  *   that keeps timing out is retried, never input-failed - without saving anything: the old URI stays and the end is audited as
  *   `data.migrate.failed` by {@link onMigrateEnd}.
@@ -38,6 +40,7 @@ import { MongoClient, type Db } from 'mongodb';
 import { getDb } from './mongo.js';
 import { restoreDatabase } from './restore.js';
 import { runBackupNow } from './backup-scheduler.js';
+import { removeBackup } from './backup-location.js';
 import { dbNameFromUri } from './db-name.js';
 import { boundedClientOptions, closeWithinBound } from './bounded-client-options.js';
 import { isDuplicateKey } from './write-errors.js';
@@ -49,7 +52,7 @@ import { resolveMasterSecret, isEnvelope, encryptEnvelope, decryptEnvelope } fro
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import {
   defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, instanceWideActStanding, spaceActSetTarget,
-  noteSpaceActSetBackup, closeEveryWriteUntilExit, SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
+  noteSpaceActSetBackup, spaceActSetOf, closeEveryWriteUntilExit, SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
 } from '../spaces/space-act-runner.js';
 import { setMaintenanceActive } from '../maintenance.js';
 import { isStoreSide } from '../brain/store-failure.js';
@@ -154,6 +157,10 @@ async function migrateInstance(ctx: SpaceActBodyContext): Promise<SpaceActBodyOu
   const target = unsealTarget(sealed);
 
   const began = Date.now();
+  // The dump the set's earlier attempt took, if any: this attempt dumps again (instance collections written since must reach the
+  // target) and then removes it, so a migrate leaves one dump - the one its report names - however often it is retried (Q-566).
+  const standing = spaceActSetOf(KIND);
+  const earlierBackup = standing?.id === ctx.entry.setId ? standing?.backupId : undefined;
   let backup;
   try {
     backup = await runBackupNow({ underAct: KIND });
@@ -163,6 +170,7 @@ async function migrateInstance(ctx: SpaceActBodyContext): Promise<SpaceActBodyOu
   }
   // The set names the backup from here on: its report, and its outcome row whichever way it ends.
   if (ctx.entry.setId) noteSpaceActSetBackup(ctx.entry.setId, backup.id);
+  if (earlierBackup && earlierBackup !== backup.id) removeBackup(earlierBackup);
 
   const client = targetClient(target);
   try {
@@ -191,21 +199,21 @@ async function migrateInstance(ctx: SpaceActBodyContext): Promise<SpaceActBodyOu
 // ── the completion and the end ────────────────────────────────────────────────────────────────────────────────
 
 /**
- * In the completion write that removes every migrate entry: the new URI becomes the configured one, and every write of this process is
- * closed until it exits (Q-564 F4). The removal alone would lift every space's gate while this process still writes to the OLD
- * database; closing here, in the same synchronous step, leaves no turn in which an admin's write, an exchange in flight, an embed job
- * or a housekeeping pass is admitted and lands where the instance is leaving.
+ * In the completion write that removes every migrate entry: the new URI becomes the configured one, and nothing else. The write can
+ * FAIL (a full disk): this callback runs before it, so closing every write of the process here would leave them closed for a migrate
+ * that did not complete, for ever, an abandon included (Q-569). The closure is {@link onMigrateEnd}'s, after the write succeeded.
  */
 function saveTargetUri(cfg: Config, set: Readonly<SpaceActSet>): void {
   if (!set.target) throw new SpaceActInputFailure('the migrate names no target database.');
   cfg.mongo = { ...cfg.mongo, uri: unsealTarget(set.target) };
-  closeEveryWriteUntilExit(KIND);
 }
 
 /**
- * When the set ends, once. Completed: this process still holds a connection to the OLD database while every hold has lifted, so it goes
- * into maintenance (in memory, gone with the process) and ends; the next start connects to the saved URI. Under `NODE_ENV=test` it does
- * not end the process. Abandoned: the old URI stands, and the sentence names the backup.
+ * When the set ends, once. Completed: every write of this process is closed until it exits (Q-564 F4), FIRST and in the same
+ * synchronous step as the end - the removal of the entries alone lifted every space's gate while this process still writes to the OLD
+ * database, so a turn between them would admit an admin's write, an exchange in flight, an embed job or a housekeeping pass that lands
+ * where the instance is leaving. Then it goes into maintenance (in memory, gone with the process) and ends; the next start connects to
+ * the saved URI. Under `NODE_ENV=test` it does not end the process. Abandoned: the old URI stands, and the sentence names the backup.
  */
 function onMigrateEnd(set: Readonly<SpaceActSet>): void {
   if (set.outcome === 'abandoned') {
@@ -214,6 +222,7 @@ function onMigrateEnd(set: Readonly<SpaceActSet>): void {
     log.error(`migrate ${peerText(set.id)} ended without completing; the database URI is unchanged. ${peerText(set.lastError ?? '')}`);
     return;
   }
+  closeEveryWriteUntilExit(KIND);
   const uri = getConfig().mongo?.uri ?? '';
   log.info(`migrate ${peerText(set.id)} completed: the database URI is now ${peerText(redactUri(uri))}. `
     + 'The old database still holds every record until the operator removes it.');

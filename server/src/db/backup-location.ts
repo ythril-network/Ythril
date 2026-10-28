@@ -6,6 +6,8 @@
  * A restore act stores a backup's ID, never its path, and resolves it again when its body runs - after a restart, possibly days later.
  * Resolving it is the route's traversal check plus "is there a backup there", and a second spelling of that check in the body would be the
  * one that forgot the traversal half. Both ask {@link backupDirOf}, and the scheduler, the list and the retention ask {@link backupsRoot}.
+ * A backup is removed through {@link removeBackup} alone (a migrate's earlier attempt, a dump that failed): the removal takes an id, never
+ * a path, so no caller can hand it a directory outside the root.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,4 +28,16 @@ export function backupDirOf(id: string): string | null {
   if (!isBackupId(id)) return null;
   const dir = path.join(backupsRoot(), id);
   return fs.existsSync(path.join(dir, 'manifest.json')) ? dir : null;
+}
+
+/**
+ * Remove the local backup directory `id`, whole - with or without a manifest, because a dump that failed part-way has none and no
+ * retention counts it. An id that could leave the backups root removes nothing. Returns whether a directory was removed.
+ */
+export function removeBackup(id: string): boolean {
+  if (!isBackupId(id)) return false;
+  const dir = path.join(backupsRoot(), id);
+  if (!fs.existsSync(dir)) return false;
+  fs.rmSync(dir, { recursive: true, force: true });
+  return true;
 }
