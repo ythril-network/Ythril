@@ -163,6 +163,22 @@ export function touchToken(tokenId: string): void {
 }
 
 /** Create a new PAT and return the record + plaintext */
+/**
+ * The rights matrix a new token is stored with when its minter names none: what `createToken` stores, answered once.
+ *
+ * Exported because a guard must judge THIS matrix, not the absent one. `POST /api/tokens` capped and scope-checked only a
+ * `rights` the body carried, and a body without one was stored with this default — a write floor on every area of every
+ * space — so a space administrator minted an instance-wide write token by leaving the field out (Q-593).
+ */
+export function initialRightsOf(opts: { admin?: boolean; readOnly?: boolean; spaces?: string[]; schemaLibrary?: boolean }): TokenRecord['rights'] {
+  return migrateToken({
+    admin: opts.admin ?? false,
+    readOnly: opts.readOnly ?? false,
+    spaces: opts.spaces,
+    ...(opts.schemaLibrary ? { schemaLibrary: true } : {}),
+  }) as unknown as TokenRecord['rights'];
+}
+
 export async function createToken(opts: {
   name: string;
   expiresAt?: string | null;
@@ -223,12 +239,7 @@ export async function createToken(opts: {
     // and `enforceAreaRung` PASSES when `rights` is absent. Measured: a plain non-admin token deleted a fact
     // over REST with a 204 where a rights-bearing `write` token got a 403 for the same call. The hole was the
     // missing matrix, not the rung.
-    rights: opts.rights ?? (migrateToken({
-      admin: opts.admin ?? false,
-      readOnly: opts.readOnly ?? false,
-      spaces: opts.spaces,
-      ...(opts.schemaLibrary ? { schemaLibrary: true } : {}),
-    }) as unknown as TokenRecord['rights']),
+    rights: opts.rights ?? initialRightsOf(opts),
   };
   // An instance admin is stored with space admin on the floor (S-11): one statement, every minting path.
   record.rights = withInstanceAdminGrants(record.rights);

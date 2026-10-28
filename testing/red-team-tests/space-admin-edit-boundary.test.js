@@ -157,6 +157,38 @@ describe('the tier is BOUNDED — each refusal, and nothing written', () => {
     assert.equal((await stored(outsideId))?.name, before?.name, 'the name must be unchanged');
   });
 
+  it('cannot mint a token by leaving `rights` out — the default it would get is a write floor on every space (Q-593)', async () => {
+    // Omitting `rights` skipped the cap and the scope check, and the token was stored with the default matrix: write in
+    // every area of every space, including ones created later. The guards must see what would be stored.
+    const name = `sa-norights-${RUN}`;
+    const r = await post(INSTANCES.a, spaceAdmin, '/api/tokens', { name });
+    if (r.status === 201) madeTokens.push(r.body.token.id);
+    assert.equal(r.status, 403, `a space admin minted a token without rights: ${JSON.stringify(r.body)}`);
+    const list = await get(INSTANCES.a, adminToken, '/api/tokens');
+    assert.ok(!list.body.tokens.some(t => t.name === name), 'nothing may be stored by a refused mint');
+  });
+
+  it('an instance admin minting without `rights` still gets the default token', async () => {
+    const r = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `ia-norights-${RUN}` });
+    assert.equal(r.status, 201, `the instance admin's default mint was refused: ${JSON.stringify(r.body)}`);
+    madeTokens.push(r.body.token.id);
+  });
+
+  it('cannot rotate, revoke or rename a token in its own space that holds createSpaces (Q-594)', async () => {
+    // Its rows sit inside the space admin's scope, which was the only thing asked. Rotating it would hand the space admin
+    // the secret of a token that creates spaces.
+    const holder = (await mint({ name: `sa-creator-${RUN}`, rights: { ...legacyRights({ spaces: [MINE] }), createSpaces: true } })).token.id;
+    const rotate = await post(INSTANCES.a, spaceAdmin, `/api/tokens/${holder}/regenerate`, {});
+    assert.equal(rotate.status, 403, `rotated a createSpaces token: ${JSON.stringify(rotate.body)}`);
+    assert.equal(rotate.body.plaintext, undefined, 'no secret may be handed out');
+    const rename = await patch(INSTANCES.a, spaceAdmin, `/api/tokens/${holder}`, { name: 'mine-now' });
+    assert.equal(rename.status, 403, `renamed a createSpaces token: ${JSON.stringify(rename.body)}`);
+    assert.match(rename.body.error, /createSpaces/);
+    const revoke = await del(INSTANCES.a, spaceAdmin, `/api/tokens/${holder}`);
+    assert.equal(revoke.status, 403, `revoked a createSpaces token: ${JSON.stringify(revoke.body)}`);
+    assert.ok(await stored(holder), 'the token must still exist');
+  });
+
   it('cannot edit an UNRESTRICTED token, which reaches every space', async () => {
     // A token with no allowlist is outside every restricted scope by definition — including the instance admin's own.
     const unrestricted = (await mint({ name: `sa-unrestricted-${RUN}` })).token.id;

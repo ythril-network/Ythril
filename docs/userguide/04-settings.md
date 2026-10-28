@@ -350,7 +350,9 @@ Then **Create token** — the value is shown **once**. Copy it immediately.
 
 > **The two instance-level checkboxes are the widest thing this dialog can grant.** **Instance
 > administrator** and **May create new spaces** are not rungs on a space: the dialog says so itself —
-> *"these apply to the whole instance. A space-restricted administrator cannot grant them."*
+> *"these apply to the whole instance. A space-restricted administrator cannot grant them."* Nor can a
+> space administrator rename, regenerate or revoke a token that holds either of them, even one that reaches only
+> its own spaces.
 >
 > **May create new spaces is enough to create one**, from this page, over the API, with the `save_space` tool, or by
 > joining a network — no instance administrator needed. The token that creates a space becomes its administrator,

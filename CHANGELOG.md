@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Restore and wipe:** edits after a restore onto an empty database, a `docker compose down -v` that kept `config.json`, or an import onto an emptied space are no longer lost on peers. Losing `config.json` with the database, or a crash just before, can still lose them.
 
+### Security
+
+- **Tokens:** a space administrator can no longer mint a token that writes to every space by leaving `rights` out of `POST /api/tokens`, and can no longer rename, regenerate or revoke a token that holds `createSpaces` or `instanceAdmin`.
+
 ## [6.0.0] — 2026-10-27
 
 **6.0 turns proxy spaces into personal views, pages sync by landing position (5.x and 6.0 peers do not sync; upgrade every instance of a network together) and keeps both edits of every record kind; a failing store answers a retryable `503`.**

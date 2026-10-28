@@ -9,7 +9,7 @@ Base path: `/api/tokens`.
 - `GET /api/tokens/me` requires any valid token.
 - The read-only list `GET /api/tokens` requires an **admin** token (but not MFA).
 - All **mutating** token routes (create/rename/delete/regenerate) require admin scope **and** MFA where enabled.
-- A **space-restricted administrator** is admitted by those guards and then narrowed: every one of them resolves the caller's scope and refuses a token that reaches spaces outside it. That holds for reading the list (fewer rows), minting (an out-of-scope grant is refused), editing, **rotating** and **revoking**.
+- A **space-restricted administrator** is admitted by those guards and then narrowed: every one of them resolves the caller's scope and refuses a token that reaches spaces outside it. That holds for reading the list (fewer rows), minting (an out-of-scope grant is refused), editing, **rotating** and **revoking**. A token that holds `createSpaces` or `instanceAdmin` is outside every restricted scope, whichever spaces its rows name: a space-restricted administrator cannot edit, rotate or revoke it (`403`).
 
 ### Current Token Context
 
@@ -338,7 +338,10 @@ already — a personal access token gets one when it is created, and an OIDC ses
 from its claim mapping. The fields may still sit in `config.json`; nothing enforces from them.
 
 **A space-restricted administrator minting a token is judged on the matrix.** The mint route decides *outside
-your scope* with the same function the edit routes use, so a matrix-only request needs no `spaces` array.
+your scope* with the same function the edit routes use, so a matrix-only request needs no `spaces` array. A
+request without `rights` is judged on the matrix the token would be stored with, which is a `write` floor on
+every space: an instance administrator gets that token, and a space-restricted administrator is refused (`403`)
+and must name its own spaces in `rights`.
 
 > **`readOnly` is not stored on a token, and sending it to `POST /api/tokens` is a `400`**, as the table above
 > says. Write `rights.floor` with read rungs instead.

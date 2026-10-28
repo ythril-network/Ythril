@@ -265,7 +265,13 @@ export function refusalsOutsideEditorScope(input: {
     // so both sides of this comparison now answer one question one way. Reading the raw allowlist here
     // would call every token minted since 2.9 unrestricted, and refuse a space administrator every edit.
     const targetSpaces = editorScopeFor(target);
-    if (!targetSpaces) {
+    // An instance-wide grant on the target puts it outside every restricted scope, whatever spaces its rows name: rotating
+    // a token that holds createSpaces handed a space administrator the secret of a token that creates spaces (Q-594).
+    const instanceWide = [target.rights?.instanceAdmin ? '`instanceAdmin`' : null, target.rights?.createSpaces ? '`createSpaces`' : null]
+      .filter((g): g is string => g !== null);
+    if (instanceWide.length > 0) {
+      out.push(`that token holds ${instanceWide.join(' and ')}, which is instance-wide, so a space-restricted administrator cannot manage it`);
+    } else if (!targetSpaces) {
       out.push('that token is unrestricted (it reaches every space), so a space-restricted administrator cannot edit it');
     } else {
       const outside = targetSpaces.filter(s => !editorSpaces.includes(s));
