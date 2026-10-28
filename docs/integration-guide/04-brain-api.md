@@ -477,7 +477,7 @@ what a read never sends, retiring a record from semantic search, and partial upd
 brain record, not only to facts.
 
 **A record's `seq` is its version, and a list's default order is not by it.** An edit stores a higher `seq` than the one it read, and an edit whose read version moved
-meanwhile reads again and writes above it. A write whose next version would pass the ceiling is `409` `record_version_at_ceiling` on every create, update, delete and merge
+meanwhile reads again and writes above it. The version may jump by up to 100,000 after a server start, so only compare versions and never reason about the gap. A write whose next version would pass the ceiling is `409` `record_version_at_ceiling` on every create, update, delete and merge
 route and tool, with nothing written. Every brain list (facts, entities, edges, chrono, `query`) defaults to **landing order**, the order records arrived on this instance,
 newest first; `sort` and `dir` choose another and `skip` pages through whichever is used ([Write & Read Semantics](04f-write-semantics.md#optimistic-concurrency-if-match)).
 

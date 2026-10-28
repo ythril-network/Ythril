@@ -259,7 +259,7 @@ After the row is gone, the file TOMBSTONE is what stops a stale copy of the dele
 - **Branch on `status`, not on `202`.** `DELETE /api/spaces/:id` and `POST /api/admin/spaces/:spaceId/wipe` answer `200` (was `202 vote_pending`) when this instance's own yes passes the round and the change ran; `202` with `status: "passed"` and `queued: true` while the change is still running; `202 vote_pending` only when no round passed. The tool door keeps its `200` envelope, with `data.status`.
 - **A networked delete or wipe needs `{ "confirm": true }` (breaking).** Without it the answer is `400` and nothing is opened. The admin wipe needs it on an unnetworked space too.
 - **Writes into a space being wiped, deleted or renamed answer `409`** (`space_being_wiped`, `space_being_deleted`, `space_being_renamed`); retry once it completes.
-- **After a networked wipe that resets the space's sequence counters, expect one re-read of the upstream's tombstones for that space per member**, once afterwards; re-reading is idempotent.
+- **After a networked wipe that resets the space's sequence counters, expect one re-read of the upstream's tombstones for that space per member**, once afterwards; re-reading is idempotent. New edits in the wiped space are still stamped above every version it handed out before, because the version mark in `config.json` ([`versionMarks`](02-hosting.md#versionmarks-in-configjson)) is not reset by the wipe; a version may therefore jump by up to 100,000.
 - **A space-scoped user token or an unlisted peer reading a network's votes or members is refused `403`**, and a network this instance does not hold answers `403` (was `404`). Read them through `/api/networks/:id/votes` as an operator.
 - **Pub/sub:** a publisher stops sending a space to a subscriber that left it, until the subscriber announces it again. Such a space is listed as `declined` in the sync history, not as held.
 - **An older member's cycle for a held space is refused with `423`** and reads as failed for up to `votingDeadlineHours`. Upgrade the members before a networked wipe.
@@ -405,6 +405,11 @@ recall on it answers empty until it is ready. Nothing is lost; the records are u
 kinds: an entry of either left in `pendingSpaceActs` is never finished there, and its space stays marked as owing an act for as
 long as that build runs; the set's record (`spaceActSets`) is ignored. Roll back only when `GET /api/admin/data/restore` and `GET /api/admin/data/migrate` answer a `state`
 other than `running` (or `null`) and the danger tab shows no act standing. Abandon a restore that cannot finish first.
+
+**A build from before the version mark ignores `versionMarks` in `config.json` and keeps it.** Rolling back loses nothing and
+needs no edit: the older build stamps versions as it always did, with no protection after a restore onto an empty database or a
+wiped volume, and the key is still there when you upgrade again ([`versionMarks`](02-hosting.md#versionmarks-in-configjson)). A
+`config.json` copied from before the upgrade has no marks, so the first writes after that start have nothing to continue from.
 
 **The first boot on a new version rewrites `config.json`, and some of those rewrites drop a field an older
 build reads.** So a rollback is not simply "run the previous image": that path exists, but it needs the copy of

@@ -32,14 +32,17 @@ empty database.
    serves is refused unless the operator leaves it out. The backup is checked whole before anything is registered and again
    by each space's act.
 3. **The counter never goes backwards.** Each space's counter is raised to at least every seq this instance handed out before
-   the restore, whatever the backup's counter says.
+   the restore, whatever the backup's counter says. On an empty database the counter the restore can read is zero, so the
+   floor there is the version mark `config.json` keeps (decision 16, point 4): the space's first write after the restore
+   raises the counter to the mark before it stamps.
 4. **A restore forgets only the marks of what this instance received**, so each peer sends again what
    arrived after the backup. The marks of what it sent, and of what the peers acknowledged, stay, each with its reason: the
    restore does not change what the peers hold, and the raised counter keeps those marks true. A migrate forgets nothing,
    because the data is the same.
 5. **What a restore does not restore is stated, not implied.** The audit log, which records what happened, the restore
-   included; `space_activity`, the webhook subscriptions and queues and the other instance collections; `config.json`; and the
-   files' bytes on disk.
+   included; `space_activity`, the webhook subscriptions and queues and the other instance collections; `config.json`, which
+   stays as it is (the version mark it carries is what the version continuation reads, so bring it back with the
+   database); and the files' bytes on disk.
 
 ## Consequences
 
@@ -47,10 +50,12 @@ empty database.
 - A restore whose backup cannot be read stays owed and held until an operator abandons it; an abandoned space may be half
   restored, and the report says so.
 - An instance administrator passes maintenance on every path, so the operator can watch and abandon a restore while it holds.
-- **Residuals, owned by the limit "a peer's numbering starts over" (`D-48`), not by this decision:** a restore onto an empty
-  database cannot raise the counter past seqs peers have already read; a peer this instance never pulls from (its subscribers,
-  when it publishes) does not send again what it sent; and a record deleted here after the backup whose tombstone the peers
-  have since pruned comes back here and is not pushed again. File bytes and their records going out of step is a separate
+- **Residuals, owned by the limit "a peer's numbering starts over" (`D-48`) and decision 16, not by this decision:** a
+  restore onto an empty database continues above the version mark in `config.json`, so the counter is a residual only when
+  that file is lost too or older than the last stamps (records are then sorted out by id and version), or when the instance
+  crashed after the counter passed the last saved mark; a peer this instance never pulls from (its subscribers, when it
+  publishes) does not send again what it sent; and a record deleted here after the backup whose tombstone the peers have
+  since pruned comes back here and is not pushed again. File bytes and their records going out of step is a separate
   defect of its own.
 - Records erased after the backup come back, while the kept audit log still records the erasure.
 

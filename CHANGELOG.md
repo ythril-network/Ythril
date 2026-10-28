@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Config:** `config.json` carries a new key, `versionMarks`, written by the server: per space, the highest version its counter may already have reached. Do not edit it and do not copy it to another instance. A version can jump by up to 100,000 after a server start.
+
 ### Changed
 
 - **Webhooks:** The webhook admin routes are listed as instance-admin in the rights table. No user-facing effect: managing webhooks still needs instance admin with MFA.
+
+### Fixed
+
+- **Restore and wipe:** edits after a restore onto an empty database, a `docker compose down -v` that kept `config.json`, or an import onto an emptied space are no longer lost on peers. Losing `config.json` with the database, or a crash just before, can still lose them.
 
 ## [6.0.0] — 2026-10-27
 
