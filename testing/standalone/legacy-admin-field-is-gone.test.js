@@ -75,8 +75,11 @@ describe('the field is gone from the record and the plumbing', () => {
     // was made unconditional, so it is asserted by count rather than by finding one.
     const tokens = src('server/src/auth/tokens.ts');
     assert.doesNotMatch(tokens, /^ {4}admin: opts\.admin \?\? false,/m, 'no record literal may carry it');
-    assert.equal((tokens.match(/^ {6}admin: opts\.admin \?\? false,/gm) ?? []).length, 2,
-      'both minting paths must still FEED migrateToken with it — that is the whole safety property');
+    // ONE since Q-593: both minting paths take their default from `initialRightsOf`, which feeds migrateToken.
+    assert.equal((tokens.match(/^ {6}admin: opts\.admin \?\? false,/gm) ?? []).length, 1,
+      'the one default (initialRightsOf) must still FEED migrateToken with it — that is the whole safety property');
+    assert.equal((tokens.match(/rights: opts\.rights \?\? initialRightsOf\(opts\)/g) ?? []).length, 2,
+      'both minting paths must take that one default');
   });
 
   it('ToolContext no longer declares isAdmin, and the MCP server no longer takes it', () => {

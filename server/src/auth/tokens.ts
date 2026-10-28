@@ -171,12 +171,14 @@ export function touchToken(tokenId: string): void {
  * space — so a space administrator minted an instance-wide write token by leaving the field out (Q-593).
  */
 export function initialRightsOf(opts: { admin?: boolean; readOnly?: boolean; spaces?: string[]; schemaLibrary?: boolean }): TokenRecord['rights'] {
-  return migrateToken({
-    admin: opts.admin ?? false,
-    readOnly: opts.readOnly ?? false,
-    spaces: opts.spaces,
-    ...(opts.schemaLibrary ? { schemaLibrary: true } : {}),
-  }) as unknown as TokenRecord['rights'];
+  return (
+    migrateToken({
+      admin: opts.admin ?? false,
+      readOnly: opts.readOnly ?? false,
+      spaces: opts.spaces,
+      ...(opts.schemaLibrary ? { schemaLibrary: true } : {}),
+    }) as unknown as TokenRecord['rights']
+  );
 }
 
 export async function createToken(opts: {
@@ -292,11 +294,7 @@ export async function createOAuthToken(opts: {
     // until the next restart; this second minting path kept storing nothing, so every OAuth connector token
     // was matrix-less. Harmless while a missing matrix meant "fall back to the flags", and NOT harmless once
     // `toolIsVisible` began failing closed: a fresh connector could not call a single mutating tool.
-    rights: opts.rights ?? (migrateToken({
-      admin: opts.admin ?? false,
-      readOnly: opts.readOnly ?? false,
-      spaces: opts.spaces,
-    }) as unknown as TokenRecord['rights']),
+    rights: opts.rights ?? initialRightsOf(opts),
   };
   record.rights = withInstanceAdminGrants(record.rights);
   const config = getConfig();
