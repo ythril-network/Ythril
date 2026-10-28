@@ -288,6 +288,12 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir,
         await drainWrites(m, [...RECORD_PARTS.map(p => `${space}_${p}`), 'ythril_counters'], { drainMs });
         await wipeParts(m, space, RECORD_PARTS);
         await m.col('ythril_counters').deleteMany({ _id: space });
+        // The next case is a new space under the same id, as a delete and a re-create would leave it: the process forgets the space's version
+        // mark too, or its first stamp reads the cleared counter as one that went back and raises it a step (`util/version-mark.ts`, Q-556).
+        // From the loaded config as well, or its next save or reload takes the old mark back into memory.
+        const { forgetVersionMark } = await import('../../server/dist/util/version-mark.js');
+        const { isConfigLoaded, getConfig } = await import('../../server/dist/config/loader.js');
+        forgetVersionMark(isConfigLoaded() ? getConfig() : {}, space);
         landed.delete(space);
       },
     };
