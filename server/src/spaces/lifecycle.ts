@@ -45,6 +45,7 @@ import { declareStep } from '../util/housekeeping-signals.js';
 import { refusalText, storeFailureAnswer, throwIfStoreSide } from '../brain/store-failure.js';
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
 import { createReadyCounter } from '../sync/positions-owed.js';
+import { forgetVersionMark } from '../util/version-mark.js';
 import { builtInRefusal } from './built-in-space.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
@@ -771,6 +772,8 @@ function commitSpaceDeletion(spaceId: string, write: (apply: (cfg: Config) => vo
   write(cfg => {
     removeSpaceFromConfig(cfg, spaceId);
     delete cfg.pendingSpaceOp;
+    // Only here, with the collections already dropped: a space created later under the id starts without a mark of the old one.
+    forgetVersionMark(cfg, spaceId);
   });
   forgetSearchWaiter(confirmWaiterKey(spaceId));
   forgetSpaceSearchIndexWaiters(spaceId);
