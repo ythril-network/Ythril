@@ -185,7 +185,7 @@ such memory: it is a new instance, and a peer's copy at a higher version wins un
 ### `versionMarks` in config.json
 
 `versionMarks` is a map from space id to a number, kept by the server in `config.json`. It is the highest version (`seq`)
-the space's counter may already have reached, always a step of 100,000 ahead of the counter. The instance keeps it outside
+the space's counter may already have reached, up to 100,000 ahead of the counter. The instance keeps it outside
 the database so that a restore onto an empty database, a wiped database volume with `config.json` kept, an import onto an
 emptied space or a rename whose counter move failed cannot make the instance stamp a version below one it already handed out
 (which a peer would silently drop). The first write of a space after the server starts raises the counter to the mark
@@ -199,7 +199,7 @@ before it stamps, and so does a write after the counter went backwards while the
 - **Keep it with the database.** Back up and restore `config.json` together with the data (the restore does not touch it).
   A `config.json` lost together with the database, or put back from an older copy before the first start, leaves nothing to
   continue from: the records are then sorted out by id and version.
-- **What you see.** A version may jump by up to 100,000 after a server start; versions are only compared, so nothing else
+- **What you see.** A version may jump by up to 100,000 after a server start or a restore; versions are only compared, so nothing else
   changes. When the counter was below the mark the log says `Space '<id>': the version counter (<n>) was below the mark kept
   in config.json; raised to <m>.` and `ythril_version_counter_raised_total{reason="start"|"went_back"}` counts it. A background
   save of `config.json` that failed counts in `ythril_config_flush_failures_total`.
