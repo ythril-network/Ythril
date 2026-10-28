@@ -48,16 +48,23 @@ let _secrets: SecretsFile | null = null;
 export type ConfigOverlay = (config: Config) => void;
 const _overlays: ConfigOverlay[] = [];
 
-/** Register an overlay, once at module load. Registering the same function twice registers it once. */
+/** Register an overlay, once at module load, and run it at once on a config already loaded. Registering the same function twice registers it once. */
 export function registerConfigOverlay(apply: ConfigOverlay): void {
-  if (!_overlays.includes(apply)) _overlays.push(apply);
+  if (_overlays.includes(apply)) return;
+  _overlays.push(apply);
+  // Registered after the config was loaded (a lazy import, a reshuffled import graph): it takes the loaded object in now, or what the file holds
+  // for it would reach it only at the next reload.
+  if (_config) runOverlay(apply, _config);
+}
+
+/** Run one overlay; a throw in it is logged and never reaches the load or the save. */
+function runOverlay(apply: ConfigOverlay, config: Config): void {
+  try { apply(config); } catch (err) { log.error(`A config overlay failed on config.json: ${peerText(err)}`); }
 }
 
 /** Run every registered overlay on a config object the loader is taking in or writing out. */
 function applyConfigOverlays(config: Config): void {
-  for (const apply of _overlays) {
-    try { apply(config); } catch (err) { log.error(`A config overlay failed on config.json: ${peerText(err)}`); }
-  }
+  for (const apply of _overlays) runOverlay(apply, config);
 }
 
 // ── File permission check ──────────────────────────────────────────────────

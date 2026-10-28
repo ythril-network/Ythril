@@ -111,15 +111,27 @@ describe('the version mark is read only as a valid number', () => {
     assert.equal(versionMarkOf('zero'), 0, '0 is a valid mark');
   });
 
-  it('only an own key of the marks is read: __proto__, constructor and toString answer undefined', async () => {
+  it('only an own key of the marks is read, and touches no prototype: inherited names answer undefined, a space named constructor has its mark', async () => {
     const { versionMarkOf } = await needModule();
     writeConfigWithMarks('{"__proto__":77,"s":5}');   // an own "__proto__" key, as JSON.parse makes it
     loader.reloadConfig();
-    assert.equal(versionMarkOf('__proto__'), undefined, 'an own key named __proto__ was read as a space');
+    assert.equal(({}).s, undefined, 'reading the marks wrote to Object.prototype');
+    assert.equal(Object.getPrototypeOf(loader.getConfig().versionMarks), null, 'the marks are written into an object with a prototype');
     for (const inherited of ['constructor', 'toString', 'hasOwnProperty', 'valueOf']) {
       assert.equal(versionMarkOf(inherited), undefined, `an inherited property '${inherited}' was read as a space's mark`);
     }
     assert.equal(versionMarkOf('s'), 5, 'fixture: the valid mark beside them was not read');
+    // `constructor` and `prototype` are valid space ids (`[a-z0-9-]+`): they get their marks like any other space.
+    writeConfigWithMarks('{"constructor":11,"prototype":12}');
+    loader.reloadConfig();
+    assert.equal(versionMarkOf('constructor'), 11, "a space named 'constructor' has no mark");
+    assert.equal(versionMarkOf('prototype'), 12, "a space named 'prototype' has no mark");
+  });
+
+  it('an overlay registered after the config was loaded takes the loaded object in at once, so the marks never depend on import order', () => {
+    let seen;
+    loader.registerConfigOverlay(cfg => { seen = cfg; });
+    assert.equal(seen, loader.getConfig(), 'an overlay registered late saw nothing until the next reload');
   });
 
   it('versionMarks that is not an object reads as no marks and does not throw', async () => {
