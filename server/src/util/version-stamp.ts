@@ -27,6 +27,10 @@
  *    anything is written and before the counter moves for the refused row, so a refused edit changes nothing and a refused delete leaves
  *    no tombstone. It is D-19 B's accepted residual, and nothing else is refused here. Counted, per collection, as
  *    `ythril_brain_write_seq_total{outcome="ceiling"}`.
+ *  - **The version mark is read here and nowhere else** (`util/version-mark.ts`, Q-556): the first stamp of a space in this process raises the counter to the
+ *    mark kept in config.json BEFORE the counter's update, and a counter found below one this process saw (it went back while running) is raised to it and
+ *    the update redone once, so a restore onto an empty database, a counter wipe, an import onto an emptied space or a failed rename's counter move cannot
+ *    restart a space's versions below ones peers hold. After the update the mark follows the counter, never a stamp lifted by a held tombstone.
  *  - **The counter is only ever raised to a value at or below the cap** (`raiseVersionTo` clamps), never lowered, and an allocation
  *    keeps every field of the counter doc it does not own (`positionsOwed`, `positionsReadyAt`: the owed marker rides on this doc).
  *
@@ -43,6 +47,8 @@ import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { readyWhenCreated } from '../sync/positions-ready.js';
 import { log, peerText } from './log.js';
+import { versionMarkOf, followCounter, counterSeenBefore, isFirstStampOf, firstStampChecked, reportCounterRaised } from './version-mark.js';
+import type { VersionRaiseReason } from '../metrics/version-raise-count.js';
 import { MAX_INGEST_SEQ, SEQ_CARRYING, VERSION_FLOOR_CAP, highestVersionBelowCapOf } from './seq.js';
 import type { ClientSession } from 'mongodb';
 
@@ -153,9 +159,18 @@ async function allocateBounded(
   let counter = 0;
   if (accepted.length > 0) {
     const n = accepted.length;
+    // The version mark (`util/version-mark.ts`) is read HERE and nowhere else, before the counter moves for this allocation: the first stamp of a
+    // space in this process starts from a counter at or above its mark, so a restore onto an empty database or a wiped counter cannot restart a
+    // space's versions below ones peers hold. Marked done only after the raise succeeded, so a failed raise is tried again by the next stamp.
+    if (isFirstStampOf(spaceId)) {
+      const mark = versionMarkOf(spaceId);
+      if (mark !== undefined) await raiseCounterToMark(spaceId, mark, 'start');
+      firstStampChecked(spaceId);
+    }
+    const seenBefore = counterSeenBefore(spaceId);
     // ONE pipeline, atomic: `seq := max(seq + n, H)` and the version the build that wrote it has seen. Upserted for a space with no
     // doc yet; every other field of the doc (`positionsOwed`, `positionsReadyAt`) is left as it is.
-    const before = await col<SpaceCounterDoc>('ythril_counters').findOneAndUpdate(
+    const allocateFromCounter = () => col<SpaceCounterDoc>('ythril_counters').findOneAndUpdate(
       asFilter<SpaceCounterDoc>({ _id: spaceId }),
       [
         readyWhenCreated(),
@@ -164,7 +179,18 @@ async function allocateBounded(
       ] as unknown as ReturnType<typeof asUpdate<SpaceCounterDoc>>,
       { upsert: true, returnDocument: 'before' },
     );
+    let before = await allocateFromCounter();
+    // A counter below one this process saw BEFORE it sent this update has gone back while the process ran (an import onto an emptied space, a
+    // failed rename's counter move, a live wipe): the update above started from it and its stamps are not safe. Raised to the mark and redone once;
+    // the numbers the first update took are simply not used.
+    const mark = versionMarkOf(spaceId);
+    if ((before?.seq ?? 0) < seenBefore && mark !== undefined) {
+      await raiseCounterToMark(spaceId, mark, 'went_back');
+      before = await allocateFromCounter();
+    }
     counter = before?.seq ?? 0;
+    // The mark follows the counter this update LEFT (the stamp's lifts by a held tombstone are not in it).
+    followCounter(spaceId, Math.max(counter + n, raiseTo));
   }
   let next = 0;
   return held.map((h, i): VersionAllocation | RefusedVersion => {
@@ -215,20 +241,35 @@ export async function highestVersionBelowCap(spaceId: string): Promise<number> {
  * clamped and said (a stray value must not strand the counter within `SEQ_CEILING_RESERVE` of the ceiling).
  */
 export async function raiseVersionTo(spaceId: string, target: number): Promise<void> {
+  await raiseCounter(spaceId, target);
+}
+
+/** {@link raiseVersionTo}, answering the counter as it stood BEFORE the raise (`0` for a space with no counter doc), so a caller can say whether it moved. */
+async function raiseCounter(spaceId: string, target: number): Promise<number> {
   let to = target;
   if (to > VERSION_FLOOR_CAP) {
     log.warn(`Clamped the version raise for space '${peerText(spaceId)}': ${to} is above the cap (${VERSION_FLOOR_CAP}); raising to the cap instead.`);
     to = VERSION_FLOOR_CAP;
   }
-  await col<SpaceCounterDoc>('ythril_counters').updateOne(
+  const before = await col<SpaceCounterDoc>('ythril_counters').findOneAndUpdate(
     asFilter<SpaceCounterDoc>({ _id: spaceId }),
     [
       readyWhenCreated(),
       { $set: { seq: { $max: [{ $ifNull: ['$seq', 0] }, to] } } },
       { $set: { seqSeenBy6: '$seq' } },
     ] as unknown as ReturnType<typeof asUpdate<SpaceCounterDoc>>,
-    { upsert: true },
+    { upsert: true, returnDocument: 'before' },
   );
+  return before?.seq ?? 0;
+}
+
+/**
+ * Raise the counter to the space's version mark (`util/version-mark.ts`) and say so when that moved it: one line and one count, with the reason.
+ * The only reader of a mark that moves a counter, and it is called from `allocate` alone.
+ */
+async function raiseCounterToMark(spaceId: string, mark: number, reason: VersionRaiseReason): Promise<void> {
+  const from = await raiseCounter(spaceId, mark);
+  if (from < mark) reportCounterRaised(spaceId, from, mark, reason);
 }
 
 /**

@@ -15,6 +15,7 @@ import { settledWithin } from '../util/time-bound.js';
 import { migrateProxiesToViews, holdsLegacyProxies } from './migrate-proxies-to-views.js';
 import { validateViews } from './view-shape.js';
 import { effectiveMongoUri, readConfiguredMongoUriFrom } from './mongo-uri.js';
+import { countConfigFlushFailure } from '../metrics/config-flush-count.js';
 
 const CONFIG_PATH = process.env['CONFIG_PATH'] ?? '/config/config.json';
 const SECRETS_PATH = path.join(path.dirname(CONFIG_PATH), 'secrets.json');
@@ -23,6 +24,41 @@ const SCHEMA_CATALOGS_PATH = path.join(path.dirname(CONFIG_PATH), 'schema-catalo
 
 let _config: Config | null = null;
 let _secrets: SecretsFile | null = null;
+
+// ── The config overlay ───────────────────────────────────────────────────────
+
+/**
+ * State this instance keeps in memory that config.json must also carry, and that no caller who holds a config object may drop.
+ *
+ * ## The question it answers
+ *
+ * "How does a module that owns part of config.json (the version marks, `util/version-mark.ts`) keep its part in every config object the
+ * loader reads or writes, without the loader importing it?" The loader is imported by almost everything, so it cannot import a module that
+ * imports the stamping code (`no-runtime-import-cycles`); the module registers a function here instead.
+ *
+ * ## What it prevents, and why it is inside the loader
+ *
+ * The loader keeps ONE object, replaced in place by a reload and swapped by a save of a detached copy (`saveConfig(cfg)` with a `cfg` read
+ * before an await). A part that lives in config.json and is merged in by its callers is dropped by the first caller that holds a fresh or
+ * stale object. So {@link applyConfigOverlays} runs at every place the loader takes a config object in (`loadConfig`, `reloadConfig`) and at
+ * every place it writes one out (`saveConfig`, `saveConfigSoon`, the background flush): the one choke point, not one per caller.
+ *
+ * An overlay must be quick and synchronous (a save runs it), and a throw in it is logged and never reaches the load or the save.
+ */
+export type ConfigOverlay = (config: Config) => void;
+const _overlays: ConfigOverlay[] = [];
+
+/** Register an overlay, once at module load. Registering the same function twice registers it once. */
+export function registerConfigOverlay(apply: ConfigOverlay): void {
+  if (!_overlays.includes(apply)) _overlays.push(apply);
+}
+
+/** Run every registered overlay on a config object the loader is taking in or writing out. */
+function applyConfigOverlays(config: Config): void {
+  for (const apply of _overlays) {
+    try { apply(config); } catch (err) { log.error(`A config overlay failed on config.json: ${peerText(err)}`); }
+  }
+}
 
 // ── File permission check ──────────────────────────────────────────────────
 
@@ -381,6 +417,7 @@ export function loadConfig(): Config {
   // A malformed `views` list refuses the boot, naming the entry: a view nobody can name or delete must not be served (Q-531).
   validateViews(parsed.views);
   _config = parsed;
+  applyConfigOverlays(_config);
   validateOidcBlock(_config);
   // Derive the per-space rights matrix for any token that has none. IN MEMORY ONLY, and deliberately not
   // persisted: enforcement still reads the legacy fields, so this run is an observation rather than a
@@ -541,6 +578,9 @@ export function reloadConfig(): Config {
   } else {
     _config = parsed;
   }
+  // After the replace, on the object every holder of `getConfig()` sees: a mark this process holds that the file does not (an older copy put
+  // back) is written into it, and a higher one the file holds is taken into memory.
+  applyConfigOverlays(parsed);
   // Fix permission bits without rewriting content — avoids overwriting a
   // host-side edit that hasn't propagated through the bind-mount yet.
   try { fs.chmodSync(CONFIG_PATH, 0o600); } catch { /* non-POSIX host — ignore */ }
@@ -568,7 +608,14 @@ export function getConfig(): Config {
 //                         fields are runtime state, not configuration: losing the
 //                         last few on a crash is harmless (watermarks re-derive by
 //                         seq on the next pull, counters are cosmetic), so they are
-//                         safe to flush lazily off the event loop.
+//                         safe to flush lazily off the event loop. The version
+//                         marks (`versionMarks`, `util/version-mark.ts`) ride on
+//                         this flush too and are NOT harmless to lose: a crash
+//                         before the flush, together with the loss of the
+//                         database, lets a space reuse versions peers hold. They
+//                         are saved in steps of 100 000, so a stretch that short
+//                         is the whole exposure, and a failed flush is logged and
+//                         counted (`ythril_config_flush_failures_total`).
 //
 // A monotonic generation counter lets the two paths coexist without a torn or
 // stale write: every in-memory mutation bumps `_writeGeneration`; the async
@@ -610,6 +657,7 @@ export function mutateConfig(apply: (config: Config) => void): void {
 
 export function saveConfig(config: Config): void {
   _config = config;
+  applyConfigOverlays(config);
   const gen = ++_writeGeneration;
   // Ensure parent directory exists
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
@@ -806,6 +854,7 @@ export function startConfigWatcher(
  */
 export function saveConfigSoon(config: Config): void {
   _config = config;
+  applyConfigOverlays(config);
   _writeGeneration++;
   if (_flushScheduled) return; // a flush is already queued — it will pick up the latest state
   _flushScheduled = true;
@@ -813,7 +862,10 @@ export function saveConfigSoon(config: Config): void {
     _flushScheduled = false;
     // Serialize writes so two flushes never race on the temp file.
     void _flushLock.run(FLUSH_KEY, async () => {
-      try { await writeConfigAsync(); } catch (err) { log.error(`Async config flush failed: ${peerText(err)}`); }
+      try { await writeConfigAsync(); } catch (err) {
+        countConfigFlushFailure();
+        log.error(`Async config flush failed: config.json was not saved, so the sync bookkeeping and the version marks since the last save are not on disk yet (the next save writes them): ${peerText(err)}`);
+      }
     });
   });
 }
@@ -825,6 +877,7 @@ async function writeConfigAsync(): Promise<void> {
   const gen = _writeGeneration;
   const config = _config;
   if (!config || gen <= _flushedGeneration) return; // nothing new to persist
+  applyConfigOverlays(config);   // the snapshot carries what the overlays hold now, not what they held when the flush was asked for
   const snapshot = encodeStateFile(JSON.stringify(config, null, 2));
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   const tmp = CONFIG_PATH + '.async.tmp';

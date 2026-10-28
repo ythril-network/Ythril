@@ -28,6 +28,8 @@ import { peekUsage, refreshUsageInBackground, usageMeasurementCount, usageIsComp
 import { spaceCollection } from '../db/space-collection.js';
 import { positionClockUnusable } from '../util/position-clock.js';
 import { setBrainWriteSink } from './brain-write-count.js';
+import { setVersionRaiseSink, VERSION_RAISE_REASONS } from './version-raise-count.js';
+import { setConfigFlushFailureSink } from './config-flush-count.js';
 import { oldestRecordPositionHoldSeconds } from '../sync/record-position-stream.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
 import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
@@ -2020,6 +2022,33 @@ for (const collection of Object.values(COLLECTION_SUFFIX)) {
     brainWriteSeqTotal.labels({ collection, outcome }).inc(0);
   }
 }
+
+/**
+ * Raises of a space's version counter to the mark kept in config.json (`util/version-mark.ts`, `Q-556`): `start` is the first stamp of a space
+ * in this process finding its counter below the mark (every restart of an instance that has been written to does it once per space, by up to
+ * the mark's step), `went_back` is a counter found below one this process had already seen (a restore, a wipe or an import underneath it).
+ * Counted only when the raise moved the counter. Both series are pre-declared: absent and zero look identical in a graph and mean opposites.
+ */
+export const versionCounterRaisedTotal = new Counter({
+  name: 'ythril_version_counter_raised_total',
+  help: 'Raises of a space version counter to the mark kept in config.json, by reason (start of the process, or the counter went back)',
+  labelNames: ['reason'] as const,
+  registers: [register],
+});
+setVersionRaiseSink(reason => versionCounterRaisedTotal.labels({ reason }).inc());
+for (const reason of VERSION_RAISE_REASONS) versionCounterRaisedTotal.labels({ reason }).inc(0);
+
+/**
+ * Background flushes of config.json that failed (`config/loader.ts`, `saveConfigSoon`). The sync bookkeeping and the version marks ride on
+ * that flush, and the failure is logged and otherwise silent: a flush that keeps failing is state that is not reaching the disk.
+ */
+export const configFlushFailuresTotal = new Counter({
+  name: 'ythril_config_flush_failures_total',
+  help: 'Background (coalesced) flushes of config.json that failed',
+  registers: [register],
+});
+setConfigFlushFailureSink(() => configFlushFailuresTotal.inc());
+configFlushFailuresTotal.inc(0);
 
 /**
  * Functional-label writes the store refused because another writer's edge already held the subject (`Q-439`): two writers

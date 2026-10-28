@@ -108,6 +108,11 @@ export async function startConfiguredInstanceServices(): Promise<void> {
     const { forgetWhatWasReceivedAfterCounterWipe } = await import('./util/seq.js');
     await forgetWhatWasReceivedAfterCounterWipe();
 
+    // Q-556: every space whose counter is above its version mark gets one (a space not written since the upgrade has none), before any loss
+    // of the database could leave the counter without a record of where it stood. Local state only; the raise itself happens at the first stamp.
+    const { seedVersionMarks } = await import('./util/version-mark.js');
+    await seedVersionMarks();
+
     // What a 5.6 build left (the first carry, or a repair): marked here, done by the owed job. Before the sync scheduler starts and before the server listens.
     await detectReupgradeAtBoot();
 

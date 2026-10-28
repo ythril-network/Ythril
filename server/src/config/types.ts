@@ -1422,6 +1422,14 @@ export interface Config {
    * creating, renaming or joining under one is refused, and every door that names one answers `410 space_retired`.
    */
   retiredSpaceIds?: string[];
+  /**
+   * The version mark of each space (`util/version-mark.ts`, Q-556): how high the space's version counter may already have gone, kept OUTSIDE the
+   * database so a restore onto an empty database, a counter wipe or a failed rename cannot restart a space's versions below ones peers hold. The
+   * key is the local space id; the value is `counter + 100 000` (at most `VERSION_FLOOR_CAP - 100 000`), saved in the background in steps of that
+   * size, and the space's counter is raised to it before the first stamp of every process start and whenever it is found to have gone back.
+   * Written by the server; read only as a valid number, and never lowered by a read.
+   */
+  versionMarks?: Record<string, number>;
   /** What the upgrade migration did, kept so the admin door can report it after the boot log is gone (`GET /api/admin/views/migration`). */
   viewsMigration?: ViewsMigrationReport;
   /**

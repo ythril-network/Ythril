@@ -5,6 +5,7 @@
  * then rewrites every config reference (networks, tokens, proxy members). Depends only on _shared.
  */
 import { moveCounterDoc } from '../sync/positions-owed.js';
+import { moveVersionMark } from '../util/version-mark.js';
 import { moveScanCursors } from '../brain/scan-cursor.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -141,7 +142,11 @@ export async function moveSpaceData(
   // `_id` is immutable in MongoDB, so these are copy-then-delete. The WHOLE document moves (`moveCounterDoc`, `sync/positions-owed.ts`): the greater of the two
   // versions and every marker field it carries (`positionsOwed`, `positionsReadyAt`, `seqSeenBy6`). A hand-built `{ _id, seq }` dropped them, and a renamed space
   // then read as owing a repair or, worse, lost an owed marker and read as ready.
+  //
+  // The space's version mark (`util/version-mark.ts`) moves FIRST, so a counter move that fails half way leaves a mark under the new id that the
+  // first stamp there raises the counter to (`allocate`).
   try {
+    moveVersionMark(oldId, newId);
     const moved = await moveCounterDoc(oldId, newId);
     if (moved) log.debug(`Migrated the counter document ('ythril_counters') ${peerText(oldId)} → ${peerText(newId)} (seq=${moved.seq})`);
   } catch (err) {
