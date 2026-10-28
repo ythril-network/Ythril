@@ -340,7 +340,7 @@ Notes:
   a `seq` above the one it read for the record, and above any deletion this instance holds for its id, so the version
   of one record only goes up on one instance. It is drawn from a per-space counter, so consecutive writes to one
   record will not give you `1, 2, 3`: echo back what you read, compare, and do not reason about the gaps. The first write
-  of a space after the server starts can raise the counter by up to 100,000 (the instance keeps a version mark in
+  of a space after the server starts or a restore ends can raise the counter by up to 100,000 (the instance keeps a version mark in
   `config.json` that a restart, a restore onto an empty database or a wipe continues from), so a record's `seq` may jump
   by that much between two edits. Only compare versions; never add to one, check it for a step or derive a count from it.
 - **A write without `If-Match` is conditional all the same, on the version it read.** If the stored version moved between its

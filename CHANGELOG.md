@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Config:** `config.json` carries a new key, `versionMarks`, written by the server: per space, the highest version its counter may already have reached. Do not edit it and do not copy it to another instance. A version can jump by up to 100,000 after a server start.
+- **Config:** `config.json` carries a new key, `versionMarks`, written by the server: per space, the highest version its counter may already have reached. Do not edit it and do not copy it to another instance. A version can jump by up to 100,000 after a server start or a restore.
 
 ### Changed
 

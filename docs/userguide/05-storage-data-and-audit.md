@@ -309,7 +309,7 @@ this instance handed out before, so peers keep them. Four things remain:
   remembers the numbers; the records are then sorted out by id and version when the peers next meet. Keep the two files together.
 - A record you edit before a peer's newer copy of it has arrived takes the higher version and replaces that copy on every
   peer, without a conflict to review.
-- Version numbers can jump by up to 100,000 after a server start. They are only compared, so nothing else changes.
+- Version numbers can jump by up to 100,000 after a server start or a restore. They are only compared, so nothing else changes.
 
 **What a restore tells you about files.** Once a space's records are back, the restore compares that space's files on disk
 with its file records and lists, per space, the files that no longer match. It only reports: it changes no file, no record
