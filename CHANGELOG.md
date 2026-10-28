@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Restore and wipe:** edits after a restore onto an empty database, a `docker compose down -v` that kept `config.json`, or an import onto an emptied space are no longer lost on peers. Losing `config.json` with the database, or a crash just before, can still lose them.
 - **Migrate:** a migrate whose copy is retried keeps one backup, the one its report names, instead of one full dump per attempt, and a backup that fails part-way no longer leaves its directory behind. Offsite copies of earlier attempts stay until the offsite retention prunes them.
 - **Migrate:** a completion write that fails (a full disk) no longer leaves every space refusing writes after you abandon the migrate; writes close only once the new URI is saved.
+- **Data page:** the migrate block and the maintenance pill now show how a migrate ended, or that the instance stopped to switch database, instead of keeping "Migration accepted: N spaces are being copied" and the last copy count.
 
 ### Security
 

@@ -106,6 +106,27 @@ async function restoreAnswered(p: Page, a: WireAnswer): Promise<void> {
   p.fixture.detectChanges();
 }
 
+async function migrateAnswered(p: Page, a: WireAnswer): Promise<void> {
+  p.c.migrateUri = 'mongodb://new-host:27017/ythril';
+  await p.c.confirmMigrate();
+  flushWire(p.http.expectOne(r => r.method === 'POST' && r.url === '/api/admin/data/migrate'), a);
+  p.fixture.detectChanges();
+}
+const migratePolls = (p: Page) => p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/migrate');
+
+/** A running migrate whose set is owed: its copy failed and is retried, as a target that keeps timing out leaves it. */
+const owedMigrate = () => migrateReport({
+  done: 0, spaces: [restoreSpace('general', 'owed', { attempts: 3, retryAt: '2026-10-18T12:05:00.000Z' }), restoreSpace('notes', 'owed', { attempts: 3 })],
+});
+const migrateAbandonButton = (p: Page) => Array.from(el(p).querySelectorAll('app-act-set-progress[kind="migrate"] button'))
+  .find(b => /abandon/i.test(b.textContent ?? '')) as HTMLButtonElement | undefined;
+/** Click the migrate card's abandon and let the confirm's promise settle. */
+async function clickAbandon(p: Page): Promise<void> {
+  migrateAbandonButton(p)!.click();
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  p.fixture.detectChanges();
+}
+
 describe('a restore is accepted, then shown as it runs (bundle-157)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
@@ -301,13 +322,6 @@ describe('a backup naming spaces this instance does not serve offers the leaveOu
 describe('the migrate card maps its refusals to keys and says what a migrate does now (bundle-157)', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  async function migrateAnswered(p: Page, a: WireAnswer): Promise<void> {
-    p.c.migrateUri = 'mongodb://new-host:27017/ythril';
-    await p.c.confirmMigrate();
-    flushWire(p.http.expectOne(r => r.method === 'POST' && r.url === '/api/admin/data/migrate'), a);
-    p.fixture.detectChanges();
-  }
-
   it('INFRA_MANAGED (the flag, and a URI from the environment) is one key; target_not_empty its own', async () => {
     for (const a of [MIGRATE_ANSWERS.infraFlag, MIGRATE_ANSWERS.infraEnv]) {
       const p = open({ migrationEnabled: true });
@@ -479,21 +493,8 @@ describe('the end of a restore is shown, and a migrate that stops the instance s
 describe('a migrate that cannot finish can be abandoned from its card, as a restore can (Q-564 F5)', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  /** A running migrate whose set is owed: its copy failed and is retried, as a target that keeps timing out leaves it. */
-  const owedMigrate = () => migrateReport({
-    done: 0, spaces: [restoreSpace('general', 'owed', { attempts: 3, retryAt: '2026-10-18T12:05:00.000Z' }), restoreSpace('notes', 'owed', { attempts: 3 })],
-  });
-  const migrateAbandonButton = (p: Page) => Array.from(el(p).querySelectorAll('app-act-set-progress[kind="migrate"] button'))
-    .find(b => b.textContent?.includes('data.progress.abandon')) as HTMLButtonElement | undefined;
-  /** Click the migrate card's abandon and let the confirm's promise settle. */
-  async function clickAbandon(p: Page): Promise<void> {
-    migrateAbandonButton(p)!.click();
-    for (let i = 0; i < 5; i++) await Promise.resolve();
-    p.fixture.detectChanges();
-  }
-
   it('a running migrate with an owed space offers abandon on its own card; a confirmed abandon posts to the migrate door', async () => {
-    const p = open({ migrate: owedMigrate() });
+    const p = open({ migrate: owedMigrate(), migrationEnabled: true });
     expect(migrateAbandonButton(p), 'the migrate card offers no abandon').toBeTruthy();
     await clickAbandon(p);
     expect(p.confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true }));
@@ -534,5 +535,105 @@ describe('a migrate that cannot finish can be abandoned from its card, as a rest
     }
     expect(EN['data.migrate.abandonConfirm']).toMatch(/old database/i);
     expect(EN['data.migrate.abandonConfirm']).toMatch(/empt/i);
+  });
+});
+
+/*
+ * bundle-160 (Q-568, Q-562), with the REAL en.json: the migrate block and the maintenance pill tell how a migrate ended, or that the
+ * instance stopped to switch database. The block kept "Migration accepted: N spaces are being copied" for ever, and the pill kept the last
+ * copy count, so the page said two different things.
+ */
+describe('the migrate block and the maintenance pill say how a migrate ended (Q-568, Q-562)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  const block = (p: Page, title: string) =>
+    Array.from(el(p).querySelectorAll('.dz-block')).find(b => b.querySelector('h4')?.textContent?.includes(title));
+  /** What a sighted operator reads in the migrate block's own live region. */
+  const migrateNotice = (p: Page) =>
+    Array.from(block(p, EN['data.migrate.title']!)?.querySelectorAll('[role="status"] .alert') ?? [])
+      .map(e => (e.textContent ?? '').replace(/\s+/g, ' ').trim()).join(' | ');
+  const pillText = (p: Page) =>
+    (block(p, EN['data.maintenance.title']!)?.querySelector('app-status-pill')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+
+  /** A migrate this page started and is following, then the next report poll answered as `answer` after the poll interval. */
+  async function migrateFollowed(answer: (poll: TestRequest) => void): Promise<Page> {
+    const p = open({ words: EN, migrationEnabled: true });
+    await migrateAnswered(p, MIGRATE_ANSWERS.accepted);
+    expect(migrateNotice(p), 'accepted is said while it runs').toContain('Migration accepted: 2 spaces are being copied');
+    migratePolls(p).forEach(r => r.flush(migrateReport()));
+    vi.advanceTimersByTime(TEN_MINUTES);
+    answer(migratePolls(p)[0]!);
+    p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/maintenance').forEach(r => r.flush(MAINTENANCE.off));
+    vi.advanceTimersByTime(1_000);
+    p.fixture.detectChanges();
+    return p;
+  }
+
+  it('an abandon from the card replaces the accepted line in the migrate block', async () => {
+    const p = open({ words: EN, migrationEnabled: true });
+    await migrateAnswered(p, MIGRATE_ANSWERS.accepted);
+    migratePolls(p).forEach(r => r.flush(owedMigrate()));
+    p.fixture.detectChanges();
+    await clickAbandon(p);
+    flushWire(p.http.expectOne(r => r.method === 'POST' && r.url === '/api/admin/data/migrate/abandon'), MIGRATE_ABANDON_ANSWERS.abandoned);
+    p.fixture.detectChanges();
+    expect(migrateNotice(p)).toContain(EN['data.migrate.abandoned']);
+    expect(migrateNotice(p)).not.toContain('Migration accepted');
+    expect(migrateNotice(p)).not.toContain('being copied');
+  });
+
+  it('an abandoned migrate seen by the poll replaces the accepted line with the abandoned sentence', async () => {
+    const p = await migrateFollowed(r => r.flush(migrateReport({ state: 'abandoned', endedAt: '2026-10-18T12:01:00.000Z' })));
+    expect(migrateNotice(p)).toContain(EN['data.migrate.abandonedOutcome']);
+    expect(migrateNotice(p)).not.toContain('Migration accepted');
+    expect(migrateNotice(p)).not.toContain('being copied');
+  });
+
+  it('a completed migrate replaces the accepted line with the completion sentence', async () => {
+    const p = await migrateFollowed(r => r.flush(migrateReport({ state: 'completed', done: 2, endedAt: '2026-10-18T12:01:00.000Z' })));
+    expect(migrateNotice(p)).toContain(EN['data.migrate.completed']);
+    expect(migrateNotice(p)).not.toContain('Migration accepted');
+    expect(migrateNotice(p)).not.toContain('being copied');
+  });
+
+  it('a migrate whose poll is refused at the connection replaces the accepted line with the stopped sentence', async () => {
+    const p = await migrateFollowed(r => r.error(new ProgressEvent('error')));
+    expect(migrateNotice(p)).toContain(EN['data.progress.migrateStopped']);
+    expect(migrateNotice(p)).not.toContain('being copied');
+  });
+
+  it('an answer from the server (a 503) leaves the accepted line', async () => {
+    const p = await migrateFollowed(r => r.flush({ error: 'unavailable' }, { status: 503, statusText: 'Service Unavailable' }));
+    expect(migrateNotice(p)).toContain('Migration accepted: 2 spaces are being copied');
+    expect(migrateNotice(p)).not.toContain(EN['data.progress.migrateStopped']);
+  });
+
+  it('the maintenance pill stops counting copied spaces when the migrate poll is refused at the connection', () => {
+    const p = open({ words: EN, maintenance: MAINTENANCE.heldByMigrate, migrate: migrateReport() });
+    expect(pillText(p)).toContain('Copying to the new database: 1 of 2');
+    vi.advanceTimersByTime(TEN_MINUTES);
+    migratePolls(p)[0]!.error(new ProgressEvent('error'));
+    p.fixture.detectChanges();
+    expect(pillText(p)).not.toContain('Copying to the new database');
+    expect(pillText(p)).toContain(EN['data.maintenance.migrateStopped']);
+  });
+
+  it('a 503 from the migrate report leaves the pill counting', () => {
+    const p = open({ words: EN, maintenance: MAINTENANCE.heldByMigrate, migrate: migrateReport() });
+    vi.advanceTimersByTime(TEN_MINUTES);
+    migratePolls(p)[0]!.flush({ error: 'unavailable' }, { status: 503, statusText: 'Service Unavailable' });
+    p.fixture.detectChanges();
+    expect(pillText(p)).toContain('Copying to the new database: 1 of 2');
+  });
+
+  it('every language has words for the stopped pill', () => {
+    for (const lang of ['en', 'de', 'pl']) {
+      const d: Record<string, string> = JSON.parse(readFileSync(resolve(__dirname, `../../../../public/assets/i18n/${lang}.json`), 'utf8'));
+      expect(d['data.maintenance.migrateStopped']?.trim(), `${lang} has no words for data.maintenance.migrateStopped`).toBeTruthy();
+    }
   });
 });

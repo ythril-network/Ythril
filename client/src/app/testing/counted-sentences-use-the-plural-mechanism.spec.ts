@@ -108,8 +108,6 @@ describe('a counted sentence uses the plural mechanism (Q-549)', () => {
 
 /** A translated key sitting directly beside a value in a template, with the reason it is allowed to. */
 const TEMPLATE_ALLOWED: Readonly<Record<string, string>> = {
-  'data.migrate.success':
-    'the value is a status sentence (the migration notice, already built by pluralText in the component) and the key is the clause that follows it - there is no noun being counted',
   'tokens.table.perMin':
     'a unit of rate ("/min") written directly after a limit, like the "d" of "3 d": a quantity with a unit, not a count of things (COUNT_PARAMS leaves time units out on purpose)',
 };

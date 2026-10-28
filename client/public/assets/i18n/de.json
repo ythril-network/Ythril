@@ -237,6 +237,7 @@
   "data.maintenance.migrating.many": "Kopie in die neue Datenbank: {{done}} von {{count}} Spaces",
   "data.maintenance.migrating.other": "Kopie in die neue Datenbank: {{done}} von {{count}} Spaces",
   "data.maintenance.heldHint": "Eine Wiederherstellung oder Migration hält den Wartungsmodus, bis sie endet; danach lässt er sich wieder schalten.",
+  "data.maintenance.migrateStopped": "Beendet, um auf die neue Datenbank umzuschalten",
   "common.save": "Speichern",
   "common.unsavedChanges": "Nicht gespeicherte Änderungen",
   "common.saving": "Speichern…",
