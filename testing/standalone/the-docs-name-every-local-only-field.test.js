@@ -53,9 +53,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { localRuleSheets } from '../_shared/local-rule-sheets.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 
-const DOC_FLOOR = 4;
+// The three tracked docs below, plus the local rule sheet where the checkout has one (`CLAUDE.md` is not tracked, Q-632).
+const DOC_FLOOR = 3 + localRuleSheets(REPO_ROOT).length;
 /** The classes the module exports today (restored, derived, write guard, the restored dates, the union): a floor on the derivation. */
 const CLASS_FLOOR = 5;
 
@@ -65,7 +67,8 @@ before(async () => { loaded = await loadDistModule('../../server/dist/sync/local
 /** Whole-word, so `embedding` is not found inside `embeddingModel`. */
 const names = (text, field) => new RegExp(String.raw`(?<![\w$])${field.replace(/[$]/g, String.raw`\$`)}(?![\w$])`).test(text);
 
-const DOCS = trackedSources(['docs', 'CLAUDE.md'], { ext: ['.md'], floor: 20, untracked: true })
+// The local rule sheet is read beside the listing, not through it: an ignored file is in no git listing (Q-632).
+const DOCS = [...trackedSources(['docs'], { ext: ['.md'], floor: 20, untracked: true }), ...localRuleSheets(REPO_ROOT)]
   .map(file => ({ file, text: readFileSync(join(REPO_ROOT, file), 'utf8') }));
 
 /** The docs with a paragraph naming two or more restored fields. */
@@ -90,7 +93,7 @@ describe('the docs that enumerate the local-only fields name every field of the 
     const { RESTORED_LOCAL_FIELDS } = needModule(loaded, ['RESTORED_LOCAL_FIELDS'], 'local-only fields');
     const found = enumeratingDocs(RESTORED_LOCAL_FIELDS).map(d => d.file);
     assert.ok(found.length >= DOC_FLOOR, `only ${found.length} found: ${found.join(', ')}`);
-    for (const must of ['CLAUDE.md', 'docs/sync-protocol.md', 'docs/integration-guide/09-sync-api.md', 'docs/integration-guide/12-admin-api.md']) {
+    for (const must of [...localRuleSheets(REPO_ROOT), 'docs/sync-protocol.md', 'docs/integration-guide/09-sync-api.md', 'docs/integration-guide/12-admin-api.md']) {
       assert.ok(found.includes(must), `${must} no longer enumerates the record-tier fields in one paragraph: re-point this gate or restore the sentence`);
     }
   });

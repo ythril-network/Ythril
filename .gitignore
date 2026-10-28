@@ -107,6 +107,13 @@ bench-data/
 .claude/settings.local.json
 **/.claude/settings.local.json
 
+# The agents' instructions and project skills are the owner's working notes, not part of the product, and this
+# repository is public (Q-632, owner 2026-10-28). They stay on the machine that uses them; a test that reads
+# CLAUDE.md treats it as local-only (read when present, never required in a clean clone).
+/CLAUDE.md
+/CLAUDE.local.md
+.claude/skills/
+
 # The rule the note above DESCRIBES but did not add. `.mcp.json` names a live instance
 # (`https://ythril.example.com/mcp`) and the env var holding its bearer token, and it was still
 # covered only by `.git/info/exclude`. The paragraph above explaining why that is not protection

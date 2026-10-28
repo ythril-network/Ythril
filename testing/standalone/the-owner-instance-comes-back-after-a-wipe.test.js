@@ -27,7 +27,7 @@
  * - `ConvertTo-ComparablePath -Path <string>` → `\` turned to `/`, case folded to lower, trailing `/` dropped.
  * - `Test-SameDirectory -Path <string> -Root <string>` → `$true` when both name one directory, whatever the spelling.
  * - `Test-PathUnder -Path <string> -Root <string>` → `$true` for the root itself or anything below it, with a boundary
- *   (`O:\Projects\Ythril-old` is NOT under `O:\Projects\Ythril`).
+ *   (`D:\Work\Ythril-old` is NOT under `D:\Work\Ythril`).
  * - `Split-ConfigFiles -Value <string>` → the `com.docker.compose.project.config_files` label split on commas, trimmed,
  *   empties dropped.
  *
@@ -99,7 +99,7 @@ import { tmpdir } from 'node:os';
 import { REPO_ROOT } from './_sources.mjs';
 
 const MODULE = join(REPO_ROOT, 'scripts', 'owner-instance.ps1');
-const REPO = 'O:\\Projects\\Ythril';
+const REPO = 'D:\\Work\\Ythril';
 const FILES = [`${REPO}\\docker-compose.yml`, `${REPO}\\docker-compose.override.yml`];
 const SECRET = 'fake-mongo-pw-7f3a';
 const HEAD = '0123456789abcdef0123456789abcdef01234567';
@@ -244,13 +244,13 @@ const sameFile = (before) => (r) => {
 const CASES = [
   // pure
   { name: 'ConvertTo-ComparablePath folds case and the separator, and drops a trailing slash',
-    body: `$V = @((ConvertTo-ComparablePath -Path 'O:\\Projects\\Ythril'), (ConvertTo-ComparablePath -Path 'o:/projects/ythril/'))`,
-    expect: (r) => assert.deepEqual(r.value, ['o:/projects/ythril', 'o:/projects/ythril']) },
-  { name: 'Test-SameDirectory: O:\\Projects\\Ythril is o:/projects/ythril, and is not O:\\Projects\\Ythril2',
-    body: `$V = @((Test-SameDirectory -Path 'O:\\Projects\\Ythril' -Root 'o:/projects/ythril'), (Test-SameDirectory -Path 'O:\\Projects\\Ythril2' -Root 'O:\\Projects\\Ythril'))`,
+    body: `$V = @((ConvertTo-ComparablePath -Path 'D:\\Work\\Ythril'), (ConvertTo-ComparablePath -Path 'd:/work/ythril/'))`,
+    expect: (r) => assert.deepEqual(r.value, ['d:/work/ythril', 'd:/work/ythril']) },
+  { name: 'Test-SameDirectory: D:\\Work\\Ythril is d:/work/ythril, and is not D:\\Work\\Ythril2',
+    body: `$V = @((Test-SameDirectory -Path 'D:\\Work\\Ythril' -Root 'd:/work/ythril'), (Test-SameDirectory -Path 'D:\\Work\\Ythril2' -Root 'D:\\Work\\Ythril'))`,
     expect: (r) => assert.deepEqual(r.value, [true, false]) },
   { name: 'Test-PathUnder holds the root and below it, with a boundary',
-    body: `$V = @((Test-PathUnder -Path 'O:\\Projects\\Ythril\\local-data\\mongo\\db' -Root 'o:/projects/ythril'), (Test-PathUnder -Path 'O:\\Projects\\Ythril' -Root 'O:\\Projects\\Ythril\\'), (Test-PathUnder -Path 'O:\\Projects\\Ythril-old\\data' -Root 'O:\\Projects\\Ythril'), (Test-PathUnder -Path 'C:\\Users\\owner\\.ythril' -Root 'O:\\Projects\\Ythril'))`,
+    body: `$V = @((Test-PathUnder -Path 'D:\\Work\\Ythril\\local-data\\mongo\\db' -Root 'd:/work/ythril'), (Test-PathUnder -Path 'D:\\Work\\Ythril' -Root 'D:\\Work\\Ythril\\'), (Test-PathUnder -Path 'D:\\Work\\Ythril-old\\data' -Root 'D:\\Work\\Ythril'), (Test-PathUnder -Path 'C:\\Users\\owner\\.ythril' -Root 'D:\\Work\\Ythril'))`,
     expect: (r) => assert.deepEqual(r.value, [true, true, false, false]) },
   { name: 'Split-ConfigFiles splits the label on commas, trimmed, empties dropped',
     body: `$V = @{ two = @(Split-ConfigFiles -Value '${FILES.join(',')}'); spaced = @(Split-ConfigFiles -Value ' a.yml , ,b.yml '); none = @(Split-ConfigFiles -Value '').Count }`,
@@ -259,8 +259,8 @@ const CASES = [
   // Get: which project
   { name: 'Get selects this checkout\'s project and not the test stack under it', ...getCase([...owner(['ythril', 'ythril-mongo']), ...testStack]),
     expect: (r) => { const v = recorded(r); assert.equal(v.project, 'ythril'); assert.equal(v.workingDir, REPO); } },
-  { name: 'Get matches working_dir whatever its spelling (o:/projects/ythril/ against O:\\Projects\\Ythril)',
-    ...getCase(owner(['ythril', 'ythril-mongo']), undefined, 'o:/projects/ythril/'),
+  { name: 'Get matches working_dir whatever its spelling (d:/work/ythril/ against D:\\Work\\Ythril)',
+    ...getCase(owner(['ythril', 'ythril-mongo']), undefined, 'd:/work/ythril/'),
     expect: (r) => assert.equal(recorded(r).project, 'ythril') },
   { name: 'Get returns nothing, and does not refuse, when only the test stack runs', ...getCase(testStack, {}),
     expect: (r) => { assert.equal(r.error, null, `it refused: ${r.error}`); assert.equal(r.value, null); } },

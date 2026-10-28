@@ -140,7 +140,7 @@ describe('--record-ci records the client job from its own artifact', () => {
 
 describe('masking is held through this door as well: the same secrets, masked in title, message and path', () => {
   const SECRETS = [TOKEN, 'ythril_abcdef0123456789ABCDEF', 'opaque-credential-0123456789'];
-  const outsidePath = (r) => { r.testResults[0].name = `C:\\Users\\Menne\\secret-project\\${TOKEN}.spec.ts`; };
+  const outsidePath = (r) => { r.testResults[0].name = `C:\\Users\\someuser\\secret-project\\${TOKEN}.spec.ts`; };
   const cases = [
     ['an artifact the real mask step made', { masked: true }],
     ['an artifact that reached the recorder unmasked (the recorder masks for itself)', { masked: false }],
@@ -152,7 +152,7 @@ describe('masking is held through this door as well: the same secrets, masked in
         assert.equal(r.code, 0, everything(r));
         assert.ok(byKey(ythril)[KEY], `no client record: ${everything(r)}`);
         const sent = JSON.stringify(ythril.calls.map(c => c.args));
-        for (const leaked of [...SECRETS, 'Menne', 'secret-project']) assert.ok(!sent.includes(leaked), `${leaked} was written`);
+        for (const leaked of [...SECRETS, 'someuser', 'secret-project']) assert.ok(!sent.includes(leaked), `${leaked} was written`);
         assert.ok(!sent.includes('chunk-hooks'), 'a stack frame was written');
         assert.ok(sent.includes('title leaks'), 'the failure is recorded with its (masked) title');
         assert.ok(!everything(r).includes(TOKEN));

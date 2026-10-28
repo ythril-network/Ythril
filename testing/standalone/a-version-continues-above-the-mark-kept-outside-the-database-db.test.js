@@ -8,7 +8,7 @@
  * versions this instance already handed out. The next edit is then stamped below the copy the peers hold, and every peer keeps its own
  * (the newer one wins on a version compare): the edit is lost on every peer, with no error on either side.
  *
- * Probed on 7c81b63e (`E:\ythril-scratch\tmp\q556\probe-restore-db.test.mjs`): a record X held at version 6 by a peer, a restore onto an
+ * Probed on 7c81b63e: a record X held at version 6 by a peer, a restore onto an
  * empty database from a backup whose counter was 3, and the first edit of X stamped 4.
  *
  * The rule (owner decision 2026-10-28): the instance keeps the high-water of its versions in config.json (`versionMarks`, saved in steps

@@ -316,13 +316,13 @@ describe('what the client\'s report says is masked on the way in, and a hostile 
   it('a spec path outside the checkout is masked: no home directory, no token-shaped name', async () => {
     await withClientRun({}, async ({ server, dir, report, env }) => {
       const r0 = report('failed');
-      r0.testResults[0].name = `C:\\Users\\Menne\\secret-project\\${TOKEN}.spec.ts`;
+      r0.testResults[0].name = `C:\\Users\\someuser\\secret-project\\${TOKEN}.spec.ts`;
       writeClientReport(dir, r0);
       const r = await runTimes(['--record'], { cwd: dir, env });
       assert.equal(r.code, 0, everything(r));
       assert.ok(clientRecord(server), `the run was not recorded: ${everything(r)}`);
       const sent = JSON.stringify(server.calls.map(c => c.args));
-      for (const leaked of ['Menne', 'secret-project', TOKEN]) assert.ok(!sent.includes(leaked), `${leaked} was written`);
+      for (const leaked of ['someuser', 'secret-project', TOKEN]) assert.ok(!sent.includes(leaked), `${leaked} was written`);
     });
   });
 

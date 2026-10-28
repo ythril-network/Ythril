@@ -60,6 +60,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { localRuleSheets } from '../_shared/local-rule-sheets.mjs';
 
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 
@@ -113,7 +114,7 @@ function haystack() {
  * Excluded from the haystack below for the same reason this file is: a document that is its own haystack
  * validates every name it invents.
  */
-const RULE_SHEETS = ['CLAUDE.md'];
+const RULE_SHEETS = localRuleSheets();
 
 /** Every backticked camelCase identifier in the docs, mapped to the files that name it. */
 function documentedIdentifiers() {
