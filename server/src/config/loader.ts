@@ -889,14 +889,15 @@ async function writeConfigAsync(): Promise<void> {
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   const tmp = CONFIG_PATH + '.async.tmp';
   await fs.promises.writeFile(tmp, snapshot, { encoding: 'utf8', mode: 0o600 });
-  // A synchronous durable write may have landed a newer generation while we were
-  // writing — if so our snapshot is stale, so discard it rather than clobber disk.
+  // From here to the end is ONE synchronous step (Q-638). A synchronous durable write may have landed a newer generation while the
+  // snapshot was being written; if so it is stale and is discarded. The check and the rename must not be split by an await: a
+  // durable save landing between them was overwritten on disk by this older snapshot, and the next reload took it back into memory.
   if (_flushedGeneration >= gen) {
-    await fs.promises.unlink(tmp).catch(() => { /* already gone */ });
+    try { fs.rmSync(tmp, { force: true }); } catch { /* already gone */ }
     return;
   }
-  await fs.promises.rename(tmp, CONFIG_PATH);
-  try { await fs.promises.chmod(CONFIG_PATH, 0o600); } catch { /* non-POSIX host — ignore */ }
+  fs.renameSync(tmp, CONFIG_PATH);
+  try { fs.chmodSync(CONFIG_PATH, 0o600); } catch { /* non-POSIX host — ignore */ }
   if (gen > _flushedGeneration) _flushedGeneration = gen;
   recordConfigMtime(); // ours, not foreign — the watcher must not react to it
 }
