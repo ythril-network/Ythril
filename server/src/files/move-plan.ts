@@ -96,9 +96,9 @@ export interface MovePlan {
  * A row as it is stored at its new id: a plain re-key of the stored row (`rekeyedRow`: a record written HERE, nobody's delivery, none
  * of the old path's sync agreement), its `path` the new id, its parent and its converted-Markdown pointer re-rooted by the SAME rule
  * as its id. The pointer is set here, by the row that holds it, so the move writes none by a scan on a field that has no index.
- * Everything else, the `seq`, the author and the stored `updatedAt`, is the stored row's: this write stamps no version, so it must not
- * move the timestamp read beside the version. It does stamp a POSITION (`landing`, the move's own `withLandingStamp` patch: the row's own
- * version, a fresh position and written here): the row is a record under a new id, and a copy that kept the old row's position would sit below
+ * Everything else, the author and the stored `updatedAt`, is the stored row's: the version is the landing's (above the stored one and above every deletion
+ * held for the new id, bundle-112), and the author and the clock are the authored half the move does not change (Q-419). The landing is the move's own
+ * `withLandingStamp` patch (`landing`: the new version, a fresh position and written here): the row is a record under a new id, and a copy that kept the old row's position would sit below
  * every peer's mark and never be offered. A row with no version (a pre-4.0 file row) is given none: it was never served and still is not.
  *
  * `unplaced` are the sidecar paths (at the source) whose bytes could not be placed because something else stands at their destination

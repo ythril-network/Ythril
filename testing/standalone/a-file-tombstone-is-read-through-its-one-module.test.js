@@ -41,8 +41,12 @@ import { relativeImports } from './_module-shape.mjs';
 const OWNER = 'server/src/files/tombstone-store.ts';
 /** The module the lifecycle lives in: the readers' public door, and where `heldFileTombstones` (published rows only) is defined. */
 const LIFECYCLE = 'server/src/files/tombstones.ts';
-/** The only two modules allowed to import the store (Q-462, vet T-S8): the lifecycle and the move's marker block. */
-const STORE_IMPORTERS = ['server/src/files/move-markers.ts', 'server/src/files/tombstones.ts'];
+/**
+ * The only modules allowed to import the store (Q-462, vet T-S8): the lifecycle and the move's marker block, and (bundle-112, Q-460) the version stamper, which
+ * reads the highest version any file tombstone of a path names (`highestFileTombstoneVersionAt`) to land a moved or re-uploaded file above it. It imports the store and
+ * not the lifecycle because the lifecycle reaches the stamper (importing it there closes a runtime import cycle), and what it reads serves, pushes and prunes nothing.
+ */
+const STORE_IMPORTERS = ['server/src/files/move-markers.ts', 'server/src/files/tombstones.ts', 'server/src/util/version-stamp.ts'];
 
 /**
  * Sources that name the collection and READ none of it, each with the code that shows it. Not readers, so not held
@@ -127,7 +131,7 @@ describe('the file-tombstone collection is opened only by its module', () => {
   });
 });
 
-describe('the store module is imported by the lifecycle and the marker block, and by nothing else (Q-462)', () => {
+describe('the store module is imported by the lifecycle, the marker block and the version stamper, and by nothing else (Q-462, Q-460)', () => {
   const known = () => new Set(trackedSources('server/src'));
 
   /** Every tracked source that imports (or re-exports from) the store module, by the relative specifier it resolves through. */
@@ -141,10 +145,10 @@ describe('the store module is imported by the lifecycle and the marker block, an
     return out.sort();
   }
 
-  it('the importers are exactly the lifecycle and the marker module', () => {
+  it('the importers are exactly the lifecycle, the marker module and the version stamper', () => {
     assert.ok(known().has(OWNER), `${OWNER} does not exist — the derivation looks in the wrong place`);
     assert.deepEqual(importersOf(OWNER), STORE_IMPORTERS,
-      'a source other than tombstones.ts and move-markers.ts imports the store module: it would read the collection around '
+      'a source other than tombstones.ts, move-markers.ts and version-stamp.ts imports the store module: it would read the collection around '
       + "the lifecycle's rule that a pending tombstone is never served, and around the marker block's rule that an owed move's marker is never dropped");
   });
 

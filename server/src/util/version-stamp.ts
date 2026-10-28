@@ -10,7 +10,8 @@
  * where `V` is the space's counter before the allocation, `heldSeq` the stored record's version whatever its author (so an edit beats
  * what it replaces) and `heldTomb` the version of ANY held tombstone for the id, whatever its issuer (so a re-create lands above every
  * deletion this instance knows of, on every relay: a quiet instance re-creating an edge a busy peer deleted would otherwise be refused
- * by every relay holding that tombstone, for good). One batched read of both runs BEFORE the counter moves (held must be read first),
+ * by every relay holding that tombstone, for good; a stamp over file rows reads the FILE tombstones at the ids too, which a moved or re-uploaded
+ * file lands above: `highestFileTombstoneVersionAt`, `files/tombstone-store.ts`). One batched read of both runs BEFORE the counter moves (held must be read first),
  * then ONE pipeline update sets `seq := max(seq + n, H)` and `seqSeenBy6 := seq` and returns the previous value. `H` is the highest held
  * term at or below the cap, so the counter only ever takes stamps at or below it.
  *
@@ -41,6 +42,7 @@ import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { readPageTombstones } from '../sync/push-reads.js';
+import { highestFileTombstoneVersionAt } from '../files/tombstone-store.js';
 import { BRAIN_COLLECTIONS, type BrainCollection, type SpaceCounterDoc } from '../config/types.js';
 import { countBrainWriteSeq } from '../metrics/brain-write-count.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
@@ -87,9 +89,11 @@ export interface VersionReadOptions {
 async function heldTermsOf(spaceId: string, ids: readonly string[], opts: VersionReadOptions) {
   const parts = opts.parts ?? BRAIN_COLLECTIONS;
   const session = opts.session ? { session: opts.session } : {};
-  const [byPart, tombs] = await Promise.all([
+  const [byPart, tombs, fileTombs] = await Promise.all([
     Promise.all(parts.map(async part => [part, await readStoredById<{ seq?: number }>(spaceCollection(spaceId, part), ids, { seq: 1 }, session)] as const)),
     readPageTombstones(spaceId, ids, opts.session),
+    // A file row's id is its path, and a deleted file's tombstone is held apart from the brain's: read when the ids may be file rows.
+    parts.includes('files') ? highestFileTombstoneVersionAt(spaceId, ids) : Promise.resolve(new Map<string, number>()),
   ]);
   return ids.map((id) => {
     let stored: { part: BrainCollection; seq: number | null } | undefined;
@@ -104,6 +108,9 @@ async function heldTermsOf(spaceId: string, ids: readonly string[], opts: Versio
       const t = byId.get(id)?.seq;
       if (typeof t === 'number' && (heldTomb === undefined || t > heldTomb)) heldTomb = t;
     }
+    // A file tombstone's version is a held TOMBSTONE term like the brain's: capped by `heldFloor`, and never a term of the counter.
+    const fileTomb = fileTombs.get(id);
+    if (fileTomb !== undefined && (heldTomb === undefined || fileTomb > heldTomb)) heldTomb = fileTomb;
     // What the caller already read counts as held, but is never the row's `readSeq`: that names what is STORED, for the write's filter.
     const known = opts.known?.get(id);
     return { id, stored, heldTomb, known: typeof known === 'number' ? known : undefined };
@@ -208,7 +215,7 @@ async function allocateBounded(
 /**
  * The versions a local write of `ids` takes, in order. Throws `RecordVersionAtCeiling` for the first id whose version would be above
  * `MAX_INGEST_SEQ`, with nothing written for any of them. `opts.parts` narrows where the held version is read (a fact write reads
- * `facts`); the held tombstone is always read.
+ * `facts`); the held brain tombstone is always read, and the held file tombstone when `parts` names `files`.
  */
 export async function versionsFor(spaceId: string, ids: readonly string[], opts: VersionReadOptions = {}): Promise<VersionAllocation[]> {
   const out = await allocate(spaceId, ids, opts);

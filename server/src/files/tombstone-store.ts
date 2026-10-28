@@ -190,6 +190,21 @@ export async function tombstonesAtPaths<T>(
 }
 
 /**
+ * The highest version a file tombstone names (`rowSeq`) at each of `paths`, published OR pending: what a LOCAL write of a file row at the path has to
+ * land above, or a peer holding that tombstone refuses it (`shadowDecision`). Read by `versionsFor` (`util/version-stamp.ts`) and nowhere else. It reads
+ * pending rows on purpose, which no serving, pushing or pruning reader may: a stamp lifted above a pending row costs one number (the stamp caps it,
+ * and never moves the counter by it) and discards, serves and publishes nothing. A path with no tombstone naming a version is absent from the answer.
+ */
+export async function highestFileTombstoneVersionAt(spaceId: string, paths: readonly string[]): Promise<Map<string, number>> {
+  const rows = await tombstonesAtPaths<{ path: string; rowSeq?: number }>(spaceId, paths, chunk => ({ path: { $in: chunk } }), { path: 1, rowSeq: 1 });
+  const out = new Map<string, number>();
+  for (const { path, rowSeq } of rows) {
+    if (typeof rowSeq === 'number' && rowSeq > (out.get(path) ?? -1)) out.set(path, rowSeq);
+  }
+  return out;
+}
+
+/**
  * How many times each space's file tombstones have been wiped in this process. A pending handle carries the generation it was
  * written under, and a publish or a settle that read its rows under another one drops instead of upserting: its upsert exists to
  * write again a row a stale settle dropped, and after a wipe it would re-create a tombstone in a space that was just emptied —

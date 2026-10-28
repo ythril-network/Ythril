@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Files:** a file moved back to its old path, or onto a path whose earlier file was deleted, now reaches peers; a file uploaded again at a path that held another instance's deleted file reaches peers too.
+
 ## [6.0.1] — 2026-10-28
 
 **A patch for defects present in 6.0.0, two of them security (a space administrator could mint a token that writes to every space, or take over a token that may create spaces); take it before or instead of 6.0.0.**
