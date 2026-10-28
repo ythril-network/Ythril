@@ -521,12 +521,18 @@ describe('a functional label holds under concurrent local writers', { skip }, ()
         let seen = 0;
         const park = reads.arm(`${STRICT}_edges`, (f) => isFunctionalCountRead(f) && ++seen === last);
         const answers = {};
+        let hold;
         try {
-          await holdWhileOtherRuns(park, {
+          // A window long enough for 200 edges on a loaded runner (Q-629: 400 ms was not, and the parked batch was then released to
+          // land first). It ends the moment the second batch returns, so a passing run pays nothing for its length.
+          hold = await holdWhileOtherRuns(park, {
             first: async () => { answers.loser = await send(d, STRICT, TO_A); },
             second: async () => { answers.winner = await send(d, STRICT, TO_B); },
+            windowMs: 10_000,
           });
         } finally { disarm(); }
+        assert.ok(hold.secondFinishedWhileFirstWasParked,
+          `${d.name}: the second batch did not finish within the window while the first was parked, so what follows would read a different interleaving`);
         const { bySubject } = await stored(STRICT);
         const wrong = [...bySubject].filter(([, tos]) => tos.length !== 1 || tos[0] !== TO_B).map(([s, tos]) => `${s}: [${tos}]`);
         assert.deepEqual(wrong, [], `${d.name}: the batch that ran to its end owns every subject (to ${TO_B}), and the parked one landed none`);

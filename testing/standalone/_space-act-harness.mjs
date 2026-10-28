@@ -72,6 +72,9 @@ export function eventLog() {
   };
 }
 
+/** How many times `maxTurns` a wait may last in all while a body is running (about 25 s at the default). */
+const BUSY_FACTOR = 20;
+
 /**
  * Is the runner idle: no body in the slot, no entry registered or draining, and no owed entry whose `retryAt` has passed at `now`?
  * Read from the runner's own exports (`spaceActsRunning`) and from the entries on the live config.
@@ -82,12 +85,20 @@ export function runnerIsIdle(runner, loader, now = Date.now()) {
     || (e.state === 'owed' && (e.retryAt === undefined || Date.parse(e.retryAt) <= now)));
 }
 
-/** Resolve once {@link runnerIsIdle}; throws (never returns) when it is not idle after `maxTurns` turns of the event loop. */
+/**
+ * Resolve once {@link runnerIsIdle}; throws (never returns) when it is not idle after `maxTurns` turns of the event loop in which no
+ * body was running, or after `maxTurns * BUSY_FACTOR` turns in all.
+ */
 export async function untilRunnerIdle(runner, loader, { maxTurns = 4000, now } = {}) {
+  // A turn with a body in the slot is not counted against `maxTurns` (Q-628): the body is doing store work, which is progress, and on
+  // a loaded CI runner one wipe batch outlasted the whole bound with the log already saying it had finished. Such turns count only
+  // against the larger total, so a body that never ends still ends the wait, naming it.
+  let quiet = 0;
   // waits-differently: bounded by TURNS of the event loop, not by a deadline read from the clock (design v5 TS-2) — a turn count is the
   // bound this harness promises its callers, and it throws naming what stayed busy.
-  for (let i = 0; i < maxTurns; i++) {
+  for (let i = 0; quiet < maxTurns && i < maxTurns * BUSY_FACTOR; i++) {
     if (runnerIsIdle(runner, loader, now ?? Date.now())) return;
+    if (runner.spaceActsRunning() === 0) quiet++;
     // waits-differently: every fiftieth turn is a 15 ms timer — an act's body is store work, and four thousand `setImmediate` turns passed
     // in a few milliseconds while one wipe batch was still on the wire. The delay is stated, not left to the platform: a zero timer
     // costs a clock tick on Windows (about 15 ms) and about 1 ms on Linux, so the same bound was about a second here and under
