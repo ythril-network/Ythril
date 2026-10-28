@@ -12,7 +12,7 @@ import { getConfig } from '../../config/loader.js';
 import { syncHistoryAct } from '../../networks/vote-acts.js';
 import { sendAct } from './_shared.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
-import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs } from '../../sync/trigger.js';
+import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs, resolveSyncWait } from '../../sync/trigger.js';
 import { attachSyncNote, changeNotesAct } from '../../sync/change-notes.js';
 import {
   networkAnswer, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, 
@@ -80,7 +80,8 @@ crudRouter.get('/:id/sync-history', globalRateLimit, requireAdmin, async (req, r
 crudRouter.post('/:id/sync', globalRateLimit, requireAdmin, async (req, res) => {
   const net = getConfig().networks.find(n => n.id === req.params['id']);
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
-  const wait = req.query['wait'] === 'true' || req.query['wait'] === '1';
+  // The door resolves its own default (`resolveSyncWait`): false here, where MCP's `network_sync` waits unless told not to.
+  const wait = resolveSyncWait(req.query['wait'], 'rest');
   // F-42: an optional `{ note, spaces }` body rides this sync to the members below. Queued BEFORE the cycle starts,
   // so this cycle carries it; a note that cannot travel is refused and the sync does not run, rather than running
   // without the note the caller asked for.
@@ -119,7 +120,7 @@ crudRouter.post('/peers/:peerId/sync', globalRateLimit, requireAdmin, async (req
   const peerId = req.params['peerId'] as string;
   const refusal = unknownPeerRefusal(peerId);
   if (refusal) { res.status(refusal.status).json({ error: refusal.error }); return; }
-  const wait = req.query['wait'] === 'true' || req.query['wait'] === '1';
+  const wait = resolveSyncWait(req.query['wait'], 'rest');
   await triggerPeerSync(res, peerId, { wait });
 });
 

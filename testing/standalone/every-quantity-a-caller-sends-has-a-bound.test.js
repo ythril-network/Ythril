@@ -79,6 +79,13 @@ const OPEN_BY_RULING = [
   { name: 'filter limit', test: q => q.door === 'MCP filter' && q.seg === 'limit',
     why: 'documented "NOT capped" since 5.0, where a clamp made a page of 200 read as a correct page of 100. What is READ is bounded instead '
       + '(Q-108): a single-space read stops at twice the byte budget, and a proxy read at PROXY_PAGE_CEILING' },
+  { name: 'read_file listing pages', test: q => q.door === 'MCP read_file' && ['limit', 'imagesLimit', 'imagesSkip'].includes(q.seg),
+    why: 'held by `files/extract-listing.ts`, the module `GET …/files/extract` reads them through: `limit` to 500 and `imagesLimit` to 200, '
+      + 'each echoed back as the one that applied, and `imagesSkip` is an offset into the image list the pipeline caps at 50 a file. '
+      + 'A schema `maximum` here would REFUSE what the route clamps (Q-647)' },
+  { name: 'the sync wait bound', test: q => q.door === 'MCP network_sync' && q.seg === 'timeoutMs',
+    why: 'clamped to 1000-120000 by `syncTimeoutMs`, the function `POST /api/networks/:id/sync` clamps with, and the applied value is '
+      + 'disclosed in the answer. A schema `maximum` would REFUSE a value REST clamps (Q-468)' },
   { name: 'merge resolutions', test: q => q.door === 'MCP graph_merge' && q.seg === 'resolutions',
     why: 'read once into a map keyed by property name; an entry naming a property the plan did not report changes nothing' },
 ];

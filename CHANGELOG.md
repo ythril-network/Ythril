@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **MCP:** `network_sync` takes `wait` and `timeoutMs`, as `POST /api/networks/:id/sync` does, and waits at most `timeoutMs` per network (default 30 seconds) instead of without limit. It still waits by default; REST still does not. Every answer says the `wait` it used.
+- **MCP:** `read_file` takes `limit`, `skip`, `imagesLimit` and `imagesSkip` like `GET …/files/extract`, and adds the file's chunk and image listing to its answer when you send any of them.
+
 ### Fixed
 
+- **Files:** a bad `imagesLimit` or `imagesSkip` on `GET …/files/extract` is refused naming the parameter you sent, not `imageslimit`.
 - **Files:** a file moved back to its old path, or onto a path whose earlier file was deleted, now reaches peers; a file uploaded again at a path that held another instance's deleted file reaches peers too.
 
 ## [6.0.1] — 2026-10-28

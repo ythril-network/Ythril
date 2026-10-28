@@ -17,10 +17,13 @@ import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
 import { resolveTextWindow, type MarkdownWindow } from '../../files/markdown-window.js';
 import { carriagesFor, defaultBudgetChars } from '../../brain/result-budget.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
+import { extractListingAsked, extractListingRefusal, readExtractListing } from '../../files/extract-listing.js';
+import { getFileMeta } from '../../files/file-meta.js';
+import { toDocId } from '../../util/paths.js';
 
 export const read_fileTool: ToolHandler = {
   name: 'read_file',
-  description: 'Read the text contents of a file in the space file store, a window at a time. The window is whole paragraphs from `markdownSkip` (a character offset, default 0) that fit the answer budget (`maxChars` / `maxBytes` / `maxTokens`); `truncated` says more follows and `markdownNextSkip` is where — send it back as `markdownSkip`, and the windows joined are the file, character for character. A paragraph larger than the budget is split at a line break. The same two parameters page the converted Markdown on `GET /api/brain/spaces/:spaceId/files/extract`. Prefer `recall` with `includeFileContent: false` to find WHICH file and WHICH passage first.\n\n'
+  description: 'Read the text contents of a file in the space file store, a window at a time. The window is whole paragraphs from `markdownSkip` (a character offset, default 0) that fit the answer budget (`maxChars` / `maxBytes` / `maxTokens`); `truncated` says more follows and `markdownNextSkip` is where — send it back as `markdownSkip`, and the windows joined are the file, character for character. A paragraph larger than the budget is split at a line break. The same two parameters page the converted Markdown on `GET /api/brain/spaces/:spaceId/files/extract`, which this tool is the twin of: `limit`, `skip`, `imagesLimit` and `imagesSkip` (all four, with the route\'s defaults and ceilings) add the file\'s chunk and extracted-image listing to the answer, and without them the answer is the text window alone. Prefer `recall` with `includeFileContent: false` to find WHICH file and WHICH passage first.\n\n'
     + 'It reads the STORED TEXT, which for an uploaded PDF or image is the extracted text rather than the original bytes. A file whose extraction has not finished, or whose type yields no text, reads as empty — that is a pending or unextractable document, not an empty file. `list_dir` shows what is present, and `list_embed_jobs` shows whether its indexing is still queued or failed.\n\n'
     + 'This is a path lookup, not a search: an unknown path is an error, not an empty result.',
   spaceRequired: true,
@@ -35,6 +38,18 @@ export const read_fileTool: ToolHandler = {
               description: 'Character offset the window starts at (default 0). Send the previous answer\'s `markdownNextSkip`.',
             },
             ...budgetSizeSchema('character'),
+            // NO `minimum`/`maximum` on these four, as on the route: the dispatcher enforces this schema before the handler, so a
+            // bound here would refuse what `GET …/files/extract` clamps (`limit`, `skip`) or refuses in its own words (`images*`).
+            limit: {
+              type: 'integer',
+              description: 'Chunks per page of the chunk listing (default 100, held to 500 and echoed as the `limit` that applied). Asking for ANY of `limit`, `skip`, `imagesLimit` or `imagesSkip` adds the listing to the answer: `chunks` (in document order), `chunkTotal`, `limit`, `skip`, `images`, `imagesTotal`, `imagesTruncated` and `imagesNextSkip` — the same fields as `GET /api/brain/spaces/:spaceId/files/extract`. Needs the file to have a metadata record.',
+            },
+            skip: { type: 'integer', description: 'Chunks to skip before the page (default 0). Part of the listing described on `limit`.' },
+            imagesLimit: {
+              type: 'integer',
+              description: 'Extracted images per page (default and ceiling 200); a value that is not a positive integer is refused. Part of the listing described on `limit`. `imagesTruncated` and `imagesNextSkip` say where to go on.',
+            },
+            imagesSkip: { type: 'integer', description: 'Extracted images to skip before the page (default 0); a negative value is refused. Send `imagesNextSkip` back here.' },
           },
           required: ['space', 'path'],
           additionalProperties: false,
@@ -56,6 +71,14 @@ export const read_fileTool: ToolHandler = {
         structuredContent: { path: filePath, content: spill.body } };
     }
     const memberIds = readSpacesOfCall(ctx, callSpace);
+    // The chunk and image listing, only when one of its four parameters is stated (`Q-647`): a bad `imagesLimit`/`imagesSkip` is
+    // refused here, before anything is read, in the words `GET …/files/extract` refuses it in.
+    const listingRequest = { limit: a['limit'], skip: a['skip'], imagesLimit: a['imagesLimit'], imagesSkip: a['imagesSkip'] };
+    const listingAsked = extractListingAsked(listingRequest);
+    if (listingAsked) {
+      const refusal = extractListingRefusal(listingRequest, defaultBudgetChars(ctx.transport));
+      if (refusal) throw new Error(refusal);
+    }
     let w: MarkdownWindow | null = null;
     for (const mid of memberIds) {
       try {
@@ -69,6 +92,17 @@ export const read_fileTool: ToolHandler = {
       }
     }
     if (w === null) throw new Error(`File not found: ${filePath}`);
+    let listing: Record<string, unknown> | null = null;
+    if (listingAsked) {
+      // Resolved per MEMBER and the member kept, as the route does: the derived records live beside their parent's record.
+      const parentId = toDocId(filePath);
+      let member: string | null = null;
+      for (const mid of memberIds) { if (await getFileMeta(mid, parentId)) { member = mid; break; } }
+      if (member === null) throw new Error('File metadata record not found');
+      const read = await readExtractListing(member, parentId, listingRequest, defaultBudgetChars(ctx.transport));
+      if (!read.ok) throw new Error(read.error);
+      listing = read.fields;
+    }
     /*
      * A WINDOW, held to the stated budget across both carriages (`Q-111`). The whole file went into `content` AND
      * `structuredContent`, unbudgeted: a 2 MB document crossed as 4.3 MB. A client reading only `content` must still
@@ -78,11 +112,13 @@ export const read_fileTool: ToolHandler = {
     const more = w.truncated ? `\n\n[read_file: ${w.skip + w.markdown.length} of ${w.totalChars} characters; `
       + `continue with markdownSkip: ${w.nextSkip}]` : '';
     return {
-      content: [{ type: 'text' as const, text: w.markdown + more }],
+      // The listing rides in BOTH carriages, as the text does: a client reading only `content` must not lose the half it asked for.
+      content: [{ type: 'text' as const, text: w.markdown + more + (listing ? `\n\n${JSON.stringify(listing)}` : '') }],
       structuredContent: {
         path: filePath, content: w.markdown, truncated: w.truncated, markdownSkip: w.skip, markdownChars: w.totalChars,
         ...(w.nextSkip !== undefined ? { markdownNextSkip: w.nextSkip } : {}),
         budgetChars: stated.chars, budgetBytes: stated.bytes,
+        ...(listing ?? {}),
       },
     };
   },

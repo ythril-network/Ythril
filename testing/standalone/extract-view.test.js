@@ -41,6 +41,9 @@ const handler = (() => {
   return src.slice(start, next > 0 ? next : undefined);
 })();
 
+/** The listing module the route and `read_file` both read the chunks and images through (Q-647). */
+const listing = strip(readFileSync('server/src/files/extract-listing.ts', 'utf8'));
+
 describe('the extract route', () => {
   it('is authenticated per space and rate limited, like its siblings', () => {
     assert.match(handler, /globalRateLimit/);
@@ -57,30 +60,41 @@ describe('the extract route', () => {
     assert.match(handler, /File metadata record not found/);
   });
 
+  it('reads the chunk and image listing through the module `read_file` reads it with (Q-647)', () => {
+    // The four parameters are named at the door, because they are the route's; the parse, the clamp, the refusal and both
+    // queries are the module's, so the two doors cannot take the same parameters differently.
+    assert.match(handler, /readExtractListing\(member, parentId, \{/);
+    for (const k of ['limit', 'skip', 'imagesLimit', 'imagesSkip']) {
+      assert.match(handler, new RegExp(`req\\.query\\['${k}'\\]`), `the route no longer names \`${k}\``);
+    }
+    assert.match(strip(readFileSync('server/src/mcp/tools/file.ts', 'utf8')), /readExtractListing\(member, parentId, listingRequest/,
+      'read_file reads the listing some other way than the route does');
+  });
+
   it('identifies a chunk by its chunkIndex, not by its path shape', () => {
     // `#chunk<n>` for text and `#media-chunk<n>` for audio: matching on the path would have covered one
     // pipeline and silently missed the other.
-    assert.match(handler, /chunkIndex: \{ \$exists: true \}/);
-    assert.match(handler, /sort\(\{ chunkIndex: 1 \}\)/);
+    assert.match(listing, /chunkIndex: \{ \$exists: true \}/);
+    assert.match(listing, /sort\(\{ chunkIndex: 1 \}\)/);
   });
 
   it('partitions the derived records, so an image is never listed as a chunk', () => {
-    assert.match(handler, /chunkIndex: \{ \$exists: false \}/);
+    assert.match(listing, /chunkIndex: \{ \$exists: false \}/);
     // Through the one sidecar module (`parentOfSidecar`, which says which role a path has), never a prefix test written here:
     // the root names are that module's, and a second spelling of them is the copy that drifts (Q-349).
-    assert.match(handler, /parentOfSidecar\(d\.path\)\?\.role === 'extracted'/);
+    assert.match(listing, /parentOfSidecar\(d\.path\)\?\.role === 'extracted'/);
     assert.match(handler, /parentOfSidecar\(d\.path\)\?\.role === 'converted'/);
-    assert.doesNotMatch(handler, /startsWith\('_(?:extracted|converted)\//, 'a sidecar root is named by the sidecar module only');
+    assert.doesNotMatch(handler + listing, /startsWith\('_(?:extracted|converted)\//, 'a sidecar root is named by the sidecar module only');
   });
 
   it('bounds every list it returns', () => {
     // A 500-page document has thousands of chunks and megabytes of Markdown. An unbounded diagnostic is
     // the thing that takes the page down while someone is trying to work out why recall is poor.
-    assert.match(handler, /parseLimit\(req\.query\['limit'\]/);
-    assert.match(handler, /parseSkip\(req\.query\['skip'\]\)/);
+    assert.match(listing, /parseLimit\(req\.limit, CHUNKS_DEFAULT_LIMIT, CHUNKS_MAX_LIMIT\)/);
+    assert.match(listing, /parseSkip\(req\.skip\)/);
     // Q-128: the images page through the shared list rule and the Markdown comes in whole-paragraph windows. The
     // old spellings (`limit(MAX_DERIVED_RECORDS)`, `slice(0, MAX_CONVERTED_BYTES)`) were the cuts that said nothing.
-    assert.match(handler, /pageList\(allImages,/);
+    assert.match(listing, /pageList\(allImages,/);
     // Q-296: the window is read through files.ts readFileWindow, which holds only the window in memory and answers with
     // markdownWindow's own cut (asserted there), so the route names the windowed read, not a whole text it slices.
     assert.match(handler, /readFileWindow\(member, convertedRecord\.path/);
@@ -96,8 +110,8 @@ describe('the extract route', () => {
   });
 
   it('returns the total so the client can tell one page from all of them', () => {
-    assert.match(handler, /countDocuments/);
-    assert.match(handler, /chunkTotal/);
+    assert.match(listing, /countDocuments/);
+    assert.match(listing, /chunkTotal/);
   });
 
   it('resolves the member and KEEPS it', () => {
@@ -109,7 +123,8 @@ describe('the extract route', () => {
     // narrowed form, since a call that was not narrowed would fail here too.
     assert.match(handler, /for \(const mid of readSpacesOfRequest\(req, spaceId\)\)/);
     assert.match(handler, /member = mid/);
-    assert.match(handler, /col<FileMetaDoc>\(spaceCollection\(member, 'files'\)\)/);
+    // The member it kept is the one the listing reads — handed over, never re-derived inside.
+    assert.match(listing, /col<FileMetaDoc>\(spaceCollection\(member, 'files'\)\)/);
   });
 
   it('reports a missing sidecar as its own state, not as an empty document', () => {
@@ -120,6 +135,6 @@ describe('the extract route', () => {
 
   it('carries the caption provenance through', () => {
     // The same claim the file detail pane makes: "generated" is a claim about who wrote the text.
-    assert.match(handler, /descriptionSource: d\.descriptionSource \?\? null/);
+    assert.match(listing, /descriptionSource: d\.descriptionSource \?\? null/);
   });
 });

@@ -287,7 +287,7 @@ describe('a webhook retry row is counted by what the store holds after the write
       const before = await reading();
       await pollOnce('poll-refused', () => faults.fail('insertOne', RETRY_QUEUE, F.refused.duplicateKey));
       const d = minus(await reading(), before);
-      assert.equal(await acts.door.mongo.col(RETRY_QUEUE).countDocuments({ webhookId: a }), 0, 'fixture: the refused requeue stored a row, or the due row was not removed');
+      assert.equal(await acts.door.mongo.col(RETRY_QUEUE).countDocuments({ webhookId: a, deliveryId: 'd-poll-refused' }), 0, 'fixture: the refused requeue stored a row, or the due row was not removed');
       assert.equal(d.lost, 1, `a requeue the store refused lost the event, and ${d.lost} were counted lost: the poll's requeue is counted nowhere (${JSON.stringify(d)})`);
       assert.equal(d.notStored, 1, `the refused poll requeue was not counted as lost{reason="not_stored"}: ${JSON.stringify(d)}`);
     });
@@ -296,7 +296,11 @@ describe('a webhook retry row is counted by what the store holds after the write
       const before = await reading();
       await pollOnce('poll-landed', () => faults.fail('insertOne', RETRY_QUEUE, F.storeGone.single, { land: true }));
       const d = minus(await reading(), before);
-      assert.equal(await acts.door.mongo.col(RETRY_QUEUE).countDocuments({ webhookId: a, attempt: 3 }), 1, 'fixture: the landed requeue did not store its next attempt');
+      // Counted by the seeded row's delivery id, not by the subscription: main's CI (run 40759260337) read 2 rows of sink A at
+      // attempt 3 here, and a row another case left for sink A is not this requeue. A second requeue of THIS row still fails it.
+      const next = await acts.door.mongo.col(RETRY_QUEUE).find({ webhookId: a, attempt: 3 }).toArray();
+      assert.equal(next.filter(r => r.deliveryId === 'd-poll-landed').length, 1,
+        `fixture: the landed requeue did not store its next attempt exactly once: ${JSON.stringify(next.map(r => ({ deliveryId: r.deliveryId, body: r.body })))}`);
       assert.equal(d.lost, 0, `a requeue the queue holds was counted lost: ${JSON.stringify(d)}`);
     });
   });

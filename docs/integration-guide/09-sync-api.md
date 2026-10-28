@@ -73,7 +73,18 @@ cycle: it is counted in `errors` of a `completed` answer.
 `?timeoutMs` (default `30000`, clamped `1000`–`120000`) bounds the WAIT on the network door only. A peer
 cycle is already bounded by that peer's own request timeouts, so racing it would report a timeout for
 something that cannot hang. A completed peer cycle reports `networksSynced` rather than `synced`, because
-one peer can belong to several networks. `refused` (REST and the MCP `network_sync` result alike) counts the networks in which the peer answered in the 5.x shape and its turn was ended: nothing was exchanged with it and no failure was counted against it (it is shown as too old).
+one peer can belong to several networks. Every answer names the `wait` it used (`"wait": false` or `true`), and a
+waited network answer the `timeoutMs` that bounded it.
+
+The MCP tool `network_sync` takes the same two parameters, `wait` and `timeoutMs`, with the same clamp (a value
+outside `1000`–`120000` is held to it, never refused) and the same peer rule (`timeoutMs` is ignored for `peerId`).
+**One default differs, on purpose:** `wait` defaults to **`true` on MCP** and **`false` on REST**, because an agent
+calling the tool wants what the cycle did and a script or the UI's button wants the answer at once; send `wait`
+explicitly and the two doors behave alike. The same tool reached through the generic REST door
+(`POST /api/network_sync`) answers as REST does. A full MCP cycle (no `networkId`, no `peerId`) applies `timeoutMs` to
+each network in turn, and a network still running past it is reported as `timeout`, not stopped.
+
+`refused` (REST and the MCP `network_sync` result alike) counts the networks in which the peer answered in the 5.x shape and its turn was ended: nothing was exchanged with it and no failure was counted against it (it is shown as too old).
 
 The peer id must be an exact `instanceId` of a configured member, as `GET /api/networks` returns — never a
 URL and never a label. An id belonging to no network is refused `404`, because an unvalidated value would
