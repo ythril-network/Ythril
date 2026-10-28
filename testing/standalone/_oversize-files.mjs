@@ -518,7 +518,10 @@ export const FROZEN = {
   //
   // LOWERED rather than left at 650. A frozen number above the real size is that many lines the file can
   // regrow into with the gate saying nothing, which is how a decomposition gets spent twice.
-  'client/src/app/pages/settings/networks.component.ts': 598,
+  //
+  // 598 -> 506 with `Q-621`: the sync-history panel (markup, styles, state, load) is its own component,
+  // network-sync-history.component.ts. It had grown back to 605 since `N-2`.
+  'client/src/app/pages/settings/networks.component.ts': 506,
   // FIRST entry for this file: RAISED 650 -> 662 for the re-key branch in `updateEdgeById` — the If-Match
   // check that `writeFilterFor` cannot make on a path with no `findOneAndUpdate`, the call, the deleteFields
   // replay onto the moved document, and the metric.
