@@ -265,7 +265,8 @@ every file it names is present, every line can be read (and decrypted, for an en
 collections and creates them again, empty, with every index the space declares (the unique ones included, so a duplicate
 the backup holds is refused when it is loaded; the retention sweep's too), loads the backup's records, raises the space's
 sequence counter to at least every seq this instance handed out before (a peer never meets a new write under a seq it has
-already seen), checks that every unique index stands, and starts the vector index builds. When the act completes, the space forgets its **receive marks** in every
+already seen; on an empty database the floor is the **version mark** `config.json` keeps for the space, applied by the
+space's first write after the restore, see [`versionMarks`](./02-hosting.md#versionmarks-in-configjson)), checks that every unique index stands, and starts the vector index builds. When the act completes, the space forgets its **receive marks** in every
 network that carries it: how far it had read each peer, and where its re-reads of a peer's tombstones and file metadata stood.
 The peers therefore send again what reached this instance after the backup. The marks of what this instance **sent** are kept
 ([which marks, and why](../sync-protocol.md#the-per-space-marks-and-what-a-restore-does-to-them)).
@@ -279,7 +280,7 @@ longer whole, or that holds records one of the space's unique indexes refuses, i
 **What a restore does not restore:**
 
 - the audit log, which records what happened, the restore included; `space_activity`; the webhook subscriptions and delivery
-  queues; the other instance collections; and `config.json`;
+  queues; the other instance collections; and `config.json` (which carries the version mark, so keep it with the database);
 - the files' bytes on disk. A file's record comes back as the backup has it while its bytes stay as they are now, so after a
   restore a file can be listed without its bytes, or bytes can be on disk that no record names. The restore does not repair
   that, and it says where it happened: each restored space's row of [`GET /api/admin/data/restore`](#get-apiadmindatarestore)
@@ -288,10 +289,22 @@ longer whole, or that holds records one of the space's unique indexes refuses, i
 
 **What comes back that you may not expect.** Records erased after the backup come back, erasure requests included, while the
 kept audit log still records the erasure: erase them again. A record deleted here after the backup whose deletion the peers have
-since pruned comes back live here and is not sent to them again. A restore onto an empty database cannot raise the counter past
-seqs peers have already read from this instance, and a peer this instance never pulls from (its own subscribers, when it
-publishes) does not send again what it sent: these belong to the same limit, a peer's numbering starting over, and are not
-solved by a restore.
+since pruned comes back live here and is not sent to them again. A peer this instance never pulls from (its own subscribers,
+when it publishes) does not send again what it sent: that belongs to the same limit, a peer's numbering starting over, and is
+not solved by a restore.
+
+**Versions after a restore onto an empty database.** The first edit of each space after the restore is stamped above every
+version this instance handed out before, because the instance keeps a version mark per space in `config.json`; a peer
+therefore keeps that edit instead of dropping it for the copy it already holds. What is left:
+
+- A crash, or a `config.json` write that never reached the disk, after the counter passed the last saved mark, together with
+  losing the database: versions stamped in that stretch can be reused, and a peer then keeps its own copy.
+- `config.json` lost too, or put back from an older copy before the first start: nothing remembers the numbers, and the
+  records are sorted out by id and version when the peers meet.
+- An edit made on a restored record before the peers' newer copy arrives takes the higher version and replaces that copy on
+  every peer, without a fork.
+- A record's version may jump by up to 100,000 at each server start. Versions are only compared, so a caller sees larger
+  numbers and nothing else.
 
 | Status | `code` | Meaning |
 |---|---|---|

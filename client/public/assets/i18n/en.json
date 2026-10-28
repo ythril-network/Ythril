@@ -1952,7 +1952,7 @@
   "data.restore.confirmNotReplaced": "Not replaced: the audit log, the job queues and the stored file bytes, so a file record and its bytes may no longer match; the restore lists those files for each space.",
   "data.restore.confirmPeers": "Peers send again what this instance received from them since the backup.",
   "data.restore.confirmErasures": "Records erased after the backup come back, including those removed on an erasure request; the audit log still records the erasure.",
-  "data.restore.confirmLimits": "A restore cannot bring back what only peers that never send to this instance hold, and after a restore onto an empty database peers may skip its next writes until the network catches up.",
+  "data.restore.confirmLimits": "A restore cannot bring back what only peers that never send to this instance hold. After a restore onto an empty database, edits continue above the version numbers kept in config.json; if config.json is lost too, or the server crashed just before, a peer may keep its own copy of a record edited soon after the restore.",
   "data.restore.leaveOutRetry": "Restore without them",
   "data.restore.leaveOutConfirm": "Restore the backup without {{spaces}}? Their data in the backup is not restored anywhere.",
   "data.restore.completed": "The restore has completed: every space now holds the backup.",

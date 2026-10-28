@@ -176,6 +176,34 @@ docker compose up -d       # reattaches volumes — picks up where it left off
 docker compose down -v     # ⚠ permanently deletes all named volumes
 ```
 
+`docker compose down -v` deletes the brain data (`ythril-mongo-data`) and with it each space's version counter, but not
+`config/config.json`, which is a host bind mount. When the instance starts again on the empty database, the first write of
+each space raises the counter to the [version mark](#versionmarks-in-configjson) in `config.json`, so new edits are stamped
+above every version this instance handed out and a peer keeps them. Delete `config.json` as well and the instance has no
+such memory: it is a new instance, and a peer's copy at a higher version wins until the records are sorted out by id and version.
+
+### `versionMarks` in config.json
+
+`versionMarks` is a map from space id to a number, kept by the server in `config.json`. It is the highest version (`seq`)
+the space's counter may already have reached, always a step of 100,000 ahead of the counter. The instance keeps it outside
+the database so that a restore onto an empty database, a wiped database volume with `config.json` kept, an import onto an
+emptied space or a rename whose counter move failed cannot make the instance stamp a version below one it already handed out
+(which a peer would silently drop). The first write of a space after the server starts raises the counter to the mark
+before it stamps, and so does a write after the counter went backwards while the server runs.
+
+- **The server writes it. Do not edit it.** The mark is saved in the background and no write waits on it. A value you lower
+  by hand has no effect while the server runs, and a value that is not a whole number from 0 up to the version ceiling minus
+  one step is ignored and named once in the log.
+- **Never copy it to another instance.** It describes this instance's database only. A copy on another instance raises that
+  instance's counter for nothing, and a space with the same id on a different brain would continue from numbers it never used.
+- **Keep it with the database.** Back up and restore `config.json` together with the data (the restore does not touch it).
+  A `config.json` lost together with the database, or put back from an older copy before the first start, leaves nothing to
+  continue from: the records are then sorted out by id and version.
+- **What you see.** A version may jump by up to 100,000 after a server start; versions are only compared, so nothing else
+  changes. When the counter was below the mark the log says `Space '<id>': the version counter (<n>) was below the mark kept
+  in config.json; raised to <m>.` and `ythril_version_counter_raised_total{reason="start"|"went_back"}` counts it. A background
+  save of `config.json` that failed counts in `ythril_config_flush_failures_total`.
+
 ---
 
 ### Runtime Model Downloads

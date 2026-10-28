@@ -76,9 +76,9 @@ while the sending side is unchanged and its marks stay true: positions come from
 | `lastPosServed` | How far the peer has been served of this instance's stream | Kept: the restore does not change what the peer holds |
 | `lastFileTombstoneAckedAt` | Which file deletions the peer has taken | Kept: the peer still holds them |
 
-A pending join round's member carries the same marks and is treated the same way. What this leaves open: a record deleted here
+A pending join round's member carries the same marks and is treated the same way. **Versions are a separate matter from these marks:** the space's version counter can also come back below versions this instance already handed out (a restore onto an empty database, a wiped volume with `config.json` kept), and a peer would then drop the next edit for the copy it holds. The instance keeps a **version mark** per space in `config.json` (`versionMarks`, [details](integration-guide/02-hosting.md#versionmarks-in-configjson)) and the space's first write after such a loss raises the counter to it before stamping, so the next edit is stamped above what peers hold. What this leaves open: a record deleted here
 after the backup whose tombstone the peers have since pruned comes back here and is not pushed again (its push mark is kept),
-and a peer this instance never pulls from does not send again what it sent.
+a peer this instance never pulls from does not send again what it sent, and versions can be reused after a crash that came after the counter passed the last saved mark together with a database loss, or when `config.json` is lost too (the receiver then sorts the records out by id and version).
 
 **Marks are per network.** A member of two networks has one mark per network row for the same space, and a mark moves only for the transfer its network's cycle made: a cycle of one network never advances, forgets or re-reads a mark of another. A peer reached over two networks is two members, each with its own marks and its own pull.
 

@@ -74,7 +74,7 @@ and last up to a day; in a backup they would outlive that day — including reco
 for as long as the backup is kept. So they are left out of every backup, manual, scheduled and offsite, and a
 restore leaves the ones currently kept alone.
 
-**Personal views are not in a backup.** A backup is a copy of the database, and personal views live in `config.json`, which it does not hold. After a restore, bring `config.json` back with the rest of the instance's files to get the views back. The 6.0 upgrade keeps the file it started from as `config.json.pre-6.0` beside it. Deleting a space takes it out of every view that listed it, so an id created again later never silently rejoins one.
+**Personal views are not in a backup.** A backup is a copy of the database, and personal views live in `config.json`, which it does not hold. After a restore, bring `config.json` back with the rest of the instance's files to get the views back; the same file also carries the instance's version mark for each space (`versionMarks`, written by the server, not for editing), which is what keeps new edits above the versions already handed out. The 6.0 upgrade keeps the file it started from as `config.json.pre-6.0` beside it. Deleting a space takes it out of every view that listed it, so an id created again later never silently rejoins one.
 
 ### Scheduled and offsite backups
 
@@ -285,7 +285,9 @@ Once you confirm, the request is accepted at once and the work runs in the backg
 2. Each space's data is replaced with the backup's, and **every index the space has is built again**: the search
    indexes, the ones that keep the retention sweep from reading every record of a collection, and the unique ones that
    stop the same edge, the same link, or two edges under a one-per-subject label, being stored twice by writers working
-   at the same moment. Its sequence counter is kept above every number this instance already handed out. An index that
+   at the same moment. Its version numbers keep continuing above every number this instance already handed out, even when
+   the restore starts from an empty database: the instance remembers that high-water mark in `config.json`, and the space's
+   first edit after the restore starts above it. An index that
    cannot be built stops that space's part of the restore - every index except two kinds, and every unique one, the
    one-per-subject lock included: the space keeps refusing writes, the server log names the index that failed, and the
    space is tried again on its own. The two kinds a space is restored without, each named in the server log, are the
@@ -297,6 +299,17 @@ Once you confirm, the request is accepted at once and the work runs in the backg
 queues and webhook subscriptions; and the files' bytes on disk. A file's details come back as the backup has them while
 its bytes stay as they are now, so after a restore a file can be listed without its bytes, or bytes can be on disk that no
 file names.
+
+**What a restore onto an empty database still cannot promise.** Edits made after the restore are stamped above the versions
+this instance handed out before, so peers keep them. Four things remain:
+
+- If the server crashed shortly before the database was lost, or `config.json` was not saved in time, a few of the newest
+  version numbers can be reused, and a peer may keep its own copy of a record you edited in that stretch.
+- If `config.json` is lost together with the database, or an older copy of it is put back before the first start, nothing
+  remembers the numbers; the records are then sorted out by id and version when the peers next meet. Keep the two files together.
+- A record you edit before a peer's newer copy of it has arrived takes the higher version and replaces that copy on every
+  peer, without a conflict to review.
+- Version numbers can jump by up to 100,000 after a server start. They are only compared, so nothing else changes.
 
 **What a restore tells you about files.** Once a space's records are back, the restore compares that space's files on disk
 with its file records and lists, per space, the files that no longer match. It only reports: it changes no file, no record
