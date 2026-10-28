@@ -66,10 +66,15 @@ describe('no minting path can store a token without a matrix', () => {
   it('and derives it from migrateToken rather than hand-rolling one', () => {
     // Two hand-written claims-to-rungs mappings is how the two halves of one migration ended up disagreeing
     // about whether `spaces: null` could happen. There is one mapping.
+    // Through `initialRightsOf` since Q-593: the default a token is stored with is one function, because the mint route
+    // must judge that same default before it creates anything.
     for (const m of mintedRecords()) {
-      assert.match(m.body, /rights: opts\.rights \?\? \(migrateToken\(\{/,
-        `${m.name} must inherit an explicit matrix or derive one with migrateToken`);
+      assert.match(m.body, /rights: opts\.rights \?\? initialRightsOf\(opts\)/,
+        `${m.name} must inherit an explicit matrix or take the one default, initialRightsOf`);
     }
+    const at = SRC.indexOf('export function initialRightsOf(');
+    assert.ok(at >= 0, 'initialRightsOf not found');
+    assert.match(SRC.slice(at, SRC.indexOf('\n}', at)), /migrateToken\(\{/, 'initialRightsOf must derive the default with migrateToken');
   });
 });
 

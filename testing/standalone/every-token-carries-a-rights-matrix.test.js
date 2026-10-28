@@ -43,8 +43,11 @@ describe('a minted token has a matrix', () => {
   it('createToken derives one when the caller did not supply it', () => {
     // NOT `...(opts.rights ? {rights} : {})` — that spread is what left a new token matrix-less until the next
     // boot, and the rung silently unenforced in the meantime.
-    assert.match(src, /rights: opts\.rights \?\? \(migrateToken\(\{/,
+    // The derived default is `initialRightsOf` since Q-593 (the mint route judges that same default first).
+    assert.match(src, /rights: opts\.rights \?\? initialRightsOf\(opts\)/,
       'createToken must fall back to a derived matrix rather than omitting the field');
+    assert.match(src.slice(src.indexOf('export function initialRightsOf('), src.indexOf('export async function createToken(')), /migrateToken\(\{/,
+      'initialRightsOf must derive the default with migrateToken');
     assert.ok(!/\.\.\.\(opts\.rights \? \{ rights: opts\.rights \} : \{\}\)/.test(src),
       'the conditional spread is back — a token minted without explicit rights would carry no matrix');
   });
