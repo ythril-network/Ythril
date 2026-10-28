@@ -38,7 +38,7 @@ docker compose version
 ## Step 1: Open the project root
 
 ```bash
-cd O:/Projects/Ythril
+cd path/to/Ythril
 ```
 
 Why: all compose paths and mounts in this guide assume you run commands from the repository root.

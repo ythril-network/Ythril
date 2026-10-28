@@ -417,12 +417,12 @@ describe('a record that cannot be written is kept, said so in exact words, and n
 describe('what the recorder writes carries no secret and no stack', () => {
   it('masks token-shaped strings and absolute home paths, and stores the first line of a failure only', async () => {
     await withRun({}, async ({ server, dir }) => {
-      const message = 'AssertionError: leaked ythril_abcdef0123456789ABCDEF and ghp_abcdefghijklmnopqrstuvwxyz0123456789 and Authorization: Bearer opaque-credential-0123456789 at C:\\Users\\Menne\\secret-project\\file.js';
+      const message = 'AssertionError: leaked ythril_abcdef0123456789ABCDEF and ghp_abcdefghijklmnopqrstuvwxyz0123456789 and Authorization: Bearer opaque-credential-0123456789 at C:\\Users\\someuser\\secret-project\\file.js';
       writeResults(dir, { suite: 'standalone', batch: 'pure', files: [{ file: A, ms: 1000, tests: [T('the failing test', 1, { status: 'fail', message })] }] });
       const r = await runTimes(['--record'], { cwd: dir, env: envFor(server) });
       assert.equal(r.code, 0, everything(r));
       const sent = JSON.stringify(server.calls.map(c => c.args));
-      for (const secret of ['ythril_abcdef0123456789ABCDEF', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789', 'opaque-credential-0123456789', 'Menne', 'secret-project']) assert.ok(!sent.includes(secret), `${secret} must not be written`);
+      for (const secret of ['ythril_abcdef0123456789ABCDEF', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789', 'opaque-credential-0123456789', 'someuser', 'secret-project']) assert.ok(!sent.includes(secret), `${secret} must not be written`);
       assert.ok(sent.includes('the failing test'), 'the failure itself is recorded');
       assert.ok(!/"(actor|author|email|login|sender)/i.test(JSON.stringify(server.store.map(e => e.properties))), 'no person is named');
     });

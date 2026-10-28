@@ -53,6 +53,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { localRuleSheets } from '../_shared/local-rule-sheets.mjs';
 
 /**
  * Every top-level SCREAMING_SNAKE_CASE constant whose initializer is a list: `const NAME[: type] = [`,
@@ -72,7 +73,7 @@ for (const file of SOURCES) {
 }
 
 const PAGES = [
-  'CLAUDE.md',
+  ...localRuleSheets(REPO_ROOT),
   ...trackedSources('docs', { ext: ['.md'], floor: 30 }),
 ];
 
@@ -144,7 +145,8 @@ describe('the scan reads before it concludes', () => {
     assert.ok(CONSTANTS.size >= 100, 'too few list constants were found in the sources; the initializer pattern stopped matching');
     assert.ok(CONSTANTS.has('ALL_TOOLS') || CONSTANTS.has('ROUTE_RIGHTS'), 'a list constant every reader knows was not found; the extraction is broken');
     assert.ok(PAGES.length >= 30, 'too few pages were read');
-    assert.ok(NAMED.size >= 10, 'too few list constants are named in prose; the tokenizer stopped finding backticked names');
+    // 5, not 10: the tracked docs name 6 on their own, and the 10 counted CLAUDE.md, which a clean clone no longer has (Q-632).
+    assert.ok(NAMED.size >= 5, `too few list constants are named in prose (${NAMED.size}); the tokenizer stopped finding backticked names`);
   });
 
   it('the count pattern reads a count and an emptiness, and leaves a version alone', () => {

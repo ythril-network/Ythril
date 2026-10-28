@@ -45,7 +45,7 @@ function Invoke-DockerCli {
 function Invoke-GitCli { Invoke-Native -Command { git @args } -ArgumentList $args }
 
 # -- Paths, compared as strings --------------------------------------------------------------------------------
-# Compose writes working_dir as the shell spelled it (O:\Projects\Ythril, o:\projects\ythril, with or without a
+# Compose writes working_dir as the shell spelled it (D:\Work\Ythril, d:\work\ythril, with or without a
 # trailing separator). Every comparison goes through this one spelling.
 
 function ConvertTo-ComparablePath {
@@ -60,7 +60,7 @@ function Test-SameDirectory {
   return ((ConvertTo-ComparablePath -Path $Path) -eq (ConvertTo-ComparablePath -Path $Root))
 }
 
-# The root itself or anything below it - with a boundary, so O:\Projects\Ythril-old is not under O:\Projects\Ythril.
+# The root itself or anything below it - with a boundary, so D:\Work\Ythril-old is not under D:\Work\Ythril.
 function Test-PathUnder {
   param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Root)
   $p = ConvertTo-ComparablePath -Path $Path

@@ -27,6 +27,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { schemaDescriptions } from './_schema-descriptions.mjs';
+import { localRuleSheets } from '../_shared/local-rule-sheets.mjs';
 
 let ALL_TOOLS, helpSections;
 
@@ -138,7 +139,7 @@ describe('no tool schema repeats a claim we have already been corrected on', () 
     const surfaces = [
       ...helpSections(ctx, [], 0).map(s => ({ where: `help() section '${s.id}'`, text: s.body })),
       ...docFiles().map(f => ({ where: `docs/${f}`, text: readFileSync(join(DOCS_ROOT, f), 'utf8') })),
-      { where: 'CLAUDE.md', text: readFileSync(join(DOCS_ROOT, '..', 'CLAUDE.md'), 'utf8') },
+      ...localRuleSheets(join(DOCS_ROOT, '..')).map(f => ({ where: f, text: readFileSync(join(DOCS_ROOT, '..', f), 'utf8') })),
     ];
     assert.ok(surfaces.length > 50, `only ${surfaces.length} surfaces read — the sweep is broken`);
     const found = [];

@@ -21,7 +21,7 @@
  * - A code or outcome the client has no words for still says something true (the server's reason), never a blank and
  *   never the raw code (`Q-133`, the rule `refusalText` already keeps).
  *
- * The wire shapes are fixed in E:/ythril-scratch/b23/client-contract.md (SchemaViolationError.toStructured()).
+ * The wire shapes are the server's SchemaViolationError.toStructured().
  * These specs are RED on the base because `describeRefusal` does not exist: a TypeError at the first call, which is
  * the correct red for a function that is the whole subject.
  */
