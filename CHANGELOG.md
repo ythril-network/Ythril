@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Webhooks:** The webhook admin routes are listed as instance-admin in the rights table. No user-facing effect: managing webhooks still needs instance admin with MFA.
+- **Client:** the networks page's sync history panel and the advanced query's request builder are their own modules. No user-facing effect.
 
 ### Fixed
 

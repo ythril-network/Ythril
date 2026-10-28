@@ -12,6 +12,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { RecallFormComponent, type RecallFormState, type RecallTypeOpt } from './recall-form.component';
 import { JsonTreeComponent } from '../../shared/json-tree.component';
 import { recallRequestFrom } from './recall-request';
+import { queryRequestFrom } from './query-request';
 import { BrainStore } from './brain-store.service';
 import { type ResultSpillLink } from '../../core/read-spill';
 import { type IncompleteRow } from '../../core/recall-graph-report';
@@ -735,27 +736,13 @@ export class QueryTabComponent {
     this.queryFilterError.set('');
     this.queryProjectionError.set('');
     this.queryError.set('');
-
-    let filter: Record<string, unknown> = {};
-    let projection: Record<string, unknown> | undefined;
-
-    if (this.queryForm.filter.trim()) {
-      try { filter = JSON.parse(this.queryForm.filter.trim()); }
-      catch (e) { this.queryFilterError.set(`Invalid JSON — ${e instanceof Error ? e.message : 'check your filter syntax'}`); return; }
+    const request = queryRequestFrom(this.queryForm);
+    if (!request.body) {
+      (request.field === 'filter' ? this.queryFilterError : this.queryProjectionError).set(request.error);
+      return;
     }
-    if (this.queryForm.projection.trim()) {
-      try { projection = JSON.parse(this.queryForm.projection.trim()); }
-      catch (e) { this.queryProjectionError.set(`Invalid JSON — ${e instanceof Error ? e.message : 'check your projection syntax'}`); return; }
-    }
-
     this.queryRunning.set(true);
-    this.brainApi.queryBrain(this.spaceId(), {
-      collection: this.queryForm.collection,
-      filter,
-      projection,
-      limit: this.queryForm.limit,
-      maxTimeMS: this.queryForm.maxTimeMS,
-    }).subscribe({
+    this.brainApi.queryBrain(this.spaceId(), request.body).subscribe({
       next: (res) => { this.queryRunning.set(false); this.queryResult.set(res); },
       error: (err) => {
         this.queryRunning.set(false);

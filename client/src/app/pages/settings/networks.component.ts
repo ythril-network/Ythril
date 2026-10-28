@@ -1,8 +1,7 @@
 import { Component, inject, signal, computed, viewChildren, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
-import { Network, Space, SyncHistoryRecord, VoteRound } from '../../core/api.types';
+import { Network, Space, VoteRound } from '../../core/api.types';
 import { PluralText } from '../../core/plural-text.service';
 import { roleCountText, remoteOf, memberGroups } from './network-role-view';
 import type { NetworkRole } from '../../core/network-role.types';
@@ -12,6 +11,7 @@ import { NetworkAddSpaceComponent } from './network-add-space.component';
 import { NetworkPendingSpacesComponent } from './network-pending-spaces.component';
 import { NetworkConnectingComponent } from './network-connecting.component';
 import { NetworkChangeNotesComponent } from './network-change-notes.component';
+import { NetworkSyncHistoryComponent } from './network-sync-history.component';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { AdminApi } from '../../core/admin-api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
@@ -41,7 +41,7 @@ import { PluralPipe } from '../../core/plural.pipe';
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [PluralPipe, CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent, NetworkOwedActsComponent, NetworkRereadSectionComponent],
+  imports: [PluralPipe, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent, NetworkOwedActsComponent, NetworkRereadSectionComponent, NetworkSyncHistoryComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -90,35 +90,7 @@ import { PluralPipe } from '../../core/plural.pipe';
      * correctly from its own styles while the parent carries dead rules for markup it no longer holds,
      * and the next person to touch either copy has two.
      */
-    /* The vote row's rules live with the row, in network-vote-row.component.ts. */
-    .history-row {
-      display: grid;
-      grid-template-columns: 140px 70px 1fr auto;
-      gap: 8px;
-      align-items: center;
-      padding: 6px 0;
-      border-bottom: 1px solid var(--border-muted);
-      font-size: 12px;
-    }
-    .history-row > span:nth-child(3) { min-width: 0; } /* let the counts cell shrink instead of overflowing */
-    /* Narrow iframe: drop the fixed grid and let the cells wrap. */
-    @media (max-width: 680px) {
-      .history-row { display: flex; flex-wrap: wrap; }
-    }
-
-    .history-row:last-child { border-bottom: none; }
-
-    .status-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-
-    .status-success { background: var(--status-success-bg); color: var(--status-success-fg); }
-    .status-partial { background: var(--status-warning-bg); color: var(--status-warning-fg); }
-    .status-failed  { background: var(--status-error-bg);   color: var(--status-error-fg); }
+    /* The vote row's rules live with the row, in network-vote-row.component.ts; the sync history's, in network-sync-history.component.ts. */
     .create-join-row { display: flex; gap: 24px; margin-bottom: 24px; }
     .create-join-row > .card { flex: 1; min-width: 0; margin-bottom: 0; }
     @media (max-width: 900px) { .create-join-row { flex-direction: column; } }
@@ -243,48 +215,7 @@ import { PluralPipe } from '../../core/plural.pipe';
                 }
               </div>
 
-              <!-- Sync History -->
-              <div style="margin-bottom:16px;">
-                <div class="section-title" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px;" (click)="toggleHistory(net.id)">
-                  {{ 'networks.network.syncHistory.title' | transloco }} <ph-icon [name]="historyExpanded() === net.id ? 'caret-up' : 'caret-down'" [size]="12" />
-                </div>
-                @if (historyExpanded() === net.id) {
-                  @if (historyLoading()) {
-                    <div style="padding:8px 0; color:var(--text-muted); font-size:12px;">{{ 'networks.network.syncHistory.loading' | transloco }}</div>
-                  } @else if (historyError() !== null) {
-                    <app-error-state [message]="'networks.network.syncHistory.loadError' | transloco"
-                                     [reason]="historyError() ?? ''" [icon]="28" (retry)="retryHistory(net.id)" />
-                  } @else if (historyForNet(net.id).length === 0) {
-                    <div style="padding:8px 0; color:var(--text-muted); font-size:12px;">{{ 'networks.network.syncHistory.empty' | transloco }}</div>
-                  } @else {
-                    @for (rec of historyForNet(net.id); track rec._id) {
-                      <div class="history-row">
-                        <span style="color:var(--text-muted);"><app-instant [value]="rec.completedAt" variant="datetime"/></span>
-                        <span class="status-badge" [ngClass]="'status-' + rec.status">{{ rec.status }}</span>
-                        <span>
-                          ↓ {{ rec.pulled.facts + rec.pulled.entities + rec.pulled.edges }}
-                          + {{ rec.pulled.files }} files &nbsp;
-                          ↑ {{ rec.pushed.facts + rec.pushed.entities + rec.pushed.edges }}
-                          + {{ rec.pushed.files }} files
-                        </span>
-                        @if (rec.errors?.length) {
-                          <button class="btn-ghost btn btn-sm" style="font-size:11px;"
-                            (click)="toggleHistoryErrors(rec._id)">
-                            @if (expandedError() === rec._id) { {{ 'networks.network.syncHistory.hideErrors' | transloco }} } @else { {{ rec.errors!.length | plural:'networks.network.syncHistory.errorCount' }} }
-                          </button>
-                        }
-                      </div>
-                      @if (expandedError() === rec._id && rec.errors) {
-                        <div style="padding:4px 0 8px 8px; font-size:11px; color:var(--error);">
-                          @for (e of rec.errors; track e) {
-                            <div>{{ e }}</div>
-                          }
-                        </div>
-                      }
-                    }
-                  }
-                }
-              </div>
+              <app-network-sync-history [networkId]="net.id" />
 
               <!-- Spaces the network carries (F-38.1) -->
               <div style="margin-bottom:16px;">
@@ -409,14 +340,6 @@ export class NetworksComponent implements OnInit {
   syncingNet: Record<string, boolean> = {};
   votingRound: Record<string, boolean> = {};
 
-  // Sync history state
-  historyExpanded = signal('');
-  historyLoading = signal(false);
-  /** Null until the sync history failed to load — else "no sync history yet" claims the sync never ran. */
-  historyError = signal<string | null>(null);
-  expandedError = signal('');
-  private historyByNetwork: Record<string, SyncHistoryRecord[]> = {};
-
   // Whether this brain looks locally-reachable (so it needs the enable-networks wizard to get a public
   // URL before it can join). Derived from its own URL in ngOnInit; cleared when the wizard reports success.
   needsNetworkEnable = signal(false);
@@ -442,6 +365,7 @@ export class NetworksComponent implements OnInit {
   readonly rereadStateOf = rereadStateOf;
   readonly rereadOwedMembers = rereadOwedMembers;
   private readonly decisions = viewChildren(RecentDecisionsComponent);
+  private readonly histories = viewChildren(NetworkSyncHistoryComponent);
   private readonly dates = inject(DateFormatService);
   private readonly t: Translate = (key, params) => this.transloco.translate(key, params);
 
@@ -581,50 +505,13 @@ export class NetworksComponent implements OnInit {
         this.networks.update(n => [...n]);
         setTimeout(() => { delete this.syncResults[networkId]; this.networks.update(n => [...n]); }, 4000);
         // Auto-refresh history after sync completes (give it a moment)
-        if (this.historyExpanded() === networkId) {
-          setTimeout(() => this.loadHistory(networkId), 3000);
-        }
+        setTimeout(() => this.histories().find(h => h.networkId() === networkId)?.refreshIfOpen(), 3000);
       },
       error: () => {
         delete this.syncingNet[networkId];
         this.syncResults[networkId] = { ok: false };
         this.networks.update(n => [...n]);
       },
-    });
-  }
-
-  toggleHistory(networkId: string): void {
-    if (this.historyExpanded() === networkId) {
-      this.historyExpanded.set('');
-    } else {
-      this.historyExpanded.set(networkId);
-      this.loadHistory(networkId);
-    }
-  }
-
-  historyForNet(networkId: string): SyncHistoryRecord[] {
-    return this.historyByNetwork[networkId] ?? [];
-  }
-
-  toggleHistoryErrors(recordId: string): void {
-    this.expandedError.update(v => v === recordId ? '' : recordId);
-  }
-
-  /** Public so the history panel's error state can retry the one network it belongs to. */
-  retryHistory(networkId: string): void {
-    this.loadHistory(networkId);
-  }
-
-  private loadHistory(networkId: string): void {
-    this.historyLoading.set(true);
-    this.historyError.set(null);
-    this.networksApi.getSyncHistory(networkId).subscribe({
-      next: ({ history }) => {
-        this.historyByNetwork[networkId] = history;
-        this.historyLoading.set(false);
-        this.networks.update(n => [...n]);
-      },
-      error: (err) => { this.historyError.set(httpErrorReason(err)); this.historyLoading.set(false); },
     });
   }
 
