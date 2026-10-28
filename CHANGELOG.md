@@ -15,10 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Webhooks:** The webhook admin routes are listed as instance-admin in the rights table. No user-facing effect: managing webhooks still needs instance admin with MFA.
 - **Client:** the networks page's sync history panel and the advanced query's request builder are their own modules. No user-facing effect.
+- **Server:** the space act runner's request, context and knob types are their own module, and the runner re-exports them. No user-facing effect.
 
 ### Fixed
 
 - **Restore and wipe:** edits after a restore onto an empty database, a `docker compose down -v` that kept `config.json`, or an import onto an emptied space are no longer lost on peers. Losing `config.json` with the database, or a crash just before, can still lose them.
+- **Migrate:** a migrate whose copy is retried keeps one backup, the one its report names, instead of one full dump per attempt, and a backup that fails part-way no longer leaves its directory behind. Offsite copies of earlier attempts stay until the offsite retention prunes them.
+- **Migrate:** a completion write that fails (a full disk) no longer leaves every space refusing writes after you abandon the migrate; writes close only once the new URI is saved.
 
 ### Security
 

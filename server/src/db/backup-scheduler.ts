@@ -29,7 +29,7 @@ import { log, outsideRequest } from '../util/log.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { cronArmingRefused } from '../util/cron-arming.js';
 import { runExclusive } from '../util/single-flight.js';
-import { backupsRoot } from './backup-location.js';
+import { backupsRoot, removeBackup } from './backup-location.js';
 import { instanceWideActStanding, backupsNamedByActs } from '../spaces/space-act-runner.js';
 import type { SpaceActKind } from '../config/types.js';
 
@@ -88,7 +88,14 @@ export async function runBackupNow({ underAct }: { underAct?: SpaceActKind } = {
   log.info(`Backup starting → ${destDir}`);
   // The one setting, reaching the one choke point. The offsite copy below copies whatever this wrote, so it
   // inherits the choice rather than needing its own flag.
-  const manifest = await dumpDatabase(getMongoUri(), destDir, { encrypt: cfg?.encrypt === true });
+  // A dump that fails part-way leaves a directory with no manifest, which no retention counts: it removes its own before it rethrows.
+  let manifest: DumpManifest;
+  try {
+    manifest = await dumpDatabase(getMongoUri(), destDir, { encrypt: cfg?.encrypt === true });
+  } catch (err) {
+    removeBackup(ts);
+    throw err;
+  }
   log.info(`Backup dump complete: ${ts}`);
 
   const result: BackupResult = {

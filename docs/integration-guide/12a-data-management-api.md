@@ -564,7 +564,10 @@ Copies the entire database into a new MongoDB database **online**, then moves th
 3. **Copied, once for the whole set:** this database is dumped as a normal backup under `<data-root>/backups/` (listed, pruned
    by retention and encrypted by the one backup setting), that backup is loaded into the target, collection by collection,
    replacing whatever a crashed earlier attempt left there, and every index of this database is built on the target. Every
-   operation of the copy is bounded (`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS`), on this database and on the target.
+   operation of the copy is bounded (`YTHRIL_HOUSEKEEPING_OP_TIMEOUT_MS`), on this database and on the target. A retried copy
+   dumps again (what was written meanwhile must reach the target) and removes the dump its earlier attempt took, so a migrate
+   leaves exactly the backup its report names; an earlier attempt's offsite copy, when one is configured, stays until the offsite
+   retention prunes it. A dump that fails part-way removes its own directory.
 4. **Completed:** the new URI is saved to `config.json` in the same write that removes the migrate acts. **From that write
    until the process exits, every write to a space is refused** - `409` with `code: "space_being_migrated"` on REST and
    MCP, an instance-admin token's included, and an exchange, an embedding job or a housekeeping pass already under way is refused the

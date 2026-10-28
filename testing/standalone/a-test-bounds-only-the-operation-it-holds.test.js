@@ -14,7 +14,7 @@
  * ## How the set is found — derived, never listed
  *
  * - **Setters, by shape**, from `server/src`: an exported `...ForTest` function whose parameter is a `number`, or an
- *   object type declared in the same file with keys ending `Ms` / `_MS` typed `number`. Those keys are the figures.
+ *   object type declared in the same file (or imported by name from a relative module) with keys ending `Ms` / `_MS` typed `number`. Those keys are the figures.
  * - **Env figures**: an assignment to `process.env.<NAME_MS>` in testing/ (a computed name resolved like a figure), or a
  *   `<NAME_MS>` key beside a spread of `process.env`.
  * - **Figures are resolved** through literals, arithmetic, `String`/`Number`, a variable declared once in the file (a
@@ -93,6 +93,34 @@ const propName = (p) => (p?.name && (ts.isIdentifier(p.name) || ts.isStringLiter
 const fnName = (fn) => (fn.name && ts.isIdentifier(fn.name) ? fn.name.text
   : (fn.parent && ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name) ? fn.parent.name.text : null));
 
+/** The object types (interfaces, and aliases of a type literal) declared in source file `file`, by name. */
+function objectTypesOf(file, sf) {
+  const types = new Map();
+  walkEveryNode(sf, (n) => {
+    if (ts.isInterfaceDeclaration(n)) types.set(n.name.text, n.members);
+    else if (ts.isTypeAliasDeclaration(n) && ts.isTypeLiteralNode(n.type)) types.set(n.name.text, n.type.members);
+  });
+  return types;
+}
+
+/**
+ * The members of the object type `name` as `file` sees it: declared there, or imported by name from a relative module (a setter's
+ * figures may live beside the type its module exports, as the space act runner's knobs live in `space-act-contract.ts`).
+ */
+function membersOfType(file, sf, local, name) {
+  if (local.has(name)) return local.get(name);
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier) || !st.moduleSpecifier.text.startsWith('.')) continue;
+    const named = st.importClause?.namedBindings;
+    if (!named || !ts.isNamedImports(named) || !named.elements.some(e => e.name.text === name && (e.propertyName ?? e.name).text === name)) continue;
+    const target = join(dirname(file), st.moduleSpecifier.text.replace(/\.js$/, '.ts')).replace(/\\/g, '/');
+    let text;
+    try { text = readFileSync(join(ROOT, target), 'utf8'); } catch { return []; }
+    return objectTypesOf(target, parseSource(target, text)).get(name) ?? [];
+  }
+  return [];
+}
+
 /** Every exported `...ForTest` setter in server/src that takes a figure, with the figures it takes. */
 function deriveSetters() {
   const files = trackedSources('server/src', { ext: ['.ts'], specs: false, floor: 100, root: ROOT });
@@ -101,11 +129,7 @@ function deriveSetters() {
     const text = readFileSync(join(ROOT, file), 'utf8');
     if (!text.includes('ForTest')) continue;
     const sf = parseSource(file, text);
-    const types = new Map();
-    walkEveryNode(sf, (n) => {
-      if (ts.isInterfaceDeclaration(n)) types.set(n.name.text, n.members);
-      else if (ts.isTypeAliasDeclaration(n) && ts.isTypeLiteralNode(n.type)) types.set(n.name.text, n.type.members);
-    });
+    const types = objectTypesOf(file, sf);
     for (const st of sf.statements) {
       if (!ts.isFunctionDeclaration(st) || !st.name?.text.endsWith('ForTest')) continue;
       if (!st.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) || st.parameters.length === 0) continue;
@@ -116,7 +140,7 @@ function deriveSetters() {
         if (!ts.isTypeReferenceNode(part)) continue;
         const ref = part.typeName.getText(sf) === 'Partial' && part.typeArguments?.[0] && ts.isTypeReferenceNode(part.typeArguments[0])
           ? part.typeArguments[0].typeName.getText(sf) : part.typeName.getText(sf);
-        const figures = new Set((types.get(ref) ?? [])
+        const figures = new Set(membersOfType(file, sf, types, ref)
           .filter(m => ts.isPropertySignature(m) && m.type?.kind === ts.SyntaxKind.NumberKeyword && isFigureName(propName(m) ?? ''))
           .map(propName));
         if (figures.size > 0) setters.set(st.name.text, { file, scalar: false, figures });
