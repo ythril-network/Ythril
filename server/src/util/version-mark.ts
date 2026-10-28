@@ -24,8 +24,8 @@
  *
  * ## What it keeps, and what a hand-written copy would drop
  *
- *  - **A mark is read only as a valid number**: `Number.isSafeInteger(v) && 0 <= v <= VERSION_FLOOR_CAP - STEP`, for an OWN key of a plain object (not
- *    `__proto__`, not an inherited name). A value above that limit would raise a counter into the ceiling reserve, where every later stamp is refused
+ *  - **A mark is read only as a valid number**: `Number.isSafeInteger(v) && 0 <= v <= VERSION_FLOOR_CAP - STEP`, for an OWN key of a plain object (an
+ *    inherited name is never read), and written into an object with no prototype, so every space id is a plain key. A value above that limit would raise a counter into the ceiling reserve, where every later stamp is refused
  *    by every peer; a value that is not a number would raise it to nothing. Anything else is ignored and said once per space ({@link warnOnce}), and
  *    the next save rewrites the entry from memory.
  *  - **A read never lowers a valid mark** (an older config.json put back, a hand edit), and a garbage value never pins one, because "never lowered"
@@ -49,7 +49,6 @@ import { countVersionCounterRaise, type VersionRaiseReason } from '../metrics/ve
 import { log, peerText } from './log.js';
 import { VERSION_FLOOR_CAP } from './seq.js';
 import { warnOnce } from './warn-once.js';
-import { isObjectInternalKey } from './object-internal-keys.js';
 
 /** How far above the counter a mark is set, and so the most a counter goes up at a process start, and the interval between two saves of one space's mark. */
 export const VERSION_MARK_STEP = 100_000;
@@ -71,9 +70,6 @@ function isValidMark(v: unknown): v is number {
   return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= MARK_LIMIT;
 }
 
-/** A space id this module keeps a mark for: an object-internal key would be a write to the internals of the object the marks are saved in. */
-const isMarkKey = (spaceId: string): boolean => !isObjectInternalKey(spaceId);
-
 /** The space's mark as this process knows it, or `undefined` when it has none. */
 export function versionMarkOf(spaceId: string): number | undefined {
   return marks.get(spaceId);
@@ -81,7 +77,7 @@ export function versionMarkOf(spaceId: string): number | undefined {
 
 /** Raise the space's mark in memory to `target` when that is higher and valid. Answers whether it rose. */
 function raiseMark(spaceId: string, target: number): boolean {
-  if (!isMarkKey(spaceId) || !isValidMark(target)) return false;
+  if (!isValidMark(target)) return false;
   const current = marks.get(spaceId);
   if (current !== undefined && target <= current) return false;
   marks.set(spaceId, target);
@@ -156,7 +152,7 @@ function overlayMarks(config: Config): void {
   if (raw !== undefined && raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
     for (const key of Object.keys(raw)) {
       const value = (raw as Record<string, unknown>)[key];
-      if (isMarkKey(key) && isValidMark(value)) raiseMark(key, value);
+      if (isValidMark(value)) raiseMark(key, value);
       else invalidSaid(key, () => log.warn(`config.json holds versionMarks['${peerText(key)}'] = ${peerText(JSON.stringify(value))}, which is not a version mark (a whole number from 0 to ${MARK_LIMIT}); it is ignored and the next save rewrites it.`));
     }
   } else if (raw !== undefined) {
@@ -166,7 +162,8 @@ function overlayMarks(config: Config): void {
     if (raw !== undefined) delete config.versionMarks;
     return;
   }
-  const out: Record<string, number> = {};
+  // No prototype, so every key is a plain property here: `constructor` and `prototype` are valid space ids and get their marks like any other.
+  const out = Object.create(null) as Record<string, number>;
   for (const [spaceId, mark] of marks) out[spaceId] = mark;
   config.versionMarks = out;
 }

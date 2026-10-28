@@ -145,8 +145,13 @@ export async function moveSpaceData(
   //
   // The space's version mark (`util/version-mark.ts`) moves FIRST, so a counter move that fails half way leaves a mark under the new id that the
   // first stamp there raises the counter to (`allocate`).
+  // Its own step: a config.json save that fails is reported as itself and does not skip the counter move.
   try {
     moveVersionMark(oldId, newId);
+  } catch (err) {
+    stepFailed(`Could not move the version mark in config.json ${oldId} → ${newId}`, err, errors);
+  }
+  try {
     const moved = await moveCounterDoc(oldId, newId);
     if (moved) log.debug(`Migrated the counter document ('ythril_counters') ${peerText(oldId)} → ${peerText(newId)} (seq=${moved.seq})`);
   } catch (err) {
