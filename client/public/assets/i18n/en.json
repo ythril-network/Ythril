@@ -237,6 +237,7 @@
   "data.maintenance.migrating.many": "Copying to the new database: {{done}} of {{count}} spaces",
   "data.maintenance.migrating.other": "Copying to the new database: {{done}} of {{count}} spaces",
   "data.maintenance.heldHint": "A restore or migration holds maintenance until it ends; the switch works again once it has.",
+  "data.maintenance.migrateStopped": "Stopped to switch to the new database",
   "common.save": "Save",
   "common.unsavedChanges": "Unsaved changes",
   "common.saving": "Saving…",

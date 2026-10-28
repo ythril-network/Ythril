@@ -237,6 +237,7 @@
   "data.maintenance.migrating.many": "Kopiowanie do nowej bazy: {{done}} z {{count}} przestrzeni",
   "data.maintenance.migrating.other": "Kopiowanie do nowej bazy: {{done}} z {{count}} przestrzeni",
   "data.maintenance.heldHint": "Przywracanie lub migracja utrzymuje tryb konserwacji do swojego końca; potem przełącznik znów działa.",
+  "data.maintenance.migrateStopped": "Zatrzymano, aby przełączyć na nową bazę danych",
   "common.save": "Zapisz",
   "common.unsavedChanges": "Niezapisane zmiany",
   "common.saving": "Zapisywanie…",

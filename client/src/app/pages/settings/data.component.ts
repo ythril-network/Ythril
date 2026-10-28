@@ -11,7 +11,6 @@ import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { refusalText } from '../../core/refusal-text';
-import { LiveAnnouncement } from '../../core/live-announcement';
 import { pollUntil, type PollHandle } from '../../core/poll-until';
 import { reportOf, type MaintenanceState, type MigrateReport, type RestoreReport } from '../../core/admin-data.types';
 import { ActSetProgressComponent } from './act-set-progress.component';
@@ -100,9 +99,8 @@ interface BackupConfig {
         @if (backupTaken())    { <div class="alert alert-success" style="margin-bottom:12px;">{{ 'data.backup.success' | transloco }}</div> }
         @if (backupError())    { <div class="alert alert-error"   style="margin-bottom:12px;">{{ backupError() }}</div> }
         <!-- What a restore came to, in ONE polite live region that is always in the DOM (a region that appears with its text is not
-             announced): the accepted line, a refusal and its leaveOut retry, and - in the sr-only span - the end of a followed set. -->
+             announced): the accepted line and the end that replaces it, and a refusal and its leaveOut retry. -->
         <div role="status" aria-live="polite">
-          <span class="sr-only">{{ live.text() }}</span>
           @if (restoreNotice(); as n) { <div class="alert alert-success" style="margin-bottom:12px;">{{ n }}</div> }
           @if (restoreError()) {
             <div class="alert alert-error" style="margin-bottom:12px;">
@@ -115,7 +113,6 @@ interface BackupConfig {
               }
             </div>
           }
-          @if (migrateAbandonNotice(); as n) { <div class="alert alert-success" style="margin-bottom:12px;">{{ n }}</div> }
           @if (migrateAbandonError(); as e) { <div class="alert alert-error" style="margin-bottom:12px;">{{ e }}</div> }
         </div>
 
@@ -330,7 +327,7 @@ interface BackupConfig {
               </div>
             }
             <div role="status" aria-live="polite">
-              @if (migrateNotice(); as n) { <div class="alert alert-success" style="margin-bottom:12px;">{{ n }} {{ 'data.migrate.success' | transloco }}</div> }
+              @if (migrateNotice(); as n) { <div class="alert alert-success" style="margin-bottom:12px;">{{ n }}</div> }
               @if (migrateError())   { <div class="alert alert-error"   style="margin-bottom:12px;">{{ migrateError() }}</div> }
             </div>
             @if (setStanding()) { <p class="sub">{{ 'data.migrate.blockedBySet' | transloco }}</p> }
@@ -372,8 +369,6 @@ export class DataComponent implements OnInit {
   // The restore answers 202 and runs one act per space after the answer, so a success is ACCEPTED: the page says so, then follows the
   // set's report while it is open. It said "Restore completed" on any success, for a restore that had not started.
 
-  /** What the polite live region announces that is not otherwise on screen: the end of a followed set. */
-  protected readonly live = new LiveAnnouncement();
   /** The accepted line, or what an abandon released; shown in the live region. */
   readonly restoreNotice = signal<string | null>(null);
   /** The backup and spaces a `backup_names_unserved_spaces` refusal named: the restore can be retried leaving them out. */
@@ -385,10 +380,10 @@ export class DataComponent implements OnInit {
   private readonly followedRestore = signal(false);
   private readonly followedMigrate = signal(false);
   readonly abandoning = signal(false);
+  /** The migrate block's one notice: the accepted line, then what replaces it (how the set ended, an abandon, or that the instance stopped). */
   readonly migrateNotice = signal<string | null>(null);
-  /** A migrate abandon in flight, and what it came to (Q-564): shown in the set's live region beside the restore's. */
+  /** A migrate abandon in flight, and its refusal (Q-564): shown in the set's live region beside the restore's. */
   readonly abandoningMigrate = signal(false);
-  readonly migrateAbandonNotice = signal<string | null>(null);
   readonly migrateAbandonError = signal<string | null>(null);
   /** The migrate's report poll got no answer at all: the process has exited to switch database. */
   readonly migrateStopped = signal(false);
@@ -514,15 +509,14 @@ export class DataComponent implements OnInit {
 
   /** The pill's words: "restoring k of n" once the report it counts from has loaded, else whether maintenance is on. */
   maintenancePillText(): string {
-    const t = (k: string, p?: Record<string, unknown>) => this.transloco.translate(k, p);
     const held = this.maintenanceHeldBy();
+    // A stopped instance is not copying: the last count would say so for ever (Q-562).
+    if (held === 'migrate' && this.migrateStopped()) return this.transloco.translate('data.maintenance.migrateStopped');
     const r = held === 'restore' ? this.restoreReport() : held === 'migrate' ? this.migrateReport() : null;
     if (r && r.state === 'running') {
-      return held === 'restore'
-        ? this.plural.text('data.maintenance.restoring', r.total, { done: r.done })
-        : this.plural.text('data.maintenance.migrating', r.total, { done: r.done });
+      return held === 'restore' ? this.plural.text('data.maintenance.restoring', r.total, { done: r.done }) : this.plural.text('data.maintenance.migrating', r.total, { done: r.done });
     }
-    return t(this.maintenanceActive() ? 'data.maintenance.active' : 'data.maintenance.inactive');
+    return this.transloco.translate(this.maintenanceActive() ? 'data.maintenance.active' : 'data.maintenance.inactive');
   }
 
   // ─ Following a set ─────────────────────────────────────────────────────────────────
@@ -568,7 +562,8 @@ export class DataComponent implements OnInit {
     const running = m?.state === 'running';
     if (running) this.followedMigrate.set(true);
     if (was?.state === 'running' && m && !running) {
-      this.live.say(this.transloco.translate(m.state === 'abandoned' ? 'data.migrate.abandonedOutcome' : 'data.migrate.completed'));
+      // The end replaces "Migration accepted ..." in the block's polite region, so it is both read and heard.
+      this.migrateNotice.set(this.transloco.translate(m.state === 'abandoned' ? 'data.migrate.abandonedOutcome' : 'data.migrate.completed'));
       this.loadMaintenance();
     }
     return running;
@@ -592,7 +587,11 @@ export class DataComponent implements OnInit {
       request: () => this.adminApi.getMigrateReport(),
       onAnswer: a => this.takeMigrate(reportOf<MigrateReport>(a)),
       // Status 0 is no answer at all (refused or reset): a migrate that completed has exited. Any answer, even a 503, is the process.
-      onError: err => { if ((err as { status?: number }).status === 0) this.migrateStopped.set(true); },
+      onError: err => {
+        if ((err as { status?: number }).status !== 0) return;
+        this.migrateStopped.set(true);
+        this.migrateNotice.set(this.transloco.translate('data.progress.migrateStopped'));
+      },
     });
   }
 
@@ -788,7 +787,7 @@ export class DataComponent implements OnInit {
       next: () => {
         this.abandoningMigrate.set(false);
         if (this.destroyed) return;
-        this.migrateAbandonNotice.set(this.transloco.translate('data.migrate.abandoned'));
+        this.migrateNotice.set(this.transloco.translate('data.migrate.abandoned'));
         // Said here, in the region; the poll that sees the set end must not say it a second time.
         this.migrateReport.update(cur => (cur ? { ...cur, state: 'abandoned' } : cur));
         this.migratePoll?.stop();
@@ -1000,7 +999,8 @@ export class DataComponent implements OnInit {
       next: started => {
         this.migrating.set(false);
         if (this.destroyed) return;
-        this.migrateNotice.set(this.plural.text('data.migrate.accepted', started.spaces.length));
+        // One sentence, replaced in place by how the set ends.
+        this.migrateNotice.set(this.plural.text('data.migrate.accepted', started.spaces.length) + ' ' + this.transloco.translate('data.migrate.success'));
         // This page started it, so its outcome is shown even when the first report already says it ended (a copy refused at once).
         this.followedMigrate.set(true);
         this.loadMaintenance();
