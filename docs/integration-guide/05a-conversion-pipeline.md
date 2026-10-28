@@ -74,6 +74,14 @@ A chunk is identified by **carrying a `chunkIndex`**, not by the shape of its id
 `<path>#chunk<n>` and audio chunks are `<path>#media-chunk<n>`, two spellings of one thing. Read-only: it
 mutates nothing and sends no content anywhere.
 
+**The MCP twin is `read_file`.** It takes this route's `markdownSkip` window and budget (`maxChars`, `maxBytes`,
+`maxTokens`) and, since `Q-647`, the listing's four parameters too — `limit`, `skip`, `imagesLimit`, `imagesSkip` — with
+the same defaults, ceilings and refusals, read through one module (`files/extract-listing.ts`). Naming any of the four adds
+`chunks`, `chunkTotal`, `limit`, `skip`, `images`, `imagesTotal`, `imagesTruncated` and `imagesNextSkip` to the tool's
+answer, as they appear here; a file with no metadata record is refused as this route refuses it (`404`). Without them the
+tool answers the text window alone, as it always has. A bad `imagesLimit` or `imagesSkip` is refused naming the parameter
+you sent (it used to read `` `imageslimit` ``, a name that exists nowhere).
+
 **Brain → Files** surfaces this as an **Extract** tab on the file detail pane, shown only for files that
 have been through the pipeline.
 

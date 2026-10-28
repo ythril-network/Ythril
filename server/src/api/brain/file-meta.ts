@@ -25,8 +25,6 @@ import { readFileWindow } from '../../files/files.js';
 import { parentOfSidecar } from '../../files/moved-paths.js';
 import { log, peerText } from '../../util/log.js';
 import { StoredFileUnreadable } from '../../files/stored-bytes.js';
-import { col, asFilter } from '../../db/mongo.js';
-import { parseLimit, parseSkip } from '../../util/pagination.js';
 import { findFirstAcrossMembers } from '../../spaces/across-members.js';
 import { isStrictLinkage } from '../../spaces/space-lookup.js';
 import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
@@ -36,10 +34,8 @@ import { getMediaJobCounts, FAILED_SAMPLE_LIMIT, FAILED_REASON_LIMIT, type Media
 import { reachesSpace } from '../../auth/space-reach.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
-import { spaceCollection } from '../../db/space-collection.js';
 import { resolveTextWindow } from '../../files/markdown-window.js';
-import { pageList } from '../../brain/list-page.js';
-import { NEVER_RETURNED_PROJECTION } from '../../brain/read-projection.js';
+import { readExtractListing } from '../../files/extract-listing.js';
 import { defaultBudgetChars } from '../../brain/result-budget.js';
 import { queryInt } from '../../brain/result-budget.js';
 import { tagsError } from '../../util/request-bounds.js';
@@ -99,8 +95,6 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
     return;
   }
   const parentId = toDocId(rawPath);
-  const limit = parseLimit(req.query['limit'], 100, 500);
-  const skip = parseSkip(req.query['skip']);
   // The Markdown window: `markdownSkip` and the answer budget, resolved by the one function `read_file` resolves them
   // with (`Q-111`), so the two doors that read a document's text take the same parameters and refuse the same values.
   // Unstated, the window is `MAX_CONVERTED_CHARS`, as it always was.
@@ -128,39 +122,14 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
     return;
   }
 
-  const files = col<FileMetaDoc>(spaceCollection(member, 'files'));
-
-  // Chunks: everything carrying a chunkIndex, in document order. `chunkIndex` is the discriminator
-  // rather than the path shape, because a chunk's id is `<parent>#chunk<n>` for text and
-  // `#media-chunk<n>` for audio — two spellings of one thing.
-  const chunkFilter = { parentFileId: parentId, chunkIndex: { $exists: true } };
-  const [chunkDocs, chunkTotal] = await Promise.all([
-    files.find(asFilter<FileMetaDoc>(chunkFilter), { projection: NEVER_RETURNED_PROJECTION }).sort({ chunkIndex: 1 }).skip(skip).limit(limit).toArray(),
-    files.countDocuments(asFilter<FileMetaDoc>(chunkFilter)),
-  ]);
-
-  // Everything else derived from this parent: the `_converted/` record and the `_extracted/` images. Read whole —
-  // the pipeline writes at most 50 images per file — and the images then page through the shared list rule, so a
-  // file with more says so rather than stopping at a number (Q-128). Metadata only; the image bytes stay in the store.
-  const derived = await files
-    .find(asFilter<FileMetaDoc>({ parentFileId: parentId, chunkIndex: { $exists: false } }), { projection: NEVER_RETURNED_PROJECTION })
-    .toArray() as FileMetaDoc[];
-
-  const allImages = derived
-    .filter(d => parentOfSidecar(d.path)?.role === 'extracted')
-    .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))
-    .map(d => ({
-      path: d.path,
-      description: d.description ?? null,
-      // Says whether a caption was written by a model or is the operator's own text — the same
-      // provenance the file detail pane shows, because "generated" is a claim.
-      descriptionSource: d.descriptionSource ?? null,
-      sizeBytes: d.sizeBytes,
-      embeddingStatus: d.embeddingStatus ?? null,
-    }));
-  const imagePage = pageList(allImages, { limit: req.query['imagesLimit'], skip: req.query['imagesSkip'] },
-    { defaultLimit: 200, maxLimit: 200, budgetChars: defaultBudgetChars('rest') });
-  if (!imagePage.ok) { res.status(400).json({ error: imagePage.error.replace(/`(limit|skip)`/, '`images$1`') }); return; }
+  // The chunk page and the image page, read by the one module `read_file` reads them with (`Q-647`): the parse and the clamp of
+  // `limit`/`skip`, the refusal of a bad `imagesLimit`/`imagesSkip`, both queries and the answer's fields. The four are named
+  // here, at the door, because they are this route's parameters.
+  const listing = await readExtractListing(member, parentId, {
+    limit: req.query['limit'], skip: req.query['skip'], imagesLimit: req.query['imagesLimit'], imagesSkip: req.query['imagesSkip'],
+  }, defaultBudgetChars('rest'));
+  if (!listing.ok) { res.status(400).json({ error: listing.error }); return; }
+  const derived = listing.derived;
 
   // The converted Markdown, read from the file store rather than from the record — the record carries
   // metadata, the bytes are the thing being inspected. Absent for formats that need no conversion
@@ -205,25 +174,8 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
     descriptionSource: parent.descriptionSource ?? null,
     excerpt: parent.excerpt ?? null,
     converted,
-    chunks: chunkDocs.map(c => ({
-      id: c._id,
-      index: c.chunkIndex ?? null,
-      headingText: c.headingText ?? null,
-      content: c.content ?? '',
-      // Audio/video chunks carry their position in the recording; documents carry heading provenance.
-      // Both spellings are returned as they are, so the client formats rather than guesses.
-      chunkOffsetMs: (c as { chunkOffsetMs?: number }).chunkOffsetMs ?? null,
-      chunkDurationMs: (c as { chunkDurationMs?: number }).chunkDurationMs ?? null,
-      embeddingStatus: c.embeddingStatus ?? null,
-    })),
-    chunkTotal,
-    limit,
-    skip,
-    images: imagePage.rows,
-    // The image list's own page, prefixed because `limit`/`skip` above are the chunks' (Q-128).
-    imagesTotal: imagePage.fields['total'],
-    imagesTruncated: imagePage.fields['truncated'],
-    ...(imagePage.fields['nextSkip'] !== undefined ? { imagesNextSkip: imagePage.fields['nextSkip'] } : {}),
+    // `chunks`, `chunkTotal`, `limit`, `skip`, `images`, `imagesTotal`, `imagesTruncated` and `imagesNextSkip`: the listing, from the module both doors read it through.
+    ...listing.fields,
   });
 });
 

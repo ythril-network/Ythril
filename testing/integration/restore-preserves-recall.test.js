@@ -75,7 +75,14 @@ describe('restore preserves semantic recall', () => {
 
     // 3. Restore it. This is the step that used to destroy every vector index.
     // Since bundle-157 a restore is a set of space acts: answered 202 when they are registered, its outcome read from GET /restore.
-    const restored = await post(INSTANCES.a, tokenA, '/api/admin/data/restore', { backupId: latest.id });
+    // The integration files run side by side, so the backup can hold another file's space that was deleted before this restore
+    // (main's CI run 40765189225: 'qdeep-…'). The restore refuses such a backup by name; those spaces are not this test's subject,
+    // so they are left out, and only they: 'general', which holds the fact, must never be among them.
+    let restored = await post(INSTANCES.a, tokenA, '/api/admin/data/restore', { backupId: latest.id });
+    if (restored.status === 400 && restored.body?.code === 'backup_names_unserved_spaces') {
+      assert.ok(!restored.body.spaces.includes('general'), `the restore says 'general' is not served: ${JSON.stringify(restored.body)}`);
+      restored = await post(INSTANCES.a, tokenA, '/api/admin/data/restore', { backupId: latest.id, leaveOut: restored.body.spaces });
+    }
     assert.equal(restored.status, 202, `restore failed: ${JSON.stringify(restored.body)}`);
     const report = await waitForReading(
       () => get(INSTANCES.a, tokenA, '/api/admin/data/restore'),

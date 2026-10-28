@@ -15,6 +15,22 @@
  * `wait` / `timeoutMs` / a peer subject from the trigger. This module is where they meet, so a fourth door
  * cannot invent a fourth set of semantics.
  *
+ * ## One outcome, two renderings (Q-468)
+ *
+ * The MCP tool `network_sync` ran the cycles itself: it always waited, had no bound, and so could not take the `wait` and
+ * `timeoutMs` the route takes — a second implementation of the wait, and the weaker one. The act is now computed ONCE
+ * ({@link networkSyncOutcome}, {@link peerSyncOutcome}) and each door renders what comes back: REST as a status and a body
+ * ({@link sendSyncAnswer}), MCP as text and `structuredContent`. Neither door runs a cycle or a time bound of its own, which is
+ * what `mcp-network-sync-waits-by-default-and-says-so` holds.
+ *
+ * ## The one default that differs between the doors, and why it is stated
+ *
+ * An agent calling `network_sync` wants what the cycle did, and a script or the UI's button wants the answer at once (owner,
+ * 2026-10-28). So `wait` defaults to true on MCP ({@link MCP_SYNC_WAIT_DEFAULT}) and false on REST ({@link SYNC_WAIT_DEFAULT}) —
+ * the third sanctioned divergence after `maxChars`, held to the same three conditions: deliberate, resolved in ONE place by the
+ * door that took the call ({@link resolveSyncWait}), and disclosed — every answer says the `wait` it used, and the `timeoutMs`
+ * where a bound applied.
+ *
  * ## What it deliberately keeps different between the two subjects
  *
  * A NETWORK cycle races a timeout because it can span many peers and a stuck one would hang the request.
@@ -52,15 +68,46 @@ export function syncTimeoutMs(raw: unknown): number {
   return Math.min(Math.max(parseInt(String(raw ?? ''), 10) || 30_000, 1_000), 120_000);
 }
 
+/** REST's default for `wait`: answer at once that a cycle was started. A script and the UI's button want the acknowledgement. */
+export const SYNC_WAIT_DEFAULT = false;
 /**
- * Run a cycle for ONE NETWORK and answer the request.
+ * MCP's default for `wait`: run the cycle and report what it did (owner, 2026-10-28). An agent calling `network_sync` wants the
+ * outcome, not an acknowledgement it would have to poll behind. The only value that differs between the doors; named here and
+ * read only by {@link resolveSyncWait}, never by a call site.
+ */
+export const MCP_SYNC_WAIT_DEFAULT = true;
+
+/**
+ * The `wait` a request asked for, resolved by the door that took it: a stated value reads the same on both doors (`true`, or
+ * `'true'`/`'1'` from a query string; anything else stated is false), and what is left unsaid is that door's default.
+ */
+export function resolveSyncWait(raw: unknown, transport: 'mcp' | 'rest'): boolean {
+  if (raw === undefined || raw === null || raw === '') return transport === 'mcp' ? MCP_SYNC_WAIT_DEFAULT : SYNC_WAIT_DEFAULT;
+  return raw === true || raw === 'true' || raw === '1' || raw === 1;
+}
+
+/**
+ * What a sync act came to, before any door renders it. `status`/`body` are the REST answer; `failure` is a throw the cycle ended
+ * in (REST answers it through the one sender, MCP rethrows it to its own failure handling); `detail` is the cycle's own result for
+ * a door that reports more than the body does (the peer cycle's `notFound`).
+ */
+export interface SyncAnswer {
+  status: number;
+  body: Record<string, unknown> & { status: 'triggered' | 'completed' | 'timeout' | 'error'; wait: boolean };
+  failure?: { err: unknown; where: string };
+  detail?: { notFound?: boolean; networksSynced?: number; errors: number; refused?: number; synced?: number };
+}
+
+/**
+ * Run a cycle for ONE NETWORK and say what came of it.
  *
  * `wait` false answers `triggered` immediately and logs any later failure. `wait` true races the cycle
- * against `timeoutMs` and answers `completed`, `timeout` (504, still running) or `error` (500).
+ * against `timeoutMs` and answers `completed`, `timeout` (504, still running) or `error` (500). Every answer names the `wait` it
+ * used, and a waited one the `timeoutMs` that bounded it.
  */
-export async function triggerNetworkSync(
-  res: Response, networkId: string, opts: { wait: boolean; timeoutMs: number; noteId?: string },
-): Promise<void> {
+export async function networkSyncOutcome(
+  networkId: string, opts: { wait: boolean; timeoutMs: number; noteId?: string },
+): Promise<SyncAnswer> {
   const { runSyncForNetwork } = await import('./engine.js');
   // F-42: every answer names the change note this sync carries, whatever became of the cycle — the note is queued
   // either way and travels with the next cycle that reaches each member.
@@ -69,49 +116,76 @@ export async function triggerNetworkSync(
   if (!opts.wait) {
     void runSyncForNetwork(networkId)
       .catch(err => log.error(`Triggered sync for network ${peerText(networkId)} failed: ${peerText(err)}`));
-    res.json({ ok: true, status: 'triggered', networkId, ...note });
-    return;
+    return { status: 200, body: { ok: true, status: 'triggered', networkId, wait: false, ...note } };
   }
 
   try {
     const r = await withinTimeBound(runSyncForNetwork(networkId), opts.timeoutMs, `the sync cycle of network ${networkId}`);
-    res.json({ ok: true, status: 'completed', networkId, synced: r.synced, errors: r.errors, ...note });
+    return {
+      status: 200,
+      body: { ok: true, status: 'completed', networkId, wait: true, timeoutMs: opts.timeoutMs, synced: r.synced, errors: r.errors, ...note },
+      detail: { synced: r.synced, errors: r.errors },
+    };
   } catch (err) {
     if (isTimeBoundEnded(err)) {
       // 504 and NOT an error: the cycle is still running, and saying "failed" would send an operator
       // looking for a fault that does not exist.
-      res.status(504).json({ ok: false, status: 'timeout', networkId, timeoutMs: opts.timeoutMs, ...note });
-    } else {
-      // Through the one sender (bundle-30 I13): a store failure is its 503 in our words — this answered the
-      // exception's message, which for the store's names internal hosts and ports. Anything else is answered by what it is, in our
-      // words (`sendCaughtFailure`): the reason is in the server log, not in a body.
-      sendCaughtFailure(res, `synchronous sync trigger for network ${peerText(networkId)}`, err,
-        { ok: false, status: 'error', networkId, error: SYNC_FAILED_TEXT, ...note });
+      return { status: 504, body: { ok: false, status: 'timeout', networkId, wait: true, timeoutMs: opts.timeoutMs, ...note } };
     }
+    // Through the one sender (bundle-30 I13): a store failure is its 503 in our words — this answered the
+    // exception's message, which for the store's names internal hosts and ports. Anything else is answered by what it is, in our
+    // words (`sendCaughtFailure`): the reason is in the server log, not in a body.
+    return {
+      status: 500,
+      body: { ok: false, status: 'error', networkId, wait: true, timeoutMs: opts.timeoutMs, error: SYNC_FAILED_TEXT, ...note },
+      failure: { err, where: `synchronous sync trigger for network ${peerText(networkId)}` },
+    };
   }
 }
 
 /**
- * Run a cycle for ONE PEER, across every network it belongs to, and answer the request.
+ * Run a cycle for ONE PEER, across every network it belongs to, and say what came of it.
  *
- * No timeout race — see the note at the top of this file. `networksSynced` rather than `synced`, because
- * the unit a peer cycle reports is networks touched.
+ * No timeout race — see the note at the top of this file — so a `timeoutMs` is not taken here and no answer names one.
+ * `networksSynced` rather than `synced`, because the unit a peer cycle reports is networks touched.
  */
-export async function triggerPeerSync(
-  res: Response, peerId: string, opts: { wait: boolean },
-): Promise<void> {
+export async function peerSyncOutcome(peerId: string, opts: { wait: boolean }): Promise<SyncAnswer> {
   const { runSyncForPeer } = await import('./engine.js');
 
   if (!opts.wait) {
     void runSyncForPeer(peerId).catch(err => log.error(`Triggered sync for peer ${peerText(peerId)} failed: ${peerText(err)}`));
-    res.json({ ok: true, status: 'triggered', peerId });
-    return;
+    return { status: 200, body: { ok: true, status: 'triggered', peerId, wait: false } };
   }
   try {
     const r = await runSyncForPeer(peerId);
-    res.json({ ok: true, status: 'completed', peerId, networksSynced: r.networksSynced, errors: r.errors, refused: r.refused });
+    return {
+      status: 200,
+      body: { ok: true, status: 'completed', peerId, wait: true, networksSynced: r.networksSynced, errors: r.errors, refused: r.refused },
+      detail: { ...r },
+    };
   } catch (err) {
-    sendCaughtFailure(res, `synchronous sync trigger for peer ${peerText(peerId)}`, err,
-      { ok: false, status: 'error', peerId, error: SYNC_FAILED_TEXT });
+    return {
+      status: 500,
+      body: { ok: false, status: 'error', peerId, wait: true, error: SYNC_FAILED_TEXT },
+      failure: { err, where: `synchronous sync trigger for peer ${peerText(peerId)}` },
+    };
   }
+}
+
+/** Put a sync answer on the wire: its status and body, or — when the cycle threw — through the one sender every route catch uses. */
+export function sendSyncAnswer(res: Response, answer: SyncAnswer): void {
+  if (answer.failure) { sendCaughtFailure(res, answer.failure.where, answer.failure.err, answer.body); return; }
+  res.status(answer.status).json(answer.body);
+}
+
+/** The REST rendering of {@link networkSyncOutcome}. */
+export async function triggerNetworkSync(
+  res: Response, networkId: string, opts: { wait: boolean; timeoutMs: number; noteId?: string },
+): Promise<void> {
+  sendSyncAnswer(res, await networkSyncOutcome(networkId, opts));
+}
+
+/** The REST rendering of {@link peerSyncOutcome}. */
+export async function triggerPeerSync(res: Response, peerId: string, opts: { wait: boolean }): Promise<void> {
+  sendSyncAnswer(res, await peerSyncOutcome(peerId, opts));
 }

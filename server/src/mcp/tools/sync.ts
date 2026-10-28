@@ -4,6 +4,7 @@ import { getConfig } from '../../config/loader.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../../sync/peer-floor.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { attachSyncNote } from '../../sync/change-notes.js';
+import { networkSyncOutcome, peerSyncOutcome, resolveSyncWait, syncTimeoutMs } from '../../sync/trigger.js';
 
 export const network_peersTool: ToolHandler = {
   name: 'network_peers',
@@ -108,13 +109,17 @@ export const network_syncTool: ToolHandler = {
   name: 'network_sync',
   description:
         'Run a sync cycle now instead of waiting for the schedule. Requires instance-admin rights.\n\n'
-        + 'IT WAITS FOR THE CYCLE, so the reply is an outcome and not an acknowledgement: the transfers run '
-        + 'inline and the text reports how many networks synced and how many errored. How long it takes '
-        + 'depends on how far behind the peers are, so give it room — a peer with a large backlog is a slow '
-        + 'call, not a hung one.\n\n'
+        + 'IT WAITS FOR THE CYCLE BY DEFAULT (`wait`, default true here), so the reply is an outcome and not an '
+        + 'acknowledgement: the transfers run inline and the text reports how many networks synced and how many '
+        + 'errored. A network\'s wait is bounded by `timeoutMs` (default 30000, held between 1000 and 120000): '
+        + 'past it the reply says the cycle is STILL RUNNING (`status: "timeout"`, `isError` set) — it was not stopped, '
+        + 'and its outcome is in `network_sync_history`. A peer with a large backlog is a slow call, not a hung one, '
+        + 'so raise `timeoutMs` for it. Pass `wait: false` to start the cycle and return at once, as '
+        + '`POST /api/networks/:id/sync` does by default; every reply says the `wait` it used.\n\n'
         + 'THIS PARAGRAPH USED TO SAY THE OPPOSITE — "it does not wait for the data", and that a successful '
         + 'reply meant only "a cycle was started". If you built a poll loop against that, you were waiting '
-        + 'for something that had already finished.\n\n'
+        + 'for something that had already finished. And until `wait` and `timeoutMs` existed on this tool the wait '
+        + 'had no bound at all.\n\n'
         + 'WHAT IT STILL DOES NOT TELL YOU is whether every record is now in step. A cycle transfers what the '
         + 'watermarks say is outstanding and can be bounded per hop, so a clean run is not proof of a '
         + 'converged space — `network_peers` and its `lastSyncAt` / `consecutiveFailures` are how you see that.'
@@ -137,7 +142,13 @@ export const network_syncTool: ToolHandler = {
         + 'a member that is offline gets it when it is back; each arrival fires the `change_note.received` webhook '
         + 'there. Same as the `{ note, spaces }` body of `POST /api/networks/:id/sync`.\n'
         + '- `spaces` — the network\'s spaces the note concerns, by this instance\'s ids. Only with `note`; omit it '
-        + 'for a note about the whole network.\n\n'
+        + 'for a note about the whole network.\n'
+        + '- `wait` — whether to run the cycle and report what it did (true) or start it and return at once (false). '
+        + 'The ONE default that differs from REST: true on MCP, false on `POST /api/networks/:id/sync`, because an agent '
+        + 'wants the outcome and a script wants the answer at once. Everything else is the same on both doors.\n'
+        + '- `timeoutMs` — how long to wait for a NETWORK\'s cycle (default 30000, held to 1000-120000 and not refused '
+        + 'outside it). A full cycle applies it per network. Ignored for `peerId`, whose cycle is bounded by that peer\'s own '
+        + 'request timeouts; ignored with `wait: false`.\n\n'
         + 'RESPONSE: what the cycle did — per network when you omit `peerId`, with a total. A peer that is '
         + 'unreachable is COUNTED as an error and the call comes back with `isError` set, so a clean reply is '
         + 'real evidence the peers answered. It also raises `consecutiveFailures` on that peer, which is where '
@@ -157,6 +168,16 @@ export const network_syncTool: ToolHandler = {
             networkId: { type: 'string', description: 'Sync this one network. Not with `peerId`. Required for `note`.' },
             note: { type: 'string', maxLength: 10000, description: 'A change note that travels with this sync to the members below this instance. Needs `networkId`.' },
             spaces: { type: 'array', items: { type: 'string' }, maxItems: 100, description: 'The network\'s spaces (this instance\'s ids) the note concerns. Only with `note`.' },
+            // NO `default` and NO `minimum`/`maximum`, deliberately: the dispatcher enforces this schema before the handler, so
+            // a bound here would REFUSE a `timeoutMs` the REST route clamps. The defaults live in `sync/trigger.ts`.
+            wait: {
+              type: 'boolean',
+              description: 'Run the cycle and report what it did (true) or start it and return at once (false). Default true on MCP — REST\'s `?wait=` defaults to false, the one default that differs between the doors. The reply says the `wait` it used.',
+            },
+            timeoutMs: {
+              type: 'integer',
+              description: 'How long to wait for a network\'s cycle, in ms (default 30000; held between 1000 and 120000, not refused outside them). Applied per network on a full cycle; ignored for `peerId` and with `wait: false`. Past it the reply is `status: "timeout"` and the cycle keeps running. The reply says the value that applied.',
+            },
           },
           required: [],
           additionalProperties: false,
@@ -165,7 +186,10 @@ export const network_syncTool: ToolHandler = {
     const { args: a } = ctx;
     const peerId = a['peerId'] != null ? String(a['peerId']).trim() : null;
     const networkId = a['networkId'] != null ? String(a['networkId']).trim() : null;
-    const { runSyncForPeer, runSyncForNetwork } = await import('../../sync/engine.js');
+    // The door decides the default (`resolveSyncWait`): MCP waits unless told not to, and the same tool reached through the
+    // generic REST door (`POST /api/network_sync`) answers as REST does. `timeoutMs` is clamped, never refused, by REST's function.
+    const wait = resolveSyncWait(a['wait'], ctx.transport);
+    const timeoutMs = syncTimeoutMs(a['timeoutMs']);
     const syncCfg = getConfig();
     const fail = (status: number, error: string): ToolResult => ({ content: [{ type: 'text' as const, text: `Error (${status}): ${error}` }], isError: true });
 
@@ -181,12 +205,23 @@ export const network_syncTool: ToolHandler = {
       const noteInput = a['note'] !== undefined || a['spaces'] !== undefined ? { note: a['note'], spaces: a['spaces'] } : undefined;
       const attached = await attachSyncNote(net, noteInput, ctx.actor?.tokenLabel ?? 'an instance admin');
       if (attached && 'error' in attached) return fail(attached.status, attached.error);
-      const r = await runSyncForNetwork(net.id);
       const noteId = attached ? attached.queued._id : undefined;
+      const answer = await networkSyncOutcome(net.id, { wait, timeoutMs, ...(noteId ? { noteId } : {}) });
+      // A cycle that threw is answered by the dispatcher's own failure handling, as it was when the tool ran the cycle itself.
+      if (answer.failure) throw answer.failure.err;
+      const queued = noteId ? ` Change note ${noteId} queued for the members below.` : '';
+      const status = answer.body.status;
+      const synced = answer.detail?.synced ?? 0;
+      const errors = answer.detail?.errors ?? 0;
       return {
-        content: [{ type: 'text' as const, text: `${net.label}: ${r.synced} ok, ${r.errors} error(s).${noteId ? ` Change note ${noteId} queued for the members below.` : ''}` }],
-        structuredContent: { networkId: net.id, synced: r.synced, errors: r.errors, ...(noteId ? { noteId } : {}) },
-        isError: r.errors > 0,
+        content: [{ type: 'text' as const, text: (status === 'triggered'
+          ? `${net.label}: sync cycle started (wait: false) — not waited for; see network_sync_history for what it did.`
+          : status === 'timeout'
+            ? `${net.label}: the cycle is still running after ${timeoutMs} ms (it was not stopped); see network_sync_history for what it did.`
+            : `${net.label}: ${synced} ok, ${errors} error(s).`) + queued }],
+        // The body REST answers, whole: `wait` and (for a waited network) `timeoutMs` say what applied; `synced`/`errors` are there when the cycle finished.
+        structuredContent: { ...answer.body },
+        isError: status === 'timeout' || errors > 0,
       };
     }
 
@@ -200,39 +235,58 @@ export const network_syncTool: ToolHandler = {
           isError: true,
         };
       }
-      const result = await runSyncForPeer(peerId);
+      const answer = await peerSyncOutcome(peerId, { wait });
+      if (answer.failure) throw answer.failure.err;
+      if (answer.body.status === 'triggered') {
+        return {
+          content: [{ type: 'text' as const, text: `Sync cycle for peer '${peerId}' started (wait: false) — not waited for.` }],
+          structuredContent: { ...answer.body },
+        };
+      }
+      const result = answer.detail!;
       return {
         content: [{
           type: 'text' as const,
           text: result.notFound
             ? `Peer '${peerId}' not found in any network.`
-            : `Sync complete: ${result.networksSynced} network(s) synced, ${result.errors} error(s)${result.refused > 0 ? `, ${result.refused} member(s) too old to exchange with (pre-6.0)` : ''}.`,
+            : `Sync complete: ${result.networksSynced} network(s) synced, ${result.errors} error(s)${(result.refused ?? 0) > 0 ? `, ${result.refused} member(s) too old to exchange with (pre-6.0)` : ''}.`,
         }],
         // `notFound` is carried EXPLICITLY rather than inferred from a sentence. It is the one
         // outcome a caller must branch on — a named peer that does not exist is not a sync that
-        // did nothing — and it was readable only by matching English.
-        structuredContent: { ...result },
+        // did nothing — and it was readable only by matching English. `wait` says which kind of answer this is.
+        structuredContent: { ...result, wait },
         isError: result.errors > 0,
       };
     } else {
-      // Sync all networks
-      let totalSynced = 0; let totalErrors = 0;
+      // Sync all networks: the same act per network, the wait and the bound applied to each.
+      let totalSynced = 0; let totalErrors = 0; let stillRunning = 0;
       const lines: string[] = [];
       for (const net of syncCfg.networks) {
-        const r = await runSyncForNetwork(net.id);
-        totalSynced += r.synced;
-        totalErrors += r.errors;
-        lines.push(`${net.label}: ${r.synced} ok, ${r.errors} error(s)`);
+        const answer = await networkSyncOutcome(net.id, { wait, timeoutMs });
+        if (answer.failure) throw answer.failure.err;
+        const status = answer.body.status;
+        if (status === 'triggered') lines.push(`${net.label}: cycle started`);
+        else if (status === 'timeout') { stillRunning++; lines.push(`${net.label}: still running after ${timeoutMs} ms`); }
+        else {
+          const r = answer.detail!;
+          totalSynced += r.synced ?? 0;
+          totalErrors += r.errors;
+          lines.push(`${net.label}: ${r.synced} ok, ${r.errors} error(s)`);
+        }
       }
+      const total = !wait ? `\n\nStarted ${lines.length} cycle(s) (wait: false) — not waited for.`
+        : `\n\nTotal: ${totalSynced} synced, ${totalErrors} error(s)${stillRunning ? `, ${stillRunning} still running` : ''}.`;
       return {
         content: [{
           type: 'text' as const,
-          text: lines.length === 0
-            ? 'No networks configured.'
-            : lines.join('\n') + `\n\nTotal: ${totalSynced} synced, ${totalErrors} error(s).`,
+          text: lines.length === 0 ? 'No networks configured.' : lines.join('\n') + total,
         }],
-        structuredContent: { synced: totalSynced, errors: totalErrors, networks: lines },
-        isError: totalErrors > 0,
+        structuredContent: {
+          synced: totalSynced, errors: totalErrors, networks: lines, wait,
+          ...(wait ? { timeoutMs } : {}),
+          ...(stillRunning ? { timedOut: stillRunning } : {}),
+        },
+        isError: totalErrors > 0 || stillRunning > 0,
       };
     }
   },

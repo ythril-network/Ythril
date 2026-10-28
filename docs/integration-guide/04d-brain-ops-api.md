@@ -670,7 +670,7 @@ endpoints. **`_id` is appended to every order**, including one you choose — th
 | `limit` | `200` | Max documents, not capped — see the `limit` row above |
 | `skip` | `0` | Rows to discard before the page. Must be a **non-negative integer** — a negative or fractional value is a `400`, not a silent `0` |
 
-The result order is **total** — `seq`, then `updatedAt`, `createdAt`, `_id` — so no row can drift between pages and be
+The result order is **total** — [landing order](04-brain-api.md#sorting-all-brain-list-endpoints) (the record that most recently landed on this instance first), with `_id` breaking every tie, or the order you choose with `sort` and `dir` (default `desc`, `_id` still last) — so no row can drift between pages and be
 seen twice or missed. Concatenating `skip=0,5,10,…` gives you the collection exactly once, in order.
 
 ```json

@@ -83,7 +83,8 @@ describe('the doors go through the one parser', () => {
     for (const [name, src] of [['crud.ts', rest], ['sync.ts', mcp]]) {
       const at = src.indexOf('attachSyncNote(');
       assert.ok(at > -1, `${name} does not attach the note through attachSyncNote`);
-      const run = src.search(/triggerNetworkSync\(|runSyncForNetwork\(net\.id\)/);
+      // The shared act starts the cycle for both doors (`networkSyncOutcome`, which `triggerNetworkSync` renders for REST).
+      const run = src.search(/triggerNetworkSync\(|networkSyncOutcome\(net\.id/);
       assert.ok(run > at, `${name} must queue the note BEFORE the cycle, so this cycle carries it`);
     }
   });

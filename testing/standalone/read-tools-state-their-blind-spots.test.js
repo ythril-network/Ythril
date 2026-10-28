@@ -119,8 +119,10 @@ describe('the sync tools say what their answers do not cover', () => {
    */
   it('sync_now: the handler AWAITS the cycle, and the description says so', () => {
     const handler = src('server/src/mcp/tools/sync.ts');
-    assert.match(handler, /await runSyncForPeer\(/, 'the handler no longer awaits — re-read the description');
-    assert.match(SYNCNOW, /IT WAITS FOR THE CYCLE/,
+    // Through the shared act now (`peerSyncOutcome` runs the cycle and the door renders it), and by DEFAULT: `wait: false` is the
+    // caller's to ask for, which the description says in the same sentence (Q-468).
+    assert.match(handler, /await peerSyncOutcome\(/, 'the handler no longer awaits — re-read the description');
+    assert.match(SYNCNOW, /IT WAITS FOR THE CYCLE BY DEFAULT/,
       'the reply is an outcome, not an acknowledgement, and a caller polling for it waits for nothing');
     assert.doesNotMatch(SYNCNOW, /IT DOES NOT WAIT FOR THE DATA/,
       'the old claim must not come back — it was false and this gate used to require it');
