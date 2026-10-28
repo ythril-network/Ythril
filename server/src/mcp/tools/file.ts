@@ -20,6 +20,7 @@ import { budgetSizeSchema } from './_page-budget-schema.js';
 import { extractListingAsked, extractListingRefusal, readExtractListing } from '../../files/extract-listing.js';
 import { getFileMeta } from '../../files/file-meta.js';
 import { toDocId } from '../../util/paths.js';
+import { NotFoundError } from '../../util/errors.js';
 
 export const read_fileTool: ToolHandler = {
   name: 'read_file',
@@ -91,15 +92,16 @@ export const read_fileTool: ToolHandler = {
         if (err instanceof StoredFileUnreadable) throw new Error(err.message);
       }
     }
-    if (w === null) throw new Error(`File not found: ${filePath}`);
+    if (w === null) throw new NotFoundError(`File not found: ${filePath}`);
     let listing: Record<string, unknown> | null = null;
     if (listingAsked) {
       // Resolved per MEMBER and the member kept, as the route does: the derived records live beside their parent's record.
       const parentId = toDocId(filePath);
       let member: string | null = null;
       for (const mid of memberIds) { if (await getFileMeta(mid, parentId)) { member = mid; break; } }
-      if (member === null) throw new Error('File metadata record not found');
-      const read = await readExtractListing(member, parentId, listingRequest, defaultBudgetChars(ctx.transport));
+      // A NotFoundError, so the generic REST door answers the 404 the extract route does, not a plain Error's 400.
+      if (member === null) throw new NotFoundError('File metadata record not found');
+      const read = await readExtractListing(member, parentId, listingRequest, defaultBudgetChars(ctx.transport), carriagesFor(ctx.transport));
       if (!read.ok) throw new Error(read.error);
       listing = read.fields;
     }

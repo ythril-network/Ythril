@@ -25,6 +25,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { pageList, resolveListPaging } from '../brain/list-page.js';
+import { applyBudget, resolveBudget } from '../brain/result-budget.js';
 import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';
 import { parentOfSidecar } from './moved-paths.js';
 import type { FileMetaDoc } from '../config/types.js';
@@ -74,10 +75,12 @@ export type ExtractListing =
  *
  * @param member       the member space the parent's record lives in — on a proxy space the derived records are in the same
  *                     member collection as their parent, and another member's would answer empty with no error
- * @param budgetChars  the door's character default for the image page (`defaultBudgetChars(transport)`)
+ * @param budgetChars  the door's character default (`defaultBudgetChars(transport)`), which holds the chunk page and the image
+ *                     page alike: a page of 500 converted-PDF chunks is most of a megabyte, and MCP carries it twice
+ * @param carriages    how many times the door carries the listing (`carriagesFor(transport)`), so each copy keeps to its share
  */
 export async function readExtractListing(
-  member: string, parentId: string, req: ExtractListingRequest, budgetChars: number,
+  member: string, parentId: string, req: ExtractListingRequest, budgetChars: number, carriages = 1,
 ): Promise<ExtractListing> {
   const refusal = extractListingRefusal(req, budgetChars);
   if (refusal) return { ok: false, error: refusal };
@@ -117,11 +120,7 @@ export async function readExtractListing(
     { defaultLimit: IMAGES_DEFAULT_LIMIT, maxLimit: IMAGES_MAX_LIMIT, budgetChars });
   if (!imagePage.ok) return { ok: false, error: imagesRefusal(imagePage.error) };
 
-  return {
-    ok: true,
-    derived,
-    fields: {
-      chunks: chunkDocs.map(c => ({
+  const chunkRows = chunkDocs.map(c => ({
         id: c._id,
         index: c.chunkIndex ?? null,
         headingText: c.headingText ?? null,
@@ -131,8 +130,22 @@ export async function readExtractListing(
         chunkOffsetMs: (c as { chunkOffsetMs?: number }).chunkOffsetMs ?? null,
         chunkDurationMs: (c as { chunkDurationMs?: number }).chunkDurationMs ?? null,
         embeddingStatus: c.embeddingStatus ?? null,
-      })),
+      }));
+  // Whole chunks only, held to the door's budget; the first chunk is always admitted, so a page never stalls. The cut is
+  // said by `chunksTruncated` and `chunksNextSkip` (absolute), never by the page just coming back shorter than `limit`.
+  const chunkBudget = resolveBudget({}, budgetChars, carriages);
+  if (!chunkBudget.ok) return { ok: false, error: chunkBudget.error };
+  const chunkPage = applyBudget(chunkRows, chunkBudget).returned;
+  const chunksCut = chunkPage.length < chunkRows.length;
+
+  return {
+    ok: true,
+    derived,
+    fields: {
+      chunks: chunkPage,
       chunkTotal,
+      chunksTruncated: chunksCut,
+      ...(chunksCut ? { chunksNextSkip: skip + chunkPage.length } : {}),
       limit,
       skip,
       images: imagePage.rows,

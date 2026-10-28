@@ -115,7 +115,28 @@ describe('read_file takes the extract route\'s listing parameters', { skip }, ()
 
   it('a file with no metadata record is the route\'s 404 when a listing is asked for', async () => {
     fs.writeFileSync(path.join(tmpDir, 'files', SPACE, 'bare.md'), 'x');
-    await assert.rejects(readFileTool.handle(ctx({ path: 'bare.md', limit: 5 })), /File metadata record not found/);
+    // A NotFoundError, which the generic REST door answers 404 as the route does; a plain Error was its 400.
+    await assert.rejects(readFileTool.handle(ctx({ path: 'bare.md', limit: 5 })),
+      (err) => err.name === 'NotFoundError' && /File metadata record not found/.test(err.message));
+  });
+
+  it('a page of long chunks is held to the door\'s budget in whole chunks, and says where to go on', async () => {
+    // 8 chunks of 5000 characters: 40 000 in all — inside REST's 50 000, over MCP's 25 000 (held per carriage). The listing used to
+    // ride both carriages unbudgeted, so a 500-chunk page of a converted PDF crossed as megabytes.
+    const LONG = 'long.md';
+    fs.writeFileSync(path.join(tmpDir, 'files', SPACE, LONG), 'y');
+    await mongo.col(`${SPACE}_files`).insertMany([
+      meta(LONG),
+      ...Array.from({ length: 8 }, (_, i) => meta(`${LONG}#chunk${i}`, { parentFileId: LONG, chunkIndex: i, content: 'z'.repeat(5000) })),
+    ]);
+    const mcp = (await readFileTool.handle(ctx({ path: LONG, limit: 8, skip: 0 }))).structuredContent;
+    assert.ok(mcp.chunks.length >= 1 && mcp.chunks.length < 8, `MCP returned ${mcp.chunks.length} of 8 long chunks: the chunk page is not budgeted`);
+    assert.equal(mcp.chunksTruncated, true);
+    assert.equal(mcp.chunksNextSkip, mcp.chunks.length, 'chunksNextSkip is the absolute skip of the first chunk left out');
+    const rest = (await readFileTool.handle(ctx({ path: LONG, limit: 8, skip: 0 }, 'rest'))).structuredContent;
+    assert.equal(rest.chunks.length, 8, 'REST\'s larger default holds all 40 000 characters');
+    assert.equal(rest.chunksTruncated, false);
+    assert.equal('chunksNextSkip' in rest, false);
   });
 
   it('with none of the four stated the answer is what it always was: the text window, no listing', async () => {

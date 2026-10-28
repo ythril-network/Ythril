@@ -35,12 +35,14 @@ export interface ToolContext {
   /**
    * Which door took this call.
    *
-   * It governs exactly one thing and must keep governing exactly one thing: the default byte budget, via
-   * `defaultBudgetChars`. An answer is trimmed lower for an agent than for a script because the agent pays
-   * for the bytes out of its own context — a fact about the READER, which the handler cannot otherwise see.
+   * It governs exactly two DEFAULTS and must keep governing only those: the byte budget, via `defaultBudgetChars`
+   * (and `carriagesFor`), and whether `network_sync` waits, via `resolveSyncWait` (owner, 2026-10-28, Q-468). An
+   * answer is trimmed lower for an agent than for a script because the agent pays for the bytes out of its own
+   * context; and an agent wants a sync's outcome where a script wants the answer at once — facts about the READER,
+   * which the handler cannot otherwise see.
    *
-   * **Not a licence to branch on the door.** `CLAUDE.md` sanctions two divergences between the surfaces and
-   * a third needs its own argument and its own gate; a handler that reads this for anything else has made
+   * **Not a licence to branch on the door.** `CLAUDE.md` sanctions three divergences between the surfaces and
+   * a fourth needs its own argument and its own gate; a handler that reads this for anything else has made
    * one door quietly weaker than the other, which is the defect this whole module exists to prevent.
    */
   transport: 'mcp' | 'rest';

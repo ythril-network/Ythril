@@ -88,6 +88,8 @@ describe('no tool description denies a parameter its schema declares', () => {
   const result = scan(ALL_TOOLS);
 
   it('read most of the tools, and found denial phrases to judge', () => {
+    // An absolute floor first: a share of an empty tool list is zero, and zero passes a share.
+    assert.ok(ALL_TOOLS.length >= 40, `only ${ALL_TOOLS.length} tools were found to scan — the tool list is broken, not clean`);
     assert.ok(result.scanned >= ALL_TOOLS.length * 0.8,
       `only ${result.scanned} of ${ALL_TOOLS.length} tools were scanned — the sweep is broken, not clean`);
     assert.ok(result.phrases >= 1,

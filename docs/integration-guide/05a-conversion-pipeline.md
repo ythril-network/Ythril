@@ -67,6 +67,7 @@ are hidden from browsing. Nothing in it is new data; every part is a record conv
 | `converted` | `{ path, markdown, truncated, sizeBytes, markdownSkip, markdownChars, markdownNextSkip? }` for the `_converted/<id>.md` sidecar, or `null` when the format needed no conversion (`.md`/`.txt`). **Whole, or in whole paragraphs** (`Q-128`): a document over 256K characters comes back as a window of whole paragraphs from `markdownSkip` (a character offset, default 0), `markdownNextSkip` is where the next window starts, and the windows joined are the document character for character — never a cut mid-sentence. `maxChars` / `maxBytes` / `maxTokens` set the window's size instead (`Q-111`), with the same meaning and the same refusals as on `read_file`, which pages a file's text by these same parameters; a single paragraph larger than the window is split at a line break rather than returned whole past it. `markdownChars` is the document's length, counted while the file streams: only the requested window is held in memory, however large the document, but the file is read to its end for every page, so time per page stays proportional to its size. A stored file that fails its decryption check refuses before any text is returned. `unreadable` is present, holding the reason, when the sidecar exists but cannot be decoded. |
 | `chunks[]` | one page, always ordered by `chunkIndex`: `{ id, index, headingText, content, chunkOffsetMs, chunkDurationMs, embeddingStatus }`. Audio and video chunks carry the offset/duration; documents carry the heading they opened |
 | `chunkTotal` | total across all pages — page with `limit` (default 100, max 500) and `skip` |
+| `chunksTruncated` · `chunksNextSkip` | the chunk page is held to the answer budget (50 000 characters by default) in whole chunks, the first always included: `chunksTruncated` says it was cut short of `limit`, and `chunksNextSkip` is the `skip` to send next |
 | `images[]` | the `_extracted/` images with `{ path, description, descriptionSource, sizeBytes, embeddingStatus }`, in numeric path order. Paged through the shared list rule under its own names (`Q-128`): `imagesLimit` (default and ceiling 200), `imagesSkip`, and `imagesTotal`, `imagesTruncated`, `imagesNextSkip` in the answer — it used to stop at 200 with no flag. |
 | `description` · `descriptionSource` · `excerpt` | the parent's own, so one request answers the whole question |
 
@@ -78,7 +79,10 @@ mutates nothing and sends no content anywhere.
 `maxTokens`) and, since `Q-647`, the listing's four parameters too — `limit`, `skip`, `imagesLimit`, `imagesSkip` — with
 the same defaults, ceilings and refusals, read through one module (`files/extract-listing.ts`). Naming any of the four adds
 `chunks`, `chunkTotal`, `limit`, `skip`, `images`, `imagesTotal`, `imagesTruncated` and `imagesNextSkip` to the tool's
-answer, as they appear here; a file with no metadata record is refused as this route refuses it (`404`). Without them the
+answer, as they appear here. On both doors the chunk page is held to the answer budget in whole chunks (the first one
+always comes back): `chunksTruncated` says the page was cut short of `limit`, and `chunksNextSkip` is the `skip` to send
+next. The budget is each door's default (25 000 characters on MCP, 50 000 here), which is why a page of long chunks comes
+back shorter on MCP; a file with no metadata record is refused as this route refuses it (`404`). Without them the
 tool answers the text window alone, as it always has. A bad `imagesLimit` or `imagesSkip` is refused naming the parameter
 you sent (it used to read `` `imageslimit` ``, a name that exists nowhere).
 
