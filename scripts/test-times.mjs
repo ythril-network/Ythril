@@ -85,7 +85,7 @@
  * Run the tests: `node --test testing/standalone/test-times-*.test.js`
  */
 import { inflateRawSync, crc32 } from 'node:zlib';
-import { readFileSync, readdirSync, writeFileSync, appendFileSync, mkdirSync, existsSync, unlinkSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, appendFileSync, existsSync, unlinkSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative, resolve, sep, isAbsolute } from 'node:path';
 import { assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
@@ -100,6 +100,7 @@ import { readCappedBody } from './_shared/capped-body.mjs';
 import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
 import { readTimingLog, timingResultsDir, TEST_RESULTS_DIR_ENV } from '../testing/_shared/timing-reporter.mjs';
+import { makeResultsFolder } from '../testing/_shared/results-folder.mjs';
 import { maskText } from './_shared/mask-text.mjs';
 import { waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
@@ -498,7 +499,7 @@ const stopsEverything = (err) => !(err instanceof YthrilApiError) || err.status 
 const unrecordedName = (payload) => `${payload.properties.recordKey.replace(/[^A-Za-z0-9._-]/g, '_')}.json`;
 
 function keepPayload(payload, why) {
-  mkdirSync(unrecordedDir(), { recursive: true });
+  makeResultsFolder(unrecordedDir());
   const name = unrecordedName(payload);
   writeFileSync(join(unrecordedDir(), name), JSON.stringify(payload));
   console.log(`test-times: not recorded: ${why}; kept ${shown(join(unrecordedDir(), name))}`);

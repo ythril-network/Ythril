@@ -38,10 +38,11 @@
  * The flags are NOT part of `offlineRuns`' plan: the batch budget and the cap are about the files, and
  * `a-db-file-runs-in-a-capped-batch` stays about them. A runner appends these after the plan's own args.
  */
-import { mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { readdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TIMING_ENV, TIMING_SCOPES, DEFAULT_TIMING_SCOPE, timingResultsDir } from './timing-reporter.mjs';
+import { makeResultsFolder, ResultsFolderRefused } from './results-folder.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPORTER_URL = pathToFileURL(join(HERE, 'timing-reporter.mjs')).href;
@@ -87,7 +88,10 @@ export function timingReporterFlags({
     throw new Error(`timingReporterFlags: scope ${JSON.stringify(scope)} is not one of ${TIMING_SCOPES.join(', ')}`);
   }
   const folder = resolve(dir);
-  try { mkdirSync(folder, { recursive: true }); } catch { /* the reporter says so once; the tests still run */ }
+  try { makeResultsFolder(folder); } catch (err) {
+    if (err instanceof ResultsFolderRefused) throw err; // a rule, not a failure to create: a test may not make the checkout's folder
+    /* the reporter says so once; the tests still run */
+  }
   const destination = join(folder, `${suiteName}-${batchName}.jsonl`);
   return {
     args: [

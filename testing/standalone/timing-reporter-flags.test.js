@@ -41,8 +41,10 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, statSync, re
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
+import { timingReporterFlags, clearTimingResults, defaultTimingResultsDir } from '../_shared/timing-reporter-flags.mjs';
 import { readTimingLog, TIMING_RESULTS_FOLDER, TEST_RESULTS_DIR_ENV } from '../_shared/timing-reporter.mjs';
+import { makeResultsFolder, ResultsFolderRefused } from '../_shared/results-folder.mjs';
+import { isTestChild } from '../_shared/test-child-env.mjs';
 import { splitStandalone, offlineRuns } from '../_shared/standalone-split.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { loadAllWorkflows, jobEntries, stepsOf, shellOf } from '../_shared/ci-workflow.mjs';
@@ -108,8 +110,8 @@ describe('timingReporterFlags: the flags', () => {
     const saved = process.env[TEST_RESULTS_DIR_ENV];
     try {
       delete process.env[TEST_RESULTS_DIR_ENV];
-      const d = timingReporterFlags({ suite: 'standalone', batch: 1, stdoutIsTTY: false });
-      assert.equal(dirname(d.destination), resolve(ROOT, 'test-results'));
+      // The default is asked for, not used: a test child that called the helper with it would make the checkout's own folder (refused, below).
+      assert.equal(defaultTimingResultsDir(), resolve(ROOT, 'test-results'));
       // The variable moves the default folder out of the checkout, for the writer and for the clearing of an earlier run's files alike.
       process.env[TEST_RESULTS_DIR_ENV] = join(tmp, 'moved');
       const m = timingReporterFlags({ suite: 'standalone', batch: 1, stdoutIsTTY: false });
@@ -119,6 +121,30 @@ describe('timingReporterFlags: the flags', () => {
     } finally {
       if (saved === undefined) delete process.env[TEST_RESULTS_DIR_ENV]; else process.env[TEST_RESULTS_DIR_ENV] = saved;
     }
+  });
+
+  it('a test child may not create the checkout\'s results folder, by the helper or by the one folder maker; its own dir is made', () => {
+    const checkoutResults = resolve(ROOT, TIMING_RESULTS_FOLDER);
+    const before = existsSync(checkoutResults);
+    const saved = process.env[TEST_RESULTS_DIR_ENV];
+    try {
+      delete process.env[TEST_RESULTS_DIR_ENV];
+      assert.ok(isTestChild(), 'this file runs under node --test, which is the case the rule is about');
+      assert.throws(() => timingReporterFlags({ suite: 'guard', batch: 1, stdoutIsTTY: false }), ResultsFolderRefused);
+      assert.throws(() => timingReporterFlags({ suite: 'guard', batch: 1, dir: checkoutResults, stdoutIsTTY: false }), /a test must pass its own dir/);
+      assert.throws(() => makeResultsFolder(join(checkoutResults, 'unrecorded')), /may not create the checkout's results folder/);
+    } finally {
+      if (saved === undefined) delete process.env[TEST_RESULTS_DIR_ENV]; else process.env[TEST_RESULTS_DIR_ENV] = saved;
+    }
+    assert.equal(existsSync(checkoutResults), before, 'a refused call creates nothing');
+    // Its own dir, and a runner (no NODE_TEST_CONTEXT in the environment it is asked about), are not refused.
+    const own = join(tmp, 'guard-own');
+    assert.doesNotThrow(() => timingReporterFlags({ suite: 'guard', batch: 1, dir: own, stdoutIsTTY: false }));
+    assert.ok(existsSync(own));
+    const seen = {};
+    assert.doesNotThrow(() => makeResultsFolder(join(tmp, 'guard-runner'), seen));
+    assert.ok(existsSync(join(tmp, 'guard-runner')));
+    assert.equal(existsSync(checkoutResults), before);
   });
 
   it('refuses a suite or batch that could leave the folder, or is not a name', () => {
