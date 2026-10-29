@@ -41,7 +41,7 @@ import { holdCounterLock, settleWithin, setWriteBoundForTest } from './_write-fa
 import { sawLiveWrite } from './_active-operations.mjs';
 import { startDelayedWriteRelay } from './_delayed-write-relay.mjs';
 import { openStalledWriteDoors, seedDoorSpace, stalledWriteDoors } from './_stalled-write-doors.mjs';
-import { holderCases, loadHolderModules, seedHolderSpace } from './_seq-hold-cases.mjs';
+import { holderCases, loadHolderModules, seedHolderSpace, serverCallsOfLocks, LOCK_MAY_CALL } from './_seq-hold-cases.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
@@ -345,6 +345,13 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
       const fixtureClient = env.fixture.mongo.getMongo();
       assert.notEqual(fixtureClient, env.door.mongo.getMongo(), 'the fixture steps run through the server\'s client, so its option ends a seed or a lock too');
       assert.ok(!fixtureClient.options.timeoutMS, `the fixture client carries timeoutMS=${fixtureClient.options.timeoutMS}: its own steps would die of it on a loaded host`);
+      // And no lock calls a server module that WRITES: that write would run on the server's client, the one that carries the clock (Q-649). Derived from the table's
+      // own lock functions; the modules a lock may name are listed with their reason (`LOCK_MAY_CALL`), so a new one is a decision and not a default.
+      const { inspected, calls } = serverCallsOfLocks(holderCases(ctx, 'x'));
+      assert.ok(inspected >= 10, `only ${inspected} lock function(s) read — the table or the reading of it is broken`);
+      assert.ok(calls.length >= Object.keys(LOCK_MAY_CALL).length, `only ${calls.length} server call(s) found in the locks — the reading found none of what LOCK_MAY_CALL lists`);
+      assert.deepEqual(calls.filter(c => !(c.call in LOCK_MAY_CALL)).map(c => `${c.holder}: '${c.label}' calls ctx.mods.${c.call}`), [],
+        "a holder lane's lock calls a server module: its writes would run on the server's client, which carries the clock. Write the row through the fixture (`ctx.fixture`), or list the module in LOCK_MAY_CALL with the reason it writes nothing");
     });
 
     it('the relay held writes back, so the server\'s deadline really was later than the client\'s', () => {

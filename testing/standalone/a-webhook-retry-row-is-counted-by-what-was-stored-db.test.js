@@ -59,7 +59,7 @@ const OVERFLOWED = 'ythril_webhook_first_deliveries_overflowed_total';
 const OVER = 30;
 const pathOf = (tag, i) => `${tag}/f${String(i).padStart(4, '0')}.txt`;
 
-let acts, dispatcher, store, registry, writeBound, signals, F, faults;
+let acts, dispatcher, store, registry, writeBound, F, faults;
 let a, b;
 
 const gate = () => { let release; const p = new Promise(r => { release = r; }); return { p, release }; };
@@ -144,7 +144,6 @@ describe('a webhook retry row is counted by what the store holds after the write
     store = await import('../../server/dist/webhooks/store.js');
     registry = await import('../../server/dist/metrics/registry.js');
     writeBound = await import('../../server/dist/db/write-bound.js');
-    signals = await import('../../server/dist/util/housekeeping-signals.js');
     F = await driverWriteFailures(`ythril_harness_${SUITE}`);
     faults = failWrites(Object.getPrototypeOf(acts.door.mongo.col('probe')), ['insertMany', 'insertOne']);
     a = (await store.createWebhook({ url: 'http://127.0.0.1:9/a', secret: 'counted-a' })).id;
@@ -158,7 +157,10 @@ describe('a webhook retry row is counted by what the store holds after the write
     await acts?.close();
   });
   beforeEach(async () => { await acts.door.mongo.col(RETRY_QUEUE).deleteMany({}); });
-  afterEach(() => { faults.clear(); dispatcher.setFirstDeliveryDepsForTest(null); });
+  // Every write a case started is settled before the next case begins (Q-650): a requeue's read-back that finishes after the next case's `beforeEach` has wiped
+  // its row finds the row absent and counts `not_known_stored` into THAT case's counters. `settledRetryWrites` waits for the overflow flush and for every
+  // single-row requeue (the first-delivery path's and the poll's), and the deps are reset only after it, so a write still in flight meets the faults it was armed under.
+  afterEach(async () => { await dispatcher.settledRetryWrites(); faults.clear(); dispatcher.setFirstDeliveryDepsForTest(null); });
 
   describe('the read-back verdict (retryRowsStored), per branch', () => {
     // The rows are written or not by the test itself, so each verdict is read against a queue whose state is known; the errors are the
@@ -259,28 +261,43 @@ describe('a webhook retry row is counted by what the store holds after the write
   describe('the poll\'s requeue (a failed retry put back for its next attempt, N12)', () => {
     /**
      * One tick of the REAL poll (production deps) over a due row for sink A, whose delivery fails (the SSRF guard refuses loopback), so
-     * the row is requeued. The job's timer is a function this test calls; the tick has ended when a tick fired after it is not skipped.
+     * the row is requeued. The job's timer is a function this test calls, and it is called ONCE: the tick it launches is the only one this
+     * case starts, and the case returns only when everything that tick reached has answered.
+     *
+     * The tick used to be waited for by firing the timer again until a fire was skipped. The fire that was not skipped was a REAL tick, launched
+     * and never awaited: it read the queue after the case had returned, and with the next case's due row seeded it delivered and requeued THAT
+     * row under the next case's armed fault, so its read-back counted `not_known_stored` into a case that had no such requeue (Q-650: the bound
+     * case read `{overflowed: 30, lost: 1, notKnownStored: 1}`). A tick is awaited through what it calls instead: each dependency is tracked, and the
+     * tick has ended when none is in flight after a turn of the event loop (a step of the tick follows the one before it in the same turn).
      */
     async function pollOnce(tag, arm) {
       const due = { _id: `due-${tag}`, webhookId: a, body: JSON.stringify({ entry: { path: `${tag}/f0000.txt` } }), event: 'file.deleted', spaceId: S,
         deliveryId: `d-${tag}`, attempt: 2, scheduledAt: new Date(0), createdAt: new Date(0) };
       await acts.door.mongo.col(RETRY_QUEUE).insertOne(due);
       arm();   // after the seed, or the seed's own insertOne takes the fault
+      const inFlight = new Set();
+      const tracked = (fn) => (...args) => {
+        const call = Promise.resolve(fn(...args));
+        inFlight.add(call);
+        const done = () => { inFlight.delete(call); };
+        call.then(done, done);
+        return call;
+      };
+      const production = dispatcher.productionRetryPollDeps();
+      const deps = Object.fromEntries(Object.entries(production).map(([name, dep]) => [name, typeof dep === 'function' && name !== 'now' ? tracked(dep) : dep]));
       let tickFn;
-      const skips = [];
-      const off = signals.onHousekeepingSignal((e) => { if (e.type === 'tick-skipped' && e.job === dispatcher.RETRY_JOB_LABEL) skips.push(e); });
-      const worker = dispatcher.createRetryWorker(undefined, { arm: (fn) => { tickFn = fn; return { unref() { return this; } }; }, disarm: () => {} });
+      const worker = dispatcher.createRetryWorker(deps, { arm: (fn) => { tickFn = fn; return { unref() { return this; } }; }, disarm: () => {} });
       try {
         worker.job.start();
         tickFn();
         await waitFor(() => faults.fired('insertOne', RETRY_QUEUE) === 1, 30_000, 25, 'fixture: the poll never requeued the failed retry');
         await waitFor(async () => {
-          const n = skips.length;
-          tickFn();
+          await Promise.allSettled([...inFlight]);
           await new Promise(r => setImmediate(r));
-          return skips.length === n;
-        }, 30_000, 25, 'the poll\'s tick never ended', { what: 'the tick ended' });
-      } finally { worker.job.stop(); off(); }
+          return inFlight.size === 0;
+        }, 30_000, 25, "the poll's tick never ended", { what: 'the tick ended' });
+        await dispatcher.settledRetryWrites();
+      } finally { worker.job.stop(); }
     }
 
     it('a refused requeue is lost{not_stored}', async () => {
