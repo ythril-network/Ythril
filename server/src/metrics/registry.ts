@@ -36,7 +36,7 @@ import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
 import { JUDGED_WRITE_OPERATIONS } from '../contract/judged-write-operations.js';
 import { webhookFirstDeliveryCounts, webhookProbeCounts, webhookRetriesDroppedCounts, webhookRetryTicksCutCount } from '../webhooks/dispatcher.js';
 import { countFailingWebhooks } from '../webhooks/store.js';
-import { oldestPositionHoldAgeSeconds } from '../files/tombstones.js';
+import { oldestPositionHoldAgeSeconds, fileTombstoneSeedFallbackCounts } from '../files/tombstones.js';
 import { FILE_MISMATCH_CLASSES } from '../files/file-mismatch-classes.js';
 import { owedMoveCount, oldestOwedMoveAgeSeconds, strandedMoveCount } from '../files/owed-moves-seen.js';
 import { declaredJobs, declaredSteps, onHousekeepingSignal, type SpaceFailureKind } from '../util/housekeeping-signals.js';
@@ -932,19 +932,6 @@ export const fileMoveRowsReplacedTotal = new Counter({
 });
 fileMoveRowsReplacedTotal.labels({ space: '' }).inc(0);
 
-/**
- * Stamps a file tombstone took from the wall clock alone because the clock's seed (the highest stored `positionAt`) could not be read.
- * The restart guarantee is the seed's, so each of these is a stamp that rests on the wall clock being ahead of what an earlier run
- * handed out; the line beside it (`File tombstone clock seed`) says why, and this says how often.
- */
-export const fileTombstoneSeedFallbackTotal = new Counter({
-  name: 'ythril_file_tombstone_seed_fallback_total',
-  help: 'File tombstone stamps taken from the wall clock alone because the clock seed could not be read',
-  labelNames: ['space'] as const,
-  registers: [register],
-});
-fileTombstoneSeedFallbackTotal.labels({ space: '' }).inc(0);
-
 /** Moves whose bytes were taken by a rename because the file system refused a hard link, which is what a move's no-overwrite guarantee is built on. */
 export const fileMoveLinkFallbackTotal = new Counter({
   name: 'ythril_file_move_link_fallback_total',
@@ -1008,6 +995,19 @@ export const fileActAnswersTotal = counterMirroringTally({
   help: 'Refusals and failures a file act (move, create directory, write, delete) answered, by the answer\'s code',
   labelName: 'code',
   read: fileActAnswerCounts,
+});
+
+/**
+ * Stamps a file tombstone took from the wall clock alone because the clock's seed (the highest stored `positionAt`) could not be read, by `space`.
+ * The restart guarantee is the seed's, so each is a stamp that rests on the wall clock being ahead of what an earlier run handed out; the line
+ * beside it (`File tombstone clock seed`) says why, and this says how often. Kept by `files/tombstones.ts` (which this module imports for its
+ * gauge, so it cannot call back into it) and mirrored here at scrape time.
+ */
+export const fileTombstoneSeedFallbackTotal = counterMirroringTally({
+  name: 'ythril_file_tombstone_seed_fallback_total',
+  help: 'File tombstone stamps taken from the wall clock alone because the clock seed could not be read',
+  labelName: 'space',
+  read: fileTombstoneSeedFallbackCounts,
 });
 
 /**
