@@ -955,11 +955,9 @@ interface HeldForArrivals {
  * drain reads and which must not widen.
  */
 async function actedPendingTombstones(
-  spaceId: string, paths: readonly string[],
+  spaceId: string, pendingRows: ReadonlyArray<HeldFileTombstone & { path: string }>,
 ): Promise<{ gone: Map<string, HeldFileTombstone[]>; unlooked: Map<string, HeldFileTombstone[]>; cause?: unknown }> {
-  const rows = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths,
-    chunk => FILE_TOMBSTONE_QUERIES.pendingByPath({ paths: chunk }).filter, HELD_PROJECTION);
-  const speaking = heldByPath(rows.filter(t => typeof t.rowSeq === 'number' || erasedContent(t)));
+  const speaking = heldByPath(pendingRows.filter(t => typeof t.rowSeq === 'number' || erasedContent(t)));
   const gone = new Map<string, HeldFileTombstone[]>();
   const unlooked = new Map<string, HeldFileTombstone[]>();
   let cause: unknown;
@@ -976,8 +974,11 @@ async function actedPendingTombstones(
 
 /** The tombstones an arrival at each of `paths` is compared with: the published ones, and the pending ones whose act has happened. */
 async function readHeldFor(spaceId: string, paths: readonly string[]): Promise<HeldForArrivals> {
-  const held = await heldFileTombstones(spaceId, paths);
-  const { gone, unlooked, cause } = await actedPendingTombstones(spaceId, paths);
+  // ONE read per chunk of paths for both kinds, split in memory: the published rows (`heldFileTombstones`' question) and the pending ones.
+  const rows = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths,
+    chunk => ({ path: { $in: chunk }, $or: [PUBLISHED, FILE_TOMBSTONE_QUERIES.pendingByPath({ paths: chunk }).filter] }), { ...HELD_PROJECTION, pending: 1 });
+  const held = heldByPath(rows.filter(t => t.pending !== true));
+  const { gone, unlooked, cause } = await actedPendingTombstones(spaceId, rows.filter(t => t.pending === true));
   for (const [p, rows] of gone) {
     const already = held.get(p);
     if (already) already.push(...rows); else held.set(p, [...rows]);
@@ -1007,14 +1008,18 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
   try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isActRefusal(err)) return 0; throw err; }
   const cap = await settledPositionCap(spaceId);
   let removed = 0;
-  let after: IsoPosition = ISO_READ_START;
-  for (;;) {
+  let after: IsoPosition = pruneResume.get(spaceId) ?? ISO_READ_START;
+  let reachedEnd = false;
+  for (let pages = 0; pages < PRUNE_PAGES_PER_PASS; pages++) {
     const page = await ask<PrunableRow>(spaceId, FILE_TOMBSTONE_QUERIES.prunePage({ after, cap, upTo, limit: FILE_TOMBSTONE_PAGE }), PRUNABLE);
     removed += await removeUnlessKept(spaceId, page);
     const last = page[page.length - 1];
-    if (page.length < FILE_TOMBSTONE_PAGE || !last?.positionAt) break;
+    if (page.length < FILE_TOMBSTONE_PAGE || !last?.positionAt) { reachedEnd = true; break; }
     after = { at: last.positionAt, id: last._id };
   }
+  // A pass that used its budget resumes after the last row it examined; one that reached the end starts over, and also takes the legacy rows.
+  if (!reachedEnd) { pruneResume.set(spaceId, after); return removed; }
+  pruneResume.delete(spaceId);
   // Stored before positions existed (the boot pass, which runs before any prune, gives each its own): judged by `deletedAt`, as it
   // always was. One delete and not a page loop: a row here is a leftover of the upgrade, and neither of the two reasons to keep a
   // row applies to it (a pending tombstone beside it was written by an act that began after the upgrade, which published it with
@@ -1029,6 +1034,12 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
 }
 
 const PRUNABLE = { _id: 1, path: 1, positionAt: 1, move: 1 } as const;
+
+/** How many pages of acknowledged tombstones one prune pass removes before it gives the space back (the next pass resumes where it stopped). */
+export const PRUNE_PAGES_PER_PASS = 20;
+
+/** Where the last pass over a space stopped, so the next resumes after it: absent once a pass reaches the end. */
+const pruneResume = new Map<string, IsoPosition>();
 
 /** Remove the rows of one prune page that may go, by id, and count them. */
 async function removeUnlessKept(spaceId: string, page: readonly PrunableRow[]): Promise<number> {

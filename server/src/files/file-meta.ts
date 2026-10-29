@@ -469,16 +469,16 @@ export async function updateFileMeta(
     .findOne(asFilter<FileMetaDoc>({ _id: normalised }), { projection: NEVER_RETURNED_PROJECTION }) as Promise<FileMetaDoc | null>;
 }
 
-/** Remove the metadata record when a file is deleted. */
+/** Remove the metadata record when a file is deleted: one `deleteMany` per `READ_CHUNK` ids, so many rows are never one write each. */
 export async function deleteFileMeta(
   spaceId: string,
-  filePath: string,
+  filePaths: string | readonly string[],
 ): Promise<void> {
+  const ids = [...new Set((typeof filePaths === 'string' ? [filePaths] : filePaths).map(toDocId))];
+  if (ids.length === 0) return;
   await admitSpaceWrite(spaceId, 'files', async () => {
-    const normalised = toDocId(filePath);
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).deleteOne(
-      asFilter<FileMetaDoc>({ _id: normalised }),
-    );
+    const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+    for (let i = 0; i < ids.length; i += READ_CHUNK) await coll.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: ids.slice(i, i + READ_CHUNK) } }));
   });
 }
 
@@ -616,14 +616,15 @@ function liveFileRecords(path: string, scope: 'under' | 'exactly-at' | 'at-or-un
  */
 export async function markFileMetaDeleted(
   spaceId: string,
-  filePath: string,
+  filePaths: string | readonly string[],
 ): Promise<void> {
+  const ids = [...new Set((typeof filePaths === 'string' ? [filePaths] : filePaths).map(toDocId))];
+  if (ids.length === 0) return;
   await admitSpaceWrite(spaceId, 'files', async () => {
-    const normalised = toDocId(filePath);
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
-      asFilter<FileMetaDoc>({ _id: normalised, ...LIVE_FILE_ROW }),
-      flagAndStrip() as never,
-    );
+    const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+    for (let i = 0; i < ids.length; i += READ_CHUNK) {
+      await coll.updateMany(asFilter<FileMetaDoc>({ _id: { $in: ids.slice(i, i + READ_CHUNK) }, ...LIVE_FILE_ROW }), flagAndStrip() as never);
+    }
   });
 }
 
@@ -661,8 +662,17 @@ function flagAndStrip(): object[] {
  * path under it (`deleteConversionArtifacts`) — so a soft delete cannot flag the first and hard-delete the second.
  */
 export async function retireFileMeta(spaceId: string, filePath: string): Promise<void> {
-  if (getConfig().softDeleteFileMeta === true) await markFileMetaDeleted(spaceId, filePath);
-  else await deleteFileMeta(spaceId, filePath);
+  await retireFileMetaMany(spaceId, [filePath]);
+}
+
+/**
+ * {@link retireFileMeta} for many rows at once — ONE rule, the single row a parameter: one `updateMany` (flag-and-strip, only a live row) or one
+ * `deleteMany` per `READ_CHUNK` ids, inside one admitted unit. The rows an ARRIVED sidecar made (a peer that never converted delivers its sidecars as
+ * ordinary files) were retired one write per row, so a file with fifty of them cost fifty writes.
+ */
+export async function retireFileMetaMany(spaceId: string, filePaths: readonly string[]): Promise<void> {
+  if (getConfig().softDeleteFileMeta === true) await markFileMetaDeleted(spaceId, filePaths);
+  else await deleteFileMeta(spaceId, filePaths);
 }
 
 /**

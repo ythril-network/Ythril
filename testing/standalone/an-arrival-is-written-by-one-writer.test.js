@@ -123,12 +123,12 @@ const EXEMPT = {
   'server/src/files/file-meta.ts:markFileMetaDeleted':
     'file sync: a peer\'s file tombstone, on an instance that keeps deleted rows for audit (`softDeleteFileMeta`), flags the row '
     + 'deleted instead of removing it (`removeFileHere`, the steps of a local delete) — a delete, not an arrival',
-  'server/src/files/converters/pipeline.ts:removeWhatSidecarsLeft':
+  'server/src/files/converters/pipeline.ts:removeSidecarRows':
     'file sync: a peer\'s file tombstone removes the chunk and sidecar rows DERIVED from the file here, at every level (`removeFileHere`, '
     + 'through `deleteConversionArtifacts`, the step a directory\'s delete shares), as a local delete does — rows no peer sends '
     + '(`derived` in the writer), removed with the file they came from',
   'server/src/files/derived-rows.ts:deleteRowsDerivedFrom':
-    'file sync: the row half of `removeWhatSidecarsLeft` (above), shared with a peer\'s tombstone that removes only a record whose entry another '
+    'file sync: the row half of `removeSidecarRows` (above), shared with a peer\'s tombstone that removes only a record whose entry another '
     + 'live record names (`removeOnlyTheRecordNamed`): the rows DERIVED from the removed record at every level, which no peer sends',
   'server/src/sync/file-sync.ts:recordSyncBase':
     'file sync: the last-agreed hash a conflict is judged against, local bookkeeping on the file row',

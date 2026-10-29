@@ -204,7 +204,7 @@ const WITH_VECTOR = { embedding: { $exists: true } };
 export async function dropFileVectors(spaceId: string, fileIds: readonly string[]): Promise<string[]> {
   if (fileIds.length === 0) return [];
   const files = col<Record<string, unknown>>(spaceCollection(spaceId, 'files'));
-  const reached = await rowsDerivedFrom(spaceId, fileIds);
+  const { reached } = await rowsDerivedFrom(spaceId, fileIds);
   // The ones that hold a vector, through the one by-id reader.
   const ids = [...(await readStoredById(spaceCollection(spaceId, 'files'), [...reached], {}, { filter: WITH_VECTOR })).keys()];
   for (const part of inChunks(ids, READ_CHUNK)) {
