@@ -1620,7 +1620,7 @@
   "networks.refusal.space_name_in_use": "Inna przestrzeń synchronizuje się już pod tą nazwą w tej sieci. Wybierz inną nazwę.",
   "networks.refusal.round_expired": "Głosowanie nad tą rundą zakończyło się. Głos nie został policzony.",
   "networks.refusal.record_version_at_ceiling": "Wersja rekordu {{id}} osiągnęła najwyższy numer, jaki przyjmuje synchronizacja, więc ta instancja nie może go już zmienić ani usunąć. Może to nadal zrobić instancja, która go zapisała.",
-  "networks.refusal.endpoint_removed": "Encja {{id}} na jednym końcu tej relacji została usunięta lub scalona w trakcie zapisu, więc relacja została wycofana. Wczytaj graf ponownie i spróbuj jeszcze raz.",
+  "networks.refusal.endpoint_removed": "Podmiot {{id}} na jednym końcu tej relacji został usunięty lub scalony w trakcie zapisu, więc relacja została wycofana. Wczytaj graf ponownie i spróbuj jeszcze raz.",
   "networks.wizard.continue": "Dalej",
   "networks.wizard.back": "Wstecz",
   "networks.wizard.step1.resultItem": "Wynik: użyj publicznej nazwy hosta jako myUrl/instanceUrl podczas dołączania.",
