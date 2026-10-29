@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.1.0] — 2026-10-29
+
+**A minor release: MCP `network_sync` and `read_file` take the parameters their REST doors already had, and file sync now carries moved, re-uploaded and decomposed-name files that 6.0 left behind.**
+
+| Changes on upgrade | Action |
+|---|---|
+| `POST /api/admin/data/restore` answers `202` before reading the records; a broken record now fails every space's act, which then needs an abandon, instead of answering `400` | Read the restore's report on the Data page, not only the answer |
+| MCP `network_sync` waits at most 30 seconds per network by default | Pass `timeoutMs` for a longer wait |
+
 ### Changed
 
 - **MCP:** `network_sync` takes `wait` and `timeoutMs`, as `POST /api/networks/:id/sync` does, and waits at most `timeoutMs` per network (default 30 seconds) instead of without limit. It still waits by default; REST still does not. Every answer says the `wait` it used.
@@ -17,7 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Data:** the Data page's "accepted" line for a restore or migrate is replaced by the end sentence when the act ended before its first poll, and once by "cannot finish, abandon it" when every unfinished space needs an abandon.
-
 - **Files:** a bad `imagesLimit` or `imagesSkip` on `GET …/files/extract` is refused naming the parameter you sent, not `imageslimit`.
 - **Files:** a file moved back to its old path, or onto a path whose earlier file was deleted, now reaches peers; a file uploaded again at a path that held another instance's deleted file reaches peers too.
 - **Files:** deleting a file costs commands per level of what it left, not per chunk; a directory delete reads its roots in pages; a file-tombstone prune pass removes at most 20 pages and resumes on the next.
