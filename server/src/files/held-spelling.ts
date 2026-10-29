@@ -14,7 +14,7 @@
  *
  * The NFC resolution is tried first, with the boundary and symlink checks of {@link peerFileKey}. When nothing is at it, the key's
  * segments are walked from the space root: a segment whose NFC spelling exists is taken, and one that does not is looked up in its
- * parent's listing (one `readdir` per such segment) as the entry whose name normalises to it, the lexicographically smallest when a
+ * parent's listing (one `readdir` per such segment, and none for a name no other spelling can exist for: {@link canHaveAnotherSpelling}) as the entry whose name normalises to it, the lexicographically smallest when a
  * file system holds several. The spelling found goes through {@link heldFileAt}, so the boundary and symlink checks apply to it as to
  * any file the manifest found. Nothing is created, moved or renamed: the bytes stay where they are.
  *
@@ -24,6 +24,22 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { heldFileAt, fileKeyOf, peerFileKey, resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { bytesPresent, lstatIfPresent, isMissingPath } from './stored-bytes.js';
+
+/**
+ * Whether a name could be held under another Unicode spelling that normalises to it: the one question that decides whether a missing segment is worth
+ * listing its directory for. False for a name of ASCII characters that nothing else normalises to, which has no other spelling by construction.
+ *
+ * ## What it prevents
+ *
+ * Every lookup of a missing name listed the whole directory (`readdir`), however large and whatever the name, so a probe for names that are nowhere
+ * cost a full listing each. It is NOT "ASCII only": three ASCII characters have another character that normalises to them (U+212A is a K, U+037E a
+ * semicolon, U+1FEF a backtick), so a name holding one of those still looks. And it is NOT "equal to its own NFC and NFD forms" either: a CJK
+ * compatibility ideograph (U+F900 and its kin) normalises to the unified one, so `豈` has another spelling although it is its own NFC and NFD form.
+ * `a-missing-path-is-listed-only-where-another-spelling-can-exist` derives the set from the whole code space and holds this to it.
+ */
+export function canHaveAnotherSpelling(segment: string): boolean {
+  return /[^\x00-\x7f]|[;K`]/.test(segment);
+}
 
 /**
  * The absolute path of the file `userPath` names in `spaceId` and its key, or `null` when nothing is held under any spelling of it.
@@ -43,6 +59,8 @@ export async function heldSpellingOf(spaceId: string, userPath: string): Promise
       held.push(segment);
       continue;
     }
+    // No other spelling can exist for this name, so the directory is not listed: a missing name costs the caller one lstat, however large the directory.
+    if (!canHaveAnotherSpelling(segment)) return null;
     const names = await fsp.readdir(at).catch((err: unknown) => { if (isMissingPath(err)) return [] as string[]; throw err; });
     const spelling = names.filter(n => n.normalize('NFC') === segment).sort()[0];
     if (spelling === undefined) return null;
