@@ -40,6 +40,18 @@ function endsAnAct(was: { state: string } | null, now: { state: string } | null,
   return now !== null && now.state !== 'running' && (was?.state === 'running' || startedHere);
 }
 
+/**
+ * Is this the first report of a set whose every unfinished member needs an abandon (`needsAbandon`: another try meets the same input,
+ * as a backup with a corrupt record does to every space, D-66)? The set stays `running` and nothing will ever proceed, so the page must
+ * not keep saying it "is being restored": it says once, per set (`saidFor` is the set id it already said it for), that the act cannot
+ * finish. Needs an owed member, because that is what the card's abandon control is offered for. Restore and migrate ask it alike.
+ */
+function firstSeesStuckSet(report: { state: string; spaces: Array<{ state: string; needsAbandon?: true }> } | null, setId: string | undefined, saidFor: string | null): boolean {
+  if (!report || report.state !== 'running' || (setId !== undefined && setId === saidFor)) return false;
+  const unfinished = report.spaces.filter(s => s.state !== 'done');
+  return unfinished.length > 0 && unfinished.every(s => s.needsAbandon === true) && unfinished.some(s => s.state === 'owed');
+}
+
 type Frequency = 'never' | 'hourly' | 'daily' | 'weekly' | 'monthly';
 
 interface BackupConfig {
@@ -391,6 +403,9 @@ export class DataComponent implements OnInit {
   /** This page started the act and has not yet announced its end: the first report it reads may already say it ended (Q-637). */
   private restoreStartedHere = false;
   private migrateStartedHere = false;
+  /** The set whose "cannot finish" sentence this page has said (once per set, so a poll does not say it over a notice that came after). */
+  private restoreStuckSaidFor: string | null = null;
+  private migrateStuckSaidFor: string | null = null;
   readonly abandoning = signal(false);
   /** The migrate block's one notice: the accepted line, then what replaces it (how the set ended, an abandon, or that the instance stopped). */
   readonly migrateNotice = signal<string | null>(null);
@@ -564,6 +579,9 @@ export class DataComponent implements OnInit {
         ? this.transloco.translate('data.restore.abandonedOutcome', { spaces: left.join(', ') })
         : this.transloco.translate('data.restore.completed'));
       this.loadMaintenance();
+    } else if (r && firstSeesStuckSet(r, r.restoreId, this.restoreStuckSaidFor)) {
+      this.restoreStuckSaidFor = r.restoreId;
+      this.restoreNotice.set(this.transloco.translate('data.restore.cannotFinish', { button: this.transloco.translate('data.progress.abandon') }));
     }
     return running;
   }
@@ -579,6 +597,9 @@ export class DataComponent implements OnInit {
       // The end replaces "Migration accepted ..." in the block's polite region, so it is both read and heard.
       this.migrateNotice.set(this.transloco.translate(m.state === 'abandoned' ? 'data.migrate.abandonedOutcome' : 'data.migrate.completed'));
       this.loadMaintenance();
+    } else if (m && firstSeesStuckSet(m, m.migrateId, this.migrateStuckSaidFor)) {
+      this.migrateStuckSaidFor = m.migrateId;
+      this.migrateNotice.set(this.transloco.translate('data.migrate.cannotFinish', { button: this.transloco.translate('data.progress.abandonMigrate') }));
     }
     return running;
   }
