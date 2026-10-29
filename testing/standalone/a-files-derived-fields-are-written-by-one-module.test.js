@@ -260,6 +260,9 @@ describe('a file row\'s derived fields are written by one module', () => {
     'server/src/files/move-cascade.ts':
       'the move re-keys the stored rows it read INSIDE its transaction, rebuilt by `rebuiltFileRow` (files/move-plan.ts), whose assigned '
       + 'keys a-file-keeps-its-metadata-across-a-move holds to the identity and parent pointers: it carries derived fields across, never sets one',
+    'server/src/files/legacy-file-rekey.ts':
+      'the re-key of a legacy file row (stored under another spelling of its path, Q-413) rebuilds the stored row it read with `rekeyedRow`, which names only '
+      + '`_id`, `path` and the landing stamps: it carries derived fields across, never sets one, and queues the file for embedding again under the receiver\'s rules',
   };
   it('a re-key of file rows through rekey-rows, whose collection is a parameter, is seen and named too', () => {
     const calls = [];

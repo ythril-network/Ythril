@@ -79,6 +79,20 @@ const EXEMPT = {
   },
 };
 
+/**
+ * A relocator that re-queues the embed work ITSELF, after its own commit, by the receiver's rules instead of through the move's step, with the
+ * step it calls and the reason. Honoured only while the relocator really calls that step AFTER its rekey (`afterCommitMissing`), so the row is a
+ * claim the gate checks, not a pass. A row whose function no longer re-keys file rows fails below.
+ */
+const OWN_AFTER_COMMIT = {
+  'server/src/files/legacy-file-rekey.ts:rekeyLegacy': {
+    step: 'server/src/sync/embed-arrived-files.ts:embedArrivedFiles',
+    why: "it re-keys one of THIS instance's own rows from another spelling of its path (Q-413) and queues the file at its key by the receiver's rules "
+      + "(embedArrivedFiles: a suppressed file holds no vector, a file with bytes here is queued) once the row has committed; the old id's jobs and derived rows are removed beside it. "
+      + "It is no move: the file's text does not change with a path, so the move's step (which re-queues a whole tree) has nothing to cover",
+  },
+};
+
 const { INDEX, callersOf } = sourceTree();
 const REMOVALS = removalsOfFileRows({ floor: 8 });
 const REMOVERS = [...new Set(REMOVALS.map(r => r.key))].sort();
@@ -150,6 +164,12 @@ function callsReaching(key, target) {
  * from the relocator's callers up — the relocator runs ONE batch, and a step taken there cannot re-cover what an earlier attempt committed.
  */
 function afterCommitMissing(key, trail = new Set()) {
+  const own = OWN_AFTER_COMMIT[key];
+  if (own) {
+    const rekeyAt = REKEYS.filter(r => r.key === key).map(r => r.at);
+    if (callsReaching(key, own.step).some(s => rekeyAt.every(at => s.at > at))) return null;
+    return `${key} (exempt for its own ${own.step}, which it no longer calls after its rekey)`;
+  }
   const callers = callersOf.get(key) ?? [];
   if (callers.length === 0) return `${key} (an entry: nothing above it re-queues the embed work after the batches)`;
   const next = new Set(trail).add(key);
@@ -210,6 +230,14 @@ describe('(b) every relocator of file rows carries the cache in its transaction 
       if (!sameSession) failures.push(`${r.key}: carries the cache outside the rekey's transaction (no call is handed '${r.session}')`);
     }
     assert.deepEqual(failures, [], 'a move that re-keys file rows leaves the cache entries at the old paths, or carries them in a second transaction');
+  });
+  it('every own-after-commit row still names a relocator of file rows, and owes its reason', () => {
+    const relocators = new Set(RELOCATORS.map(r => r.key));
+    assert.deepEqual(Object.keys(OWN_AFTER_COMMIT).filter(k => !relocators.has(k)), [], 'rows for functions that no longer re-key file rows — delete them');
+    for (const [k, { step, why }] of Object.entries(OWN_AFTER_COMMIT)) {
+      assert.ok(INDEX.bodies.has(step), `${k}: names ${step}, which does not exist`);
+      assert.ok(why.length > 40, `${k}: an exemption owes its reason`);
+    }
   });
   it('whatever runs a relocator\'s batches re-queues the moved rows\' embed work after them', () => {
     const failures = [...new Set(RELOCATORS.map(r => afterCommitMissing(r.key)).filter(Boolean))];
