@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** a file delete whose version could not be read is published even after an earlier delete of the same path, and a leftover from before the upgrade is not published twice.
 - **Sync:** one file path whose disk cannot be looked at no longer fails a whole page of file metadata or stops a pull at it; the settle says it once per window.
 - **Sync:** a file-metadata document whose `_id` or `path` is over 4096 characters (the file tombstone's bound) is refused alone.
-- **Sync:** a file tombstone stamped from the wall clock because its clock seed could not be read is now said once per window whatever the failure was, and counted in `ythril_file_tombstone_seed_fallback_total`; a store-side failure used to be silent.
+- **Sync:** a file tombstone stamped from the wall clock alone after its clock seed could not be read is now said once per window for every failure, and counted in `ythril_file_tombstone_seed_fallback_total`; a store-side failure said nothing before.
 - **Spaces:** renaming a space on Windows no longer fails, or leaves its upload folder behind, while a file under it is still open; the move waits for it for about five seconds, and reports the rename as incomplete if the file is still held.
 - **Spaces:** a rename into an id whose upload folder is empty or holds only an old upload's leftovers is no longer stopped by it (it blocked every other space operation for a day); a non-empty files folder still stops it, and the answer no longer names the server's data path.
 - **Spaces:** deleting a space no longer waits without limit on the search service: each collection's search indexes are given 15 seconds, and the face gallery index goes with the space.
