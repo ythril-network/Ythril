@@ -156,11 +156,16 @@ const EXEMPT = {
  * fails when it no longer excuses a write.
  */
 const BYTE_WRITER = 'server/src/files/bytes-arrived.ts:recordArrivedBytes';
+const LEGACY_REKEY = 'server/src/files/legacy-file-rekey.ts:rekeyLegacy';
 const EXEMPT_VIA = {
   [BYTE_WRITER]:
     'file BYTES arrived (a peer\'s push to the upload door, or the manifest pull): it records the row that names them '
     + '(`recordArrivedFile`: size, hash, the peer as deliverer, no seq stamp) and the processing state of what it queued '
     + '(`setFileProcessingState`: a status mark that stamps no `updatedAt` and no `seq`), once, for both roads',
+  [LEGACY_REKEY]:
+    'the re-key of THIS instance\'s own legacy file row onto its key (Q-413), run by the first door that needs the key: the row keeps its '
+    + 'version, author and metadata and gains a landing position; no peer record is stored and no seq is stamped, so it is no arrival and '
+    + 'the writer\'s preconditions (seq refusal, retag, carried fields) have nothing to decide. The arrival that triggered it is still written by writeArrivals',
 };
 /** The upload door: a peer's push to it is an arrival, so it is a door of this rule though it is not under api/sync. */
 const BYTE_DOOR_FILE = 'server/src/api/files-upload.ts';
