@@ -29,7 +29,8 @@ boot.** The first door that needs the file's row (a read, an edit, an upload, a 
 and a networked space converges on its first sync cycle, which reads every top-level row; an un-networked space converges file by file as they
 are touched. The row keeps its version, author, creation time and metadata and takes a new landing position, which is how it reaches peers. When
 a row already stands at the key the higher version wins (the one at the key on a tie), and a row a held delete shadows is removed here as an
-arrival it shadows would be. **No tombstone is written and nothing a peer holds is deleted.** A failure is logged once per window and the row
+arrival it shadows would be. The row's links follow it to its key (each under the instance that wrote it), or, when the row does not survive,
+leave this instance's own link rows. **No tombstone is written, for the file or for a link, and nothing a peer holds is deleted.** A failure is logged once per window and the row
 stays where it was until the next touch.
 
 **Upgrading to 6.0 turns every proxy space into personal views. It is breaking, and a 5.x build cannot read the result.**

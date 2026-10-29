@@ -20,7 +20,7 @@ import { decideArrivals } from './tombstones.js';
 import { deleteRowsDerivedFrom, rowsOfFiles } from './derived-rows.js';
 import { cancelJobsOwnedBy, cancelMediaJob } from './media/job-queue.js';
 import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
-import { convergeLinks, retireLinks } from './move-links.js';
+import { carryLinksToKey, dropLinkRowsLocally } from './move-links.js';
 import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
 import { LIVE_FILE_ROW } from './live-file-row.js';
 import type { FileMetaDoc } from '../config/types.js';
@@ -87,7 +87,8 @@ async function removeWhatTheOldIdsHold(spaceId: string, rows: readonly string[],
     await cancelJobsOwnedBy(spaceId, id, 'file');
   }
   const { ids, parents } = await rowsOfFiles(spaceId, rows, []);
-  if (moved) await convergeLinks(spaceId, [moved]);
+  // Carried to the key and nothing removed there (`carryLinksToKey`): a re-key writes no tombstone of any kind, links included.
+  if (moved) await carryLinksToKey(spaceId, [moved]);
   await deleteRowsDerivedFrom(spaceId, parents);
   await retireEmbedWorkOfRemovedRows(spaceId, { ids: [...ids] });
   const coll = col<{ _id: string }>(spaceCollection(spaceId, 'files'));
@@ -96,5 +97,6 @@ async function removeWhatTheOldIdsHold(spaceId: string, rows: readonly string[],
   });
   // What is keyed by the old ids' paths goes with them (the hash cache entry the re-key did not carry), as every remover of file rows forgets it.
   await forgetPathKeyedCache(spaceId, { ids: [...rows] });
-  await retireLinks(spaceId, rows);
+  // The old ids' own link rows go from THIS instance's collection, with no tombstone (`dropLinkRowsLocally`): carried above, or the row did not survive.
+  await dropLinkRowsLocally(spaceId, rows);
 }
