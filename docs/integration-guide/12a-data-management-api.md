@@ -275,7 +275,7 @@ network that carries it: how far it had read each peer, and where its re-reads o
 The peers therefore send again what reached this instance after the backup. The marks of what this instance **sent** are kept
 ([which marks, and why](../sync-protocol.md#the-per-space-marks-and-what-a-restore-does-to-them)).
 
-**A failure.** A store that is down or does not answer is retried: the space is `owed` with a `retryAt`. So is a unique
+**A failure.** A store that is down or does not answer is retried: the space is `owed` with a `retryAt`. So is a file-system error while the backup is read (a read that failed, a share that dropped, a directory where a file should be): it says nothing about the backup, and the next attempt reads again. So is a unique
 index that does not stand after the load, named in the server log: the space stays held rather than taking writes no unique
 index refuses. A backup that is no
 longer whole, or that holds records one of the space's unique indexes refuses, is not retried: the space shows
@@ -314,7 +314,7 @@ therefore keeps that edit instead of dropping it for the copy it already holds. 
 |---|---|---|
 | `400` | | Missing or invalid `backupId` or `leaveOut` |
 | `400` | `backup_names_unserved_spaces` | The backup holds spaces this instance does not serve (`spaces`); name them in `leaveOut` |
-| `400` | `backup_not_whole` | The backup fails at its manifest (no readable manifest, a file it names is missing, a secret that cannot open it); the sentence says what. A broken record is not found here: it fails the acts (see above) |
+| `400` | `backup_not_whole` | The backup fails at its manifest (no readable manifest, a file it names is missing or holds no record where the manifest counts some, a secret that cannot open it); the sentence says what. A file-system error while reading is a server failure, not this code. A broken record is not found here: it fails the acts (see above) |
 | `404` | | Backup not found |
 | `409` | `space_being_restored`, `space_being_migrated` | A restore or a migrate already stands |
 | `503` | | The server is shutting down |

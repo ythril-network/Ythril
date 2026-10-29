@@ -15,11 +15,16 @@
  *   know), every member is owed with `needsAbandon`, and neither space has changed - including the space that sorts BEFORE the broken
  *   one, which a per-space check alone would already have replaced;
  * - a manifest that does not parse, a file it names that is missing, and an encrypted backup with no secret are still `400 backup_not_whole`
- *   at the door, registering nothing (controls: green before and after).
+ *   at the door, registering nothing (controls: green before and after);
+ * - a collection file that is EMPTY while the manifest says it holds records is `400 backup_not_whole` at the door (truncated);
+ * - a file-system error while the backup is read (a directory where a collection file should be, EISDIR) is the file system's and not the
+ *   backup's: the members are owed WITH a retry time and no `needsAbandon`, nothing is replaced, and the retry completes the restore once
+ *   the file is back. It was cached as the backup's verdict, so every member needed an abandon.
  *
  * ## Seen red
  *
- * On ab3bc6365 the garbage-record case answers 400 `backup_not_whole` at the door, because the door reads every record.
+ * On ab3bc6365 the garbage-record case answers 400 `backup_not_whole` at the door, because the door reads every record. On 2f584d7f2 the
+ * truncated file answers 202 and the directory case leaves every member `needsAbandon` with no retry time.
  *
  * Run: `node --test testing/standalone/the-restore-door-reads-no-record-and-a-broken-record-replaces-nothing-db.test.js` (a Mongo the
  * harness accepts, a prior `npm run build` in server/).
@@ -31,7 +36,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { mongoSkipReason, testMongoUri } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
-import { clearActEntries, resetRunnerForTest } from './_space-act-harness.mjs';
+import { clearActEntries, resetRunnerForTest, untilRunnerIdle } from './_space-act-harness.mjs';
 import { restoreModules, takeBackup, requestRestore, restoreEntries, startRestoreActs, restoreReportBody, spaceRowsOfReport } from './_restore-act.mjs';
 
 const skip = await mongoSkipReason();
@@ -97,6 +102,49 @@ describe('the restore door reads no record, and a broken record replaces nothing
     assert.equal(answer.status, 400, `a backup with an unreadable manifest was answered ${answer.status}: ${JSON.stringify(answer.body)}`);
     assert.equal(answer.body?.code, 'backup_not_whole');
     assert.deepEqual(restoreEntries(mods.loader), [], 'a refused restore registered acts');
+  });
+
+  it('a collection file that is empty while the manifest says it holds records is 400 backup_not_whole at the door, naming the collection and no path, and registers nothing', T, async () => {
+    const { backup } = await seedAndBackup('truncated');
+    const file = path.join(backup.dir, 'door-b_facts.ndjson');
+    assert.ok(fs.readFileSync(file, 'utf8').trim().length > 0, 'the fixture is wrong: the backup holds no facts of door-b');
+    fs.writeFileSync(file, '');
+    const answer = await requestRestore(mods.dataRouter, { backupId: backup.id });
+    assert.equal(answer.status, 400, `a truncated collection file was answered ${answer.status}: ${JSON.stringify(answer.body)}`);
+    assert.equal(answer.body?.code, 'backup_not_whole');
+    assert.match(String(answer.body?.error), /door-b_facts/, `the refusal does not name the collection: ${JSON.stringify(answer.body)}`);
+    assert.ok(!String(answer.body?.error).includes(backup.dir), `the refusal names a path: ${JSON.stringify(answer.body)}`);
+    assert.deepEqual(restoreEntries(mods.loader), [], 'a refused restore registered acts');
+  });
+
+  it('a file-system error while the backup is read (a directory where a collection file should be) is owed with a retry time, not needsAbandon, replaces nothing, and the retry completes once the file is back', T, async () => {
+    const { backup, live } = await seedAndBackup('fserror');
+    const file = path.join(backup.dir, 'door-b_facts.ndjson');
+    const original = fs.readFileSync(file);
+    // After the door answered, as the body is about to run: the file becomes a directory, which a read refuses with EISDIR.
+    mods.runner.setSpaceActHooksForTest({
+      afterDrain: (e) => { if (e.kind === 'restore' && fs.statSync(file).isFile()) { fs.rmSync(file); fs.mkdirSync(file); } },
+    });
+    const answer = await requestRestore(mods.dataRouter, { backupId: backup.id });
+    assert.equal(answer.status, 202, `the door answered ${answer.status}: ${JSON.stringify(answer.body)}`);
+    await Promise.all(startRestoreActs(mods.runner, mods.loader));
+
+    const rows = spaceRowsOfReport(await restoreReportBody(mods.dataRouter));
+    for (const space of SPACES) {
+      assert.equal(rows[space]?.state, 'owed', `${space} is not owed after the file-system error: ${JSON.stringify(rows[space])}`);
+      assert.ok(rows[space]?.retryAt, `${space} has no retry time (a file-system error is retried): ${JSON.stringify(rows[space])}`);
+      assert.ok(!rows[space]?.needsAbandon, `${space} needs an abandon over a file-system error the backup did not cause: ${JSON.stringify(rows[space])}`);
+    }
+    for (const space of SPACES) assert.deepEqual(await ids(space), live[space], `${space} was replaced over a backup that could not be read`);
+
+    fs.rmSync(file, { recursive: true });
+    fs.writeFileSync(file, original);
+    mods.runner.setSpaceActHooksForTest(null);
+    const at = Math.max(...SPACES.map(s => Date.parse(rows[s].retryAt))) + 1000;
+    await mods.runner.retryOwedSpaceActs(at);
+    await untilRunnerIdle(mods.runner, mods.loader, { now: at });
+    assert.deepEqual(restoreEntries(mods.loader), [], 'the retry did not complete the restore');
+    for (const space of SPACES) assert.deepEqual(await ids(space), [`${space}-1`, `${space}-2`], `${space} is not the backup after the retry`);
   });
 
   it('control: an encrypted backup with no master secret configured is still 400 backup_not_whole at the door, naming the secret', T, async () => {
