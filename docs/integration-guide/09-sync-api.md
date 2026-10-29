@@ -375,6 +375,7 @@ tombstone rather than a brain one, so the metadata page carries no tombstones of
 arrival that a held file tombstone covers (its `rowSeq` is at or above the arriving `seq`) is counted in the
 batch answer's `filemeta.tombstoned`, not stored, and not `rejected`: the sender reads it as delivered. The
 counter is additive and appears only when it is above zero; an older receiver never sends it, so read a missing one as zero.
+**A file-metadata document's `_id` and `path` are at most 4096 characters** (the bound a file tombstone's `path` has too); a document past it is refused alone, counted `rejected`, and the rest of the page is stored.
 **A path the receiver cannot look at never fails the page.** When a pending delete's path cannot be looked at on the receiver's disk, the
 receiver decides a file's metadata from its stored row instead (no live row: it is `tombstoned`; a live row at the delete's version or
 above: the usual `skipped`), the other documents of the page are stored, and the answer is a `200`; the byte door's retryable `503` is

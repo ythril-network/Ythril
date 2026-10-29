@@ -21,7 +21,7 @@ import { REF_KINDS, type BrainCollection } from '../config/types-knowledge.js';
 import { MAX_SYNC_SEQ } from '../util/seq-ceiling.js';
 import { MACHINE_MADE_SOURCES } from '../files/machine-made-sources.js';
 import { CHRONO_STATUSES } from '../config/chrono-statuses.js';
-import { MAX_FACT_LENGTH, MAX_TAGS } from '../util/request-bounds.js';
+import { MAX_FACT_LENGTH, MAX_PEER_PATH_LENGTH, MAX_TAGS } from '../util/request-bounds.js';
 
 // ── Incoming document schemas (Zod validation for peer-submitted docs) ─────
 
@@ -106,9 +106,9 @@ const MAX_TIMESTAMP_LENGTH = 40;
  */
 export const IncomingFileMetaDoc = z.object({
   // The path IS the id. Both are carried, as the document does.
-  _id: z.string().min(1),
+  _id: z.string().min(1).max(MAX_PEER_PATH_LENGTH),
   spaceId: z.string().min(1),
-  path: z.string().min(1),
+  path: z.string().min(1).max(MAX_PEER_PATH_LENGTH),
   description: z.string().optional(),
   descriptionSource: z.enum(MACHINE_MADE_SOURCES).optional(),
   tags: z.array(z.string()).max(MAX_TAGS).optional(),
