@@ -518,8 +518,8 @@ describe('ReviewTabComponent', () => {
           listContradictions: (status: string) => { asked.push(status); return of({ contradictions: [], nliConfigured: true }); },
         });
         c.sub.set('contradictions');
-        c.conStatusFilter = 'dismissed';
-        c.loadContradictions();
+        c.conState.statusFilter ='dismissed';
+        c.conState.load('work');
         f.detectChanges();
         expect(asked[0]).toBe('open');          // the default is unchanged
         expect(asked).toContain('dismissed');   // and it is no longer the only thing askable
@@ -545,7 +545,7 @@ describe('ReviewTabComponent', () => {
         });
         c.sub.set('contradictions');
         f.detectChanges();
-        c.scanContradictions();
+        c.conState.scan('work');
         expect(scanned).toBe(1);
       });
 
@@ -557,7 +557,7 @@ describe('ReviewTabComponent', () => {
         });
         c.sub.set('contradictions');
         f.detectChanges();
-        c.scanContradictions();
+        c.conState.scan('work');
         expect(toastErrors.length).toBeGreaterThan(0);
       });
 
@@ -568,7 +568,7 @@ describe('ReviewTabComponent', () => {
         });
         c.sub.set('contradictions');
         f.detectChanges();
-        c.scanContradictions();
+        c.conState.scan('work');
         expect(toastErrors).toContain('duplicates.scanError');
       });
 
@@ -615,7 +615,7 @@ describe('ReviewTabComponent', () => {
         const { f, c } = setup({}, true, { listContradictions: () => of({ contradictions: [] }) });
         c.sub.set('contradictions');
         f.detectChanges();
-        expect(c.conNliConfigured()).toBeNull();
+        expect(c.conState.nliConfigured()).toBeNull();
         expect(emptyText(f)).toContain('review.contradictions.cleanTitle');
         expect(emptyText(f)).not.toContain('review.contradictions.judgeRan');
       });
@@ -623,8 +623,8 @@ describe('ReviewTabComponent', () => {
       it('an empty dismissed pile is not a statement about the space', () => {
         const { f, c } = setup({}, true, { listContradictions: () => of({ contradictions: [], nliConfigured: true }) });
         c.sub.set('contradictions');
-        c.conStatusFilter = 'dismissed';
-        c.loadContradictions();
+        c.conState.statusFilter ='dismissed';
+        c.conState.load('work');
         f.detectChanges();
         expect(emptyText(f)).toContain('review.contradictions.noneWithStatus');
       });
@@ -649,8 +649,8 @@ describe('ReviewTabComponent', () => {
         keepSide: (id: string, winner: string) => { calls.push([id, winner]); return of({ status: 'resolved', resolution: 'superseded' }); },
       });
       c.sub.set('contradictions');
-      c.loadContradictions();
-      c.keepSide(c.conRows()[0], 'b');
+      c.conState.load('work');
+      c.conState.keepSide('work',c.conState.rows()[0], 'b');
       expect(calls).toEqual([['c1', 'b']]);
     });
 
@@ -666,8 +666,8 @@ describe('ReviewTabComponent', () => {
         keepSide: () => of({ status: 'resolved', resolution: 'superseded', markedRecord: false }),
       });
       c.sub.set('contradictions');
-      c.loadContradictions();
-      c.keepSide(c.conRows()[0], 'a');
+      c.conState.load('work');
+      c.conState.keepSide('work',c.conState.rows()[0], 'a');
       expect(toastErrors.join(' ')).toContain('review.contradictions.notMarked');
     });
 
@@ -677,8 +677,8 @@ describe('ReviewTabComponent', () => {
         keepSide: () => of({ status: 'resolved', resolution: 'superseded', edge: { id: 'e', from: 'a', to: 'b', label: 'supersedes' } }),
       });
       c.sub.set('contradictions');
-      c.loadContradictions();
-      c.keepSide(c.conRows()[0], 'a');
+      c.conState.load('work');
+      c.conState.keepSide('work',c.conState.rows()[0], 'a');
       expect(toastInfos).toEqual([]);
     });
 
@@ -688,10 +688,10 @@ describe('ReviewTabComponent', () => {
         keepSide: () => throwError(() => new Error('nope')),
       });
       c.sub.set('contradictions');
-      c.loadContradictions();
-      c.keepSide(c.conRows()[0], 'a');
+      c.conState.load('work');
+      c.conState.keepSide('work',c.conState.rows()[0], 'a');
       expect(toastErrors.length).toBe(1);
-      expect(c.conBusy()).toBeNull();
+      expect(c.conState.busy()).toBeNull();
     });
 
     it('expands both records IN FULL on demand, and collapses again', () => {
@@ -699,14 +699,14 @@ describe('ReviewTabComponent', () => {
         listContradictions: () => of({ contradictions: [con()], nliConfigured: true }),
       });
       c.sub.set('contradictions');
-      c.loadContradictions();
-      expect(c.expanded()).toBeNull();
-      c.toggleFull(c.conRows()[0]);
-      expect(c.expanded()).toBe('c1');
-      expect(c.fullA()).toContain('full record');
-      expect(c.fullB()).toContain('full record');
-      c.toggleFull(c.conRows()[0]);
-      expect(c.expanded()).toBeNull();
+      c.conState.load('work');
+      expect(c.conState.expanded()).toBeNull();
+      c.conState.toggleFull(c.conState.rows()[0]);
+      expect(c.conState.expanded()).toBe('c1');
+      expect(c.conState.fullA()).toContain('full record');
+      expect(c.conState.fullB()).toContain('full record');
+      c.conState.toggleFull(c.conState.rows()[0]);
+      expect(c.conState.expanded()).toBeNull();
     });
 
     it('names a record it could not load rather than showing an empty panel', () => {
@@ -715,10 +715,10 @@ describe('ReviewTabComponent', () => {
         listContradictions: () => of({ contradictions: [con()], nliConfigured: true }),
       }, { getRecord: () => throwError(() => new Error('gone')) });
       c.sub.set('contradictions');
-      c.loadContradictions();
-      c.toggleFull(c.conRows()[0]);
-      expect(c.fullA()).toBeNull();
-      expect(c.fullError()).toContain('review.contradictions.fullError');
+      c.conState.load('work');
+      c.conState.toggleFull(c.conState.rows()[0]);
+      expect(c.conState.fullA()).toBeNull();
+      expect(c.conState.fullError()).toContain('review.contradictions.fullError');
     });
   });
 

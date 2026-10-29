@@ -1,17 +1,12 @@
 import { Component, inject, signal, computed, OnInit, OnChanges, SimpleChanges, Input, Output, EventEmitter } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DuplicateRecord, ContradictionRecord, type ContradictionResolveNote } from '../../core/api.types';
-import { translatedOrEmpty } from '../../core/translated-text';
+import { DuplicateRecord, ContradictionRecord } from '../../core/api.types';
 import { DuplicatesApi } from '../../core/duplicates-api.service';
-import { ContradictionsApi } from '../../core/contradictions-api.service';
-import { BrainApi } from '../../core/brain-api.service';
 import type { CollectionTab } from './brain-tabs';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-strip.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import { RelativeTimeComponent } from '../../shared/relative-time.component';
-import { ErrorStateComponent } from '../../shared/error-state.component';
-import { httpErrorReason } from '../../core/http-error';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
@@ -23,15 +18,15 @@ import { ReviewForksState } from './review-forks-state';
 import { ActivatedRoute } from '@angular/router';
 import { FORK_KINDS, type ForkKind } from '../../core/forks.types';
 import { ReviewCompletenessState } from './review-completeness-state';
-
-/** The family a failed contradiction resolve's `code` is said under (`resolvedOtherwise`, and the codes every family carries). */
-const RESOLVE_REFUSALS = 'review.contradictions.refusal';
+import { ReviewContradictionsPanelComponent } from './review-contradictions-panel.component';
+import { ReviewContradictionsState } from './review-contradictions-state';
+import { scorePct, scoreVariant } from './review-score';
 
 @Component({
   selector: 'app-review-tab',
   standalone: true,
-  imports: [FormsModule, PhIconComponent, TranslocoPipe, SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, ErrorStateComponent, ReviewForksPanelComponent],
-  providers: [ReviewForksState, ReviewCompletenessState],
+  imports: [FormsModule, PhIconComponent, TranslocoPipe, SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, ReviewForksPanelComponent, ReviewContradictionsPanelComponent],
+  providers: [ReviewForksState, ReviewCompletenessState, ReviewContradictionsState],
   styles: [`
     .page-title { margin: 0 0 4px; font-size: 18px; }
     .intro { color: var(--text-muted); font-size: 13px; margin: 0 0 16px; }
@@ -67,33 +62,8 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
     .dup-rec.b .dup-rec-txt { color: var(--text-secondary); }
     .dup-vs { display: flex; align-items: center; color: var(--text-muted); font-size: 11px; font-style: italic; }
 
-    .con-fields { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-    .con-fields li { display: flex; align-items: baseline; gap: 7px; font-size: 12px; flex-wrap: wrap; }
-    .con-key { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--text-muted); }
-    .con-a, .con-b { font-weight: 600; color: var(--text-primary); }
-    .con-sep { color: var(--text-muted); font-style: italic; font-size: 11px; }
-
     .dup-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
     .dup-resolved { font-size: 12px; color: var(--success); text-align: right; }
-
-    /* Keep A / Keep B. Deliberately NOT btn-danger: nothing is deleted — the loser stays, marked as
-       overtaken — so a destructive colour would misdescribe the action. */
-    .keep-group { display: flex; gap: 6px; margin-right: auto; }
-    .keep-hint { font-size: 11px; color: var(--text-muted); font-style: italic; }
-    /* The full records, expanded on demand. Collapsed by default because the summary is enough to triage
-       most pairs, and a wall of two full records per card is what stops a queue being read at all. */
-    /* An expanded card takes the whole row. Two full records inside a 340px grid cell wrap into a column of
-       three-word lines, which is technically "in full" and unreadable in practice. */
-    .dup-card.expanded { grid-column: 1 / -1; }
-    .rec-full { margin-top: 6px; border-top: 1px dashed var(--border-muted); padding-top: 6px; }
-    .rec-full pre { margin: 0; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
-      color: var(--text-secondary); font-family: var(--font-mono, monospace); max-height: 260px; overflow: auto; }
-    .rec-full .rec-err { font-size: 11px; color: var(--danger); }
-    .superseded-note { font-size: 11px; color: var(--text-muted); }
-    .resolve-note summary { cursor: pointer; }
-    .kept-badge { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-    .kept-badge.win { color: var(--success); }
-    .kept-badge.lose { color: var(--text-muted); }
 
     /* Record-type filter — sits under the sub-tabs because it applies to whichever one is open. */
     .type-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; font-size: 13px; }
@@ -260,200 +230,8 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
         }
       </section>
     } @else if (sub() === 'contradictions') {
-      <section role="tabpanel" id="review-panel-contradictions" aria-labelledby="review-tab-contradictions">
-        <p class="intro">{{ 'review.contradictions.intro' | transloco }}</p>
-
-        <!-- Its own strip rather than one lifted above the tabs: the search box IS shared (same signal as
-             Duplicates), but the status piles are not the same set — contradictions have a resolved pile
-             and duplicates do not — so a single control would have to offer an option meaning nothing on
-             one side. Sharing it would be a worse lie than repeating fifteen lines of markup. -->
-        <app-summary-strip [items]="conSummaryItems()">
-          <div class="strip-ctl">
-            <label class="dup-search">
-              <ph-icon name="magnifying-glass" [size]="14"/>
-              <input type="search" [ngModel]="query()" (ngModelChange)="query.set($event)"
-                [placeholder]="'duplicates.searchPlaceholder' | transloco"
-                [attr.aria-label]="'duplicates.searchPlaceholder' | transloco" />
-            </label>
-            <select [(ngModel)]="conStatusFilter" (change)="loadContradictions()"
-              [attr.aria-label]="'duplicates.statusFilterAria' | transloco">
-              <option value="open">{{ 'duplicates.status.open' | transloco }}</option>
-              <option value="dismissed">{{ 'duplicates.status.dismissed' | transloco }}</option>
-              <option value="resolved">{{ 'duplicates.status.resolved' | transloco }}</option>
-              <option value="all">{{ 'duplicates.status.all' | transloco }}</option>
-            </select>
-            <button class="btn btn-sm btn-secondary" (click)="scanContradictions()" [disabled]="conScanning()">
-              @if (conScanning()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
-              {{ 'duplicates.scanNow' | transloco }}
-            </button>
-          </div>
-        </app-summary-strip>
-
-        @if (conLoading()) {
-          <div class="loading-overlay"><span class="spinner"></span></div>
-        } @else if (conError() !== null) {
-          <app-error-state [message]="'review.contradictions.loadError' | transloco" [reason]="conError() ?? ''"
-                           (retry)="loadContradictions()" />
-        } @else if (conFilteredRows().length === 0) {
-          <div class="empty-state">
-            <div class="empty-state-icon"><ph-icon name="warning" [size]="48"/></div>
-            <!-- Four different reasons for an empty list, and they used to share one message which
-                 asserted the most alarming of them. Narrowest cause first. -->
-            @if (query().trim() && conRows().length) {
-              <h3>{{ 'duplicates.noMatches.title' | transloco }}</h3>
-              <p>{{ 'duplicates.noMatches.body' | transloco }}</p>
-            } @else if (typeFilter() !== 'all' && conRows().length) {
-              <!-- Distinct from "nothing to review": the queue is not empty, this filter is. -->
-              <h3>{{ 'review.typeFilter.noneOfType' | transloco }}</h3>
-              <p>{{ 'review.typeFilter.noneOfTypeBody' | transloco }}</p>
-            } @else if (conStatusFilter !== 'open') {
-              <!-- An empty dismissed or resolved pile is not a finding about the space at all. -->
-              <h3>{{ 'review.contradictions.noneWithStatus' | transloco }}</h3>
-              <p>{{ 'review.contradictions.noneWithStatusBody' | transloco }}</p>
-            } @else if (conNliConfigured() === false) {
-              <!-- No judge configured — so say what that costs and what still runs, rather than "detection
-                   is not running". The deterministic pass runs with no model at all. -->
-              <h3>{{ 'review.contradictions.structuredOnlyTitle' | transloco }}</h3>
-              <p>{{ 'review.contradictions.structuredOnlyBody' | transloco }}</p>
-            } @else {
-              <!-- Nothing found. The body states only that; the extra line claiming BOTH passes ran is
-                   added only when the server actually said so, never on an unknown. -->
-              <h3>{{ 'review.contradictions.cleanTitle' | transloco }}</h3>
-              <p>{{ 'review.contradictions.cleanBody' | transloco }}</p>
-              @if (conNliConfigured() === true) {
-                <p>{{ 'review.contradictions.judgeRan' | transloco }}</p>
-              }
-            }
-          </div>
-        } @else {
-          <div class="dup-grid">
-            @for (c of conFilteredRows(); track c.id) {
-              <div class="dup-card" [class.expanded]="expanded() === c.id">
-                <div class="dup-card-h">
-                  <span class="dup-type">{{ c.type }}</span>
-                  <!-- The basis, never a bare number: a deterministic field conflict and a model's opinion
-                       are different kinds of claim, and a reviewer needs to tell them apart at a glance. -->
-                  @if (c.basis === 'structured-field') {
-                    <app-status-pill variant="warn">{{ 'review.contradictions.basis.structured' | transloco }}</app-status-pill>
-                  } @else {
-                    <app-status-pill variant="off">{{ 'review.contradictions.basis.nli' | transloco }}</app-status-pill>
-                    <span class="conf" [attr.title]="'review.contradictions.confidence' | transloco">
-                      <span class="conf-track"><span class="conf-fill" [class]="scoreVariant(c.confidence)" [style.width.%]="scorePct(c.confidence)"></span></span>
-                      <span class="conf-pct">{{ scorePct(c.confidence) }}%</span>
-                    </span>
-                  }
-                  @if (c.status !== 'open') {
-                    <app-status-pill [variant]="c.status === 'resolved' ? 'ok' : 'off'">{{ ('duplicates.status.' + c.status) | transloco }}</app-status-pill>
-                  }
-                  <span class="dup-when"><app-relative-time [value]="c.detectedAt"/></span>
-                </div>
-
-                <!-- A structured verdict can NAME the disagreement; say what it is rather than asserting one. -->
-                @if (c.fields?.length) {
-                  <ul class="con-fields">
-                    @for (f of c.fields; track f.key) {
-                      <li><span class="con-key">{{ f.key }}</span>
-                        <span class="con-a">{{ f.aValue }}</span>
-                        <span class="con-sep">{{ 'review.contradictions.versus' | transloco }}</span>
-                        <span class="con-b">{{ f.bValue }}</span></li>
-                    }
-                  </ul>
-                }
-
-                <div class="dup-ab">
-                  <div class="dup-rec">
-                    <div class="dup-rec-l">
-                      {{ 'duplicates.table.recordA' | transloco }}
-                      <!-- On a settled pair, say which side won where the reviewer is already looking. -->
-                      @if (c.supersededId) {
-                        <span class="kept-badge" [class.win]="c.supersededId !== c.aId" [class.lose]="c.supersededId === c.aId">
-                          {{ (c.supersededId === c.aId ? 'review.contradictions.superseded' : 'review.contradictions.kept') | transloco }}
-                        </span>
-                      }
-                    </div>
-                    <div class="dup-rec-txt">{{ c.aSummary }}</div>
-                    @if (expanded() === c.id) {
-                      <div class="rec-full">
-                        @if (fullA(); as full) { <pre>{{ full }}</pre> } @else { <span class="rec-err">{{ fullError() ?? ('common.loading' | transloco) }}</span> }
-                      </div>
-                    }
-                  </div>
-                  <div class="dup-vs">{{ 'review.contradictions.versus' | transloco }}</div>
-                  <div class="dup-rec b">
-                    <div class="dup-rec-l">
-                      {{ 'duplicates.table.recordB' | transloco }}
-                      @if (c.supersededId) {
-                        <span class="kept-badge" [class.win]="c.supersededId !== c.bId" [class.lose]="c.supersededId === c.bId">
-                          {{ (c.supersededId === c.bId ? 'review.contradictions.superseded' : 'review.contradictions.kept') | transloco }}
-                        </span>
-                      }
-                    </div>
-                    <div class="dup-rec-txt">{{ c.bSummary }}</div>
-                    @if (expanded() === c.id) {
-                      <div class="rec-full">
-                        @if (fullB(); as full) { <pre>{{ full }}</pre> } @else { <span class="rec-err">{{ fullError() ?? ('common.loading' | transloco) }}</span> }
-                      </div>
-                    }
-                  </div>
-                </div>
-
-                @if (c.resolution === 'superseded' && c.resolvedBy) {
-                  <!-- "kept and marked" only when a mark was set: a loser that was gone (loserGone) was not marked. -->
-                  <div class="superseded-note">{{ (loserWasGone(c) ? 'review.contradictions.decidedByOnly' : 'review.contradictions.decidedBy') | transloco: { who: c.resolvedBy } }}</div>
-                }
-                @if (c.resolving) {
-                  <div class="superseded-note">{{ resolvingText(c) }}</div>
-                }
-                <!-- What the resolve could not do as asked, in the reviewer's words; the server's sentence is the disclosure. -->
-                @for (n of c.notes ?? []; track n.code) {
-                  <details class="superseded-note resolve-note">
-                    <summary>{{ resolveNoteText(n) }}</summary>
-                    {{ n.detail }}
-                  </details>
-                }
-
-                <div class="dup-actions">
-                  @if (c.status === 'dismissed') {
-                    <button class="btn btn-sm btn-secondary" type="button" [disabled]="conBusy() === c.id" (click)="reopenContradiction(c)">
-                      {{ 'duplicates.reRate' | transloco }}
-                    </button>
-                  } @else if (c.status === 'open') {
-                    <!-- Keep A / Keep B — the decision a reviewer actually makes about two disagreeing
-                         records, which neither "resolved by edit" (nothing was corrected) nor "link as
-                         contradiction" (they drew an edge by hand) could express. NOTHING is deleted: the
-                         loser stays, marked as overtaken, which is why these are not destructive buttons.
-                         NO BACKTICKS in this template — one kills the whole string and the error points at
-                         the @Component decorator. -->
-                    <div class="keep-group">
-                      <button class="btn btn-sm btn-secondary" type="button" [disabled]="conBusy() === c.id" (click)="keepSide(c, 'a')">
-                        {{ 'review.contradictions.action.keepA' | transloco }}
-                      </button>
-                      <button class="btn btn-sm btn-secondary" type="button" [disabled]="conBusy() === c.id" (click)="keepSide(c, 'b')">
-                        {{ 'review.contradictions.action.keepB' | transloco }}
-                      </button>
-                      <button class="btn btn-sm btn-ghost" type="button" (click)="toggleFull(c)"
-                              [attr.aria-expanded]="expanded() === c.id">
-                        {{ (expanded() === c.id ? 'review.contradictions.action.hideFull' : 'review.contradictions.action.showFull') | transloco }}
-                      </button>
-                    </div>
-                    <button class="btn btn-sm btn-secondary" type="button" [disabled]="conBusy() === c.id" (click)="dismissContradiction(c)">
-                      {{ 'duplicates.dismiss' | transloco }}
-                    </button>
-                    <!-- Contradictions are never merged: both records are real and which is wrong is a
-                         judgement call, so the reviewer records HOW they settled it. -->
-                    <button class="btn btn-sm btn-secondary" type="button" [disabled]="conBusy() === c.id" (click)="resolveContradiction(c, 'edited')">
-                      {{ 'review.contradictions.action.edited' | transloco }}
-                    </button>
-                    <button class="btn btn-sm btn-secondary" type="button" [disabled]="conBusy() === c.id" (click)="resolveContradiction(c, 'linked')">
-                      {{ 'review.contradictions.action.linked' | transloco }}
-                    </button>
-                  }
-                </div>
-              </div>
-            }
-          </div>
-        }
-      </section>
+      <app-review-contradictions-panel [spaceId]="spaceId" [state]="conState" [rows]="conFilteredRows()"
+                                       [query]="query()" (queryChange)="query.set($event)" [typeFilter]="typeFilter()" />
     } @else if (sub() === 'forks') {
       <app-review-forks-panel [spaceId]="spaceId" [state]="forksState" />
     } @else {
@@ -580,170 +358,6 @@ const RESOLVE_REFUSALS = 'review.contradictions.refusal';
   `,
 })
 export class ReviewTabComponent implements OnInit, OnChanges {
-  private contradictionsApi = inject(ContradictionsApi);
-  readonly conRows = signal<ContradictionRecord[]>([]);
-  readonly conLoading = signal(false);
-  /**
-   * Null until the contradictions load failed. The toast alone was not enough: it is transient, and
-   * on a FIRST load `conRows()` is empty, so the page settled on "no contradictions — your brain is
-   * consistent" while nobody had actually checked.
-   */
-  readonly conError = signal<string | null>(null);
-  readonly conBusy = signal<string | null>(null);
-  readonly conScanning = signal(false);
-
-  /**
-   * Which pile to show. Was **hardcoded to `open`**, which made `Dismiss` and both `Resolve` buttons
-   * one-way: the API has supported `dismissed` / `resolved` / `all` all along, the UI simply never asked.
-   * Three things were dead because of it — the status pill (rendered only when `status !== 'open'`), the
-   * `re-rate` button (rendered only when `status === 'dismissed'`), and any chance of undoing a mis-click.
-   */
-  conStatusFilter: 'open' | 'dismissed' | 'resolved' | 'all' = 'open';
-
-  /**
-   * Whether the model-judged pass is among the ones that run, as reported by the server.
-   *
-   * `null` means NOT KNOWN, and is deliberately a third state rather than a default of `true`. Defaulting
-   * would make the strongest available claim — "both passes have run and found nothing" — on the weakest
-   * available evidence, which is the exact move that produced the bug this whole item is about. When it is
-   * unknown the empty state says only what it can see: nothing was found.
-   */
-  readonly conNliConfigured = signal<boolean | null>(null);
-
-  /** Load this space's contradictions. Called on init, on space switch, and after every action. */
-  loadContradictions(): void {
-    this.conLoading.set(true);
-    this.conError.set(null);
-    this.contradictionsApi.listContradictions(this.conStatusFilter, this.spaceId).subscribe({
-      next: r => {
-        this.conRows.set(r.contradictions);
-        this.conNliConfigured.set(typeof r.nliConfigured === 'boolean' ? r.nliConfigured : null);
-        this.conLoading.set(false);
-      },
-      // A load failure must not read as "no contradictions" — the empty state would be a lie. Surface it
-      // and leave whatever was already on screen.
-      error: (err) => {
-        this.conError.set(httpErrorReason(err));
-        this.conLoading.set(false);
-        this.toast.error(this.transloco.translate('review.contradictions.loadError'));
-      },
-    });
-  }
-
-  dismissContradiction(c: ContradictionRecord): void {
-    this.conBusy.set(c.id);
-    this.contradictionsApi.dismissContradiction(c.id).subscribe({
-      next: () => { this.conBusy.set(null); this.loadContradictions(); },
-      // A dismiss that lost a race with a resolve is refused `409 alreadyResolved`, said by its code in the resolve's family.
-      error: (e) => { this.conBusy.set(null); this.toast.error(refusalText(this.transloco, e as Parameters<typeof refusalText>[1], 'duplicates.dismissError', RESOLVE_REFUSALS)); },
-    });
-  }
-
-  reopenContradiction(c: ContradictionRecord): void {
-    this.conBusy.set(c.id);
-    this.contradictionsApi.reopenContradiction(c.id).subscribe({
-      next: () => { this.conBusy.set(null); this.loadContradictions(); },
-      error: () => { this.conBusy.set(null); this.toast.error(this.transloco.translate('duplicates.dismissError')); },
-    });
-  }
-
-  resolveContradiction(c: ContradictionRecord, resolution: 'edited' | 'linked'): void {
-    this.conBusy.set(c.id);
-    this.contradictionsApi.resolveContradiction(c.id, resolution).subscribe({
-      next: () => { this.conBusy.set(null); this.loadContradictions(); },
-      error: (e) => this.resolveFailed(e),
-    });
-  }
-
-  /**
-   * A failed resolve, said by the answer's `code` under the resolve's own family (`Q-442`): `resolvedOtherwise` (someone settled
-   * it differently first) reads differently from a fault. It used to be `duplicates.dismissError` for every failure, a sentence
-   * about a dismiss, for a request that was not one.
-   */
-  private resolveFailed(e: unknown): void {
-    this.conBusy.set(null);
-    this.toast.error(refusalText(this.transloco, e as Parameters<typeof refusalText>[1], 'review.contradictions.resolveError', RESOLVE_REFUSALS));
-  }
-
-  /** The resolve found the record judged stale already gone, so nothing was marked: the card must not say it was. */
-  loserWasGone(c: ContradictionRecord): boolean {
-    return (c.notes ?? []).some(n => n.code === 'loserGone');
-  }
-
-  /**
-   * A card whose pair a resolve has claimed and not closed (L3): which choice stands, named by the button that makes it, and
-   * what the reviewer can do — the same choice finishes it, a dismiss releases it. Without it the card looked open while
-   * every other choice was refused.
-   */
-  resolvingText(c: ContradictionRecord): string {
-    const r = c.resolving;
-    if (!r) return '';
-    const action = r.resolution === 'superseded' ? (r.winner === 'b' ? 'keepB' : 'keepA') : r.resolution;
-    return this.transloco.translate('review.contradictions.resolving', { choice: this.transloco.translate(`review.contradictions.action.${action}`) });
-  }
-
-  /** One outcome of a resolve in the reviewer's words: its code's key with its placeholders, or the server's sentence for a code this client does not know. */
-  resolveNoteText(n: ContradictionResolveNote): string {
-    return translatedOrEmpty(this.transloco, `review.contradictions.note.${n.code}`, { label: n.label ?? '', rule: n.rule ?? '' }) || n.detail;
-  }
-
-  // ── Keep A / Keep B ────────────────────────────────────────────────────────────────────────────────────
-  //
-  // The reviewer's real decision about two disagreeing records is "this one is right, that one is stale".
-  // Neither existing resolution said it, so they were being recorded as `edited` (nothing was corrected) or
-  // `linked` (nobody drew an edge). This names the loser and lets the server draw `supersedes` for an entity
-  // pair — and nothing is deleted, which is the line between this and a duplicate merge.
-
-  /** Which card has its full records expanded. One at a time: two full records is already a lot to read. */
-  readonly expanded = signal<string | null>(null);
-  readonly fullA = signal<string | null>(null);
-  readonly fullB = signal<string | null>(null);
-  readonly fullError = signal<string | null>(null);
-
-  keepSide(c: ContradictionRecord, winner: 'a' | 'b'): void {
-    this.conBusy.set(c.id);
-    this.contradictionsApi.keepSide(c.id, winner).subscribe({
-      next: (r) => {
-        this.conBusy.set(null);
-        /*
-         * Success stays silent; what a reviewer must not be left to assume is said, in ONE toast listing every
-         * outcome (`Q-442`): each note in the reviewer's language from its code — a link the space's rules
-         * refused, a record of the pair that is gone. Never the server's English `note`.
-         *
-         * `markedRecord: false` with no note means the decision was stored and the LOSING RECORD was not
-         * marked — so the next search still returns both claims looking equally current, which is the state
-         * the whole feature exists to end. A note (a loser that is gone) already says why, so it is not said twice.
-         */
-        const notes = r.notes ?? [];
-        if (notes.length > 0) this.toast.info(notes.map(n => this.resolveNoteText(n)).join(' '));
-        else if (r.resolution === 'superseded' && r.markedRecord === false) this.toast.error(this.transloco.translate('review.contradictions.notMarked'));
-        this.loadContradictions();
-      },
-      error: (e) => this.resolveFailed(e),
-    });
-  }
-
-  /**
-   * Show both records IN FULL, fetched on demand.
-   *
-   * The card carries one-line summaries, which is enough to triage most pairs and not enough to decide one:
-   * picking a winner means reading both. Fetched on expand rather than with the list because a queue of
-   * fifty cards would otherwise pull a hundred records nobody opened.
-   */
-  toggleFull(c: ContradictionRecord): void {
-    if (this.expanded() === c.id) { this.expanded.set(null); return; }
-    this.expanded.set(c.id);
-    this.fullA.set(null); this.fullB.set(null); this.fullError.set(null);
-    for (const [id, sink] of [[c.aId, this.fullA], [c.bId, this.fullB]] as const) {
-      this.brainApi.getRecord(c.spaceId, c.type, id).subscribe({
-        next: (rec) => sink.set(JSON.stringify(rec, null, 2)),
-        // Named, not silent: a record that cannot be loaded is exactly the case where a reviewer must not
-        // decide from the summary alone.
-        error: () => this.fullError.set(this.transloco.translate('review.contradictions.fullError')),
-      });
-    }
-  }
-
   /** Sub-views of the space's record-QA queue. Ordered as a reviewer meets them. */
   readonly SUBTABS = ['duplicates', 'contradictions', 'suggestions', 'forks'] as const;
   readonly sub = signal<'duplicates' | 'contradictions' | 'suggestions' | 'forks'>('duplicates');
@@ -751,6 +365,8 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   protected readonly forksState = inject(ReviewForksState);
   /** The Suggestions sub-tab's report (the space's completeness, samples in words); provided per tab, read by the template. */
   protected readonly completeness = inject(ReviewCompletenessState);
+  /** The Contradictions section's list, actions and scan (Q-391); provided per tab, read by the contradictions panel. */
+  readonly conState = inject(ReviewContradictionsState);
 
   /** The space's completeness tab jumps back into the Brain's own tabs; the shell owns that switch. */
   @Output() openTab = new EventEmitter<CollectionTab>();
@@ -761,7 +377,6 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   @Input() isView = false;
 
   private duplicatesApi = inject(DuplicatesApi);
-  private brainApi = inject(BrainApi);
   private transloco = inject(TranslocoService);
   private readonly plural = inject(PluralText);
 
@@ -806,7 +421,7 @@ export class ReviewTabComponent implements OnInit, OnChanges {
    * would make every other option vanish the moment one was picked.
    */
   availableTypes = computed<string[]>(() => {
-    const list: Array<{ type: string }> = this.sub() === 'contradictions' ? this.conRows() : this.rows();
+    const list: Array<{ type: string }> = this.sub() === 'contradictions' ? this.conState.rows() : this.rows();
     return [...new Set(list.map(r => r.type))].sort();
   });
 
@@ -863,7 +478,7 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   conFilteredRows = computed<ContradictionRecord[]>(() => {
     const q = this.query().trim().toLowerCase();
     const type = this.typeFilter();
-    let list = this.conRows();
+    let list = this.conState.rows();
     if (type !== 'all') list = list.filter(r => r.type === type);
     if (!q) return list;
     return list.filter(r => {
@@ -871,37 +486,6 @@ export class ReviewTabComponent implements OnInit, OnChanges {
       return `${r.aSummary} ${r.bSummary} ${r.type} ${r.spaceId} ${fields}`.toLowerCase().includes(q);
     });
   });
-
-  /** The same rollup Duplicates gets: what still needs attention, and how much of it is on screen. */
-  conSummaryItems = computed<SummaryItem[]>(() => {
-    const list = this.conRows();
-    const open = list.filter(r => r.status === 'open').length;
-    return [
-      { label: this.transloco.translate('duplicates.summary.open'), value: String(open), variant: open ? 'warn' : 'ok' },
-      { label: this.transloco.translate('duplicates.summary.shown'), value: String(this.conFilteredRows().length) },
-    ];
-  });
-
-  /** Run the contradiction scan now. The API method existed from the start with no caller. */
-  scanContradictions(): void {
-    this.conScanning.set(true);
-    this.contradictionsApi.scanContradictions(this.spaceId).subscribe({
-      next: (r) => {
-        this.conScanning.set(false);
-        // `nliStalled` means the judge was unreachable, so the NLI pass settled nothing and its cursor is
-        // parked. Silence here would leave "0 found" reading as "nothing disagrees" — the same conflation
-        // the empty state used to make, one layer up.
-        if (r.nliStalled) this.toast.error(this.transloco.translate('review.contradictions.scanStalled'));
-        // The tab scans ONE space, so a space the scan could not scan is the whole scan: a `200` that names it (Q-381) must not read as done.
-        if (r.failedSpaces?.length) this.toast.error(this.transloco.translate('duplicates.scanError'));
-        this.loadContradictions();
-      },
-      error: (e) => {
-        this.conScanning.set(false);
-        this.toast.error(this.transloco.translate(e?.status === 403 ? 'duplicates.scanForbidden' : 'duplicates.scanError'));
-      },
-    });
-  }
 
   /**
    * True when the server's per-space cap was reached, so the list on screen is not the whole story.
@@ -913,7 +497,7 @@ export class ReviewTabComponent implements OnInit, OnChanges {
    */
   private static readonly SERVER_CAP = 500;
   listCapped = computed(() =>
-    (this.sub() === 'contradictions' ? this.conRows() : this.rows()).length >= ReviewTabComponent.SERVER_CAP);
+    (this.sub() === 'contradictions' ? this.conState.rows() : this.rows()).length >= ReviewTabComponent.SERVER_CAP);
 
   /** Operator-first rollup atop the list: how many still need attention + how strong the matches are. */
   summaryItems = computed<SummaryItem[]>(() => {
@@ -928,8 +512,8 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     ];
   });
 
-  scorePct(s: number): number { return Math.round(Math.min(Math.max(s, 0), 1) * 100); }
-  scoreVariant(s: number): 'high' | 'mid' | 'low' { return s >= 0.95 ? 'high' : s >= 0.85 ? 'mid' : 'low'; }
+  protected readonly scorePct = scorePct;
+  protected readonly scoreVariant = scoreVariant;
 
   /** The link a fork row's marker makes (`?section=forks&forkKind=<kind>`); absent where the tab is hosted without a router. */
   private readonly route = inject(ActivatedRoute, { optional: true });
@@ -946,10 +530,10 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     if (kind !== null && (FORK_KINDS as readonly string[]).includes(kind)) this.forksState.kind.set(kind as ForkKind);
   }
 
-  ngOnInit(): void { if (!this.isView) { this.openAsLinked(); this.load(); this.loadContradictions(); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); } }
+  ngOnInit(): void { if (!this.isView) { this.openAsLinked(); this.load(); this.conState.load(this.spaceId); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); } }
   /** Switching space in the Brain re-points this tab rather than leaving another space's pairs on screen. A view reads none of it. */
   ngOnChanges(ch: SimpleChanges): void {
-    if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.loadContradictions(); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); }
+    if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.conState.load(this.spaceId); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); }
   }
 
   load(): void {

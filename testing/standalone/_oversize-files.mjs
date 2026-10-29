@@ -295,7 +295,11 @@ export const FROZEN = {
   // master-switch and space-description ones are both here — so a fourth belongs beside them rather than in
   // a module only the loader would ever call.
   'server/src/config/loader.ts': 764,
-  'client/src/app/pages/brain/review-tab.component.ts': 748,
+  // 748 -> 485 (Q-391). The Contradictions section left the tab as the Forks section had: its list and actions are
+  // `review-contradictions-state.ts`, its rendering `review-contradictions-panel.component.ts`, and the confidence
+  // meter's percent and band, which the Duplicates cards share, `review-score.ts`. Under the ceiling, and kept: an
+  // entry here is a ratchet, and removing it would hand the tab back the lines the extraction just took.
+  'client/src/app/pages/brain/review-tab.component.ts': 485,
   // 744 -> 689, and this one is PAID rather than raised.
   //
   // The history matters because the pattern is what goes wrong: 739 -> 744 was a raise, taken deliberately to
