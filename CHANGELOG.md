@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Data:** after a restore or a migrate started from the Data page, a first report that already says it ended replaces the "accepted" line with the end sentence; it kept "accepted" when the act ended before the page's first poll.
+- **Data:** the Data page's "accepted" line for a restore or migrate is replaced by the end sentence when the act ended before its first poll, and once by "cannot finish, abandon it" when every unfinished space needs an abandon.
 
 - **Files:** a bad `imagesLimit` or `imagesSkip` on `GET …/files/extract` is refused naming the parameter you sent, not `imageslimit`.
 - **Files:** a file moved back to its old path, or onto a path whose earlier file was deleted, now reaches peers; a file uploaded again at a path that held another instance's deleted file reaches peers too.

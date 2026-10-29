@@ -483,6 +483,65 @@ describe('the end of a restore is shown, and a migrate that stops the instance s
     expect(p.c.restoreNotice(), 'the end was announced again over a notice that came after it').toBe('a later notice');
   });
 
+  /** Every member that is not done fails the same way for ever (a backup with a corrupt record, D-66): the set stays `running`. */
+  const stuckRestore = (over: Record<string, unknown> = {}) => restoreReport({
+    spaces: [
+      restoreSpace('general', 'done'),
+      restoreSpace('notes', 'owed', { attempts: 2, needsAbandon: true }),
+      restoreSpace('proj', 'owed', { attempts: 2, needsAbandon: true }),
+    ],
+    ...over,
+  });
+
+  it('a running restore whose every unfinished space needs an abandon says it cannot finish, where to abandon, and not "accepted"', async () => {
+    const p = open({ words: EN });
+    await restoreAnswered(p, RESTORE_ANSWERS.accepted);
+    expect(visibleNotice(p)).toContain('Restore accepted: 3 spaces are being restored');
+    reportPolls(p).forEach(r => r.flush(stuckRestore()));
+    p.fixture.detectChanges();
+    expect(visibleNotice(p)).toContain('The restore cannot finish');
+    expect(visibleNotice(p), 'it names the control the card already has').toContain(`"${EN['data.progress.abandon']}"`);
+    expect(visibleNotice(p)).not.toContain('Restore accepted');
+    expect(visibleNotice(p)).not.toContain('being restored');
+    expect(buttonWith(p, EN['data.progress.abandon']!), 'the control the sentence names is on the page').toBeTruthy();
+  });
+
+  it('a running restore with a space that is not stuck keeps its accepted notice', async () => {
+    const p = open({ words: EN });
+    await restoreAnswered(p, RESTORE_ANSWERS.accepted);
+    reportPolls(p).forEach(r => r.flush(stuckRestore({
+      spaces: [restoreSpace('general', 'done'), restoreSpace('notes', 'owed', { needsAbandon: true }), restoreSpace('proj', 'running')],
+    })));
+    p.fixture.detectChanges();
+    expect(visibleNotice(p)).toContain('Restore accepted: 3 spaces are being restored');
+    expect(visibleNotice(p)).not.toContain('cannot finish');
+  });
+
+  it('the cannot-finish sentence is said once per set: a later poll of the same set does not say it over a notice that came after', async () => {
+    const p = open({ words: EN });
+    await restoreAnswered(p, RESTORE_ANSWERS.accepted);
+    reportPolls(p).forEach(r => r.flush(stuckRestore()));
+    p.c.restoreNotice.set('a later notice');
+    (p.c as unknown as { takeRestore(r: unknown): boolean }).takeRestore(stuckRestore());
+    expect(p.c.restoreNotice()).toBe('a later notice');
+  });
+
+  it('a stuck restore that is then abandoned still ends in the abandoned sentence', async () => {
+    const p = open({ words: EN });
+    await restoreAnswered(p, RESTORE_ANSWERS.accepted);
+    reportPolls(p).forEach(r => r.flush(stuckRestore()));
+    vi.advanceTimersByTime(TEN_MINUTES);
+    reportPolls(p)[0]!.flush(stuckRestore({
+      state: 'abandoned', endedAt: '2026-10-18T12:01:00.000Z',
+      spaces: [restoreSpace('general', 'done'), restoreSpace('notes', 'restore_abandoned'), restoreSpace('proj', 'restore_abandoned')],
+    }));
+    p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/maintenance').forEach(r => r.flush(MAINTENANCE.off));
+    vi.advanceTimersByTime(1_000);
+    p.fixture.detectChanges();
+    expect(visibleNotice(p)).toContain('The restore was abandoned. These spaces may be half restored: notes, proj');
+    expect(visibleNotice(p)).not.toContain('cannot finish');
+  });
+
   it('a restore this page found already running ends in the same visible sentence', () => {
     const p = open({ words: EN, restore: restoreReport() });
     vi.advanceTimersByTime(TEN_MINUTES);
@@ -646,6 +705,33 @@ describe('the migrate block and the maintenance pill say how a migrate ended (Q-
     expect(migrateNotice(p)).toContain(EN['data.migrate.abandonedOutcome']);
     expect(migrateNotice(p)).not.toContain('Migration accepted');
     expect(migrateNotice(p)).not.toContain('being copied');
+  });
+
+  it('a running migrate whose every unfinished space needs an abandon says it cannot finish and where to abandon, once', async () => {
+    const p = open({ words: EN, migrationEnabled: true });
+    await migrateAnswered(p, MIGRATE_ANSWERS.accepted);
+    const stuck = () => migrateReport({
+      done: 0, spaces: [restoreSpace('general', 'owed', { attempts: 2, needsAbandon: true }), restoreSpace('notes', 'owed', { attempts: 2, needsAbandon: true })],
+    });
+    migratePolls(p).forEach(r => r.flush(stuck()));
+    p.fixture.detectChanges();
+    expect(migrateNotice(p)).toContain('The migration cannot finish');
+    expect(migrateNotice(p)).toContain(`"${EN['data.progress.abandonMigrate']}"`);
+    expect(migrateNotice(p)).not.toContain('Migration accepted');
+    expect(migrateNotice(p)).not.toContain('being copied');
+    p.c.migrateNotice.set('a later notice');
+    (p.c as unknown as { takeMigrate(m: unknown): boolean }).takeMigrate(stuck());
+    expect(p.c.migrateNotice()).toBe('a later notice');
+  });
+
+  it('a running migrate with a space still copying keeps its accepted line', async () => {
+    const p = open({ words: EN, migrationEnabled: true });
+    await migrateAnswered(p, MIGRATE_ANSWERS.accepted);
+    migratePolls(p).forEach(r => r.flush(migrateReport({
+      done: 0, spaces: [restoreSpace('general', 'owed', { needsAbandon: true }), restoreSpace('notes', 'running')],
+    })));
+    p.fixture.detectChanges();
+    expect(migrateNotice(p)).toContain('Migration accepted: 2 spaces are being copied');
   });
 
   it('a migrate whose poll is refused at the connection replaces the accepted line with the stopped sentence', async () => {
