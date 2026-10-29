@@ -16,7 +16,7 @@
  * `transport: 'rest'` is fixed rather than a parameter, because this is the REST snapshot: MCP builds its
  * own in `mcp/router.ts` from a connection rather than a request. One question per module.
  */
-import { auditAuthMethod, auditOidcSubject, routeAuditsRequest } from '../audit/middleware.js';
+import { auditAuthMethod, auditOidcSubject, requestPath } from '../audit/middleware.js';
 import type { ToolCaller } from '../mcp/call-tool.js';
 import { callerRecordOf } from '../mcp/caller-record.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -32,6 +32,7 @@ export function restToolCaller(req: Request): ToolCaller {
     authMethod: auditAuthMethod(req.authToken),
     oidcSubject: auditOidcSubject(req.authToken),
     transport: 'rest',
-    ...(routeAuditsRequest(req) ? { auditedByRoute: true } : {}),
+    ...(requestPath(req) ? { routePath: requestPath(req) } : {}),
+    onAudited: () => { req.auditedByTool = true; },
   };
 }

@@ -366,17 +366,8 @@ export { isOidc };
 // ── Middleware ──────────────────────────────────────────────────────────────
 
 /** The request's full path as this middleware matches it: `originalUrl` without its query (see the `finish` callback below). */
-function requestPath(req: Request): string {
-  return (req.originalUrl || req.url).split('?')[0]!;
-}
-
-/**
- * Does a `ROUTE_RULES` row audit this request? A route that dispatches a tool (`restToolCaller`) asks it, so the tool door does not
- * write a second row for a call this middleware already records (Q-444). Read from the same table and the same path the
- * middleware matches, so a rule added or removed later moves the row between the two writers and never doubles or drops it.
- */
-export function routeAuditsRequest(req: Request): boolean {
-  return resolveOperation(req.method, requestPath(req)) !== null;
+export function requestPath(req: Request): string {
+  return (req.originalUrl || req.url || '').split('?')[0]!;
 }
 
 export function auditMiddleware(req: Request, res: Response, next: NextFunction): void {
@@ -448,6 +439,11 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
         });
       }
     }
+
+    // A route that ran a tool whose door recorded the call (`restToolCaller`'s `onAudited`, Q-444): that row is the call's one
+    // row, and it names the space the body named and a view's members, which this rule cannot see. After the counters above,
+    // which are this middleware's alone.
+    if (req.auditedByTool) return;
 
     // Check logReads config
     let cfg;

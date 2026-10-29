@@ -94,17 +94,23 @@ export async function auditedToolCall<T extends { status: number }>(
  *
  * The REST door is audited from here rather than by `audit/middleware.ts`: a `ROUTE_RULES` row per tool
  * would be forty-five hand-written copies of a mapping `mcpAuditOperation` already derives, and the row
- * that was forgotten is an unaudited mutation.
+ * that was forgotten is an unaudited mutation. A REST route that runs a tool AND has a route rule of its own
+ * (`POST /api/brain/recall`, `/similar`, `/:space/traverse`) is recorded here too, under its own path
+ * (`caller.routePath`), and tells the middleware so (`caller.onAudited`): this row knows the space the body
+ * named and a view's members, which the route rule cannot see, and one call is one row (Q-444).
  */
+/** The longest `entryId` a row keeps: a record id is a UUID or a short path, and an id the call never resolved is the caller's text. */
+const MAX_AUDIT_ENTRY_ID = 512;
+
 function recordToolCall(caller: ToolCaller, toolName: string, status: number, durationMs: number, args: unknown, facts: ToolAuditFacts): void {
   // The ARGUMENTS, because a capability with two subjects is audited under the subject of the call:
   // `network_sync` with a `peerId` records what the per-peer route records (`Q-37`).
-  // A REST route whose own `ROUTE_RULES` row records this call (`/api/brain/recall`, `/similar`, `/:space/traverse`): that row is
-  // the call's one row, and a second here would count every such call twice.
-  if (caller.auditedByRoute) return;
   const act = mcpActOperation(toolName);
   const operation = act ?? mcpAuditOperation(toolName, args);
   if (!operation) return;                       // deliberately not an audited operation — see audit-map.ts
+  // Decided here, so the route rule of the request this call serves writes no second row; said BEFORE the logReads filter,
+  // which both writers apply alike, so a read the log does not record is recorded by neither.
+  caller.onAudited?.();
   // The one filter, as REST's: a READ is a row only when the log records reads, at every status. An act is never a read.
   if (!act && isMcpReadOperation(operation) && !getConfig().audit?.logReads) return;
   const { snapshots, writtenId, viewSpaces, auditSpace } = facts;
@@ -116,7 +122,7 @@ function recordToolCall(caller: ToolCaller, toolName: string, status: number, du
     oidcSubject: caller.oidcSubject,
     ip: caller.ip,
     method: caller.transport === 'mcp' ? 'MCP' : 'POST',
-    path: caller.transport === 'mcp' ? `http:${toolName}` : `/api/${toolName}`,
+    path: caller.transport === 'mcp' ? `http:${toolName}` : (caller.routePath ?? `/api/${toolName}`),
     // A read through a personal view is ONE row with no space and the members read: nothing in it names the view.
     spaceId: viewSpaces ? null : (auditSpace || null),
     ...(viewSpaces ? { spaces: [...viewSpaces] } : {}),
@@ -124,7 +130,9 @@ function recordToolCall(caller: ToolCaller, toolName: string, status: number, du
     // its subject's id, so an operator filtering the log by record finds the MCP edit beside the REST one.
     // `writtenId`: a create whose record landed and whose connections failed names the record it stored (`Q-170`) —
     // its arguments carry no id to name it by.
-    entryId: writtenId ?? (typeof (args as Record<string, unknown> | null)?.['id'] === 'string' ? (args as Record<string, string>)['id']! : null),
+    // Held to MAX_AUDIT_ENTRY_ID: a refused call's `id` is whatever the caller sent, and the body may be megabytes.
+    entryId: writtenId ?? (typeof (args as Record<string, unknown> | null)?.['id'] === 'string'
+      && ((args as Record<string, string>)['id']!).length <= MAX_AUDIT_ENTRY_ID ? (args as Record<string, string>)['id']! : null),
     operation,
     status,
     durationMs,

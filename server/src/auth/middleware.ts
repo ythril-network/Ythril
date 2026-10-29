@@ -87,6 +87,11 @@ declare global {
        * five hundred times that answers nothing looks identical to a popular one in a call count.
        */
       recallOutcome?: { answered: boolean; topScore?: number };
+      /**
+       * The tool door recorded this request's audit row (`restToolCaller`'s `onAudited`, Q-444), so the route rule writes none.
+       * Set by the tool recorder, read by the audit middleware on `res.finish`.
+       */
+      auditedByTool?: boolean;
     }
   }
 }
