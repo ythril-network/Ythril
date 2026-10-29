@@ -342,8 +342,8 @@ dataRouter.put('/backup-config', requireAdminMfa, (req, res) => {
 
 // ── POST /restore ─────────────────────────────────────────────────────────────
 //
-// A restore is a set of space acts (bundle-157, `db/restore-act.ts`): the backup is checked whole and the space set decided before
-// anything is registered, then one `restore` act per served space is registered in one config write and the answer is 202. Every space
+// A restore is a set of space acts (bundle-157, `db/restore-act.ts`): the backup is checked at its manifest (no record is read; the whole backup
+// is checked by the first act, before any space is replaced) and the space set decided before anything is registered, then one `restore` act per served space is registered in one config write and the answer is 202. Every space
 // is held and the instance is in maintenance from that write until the last act ends; GET /restore reports the progress and the outcome.
 
 dataRouter.post('/restore', requireAdminMfa, async (req, res) => {

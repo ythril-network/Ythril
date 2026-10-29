@@ -447,6 +447,42 @@ describe('the end of a restore is shown, and a migrate that stops the instance s
     expect(visibleNotice(p)).not.toContain('Restore accepted');
   });
 
+  it('a restore that had ended before this page\'s first report replaces the accepted notice with the end sentence (Q-637)', async () => {
+    const p = open({ words: EN });
+    await restoreAnswered(p, RESTORE_ANSWERS.accepted);
+    expect(visibleNotice(p), 'accepted is said until a report says otherwise').toContain('Restore accepted: 3 spaces are being restored');
+    reportPolls(p).forEach(r => r.flush(restoreReport({
+      state: 'completed', endedAt: '2026-10-18T12:01:00.000Z',
+      spaces: [restoreSpace('general', 'done'), restoreSpace('notes', 'done'), restoreSpace('proj', 'done')],
+    })));
+    p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/maintenance').forEach(r => r.flush(MAINTENANCE.off));
+    p.fixture.detectChanges();
+    expect(visibleNotice(p)).toContain(EN['data.restore.completed']);
+    expect(visibleNotice(p)).not.toContain('Restore accepted');
+  });
+
+  it('a restore that had ended before the first report and was abandoned names the half restored spaces, not "accepted" (Q-637)', async () => {
+    const p = open({ words: EN });
+    await restoreAnswered(p, RESTORE_ANSWERS.accepted);
+    reportPolls(p).forEach(r => r.flush(restoreReport({
+      state: 'abandoned', endedAt: '2026-10-18T12:01:00.000Z',
+      spaces: [restoreSpace('general', 'restore_abandoned'), restoreSpace('notes', 'restore_abandoned'), restoreSpace('proj', 'restore_abandoned')],
+    })));
+    p.fixture.detectChanges();
+    expect(visibleNotice(p)).toContain('The restore was abandoned. These spaces may be half restored: general, notes, proj');
+    expect(visibleNotice(p)).not.toContain('Restore accepted');
+  });
+
+  it('a restore that ended before the first report is announced once: a later report of the same ended set changes nothing (Q-637)', async () => {
+    const p = open({ words: EN });
+    await restoreAnswered(p, RESTORE_ANSWERS.accepted);
+    const ended = restoreReport({ state: 'completed', endedAt: '2026-10-18T12:01:00.000Z', spaces: [restoreSpace('general', 'done')] });
+    reportPolls(p).forEach(r => r.flush(ended));
+    p.c.restoreNotice.set('a later notice');
+    (p.c as unknown as { takeRestore(r: unknown): boolean }).takeRestore(ended);
+    expect(p.c.restoreNotice(), 'the end was announced again over a notice that came after it').toBe('a later notice');
+  });
+
   it('a restore this page found already running ends in the same visible sentence', () => {
     const p = open({ words: EN, restore: restoreReport() });
     vi.advanceTimersByTime(TEN_MINUTES);
@@ -596,6 +632,18 @@ describe('the migrate block and the maintenance pill say how a migrate ended (Q-
   it('a completed migrate replaces the accepted line with the completion sentence', async () => {
     const p = await migrateFollowed(r => r.flush(migrateReport({ state: 'completed', done: 2, endedAt: '2026-10-18T12:01:00.000Z' })));
     expect(migrateNotice(p)).toContain(EN['data.migrate.completed']);
+    expect(migrateNotice(p)).not.toContain('Migration accepted');
+    expect(migrateNotice(p)).not.toContain('being copied');
+  });
+
+  it('a migrate that had ended before this page\'s first report replaces the accepted line with the end sentence (Q-637)', async () => {
+    const p = open({ words: EN, migrationEnabled: true });
+    await migrateAnswered(p, MIGRATE_ANSWERS.accepted);
+    expect(migrateNotice(p), 'accepted is said until a report says otherwise').toContain('Migration accepted: 2 spaces are being copied');
+    migratePolls(p).forEach(r => r.flush(migrateReport({ state: 'abandoned', endedAt: '2026-10-18T12:01:00.000Z' })));
+    p.http.match(r => r.method === 'GET' && r.url === '/api/admin/data/maintenance').forEach(r => r.flush(MAINTENANCE.off));
+    p.fixture.detectChanges();
+    expect(migrateNotice(p)).toContain(EN['data.migrate.abandonedOutcome']);
     expect(migrateNotice(p)).not.toContain('Migration accepted');
     expect(migrateNotice(p)).not.toContain('being copied');
   });

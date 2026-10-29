@@ -208,8 +208,11 @@ Authorization: Bearer <admin-token>
 ### POST /api/admin/data/restore
 
 Make every space this instance serves equal to a backup. A restore is a **set of space acts**, one `restore` act per served
-space, like a [deletion or wipe](06c-space-deletion-and-wipe-api.md): the request checks the backup and answers `202` before
-anything is replaced, and each space is then replaced in the background under a hold. [`GET /api/admin/data/restore`](#get-apiadmindatarestore)
+space, like a [deletion or wipe](06c-space-deletion-and-wipe-api.md): the request checks the backup **at its manifest** (the manifest, every file it names, the first line of each; no record is read, so
+the answer does not wait on the size of the backup) and answers `202` before anything is replaced, and each space is then replaced
+in the background under a hold. The whole backup - every record, every count - is checked once for the restore, by the first
+act, before any space is replaced: a backup with a broken record is accepted with `202`, and every space's act then fails
+(`needsAbandon`) with nothing replaced. [`GET /api/admin/data/restore`](#get-apiadmindatarestore)
 reports the progress and the outcome.
 
 **Unresolved versions are rows like any other.** A fork of a fact, entity, chrono entry or edge is a row of its collection: a backup carries it and a restore brings it back unresolved, with the `_resolvedElsewhere` mark it carried (a decision still owed here). Restoring a backup that holds an entity, chrono or edge fork into a 5.x build is unsupported: 5.x strips `forkOf` and stores the version as a duplicate, or refuses an edge version against its full identity index. Count them first with the rollback tool (`node server/dist/tools/positions-rollback.js`, step 5 refuses while they exist), then resolve or discard them.
@@ -261,7 +264,8 @@ every file it names is present, every line can be read (and decrypted, for an en
   migrate;
 - a restart resumes the acts where they stand, and the holds with them.
 
-**What each space's act does.** It checks the backup again for its space (the files can change on disk), drops the space's
+**What each space's act does.** The first act to run checks the whole backup, once for the set, and a broken one fails every
+act before any space is replaced. Each act then checks the backup again for its space (the files can change on disk), drops the space's
 collections and creates them again, empty, with every index the space declares (the unique ones included, so a duplicate
 the backup holds is refused when it is loaded; the retention sweep's too), loads the backup's records, raises the space's
 sequence counter to at least every seq this instance handed out before (a peer never meets a new write under a seq it has
@@ -310,7 +314,7 @@ therefore keeps that edit instead of dropping it for the copy it already holds. 
 |---|---|---|
 | `400` | | Missing or invalid `backupId` or `leaveOut` |
 | `400` | `backup_names_unserved_spaces` | The backup holds spaces this instance does not serve (`spaces`); name them in `leaveOut` |
-| `400` | `backup_not_whole` | The backup is incomplete or unreadable; the sentence says what |
+| `400` | `backup_not_whole` | The backup fails at its manifest (no readable manifest, a file it names is missing, a secret that cannot open it); the sentence says what. A broken record is not found here: it fails the acts (see above) |
 | `404` | | Backup not found |
 | `409` | `space_being_restored`, `space_being_migrated` | A restore or a migrate already stands |
 | `503` | | The server is shutting down |
