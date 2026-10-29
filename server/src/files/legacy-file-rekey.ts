@@ -40,10 +40,10 @@ export async function rekeyLegacy(spaceId: string, key: string, ids: readonly st
   // absent one is not: the two are different plans.
   const rows = await readStoredById<LegacyRow>(filesColl, ids, { seq: 1, author: 1, deliveredBy: 1 }, { filter: LIVE_FILE_ROW });
   const best = bestLegacy(rows, ids);
-  const keyRow = (await readStoredById<LegacyRow & { deletedAt?: string }>(filesColl, [key], { seq: 1, deletedAt: 1 })).get(key);
+  if (best === undefined) return;   // gone since the index was read: another door adopted it (before the key's row is read: nothing to plan)
+  const keyRow =(await readStoredById<LegacyRow & { deletedAt?: string }>(filesColl, [key], { seq: 1, deletedAt: 1 })).get(key);
   const flaggedAtKey = keyRow?.deletedAt !== undefined;
   const atKey = flaggedAtKey ? undefined : keyRow;
-  if (best === undefined) return;   // gone since the index was read: another door adopted it
   const keep = rows.get(best)!;
 
   const shadowed = atKey !== undefined && (atKey.seq ?? 0) >= (keep.seq ?? 0) ? false : await isShadowed(spaceId, key, keep);

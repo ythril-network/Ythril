@@ -42,6 +42,7 @@ import { reportSpaceFailure } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { isActRefusal } from '../spaces/space-write-gate.js';
 import { LIVE_FILE_ROW } from './live-file-row.js';
+import { StaleRekeyPlan } from './rekey-rows.js';
 
 const REKEY_STEP = declareStep('Legacy file row re-key');
 const INDEX_STEP = declareStep('Legacy file row index');
@@ -135,6 +136,9 @@ async function adoptKeys(spaceId: string, keys: readonly string[]): Promise<void
     } catch (err) {
       // A space an act holds (a restore, a wipe) takes no write: the row waits, quietly, for the next touch.
       if (isActRefusal(err)) continue;
+      // A row appeared at the key since this door planned: another door adopting the same key got there first and did the work, and the next touch finds
+      // nothing left to do (`rekeyLegacy` returns when no legacy row remains). Not a failure an operator can act on (bundle-88 review F8).
+      if (err instanceof StaleRekeyPlan) continue;
       reportSpaceFailure(REKEY_STEP, spaceId, err, { unit: key, when: 'next touch' });
     }
   }
