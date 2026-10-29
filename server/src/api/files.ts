@@ -34,7 +34,7 @@ import {
   getUploadReceived,
 } from '../files/chunks.js';
 import { resolveSafePath, resolveSafePathChecked } from '../files/sandbox.js';
-import { heldSpellingOf } from '../files/held-spelling.js';
+import { heldEntryOf } from '../files/held-spelling.js';
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { NotFoundError, RequestRefusal } from '../util/errors.js';
@@ -243,25 +243,11 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
   // Try to find the first member where the path resolves successfully
   let foundMid: string | null = null;
   let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
-  // Where the bytes are when they are held under another spelling of the path (a decomposed name, Q-581): set only for a file.
+  // Where the path is when it is held under another spelling (a decomposed name, Q-581): `heldEntryOf`, the lookup MCP's doors make too.
   let heldAbs: string | null = null;
-
   for (const mid of memberIds) {
-    try {
-      const p = resolveSafePath(mid, normalised);
-      const s = await fs.stat(p);
-      foundMid = mid;
-      stat = s;
-      break;
-    } catch {
-      // Not at its NFC spelling: a file this member holds under another spelling of the key is the file (`heldSpellingOf`, the one
-      // lookup the MCP `read_file` makes too). A directory is looked up by its own spelling only, as a listing always was.
-      try {
-        const held = await heldSpellingOf(mid, normalised);
-        const s = held ? await fs.stat(held.abs) : null;
-        if (held && s?.isFile()) { foundMid = mid; stat = s; heldAbs = held.abs; break; }
-      } catch { /* refused, or not looked at: this member does not have it */ }
-    }
+    const at = await heldEntryOf(mid, normalised);
+    if (at) { foundMid = mid; stat = at.stat; heldAbs = at.heldAbs; break; }
   }
 
   if (!foundMid || !stat) {

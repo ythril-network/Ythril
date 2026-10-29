@@ -76,10 +76,11 @@ async function restGet(p) {
   const chunks = [];
   const res = new Writable({ write(chunk, _enc, cb) { chunks.push(chunk); cb(); } });
   Object.assign(res, { code: 200, headers: {}, json: undefined, status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; } });
-  const done = new Promise(resolve => { res.json = () => { resolve(); return res; }; res.on('finish', resolve); res.destroy = () => { resolve(); return res; }; });
+  let json;
+  const done = new Promise(resolve => { res.json = (b) => { json = b; resolve(); return res; }; res.on('finish', resolve); res.destroy = () => { resolve(); return res; }; });
   await getHandler({ method: 'GET', params: { spaceId: S }, query: { path: p }, headers: {}, authToken: { id: 't', name: 'test', rights }, get: () => undefined }, res);
   await done;
-  return { code: res.code, text: Buffer.concat(chunks).toString('utf8') };
+  return { code: res.code, text: Buffer.concat(chunks).toString('utf8'), json };
 }
 
 /** The name the listing of `dir` gives for the one file in it (REST and MCP list through the one `listDir`). */
@@ -181,5 +182,9 @@ describe('a listed decomposed file is deleted and moved by the name the listing 
     put(path.join(DIR.normalize('NFD'), 'inner.txt'));
     const listed = await d.files.listDir(S, DIR);
     assert.deepEqual(listed.map(e => e.name), ['inner.txt'], 'the listing of a directory held decomposed failed by its NFC name');
+    // The REST read door finds the member that holds the path before it lists: it must find a folder under its held spelling too.
+    const rest = await restGet(DIR);
+    assert.equal(rest.code, 200, `the REST listing of a directory held decomposed answered ${rest.code} by its NFC name`);
+    assert.deepEqual(rest.json?.entries?.map(e => e.name), ['inner.txt']);
   });
 });

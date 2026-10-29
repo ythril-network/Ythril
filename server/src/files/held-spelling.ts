@@ -21,8 +21,9 @@
  * It lives apart from `sandbox.ts` because it asks the disk through the stored-bytes door (`lstatIfPresent`), which imports the sandbox.
  */
 import fsp from 'node:fs/promises';
+import type { Stats } from 'node:fs';
 import path from 'node:path';
-import { heldFileAt, fileKeyOf, peerFileKey, resolveSafePathChecked, spaceRoot } from './sandbox.js';
+import { heldFileAt, fileKeyOf, peerFileKey, resolveSafePath, resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { bytesPresent, lstatIfPresent, isMissingPath } from './stored-bytes.js';
 
 /**
@@ -113,6 +114,25 @@ export async function storedDirOf(spaceId: string, userPath: string): Promise<st
   if (held === null) return abs;
   const there = await lstatIfPresent(held.abs);
   return there !== null && there.isDirectory() ? held.abs : abs;
+}
+
+/**
+ * What a caller's path names in `spaceId` for a READ, file or directory: its stat, and `heldAbs` when it is held under another spelling of the
+ * path (else `null`: the NFC resolution is where it is), or `null` when nothing is under any spelling. The one question the REST read door asks
+ * of each member before it lists or streams.
+ *
+ * ## What it prevents
+ *
+ * The read door accepted a held spelling for a file only, so a folder held under a decomposed name answered 404 on REST while MCP `list_dir`,
+ * which lists through {@link storedDirOf}, listed it: the two doors gave different answers for one folder.
+ */
+export async function heldEntryOf(spaceId: string, userPath: string): Promise<{ stat: Stats; heldAbs: string | null } | null> {
+  // `resolveSafePath` refuses a path that leaves the space by THROWING, so it is called inside the async step: a refused path is "nothing here".
+  const nfc = await (async () => fsp.stat(resolveSafePath(spaceId, userPath)))().catch(() => null);
+  if (nfc !== null) return { stat: nfc, heldAbs: null };
+  const held = await heldSpellingOf(spaceId, userPath).catch(() => null);
+  const stat = held === null ? null : await fsp.stat(held.abs).catch(() => null);
+  return held !== null && stat !== null ? { stat, heldAbs: held.abs } : null;
 }
 
 /** Whether bytes are held for the path a caller named, under any spelling of it ({@link storedAbsOf}): `bytesPresentAt` for a file's act. */
