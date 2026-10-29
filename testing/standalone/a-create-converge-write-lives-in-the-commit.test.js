@@ -93,6 +93,7 @@ const EXEMPT = {
   // The edge and link halves of the merge's relink, moved out so Review's fork resolve calls the same code (`brain/relink-references.ts`).
   'server/src/brain/relink-references.ts:relinkEdgesOfRecord': 'relink: moves the edges of a record that is deleted in favour of another onto it, in place where the re-key declines; never a create or a converge',
   'server/src/brain/relink-references.ts:relinkLinksOfRecord': 're-key of the links of a record that is deleted in favour of another: delete + insert under the new id, never a create or a converge',
+  'server/src/brain/links.ts:removeFileLinkRowsLocally': 'the re-key of a legacy file row (Q-413): removes link rows this instance kept under an id no door reads, with no tombstone; a local removal, never a create or a converge',
   'server/src/brain/edge-rekey.ts:rekeyEdges': 're-key: moves an edge to a new identity, delete + insert',
   'server/src/files/rekey-rows.ts:rekeyRows': 're-key of the rows of a file move (file rows, derived rows, jobs): delete + insert in the caller transaction, never a create or a converge',
   'server/src/brain/chrono-redaction.ts:redactLapsedChronoContent': 'redaction: a retention schedule clears content',

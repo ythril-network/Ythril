@@ -28,18 +28,16 @@
  * back off, when the marker that would have finished the move is finally cleared.
  */
 import { reconcileLinkRows } from '../brain/write-plan/commit.js';
-import { linkClassesFrom, linksStartingFrom, type LinkEnd } from '../brain/link-adjacency.js';
+import { fileLinksWithAuthors, linkClassesFrom, linksStartingFrom, type LinkEnd } from '../brain/link-adjacency.js';
 import { removeLinksFromMany } from '../brain/links.js';
 import { missingRefs } from '../brain/entity-refs.js';
 import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
-import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { admitSpaceWrite } from '../spaces/space-write-gate.js';
 import { inChunks } from '../util/chunks.js';
 import { authorRef } from '../config/author.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import type { AuthorRef, LinkDoc } from '../config/types.js';
+import type { AuthorRef } from '../config/types.js';
 
 /** A file whose links move: its id now and the id it is to have. */
 export interface LinkMove { from: string; to: string }
@@ -111,10 +109,7 @@ export async function retireLinks(spaceId: string, froms: readonly string[]): Pr
  */
 export async function carryLinksToKey(spaceId: string, moves: readonly LinkMove[]): Promise<void> {
   for (const part of inChunks([...moves], READ_CHUNK)) {
-    const rows = await col<LinkDoc>(spaceCollection(spaceId, 'links')).find(
-      asFilter<LinkDoc>({ spaceId, fromKind: 'file', from: { $in: part.map(m => m.from) } }),
-      { projection: { from: 1, to: 1, toKind: 1, author: 1 } },
-    ).toArray() as Array<Pick<LinkDoc, 'from' | 'to' | 'toKind' | 'author'>>;
+    const rows = await fileLinksWithAuthors(spaceId, part.map(m => m.from));
     const byAuthor = new Map<string, { to: string; author: AuthorRef; targets: Targets }>();
     for (const row of rows) {
       if (!CLASSES.includes(row.toKind)) continue;
@@ -131,24 +126,6 @@ export async function carryLinksToKey(spaceId: string, moves: readonly LinkMove[
       from: g.to, fromKind: 'file' as RefKind, desired: g.targets, author: g.author, minted: false,
     })), { additive: true });
   }
-}
-
-/**
- * Remove the link rows of old file ids from THIS instance's collection, with NO tombstone: what a re-key does with the links of a legacy row
- * that was carried (they are at the key now) or that did not survive (it lost to the row at its key, or a held tombstone shadows it).
- *
- * ## What it prevents
- *
- * {@link retireLinks} writes a tombstone per link, and a tombstone is an instruction to every peer: a re-key that retired through it told the
- * network to delete links another instance wrote, from housekeeping nobody asked for ("My instance = my data": nothing this instance does
- * decides what another holds). The rows are only where this instance kept them under an id no door reads any more. Only the rows FROM
- * the given ids go, and only file-sourced ones.
- */
-export async function dropLinkRowsLocally(spaceId: string, froms: readonly string[]): Promise<void> {
-  const links = col<LinkDoc>(spaceCollection(spaceId, 'links'));
-  await admitSpaceWrite(spaceId, 'links', async () => {
-    for (const part of inChunks([...froms], READ_CHUNK)) await links.deleteMany(asFilter<LinkDoc>({ spaceId, fromKind: 'file', from: { $in: part } }));
-  });
 }
 
 /**

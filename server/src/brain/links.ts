@@ -44,6 +44,7 @@ import { reconcileLinkRows } from './write-plan/commit.js';
 import { linkLabel, linkIdFor } from './link-id.js';
 import { LINK_CLASSES, linkClassesFrom, linksStartingFrom, fileLinksThisInstanceWrote, legacyField } from './link-adjacency.js';
 import { removeWithTombstones } from './tombstones.js';
+import { admitSpaceWrite } from '../spaces/space-write-gate.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { assertRefs, missingRefs, missingRefsRefusal, ReferenceRefusal } from './entity-refs.js';
@@ -252,6 +253,24 @@ export async function removeFileLinksThisInstanceWrote(
     removed += rows.length;
   }
   return removed;
+}
+
+/**
+ * Remove the link rows FROM these file ids from THIS instance's collection, with NO tombstone: the one removal in this module that tells nobody. It is the
+ * re-key of a legacy file row's (`files/legacy-file-rekey.ts`, Q-413), whose links were carried to the row's key or did not survive with it.
+ *
+ * ## What it prevents
+ *
+ * Every other remover here writes a tombstone per link, and a tombstone is an instruction to every peer. A re-key is housekeeping nobody asked for
+ * that repairs where THIS instance keeps a row under an id no door reads any more, and a re-key that retired its links through
+ * {@link removeLinksFromMany} told the network to delete links another instance wrote ("My instance = my data": nothing this instance does decides
+ * what another holds). Only the rows FROM the given ids go, and only file-sourced ones. A caller that means a user's removal asks one of the others.
+ */
+export async function removeFileLinkRowsLocally(spaceId: string, froms: readonly string[]): Promise<void> {
+  const links = col<LinkDoc>(spaceCollection(spaceId, 'links'));
+  await admitSpaceWrite(spaceId, 'links', async () => {
+    for (const part of inChunks([...froms], READ_CHUNK)) await links.deleteMany(asFilter<LinkDoc>({ spaceId, fromKind: 'file', from: { $in: part } }));
+  });
 }
 
 /** Every class a record of this kind can hold, each set to empty — "remove all of this record's links". */
