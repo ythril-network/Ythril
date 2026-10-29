@@ -79,11 +79,13 @@ export interface ToolCaller {
   oidcSubject: string | null;
   /** Which door. Recorded in the audit trail so the transport stays recoverable; changes nothing else. */
   transport: 'mcp' | 'rest';
+  /** The REST path the call came in by, recorded as the row's `path` (a classic route's own, not `/api/<tool>`). Set by `restToolCaller`. */
+  routePath?: string;
   /**
-   * The REST request this call serves is audited by a `ROUTE_RULES` row already (`routeAuditsRequest`), so the tool door writes
-   * no row of its own: one call, one row (Q-444). Set only by `restToolCaller`.
+   * Called when the tool door has decided this call's audit row, so the route rule of the REST request it serves writes none:
+   * one call, one row, and the row that knows the space (Q-444). Set by `restToolCaller`.
    */
-  auditedByRoute?: boolean;
+  onAudited?: () => void;
 }
 
 export interface ToolCallOutcome {

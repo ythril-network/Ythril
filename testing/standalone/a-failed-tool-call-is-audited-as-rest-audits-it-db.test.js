@@ -297,8 +297,9 @@ describe('a failed tool call is audited as REST audits its twin', { skip }, () =
 
   describe('(h) a REST route that dispatches a tool and is audited by its own route rule leaves one row, not two', () => {
     // `POST /api/brain/recall`, `/similar` and `/:space/traverse` run their tool through `callTool` with `restToolCaller`, and
-    // `ROUTE_RULES` audits the same paths: each call wrote the route's row AND the tool's. Which writes it is decided from the
-    // route table the middleware reads, so a route rule added or removed later moves the row and never doubles it.
+    // `ROUTE_RULES` audits the same paths: each call wrote the route's row AND the tool's. The one row is the TOOL's, under the
+    // route's path: it knows the space the body named (the route rule of `/api/brain/similar` has no space to read), and a
+    // version that kept the route's row instead left recall's row with no space at all (lens review of dea393b60).
     let server, port, restToolCaller, callTool, n = 0;
     before(async () => {
       ({ restToolCaller } = await import('../../server/dist/api/rest-tool-caller.js'));
@@ -325,16 +326,34 @@ describe('a failed tool call is audited as REST audits its twin', { skip }, () =
         assert.equal(r.status, status, await r.text());
         const rows = (await settledRows()).get(`failedtoolaudit-classic-${n}`) ?? [];
         assert.equal(rows.length, 1, `one call left ${rows.length} rows: ${JSON.stringify(rows.map(x => [x.path, x.operation, x.status]))}`);
-        assert.deepEqual([rows[0].path, rows[0].operation, rows[0].status], ['/api/brain/similar', 'brain.similar', status]);
+        assert.deepEqual([rows[0].path, rows[0].operation, rows[0].status, rows[0].spaceId], ['/api/brain/similar', 'brain.similar', status, SPACE],
+          'the one row is the tool\'s, under the route\'s own path and naming the space the body named');
       });
     }
 
-    it('the generic tool door is not covered by a route rule, so the tool writes its row there', () => {
-      const req = { method: 'POST', originalUrl: '/api/similar', url: '/api/similar', ip: '127.0.0.1', authToken: { id: 'x', name: 'x', rights: door.ADMIN } };
-      assert.notEqual(restToolCaller(req).auditedByRoute, true, 'POST /api/similar is audited by no route rule, and the tool row is its only row');
-      const classic = { ...req, originalUrl: '/api/brain/similar?x=1', url: '/api/brain/similar?x=1' };
-      assert.equal(restToolCaller(classic).auditedByRoute, true, 'POST /api/brain/similar matches its route rule');
+    it('a request refused before it reaches the tool is still the route rule\'s row', async () => {
+      // No `space`-less refusal reaches here: a token with no rights is refused by `callTool` itself. What stays the middleware's is
+      // a request the tool never saw, so the handler here answers without calling it.
+      const app = express();
+      app.use((req, _res, next) => { req.authToken = { id: `failedtoolaudit-classic-${++n}`, name: 'classic', rights: door.ADMIN }; next(); });
+      app.use(auditMiddleware);
+      app.post('/api/brain/similar', (_req, res) => { res.status(429).json({ error: 'rate limited' }); });
+      const s = await listenOnLoopback(http.createServer(app));
+      try {
+        const r = await fetch(`http://127.0.0.1:${s.port}/api/brain/similar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        assert.equal(r.status, 429);
+        const rows = (await settledRows()).get(`failedtoolaudit-classic-${n}`) ?? [];
+        assert.deepEqual(rows.map(x => [x.path, x.operation, x.status]), [['/api/brain/similar', 'brain.similar', 429]]);
+      } finally { await s.close(); }
     });
+  });
+
+  it('an id the call never resolved is not copied into the row past its bound', async () => {
+    const out = await door.call('update_entity', { space: 'no-such-space', id: 'x'.repeat(100_000), name: 'n' });
+    assert.equal(out.status, 404, out.text);
+    const rows = (await settledRows()).get(out.tokenId) ?? [];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].entryId ?? null, null, `a ${rows[0].entryId?.length}-character caller text was written as the row's entryId`);
   });
 
   describe('(g) exactly one row', () => {

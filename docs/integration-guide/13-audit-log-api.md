@@ -32,7 +32,8 @@ reads, and none when it does not. The row names the space the call named, when t
 exist is not written to the log. A refusal carries **no change list** — a refused edit changed nothing, and its intended
 values would claim that it had. An unknown tool is no operation and writes nothing. A REST route that runs a tool and has
 its own audited path (`POST /api/brain/recall`, `/api/brain/similar`, `/api/brain/spaces/:spaceId/traverse`) leaves one row,
-under its own path: it used to leave a second under `/api/<tool>`.
+under its own path and naming the space its body named: it used to leave a second under `/api/<tool>`. A request such a
+route answers without reaching the tool (the rate limit, for one) is the route's row, as before.
 
 Read tools (`query`, `recall`, `traverse`, `list_*`, `read_file`, …) follow the same rule as REST reads —
 recorded only when `audit.logReads` is on, whatever status they answered. Three tools record nothing at all and say why in
