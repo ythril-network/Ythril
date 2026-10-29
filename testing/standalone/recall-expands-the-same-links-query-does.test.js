@@ -64,7 +64,7 @@ describe('the seed traversal reads links, not only edges', () => {
       'a hand-rolled entityIds query here is a sixth implementation of adjacency');
     // The other direction of the same rule: `traverseGraph` had three copies of this scan and must not keep
     // one, or the pair drifts exactly as the edge query did before `frontierEdgeQuery` existed.
-    assert.doesNotMatch(bodyOf(src('server/src/brain/edges.ts'), 'traverseGraph'), /entityIds:\s*\{\s*\$in/,
+    assert.doesNotMatch(bodyOf(src('server/src/brain/traverse-graph.ts'), 'traverseGraph'), /entityIds:\s*\{\s*\$in/,
       'the standalone traversal kept its own link query, so there are two implementations again');
   });
 

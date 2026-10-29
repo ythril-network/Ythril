@@ -26,7 +26,7 @@ import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { collectionForRefKind } from './entity-refs.js';
 import { applyProjection, type NormalisedProjection } from './projection.js';
 import { RECALL_RECORD_DIAGNOSTICS } from './recall-shape.js';
-import type { TraverseResult, TraverseNode } from './edges.js';
+import type { TraverseResult, TraverseNode } from './traverse-graph.js';
 import type { TraverseEdge } from './traverse-subgraph.js';
 import type { RefKind } from '../config/types-knowledge.js';
 

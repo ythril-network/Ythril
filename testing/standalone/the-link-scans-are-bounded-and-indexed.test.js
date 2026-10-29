@@ -120,7 +120,7 @@ describe('every link scan is bounded', () => {
     // A bound the callers do not supply is a default nobody chose. Both walks already know their cap.
     // Both traversals, since A-4 put the recall walk in its own module and this asks whether EACH passes its
     // own bound. Joined rather than read separately: the subject is the pair.
-    const edges = src('server/src/brain/edges.ts') + src('server/src/brain/recall-seed-traversal.ts');
+    const edges = src('server/src/brain/traverse-graph.ts') + src('server/src/brain/recall-seed-traversal.ts');
     for (const fn of ['traverseGraph', 'traverseFromSeeds']) {
       const body = bodyOf(edges, fn);
       const at = body.indexOf('linkedRecordsAtFrontier(');

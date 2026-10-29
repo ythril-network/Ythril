@@ -206,9 +206,9 @@ describe('recall parameters reach the UI', () => {
     // The distinction the owner drew, and the one a future edit is most likely to collapse: edges are how the
     // graph is traversed, so gating traversal on this flag would return a different set of nodes rather than a
     // smaller payload. Checked structurally — the flag may only appear where the answer is assembled.
-    const src = stripComments(readFileSync('server/src/brain/edges.ts', 'utf8'));
+    const src = stripComments(readFileSync('server/src/brain/traverse-graph.ts', 'utf8'));
     const uses = [...src.matchAll(/includeEdges/g)].length;
-    assert.ok(uses >= 2, 'includeEdges is not used in edges.ts');
+    assert.ok(uses >= 2, 'includeEdges is not used in traverse-graph.ts');
     // The SHAPE of the list is not what this pins — it gained the subgraph's edges in `Q-24` — only that
     // the flag decides between a list and an empty one, in the expression that builds the answer.
     assert.match(src, /edges: includeEdges \? \[[^\]]*\] : \[\]/,

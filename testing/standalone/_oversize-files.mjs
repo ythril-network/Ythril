@@ -597,7 +597,10 @@ export const FROZEN = {
   // `brain/held-transaction.ts` (`inHeldTransaction`), the one held transaction; the ceiling follows the file down.
   // LOWERED 376 -> 366 with bundle-30 (Q-107 part 3b): `deleteEdge`'s read, delete, retire, tombstone and emit moved
   // into `brain/edge-removal.ts` (`removeEdges`), the one remover the entity cascade uses too.
-  'server/src/brain/edges.ts': 366,
+  // LOWERED 366 -> 253 with Q-360: `traverseGraph`, its result types (`TraverseNode`, `TraverseResult`) and the link-label
+  // constants moved to `brain/traverse-graph.ts` — the walk is not edge CRUD, and the file measured 386 over its own 366
+  // before the move. The ceiling follows the file down, to what it now measures.
+  'server/src/brain/edges.ts': 253,
   /*
    * A BARREL of API response shapes, and the one entry here that is not a decomposition debt.
    *

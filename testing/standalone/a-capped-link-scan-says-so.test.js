@@ -37,10 +37,10 @@ import { bodyOf } from './_structural-window.mjs';
 
 const read = (p) => stripComments(readFileSync(p, 'utf8'));
 const FRONTIER = 'server/src/brain/link-frontier.ts';
-const EDGES = 'server/src/brain/edges.ts';
+const EDGES = 'server/src/brain/traverse-graph.ts';
 /*
- * The recall walk moved to its own module in A-4 while the standalone `traverseGraph` stayed. Read each from
- * where it lives: a gate left pointing at the old file fails several assertions at once, which reads as broken
+ * The recall walk moved to its own module in A-4 and the standalone `traverseGraph` to `traverse-graph.ts` in
+ * Q-360. Read each from where it lives: a gate left pointing at the old file fails several assertions at once, which reads as broken
  * production code rather than one moved module.
  */
 const SEEDS = 'server/src/brain/recall-seed-traversal.ts';

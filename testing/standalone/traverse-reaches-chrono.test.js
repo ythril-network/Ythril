@@ -55,7 +55,7 @@ let CHRONO_LINK_LABEL;
 
 describe('the chrono link is a first-class edge label', () => {
   before(async () => {
-    ({ CHRONO_LINK_LABEL } = await import('../../server/dist/brain/edges.js'));
+    ({ CHRONO_LINK_LABEL } = await import('../../server/dist/brain/traverse-graph.js'));
   });
 
   it('is exported and non-empty, so callers can name it', () => {
@@ -71,12 +71,12 @@ describe('traverse follows chrono.entityIds', () => {
   // Comments explain the mechanism by name, so they must not satisfy the checks that guard it.
   const strip = (t) =>
     t.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
-  // Both traversals: the standalone one stayed in `edges.ts`, the recall walk moved to its own module in A-4,
-  // and the break condition this pins has to be right in both. `edge-id.ts` is here because `edges.ts` is
-  // frozen at its size and `syntheticEdgeId` went there in `Q-24` — the id format is a fact about edges
+  // Both traversals: the standalone one lives in `traverse-graph.ts` (it left `edges.ts` in Q-360), the recall walk
+  // in its own module since A-4, and the break condition this pins has to be right in both. `edge-id.ts` is here
+  // because `edges.ts` was frozen at its size and `syntheticEdgeId` went there in `Q-24` — the id format is a fact about edges
   // rather than about either walk, which is what its own docblock had been saying while it sat in the
   // walk's file. A gate reading only the two walks would have reported the id rule clean about nothing.
-  const code = strip(read('server/src/brain/edges.ts') + read('server/src/brain/recall-seed-traversal.ts')
+  const code = strip(read('server/src/brain/traverse-graph.ts') + read('server/src/brain/recall-seed-traversal.ts')
     + read('server/src/brain/edge-id.ts'));
 /*
  * The node RENDERING moved out of the walk in 5.0 and this gate has to follow it.

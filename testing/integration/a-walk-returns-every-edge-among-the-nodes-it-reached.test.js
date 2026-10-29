@@ -29,7 +29,7 @@
  *
  * ## BOTH walks, because there are two and they have diverged before
  *
- * `traverseGraph` in `edges.ts` and the seed expansion in `recall-seed-traversal.ts` are separate BFS
+ * `traverseGraph` in `traverse-graph.ts` and the seed expansion in `recall-seed-traversal.ts` are separate BFS
  * implementations of one rule, and the reporter reproduced the identical gap through each. That file already
  * carries the scar of the last time: *"One rule, two implementations, and the one reachable from a search
  * had the weaker."* A gate covering one tool would have a title claiming the walk and a body checking half

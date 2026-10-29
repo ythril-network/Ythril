@@ -16,7 +16,7 @@
  * page that delivers it — a budget over nodes alone would let a hub's hundred edges ride free.
  */
 import { applyBudget, budgetFields, resolveBudget, resolvePaging, queryInt, type BudgetRequest } from './result-budget.js';
-import type { TraverseResult } from './edges.js';
+import type { TraverseResult } from './traverse-graph.js';
 
 export interface TraversePageRequest extends BudgetRequest {
   skip?: unknown;
