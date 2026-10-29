@@ -64,7 +64,8 @@
  */
 import { moveFile, finishHalfLinkedMove, listFilesRecursive } from './files.js';
 import { holdJobsForMove, releaseMoveHold, extendMoveHold, markSpaceMayHaveWork, rekeyJobsForMove } from './media/job-queue.js';
-import { kindAt, movedId, movedPairs, movedSidecars, sidecarsOf, type PathKind } from './moved-paths.js';
+import { movedId, movedPairs, sidecarsOf, type PathKind } from './moved-paths.js';
+import { kindAt, movedSidecars } from './sidecar-disk.js';
 import { removeTree } from './remove-tree.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresentAt, isOneNameUnderTwoSpellings } from './stored-bytes.js';

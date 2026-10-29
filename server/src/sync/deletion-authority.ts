@@ -49,7 +49,7 @@ import { getConfig } from '../config/loader.js';
 import { isDirectionalNetwork, isUpstreamPeer, upstreamOf } from '../networks/network-spaces.js';
 import { networksHolding } from '../spaces/wipe-vote.js';
 import { peersReachingOnlyByToken } from './served-watermark.js';
-import { tombstoneGoverns } from './upsert-plan.js';
+import { tombstoneGoverns } from './held-tombstone-rules.js';
 import { isArrivedPlaceholder } from '../files/file-meta.js';
 
 /**

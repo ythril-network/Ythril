@@ -47,7 +47,8 @@ import type { LocalLanding } from '../sync/record-position-stream.js';
 import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
 import { jobIdsOwnedBy } from './media/job-queue.js';
 import { cacheEntryBytesOf } from './path-keyed-cache.js';
-import { belongsTo, idAfterMove, isAtOrUnder, movedRoot, parentOfSidecar, sidecarsOwnedBy, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
+import { belongsTo, idAfterMove, isAtOrUnder, movedRoot, parentOfSidecar, CONVERTED_ROOT, EXTRACTED_ROOT, type PathKind } from './moved-paths.js';
+import { sidecarsOwnedBy } from './sidecar-disk.js';
 
 /** One row a move carries. */
 export interface PlannedRow {

@@ -180,7 +180,7 @@ describe('every door plans by this accept, and the writer applies it only at the
 
 describe('one accept rule: isNewerCopy', () => {
   it('strictly newer; nothing held is beaten by anything; a seq-less copy beats nothing held at a seq', async () => {
-    const { isNewerCopy } = await import('../../server/dist/sync/upsert-plan.js');
+    const { isNewerCopy } = await import('../../server/dist/sync/held-tombstone-rules.js');
     assert.deepEqual([isNewerCopy(5, 4), isNewerCopy(5, 5), isNewerCopy(4, 5)], [true, false, false]);
     assert.deepEqual([isNewerCopy(0, undefined), isNewerCopy(undefined, undefined), isNewerCopy(undefined, 0)], [true, true, false]);
   });

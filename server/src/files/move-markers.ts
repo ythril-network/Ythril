@@ -40,7 +40,8 @@ import { keyedLock } from '../util/keyed-lock.js';
 import { removeConvergedLinks } from './move-links.js';
 import { isTheMovedBytes, movedBytesOf, somethingOfTheFileIsAt } from './move-marker-reads.js';
 import { fileLinkSourcesOf } from '../brain/link-adjacency.js';
-import { kindAt, moveKey, movedPairs, parentOfSidecar } from './moved-paths.js';
+import { moveKey, movedPairs, parentOfSidecar } from './moved-paths.js';
+import { kindAt } from './sidecar-disk.js';
 import {
   ask, tombstonesAtPaths, tombstonesOf, type FileTombstoneQuery, type FileTombstoneQuerySample, type MoveMarker, type StoredFileTombstone,
 } from './tombstone-store.js';
