@@ -69,6 +69,7 @@ import { kindAt, movedSidecars } from './sidecar-disk.js';
 import { removeTree } from './remove-tree.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { bytesPresentAt, isOneNameUnderTwoSpellings } from './stored-bytes.js';
+import { bytesHeldAt } from './held-spelling.js';
 import { actUnderPendingTombstones, pendingAmong, settleBegunMove, writePendingFileTombstones } from './tombstones.js';
 import { abandonMove, forgetFinishedMove, moveIsOwed, moveMarkerOf } from './move-markers.js';
 import { bytesIdentityAt, pairOnDisk } from './move-marker-reads.js';
@@ -410,7 +411,7 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
   await adoptLegacyRowsUnder(spaceId, src);
   await adoptLegacyRowsUnder(spaceId, dst);
   await runMoveOnce(spaceId, src, dst, async () => {
-    if (!(await bytesPresentAt(spaceId, src))) {
+    if (!(await bytesHeldAt(spaceId, src))) {   // under whichever spelling the bytes are held (Q-581)
       await finishOrRefuse(spaceId, src, dst);
     } else {
       assertNotMovedIntoItself(spaceId, src, dst);

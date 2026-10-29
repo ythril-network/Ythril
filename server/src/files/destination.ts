@@ -32,6 +32,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DestinationExists, FileSystemFault, PathBlocked, fileActAnswerOf } from './act-answers.js';
 import { fileKeyOf, resolveSafePathChecked, spaceRoot } from './sandbox.js';
+import { storedAbsOf } from './held-spelling.js';
 import { CONVERTED_ROOT, isAtOrUnder } from './moved-paths.js';
 import { kindAt, movedSidecars, sidecarsOwnedBy } from './sidecar-disk.js';
 import { bytesPresentAt, destinationStateAt, isMissingPath, isTmpStepFailure, lstatIfPresent, type DestinationState } from './stored-bytes.js';
@@ -99,7 +100,7 @@ export function assertNotMovedIntoItself(spaceId: string, src: string, dst: stri
  * tombstones, which import it.
  */
 export async function destinationStateOf(spaceId: string, src: string, dst: string, { begun }: { begun: boolean }): Promise<DestinationState> {
-  const srcAbs = await resolveSafePathChecked(spaceId, src);
+  const srcAbs = await storedAbsOf(spaceId, src);   // the source's bytes under whichever spelling they are held (Q-581)
   const dstAbs = await resolveSafePathChecked(spaceId, dst);
   return destinationStateAt(srcAbs, dstAbs, { begun }).catch((err: unknown) => { throw fsRefusalOf(err, [src, dst], 'move'); });
 }
