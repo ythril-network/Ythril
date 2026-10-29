@@ -11,6 +11,7 @@ import { readAfterPosition, type PositionStart, type PositionRead } from '../uti
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { TOMBSTONE_COLLECTION, type BrainCollection } from '../config/types-knowledge.js';
 import { admitSpaceWrite } from '../spaces/space-write-gate.js';
+import { inHeldTransaction } from './held-transaction.js';
 
 /*
  * A tombstone a PEER delivered is applied by `applyPeerTombstones` (`sync/tombstone-apply.ts`), not here: this
@@ -151,6 +152,12 @@ function familiesOf(tombs: readonly IssuedTombstone[]): BrainCollection[] {
  * It stamps the tombstones BEFORE it deletes (`stampTombstones`), so a row whose version is at the ceiling refuses the whole removal with
  * `record_version_at_ceiling` and nothing is half deleted — the forgettable half, inside. A caller that stamps its tombstones together with
  * other rows of one write (the edge re-key: every tombstone below every insert) passes the `versions` it took.
+ *
+ * **The delete and its tombstone land together, whoever calls it (`Q-313`).** Given a `session` the caller's transaction holds both. Given none, each
+ * chunk opens its OWN held transaction (`inHeldTransaction`) that deletes the chunk's rows and writes the chunk's tombstones: before, the session-less
+ * form ran every delete and THEN the tombstones as separate writes, so a tombstone the store refused left rows gone here that every peer still held, and
+ * the next pull brought them back. The transaction is inside, not the callers' to remember: the link reconcile, the file-link remover and the
+ * fork remover reach it without one. A failure part-way leaves the chunks before it removed, each with its tombstones, and the rest untouched.
  */
 export async function removeWithTombstones(
   spaceId: string, part: SpacePart, tombs: readonly IssuedTombstone[],
@@ -160,10 +167,24 @@ export async function removeWithTombstones(
   const versions = given ?? await stampTombstones(spaceId, tombs, session ? { session } : {});
   await admitSpaceWrite(spaceId, familiesOf(tombs), async () => {
     const coll = col<{ _id: string }>(spaceCollection(spaceId, part));
-    for (const chunk of inChunks(tombs, ROWS_PER_BULK_COMMAND)) {
-      await coll.deleteMany(asFilter<{ _id: string }>(andPredicates({ _id: { $in: chunk.map(t => t._id) } }, filter) as never),
-        session ? { session } : {});
+    const deleteRows = (chunk: readonly IssuedTombstone[], s?: ClientSession) =>
+      coll.deleteMany(asFilter<{ _id: string }>(andPredicates({ _id: { $in: chunk.map(t => t._id) } }, filter) as never), s ? { session: s } : {});
+    if (session) {
+      for (const chunk of inChunks(tombs, ROWS_PER_BULK_COMMAND)) await deleteRows(chunk, session);
+      await writeTombstones(spaceId, tombs, versions, session);
+      return;
     }
-    await writeTombstones(spaceId, tombs, versions, session);
+    let at = 0;
+    for (const chunk of inChunks(tombs, ROWS_PER_BULK_COMMAND)) {
+      const chunkVersions = versions.slice(at, at + chunk.length);
+      at += chunk.length;
+      await inHeldTransaction(spaceId, `${part}.remove`, async (s) => {
+        await deleteRows(chunk, s);
+        await writeTombstones(spaceId, chunk, chunkVersions, s);
+      }, {
+        // A commit whose answer was lost may have landed: it did when none of the chunk's rows is stored any more (under the filter that narrowed the delete).
+        landed: async () => (await coll.countDocuments(asFilter<{ _id: string }>(andPredicates({ _id: { $in: chunk.map(t => t._id) } }, filter) as never), { limit: 1 })) === 0,
+      });
+    }
   });
 }

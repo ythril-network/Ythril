@@ -62,7 +62,7 @@ const reasoned = (reason, keys) => Object.fromEntries(keys.map(k => [`server/src
 /** Design section 8's writer table. A writer here is not an ordinary edit of a record's body. */
 const EXEMPT = {
   ...reasoned('delete is allowed (D4): a fork alone is removed with a tombstone and nothing else', [
-    'brain/chrono.ts:deleteChrono', 'brain/entities.ts:deleteEntity', 'brain/fact.ts:deleteFact', 'brain/tombstones.ts:removeWithTombstones',
+    'brain/tombstones.ts:removeWithTombstones',
   ]),
   ...reasoned('arrival is one of the four ways a fork changes, or a peer\'s deletion, or the local mark of a decline', [
     'sync/arrivals.ts:writeArrivals', 'sync/tombstone-apply.ts:applyPeerTombstones',

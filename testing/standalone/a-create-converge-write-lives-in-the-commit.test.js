@@ -76,13 +76,11 @@ const CREATE_CONVERGE_WRITERS = [
 const EXEMPT = {
   // update / delete paths keep their own write (Design v3 item 1)
   'server/src/brain/fact.ts:updateFact': 'update path: a partial edit of one existing fact, not a create/converge',
-  'server/src/brain/fact.ts:deleteFact': 'delete path',
   'server/src/brain/entities.ts:updateEntityById': 'update path',
-  'server/src/brain/entities.ts:deleteEntity': 'delete path',
   'server/src/brain/chrono.ts:updateChrono': 'update path',
-  'server/src/brain/chrono.ts:deleteChrono': 'delete path',
   'server/src/brain/edges.ts:updateEdgeById': 'update path',
-  // `deleteEdge` and the entity cascade both remove edges through the one remover (bundle-30, Q-107 part 3b).
+  // The three per-kind deleters, `deleteEdge` and the entity cascade all remove through the one remover, `removeRecords` (Q-313; the edge's
+  // since bundle-30, Q-107 part 3b), so none of them writes a record collection itself.
   // Re-anchored (bundle-30 I6, C11): the delete moved into the one remover, which the edge removal's chunk, the merge's
   // duplicate edges and moved links, and the re-key's old rows all call.
   'server/src/brain/tombstones.ts:removeWithTombstones': 'delete path: rows deleted by id, each with its tombstone',

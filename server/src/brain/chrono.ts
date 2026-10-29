@@ -1,9 +1,9 @@
-import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js';
+import { reconcileLinks, assertDesiredLinks } from './links.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
-import { writeTombstone, stampTombstones } from './tombstones.js';
-import { refuseForkEdit, removeForksOf } from './forks.js';
+import { removeRecords } from './record-removal.js';
+import { refuseForkEdit } from './forks.js';
 import { listReadMaxMs } from './tag-filter.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
@@ -19,7 +19,7 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { classifyChronoUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { mergePropertiesOrKeep } from './merge-fields.js';
 import { applyDeleteFields } from './delete-fields.js';
-import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
+import { enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { ChronoEntry } from '../config/types.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
@@ -587,30 +587,6 @@ export async function deleteChrono(
   chronoId: string,
   actor?: WebhookActor,
 ): Promise<boolean> {
-  assertSpaceTakesWrites(spaceId, 'chrono');
-  const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
-    .findOne(asFilter<ChronoEntry>({ _id: chronoId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  // The tombstone's version is taken BEFORE the record goes: an entry whose version is at the ceiling cannot be deleted by this
-  // instance, and that refusal must leave the record where it is (`record_version_at_ceiling`).
-  const tombstone = { _id: chronoId, type: 'chrono' as const, originalSeq: existing?.seq };
-  const versions = await stampTombstones(spaceId, [tombstone]);
-  // Its unresolved versions go first, each behind a tombstone issued here (Q-624 §7): a refusal there leaves the entry and its forks both standing.
-  if (existing) await removeForksOf(spaceId, 'chrono', [chronoId]);
-  // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and link cascade are admitted writers of their own.
-  const result = await admitSpaceWrite(spaceId, 'chrono', () => col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).deleteOne({
-    _id: chronoId,
-    spaceId,
-  }));
-  if (result.deletedCount === 0) return false;
-  // The record is gone, so its embed job has nothing left to embed. Eager rather than left to the worker: the
-  // worker only claims `pending` jobs, so a job that had already gone terminal `failed` would never be claimed
-  // again and would outlive the record for ever — visible since #861 as a permanent failure naming a recordId
-  // that 404s.
-  await retireEmbedJob(spaceId, 'chrono', chronoId);
-
-  await writeTombstone(spaceId, tombstone, versions);
-  // The cascade — see `removeLinksFrom`. Links pointing AT this entry belong to the readers' slice.
-  await removeLinksFrom(spaceId, chronoId, 'chrono');
-  if (actor) emitWebhookEvent({ event: 'chrono.deleted', spaceId, entry: { _id: chronoId }, ...actor });
-  return true;
+  // The fork removal, the delete and its tombstone commit together (`removeRecords`, `Q-313`); the embed job, the links FROM the entry and the webhook follow the commit.
+  return (await removeRecords(spaceId, 'chrono', [chronoId], actor)).has(chronoId);
 }

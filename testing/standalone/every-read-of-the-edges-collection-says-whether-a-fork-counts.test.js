@@ -91,7 +91,7 @@ const EXEMPT = {
     'sync/tombstone-apply.ts:applyPeerTombstones', 'sync/engine.ts:runSyncForMember', 'util/position-keyset.ts:readAfterPosition',
     'sync/record-position-stream.ts:positionFloor', 'sync/positions-owed.ts:carryRows', 'sync/positions-rollback.ts:rollBackPositions',
     'sync/delivered-by-backfill.ts:stampCollection', 'util/version-stamp.ts:heldTermsOf', 'util/version-stamp.ts:highestVersionBelowCap',
-    'brain/merkle.ts:collectionLeaves', 'brain/edge-removal.ts:removeEdgeChunk', 'spaces/lifecycle.ts:wipeSpaceUnqueued',
+    'brain/merkle.ts:collectionLeaves', 'brain/record-removal.ts:removeChunk', 'spaces/lifecycle.ts:wipeSpaceUnqueued',
     'spaces/lifecycle.ts:initSpace', 'spaces/record-count.ts:spaceRecordCount', 'spaces/schema-validate-door.ts:walkStored',
     'brain/embed-record.ts:embedStoredRecord', 'brain/suppression-sweep.ts:sweepSuppressedVectors', 'brain/ttl-sweep.ts:expiredPage',
     'brain/ttl-sweep.ts:isStored', 'brain/queue-embed-sweep.ts:countUnswept', 'brain/queue-embed-sweep.ts:queueEmbedSweep',
@@ -121,6 +121,8 @@ const EXEMPT = {
     'api/contradictions.ts:answerAlreadyResolved', 'brain/structured-claims.ts:readStructuredClaims',
     'brain/write-connections.ts:connectionSubject', 'brain/entity-refs.ts:missingRefs', 'sync/linkage-check.ts:missingTargets',
     'brain/links.ts:sourceDoc',
+    // The read-back of a removal whose commit reply was lost: by the `_id`s the removal named, so a fork row (a different id) is never counted.
+    'brain/tombstones.ts:removeWithTombstones',
   ]),
   // ── it names a computed collection that is never edges, or reads rows that no fork can be
   ...reasoned('its collection name is computed from a record kind that is not `edge` (an edge cannot be the endpoint of an edge or a link), or it reads rows no fork can be', [

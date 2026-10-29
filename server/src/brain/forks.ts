@@ -187,7 +187,7 @@ export async function removeForksOf(
 }
 
 /** After the removal committed: the forks' embed jobs and the links they start, each failure said once and never thrown (the removal stands). */
-async function settleRemovedForks(spaceId: string, kind: ForkKind, ids: readonly string[]): Promise<void> {
+export async function settleRemovedForks(spaceId: string, kind: ForkKind, ids: readonly string[]): Promise<void> {
   try { await retireEmbedJobs(spaceId, kind, ids); } catch (err) {
     log.warn(`forks: ${ids.length} removed ${kind} forks in '${peerText(spaceId)}' kept their embed jobs (the worker retires them): ${peerText(err)}`);
   }

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Brain:** a deleted fact, chrono entry, entity or link is removed together with its tombstone, so a tombstone write that fails no longer leaves a deletion no peer hears of; the delete fails and the record stays. This covers the delete doors, the TTL sweep, the link reconcile and the removal of a file's links.
 - **Brain:** merging entity A no longer moves the edges of a fact or chrono entry that holds A's id, and resolving a fork of a fact or chrono entry no longer moves the edges of an entity holding its id: an edge end is matched by kind as well as id, by the merge plan, its bound, the relink and the Review fork count alike.
 
 ## [6.1.0] — 2026-10-29

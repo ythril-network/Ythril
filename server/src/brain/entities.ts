@@ -3,8 +3,8 @@ import { type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
-import { writeTombstone, stampTombstones } from './tombstones.js';
-import { refuseForkEdit, removeForksOf } from './forks.js';
+import { removeRecords } from './record-removal.js';
+import { refuseForkEdit } from './forks.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
@@ -14,7 +14,7 @@ import { classifyEntityUpsertAgainst, recordAfterPatch, resultingEntityType, Sch
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
-import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
+import { enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { LINK_CLASSES, assertLinkRecords, linksPointingAt, docsFromCollection, type LinkClass }
   from './link-adjacency.js';
 import type { RefKind } from '../config/types-knowledge.js';
@@ -367,32 +367,8 @@ export async function deleteEntity(
   entityId: string,
   actor?: WebhookActor,
 ): Promise<boolean> {
-  assertSpaceTakesWrites(spaceId, 'entities');
-  const existing = await col<EntityDoc>(spaceCollection(spaceId, 'entities'))
-    .findOne(asFilter<EntityDoc>({ _id: entityId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  // The tombstone's version is taken BEFORE the record goes: an entity whose version is at the ceiling cannot be deleted by this
-  // instance, and that refusal must leave the record where it is (`record_version_at_ceiling`).
-  const tombstone = { _id: entityId, type: 'entity' as const, originalSeq: existing?.seq };
-  const versions = await stampTombstones(spaceId, [tombstone]);
-  // Its unresolved versions go first, each behind a tombstone issued here (Q-624 §7): a refusal there leaves the entity and its forks both standing.
-  if (existing) await removeForksOf(spaceId, 'entity', [entityId]);
-  // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and cascades are admitted writers of their own.
-  const result = await admitSpaceWrite(spaceId, 'entities', () => col<EntityDoc>(spaceCollection(spaceId, 'entities')).deleteOne({
-    _id: entityId,
-    spaceId,
-  }));
-  if (result.deletedCount === 0) return false;
-  // The record is gone, so its embed job has nothing left to embed. Eager rather than left to the worker: the
-  // worker only claims `pending` jobs, so a job that had already gone terminal `failed` would never be claimed
-  // again and would outlive the record for ever — visible since #861 as a permanent failure naming a recordId
-  // that 404s.
-  await retireEmbedJob(spaceId, 'entity', entityId);
-
-  await writeTombstone(spaceId, tombstone, versions);
-  // Erasure has to reach the biometric copy too — see unlabelFacesForEntities.
-  await unlabelFacesForEntities(spaceId, [entityId]);
-  if (actor) emitWebhookEvent({ event: 'entity.deleted', spaceId, entry: { _id: entityId }, ...actor });
-  return true;
+  // The fork removal, the delete and its tombstone commit together (`removeRecords`, `Q-313`); the embed job, the face labels (`unlabelFacesForEntities`) and the webhook follow the commit.
+  return (await removeRecords(spaceId, 'entity', [entityId], actor)).has(entityId);
 }
 
 /**

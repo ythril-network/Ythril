@@ -4,7 +4,7 @@ import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
 import { inHeldTransaction } from './held-transaction.js';
-import { removeEdges } from './edge-removal.js';
+import { removeRecords } from './record-removal.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
@@ -155,11 +155,11 @@ export async function listEdges(
 
 /**
  * Delete an edge by ID, with its tombstone, its embed job retired and `edge.deleted` emitted — through
- * `removeEdges` (`brain/edge-removal.ts`), the one remover, so the delete and the tombstone commit together: two
+ * `removeRecords` (`brain/record-removal.ts`), the one remover, so the delete and the tombstone commit together: two
  * separate writes left an edge gone here and alive on every peer when the tombstone failed.
  */
 export async function deleteEdge(spaceId: string, edgeId: string, actor?: WebhookActor): Promise<boolean> {
-  return (await removeEdges(spaceId, [edgeId], actor)).has(edgeId);
+  return (await removeRecords(spaceId, 'edge', [edgeId], actor)).has(edgeId);
 }
 
 /** Find an edge by exact ID */
