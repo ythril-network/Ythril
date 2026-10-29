@@ -145,7 +145,11 @@ function fill(routePath) {
  * `wait`). Derived, so a flag added to a route next month is probed the day it is read.
  */
 function flagsOf(source) {
-  return [...new Set([...source.matchAll(/req\.query(?:\['(\w+)'\]|\.(\w+))\s*===\s*'(?:true|1)'/g)].map(m => m[1] ?? m[2]))];
+  // Two spellings: compared inline, or handed to `resolveSyncWait`, which parses the sync triggers' `wait` for both doors
+  // since Q-468 (the inline comparison moved there, and with it the only thing this read).
+  const inline = /req\.query(?:\['(\w+)'\]|\.(\w+))\s*===\s*'(?:true|1)'/g;
+  const resolved = /resolveSyncWait\(\s*req\.query(?:\['(\w+)'\]|\.(\w+))/g;
+  return [...new Set([...source.matchAll(inline), ...source.matchAll(resolved)].map(m => m[1] ?? m[2]))];
 }
 
 /**
