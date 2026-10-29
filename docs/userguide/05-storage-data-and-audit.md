@@ -499,6 +499,11 @@ The line has the same shape and the same limit as the one above — `at=` is the
 and the gauge `ythril_file_tombstone_oldest_hold_seconds` shows it as a number per space. Seen repeatedly, file
 deletions in that space are not reaching peers.
 
+**`File tombstone clock seed failed for space …` says a deletion was stamped from the server's clock alone.** The clock normally starts above the
+highest place already handed out; when the database cannot be read for it, the deletion still goes ahead, stamped from the wall clock, which is
+safe only while that clock is not behind an earlier run. The line comes once per window, and `ythril_file_tombstone_seed_fallback_total` counts
+every such stamp per space.
+
 **`Write bound: the server did not answer … by its own deadline` names a write the database had to be told to drop.**
 A write that is stopped (`ended=timeout`) is stopped by the database at its limit; if the database has not
 answered half a second after that — it is blocked behind another session's uncommitted insert, or the request reached it

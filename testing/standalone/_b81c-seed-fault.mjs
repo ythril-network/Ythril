@@ -15,9 +15,11 @@
  *
  * @param {object} mongo  the server's `db/mongo.js` module
  * @param {string} space
+ * @param {{ field?: string, error?: Error }} [opts]  the stream's position field (`pos` for the records, `positionAt` for the file
+ *   tombstones) and what the read rejects with
  * @returns {() => void} restores the driver
  */
-export function failTheSeedRead(mongo, space) {
+export function failTheSeedRead(mongo, space, { field = 'pos', error = new Error('b81c: the seed read failed') } = {}) {
   const proto = Object.getPrototypeOf(mongo.col('probe'));
   const find = proto.find;
   proto.find = function failing(...args) {
@@ -26,8 +28,8 @@ export function failTheSeedRead(mongo, space) {
     const sort = cursor.sort.bind(cursor);
     cursor.sort = (spec, ...rest) => {
       const out = sort(spec, ...rest);
-      if (spec && typeof spec === 'object' && !Array.isArray(spec) && spec.pos === -1) {
-        out.toArray = async () => { throw new Error('b81c: the seed read failed'); };
+      if (spec && typeof spec === 'object' && !Array.isArray(spec) && spec[field] === -1) {
+        out.toArray = async () => { throw error; };
       }
       return out;
     };
