@@ -184,7 +184,7 @@ const CITED = [
   },
   {
     what: 'contradiction-scanner similarity threshold',
-    source: 'server/src/config/types.ts',
+    source: 'server/src/config/types-scanners.ts',
     code: /Default: (0\.[0-9]+)\./,
     doc: 'docs/integration-guide.md',
     text: (v) => new RegExp(`default is therefore left at ${v}`),
