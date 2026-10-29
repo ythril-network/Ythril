@@ -13,11 +13,12 @@
  *  2. MOVE and rename (REST `PATCH`, MCP `move_file`) carry the bytes it finds under that spelling to the destination: the destination holds
  *     them, no spelling of the source is left, the row follows, and the old key is tombstoned once.
  *  3. A name held under no spelling is "not found" on both acts, as before (control).
+ *  4. A directory the root's listing names under its decomposed spelling is listed by its NFC name too (the one `listDir` both doors use).
  *
  * ## Seen red
  *
  * On the base, 1 with a row: the delete answered success, published the tombstone and left the bytes on the disk (the settle read the NFC
- * path and found nothing there); 1 without a row: "not found"; 2: "not found" on both doors. 3 and the NFC controls are green on the base.
+ * path and found nothing there); 1 without a row: "not found"; 2: "not found" on both doors; 4: ENOENT on the scandir of the NFC name. 3 and the NFC controls are green on the base.
  *
  * The decomposed names are built with `normalize('NFD')`. A file system that does not keep a decomposed name cannot hold the fixture, and
  * the suite says so and skips.
@@ -174,4 +175,11 @@ describe('a listed decomposed file is deleted and moved by the name the listing 
       });
     });
   }
+
+  it('a directory held under its decomposed name is listed by its NFC name, on both doors (4)', async (t) => {
+    if (!needsDecomposed(t)) return;
+    put(path.join(DIR.normalize('NFD'), 'inner.txt'));
+    const listed = await d.files.listDir(S, DIR);
+    assert.deepEqual(listed.map(e => e.name), ['inner.txt'], 'the listing of a directory held decomposed failed by its NFC name');
+  });
 });
