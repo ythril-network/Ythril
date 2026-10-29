@@ -168,6 +168,25 @@ export class EndpointRemoved extends Error {
   }
 }
 
+/** The code of the refusal below, and of the write warning that reports the same event when the link was only part of a larger write. A constant, never a literal at a site. */
+export const LINK_TARGET_REMOVED = 'link_target_removed';
+
+/**
+ * A link was created while the entity it points at was deleted or merged away, in a `strictLinkage` space (Q-305): the same race as {@link EndpointRemoved}, for the
+ * one write whose whole job is the link (`POST /links`, `save_link`). The row was taken back (or moved with a merge), so nothing is stored under the link's id and the
+ * write is refused rather than answered with a record that is not there. `409`, `{ error, code, id }` on every door that answers a write
+ * (`connectionRefusalAnswer`; MCP carries the same body and sentence). A link written as PART of a record (a fact's `linkEntities`, a file's, inline connections)
+ * is not refused: the record stays written and the same code arrives as a warning row.
+ */
+export class LinkTargetRemoved extends Error {
+  override readonly name = 'LinkTargetRemoved';
+  readonly code = LINK_TARGET_REMOVED;
+  readonly status = 409 as const;
+  constructor(readonly id: string) {
+    super(`The entity '${id}' this link points at was deleted or merged while the link was written; the link was not kept. Read the graph again before retrying.`);
+  }
+}
+
 /**
  * A peer answered a sync request in the 5.x shape: a page with no `through`, `head` or `positions`, or a push answer without `positions: 1`. 6.0 pages
  * by position and a 5.x peer cannot be synced with by these rules, so the client THROWS this from both parsers (`sync/wire-answer.ts`); the engine ends

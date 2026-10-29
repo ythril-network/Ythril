@@ -132,6 +132,7 @@ report a conflict.
 | `400` | a `(fromKind, toKind)` pair outside the six — the error names the ones that are allowed |
 | `400` | under `strictLinkage`, either end failing to resolve |
 | `404` | the `from` record does not exist — a link hanging off nothing is the dangling half this refuses to create |
+| `409` | `link_target_removed` (`{ "error", "code", "id" }`, `id` the entity; `strictLinkage` spaces): the entity the link points at was deleted or merged between the check of the ends and the write of the row. The row was taken back (or moved with a merge), nothing is stored under this id, and no `updated` event goes out. Read the graph again before retrying. The same on MCP (`save_link`) |
 | `503` | the database could not answer while the ends were being looked up. Retryable; **never** the `404` or `400` above, which are decided only after the database has answered ([Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field)) |
 
 ---

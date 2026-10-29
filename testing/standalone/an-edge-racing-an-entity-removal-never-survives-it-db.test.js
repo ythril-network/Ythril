@@ -33,7 +33,7 @@ const nowPos = () => Date.now() * 1000;
 const HOUR_AGO = () => nowPos() - 3_600_000_000;
 
 describe('an edge or link racing an entity removal never survives it', { skip }, () => {
-  let door; let author; let entities; let merge; let cascade; let commit; let readSet; let planEdgeMod; let planFactMod; let edgeIdFor; let linkIdFor; let gone;
+  let door; let author; let entities; let merge; let cascade; let commit; let readSet; let planEdgeMod; let planFactMod; let edgeIdFor; let linkIdFor; let gone; let links; let bus; let errors; let validation;
 
   before(async () => {
     door = await openPushDoor({ suite: 'q305', spaces: [
@@ -51,6 +51,10 @@ describe('an edge or link racing an entity removal never survives it', { skip },
     planFactMod = await import('../../server/dist/brain/write-plan/plan-fact.js');
     ({ edgeIdFor } = await import('../../server/dist/brain/edge-id.js'));
     ({ linkIdFor } = await import('../../server/dist/brain/link-id.js'));
+    links = await import('../../server/dist/brain/links.js');
+    bus = await import('../../server/dist/brain/brain-events.js');
+    errors = await import('../../server/dist/util/errors.js');
+    validation = await import('../../server/dist/brain/write-validation.js');
     // Absent before Q-305: the merge cases then fail on their own line rather than the whole file failing to load.
     gone = await import('../../server/dist/brain/gone-entity-references.js').catch(() => ({ settleReferencesToRemovedEntity: () => { throw new Error('brain/gone-entity-references.ts does not exist'); } }));
   });
@@ -260,6 +264,51 @@ describe('an edge or link racing an entity removal never survives it', { skip },
       const edges = await import('../../server/dist/brain/edges.js');
       await assert.rejects(() => edges.updateEdgeById(S, id, { toKind: 'entity' }), (err) => err.code === 'endpoint_removed');
       assert.equal(await door.coll(S, 'edges').countDocuments({ to: 'file-gone' }), 0, 'the edge now ending at a gone entity is stored');
+    });
+
+    it('a link created to an entity deleted while it was written is refused 409 link_target_removed on both doors, stores nothing and sends no updated event (never a 500)', async () => {
+      await seed(S, ENT_UUID);
+      await door.coll(S, 'facts').insertOne(build.fact(S, 'fact-f', 4));
+      // The entity is deleted AFTER the reconcile's existence check and BEFORE its row write: the first write to the links collection is preceded by the delete.
+      const proto = Object.getPrototypeOf(door.coll(S, 'links'));
+      const original = proto.bulkWrite;
+      let raced = false;
+      proto.bulkWrite = async function racing(...args) {
+        if (!raced && this.collectionName === `${S}_links`) { raced = true; await door.coll(S, 'entities').deleteOne({ _id: ENT_UUID }); }
+        return original.apply(this, args);
+      };
+      const seen = [];
+      const off = bus.subscribeBrainChanges(S, ev => seen.push(ev));
+      try {
+        await assert.rejects(() => links.addLink(S, 'fact-f', 'fact', ENT_UUID, 'entity', {}), (err) => {
+          assert.equal(err.code, 'link_target_removed', `the refusal has no code (a plain ${err.name}: ${err.message})`);
+          assert.equal(err.id, ENT_UUID);
+          return true;
+        });
+        assert.ok(raced, 'the entity was never deleted mid-write: the test did not build the race');
+        await new Promise(r => setTimeout(r, 100));
+      } finally { off(); proto.bulkWrite = original; }
+      assert.deepEqual(seen.map(e => e.event), [], 'a fact.updated went out for a link that is not there');
+      assert.equal(await door.coll(S, 'links').countDocuments({ to: ENT_UUID }), 0, 'the link to the deleted entity is stored');
+      // REST and MCP answer it from the same mapper: 409, { error, code, id }.
+      const err = new errors.LinkTargetRemoved(ENT_UUID);
+      for (const a of [validation.connectionRefusalAnswer(err, 'create'), validation.writeRefusalAnswer(err, 'update')]) {
+        assert.equal(a.status, 409);
+        assert.deepEqual(a.body, { error: err.message, code: 'link_target_removed', id: ENT_UUID });
+      }
+    });
+
+    it('control: a link created to an entity that is there answers the row and sends the updated event', async () => {
+      await seed(S, ENT_UUID);
+      await door.coll(S, 'facts').insertOne(build.fact(S, 'fact-f', 4));
+      const seen = [];
+      const off = bus.subscribeBrainChanges(S, ev => seen.push(ev));
+      try {
+        const link = await links.addLink(S, 'fact-f', 'fact', ENT_UUID, 'entity', {});
+        assert.equal(link.to, ENT_UUID);
+        await new Promise(r => setTimeout(r, 100));
+      } finally { off(); }
+      assert.deepEqual(seen.map(e => e.event), ['fact.updated']);
     });
 
     it('an edge the merge\'s settle already moved to the survivor is not refused: the writer\'s check removes and reports only what it removed', async () => {

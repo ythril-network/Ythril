@@ -56,7 +56,7 @@ import { mergeTags, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
 import { WriteConflict } from './write-plan/types.js';
 import { RecordVersionAtCeiling } from './write-precondition.js';
-import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal, EndpointRemoved } from '../util/errors.js';
+import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal, EndpointRemoved, LinkTargetRemoved } from '../util/errors.js';
 import { classifyReadFailure } from './store-failure.js';
 import { tallySchemaRefusal, type SchemaRefusalDoor, type SchemaRefusalOutcome } from './schema-refusal-tally.js';
 
@@ -415,7 +415,7 @@ export function connectionRefusalAnswer(
   // A fork row named by an ordinary edit, or a re-key past the fork cap (Q-624): 409, the code beside the one sentence, on every door that asks here.
   if (err instanceof ForkRowReadOnly || err instanceof ForkCapRefusal) return { status: err.status, body: { error: err.message, code: err.code } };
   // An edge written while its entity end was deleted or merged, taken back (Q-305): 409, the code and the entity beside the one sentence, on every door that asks here.
-  if (err instanceof EndpointRemoved) return { status: err.status, body: { error: err.message, code: err.code, id: err.id } };
+  if (err instanceof EndpointRemoved || err instanceof LinkTargetRemoved) return { status: err.status, body: { error: err.message, code: err.code, id: err.id } };
   return null;
 }
 

@@ -50,6 +50,7 @@ import { inChunks } from '../util/chunks.js';
 import { assertRefs, missingRefs, missingRefsRefusal, ReferenceRefusal } from './entity-refs.js';
 import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { LinkTargetRemoved } from '../util/errors.js';
 import type { AuthorRef, LinkDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —
 // the same import every other `brain/` module that needs it uses.
@@ -398,13 +399,15 @@ export async function addLink(
   // The link's author is the SOURCE RECORD's, not the caller's — the same value the six writers pass. A
   // link belongs to the record that claims it, and a door that stamped itself instead would give one
   // connection two different authors depending on which way it happened to be created.
-  await reconcileLinks(spaceId, from, fromKind, { [toKind]: [...new Set([...existing, to])] },
+  const { takenBack } = await reconcileLinks(spaceId, from, fromKind, { [toKind]: [...new Set([...existing, to])] },
     (doc['author'] as AuthorRef) ?? NO_AUTHOR);
-  emitRecordUpdated(spaceId, fromKind, from, actor);
-
+  // The entity was deleted while the row was written and the reconcile took the row back (Q-305): nothing is stored under the link's id, and the one write
+  // whose whole job is this link is refused (`409 link_target_removed`) rather than answered with a record that is not there, and no `updated` goes out for a
+  // record that did not change. A row that is absent without being taken back was moved by a merge's settle: the link is on the survivor, not under this id.
   const link = await col<LinkDoc>(spaceCollection(spaceId, 'links'))
     .findOne(asFilter<LinkDoc>({ _id: linkIdFor(from, fromKind, to, toKind), spaceId }));
-  if (!link) throw new Error(`link ${linkIdFor(from, fromKind, to, toKind)} was not created`);
+  if (takenBack.length > 0 || !link) throw new LinkTargetRemoved(takenBack[0] ?? to);
+  emitRecordUpdated(spaceId, fromKind, from, actor);
   return link as LinkDoc;
 }
 
