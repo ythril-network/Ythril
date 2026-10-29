@@ -217,9 +217,9 @@ export async function syncFiles(
 
     // Build our manifest for comparison
     const ours = await buildFileManifest(spaceId);
-    // Keyed as the rows and the arriving keys are (`toDocId`), not by the on-disk spelling: a name stored NFD is the one file its NFC key
+    // Keyed by the entry's `path`, which IS the key (`toDocId`) the rows and the arriving keys carry, not by its on-disk spelling (`diskPath`): a name stored NFD is the one file its NFC key
     // names, where the raw spelling made it a file this instance "did not have" and fetched a second time.
-    const oursMap = new Map(ours.map(e => [toDocId(e.path), e]));
+    const oursMap = new Map(ours.map(e => [e.path, e]));
     // One read of the space's top-level rows per call: the agreed hash of each path (`syncBase.<peer>`, Q-66) and what each row
     // records of its bytes (`repairReasonOf`). Replaces the read that returned the bases alone.
     const held = await heldRowsFor(spaceId, { peerId: member.instanceId, baseKey: syncBasePath(member.instanceId) });
@@ -294,7 +294,7 @@ export async function syncFiles(
               // them as an ordinary arrival, with its true deliverer.
               // Removed where the manifest found them (`heldFileAt`): `key` is the NFC row id, and on a file system that keeps a
               // decomposed name the bytes are not at it. The record is still looked up by the same key.
-              if (await removeUnrecordedBytes(spaceId, { held: local.path }, null)) countFileArrival('pull', 'repaired_missing_row');
+              if (await removeUnrecordedBytes(spaceId, { held: local.diskPath }, null)) countFileArrival('pull', 'repaired_missing_row');
               continue;
             }
             // A row exists, so the author and deliverer it already has stay: only its size, hash and processing are brought up to date.
@@ -313,7 +313,7 @@ export async function syncFiles(
         // the write would refuse (the key above is lexical). A file this instance holds is written where its manifest found it
         // (`heldFileAt`: the on-disk spelling, which a decomposed name keeps): at the NFC key the disk check below would find nothing,
         // and a change the peer alone made would land as a conflict copy beside the one file, on every cycle.
-        const resolveTarget = async (): Promise<string> => (local ? (await heldFileAt(spaceId, local.path)).abs : await resolveSafePathChecked(spaceId, key));
+        const resolveTarget = async (): Promise<string> => (local ? (await heldFileAt(spaceId, local.diskPath)).abs : await resolveSafePathChecked(spaceId, key));
         const abs = await resolveTarget();
         // The space quota, asked BEFORE the body is fetched, on the size the manifest declares: a pull used to fetch and write
         // whatever the space held. The measurement may be a few seconds old, so the bytes this call has already written are added.
@@ -406,7 +406,7 @@ export async function syncFiles(
               // are removed (`removeUnrecordedBytes`, the one answer every door that writes bytes gives: it keeps them only when a
               // live row still names the path, an overwrite, or the lookup could not say), no base is written, and the next cycle delivers the file again with
               // its true deliverer (Q-254).
-              await removeUnrecordedBytes(spaceId, local ? { held: local.path } : key, err);
+              await removeUnrecordedBytes(spaceId, local ? { held: local.diskPath } : key, err);
               sayPullFailure(RECORD_STEP, spaceId, key, err);   // counted `record_failed` by the recorder
               continue;
             }
@@ -456,7 +456,7 @@ export async function syncFiles(
     // decideFilePush (./file-conflict.ts): a peer copy changed since that agreement is left for the peer's own pull to
     // raise as a conflict; with no agreement recorded yet, the newer file wins as before.
     if (doPush) {
-    const peerManifestMap = new Map(manifest.map(e => [e.path, e]));
+    const peerManifestMap = new Map(manifest.map(e => [toDocId(e.path), e]));
     for (const [localPath, localEntry] of oursMap) {
       if (turn && !turn.mayContinue()) break;
       // Taken from this peer a moment ago: `localEntry` predates that write, so pushing it would undo it (Q-66).
@@ -470,7 +470,7 @@ export async function syncFiles(
       if (decideFilePush(localEntry, peerManifestMap.get(localPath), bases.get(localPath), answered) === 'skip') continue;
       try {
         // The bytes are read where the manifest found them (the on-disk spelling), never at the NFC key the loop is keyed by.
-        const absPath = (await heldFileAt(spaceId, localEntry.path)).abs;
+        const absPath = (await heldFileAt(spaceId, localEntry.diskPath)).abs;
         // One request to the peer's upload door for THIS file. Whole-file body: BATCH_FETCH_TIMEOUT_MS is a control-plane budget
         // and would abort any upload slower than a minute. Same reasoning as the download above — see PEER_TRANSFER_TIMEOUT_MS.
         // What goes in it (one streamed body, or ranges under the peer's limit) is `pushStoredFile`'s to decide.

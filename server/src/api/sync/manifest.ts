@@ -32,7 +32,11 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
 
     const sinceDate = since ? new Date(since) : undefined;
     // A conflict copy or schema snapshot is this instance's own and is never offered (Q-66, sync/file-conflict.ts).
-    const manifest = (await buildFileManifest(spaceId, sinceDate)).filter(e => !isInstanceLocalFile(e.path));
+    // Exactly the four wire keys, chosen by name: `diskPath` (where THIS instance keeps the file, in the spelling its disk has) is local
+    // only and never leaves it, and `path` is the file's NFC key, so a peer asks for the same name whatever our disk keeps (Q-581).
+    const manifest = (await buildFileManifest(spaceId, sinceDate))
+      .filter(e => !isInstanceLocalFile(e.path))
+      .map(({ path, sha256, size, modifiedAt }) => ({ path, sha256, size, modifiedAt }));
     // `spaceId` is the LOCAL id this request resolved to (the alias middleware translated the network's id), so a
     // peer addresses the plain file routes by it (Q-68, `sync/space-map.ts` peerFileSpaceId).
     res.json({ manifest, spaceId });

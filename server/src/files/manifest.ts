@@ -14,6 +14,7 @@
  */
 
 import fs from 'fs/promises';
+import type { Stats } from 'fs';
 import path from 'path';
 import { sha256OfStream } from '../util/sha256-tap.js';
 import { getDataRoot } from '../config/loader.js';
@@ -24,9 +25,30 @@ import { isMissingPath, openStoredRead, StoredFileUnreadable } from './stored-by
 import { log, peerText } from '../util/log.js';
 import { noteUnreadable, clearUnreadable } from './unreadable-files.js';
 import { spillIdFromPath } from '../brain/spill-path.js';
+import { toDocId } from '../util/paths.js';
+import { reportSpaceFailure } from '../util/space-failure.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+
+/** Two spellings of one key on a file system that keeps both: said once per window per key. */
+const TWO_SPELLINGS_STEP = declareStep('File manifest: two spellings of one file');
+
+/**
+ * Which of the on-disk spellings of one key the manifest offers: the one that IS the key, else the lexicographically smallest, so the
+ * answer does not depend on the order the directory was read in. Pure.
+ */
+export function winningSpelling(key: string, spellings: readonly string[]): string {
+  return spellings.includes(key) ? key : [...spellings].sort()[0]!;
+}
 
 export interface ManifestEntry {
-  path: string;        // relative to space files root, e.g. "notes/2024.md"
+  /** The file's KEY: its path relative to the space files root, as a document id (`toDocId`, NFC), e.g. "notes/2024.md". */
+  path: string;
+  /**
+   * Where the file is on THIS instance's disk, relative to the space root, in the spelling the disk keeps (a file system that keeps a
+   * decomposed name has it NFD). LOCAL ONLY: it is never sent to a peer (`api/sync/manifest.ts` projects the wire keys) and never
+   * hashed (`brain/merkle.ts` hashes `path`), so two instances holding one file under two spellings advertise one key (Q-581).
+   */
+  diskPath: string;
   sha256: string;
   size: number;
   modifiedAt: string;  // ISO 8601
@@ -86,6 +108,8 @@ export async function buildFileManifest(
   const results: ManifestEntry[] = [];
   const seen = new Set<string>();
   const updates: HashCacheDoc[] = [];
+  /** Every file the walk found, by KEY, then by the spelling it is held under. */
+  const byKey = new Map<string, Map<string, { abs: string; stat: Stats }>>();
 
   async function walk(dir: string): Promise<void> {
     let names: string[];
@@ -115,42 +139,57 @@ export async function buildFileManifest(
         // never offered to a peer, and so never counted in the space hash either. The sweep removes it.
         if (spillIdFromPath(relPath)) continue;
         seen.add(relPath);
-        const cached = cache.get(relPath);
-        let sha256: string;
-        let plainSize: number;
-        if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
-          sha256 = cached.sha256; // unchanged — reuse the cached hash
-          plainSize = cached.plainSize ?? stat.size;
-        } else {
-          try {
-            ({ sha256, size: plainSize } = await hashFile(abs));
-          } catch (err) {
-            /*
-             * ONE unreadable file is left out, never the manifest. A file under a foreign key or with altered
-             * bytes throwing out of here would fail the manifest route, file sync and the Merkle root for the
-             * whole space on every cycle — a whole space stopped over one file. It is logged, and the refusal
-             * reaches anyone who reads the file itself.
-             */
-            if (err instanceof StoredFileUnreadable) {
-              if (noteUnreadable(spaceId, relPath, `${stat.size}:${stat.mtimeMs}`)) log.warn(`manifest: skipped '${peerText(relPath)}' in ${peerText(spaceId)}: ${peerText(err.message)}`);
-              continue;
-            }
-            throw err;
-          }
-          clearUnreadable(spaceId, relPath);
-          updates.push({ _id: relPath, size: stat.size, mtimeMs: stat.mtimeMs, sha256, plainSize });
-        }
-        results.push({
-          path: relPath,
-          sha256,
-          size: plainSize,
-          modifiedAt: stat.mtime.toISOString(),
-        });
+        const key = toDocId(relPath);
+        const spellings = byKey.get(key);
+        if (spellings) spellings.set(relPath, { abs, stat }); else byKey.set(key, new Map([[relPath, { abs, stat }]]));
       }
     }
   }
 
   await walk(root);
+
+  // A file is advertised by its KEY (the NFC document id) and held under whatever spelling the disk keeps (Q-581): a peer asks for the
+  // key, and the byte door finds the file under either spelling. Two spellings of one key can both exist only on a file system that
+  // tells them apart; one is offered, and the other said once per window.
+  for (const [key, spellings] of byKey) {
+    const relPath = winningSpelling(key, [...spellings.keys()]);
+    const { abs, stat } = spellings.get(relPath)!;
+    if (spellings.size > 1) {
+      reportSpaceFailure(TWO_SPELLINGS_STEP, spaceId, new Error(`${spellings.size} spellings on disk: ${[...spellings.keys()].map(k => peerText(k)).join(', ')}`), { unit: key, when: 'never: the file system holds both' });
+    }
+    const cached = cache.get(relPath);
+    let sha256: string;
+    let plainSize: number;
+    if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
+      sha256 = cached.sha256; // unchanged — reuse the cached hash
+      plainSize = cached.plainSize ?? stat.size;
+    } else {
+      try {
+        ({ sha256, size: plainSize } = await hashFile(abs));
+      } catch (err) {
+        /*
+         * ONE unreadable file is left out, never the manifest. A file under a foreign key or with altered
+         * bytes throwing out of here would fail the manifest route, file sync and the Merkle root for the
+         * whole space on every cycle — a whole space stopped over one file. It is logged, and the refusal
+         * reaches anyone who reads the file itself.
+         */
+        if (err instanceof StoredFileUnreadable) {
+          if (noteUnreadable(spaceId, relPath, `${stat.size}:${stat.mtimeMs}`)) log.warn(`manifest: skipped '${peerText(relPath)}' in ${peerText(spaceId)}: ${peerText(err.message)}`);
+          continue;
+        }
+        throw err;
+      }
+      clearUnreadable(spaceId, relPath);
+      updates.push({ _id: relPath, size: stat.size, mtimeMs: stat.mtimeMs, sha256, plainSize });
+    }
+    results.push({
+      path: key,
+      diskPath: relPath,
+      sha256,
+      size: plainSize,
+      modifiedAt: stat.mtime.toISOString(),
+    });
+  }
 
   // Persist newly-computed / changed hashes so the next round reuses them.
   if (updates.length > 0 && !opts.readOnly) {

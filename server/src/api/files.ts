@@ -34,6 +34,7 @@ import {
   getUploadReceived,
 } from '../files/chunks.js';
 import { resolveSafePath, resolveSafePathChecked } from '../files/sandbox.js';
+import { heldSpellingOf } from '../files/held-spelling.js';
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { NotFoundError, RequestRefusal } from '../util/errors.js';
@@ -242,6 +243,8 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
   // Try to find the first member where the path resolves successfully
   let foundMid: string | null = null;
   let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+  // Where the bytes are when they are held under another spelling of the path (a decomposed name, Q-581): set only for a file.
+  let heldAbs: string | null = null;
 
   for (const mid of memberIds) {
     try {
@@ -251,7 +254,13 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
       stat = s;
       break;
     } catch {
-      continue;
+      // Not at its NFC spelling: a file this member holds under another spelling of the key is the file (`heldSpellingOf`, the one
+      // lookup the MCP `read_file` makes too). A directory is looked up by its own spelling only, as a listing always was.
+      try {
+        const held = await heldSpellingOf(mid, normalised);
+        const s = held ? await fs.stat(held.abs) : null;
+        if (held && s?.isFile()) { foundMid = mid; stat = s; heldAbs = held.abs; break; }
+      } catch { /* refused, or not looked at: this member does not have it */ }
     }
   }
 
@@ -298,7 +307,7 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
   try {
     // STREAMED through the stored-bytes door (F-43): a file of any size, decrypted a chunk at a time when it is
     // encrypted at rest. The length is the PLAINTEXT size, read from the ciphertext length without decrypting.
-    const abs = await resolveSafePathChecked(foundMid, normalised);
+    const abs = heldAbs ?? await resolveSafePathChecked(foundMid, normalised);
     const { size } = await statStored(abs);
     const body = await openStoredRead(abs);
     const ext = path.extname(normalised).toLowerCase();

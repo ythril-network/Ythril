@@ -141,6 +141,10 @@ GET /api/files/:spaceId?path=reports/q1.pdf
 
 Returns raw file bytes. Works with any file type — PDFs, images, archives, source code, etc. If `path` is a directory, returns a JSON listing.
 
+The path is looked up as its Unicode NFC form (a path has one key), and a file this instance holds under another normalisation of it
+(a name written decomposed on a file system that keeps it so) is found and served all the same; the MCP `read_file` tool makes the same
+lookup. A path that leaves the space, or a link that points out of it, is refused as before.
+
 The bytes are the file **as uploaded**, whether or not the instance encrypts files at rest
 ([Encryption at Rest](02a-encryption-at-rest.md#uploaded-files)); `Content-Length`, the listing's `size` and every hash are the
 plaintext's. A stored file this instance cannot decrypt — written under another master secret, altered on disk, or

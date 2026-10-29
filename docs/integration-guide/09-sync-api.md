@@ -273,6 +273,14 @@ always the plaintext's, so a keyed and a keyless peer compare equal for the same
 is only the encryption. Members of one network need not share a master secret, or have one. A path in a peer's
 manifest is resolved inside the receiving space's own directory; one that would leave it is skipped.
 
+**A manifest names each file by its key, whatever spelling the disk keeps.** An entry's `path` is the file's canonical key
+(Unicode NFC, `/` separators; see the key rule below), so a file stored under a decomposed name (a macOS-written `é` as `e` and a
+combining accent) is advertised under its composed name and hashes into the space's Merkle root as the same file whichever
+Unicode form either instance's disk keeps. The entry has exactly four keys (`path`, `sha256`, `size`, `modifiedAt`); where an
+instance keeps the file on its own disk is never sent. The byte route (`GET /api/files/:spaceId?path=<key>`) finds a file held under
+another spelling of the key it is asked for, so what the manifest advertises can always be fetched. Two spellings of one key on one
+disk are one entry (the one that is the key, else the smallest), and the instance says so once per window.
+
 The bytes have always moved through the manifest and `/api/files`. From 4.0 the file's **metadata record**
 moves too — its description, tags and properties. Its LINKS travel as link records of their own, on the
 same channel.
