@@ -68,6 +68,7 @@ import { forgetFinishedMove, moveIsOwed, movesBegunInto, type MoveMarker } from 
 import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { adoptLegacyRowsUnder } from './legacy-file-keys.js';
 
 /** The refusal of a path with nothing to delete, in one sentence for every way a delete reaches it (`404` on REST, an error result in MCP). */
 const fileNotFound = (spaceId: string, filePath: string): NotFoundError => new NotFoundError(`File '${filePath}' not found in space '${spaceId}'`);
@@ -176,6 +177,8 @@ export async function deletePath(spaceId: string, filePath: string, { confirm, a
   const confirmed = confirmOf(confirm);
   // Symlink-aware before a recursive delete: the lexical path may stay under the root while a link on the way points outside it.
   const abs = await resolveSafePathChecked(spaceId, filePath);
+  // The records at or under the path stored under a spelling bundle-71 no longer writes are put at their keys first, so the delete finds them (Q-413).
+  await adoptLegacyRowsUnder(spaceId, filePath);
   let isDirectory = false;
   let there = true;
   try {

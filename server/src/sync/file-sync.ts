@@ -44,6 +44,7 @@ import { noteToldTombstoned, wasToldTombstoned, noteRefusedUpload, wasRefusedUpl
 import { pushStoredFile, type SendUpload } from './file-push.js';
 import { assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
 import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
+import { adoptAllLegacyRows } from '../files/legacy-file-keys.js';
 
 /**
  * The most files whose held bytes are looked at for a repair, per space per sync cycle: a row that names another hash than the
@@ -222,6 +223,9 @@ export async function syncFiles(
     const oursMap = new Map(ours.map(e => [e.path, e]));
     // One read of the space's top-level rows per call: the agreed hash of each path (`syncBase.<peer>`, Q-66) and what each row
     // records of its bytes (`repairReasonOf`). Replaces the read that returned the bases alone.
+    // Every top-level row this instance holds under a spelling bundle-71 no longer writes is put at its key before the cycle reads them: a networked
+    // space converges on its first cycle, lazily (on this read, never at boot), and its row then reaches the peers that refused it (Q-413).
+    await adoptAllLegacyRows(spaceId);
     const held = await heldRowsFor(spaceId, { peerId: member.instanceId, baseKey: syncBasePath(member.instanceId) });
     const bases = { get: (path: string): string | undefined => held.get(path)?.syncBase?.[member.instanceId] };
     // Bytes this cycle has written, for the quota question of the next fetch: a cached measurement does not see them yet.
