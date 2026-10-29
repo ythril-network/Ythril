@@ -19,6 +19,8 @@ import { carriagesFor, defaultBudgetChars } from '../../brain/result-budget.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { extractListingAsked, extractListingRefusal, readExtractListing } from '../../files/extract-listing.js';
 import { getFileMeta } from '../../files/file-meta.js';
+import { writeWarningFields } from '../../brain/write-validation.js';
+import { linkTargetRemovedWarnings } from '../../brain/gone-entity-references.js';
 import { toDocId } from '../../util/paths.js';
 import { NotFoundError } from '../../util/errors.js';
 
@@ -674,13 +676,15 @@ export const update_file_metaTool: ToolHandler = {
     const { getFileMeta } = await import('../../files/file-meta.js');
     const { toDocId } = await import('../../util/paths.js');
     const audit = await readEditAudit(callSpace, mid => getFileMeta(mid, filePath), toDocId(filePath), a, 'file');
-    const updated = await updateFileMeta(callSpace, filePath, patch, dfPaths);
+    let linksTakenBack: readonly string[] = [];
+    const updated = await updateFileMeta(callSpace, filePath, patch, dfPaths, ids => { linksTakenBack = ids; });
     if (!updated) throw new Error(`No file metadata record for '${filePath}' in '${callSpace}'.`);
     { const s = audit.snapshots(updated); ctx.recordChanges?.(s.before, s.after); }
 
     return {
       content: [{ type: 'text' as const, text: `Updated metadata for '${filePath}' in '${callSpace}'.` }],
-      structuredContent: updated as unknown as Record<string, unknown>,
+      // A `linkEntities` link whose entity was deleted while the write ran was taken back and the file stays written: the answer says which (Q-305), as REST does.
+      structuredContent: { ...updated, ...writeWarningFields(linkTargetRemovedWarnings(linksTakenBack)) } as unknown as Record<string, unknown>,
     };
   },
 };

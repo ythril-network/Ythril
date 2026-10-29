@@ -16,6 +16,8 @@ import { listTokens } from '../../auth/tokens.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { updateFileMeta, getFileMeta } from '../../files/file-meta.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
+import { writeWarningFields } from '../../brain/write-validation.js';
+import { linkTargetRemovedWarnings } from '../../brain/gone-entity-references.js';
 import { linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 import { applyJudgment } from './_judged-write.js';
 import { answerUnknownWriteFields } from '../../contract/write-accepts.js';
@@ -325,11 +327,13 @@ fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth
   // The before and the link sets, from whichever member holds the file — one read shared with the MCP tool (Q-50).
   // A file is keyed in the links collection by its stored path.
   const editAudit = await readEditAudit(spaceId, mid => getFileMeta(mid, path), toDocId(path), req.body, 'file');
+  let linksTakenBack: readonly string[] = [];
   const updated = await findFirstAcrossMembers([spaceId],
-    mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body, 'file') }, dfPaths));
+    mid => updateFileMeta(mid, path, { description, tags, properties, ...linkFieldsFrom(req.body, 'file') }, dfPaths, ids => { linksTakenBack = ids; }));
   if (updated) {
     req.auditSnapshots = editAudit.snapshots(updated);
-    res.json(updated);
+    // A `linkEntities` link whose entity was deleted while the write ran was taken back and the file stays written: the answer says which (Q-305).
+    res.json(linksTakenBack.length > 0 ? { ...updated, ...writeWarningFields(linkTargetRemovedWarnings(linksTakenBack)) } : updated);
     return;
   }
   res.status(404).json({ error: 'File metadata record not found' });

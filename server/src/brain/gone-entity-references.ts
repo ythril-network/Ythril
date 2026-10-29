@@ -215,6 +215,19 @@ export async function takeBackLinksToGoneEntities(
 }
 
 /**
+ * The warning rows for links taken back because their entity was deleted while the record that carried them was written: one row per entity, the
+ * `reason` starting with the code. THE one spelling, for every writer that carries links and answers `warnings` — the fact and chrono writers (through
+ * {@link takenBackLinkWarnings}), the inline connections of a record write and a file's `linkEntities` — so the row reads the same whichever door wrote it.
+ * Empty for no entities, so a caller adds it unconditionally.
+ */
+export function linkTargetRemovedWarnings(entityIds: readonly string[]): SchemaViolation[] {
+  return entityIds.map(id => ({
+    field: 'linkEntities', value: id,
+    reason: `${LINK_TARGET_REMOVED}: the entity '${id}' was deleted while this record was written, so the link to it was not kept; the record itself is written.`,
+  }));
+}
+
+/**
  * The door-side half of `link_target_removed`: the write's own `onValidation` channel (the one every door already renders as `warnings`, REST and MCP
  * alike), wrapped so the classification the planner hands back is remembered, and a warning row per taken-back entity is added to it once the commit
  * says which links were taken back. One function for the create and the update doors of every record that carries links, so the warning reads the same
@@ -230,11 +243,7 @@ export function takenBackLinkWarnings(onValidation: ((check: UpdateValidation) =
     announce(entityIds) {
       if (!onValidation || entityIds.length === 0) return;
       const base: UpdateValidation = last ?? { blocked: false, introduced: [], preExisting: [], all: [], warnings: [], message: '' };
-      const rows: SchemaViolation[] = entityIds.map(id => ({
-        field: 'linkEntities', value: id,
-        reason: `${LINK_TARGET_REMOVED}: the entity '${id}' was deleted while this record was written, so the link to it was not kept; the record itself is written.`,
-      }));
-      onValidation({ ...base, warnings: [...base.warnings, ...rows] });
+      onValidation({ ...base, warnings: [...base.warnings, ...linkTargetRemovedWarnings(entityIds)] });
     },
   };
 }

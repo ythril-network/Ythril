@@ -59,6 +59,7 @@ import { primitivePropertyError } from './property-values.js';
 import { reconcileLinks, assertDesiredLinks } from './links.js';
 import { linksStartingFrom, linkClassesFrom } from './link-adjacency.js';
 import { upsertEdge } from './edges.js';
+import { linkTargetRemovedWarnings } from './gone-entity-references.js';
 import { ConnectionsNotWritten, writtenRecord } from './connections-not-written.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import type { AuthorRef } from '../config/types.js';
@@ -601,7 +602,10 @@ export async function applyConnections(
   // answer it beside the record's own warnings. A space that refuses never gets here with one (the edge was refused before the record).
   const warnings: SchemaViolation[] = [];
   try {
-    const links = asked.desired ? (await reconcileLinks(spaceId, from, fromKind, asked.desired, author)).added : 0;
+    const reconciled = asked.desired ? await reconcileLinks(spaceId, from, fromKind, asked.desired, author) : undefined;
+    const links = reconciled?.added ?? 0;
+    // A link whose entity was deleted while the record was written is taken back (Q-305): the record stays written and the answer's warnings say which link was not kept.
+    if (reconciled) warnings.push(...linkTargetRemovedWarnings(reconciled.takenBack));
 
     for (const [i, e] of asked.edges.entries()) {
       const stored = await upsertEdge(
