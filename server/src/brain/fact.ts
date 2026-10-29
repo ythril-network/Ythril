@@ -5,7 +5,7 @@
  * surface in query.ts (A17.4). `saveFact` reaches into recall.ts for the optional insert-time
  * duplicate check; nothing here is imported back by those modules.
  */
-import { reconcileLinks, removeLinksFrom, assertDesiredLinks } from './links.js';
+import { reconcileLinks, assertDesiredLinks } from './links.js';
 import { type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
@@ -17,11 +17,11 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { classifyFactUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { mergePropertiesOrKeep } from './merge-fields.js';
-import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
+import { enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { FactDoc } from '../config/types.js';
-import { writeTombstone, stampTombstones } from './tombstones.js';
-import { refuseForkEdit, removeForksOf } from './forks.js';
+import { removeRecords } from './record-removal.js';
+import { refuseForkEdit } from './forks.js';
 import type { SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { listReadMaxMs } from './tag-filter.js';
@@ -272,35 +272,8 @@ export async function deleteFact(
   memoryId: string,
   actor?: WebhookActor,
 ): Promise<boolean> {
-  assertSpaceTakesWrites(spaceId, 'facts');
-  const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
-    .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }), { projection: { seq: 1 } }) as { seq?: number } | null;
-  // The tombstone's version is taken BEFORE the record goes: a fact whose version is at the ceiling cannot be deleted by this instance,
-  // and that refusal must leave the record where it is (`record_version_at_ceiling`).
-  const tombstone = { _id: memoryId, type: 'fact' as const, originalSeq: existing?.seq };
-  const versions = await stampTombstones(spaceId, [tombstone]);
-  // Its unresolved versions go first, each behind a tombstone issued here (Q-624 §7): a refusal there leaves the fact and its forks both standing.
-  if (existing) await removeForksOf(spaceId, 'fact', [memoryId]);
-  // The delete is ONE admitted and counted unit, from its own check (`admitSpaceWrite`); its tombstone and link cascade are admitted writers of their own.
-  const result = await admitSpaceWrite(spaceId, 'facts', () => col<FactDoc>(spaceCollection(spaceId, 'facts')).deleteOne({
-    _id: memoryId,
-    spaceId,
-  }));
-  if (result.deletedCount === 0) return false;
-  // The record is gone, so its embed job has nothing left to embed. Eager rather than left to the worker: the
-  // worker only claims `pending` jobs, so a job that had already gone terminal `failed` would never be claimed
-  // again and would outlive the record for ever — visible since #861 as a permanent failure naming a recordId
-  // that 404s.
-  await retireEmbedJob(spaceId, 'fact', memoryId);
-
-  await writeTombstone(spaceId, tombstone, versions);
-  // The cascade. A deleted fact's links describe a connection whose SUBJECT no longer exists, and nothing
-  // else would ever remove them — the reconcile hook only runs on a write to the record that is now gone.
-  // Links pointing AT this fact are a different question and belong to the readers' slice: removing them
-  // here would delete another record's data.
-  await removeLinksFrom(spaceId, memoryId, 'fact');
-  if (actor) emitWebhookEvent({ event: 'fact.deleted', spaceId, entry: { _id: memoryId }, ...actor });
-  return true;
+  // The fork removal, the delete and its tombstone commit together (`removeRecords`, `Q-313`); the embed job, the links FROM the fact and the webhook follow the commit.
+  return (await removeRecords(spaceId, 'fact', [memoryId], actor)).has(memoryId);
 }
 
 /** List facts (no embedding, paginated) */

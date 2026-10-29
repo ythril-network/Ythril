@@ -397,7 +397,7 @@ describe('a write unit is counted from the moment the write gate lets it through
     assert.ok(askers.length >= 40, `only ${askers.length} function(s) found that ask the write gate: the derivation is broken, and an empty set passes every check below`);
     for (const key of ['server/src/files/files.ts:writeFile', 'server/src/files/files.ts:moveFile', 'server/src/brain/write-plan/commit.ts:commitPlans',
       'server/src/sync/arrivals.ts:writeArrivals', 'server/src/api/conflicts.ts:placeIncomingCopy', 'server/src/files/chunks.ts:storeChunk', 'server/src/files/chunks.ts:assembleChunks',
-      'server/src/api/conflicts.ts:executeResolve', 'server/src/brain/fact.ts:saveFact', 'server/src/brain/fact.ts:updateFact', 'server/src/brain/fact.ts:deleteFact',
+      'server/src/api/conflicts.ts:executeResolve', 'server/src/brain/fact.ts:saveFact', 'server/src/brain/fact.ts:updateFact',
       'server/src/brain/entities.ts:updateEntityById', 'server/src/brain/edges.ts:updateEdgeById', 'server/src/brain/chrono.ts:updateChrono',
       'server/src/brain/edge-rekey.ts:rekeyEdges', 'server/src/brain/tombstones.ts:writeTombstones',
       'server/src/files/file-meta.ts:upsertFileMeta', 'server/src/files/tombstones.ts:writePendingFileTombstones',

@@ -44,7 +44,7 @@ import { entityDeleteBlockers } from './entity-delete-guard.js';
 import { deleteEntity } from './entities.js';
 import type { BacklinkEntry } from './entities.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
-import { removeEdges } from './edge-removal.js';
+import { removeRecords } from './record-removal.js';
 import { countForksOf } from './forks.js';
 
 /** What a preview answers: the set, and the token that authorises removing exactly it. */
@@ -143,7 +143,7 @@ export async function deleteEntityCascade(
 
   /*
    * The EDGES first, then the entity — a chunk at a time, each chunk ONE held transaction: its delete and its
-   * tombstones commit together or not at all (`removeEdges`, `brain/edge-removal.ts`, which `deleteEdge` uses too).
+   * tombstones commit together or not at all (`removeRecords`, `brain/record-removal.ts`, which `deleteEdge` and `deleteEntity` use too).
    *
    * The tombstone is not optional. Without one, the next pull from any peer that still holds the edge brings it
    * back, pointing at an entity that no longer exists: the dangling reference `strictLinkage` refused the delete
@@ -151,7 +151,7 @@ export async function deleteEntityCascade(
    * tombstone left exactly that; per chunk in a transaction, a failure removes nothing of the chunk, and a re-run
    * (a new preview, a new token) continues with what is left.
    */
-  const gone = await removeEdges(spaceId, preview.removes.map(b => b._id), actor);
+  const gone = await removeRecords(spaceId, 'edge', preview.removes.map(b => b._id), actor);
   const removed = preview.removes.filter(b => gone.has(b._id));
 
   await deleteEntity(spaceId, entityId, actor);
