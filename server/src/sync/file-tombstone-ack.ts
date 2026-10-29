@@ -27,7 +27,7 @@ import { getConfig, saveConfigSoon } from '../config/loader.js';
 import { membersServing, peerTokensReaching, peersOutside } from './served-watermark.js';
 import { setMemberSpaceMark } from './member-space-mark.js';
 import { isComparableIso } from '../util/comparable-iso.js';
-import { fileTombstonePosition } from '../files/tombstones.js';
+import { fileTombstonePosition } from '../files/tombstone-publish-rules.js';
 
 /** The subset of a member this decision needs — keeps the pure part testable without a config. */
 export interface AckedMember {

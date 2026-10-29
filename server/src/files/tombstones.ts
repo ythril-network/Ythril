@@ -125,7 +125,8 @@ import { withinWriteBound } from '../db/write-bound.js';
 import { bytesPresentAt } from './stored-bytes.js';
 import { whatBecameOfPath } from './move-marker-reads.js';
 import { ActNotRecorded } from './act-answers.js';
-import { moveKey, parentOfSidecar } from './moved-paths.js';
+import { parentOfSidecar } from './moved-paths.js';
+import { decideSlice, fileTombstonePosition, movesToAskAbout, type SliceDecision } from './tombstone-publish-rules.js';
 import {
   ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, FILE_TOMBSTONE_PART, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
   type MoveMarker, type PrunableRow, type StoredFileTombstone,
@@ -197,14 +198,6 @@ export async function dropReplacedFileTombstoneIndexes(spaceId: string): Promise
 
 /** The indexes a later release replaced, by name: dropped by {@link dropReplacedFileTombstoneIndexes}. */
 const REPLACED_FILE_TOMBSTONE_INDEXES = ['pending_1_deletedAt_1'] as const;
-
-/**
- * THE position of a tombstone: its own `positionAt`, or — for one stored before positions existed — its `deletedAt`, which
- * was the position then. What an acknowledgement, a prune and a page compare, and nothing else is. Pure. Named for the
- * tombstone because `util/seq-keyset.ts` and `sync/position-run-pager.ts` each read a position of their own kind.
- */
-export const fileTombstonePosition = (t: { positionAt?: unknown; deletedAt?: unknown }): string | undefined =>
-  typeof t.positionAt === 'string' ? t.positionAt : typeof t.deletedAt === 'string' ? t.deletedAt : undefined;
 
 /**
  * Give every published tombstone stored before positions existed one (migration of LOCAL state: a file tombstone is never
@@ -386,103 +379,28 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[], ge
 
 /** What {@link publishSlice} reads of the rows already stored for its paths. */
 const STORED_FOR_PUBLISH = { _id: 1, path: 1, deletedAt: 1, positionAt: 1, pending: 1, rowSeq: 1, writtenAt: 1, origin: 1, storedVia: 1, move: 1, issuer: 1 } as const;
-/** When a pending row was put: its `writtenAt`, or — for one written before it existed — its `deletedAt`. */
-const writtenOf = (t: { writtenAt?: string | undefined; deletedAt: string }): string => t.writtenAt ?? t.deletedAt;
 
 /**
- * Whether `p` is a tombstone THIS instance published itself: stamped `origin: 'own'`, or — for a row published before `origin` existed
- * (bundle-71) — carrying no `origin` and no `storedVia` (nothing relayed it here) with this instance as its `issuer`. Without the second
- * form the leftover pending row of an act published before the upgrade was published a second time by the first settle after it.
- */
-function isOwnPublication(p: StoredFileTombstone): boolean {
-  if (p.pending || p.storedVia !== undefined) return false;
-  if (p.origin !== undefined) return p.origin === 'own';
-  return p.issuer !== undefined && p.issuer === authorRef().instanceId;
-}
-
-/**
- * Whether the published tombstone `p` COVERS the pending one `c`: this instance published it itself ({@link isOwnPublication}), after
- * `c` was written (both by this instance's own clock), and, by what each names of the version it erased (`rowSeq`):
- *
- * | `c`                          | `p`          | covers                                                                                |
- * |------------------------------|--------------|---------------------------------------------------------------------------------------|
- * | its version read failed      | any          | no: nobody knows which version `c` erased, so it is published                          |
- * | versioned                    | versioned    | when `p`'s version is not below `c`'s                                                 |
- * | versioned                    | none         | no: `p` was written when the path had no row, and `c` erases a version made since     |
- * | none (the path had no row)   | none         | yes: no version was uploaded between the two, they are one delete                     |
- * | none (the path had no row)   | versioned    | yes: `p` erased a file the path has not held since `c` was written                    |
- *
- * Only an own publication can cover: a relayed tombstone says a PEER deleted the path, which tells nobody that this instance's own
- * delete happened, and its position is its receive time. */
-function covers(p: StoredFileTombstone, c: ToPublish): boolean {
-  if (!isOwnPublication(p)) return false;
-  const at = fileTombstonePosition(p);
-  if (at === undefined || at <= writtenOf(c)) return false;
-  if (c.versionUnknown === true) return false;
-  const named = (t: { rowSeq?: number | undefined }): t is { rowSeq: number } => typeof t.rowSeq === 'number' && t.rowSeq > 0;
-  if (named(c)) return named(p) && p.rowSeq >= c.rowSeq;
-  return true;
-}
-
-/**
- * One slice of {@link publishOnePerPath}, under its lock: read the rows stored for `paths`, decide per path, publish the winners
- * at one held stamp, and only then remove what they replace. Only the position-writing operations run inside the hold; the read
- * before it and the deletes after it hold nothing.
- *
- * Per path: a pending tombstone a published OWN one covers is dropped ({@link covers}); of the rest the latest written
- * ({@link writtenOf}) is published and every pending row written no later than it (and every one written before `writtenAt`
- * existed) is removed — never one written after it, which is another act's. A move's marker on a row that goes is handed to the
- * row that covers it, when that row has none: it is the only thing that tells a retried move it is owed.
+ * One slice of {@link publishOnePerPath}, under its lock, in three steps: READ the rows stored for `paths` and which of the moves their rows
+ * name are still owed (`movesStillOwed`, for the rows {@link movesToAskAbout} names); DECIDE ({@link decideSlice}, pure, `files/tombstone-publish-rules.ts`,
+ * where the rule and its table are); WRITE ({@link writeSlice}). Only the position-writing operations run inside the hold; the read before it and
+ * the deletes after it hold nothing.
  */
 async function publishSlice(
   spaceId: string, paths: readonly string[], byPath: ReadonlyMap<string, readonly ToPublish[]>,
 ): Promise<{ published: number; dropped: number }> {
   try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (isActRefusal(err)) return { published: 0, dropped: 0 }; throw err; }
   const stored = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths, chunk => ({ path: { $in: chunk } }), STORED_FOR_PUBLISH);
-  const alreadyPublished = new Set(stored.filter(t => !t.pending).map(t => t._id));
-  const newestFirst = (a: ToPublish, b: ToPublish): number =>
-    Number(b.writtenAt !== undefined) - Number(a.writtenAt !== undefined) || writtenOf(b).localeCompare(writtenOf(a));
-  const winners: ToPublish[] = [];
-  const afterOps: object[] = [];
-  const superseded: string[] = [];
-  let dropped = 0;
-  for (const path of paths) {
-    const rows = stored.filter(t => t.path === path);
-    const candidates = (byPath.get(path) ?? []).filter(d => !alreadyPublished.has(d._id)).sort(newestFirst);
-    const covering = new Map(candidates.map(c => [c._id, rows.find(p => covers(p, c))] as const));
-    const live = candidates.filter(c => covering.get(c._id) === undefined);
-    for (const c of candidates) {
-      const cover = covering.get(c._id);
-      if (cover === undefined) continue;
-      superseded.push(c._id);
-      if (c.move && !cover.move) {
-        cover.move = c.move;
-        afterOps.push({ updateOne: { filter: asFilter<StoredFileTombstone>({ _id: cover._id, move: { $exists: false } }), update: asUpdate<StoredFileTombstone>({ $set: { move: c.move } }) } });
-      }
-    }
-    const winner = live[0];
-    if (!winner) { dropped += candidates.length; continue; }
-    // What goes with the winner, and the marker it may carry on: the other live candidates (their rows may be gone, so the doc
-    // is read) and the pending rows the delete below takes.
-    const goes = winner.writtenAt !== undefined
-      ? (t: StoredFileTombstone) => t.writtenAt === undefined || t.writtenAt <= (winner.writtenAt as string)
-      : (t: StoredFileTombstone) => t.writtenAt === undefined && t.deletedAt <= winner.deletedAt;
-    const removed = [...live.slice(1), ...rows.filter(t => t.pending && t._id !== winner._id && goes(t))];
-    const move = winner.move ?? removed.find(r => r.move)?.move;
-    winners.push(move && !winner.move ? { ...winner, move } : winner);
-    // The winner carries ONE marker on. A row that goes with another one — a different move's, still owed — is the only record of
-    // that move, and is kept (pending, served to nobody) until the move ends.
-    const elsewhere = removed.filter(r => r.move && (!move || moveKey(r.move) !== moveKey(move)));
-    const owedElsewhere = await movesStillOwed(spaceId, elsewhere);
-    const kept = elsewhere.filter(r => owedElsewhere.has(moveKey(r.move!))).map(r => r._id);
-    afterOps.push({ deleteMany: { filter: asFilter<StoredFileTombstone>({
-      path, pending: true, _id: { $nin: [winner._id, ...kept] },
-      ...(winner.writtenAt !== undefined
-        ? { $or: [{ writtenAt: { $lte: winner.writtenAt } }, { writtenAt: { $exists: false } }] }
-        : { writtenAt: { $exists: false }, deletedAt: { $lte: winner.deletedAt } }),
-    }) } });
-    dropped += candidates.length - 1;
-  }
+  const owed = await movesStillOwed(spaceId, movesToAskAbout(stored, paths, byPath));
+  return writeSlice(spaceId, decideSlice(stored, paths, byPath, { thisInstance: authorRef().instanceId, owed }));
+}
+
+/**
+ * Write what {@link decideSlice} came to: publish the winners at one held stamp, and only then run what replaces them (a marker handed to the
+ * row that covers a candidate, the pending rows the winner removes) and drop the superseded ones.
+ */
+async function writeSlice(spaceId: string, decision: SliceDecision<ToPublish>): Promise<{ published: number; dropped: number }> {
+  const { winners, after, superseded, dropped } = decision;
   if (winners.length > 0) {
     // Publishing UPSERTS a published row (a tombstone the stale settle dropped while its act ran is written again), so it is ONE admitted and
     // counted unit from its own check (`admitSpaceWrite`); a space an act took meanwhile is passed over, never a failure.
@@ -509,6 +427,14 @@ async function publishSlice(
     }, 'file.tombstone.publish')); } catch (err) { if (isActRefusal(err)) return { published: 0, dropped }; throw err; }
   }
   // An update and a delete per path: sliced by type, so each slice is one command (`bulkCommandOf`).
+  const afterOps = after.map(step => step.kind === 'hand-over-marker'
+    ? { updateOne: { filter: asFilter<StoredFileTombstone>({ _id: step.rowId, move: { $exists: false } }), update: asUpdate<StoredFileTombstone>({ $set: { move: step.move } }) } }
+    : { deleteMany: { filter: asFilter<StoredFileTombstone>({
+      path: step.path, pending: true, _id: { $nin: [step.winnerId, ...step.keep] },
+      ...(step.writtenAt !== undefined
+        ? { $or: [{ writtenAt: { $lte: step.writtenAt } }, { writtenAt: { $exists: false } }] }
+        : { writtenAt: { $exists: false }, deletedAt: { $lte: step.deletedAt } }),
+    }) } });
   await writeInOneCommands(afterOps, (slice, { ordered }) => tombstonesOf(spaceId).bulkWrite(asBulk<StoredFileTombstone>(slice), { ordered }),
     { ordered: false, commandKindOf: bulkCommandOf });
   await dropPendingById(spaceId, superseded);
