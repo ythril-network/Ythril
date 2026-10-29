@@ -55,7 +55,7 @@ const REPLACING_MOVE_CALLERS = Object.freeze({
 const DESTINATION_MODULE = `${SRC}/files/destination.ts`;
 
 /** The modules whose exports can put bytes or a directory somewhere. A module in `files/` holding a placing primitive and absent here fails. */
-const PLACEMENT_MODULES = Object.freeze(['files', 'store-file', 'chunks', 'stored-bytes', 'move-cascade']
+const PLACEMENT_MODULES = Object.freeze(['files', 'store-file', 'chunks', 'stored-bytes', 'move-cascade', 'remove-tree']
   .map(m => `${SRC}/files/${m}.ts`));
 
 /** What a placement module's own code does that puts bytes or a directory on disk. Read from the tree, so a new module holding one is found. */
@@ -72,6 +72,8 @@ const NOT_PLACING = Object.freeze({
   deleteStoredIfPresent: 'removes bytes; a delete places nothing', recordStoredFile: 'records the row of bytes already placed by the caller',
   peerBytesShadowed: 'a question about a tombstone, writes nothing', cleanupStaleChunks: 'removes stale staged chunks',
   ensureSpaceFilesDir: 'creates a space\'s own root, a path the instance names, never a caller\'s',
+  removeTree: 'removes a tree; a delete places nothing',
+  moveTree: 'moves a space\'s own directory to its renamed id, a path the instance names (the new id is validated by the rename), never a caller\'s destination',
 });
 
 /**

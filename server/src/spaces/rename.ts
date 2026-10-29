@@ -7,7 +7,6 @@
 import { moveCounterDoc } from '../sync/positions-owed.js';
 import { moveVersionMark } from '../util/version-mark.js';
 import { moveScanCursors } from '../brain/scan-cursor.js';
-import fs from 'fs/promises';
 import path from 'path';
 import { getDb } from '../db/mongo.js';
 import { getConfig, saveConfig, getDataRoot, mutateConfig } from '../config/loader.js';
@@ -28,7 +27,7 @@ import type { NetworkRefusalCode } from '../networks/refusal-codes.js';
 import { refusalText } from '../brain/store-failure.js';
 import { SPACE_ACT_KINDS, isInstanceWide } from '../config/types-space-acts.js';
 import { SpaceNotWritableError, spaceWriteClosedAnswer, type SpaceWriteClosedCode } from './space-write-gate.js';
-import { isMissingPath } from '../files/stored-bytes.js';
+import { moveTree } from '../files/remove-tree.js';
 
 /**
  * Record that one step of `moveSpaceData` failed, in words that are ours.
@@ -172,24 +171,30 @@ export async function moveSpaceData(
   const dataRoot = getDataRoot();
   const oldDir = path.resolve(dataRoot, 'files', oldId);
   const newDir = path.resolve(dataRoot, 'files', newId);
+  //
+  // Both directories go through `moveTree` (`files/remove-tree.ts`), which waits out an open handle the way a delete does
+  // (Q-171): on Windows any handle under a directory fails its rename at once. A directory that is not there is `'absent'`
+  // — the space had none, or the move already happened — and is not an error; anything else is a failed step, which keeps the
+  // marker so the rename resumes. The chunk directory's failure used to be swallowed, leaving `.chunks/<old>` behind.
   try {
     // Bounded when an act runs it (`fileTree`): a stuck mount fails the attempt instead of holding the lane.
-    await fileTree(async () => { await fs.access(oldDir); await fs.rename(oldDir, newDir); });
-    log.debug(`Moved files directory ${peerText(oldDir)} → ${peerText(newDir)}`);
-  } catch (err) {
-    // If old dir doesn't exist, that's fine — space had no files, or it was already moved.
-    if (!isMissingPath(err)) {
-      stepFailed('Could not move files directory', err, errors);
+    if (await fileTree(() => moveTree(oldDir, newDir)) === 'moved') {
+      log.debug(`Moved files directory ${peerText(oldDir)} → ${peerText(newDir)}`);
     }
+  } catch (err) {
+    stepFailed('Could not move files directory', err, errors);
   }
 
   // 3. Move chunked-upload directory if it exists
   const oldChunks = path.resolve(dataRoot, '.chunks', oldId);
   const newChunks = path.resolve(dataRoot, '.chunks', newId);
   try {
-    await fs.access(oldChunks);
-    await fs.rename(oldChunks, newChunks);
-  } catch { /* ignore — chunks dir may not exist / already moved */ }
+    if (await fileTree(() => moveTree(oldChunks, newChunks)) === 'moved') {
+      log.debug(`Moved chunk uploads directory ${peerText(oldChunks)} → ${peerText(newChunks)}`);
+    }
+  } catch (err) {
+    stepFailed('Could not move chunk uploads directory', err, errors);
+  }
 
   // Usage history follows the space. `space_activity` is instance-wide and its bucket `_id` embeds the
   // space id, so the collection renames above cannot carry it: without this a renamed space starts with a
