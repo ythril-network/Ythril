@@ -53,8 +53,12 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { scratchRoot as scratchRootOf } from '../../scripts/_shared/scratch-root.mjs';
+
+/** The project's scratch root, made to exist (it is outside the checkout, and a fresh machine may not have it yet). */
+const scratchRoot = () => { const d = scratchRootOf(); mkdirSync(d, { recursive: true }); return d; };
 import { REPO_ROOT } from './_sources.mjs';
 import { parseSource, ts } from '../_shared/syntax-tree.mjs';
 import { stripComments } from './_strip-comments.mjs';
@@ -609,7 +613,9 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
 
   it('the timing reporter accepts the scope the static run labels (its flags would otherwise throw)', () => {
     assert.ok(TIMING_SCOPES.includes('static'), `TIMING_SCOPES is ${JSON.stringify([...TIMING_SCOPES])}: a 'static' run's reporter flags would throw`);
-    assert.doesNotThrow(() => timingReporterFlags({ suite: 'preflight', batch: 'pure-1', scope: 'static' }));
+    // Into a folder of its own: the default is the checkout's results folder, which a test must not create.
+    const dir = mkdtempSync(join(scratchRoot(), 'flags-'));
+    assert.doesNotThrow(() => timingReporterFlags({ suite: 'preflight', batch: 'pure-1', scope: 'static', dir }));
   });
 
   describe('mutated in memory, each must turn the rule red for the region it touched', () => {
