@@ -149,6 +149,8 @@ export { shadowDecision, type HeldFileTombstone, type MetaArrival, type FileArri
  * gate can derive the wire shape from it instead of keeping a list that goes stale the day a field joins (`issuer` and
  * `rowSeq` did).
  */
+// A file tombstone leaves this instance only through this list, so a field of one that stays here (`versionUnknown`, `pending`, `origin`) needs no entry in
+// `TOMBSTONE_LOCAL_FIELDS`: that set is the BRAIN tombstones' (`sync/local-only-fields.ts`), whose serving reads do not project (bundle-88 review F9).
 export const WIRE = { _id: 1, spaceId: 1, path: 1, deletedAt: 1, issuer: 1, rowSeq: 1 } as const;
 
 /** How long a pending tombstone may wait for its act before the TTL sweep settles it from the disk. */
@@ -971,6 +973,9 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
   // A pass that used its budget resumes after the last row it examined; one that reached the end starts over, and also takes the legacy rows.
   if (!reachedEnd) { pruneResume.set(spaceId, after); return removed; }
   pruneResume.delete(spaceId);
+  // Each legacy loop below is owed one page of every pass, whatever the main loop used: rows it KEPT (a pending path, a young marker) can fill the whole budget,
+  // and a pass that reached the end with none left skipped both loops, again every pass for as long as those rows stayed kept (bundle-88 review F10).
+  pagesUsed = Math.min(pagesUsed, PRUNE_PAGES_PER_PASS - LEGACY_PRUNE_LOOPS);
   // Stored before positions existed (the boot pass, which runs before any prune, gives each its own): judged by `deletedAt`, as it
   // always was. A row here is a leftover of the upgrade, and neither of the two reasons to keep a row applies to it (a pending tombstone
   // beside it was written by an act that began after the upgrade, which published it with an `origin`), so they go by id in pages out of the
@@ -979,7 +984,7 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
   // record of a move still owed — so those are read, in order, and judged ({@link removeUnlessOwed}).
   const legacy = { upTo, limit: FILE_TOMBSTONE_PAGE };
   let afterUnmarked: string | undefined;
-  while (pagesUsed < PRUNE_PAGES_PER_PASS) {
+  while (pagesUsed < PRUNE_PAGES_PER_PASS - 1) {   // the last page of the budget is the marked rows'
     pagesUsed++;
     const page = await legacyTombstonePage<{ _id: string }>(spaceId, { ...legacy, marked: false }, { _id: 1 }, afterUnmarked);
     if (page.rows.length === 0) break;
@@ -987,7 +992,6 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
     if (page.end) break;
     afterUnmarked = page.last;
   }
-  if (pagesUsed >= PRUNE_PAGES_PER_PASS) return removed;
   // The rows with a marker are KEPT while their move is owed, so they do not leave the head the way the rows above do: a cursor, kept between
   // passes like the main loop's, takes the page behind the ones kept, or more than the first page of owed rows would starve every row after it.
   let afterMarked: string | undefined = legacyMarkedResume.get(spaceId);
@@ -1009,6 +1013,9 @@ const PRUNABLE = { _id: 1, path: 1, positionAt: 1, move: 1 } as const;
 
 /** How many pages of acknowledged tombstones one prune pass removes before it gives the space back (the next pass resumes where it stopped). */
 export const PRUNE_PAGES_PER_PASS = 20;
+
+/** The legacy loops of a prune pass (the unmarked rows, the marked rows), each of which is owed a page of the budget whatever the rows kept before them used. */
+const LEGACY_PRUNE_LOOPS = 2;
 
 /** Where the last pass over a space stopped, so the next resumes after it: absent once a pass reaches the end. */
 const pruneResume = new Map<string, IsoPosition>();

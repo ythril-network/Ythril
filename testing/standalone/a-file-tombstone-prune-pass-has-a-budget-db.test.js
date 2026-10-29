@@ -78,6 +78,26 @@ describe('a file tombstone prune pass has a budget', { skip }, () => {
     assert.equal(await count(), 0);
   });
 
+  it('kept rows that fill the budget do not starve the legacy rows: each legacy loop gets a page of every pass (bundle-88 review F10)', async () => {
+    const { PRUNE_PAGES_PER_PASS, FILE_TOMBSTONE_PAGE } = tombstones;
+    // Published rows carrying a move's marker younger than a day are KEPT whatever was acknowledged. One page short of the budget, and a last page that is
+    // not full: the main loop reaches the END of its rows having used every page it was allowed, which used to skip the legacy loops for good.
+    const kept = (PRUNE_PAGES_PER_PASS - 1) * FILE_TOMBSTONE_PAGE + 10;
+    const base = Date.now() - 3_600_000;
+    const at = (i) => new Date(base + i).toISOString();
+    const pad = (i) => String(i).padStart(6, '0');
+    const keptRows = Array.from({ length: kept }, (_, i) => ({ _id: `k${pad(i)}`, spaceId: S, path: `kept${pad(i)}.txt`, deletedAt: at(i), positionAt: at(i), origin: 'own',
+      move: { from: `kept${pad(i)}.txt`, to: `moved${pad(i)}.txt` } }));
+    for (let i = 0; i < keptRows.length; i += 5_000) await acts.door.coll(S, 'file_tombstones').insertMany(keptRows.slice(i, i + 5_000));
+    // Stored before positions existed (no `positionAt`), long ago, with no marker: neither reason to keep a row applies.
+    const legacy = Array.from({ length: 5 }, (_, i) => ({ _id: `l${pad(i)}`, spaceId: S, path: `old${i}.txt`, deletedAt: new Date(Date.UTC(2026, 0, 1) + i * 1000).toISOString() }));
+    await acts.door.coll(S, 'file_tombstones').insertMany(legacy);
+
+    const removed = await tombstones.pruneFileTombstonesUpTo(S, new Date().toISOString());
+    assert.equal(removed, legacy.length, `the pass removed ${removed} rows: the ${legacy.length} legacy rows were behind kept rows that used the whole budget, and the legacy loops never ran`);
+    assert.equal(await count(), kept, 'a kept row was removed, or a legacy row stayed');
+  });
+
   it('legacy rows whose move is still owed are kept and passed: more than a page of them does not starve the rows behind them', async () => {
     const { FILE_TOMBSTONE_PAGE } = tombstones;
     const owedMoves = FILE_TOMBSTONE_PAGE + 20;   // more than the first page of marked rows the prune reads
