@@ -462,17 +462,52 @@ export function validateChrono(meta: SpaceMeta, record: RecordView, instanceWrit
 }
 
 /**
+ * Ends a caller states it has NOT resolved, with the reason in code: what a site that cannot look anything up hands `violationsOfRecord`
+ * or `validateEdge` in place of ends (`endsNotResolved`).
+ */
+export interface NotResolved extends ResolvedEdgeEnds {
+  readonly notResolvedBecause: string;
+}
+
+/** What an edge's validation is handed: the ends its caller resolved, or the stated absence of them. */
+export type EdgeEnds = ResolvedEdgeEnds | NotResolved;
+
+/**
+ * "This site has no ends, and this is why" — the only spelling of an absence the validator's callers are allowed.
+ *
+ * ## What it prevents
+ *
+ * `validateEdge` reads an absent end or count as "not looked", so a call that handed it `{}` was silent about `endpoints` and
+ * `functional` and read as a clean answer; the arrival recorder was that for as long as it was written. A site that really cannot look
+ * (a sample the caller wrote, a proposal between records not written yet) says so here, in a string a reviewer reads at the call, and
+ * `every-edge-validation-is-handed-its-ends-or-says-why` holds every call to ends or to this. A blank reason throws: a reason nobody
+ * wrote is the `{}` it replaces.
+ */
+export function endsNotResolved(reason: string): NotResolved {
+  if (typeof reason !== 'string' || reason.trim() === '') throw new TypeError('endsNotResolved needs the reason this site has no ends');
+  return { notResolvedBecause: reason };
+}
+
+/**
  * What `meta` says about `record`, a stored-shaped record of `kind` — the validator of its kind, reached by name, handed the view of the
- * WHOLE record (an edge with no resolved ends and no exemption: a record judged as it is, by a reader and not by its writer).
+ * WHOLE record (an edge with no exemption: a record judged as it is, by a reader and not by its writer).
  *
  * The one switch for a caller that holds a record and a kind: the sync arrival recorder and the live schema check each wrote it, and a
  * fifth kind added to one of the two would have been judged by nothing in the other.
+ *
+ * **An edge needs its ends**, so the fourth argument is required wherever `kind` can be `'edge'`: what the caller resolved (`resolveEdgeEndsOfPage`,
+ * `plan-edge.ts`), or `endsNotResolved(reason)`. A kind that cannot be an edge takes none.
  */
-export function violationsOfRecord(meta: SpaceMeta, kind: ViewKind, record: object): SchemaViolation[] {
+export function violationsOfRecord(meta: SpaceMeta, kind: Exclude<ViewKind, 'edge'>, record: object): SchemaViolation[];
+export function violationsOfRecord(meta: SpaceMeta, kind: ViewKind, record: object, ends: EdgeEnds): SchemaViolation[];
+export function violationsOfRecord(meta: SpaceMeta, kind: ViewKind, record: object, ends?: EdgeEnds): SchemaViolation[] {
   const view = recordViewOf(kind, record);
   switch (kind) {
     case 'entity': return validateEntity(meta, view);
-    case 'edge': return validateEdge(meta, view);
+    case 'edge':
+      // The overloads keep a typed caller from leaving it out; a caller that is not typed (a gate importing `dist`) gets the throw, not a silent `{}`.
+      if (ends === undefined) throw new TypeError('violationsOfRecord: an edge is judged with its resolved ends, or endsNotResolved(reason)');
+      return validateEdge(meta, view, ends);
     case 'fact': return validateFact(meta, view);
     case 'chrono': return validateChrono(meta, view);
   }

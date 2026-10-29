@@ -8,7 +8,7 @@
  */
 import { UUID_V4_RE } from '../brain/entity-refs.js';
 import { recordViewOf } from '../brain/record-view.js';
-import { validateEntity, validateEdge, validationRefuses, INSTANCE_WRITTEN_PROPERTY_KEYS, type SchemaViolation } from '../spaces/schema-validation.js';
+import { validateEntity, validateEdge, validationRefuses, endsNotResolved, INSTANCE_WRITTEN_PROPERTY_KEYS, type SchemaViolation } from '../spaces/schema-validation.js';
 import type { KnowledgeType, SpaceMeta, ValidationMode } from '../config/types.js';
 
 /** A Schema Library entry, as `schemas/` and `benchmarks/space/schema.json` hold them. */
@@ -364,7 +364,7 @@ export function validateExtraction(extraction: any, schemaEntries: SchemaEntry[]
     }
     // The properties against the label's declarations, by the instance's own validator (below) — the enum, the type, the required and the
     // undeclared key, so the answer here is the answer the write would have given on request 340.
-    sayProperties(at, `'${e.label}'`, validateEdge(propertyMeta, recordViewOf('edge', e), {}, INSTANCE_WRITTEN_PROPERTY_KEYS.edge));
+    sayProperties(at, `'${e.label}'`, validateEdge(propertyMeta, recordViewOf('edge', e), endsNotResolved('an extraction proposes edges between records that are not written yet; the ends resolve at the write'), INSTANCE_WRITTEN_PROPERTY_KEYS.edge));
   }
 
   /* ── claims ────────────────────────────────────────────────────────────────────────────────────────── */

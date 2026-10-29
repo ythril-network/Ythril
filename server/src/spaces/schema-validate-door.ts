@@ -59,7 +59,7 @@ import {
   budgetCeilingZ, budgetFields, budgetMeter, carriagesFor, defaultBudgetChars, resolveBudget, type CeilingRefusal, type ResolvedBudget,
 } from '../brain/result-budget.js';
 import { parseSpaceMeta, readStoredMeta } from './body-schemas.js';
-import { violationsOfRecord, resolveMetaRefs, type SchemaViolation } from './schema-validation.js';
+import { violationsOfRecord, resolveMetaRefs, endsNotResolved, type SchemaViolation } from './schema-validation.js';
 import { validateStoredEdges, STORED_EDGE_PROJECTION, type StoredEdge, type StaleGuard } from './validate-stored-edges.js';
 
 /** The most violating records one page holds, and the default. */
@@ -276,7 +276,7 @@ export async function beginSchemaValidate(input: {
 
   if (sample) {
     // The caller's own record: its values are the caller's, so they stay in the rows whatever the caller may read.
-    const rows = boundedRows(violationsOfRecord(resolved, sample.kind, sample.record));
+    const rows = boundedRows(violationsOfRecord(resolved, sample.kind, sample.record, endsNotResolved('a sample is the record the caller wrote, judged without the store')));
     return {
       status: 200, mode: 'sample', meta,
       answer: {

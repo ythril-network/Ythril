@@ -324,7 +324,8 @@ that produces one in the ordinary course: every door that CREATES an edge — th
 and the inline `edges` of an entity, fact or chrono write — refuses a broken `endpoints` or `functional` rule, but a
 merge rewrites the `from`/`to` of stored edges, and merging entities of different types is the normal case rather
 than a mistake — it is how a mistyped record gets fixed. (An edge that arrives from a sync peer or an import is
-stored as it was written, and is not refused either.)
+stored as it was written and is not refused either; a break of `endpoints` or `functional` under this instance's schema
+is counted in the arrival's `schemaViolations` like any other rule.)
 
 Each row is `{ edgeId, label, end, field, reason }`. `end` is which end of that edge the merge moves (`from`,
 `to`, or `both` for a self-loop on the absorbed entity), `field` is `fromType`, `toType` or `functional` — the
