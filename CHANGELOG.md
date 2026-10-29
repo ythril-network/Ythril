@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** a file delete whose version could not be read is published even after an earlier delete of the same path, and a leftover from before the upgrade is not published twice.
 - **Sync:** one file path whose disk cannot be looked at no longer fails a whole page of file metadata or stops a pull at it; the settle says it once per window.
 - **Sync:** a file-metadata document whose `_id` or `path` is over 4096 characters (the file tombstone's bound) is refused alone.
+- **Sync:** a peer's manifest entries that leave the space are said once per window with their count, not once per entry on every cycle.
 - **Sync:** a file row an older release stored under a non-canonical id (a decomposed name, `a//b`, `./a`) is put at its key the first time a door needs it and on the first sync cycle of a networked space, keeping its version and author; no tombstone is written. Upgraded peers stop refusing it.
 - **Sync:** a file stored under a decomposed (NFD) name is advertised by its NFC key and can be fetched by it; the space hash is the same for either spelling. `GET /api/files/:space?path=` and MCP `read_file` find a file held under another Unicode form of the path.
 - **Sync:** a file tombstone stamped from the wall clock alone after its clock seed could not be read is now said once per window for every failure, and counted in `ythril_file_tombstone_seed_fallback_total`; a store-side failure said nothing before.

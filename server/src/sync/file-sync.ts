@@ -65,6 +65,8 @@ const RECORD_STEP = declareStep('File pull record');
 const QUOTA_STEP = declareStep('File pull quota');
 const REPAIR_STEP = declareStep('File pull repair');
 const BODY_STEP = declareStep('File pull body');
+const OUTSIDE_STEP = declareStep('File manifest entry outside the space');
+const ENTRY_STEP = declareStep('File sync entry');
 
 // What the pull reads of a space's file rows, and why a held file needs its record brought up to date, are the classifier's
 // (`files/disk-against-rows.ts`): the restore asks the same question of the same rows, and one answer serves both.
@@ -238,14 +240,19 @@ export async function syncFiles(
     // disk (`fileKeyOf`): every entry of every manifest is keyed every cycle, and the symlink check is made by the write below,
     // which is the only thing here that touches the filesystem, and only for an entry that is actually fetched.
     const arriving: { remote: (typeof manifest)[number]; key: string }[] = [];
+    let outside = 0;
+    let firstOutside: unknown;
     if (doPull) for (const remote of manifest) {
       try {
         arriving.push({ remote, key: fileKeyOf(spaceId, remote.path).key });
       } catch (err) {
-        // An entry that leaves the space (`../../other-space/x`) is skipped and touches nothing.
-        log.warn(`File sync error for ${peerText(remote.path)}: ${peerText(err)}`);
+        // An entry that leaves the space (`../../other-space/x`) is skipped and touches nothing. Collected, and said ONCE for the peer's manifest with the
+        // count (the shared reporter keeps one line per window): a manifest of such entries said every one of them on every cycle.
+        if (outside++ === 0) firstOutside = err;
       }
     }
+    if (outside > 0) reportSpaceFailure(OUTSIDE_STEP, spaceId, firstOutside, { unit: member.label ?? member.instanceId, count: outside, when: 'next cycle' });
+    else reportSpaceRecovered(OUTSIDE_STEP, spaceId, member.label ?? member.instanceId);
 
     // The bytes a tombstone erased are not downloaded again (Q-229, Q-348): asked ONCE for every entry that would be fetched,
     // by the same predicate every other arrival of a file's bytes asks (`decideArrivals`). An entry it could not decide (the
@@ -452,7 +459,8 @@ export async function syncFiles(
           await staged.discard();   // every exit: shadowed, committed (nothing left), refused, failed
         }
       } catch (err) {
-        log.warn(`File sync error for ${peerText(remote.path)}: ${peerText(err)}`);
+        // Once per window per path, counted every time (the shared reporter), not a line per entry per cycle.
+        sayPullFailure(ENTRY_STEP, spaceId, key, err);
       }
     }
 
