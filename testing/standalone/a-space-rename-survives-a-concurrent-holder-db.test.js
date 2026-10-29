@@ -43,7 +43,9 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
-const windowsOnly = process.platform === 'win32' ? false : 'a Linux directory rename does not fail on an open handle';
+// Listed in testing/_shared/expected-in-ci.mjs: CI's Linux runner cannot produce the failure (a), (b) retry through.
+const SKIPPED = 'expected-in-ci: a directory rename here does not fail on an open handle';
+const windowsOnly = process.platform === 'win32' ? false : SKIPPED;
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-rename-holder-'));
 process.env['CONFIG_PATH'] = path.join(tmpDir, 'config.json');
 process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
