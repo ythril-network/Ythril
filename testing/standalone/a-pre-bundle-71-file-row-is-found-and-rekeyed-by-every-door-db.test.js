@@ -90,18 +90,20 @@ describe('a pre-bundle-71 file row is found and re-keyed by every door', { skip 
 
   for (const shape of SHAPES) {
     describe(`stored under ${shape.name}`, () => {
-      it('the inspect read finds it, keeps its version, and the re-key writes no tombstone', async () => {
+      it('the inspect read finds it at its key and WRITES NOTHING: a read never re-keys', async () => {
         await plant(shape);
         const meta = await getFileMeta(S, shape.key);
         assert.ok(meta, 'the read did not find the row');
-        await expectAtKey(shape, { seq: 7, description: 'the peer\'s description' });
-        assert.deepEqual(await tombstonePaths(), [], 'a re-key wrote a file tombstone');
+        assert.equal(meta._id, shape.key);
+        assert.equal(meta.seq, 7);
+        assert.equal(meta.description, 'the peer\'s description');
+        assert.ok(await rows().findOne({ _id: shape.legacy }), 'a read moved the row: a token holding only a read right caused a write');
+        assert.deepEqual(await tombstonePaths(), []);
       });
 
       it('the inspect read finds it by the legacy spelling too (one key)', async () => {
         await plant(shape);
-        assert.ok(await getFileMeta(S, shape.legacy), 'the legacy spelling did not find the row');
-        await expectAtKey(shape, { seq: 7 });
+        assert.equal((await getFileMeta(S, shape.legacy))?._id, shape.key, 'the legacy spelling did not find the row');
       });
 
       it('MCP update_file_meta edits it in place', async () => {
@@ -171,7 +173,7 @@ describe('a pre-bundle-71 file row is found and re-keyed by every door', { skip 
   describe('a row already at the key (3)', () => {
     const shape = SHAPES[2];
     const atKey = (seq, description) => build.filemeta(S, shape.key, seq, { description, tags: ['legacy', 'peer'], sizeBytes: 3, createdAt: T0, updatedAt: T0 });
-    const settle = async () => { await getFileMeta(S, shape.key); return { legacy: await rows().findOne({ _id: shape.legacy }), key: await rows().findOne({ _id: shape.key }) }; };
+    const settle = async () => { await fileRowIdFor(S, shape.key); return { legacy: await rows().findOne({ _id: shape.legacy }), key: await rows().findOne({ _id: shape.key }) }; };
 
     it('a legacy row of a HIGHER version replaces the one at the key', async () => {
       await plant(shape);

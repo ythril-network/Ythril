@@ -13,7 +13,7 @@
  */
 
 import { toDocId } from '../util/paths.js';
-import { adoptLegacyRow, adoptLegacyRowsUnder } from './legacy-file-keys.js';
+import { adoptLegacyRow, adoptLegacyRowsUnder, legacyIdsOf } from './legacy-file-keys.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
@@ -71,13 +71,23 @@ import { isLocalFileField, stripDerivedStages } from './derived-fields.js';
 /**
  * THE one door from a caller's path to a file row id: the path's key (`toDocId`), with the row stored under a spelling bundle-71 no longer writes
  * put at that key first (`files/legacy-file-keys.ts`, Q-413: what it prevents, and why it is lazy). Every function below that turns a caller's path into a
- * row id asks it, and `toDocId` is spelled nowhere else in this file but {@link fileDirPrefixFor}: a lookup that built the key itself would be the
+ * row id asks it, and `toDocId` is spelled nowhere else in this file but {@link fileDirPrefixFor} and {@link fileRowIdsToRead} (the read door, which writes nothing): a lookup that built the key itself would be the
  * one that never finds the old row (`every-file-row-id-comes-through-one-door.test.js`).
  */
 export async function fileRowIdFor(spaceId: string, filePath: string): Promise<string> {
   const key = toDocId(filePath);
   await adoptLegacyRow(spaceId, key);
   return key;
+}
+
+/**
+ * The ids a READ of a file's row looks at: its key, and the legacy ids a row of that key is still stored under (`files/legacy-file-keys.ts`, Q-413). A read
+ * door finds a row stored under an old spelling and re-keys nothing: only a door that writes does ({@link fileRowIdFor}), because a token holding only a
+ * read right must never cause a write.
+ */
+async function fileRowIdsToRead(spaceId: string, filePath: string): Promise<string[]> {
+  const key = toDocId(filePath);
+  return [key, ...await legacyIdsOf(spaceId, key)];
 }
 
 /** {@link fileRowIdFor} for one path or many, each id once. */
@@ -260,10 +270,12 @@ export function isArrivedPlaceholder(row: { seq?: number; author?: { instanceId?
  * changing that signature, so nothing else has to care.
  */
 export async function getFileMeta(spaceId: string, filePath: string): Promise<FileMetaDoc | null> {
+  const [key, ...legacy] = await fileRowIdsToRead(spaceId, filePath);
   return await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
     // A deleted file's audit record is not a file record: every door that reads one through here — the inspect route,
     // the audit before-snapshot, the extract route's parent — must answer "not found", as it does for a hard delete.
-    .findOne(asFilter<FileMetaDoc>({ _id: await fileRowIdFor(spaceId, filePath), ...NOT_A_FLAGGED_ROW }), { projection: NEVER_RETURNED_PROJECTION }) as FileMetaDoc | null;
+    .findOne(asFilter<FileMetaDoc>({ _id: { $in: [key!, ...legacy] }, ...NOT_A_FLAGGED_ROW }), { projection: NEVER_RETURNED_PROJECTION })
+    .then(row => (row === null ? null : { ...row, _id: key!, path: key! })) as FileMetaDoc | null;
 }
 
 /**

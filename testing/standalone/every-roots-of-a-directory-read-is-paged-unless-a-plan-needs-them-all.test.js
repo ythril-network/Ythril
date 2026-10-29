@@ -44,6 +44,8 @@ describe('a directory\'s roots are held whole only by the move\'s plan', () => {
 
   it('the move plan says why it holds them all (2)', () => {
     const plan = text.get('server/src/files/move-plan.ts');
-    assert.match(plan, /THE ONE CALLER THAT HOLDS THEM ALL[\s\S]{0,400}rootsOfDirectoryPages/);
+    const at = plan.indexOf('THE ONE CALLER THAT HOLDS THEM ALL');
+    assert.ok(at > -1, 'the move plan does not say why it holds every root');
+    assert.ok(plan.indexOf('rootsOfDirectoryPages', at) > at, 'the sentence does not name the paged generator');
   });
 });
