@@ -64,6 +64,8 @@ export async function loadHolderModules() {
     fileMeta: await import('../../server/dist/files/file-meta.js'),
     files: await import('../../server/dist/files/files.js'),
     moveCascade: await import('../../server/dist/files/move-cascade.js'),
+    // The re-key of a legacy file row onto its key (Q-413), a record-position holder.
+    legacyRekey: await import('../../server/dist/files/legacy-file-rekey.js'),
     // The writers of what a file's bytes made, including the one record-position holder among them (bundle-89).
     derivedFields: await import('../../server/dist/files/derived-fields.js'),
     // The file tombstones' module, whose position hold is the second instance of the horizon hold (`util/horizon-holds.ts`).
@@ -367,10 +369,26 @@ export function holderCases(ctx, S) {
       },
       run: () => ctx.mods.moveCascade.moveFileCascade(S, `move-src-${ctx.moveRun}.md`, `move-dst-${ctx.moveRun}.md`),
     }],
+    // A legacy file row re-keyed onto its key (Q-413): the row lands at its key under a landing hold, inside a held transaction, so the id the re-key creates is what its
+    // insert waits for. The same shape as the move's carry above: a conflict inside a transaction is answered at once and retried until the bound, so the server's own
+    // account (the hold `file.rekey-legacy` ended by the bound) is the proof, and the two odd-clock variants leave the case out. A re-key the bound ends throws and leaves
+    // the row at its legacy id (the next touch tries again), which is the answer the bound's timeout is read as.
+    'server/src/files/legacy-file-rekey.ts:rekeyLegacy': [{
+      label: 'a legacy file row re-keyed onto its key: its landing, inside the re-key\'s held transaction', collection: `${S}_files`,
+      baseOnly: true,
+      stallSaidBy: 'file.rekey-legacy',
+      lock: async () => {
+        const n = ctx.rekeyRun = (ctx.rekeyRun ?? 0) + 1;
+        const legacy = `legacy//rekey-${n}.md`;
+        await (ctx.fixture ?? ctx.door).coll(S, 'files').insertOne({ _id: legacy, spaceId: S, path: legacy, tags: [], sizeBytes: 1, createdAt: T0, updatedAt: T0, seq: SEEDED_COUNTER });
+        return holdDocumentLock(mongo(), `${S}_files`, { insert: { _id: `legacy/rekey-${n}.md`, spaceId: S, path: `legacy/rekey-${n}.md` } });
+      },
+      run: () => ctx.mods.legacyRekey.rekeyLegacy(S, `legacy/rekey-${ctx.rekeyRun}.md`, [`legacy//rekey-${ctx.rekeyRun}.md`]),
+    }],
     // The file tombstones' POSITION hold (bundle-71, Q-346): the second instance of the horizon hold. A tombstone has no seq,
     // so the stall is a document lock on the row the write waits for, and the hold is the module's own (`positionHold: true`
     // — `lowestUncommittedPosition` answers whether one is open, where a record hold is asked of `lowestHeldRecordPosition`).
-    'server/src/files/tombstones.ts:publishSlice': [{
+    'server/src/files/tombstones.ts:writeSlice': [{
       label: 'a file tombstone published: its position stamp, inside its hold', positionHold: true, collection: `${S}_file_tombstones`,
       lock: async () => {
         // The act's pending row, written first; the publish's upsert of it is what waits behind the lock. A fixture step, so it is written
