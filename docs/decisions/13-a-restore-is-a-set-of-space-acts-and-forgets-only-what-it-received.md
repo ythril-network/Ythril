@@ -29,8 +29,11 @@ empty database.
    whole database, and it saves the new URI in the write that lifts the holds.
 2. **A restore makes each space equal to the backup.** Its collections are dropped and created again with every index before
    the backup is loaded; a space created after the backup is emptied; a space the backup holds that this instance no longer
-   serves is refused unless the operator leaves it out. The backup is checked whole before anything is registered and again
-   by each space's act.
+   serves is refused unless the operator leaves it out. The door checks the backup at its manifest (the manifest, the
+   files it names, the first line of each: no record is read, so the answer does not wait on the size of the backup); the backup is
+   checked whole - every record read, every count the manifest's - once per restore, by the first act, before any space is
+   replaced, and again by each space's act (D-66, 2026-10-29: "checked whole before anything is replaced" replaces "before
+   anything is registered"; Q-565).
 3. **The counter never goes backwards.** Each space's counter is raised to at least every seq this instance handed out before
    the restore, whatever the backup's counter says. On an empty database the counter the restore can read is zero, so the
    floor there is the version mark `config.json` keeps (decision 16, point 4): the space's first write after the restore

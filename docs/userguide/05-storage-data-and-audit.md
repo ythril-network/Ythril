@@ -273,8 +273,10 @@ Ythril runs directly on your OS. Set **Backup location** to any absolute path yo
 ### Restore
 
 To restore a backup, click **Restore** on any backup row. A restore makes **every space equal to the backup**, and it
-checks the backup before anything is replaced: a backup with a missing or unreadable file, or one encrypted with a secret
-this instance does not have, is refused and nothing changes. A space the backup holds that this instance no longer serves
+checks the backup before anything is replaced. A backup with a missing file, or one encrypted with a secret this instance
+does not have, is refused at once and nothing changes. A backup with a broken record is accepted at once, because reading every
+record can take long; the first space's part reads the whole backup before any space is replaced, and when a record is
+broken every space fails, nothing is replaced and the page offers to **abandon** the restore. A space the backup holds that this instance no longer serves
 (renamed or deleted since) is refused by name unless you leave it out; a space created after the backup is emptied.
 
 Once you confirm, the request is accepted at once and the work runs in the background, one space at a time:

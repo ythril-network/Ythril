@@ -12,11 +12,14 @@
  *
  * ## The shape now
  *
- * - **The door** ({@link planRestore}, {@link startRestore}) checks the backup whole before it registers anything, refuses a backup that
- *   names a space this instance does not serve unless the operator leaves it out, and registers a `restore` act on EVERY served space in
- *   one config write (`registerSpaceActSet`). From that write every space is held (writes refused, exchanges held) and the instance is in
+ * - **The door** ({@link planRestore}, {@link startRestore}) checks the backup AT ITS MANIFEST before it registers anything (the manifest, the
+ *   files it names, the first line of each: no record is read, so the answer does not wait on the size of the backup - Q-565, D-66),
+ *   refuses a backup that names a space this instance does not serve unless the operator leaves it out, and registers a `restore` act on
+ *   EVERY served space in one config write (`registerSpaceActSet`). The whole backup is checked by the first act's body, once for the set
+ *   ({@link wholeBackupOfSet}), before any space is replaced. From that write every space is held (writes refused, exchanges held) and the instance is in
  *   maintenance (`maintenance.ts`), and both last until the last act ends.
- * - **The body** ({@link restoreSpace}), per space, inside the runner's bound: the backup is checked again for this space (it can change on
+ * - **The body** ({@link restoreSpace}), per space, inside the runner's bound: the whole backup is checked (once per set, awaited by every
+ *   member, a broken one failing every member with nothing dropped), the backup is checked again for this space (it can change on
  *   disk), the counter floor is taken after the drain, the space's collections are dropped and created again with every declared index
  *   (`spaces/space-indexes.ts`, the TTL ones included: every collection is created now, so the ones not built at boot are built too; on
  *   empty collections, so the unique indexes refuse a duplicate the backup holds at the insert), the backup's records are loaded, the
@@ -42,7 +45,7 @@
  * instance's own running state.
  */
 import { getDb, reportDatabaseReplaced } from './mongo.js';
-import { backupIsWhole, backupLoader, backupRecords, BackupNotWhole, type BackupCollection } from './restore.js';
+import { backupIsWhole, backupManifestHolds, backupLoader, backupRecords, BackupNotWhole, type BackupCollection } from './restore.js';
 import { backupDirOf } from './backup-location.js';
 import { parseSpaceCollection } from './space-collection.js';
 import { isDuplicateKey } from './write-errors.js';
@@ -161,13 +164,14 @@ export type RestorePlan =
   | { ok: false; unserved: string[] };
 
 /**
- * Plan a restore of backup `backupId` in `dir`: THROWS {@link BackupNotWhole} when the backup is not whole (nothing is registered), and
+ * Plan a restore of backup `backupId` in `dir`: THROWS {@link BackupNotWhole} when the backup does not hold at its manifest
+ * ({@link backupManifestHolds}: nothing is registered; no record is read, so the answer's time does not grow with the backup), and
  * answers which spaces it restores, which it empties (served, not in the backup) and which it leaves out (in the backup, not served, and
  * named in `leaveOut`). A space the backup holds that this instance does not serve was renamed or deleted after the backup: restoring
  * "equal to the backup" cannot place its data, so it is refused unless the operator acknowledges that it is not restored.
  */
 export async function planRestore(backupId: string, dir: string, leaveOut: readonly string[]): Promise<RestorePlan> {
-  const manifest = await backupIsWhole(dir);
+  const manifest = await backupManifestHolds(dir);
   const served = configuredSpaces().map(s => s.id);
   const inBackup = new Set(manifest.collections.map(c => spaceOfCollection(c.name)).filter((s): s is string => s !== null));
   const unserved = [...inBackup].filter(s => !served.includes(s)).sort();
@@ -206,6 +210,7 @@ export function startRestore(plan: Extract<RestorePlan, { ok: true }>): RestoreS
  * rows now there were never read), and the outcome is one audit row naming the backup.
  */
 function onRestoreEnd(set: Readonly<SpaceActSet>): void {
+  wholeBackupChecks.delete(set.id);
   reportDatabaseReplaced();
   restartLeakedRowScans(Object.keys(set.members));
   logInternalAudit({
@@ -250,6 +255,32 @@ function inputFailure(err: unknown, collection?: string): SpaceActInputFailure |
   return null;
 }
 
+/** The whole-backup check of each restore set that has begun, by set id: one read of every record per set, however many spaces it has. */
+const wholeBackupChecks = new Map<string, Promise<void>>();
+
+/**
+ * Is the whole backup readable, once per restore SET: every record of every collection decrypts and parses and every count is the manifest's.
+ * Every member's body awaits this before its own check, so no space is replaced over a backup that a later space would find broken, and a
+ * backup found broken fails EVERY member alike through {@link inputFailure} (the one verdict is cached under the set id, so the members do not
+ * each read the backup again).
+ *
+ * ## What it prevents
+ *
+ * The door used to read every record inside the request (Q-565). The door now checks the manifest only, so this is the check that
+ * guarantees "checked whole before anything is replaced" (decision 13, section 2, D-66). Without the set level, the per-space check alone
+ * would replace the spaces that sort before a broken one and fail only the rest. A failure that is NOT the backup's (a file-system error)
+ * is not cached, so the next member or attempt reads again.
+ */
+function wholeBackupOfSet(setId: string, dir: string): Promise<void> {
+  let check = wholeBackupChecks.get(setId);
+  if (!check) {
+    check = backupIsWhole(dir).then(() => undefined);
+    wholeBackupChecks.set(setId, check);
+    check.catch((err: unknown) => { if (!(err instanceof BackupNotWhole) && wholeBackupChecks.get(setId) === check) wholeBackupChecks.delete(setId); });
+  }
+  return check;
+}
+
 /** The counter the backup holds for `spaceId` (0 when none): one doc of `ythril_counters`, never the collection. */
 async function backupCounterOf(dir: string, counters: BackupCollection | undefined, spaceId: string): Promise<number> {
   if (!counters) return 0;
@@ -270,10 +301,13 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
   if (!dir) throw new SpaceActInputFailure(`backup '${ctx.entry.backupId ?? ''}' is no longer in the backups directory.`);
   const mine = (name: string): boolean => spaceOfCollection(name) === spaceId;
 
-  // The backup again, for this space: it can have changed on disk since the door checked it. Nothing is dropped before this holds.
+  // The whole backup, once for the set and before any space of it is replaced (the door checked the manifest only); then the backup again,
+  // for this space: it can have changed on disk since. Nothing is dropped before both hold.
   let manifest;
-  try { manifest = await backupIsWhole(dir, { only: n => mine(n) || n === COUNTERS }); }
-  catch (err) { throw inputFailure(err) ?? err; }
+  try {
+    await wholeBackupOfSet(ctx.entry.setId ?? ctx.entry.id, dir);
+    manifest = await backupIsWhole(dir, { only: n => mine(n) || n === COUNTERS });
+  } catch (err) { throw inputFailure(err) ?? err; }
 
   // The floor, after the drain: no write of this space is in flight now, so no version above it can still be handed out. The counter and the
   // highest version stored at or below the cap (`highestVersionBelowCap`); a version a record holds above the cap is never the counter's.

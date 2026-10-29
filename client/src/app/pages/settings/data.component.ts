@@ -31,6 +31,15 @@ const MIGRATE_REFUSAL_KEYS: Record<string, string> = {
   INFRA_MANAGED: 'data.migrate.errorInfraManaged',
   target_not_empty: 'data.migrate.errorTargetNotEmpty',
 };
+/**
+ * Does this report END an act the page owes an end sentence for: the report before it said running (the page watched it run), or the page
+ * started the act itself and this is the first report it reads, which may already say the act ended (a copy refused at once, a restore
+ * over in less than the poll interval). Migrate and restore ask it alike, so neither keeps its "accepted" line over an ended act (Q-637).
+ */
+function endsAnAct(was: { state: string } | null, now: { state: string } | null, startedHere: boolean): boolean {
+  return now !== null && now.state !== 'running' && (was?.state === 'running' || startedHere);
+}
+
 type Frequency = 'never' | 'hourly' | 'daily' | 'weekly' | 'monthly';
 
 interface BackupConfig {
@@ -379,6 +388,9 @@ export class DataComponent implements OnInit {
   /** A set this page has seen running: its card stays after it ends, so its outcome stays on screen. */
   private readonly followedRestore = signal(false);
   private readonly followedMigrate = signal(false);
+  /** This page started the act and has not yet announced its end: the first report it reads may already say it ended (Q-637). */
+  private restoreStartedHere = false;
+  private migrateStartedHere = false;
   readonly abandoning = signal(false);
   /** The migrate block's one notice: the accepted line, then what replaces it (how the set ended, an abandon, or that the instance stopped). */
   readonly migrateNotice = signal<string | null>(null);
@@ -544,7 +556,8 @@ export class DataComponent implements OnInit {
     this.restoreReport.set(r);
     const running = r?.state === 'running';
     if (running) this.followedRestore.set(true);
-    if (was?.state === 'running' && r && !running) {
+    if (r && endsAnAct(was, r, this.restoreStartedHere)) {
+      this.restoreStartedHere = false;
       const left = r.spaces.filter(s => s.state === 'restore_abandoned').map(s => s.id);
       // The end replaces "Restore accepted ..." in the polite region, so it is both read and heard (the region is always in the DOM).
       this.restoreNotice.set(r.state === 'abandoned'
@@ -561,7 +574,8 @@ export class DataComponent implements OnInit {
     this.migrateStopped.set(false);
     const running = m?.state === 'running';
     if (running) this.followedMigrate.set(true);
-    if (was?.state === 'running' && m && !running) {
+    if (m && endsAnAct(was, m, this.migrateStartedHere)) {
+      this.migrateStartedHere = false;
       // The end replaces "Migration accepted ..." in the block's polite region, so it is both read and heard.
       this.migrateNotice.set(this.transloco.translate(m.state === 'abandoned' ? 'data.migrate.abandonedOutcome' : 'data.migrate.completed'));
       this.loadMaintenance();
@@ -722,6 +736,7 @@ export class DataComponent implements OnInit {
         this.restoreNotice.set(this.plural.text('data.restore.accepted', started.spaces.length));
         // This page started it, so its outcome is shown even when the first report already says it ended.
         this.followedRestore.set(true);
+        this.restoreStartedHere = true;
         this.loadMaintenance();
         this.refreshRestore();
       },
@@ -1003,6 +1018,7 @@ export class DataComponent implements OnInit {
         this.migrateNotice.set(this.plural.text('data.migrate.accepted', started.spaces.length) + ' ' + this.transloco.translate('data.migrate.success'));
         // This page started it, so its outcome is shown even when the first report already says it ended (a copy refused at once).
         this.followedMigrate.set(true);
+        this.migrateStartedHere = true;
         this.loadMaintenance();
         this.refreshMigrate();
       },

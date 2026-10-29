@@ -1,5 +1,6 @@
 /**
- * Reading a backup back: whether it is whole ({@link backupIsWhole}), loading one of its collections
+ * Reading a backup back: whether it holds at its manifest ({@link backupManifestHolds}, the restore door's check) and whether it is whole
+ * ({@link backupIsWhole}, every record), loading one of its collections
  * ({@link backupLoader}), and replacing a whole database with it ({@link restoreDatabase}).
  *
  * Reads NDJSON files produced by dumpDatabase(). A restore REPLACES: every collection the dump names is dropped
@@ -99,28 +100,69 @@ function readManifest(dir: string): DumpManifest {
   return manifest;
 }
 
+/**
+ * One non-empty backup line as plain text: an envelope decrypted, anything else as it is.
+ *
+ * Encryption is DETECTED, not configured. There is deliberately no "was this encrypted?" setting on restore. `isEnvelope` recognises our
+ * own envelope by its unambiguous `ythrilEnc` marker, so an operator restoring a backup never has to remember how it was written - which
+ * removes a whole class of "restored it the wrong way" error on the most stressful operation they ever perform. It also means a dump
+ * restores correctly with the manifest lost or hand-edited, and that a MIXED file (some lines encrypted, some not) still works. The key
+ * is derived lazily, once, from the first envelope's own salt - not per line, which would be one scrypt per record; `decryptLine` owns
+ * that, see its definition.
+ */
+const plainLineOf = (trimmed: string, decryptLine: (raw: string) => string): string => isEnvelope(trimmed) ? decryptLine(trimmed) : trimmed;
+
 /** The non-empty lines of a backup file, decrypted when they are envelopes and parsed as Extended JSON, in file order. */
 async function* recordsOf(file: string, decryptLine: (raw: string) => string): AsyncGenerator<Record<string, unknown>> {
   const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
   for await (const line of rl) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    // Encryption is DETECTED, not configured.
-    //
-    // There is deliberately no "was this encrypted?" setting on restore. `isEnvelope` recognises our own
-    // envelope by its unambiguous `ythrilEnc` marker, so an operator restoring a backup never has to
-    // remember how it was written — which removes a whole class of "restored it the wrong way" error on
-    // the most stressful operation they ever perform. It also means a dump restores correctly with the
-    // manifest lost or hand-edited, and that a MIXED file (some lines encrypted, some not) still works.
-    //
-    // The key is derived lazily, once, from the first envelope's own salt — not per line, which would be
-    // one scrypt per record. `decryptLine` owns that; see its definition.
-    const plain = isEnvelope(trimmed) ? decryptLine(trimmed) : trimmed;
     // Extended JSON, matching the dump. On a pre-existing plain-JSON dump this behaves exactly as
     // `JSON.parse` did — EJSON only reinterprets the `$date`/`$oid` wrappers it wrote itself — so older
     // backups still restore, with their old (string-dated) semantics rather than a hard failure.
-    yield EJSON.parse(plain) as Record<string, unknown>;
+    yield EJSON.parse(plainLineOf(trimmed, decryptLine)) as Record<string, unknown>;
   }
+}
+
+/** The first non-empty line of a backup file, or null for a file with none; reads no further than it. */
+async function firstLineOf(file: string): Promise<string | null> {
+  const stream = fs.createReadStream(file, { encoding: 'utf8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) { const trimmed = line.trim(); if (trimmed) return trimmed; }
+    return null;
+  } finally { rl.close(); stream.destroy(); }
+}
+
+/**
+ * Does the backup in `dir` hold together AT ITS MANIFEST: the manifest parses and lists its collections, every file it names is present, and
+ * the first line of each file decrypts (an envelope with no secret to open it, or the wrong one, is refused here)? Returns the manifest, or
+ * THROWS {@link BackupNotWhole}.
+ *
+ * ## What it prevents
+ *
+ * The restore door used to answer only after {@link backupIsWhole} had decrypted, parsed and counted EVERY record of the backup, so a
+ * large backup outlasted a proxy's timeout while the server went on (Q-565). This is the door's whole check: its cost is the number of
+ * collections, never of records, and it reads no record: one line of each file, decrypted and never parsed. A broken record, or a count that is
+ * not the manifest's, is found by {@link backupIsWhole} once per restore set before any space is replaced (`wholeBackupOfSet`,
+ * `restore-act.ts`) - that is where a backup is checked whole, and it is not here.
+ */
+export async function backupManifestHolds(dir: string): Promise<DumpManifest> {
+  const manifest = readManifest(dir);
+  const decryptLine = makeLineDecryptor();
+  for (const { name } of manifest.collections) {
+    const file = path.join(dir, `${name}.ndjson`);
+    if (!fs.existsSync(file)) throw new BackupNotWhole(`the backup names collection '${name}' and holds no file for it`);
+    try {
+      const first = await firstLineOf(file);
+      if (first !== null) plainLineOf(first, decryptLine);
+    } catch (err) {
+      if (err instanceof BackupNotWhole) throw err;
+      throw new BackupNotWhole(`a record of collection '${name}' in the backup cannot be read`);
+    }
+  }
+  return manifest;
 }
 
 /**
@@ -132,9 +174,10 @@ async function* recordsOf(file: string, decryptLine: (raw: string) => string): A
  *
  * The restore used to find a missing file only by skipping it with a warning, and a short file only in a debug line - after it had
  * dropped the collection. A restore over a broken backup emptied what it could not reload and reported success. This is THE rule for
- * "this backup can be restored": the route asks it before it registers anything (a broken backup is a `400` that changed nothing), and
- * each restore act asks it again for its own space before it replaces a collection, because the backup can change on disk between the
- * two. It reads every selected record once, which is the price of knowing before dropping rather than after.
+ * "this backup can be restored": the first act of a restore set asks it for the whole backup before any space is replaced
+ * (`wholeBackupOfSet`, `restore-act.ts`), and each act asks it again for its own space before it replaces a collection, because the
+ * backup can change on disk between the two. A migrate's `restoreDatabase` asks it too. It reads every selected record once, which is the
+ * price of knowing before dropping rather than after - and why the restore DOOR does not ask it ({@link backupManifestHolds}).
  */
 export async function backupIsWhole(dir: string, { only }: { only?: (name: string) => boolean } = {}): Promise<DumpManifest> {
   const manifest = readManifest(dir);
