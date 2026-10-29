@@ -30,6 +30,8 @@ import { readStoredById } from '../db/read-by-id.js';
 import { andPredicates } from '../db/and-predicates.js';
 import { inChunks } from '../util/chunks.js';
 import { log, peerText } from '../util/log.js';
+import { settledPositionCap } from '../util/position-clock.js';
+import { recordPositions } from '../sync/record-position-stream.js';
 import { inHeldTransaction } from './held-transaction.js';
 import { removeWithTombstones } from './tombstones.js';
 import { removeForksOf, settleRemovedForks } from './forks.js';
@@ -50,18 +52,19 @@ export const RECORD_REMOVAL_CHUNK = 500;
  * What a kind needs once its removal committed, besides the embed jobs every kind retires: the one place the per-kind difference lives. A kind with
  * nothing to add says so with a function that does nothing, so a new kind cannot be added without deciding.
  */
-export const AFTER_REMOVAL: Readonly<Record<RemovableKind, (spaceId: string, ids: readonly string[], actor?: WebhookActor) => Promise<void>>> = {
+export const AFTER_REMOVAL: Readonly<Record<RemovableKind, (spaceId: string, ids: readonly string[], actor: WebhookActor | undefined, began: number) => Promise<void>>> = {
   // The links a deleted fact or chrono entry STARTS describe a connection whose subject no longer exists, and nothing else would ever remove them.
   // Links pointing AT one belong to the readers' slice: removing them would delete another record's data.
   fact: async (spaceId, ids) => { await (await import('./links.js')).removeLinksFromMany(spaceId, ids, 'fact'); },
   chrono: async (spaceId, ids) => { await (await import('./links.js')).removeLinksFromMany(spaceId, ids, 'chrono'); },
   // Erasure has to reach the biometric copy too (`unlabelFacesForEntities`). Imported where it runs: `entities.ts` removes through this module.
-  entity: async (spaceId, ids, actor) => {
+  entity: async (spaceId, ids, actor, began) => {
     await (await import('./entities.js')).unlabelFacesForEntities(spaceId, [...ids]);
     // An edge or link written to the entity after its remover read the references (Q-305): taken back here, in the one place every door's delete passes,
-    // so none can omit it. A merge's absorbed entity is settled by `executeMerge`, which moves them instead.
+    // so none can omit it, and only what landed once the removal began (`began`) — a TTL or orphan-fork delete has no guard, and an older row is not a straggler.
+    // A merge's absorbed entity is settled by `executeMerge`, which moves them instead.
     const { settleReferencesToRemovedEntity } = await import('./gone-entity-references.js');
-    for (const id of ids) await settleReferencesToRemovedEntity(spaceId, id, actor ? { actor } : {});
+    for (const id of ids) await settleReferencesToRemovedEntity(spaceId, id, { removalBegan: began, ...(actor ? { actor } : {}) });
   },
   edge: async () => {},
 };
@@ -78,6 +81,9 @@ export async function removeRecords(
   spaceId: string, kind: RemovableKind, ids: readonly string[], actor?: WebhookActor, opts: { filter?: Record<string, unknown> } = {},
 ): Promise<Set<string>> {
   const gone = new Set<string>();
+  // The record position the removal begins at: a row that lands from here on (or is in flight now) carries a position at or above it. What a kind's
+  // cascade takes back as a straggler is bounded by it, so a removal with no guard of its own cannot take rows older than itself.
+  const began = await settledPositionCap(recordPositions, spaceId);
   for (const chunk of inChunks(ids, RECORD_REMOVAL_CHUNK)) {
     const { removed, forks } = await removeChunk(spaceId, kind, chunk, opts.filter);
     if (removed.size === 0) continue;
@@ -88,7 +94,7 @@ export async function removeRecords(
       log.warn(`${kind} removal: ${removed.size} ${kind}(s) were deleted in '${peerText(spaceId)}' but their embed jobs were not retired: ${peerText(err)}`);
     }
     if (forks.length > 0) await settleRemovedForks(spaceId, kind, forks);
-    await AFTER_REMOVAL[kind](spaceId, [...removed], actor);
+    await AFTER_REMOVAL[kind](spaceId, [...removed], actor, began);
     if (actor) for (const _id of removed) emitWebhookEvent({ event: `${kind}.deleted`, spaceId, entry: { _id }, ...actor });
   }
   return gone;
