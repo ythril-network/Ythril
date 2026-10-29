@@ -17,7 +17,7 @@ import { adoptLegacyRow, adoptLegacyRowsUnder, legacyIdsOf } from './legacy-file
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
-import { readRowsById, READ_CHUNK } from '../db/read-by-id.js';
+import { readRowsById, readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import { eachIdPage } from '../db/id-keyset-page.js';
 import { reconcileLinks, assertDesiredLinks } from '../brain/links.js';
 import { versionsFor, type VersionAllocation } from '../util/version-stamp.js';
@@ -270,12 +270,18 @@ export function isArrivedPlaceholder(row: { seq?: number; author?: { instanceId?
  * changing that signature, so nothing else has to care.
  */
 export async function getFileMeta(spaceId: string, filePath: string): Promise<FileMetaDoc | null> {
-  const [key, ...legacy] = await fileRowIdsToRead(spaceId, filePath);
-  return await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
-    // A deleted file's audit record is not a file record: every door that reads one through here — the inspect route,
-    // the audit before-snapshot, the extract route's parent — must answer "not found", as it does for a hard delete.
-    .findOne(asFilter<FileMetaDoc>({ _id: { $in: [key!, ...legacy] }, ...NOT_A_FLAGGED_ROW }), { projection: NEVER_RETURNED_PROJECTION })
-    .then(row => (row === null ? null : { ...row, _id: key!, path: key! })) as FileMetaDoc | null;
+  const ids = await fileRowIdsToRead(spaceId, filePath);
+  const key = ids[0]!;
+  // A deleted file's audit record is not a file record: every door that reads one through here — the inspect route,
+  // the audit before-snapshot, the extract route's parent — must answer "not found", as it does for a hard delete.
+  const rows = await readStoredById<FileMetaDoc>(spaceCollection(spaceId, 'files'), ids, 'all', { filter: NOT_A_FLAGGED_ROW });
+  // The row at the key wins; a legacy row (stored under another spelling of the path, Q-413) is PRESENTED at the key. The row is this
+  // read's own object and is never stored, so it is relabelled in place: a read causes no write, and no copy of a stored record is made.
+  const row = rows.get(key) ?? ids.slice(1).map(id => rows.get(id)).find(r => r !== undefined);
+  if (row === undefined) return null;
+  row._id = key;
+  row.path = key;
+  return row;
 }
 
 /**
