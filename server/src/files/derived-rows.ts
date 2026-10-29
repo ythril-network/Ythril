@@ -62,18 +62,24 @@ export async function rowsDerivedFrom(spaceId: string, roots: readonly string[])
   for (let depth = 0; depth < MAX_ANCESTRY && frontier.length > 0; depth++) {
     const next: string[] = [];
     for (const part of inChunks(frontier, READ_CHUNK)) {
-      const rows = await files.find(asFilter({ parentFileId: { $in: part } }), { projection: { _id: 1, parentFileId: 1 } }).toArray();
-      for (const r of rows) {
-        const id = String(r['_id']);
-        parents.add(String(r['parentFileId']));
-        if (reached.has(id)) continue;
-        reached.add(id);
-        if (!isLeafChunk(id, r['parentFileId'])) next.push(id);
-      }
+      next.push(...takeChildren(await files.find(asFilter({ parentFileId: { $in: part } }), { projection: { _id: 1, parentFileId: 1 } }).toArray(), reached, parents));
     }
     frontier = next;
   }
   return { reached, parents };
+}
+
+/** One level's rows into the walk's sets; the ids whose own children are still to be asked for. A DOWNWARD step: the row's own `parentFileId` is data here, never the next hop. */
+function takeChildren(rows: ReadonlyArray<Record<string, unknown>>, reached: Set<string>, parents: Set<string>): string[] {
+  const next: string[] = [];
+  for (const r of rows) {
+    const id = String(r['_id']);
+    parents.add(String(r['parentFileId']));
+    if (reached.has(id)) continue;
+    reached.add(id);
+    if (!isLeafChunk(id, r['parentFileId'])) next.push(id);
+  }
+  return next;
 }
 
 /** What a file (or a directory's files) leaves, as rows: see {@link rowsOfFiles}. */

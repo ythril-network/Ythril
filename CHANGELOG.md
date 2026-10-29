@@ -18,16 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Data:** the Data page's "accepted" line for a restore or migrate is replaced by the end sentence when the act ended before its first poll, and once by "cannot finish, abandon it" when every unfinished space needs an abandon.
 
-- **Sync:** a file delete made while the file's record could not be read is published to peers even when an earlier delete of the same path was published first, so a peer that holds the newer version of the file deletes it too; a delete published before the upgrade no longer lets the same act's leftover be published a second time.
-- **Sync:** one file path whose disk cannot be looked at (a pending delete under a permission error) no longer fails the whole page of file metadata with a `503` or stops a pull at that page: its metadata is decided from the stored row and the rest of the page is stored. The settle says such a path once per window, not once per pass.
-- **Files:** deleting a file costs store commands per level of what it left (its chunks, its converted sidecar), not per chunk; the rows a peer's converted sidecar made are retired in one write; a directory delete reads its roots in pages; a page of file metadata reads the file tombstones once; and a file-tombstone prune pass removes at most 20 pages and resumes on the next.
-- **Sync:** a file-metadata document whose `_id` or `path` is longer than 4096 characters (the bound a file tombstone's path already had) is refused alone instead of reaching the writer.
 - **Files:** a bad `imagesLimit` or `imagesSkip` on `GET …/files/extract` is refused naming the parameter you sent, not `imageslimit`.
 - **Files:** a file moved back to its old path, or onto a path whose earlier file was deleted, now reaches peers; a file uploaded again at a path that held another instance's deleted file reaches peers too.
+- **Files:** deleting a file costs commands per level of what it left, not per chunk; a directory delete reads its roots in pages; a file-tombstone prune pass removes at most 20 pages and resumes on the next.
 - **MCP:** `read_file` on a missing file answers `404` through `POST /api/read_file`, as the extract does, not `400`.
 - **Sync:** `ythril_positions_building_spaces` counts only the spaces this instance serves and reaches 0 after the 6.0 carry; it counted spaces deleted before the upgrade.
 - **Sync:** a space created with the id of a space deleted before the 6.0 upgrade is ready when its create answers, instead of answering `503 positions_building` until the next minute.
 - **Sync:** an edge that arrives (push, pull, import) and breaks its label's `endpoints` or `functional` rule is counted in `schemaViolations`; it is still stored, never refused.
+- **Sync:** a file delete whose version could not be read is published even after an earlier delete of the same path, and a leftover from before the upgrade is not published twice.
+- **Sync:** one file path whose disk cannot be looked at no longer fails a whole page of file metadata or stops a pull at it; the settle says it once per window.
+- **Sync:** a file-metadata document whose `_id` or `path` is over 4096 characters (the file tombstone's bound) is refused alone.
 - **Spaces:** renaming a space on Windows no longer fails, or leaves its upload folder behind, while a file under it is still open; the move waits for it for about five seconds, and reports the rename as incomplete if the file is still held.
 - **Spaces:** a rename into an id whose upload folder is empty or holds only an old upload's leftovers is no longer stopped by it (it blocked every other space operation for a day); a non-empty files folder still stops it, and the answer no longer names the server's data path.
 - **Spaces:** deleting a space no longer waits without limit on the search service: each collection's search indexes are given 15 seconds, and the face gallery index goes with the space.

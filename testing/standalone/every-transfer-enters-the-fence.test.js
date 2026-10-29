@@ -60,7 +60,7 @@ const REFUSAL_AHEAD_OF_ADMITTED_WRITES ='it asks the gate to refuse early, befor
 const EXEMPT_FUNCTIONS = new Map([
   ['server/src/files/files.ts:ensureSpaceFilesDir', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/chunks.ts:(anonymous)', { why: ONLY_REMOVES_OR_REFUSES }],
-  ['server/src/files/converters/pipeline.ts:removeWhatSidecarsLeft', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/files/converters/pipeline.ts:removeSidecarRows', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/derived-rows.ts:deleteRowsDerivedFrom', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/brain/entities.ts:unlabelFacesWhere', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/files/derived-fields.ts:stripFlaggedRowsOnce', { why: UPDATES_EXISTING_ONLY }],
