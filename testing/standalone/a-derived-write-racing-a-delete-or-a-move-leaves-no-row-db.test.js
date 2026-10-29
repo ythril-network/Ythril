@@ -105,8 +105,8 @@ describe('a derived write racing a delete, a move or a wipe leaves no row (real 
       const n = await runInCaptionCall(p);
       // The delete's last step is the parent's flag (soft) or removal (hard). Parked BEFORE it runs, the children have gone.
       const flag = soft
-        ? parkDriverCall(acts.door.mongo, S, 'files', 'updateOne', (f, u) => f?._id === p && Array.isArray(u), { before: true })
-        : parkDriverCall(acts.door.mongo, S, 'files', 'deleteOne', (f) => f?._id === p, { before: true });
+        ? parkDriverCall(acts.door.mongo, S, 'files', 'updateMany', (f, u) => f?._id?.$in?.includes(p) && Array.isArray(u), { before: true })
+        : parkDriverCall(acts.door.mongo, S, 'files', 'deleteMany', (f) => f?._id?.$in?.includes(p), { before: true });
       try {
         const del = acts.del('REST', p);
         await flag.reached;

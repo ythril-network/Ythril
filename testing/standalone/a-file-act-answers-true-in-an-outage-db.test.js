@@ -184,7 +184,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
 
     it(`${via}: a delete whose metadata delete fails after the bytes went answers 503, and the retry completes it`, async () => {
       await seed('b.txt');
-      fail('deleteOne', 'files', F.storeGone.single);
+      fail('deleteMany', 'files', F.storeGone.single);
       const a = via === 'REST' ? await restDelete('b.txt') : await mcp('delete_file', { path: 'b.txt' });
       assertStoreAnswer(`${via} delete`, a);
       const retry = via === 'REST' ? await restDelete('b.txt') : await mcp('delete_file', { path: 'b.txt' });
