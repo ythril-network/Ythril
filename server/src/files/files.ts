@@ -5,7 +5,7 @@ import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 import { StringDecoder } from 'node:string_decoder';
 import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterruptedLink, DestinationOccupied, lstatIfPresent } from './stored-bytes.js';
-import { heldSpellingOf, storedAbsOf } from './held-spelling.js';
+import { heldSpellingOf, storedAbsOf, storedDirOf } from './held-spelling.js';
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
 import { admitSpaceWrite, assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
 import { fsRefusalOf } from './destination.js';
@@ -132,7 +132,7 @@ export async function writeFileBytes(
 
 /** List entries in a directory (non-recursive) */
 export async function listDir(spaceId: string, dirPath: string): Promise<FileEntry[]> {
-  const abs = await resolveSafePathChecked(spaceId, dirPath);
+  const abs = await storedDirOf(spaceId, dirPath);
   const entries = await fs.readdir(abs, { withFileTypes: true });
   const result: FileEntry[] = [];
   for (const e of entries) {

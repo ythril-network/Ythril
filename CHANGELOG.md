@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** a bad `imagesLimit` or `imagesSkip` on `GET …/files/extract` is refused naming the parameter you sent, not `imageslimit`.
 - **Files:** a file moved back to its old path, or onto a path whose earlier file was deleted, now reaches peers; a file uploaded again at a path that held another instance's deleted file reaches peers too.
 - **Files:** deleting a file costs commands per level of what it left, not per chunk; a directory delete reads its roots in pages; a file-tombstone prune pass removes at most 20 pages and resumes on the next.
-- **Files:** deleting, moving or renaming a file by the decomposed (NFD) name a listing reports acts on the bytes held under that spelling, on REST and MCP alike. A delete used to leave the bytes behind, and a move answered "not found".
+- **Files:** deleting, moving or renaming a file by the decomposed (NFD) name a listing reports acts on the bytes held under that spelling, on REST and MCP alike, and a folder held under such a name is listed by its NFC name. A delete used to leave the bytes behind, and a move answered "not found".
 - **MCP:** `read_file` on a missing file answers `404` through `POST /api/read_file`, as the extract does, not `400`.
 - **Sync:** `ythril_positions_building_spaces` counts only the spaces this instance serves and reaches 0 after the 6.0 carry; it counted spaces deleted before the upgrade.
 - **Sync:** a space created with the id of a space deleted before the 6.0 upgrade is ready when its create answers, instead of answering `503 positions_building` until the next minute.

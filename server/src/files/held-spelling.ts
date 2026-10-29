@@ -96,6 +96,25 @@ export async function storedAbsOf(spaceId: string, userPath: string): Promise<st
   return there !== null && !there.isDirectory() ? held.abs : abs;
 }
 
+/**
+ * Where the DIRECTORY a caller's path names is on the disk, whatever spelling it is held under: the NFC resolution when something is
+ * there, else the directory {@link heldSpellingOf} finds, else the NFC resolution (where nothing is). For a read of a directory only
+ * (the listing): an act on a directory keeps resolving by its NFC name, as {@link storedAbsOf} says.
+ *
+ * ## What it prevents
+ *
+ * The listing of the space root names a directory by its held (decomposed) spelling while every other door, and the manifest, names it by
+ * its key; listing it by that key answered ENOENT, so its files could be fetched and deleted by name but never listed.
+ */
+export async function storedDirOf(spaceId: string, userPath: string): Promise<string> {
+  const abs = await resolveSafePathChecked(spaceId, userPath);
+  if (await lstatIfPresent(abs) !== null) return abs;
+  const held = await heldSpellingOf(spaceId, userPath);
+  if (held === null) return abs;
+  const there = await lstatIfPresent(held.abs);
+  return there !== null && there.isDirectory() ? held.abs : abs;
+}
+
 /** Whether bytes are held for the path a caller named, under any spelling of it ({@link storedAbsOf}): `bytesPresentAt` for a file's act. */
 export async function bytesHeldAt(spaceId: string, userPath: string): Promise<boolean> {
   return bytesPresent(await storedAbsOf(spaceId, userPath));
