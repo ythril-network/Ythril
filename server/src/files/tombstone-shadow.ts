@@ -91,6 +91,33 @@ export function shadowDecision(
 }
 
 /**
+ * What the stored row at a deciding path says about a metadata arrival that a pending tombstone, whose path could not be looked at, WOULD
+ * shadow (its `rowSeq` is at or above the arriving seq) — pure, over the row already read. `row` is the live row of the arrival's own
+ * path, or, for a sidecar, of its parent's (the path whose tombstone decides it).
+ *
+ * ## What it rests on
+ *
+ * Every act that writes a pending tombstone removes the file's bytes first and its LIVE rows LAST: the live rows are what tell a retry the
+ * delete is still owed (`markFileMetaDeletedByPrefix`; a move carries its rows after its bytes). So:
+ *  - **no live row** (absent, or flagged `deletedAt`): the act got past its bytes, so the delete happened and the arrival is `shadowed`,
+ *    exactly as a delete that was looked at;
+ *  - **a live row at a version at or above the arriving one**: whatever the act did, the arrival cannot land (the writer's seq guard answers
+ *    `newerLocal`, an equal-seq copy is skipped or forked as always), so it is `not-shadowed` and goes to the writer;
+ *  - **a live row below the arriving version** cannot occur (the tombstone's `rowSeq` was read from this row and a version only rises), and
+ *    stays `undecided`.
+ *
+ * ## What it prevents
+ *
+ * One path whose disk cannot be looked at (EACCES, EIO) answering the whole page of metadata it arrives in with a retryable 503, and a pull
+ * stopping at that page for every later page of the peer while the fault lasts. Bytes are not decided here: the manifest pull leaves the one
+ * entry for the next cycle and the byte door answers a 503 for that one path.
+ */
+export function metaDecidedByRow(arrivalSeq: number, row: StoredFileRow | undefined): 'shadowed' | 'not-shadowed' | 'undecided' {
+  if (row === undefined || row.deletedAt !== undefined) return 'shadowed';
+  return (row.seq ?? 0) >= arrivalSeq ? 'not-shadowed' : 'undecided';
+}
+
+/**
  * The failure of a door that cannot tell whether a delete already happened: a retryable `503`, in the one shape every door
  * answers a failure on the store's side with (`StoreTimeout` — `classifyReadFailure` answers it `503` with `Retry-After`, and the
  * sender does not remember it). Neither guess is safe: "it did not happen" stores bytes a delete erased, and "it did"

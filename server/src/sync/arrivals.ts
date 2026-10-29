@@ -107,7 +107,9 @@ import { fileMetaForWire } from '../api/sync/_shared.js';
 import { fillFileMetaFromStray } from './fill-file-meta.js';
 import { fileMetaUpdate, embedArrivedFiles, authoredKeysRestoreRemoves } from './file-meta-write.js';
 import { isLegacyReadSpill, isInstanceLocalFile } from './file-conflict.js';
-import { shadowedArrivals, supersedeFileTombstones } from '../files/tombstones.js';
+import { decideArrivals, supersedeFileTombstones } from '../files/tombstones.js';
+import { reportSpaceFailure } from '../util/space-failure.js';
+import { declareStep } from '../util/housekeeping-signals.js';
 import { fileKeyOf } from '../files/sandbox.js';
 import { countFileArrival } from '../files/bytes-arrived.js';
 import { isComparableIso } from '../util/comparable-iso.js';
@@ -173,6 +175,12 @@ export interface ArrivalOutcome {
    * Q-229). Only for file metadata, and never for a restore. The page is answered `tombstoned`, as a record is.
    */
   tombstoned: string[];
+  /**
+   * Not written: a file's metadata a pending delete would shadow, whose path could not be looked at, and whose stored row did not decide it
+   * (the one case that cannot occur: a live row below the arriving version, `metaDecidedByRow`). The page goes on; the document is answered
+   * `skipped` and said once per window (`UNDECIDED_STEP`).
+   */
+  undecided: string[];
   /** Ids that arrived more than once; one version (the highest seq) was kept. */
   collapsed: string[];
   /** `fillOnly`: the row this instance made already had everything the record could give it. */
@@ -373,6 +381,8 @@ const storeRefusal = (err: unknown): string =>
  * because the driver's message can carry the peer's value: escaped, cut on a code point, and saying it was cut.
  */
 const ARGUMENT_QUOTED = 200;
+/** The step a file's metadata a pending delete would shadow, that the stored row could not decide either, is said under. */
+const UNDECIDED_STEP = declareStep('File metadata arrival undecided');
 const argumentRefusal = (err: unknown): string =>
   `the database driver refused it as an invalid argument (${peerText(err, { max: ARGUMENT_QUOTED })})`;
 
@@ -401,7 +411,7 @@ export async function writeArrivals(
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const queued: Doc[] = [];
   const out: ArrivalOutcome = {
-    inserted: [], updated: [], newerLocal: [], diverged: [], duplicates: [], refused: [], derived: [], tombstoned: [], collapsed: [],
+    inserted: [], updated: [], newerLocal: [], diverged: [], duplicates: [], refused: [], derived: [], tombstoned: [], undecided: [], collapsed: [],
     complete: [], unstored: [], flagKept: [], keysRemoved: 0, maxReceived: 0,
     enqueue: async () => {
       if (recordType === null || queued.length === 0) return;
@@ -456,12 +466,13 @@ export async function writeArrivals(
   // A file's metadata a held tombstone covers is not written (Q-229): by VERSION, so a newer one passes. A restore is the
   // operator's own instruction and is never judged by one. Asked of the one predicate every arrival of a file asks.
   if (family === 'files' && !restore && toWrite.length > 0) {
-    const shadowed = await shadowedArrivals(spaceId, toWrite.map(d => ({ id: d._id, path: d._id, kind: 'meta' as const, seq: d.seq ?? 0,
+    const { shadowed, undecided, cause } = await decideArrivals(spaceId, toWrite.map(d => ({ id: d._id, path: d._id, kind: 'meta' as const, seq: d.seq ?? 0,
       author: (d.author as { instanceId?: string } | undefined)?.instanceId, deliveredBy: opts.deliveredBy })));
-    if (shadowed.size > 0) {
-      out.tombstoned.push(...shadowed);
-      toWrite = toWrite.filter(d => !shadowed.has(d._id));
-    }
+    if (shadowed.size > 0) out.tombstoned.push(...shadowed);
+    // One path the tombstone's disk cannot answer for never holds up the page: its document is not written and the rest goes on.
+    for (const id of undecided) reportSpaceFailure(UNDECIDED_STEP, spaceId, cause, { unit: id, when: 'next cycle' });
+    out.undecided.push(...undecided);
+    if (shadowed.size > 0 || undecided.size > 0) toWrite = toWrite.filter(d => !shadowed.has(d._id) && !undecided.has(d._id));
   }
 
   // ── per document: the D-9 defaults and the receiver's suppression, the space's policy read once ─────────────
