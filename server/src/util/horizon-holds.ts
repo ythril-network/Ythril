@@ -70,6 +70,11 @@ const holdWarnings = warnOnce<object>();
 /** Every instance created in this process, for the one watchdog. */
 const instances = new Set<HorizonHolds<number | string>>();
 
+/** The registries the watchdog scans, for a test that asks whether every one of them is named when a hold stalls; nothing in the server calls it. */
+export function horizonHoldsForTest(): readonly HorizonHolds<number | string>[] {
+  return [...instances];
+}
+
 /**
  * The open holds of one KIND, per space: an instance of the hold. Created once, at module level, by the module that owns the
  * floor (`seqHolds` in `util/seq.ts`, `positionHolds` in `files/tombstones.ts`).
