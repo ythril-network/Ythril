@@ -38,6 +38,7 @@ import { answerUnknownWriteFields } from '../../contract/write-accepts.js';
 import { webhookToken } from './_shared.js';
 import { sendReadFailure } from './_read-failure.js';
 import { refusalText } from '../../brain/store-failure.js';
+import { connectionRefusalAnswer } from '../../brain/write-validation.js';
 
 export const linksRouter = Router();
 
@@ -103,6 +104,9 @@ linksRouter.post('/spaces/:spaceId/links', globalRateLimit, requireSpaceAuth, de
     // driver text that ends in "not found" is a 503 and not a 404 (bundle-53 G7, Q-335).
     const msg = refusalText(err);
     if (/not found$/.test(msg)) { res.status(404).json({ error: msg }); return; }
+    // The entity the link points at was deleted or merged while it was written (Q-305): 409 `link_target_removed`, as every door answers it.
+    const refused = connectionRefusalAnswer(err, 'create');
+    if (refused) { res.status(refused.status).json(refused.body); return; }
     throw err;
   }
 

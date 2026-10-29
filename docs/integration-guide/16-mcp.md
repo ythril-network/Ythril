@@ -134,6 +134,7 @@ The write tools answer the schema exactly as the REST routes do ([Schema Validat
 - **An entity that goes away while a write runs, in a `strictLinkage` space**, is answered like REST: `save_edge` (and `update_edge` setting an end's kind to entity, and
   an item of `save_bulk`) is refused with `409` `endpoint_removed` in `structuredContent` beside the same sentence, the edge taken back; a `linkEntities` link to such an entity is
   taken back and `structuredContent.warnings` carries a row whose `reason` starts `link_target_removed`, the fact or entry staying written.
+  `save_link` itself, whose whole job is the link, is refused `409` `link_target_removed` in `structuredContent` (nothing stored, no `updated` event).
   See [Upsert an Edge](04b-graph-api.md#upsert-an-edge).
 - **A key the record's type does not declare** is judged by the space's mode (`strict` refuses a key the write adds);
   every write tool's `properties` description says so in one sentence.

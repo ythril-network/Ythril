@@ -46,7 +46,7 @@ import { removeRecords } from './record-removal.js';
 import { removeWithTombstones } from './tombstones.js';
 import { edgeEndpointKind, missingRefs } from './entity-refs.js';
 import { edgeEndsAt, type EdgeEnds } from './edge-ends-of-record.js';
-import { EndpointRemoved } from '../util/errors.js';
+import { EndpointRemoved, LINK_TARGET_REMOVED } from '../util/errors.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc } from '../config/types.js';
 import type { UpdateValidation } from './write-validation.js';
@@ -213,9 +213,6 @@ export async function takeBackLinksToGoneEntities(
   await removeWithTombstones(spaceId, 'links', taken.map(r => ({ _id: r._id, type: 'link' as const, originalSeq: r.seq })), { filter: { spaceId } });
   return new Map(taken.map(r => [r._id, r.to]));
 }
-
-/** The code a write warning carries when a link was taken back because its entity was deleted while the record was written. */
-export const LINK_TARGET_REMOVED = 'link_target_removed';
 
 /**
  * The door-side half of `link_target_removed`: the write's own `onValidation` channel (the one every door already renders as `warnings`, REST and MCP
