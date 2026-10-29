@@ -349,8 +349,8 @@ forgotten deleting comes back here and stays here.
 
 Restore is irreversible — all data written after the backup timestamp will be lost. You will be asked to confirm before the operation begins.
 
-**If a space cannot be restored** because the database is down or slow, it is tried again by itself. If the backup is the
-problem (a file that became unreadable, records one of the space's indexes refuses), retrying cannot help: the page says so,
+**If a space cannot be restored** because the database is down or slow, or a backup file could not be read at that moment, it is tried again by itself. If the backup is the
+problem (a file that was cut short or damaged, records one of the space's indexes refuses), retrying cannot help: the page says so,
 and you can **abandon** the restore. The spaces that were not done are released as they are, and may be half restored; the
 page names them. A backup is never taken while a restore runs.
 

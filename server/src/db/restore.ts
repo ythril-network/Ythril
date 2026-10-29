@@ -22,6 +22,8 @@ import {
 } from '../config/secretbox.js';
 import { log } from '../util/log.js';
 import { RequestRefusal } from '../util/errors.js';
+import { isFileSystemError } from '../util/fs-failure-words.js';
+import { isMissingPath } from '../files/stored-bytes.js';
 import { dbNameFromUri } from './db-name.js';
 import { boundedClientOptions, closeWithinBound } from './bounded-client-options.js';
 import { isNamespaceExists, isNamespaceNotFound } from './namespace-answers.js';
@@ -86,12 +88,29 @@ export class BackupNotWhole extends RequestRefusal {
 /** One collection a manifest names, with the count of records it says the file holds. */
 export type BackupCollection = DumpManifest['collections'][number];
 
+/**
+ * What a failed read of a backup means: the error to throw for `err`, which met `what` while the backup was read.
+ *
+ * ## What it prevents
+ *
+ * A file-system error (EIO, EBUSY, EMFILE, a dropped share, a directory where a file should be) says nothing about the backup, yet it
+ * was worded as {@link BackupNotWhole}: the set-level check cached it as the backup's verdict and every member needed an abandon, when
+ * the next attempt would have read the file. A file-system error is re-thrown as itself, so the runner retries with its backoff and a door
+ * answers it as the file system's failure; only what the backup's CONTENT does (a line that does not decrypt or parse) is not whole.
+ * A file that is not there (isMissingPath) is the backup's: a file it names is missing.
+ */
+function readFailureOf(err: unknown, what: string): unknown {
+  if (err instanceof BackupNotWhole) return err;
+  if (isFileSystemError(err) && !isMissingPath(err)) return err;
+  return new BackupNotWhole(what);
+}
+
 function readManifest(dir: string): DumpManifest {
   let manifest: DumpManifest;
   try {
     manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')) as DumpManifest;
-  } catch {
-    throw new BackupNotWhole('the backup has no readable manifest.json');
+  } catch (err) {
+    throw readFailureOf(err, 'the backup has no readable manifest.json');
   }
   if (!manifest || !Array.isArray(manifest.collections)
     || !manifest.collections.every(c => c && typeof c.name === 'string' && Number.isInteger(c.count) && c.count >= 0)) {
@@ -137,8 +156,9 @@ async function firstLineOf(file: string): Promise<string | null> {
 
 /**
  * Does the backup in `dir` hold together AT ITS MANIFEST: the manifest parses and lists its collections, every file it names is present, and
- * the first line of each file decrypts (an envelope with no secret to open it, or the wrong one, is refused here)? Returns the manifest, or
- * THROWS {@link BackupNotWhole}.
+ * the first line of each file decrypts (an envelope with no secret to open it, or the wrong one, is refused here), and no file is empty
+ * where the manifest counts records (truncated)? Returns the manifest, or THROWS {@link BackupNotWhole}; a file-system error is thrown as
+ * itself ({@link readFailureOf}).
  *
  * ## What it prevents
  *
@@ -151,15 +171,16 @@ async function firstLineOf(file: string): Promise<string | null> {
 export async function backupManifestHolds(dir: string): Promise<DumpManifest> {
   const manifest = readManifest(dir);
   const decryptLine = makeLineDecryptor();
-  for (const { name } of manifest.collections) {
+  for (const { name, count } of manifest.collections) {
     const file = path.join(dir, `${name}.ndjson`);
     if (!fs.existsSync(file)) throw new BackupNotWhole(`the backup names collection '${name}' and holds no file for it`);
     try {
       const first = await firstLineOf(file);
+      // A file with no record where the manifest counts some is truncated: found here, where it costs no read of a record.
+      if (first === null && count > 0) throw new BackupNotWhole(`the backup's file for collection '${name}' holds no record and its manifest says ${count}`);
       if (first !== null) plainLineOf(first, decryptLine);
     } catch (err) {
-      if (err instanceof BackupNotWhole) throw err;
-      throw new BackupNotWhole(`a record of collection '${name}' in the backup cannot be read`);
+      throw readFailureOf(err, `a record of collection '${name}' in the backup cannot be read`);
     }
   }
   return manifest;
@@ -168,7 +189,8 @@ export async function backupManifestHolds(dir: string): Promise<DumpManifest> {
 /**
  * Is the backup in `dir` whole and readable, for the collections `only` selects (every one when absent)? Returns its manifest, or
  * THROWS {@link BackupNotWhole}: the manifest parses, every selected collection's file is present, holds exactly the count the manifest
- * says, and every line of it decrypts and parses.
+ * says, and every line of it decrypts and parses. A file-system error while it reads is thrown as itself, not as a verdict on the backup
+ * ({@link readFailureOf}): a restore act retries it, and a migrate's copy fails with the file system's sentence.
  *
  * ## What it prevents
  *
@@ -190,8 +212,7 @@ export async function backupIsWhole(dir: string, { only }: { only?: (name: strin
     try {
       for await (const _record of recordsOf(file, decryptLine)) n++;
     } catch (err) {
-      if (err instanceof BackupNotWhole) throw err;
-      throw new BackupNotWhole(`a record of collection '${name}' in the backup cannot be read`);
+      throw readFailureOf(err, `a record of collection '${name}' in the backup cannot be read`);
     }
     if (n !== count) throw new BackupNotWhole(`the backup's file for collection '${name}' holds ${n} record(s) and its manifest says ${count}`);
   }
