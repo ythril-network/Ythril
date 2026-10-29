@@ -773,8 +773,10 @@ export async function ensureCollectionSearchIndexes(
  * Drop every search index ONE collection of a space carries — its embedding index, the face gallery, and any
  * swap stand-in either left — and report whether the collection is now free of them.
  *
- * Only `spaces/search-index-presence.ts` calls this, and only after it has read the collection empty under the
- * ordering its docblock proves. A swap still running on the collection is left alone and reported as not done:
+ * Two callers, each asking "this collection no longer needs its search indexes": `spaces/search-index-presence.ts`, only
+ * after it has read the collection empty under the ordering its docblock proves, and `dropSpaceData` (`spaces/lifecycle.ts`),
+ * for a space that is being deleted, which bounds each call by `SPACE_ACT_SEARCH_INDEX_MS` because the two calls in here are
+ * mongot's and no store bound ends them. A swap still running on the collection is left alone and reported as not done:
  * its next step would recreate what this dropped, and the lifecycle tries again later instead.
  *
  * Named by prefix and not by the two names known today, so a third index on a collection is dropped with the
@@ -797,10 +799,10 @@ export async function dropCollectionSearchIndexes(spaceId: string, suffix: Vecto
     try {
       await coll.dropSearchIndex(name);
       liveIndexNames.delete(name.replace(/__swap$/, ''));
-      log.debug(`Dropped search index ${peerText(name)}: its collection holds no record`);
+      log.debug(`Dropped search index ${peerText(name)} of ${peerText(spaceId)}_${suffix}`);
     } catch (err) {
       clean = false;
-      log.warn(`Could not drop search index ${peerText(name)} from empty collection ${peerText(spaceId)}_${suffix}: ${peerText(err)}`);
+      log.warn(`Could not drop search index ${peerText(name)} of ${peerText(spaceId)}_${suffix}: ${peerText(err)}`);
     }
   }
   return clean;

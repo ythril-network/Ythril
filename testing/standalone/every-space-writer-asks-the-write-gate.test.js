@@ -41,7 +41,8 @@ import { spaceWriters } from './_space-writers.mjs';
 import { ASKING_WRAPPERS } from './_space-write-askers.mjs';
 
 const INDEX = moduleIndex('server/src');
-const WRITERS = spaceWriters(INDEX, { floors: { space: 150, alias: 65, files: 40 } });
+// `files` was 40 until the space rename's two bare `fs.rename` calls became the one inside `moveTree` (`files/remove-tree.ts`, Q-171): two sites merged into one.
+const WRITERS = spaceWriters(INDEX, { floors: { space: 150, alias: 65, files: 39 } });
 
 /** The families a wipe covers, and their tombstones — the collection suffixes a covered write names. */
 const COVERED = new Set(['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'file_tombstones']);
@@ -49,7 +50,6 @@ const COVERED = new Set(['facts', 'entities', 'edges', 'chrono', 'links', 'files
 /** Files whose writers need no ask, and why. Each must still hold a writer (else the table is stale). */
 const EXEMPT = new Map([
   ['server/src/spaces/lifecycle.ts', 'the act bodies: the removal and the wipe ARE the act'],
-  ['server/src/spaces/rename.ts', 'the act body: the rename moves the data'],
   ['server/src/files/stored-bytes.ts', 'a primitive beneath the file door, which asks before it reaches it'],
   ['server/src/files/remove-tree.ts', 'a primitive beneath the file door and the act bodies'],
   ['server/src/files/plaintext-file.ts', 'a primitive beneath the file door'],

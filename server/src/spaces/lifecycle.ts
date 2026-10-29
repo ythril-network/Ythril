@@ -15,7 +15,9 @@ import { invalidateUsageCache } from '../quota/quota.js';
 import { log, peerList, peerText } from '../util/log.js';
 import type { Config, SpaceConfig, FactDoc } from '../config/types.js';
 import type { ParsedSpaceMeta } from './body-schemas.js';
-import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady } from './vector-index.js';
+import { VECTOR_INDEXED_COLLECTIONS, finalizeSpaceIndexReady, dropCollectionSearchIndexes } from './vector-index.js';
+import { spaceActKnob } from './space-act-contract.js';
+import { withinTimeBound } from '../util/time-bound.js';
 import { armSearchIndexPresence, reconcileSpaceSearchIndexes, forgetSpaceSearchIndexWaiters } from './search-index-presence.js';
 import { afterSearchUp, forgetSearchWaiter } from './search-readiness.js';
 import { SPACE_COLLECTIONS, repairStaleSpaceIds, dropLegacyPrefixedIndexes, dropSupersededEdgeIdentityIndex, pendingOpConflictMessage, pendingOpStillFailingMessage, setReindexNeeded } from './_shared.js';
@@ -573,21 +575,19 @@ export async function dropSpaceData(
   const db = getDb();
   const errors: string[] = [];
 
-  // 1. Drop vector search indexes on all indexed collections (best-effort)
-  for (const suffix of VECTOR_INDEXED_COLLECTIONS) {
-    const indexName = `${spaceId}_${suffix}_embedding`;
-    try {
-      const coll = db.collection(`${spaceId}_${suffix}`);
-      const indexes = await coll.listSearchIndexes().toArray() as Array<{ name?: string }>;
-      if (indexes.some(i => i.name === indexName)) {
-        await coll.dropSearchIndex(indexName);
-        log.debug(`Dropped vector search index ${peerText(indexName)}`);
-      }
-    } catch (err) {
-      log.warn(`Could not drop vector search index ${peerText(indexName)}: ${peerText(err)}`);
-      // Vector index failure is non-fatal — the collection drop below will clean it up
-    }
-  }
+  // 1. Drop every search index of every indexed collection (best-effort, and bounded).
+  //
+  // Through `dropCollectionSearchIndexes`, the one function that does it: it names an index by the collection's prefix, so the face
+  // gallery and a `__swap` stand-in go with the embedding index. This step used to be a weaker copy that dropped `_embedding` only and
+  // left the rest to the collection drop, where an index lingers (3 to 30 s on atlas-local) and is listed again on a collection
+  // recreated under the same name. Its two calls (list, drop) are mongot's and no store bound ends them, so each collection is bounded
+  // by `SPACE_ACT_SEARCH_INDEX_MS` here, inside the function that every delete and every resumed delete runs: whatever mongot is doing,
+  // the delete waits for it that long and no longer (Q-176). A failure or a timeout is non-fatal — the collection drop below cleans up.
+  await Promise.all(VECTOR_INDEXED_COLLECTIONS.map(suffix => withinTimeBound(
+    dropCollectionSearchIndexes(spaceId, suffix), spaceActKnob('SPACE_ACT_SEARCH_INDEX_MS'), `the search indexes of ${spaceId}_${suffix}`,
+  ).catch(err => {
+    log.warn(`Could not drop the search indexes of ${peerText(spaceId)}_${suffix}: ${peerText(err)}`);
+  })));
 
   // 2. Drop all MongoDB collections associated with this space.
   //

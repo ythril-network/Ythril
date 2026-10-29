@@ -222,11 +222,17 @@ describe('6. only the lifecycle builds or drops a collection\'s search indexes',
   const sources = readTrackedSources('server/src', SCAN).map(s => ({ ...s, code: blankComments(s.text) }));
   const BUILDERS = /\b(ensureCollectionSearchIndexes|dropCollectionSearchIndexes|ensureVectorSearchIndex)\s*\(/;
   const ALLOWED = new Set(['server/src/spaces/vector-index.ts', 'server/src/spaces/search-index-presence.ts']);
+  // A module that may DROP and never build, and why: the rule above is about a space that stays, where a drop loses its search.
+  const DROP_ONLY = new Map([
+    ['server/src/spaces/lifecycle.ts', 'dropSpaceData: the space is being deleted, so there is no search to lose, and the drop is the one function that names every index of a collection (Q-176)'],
+  ]);
+  const BUILDS = /\b(ensureCollectionSearchIndexes|ensureVectorSearchIndex)\s*\(/;
 
   it('no other module calls the per-collection builders', () => {
     const callers = sources.filter(s => BUILDERS.test(s.code)).map(s => s.file);
     assert.ok(callers.includes('server/src/spaces/search-index-presence.ts'), 'the lifecycle no longer calls the builders — the scan is broken');
-    const outside = callers.filter(f => !ALLOWED.has(f));
+    const outside = callers.filter(f => !ALLOWED.has(f) && !(DROP_ONLY.has(f) && !BUILDS.test(sources.find(x => x.file === f).code)));
+    for (const f of DROP_ONLY.keys()) assert.ok(callers.includes(f), `the drop-only allowance for ${f} is stale: it no longer calls a builder`);
     assert.deepEqual(outside, [],
       `${outside.join(', ')} builds or drops a search index directly — on an empty collection that is the cost this rule `
       + 'removes, and on a populated one a drop loses its search. Go through reconcileSpaceSearchIndexes');

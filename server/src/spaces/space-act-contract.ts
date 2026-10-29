@@ -85,6 +85,8 @@ export interface SpaceActKnobs {
   SPACE_ACT_FS_MS: number;
   /** The wait for a space's media claims to be revoked. */
   SPACE_ACT_CLAIM_MS: number;
+  /** The search indexes of ONE collection of a deleted space: listing them and dropping each (mongot's call, which no store bound ends). */
+  SPACE_ACT_SEARCH_INDEX_MS: number;
   /** An act running longer than this is reported (never cut). */
   SLOW_SPACE_ACT_MS: number;
   /** The longest one inbound transfer may stay open. */
@@ -98,6 +100,7 @@ const DEFAULT_KNOBS: { readonly [K in keyof SpaceActKnobs]: () => number } = {
   SPACE_ACT_BATCH: () => 5_000,
   SPACE_ACT_FS_MS: () => 120_000,
   SPACE_ACT_CLAIM_MS: () => 120_000,
+  SPACE_ACT_SEARCH_INDEX_MS: () => 15_000,
   SLOW_SPACE_ACT_MS: () => 10 * 60_000,
   INBOUND_TRANSFER_MS: () => PEER_TRANSFER_TIMEOUT_MS,
 };

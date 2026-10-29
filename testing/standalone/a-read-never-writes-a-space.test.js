@@ -63,7 +63,8 @@ const ROUTE_ROOTS = new Map(ROUTES.map(r => [`${r.method} ${r.path}`, routeHandl
  */
 // `space` lowered from 170 when the plan/commit split folded the create/converge writers' direct writes into
 // one commit (`Q-99` part 3): the sites went because the copies did, not because the scan broke.
-const WRITERS = spaceWriters(INDEX, { floors: { space: 150, alias: 65, files: 40 } });
+// `files` lowered from 40 when the space rename's two bare `fs.rename` calls became the one inside `moveTree` (Q-171): two sites merged into one.
+const WRITERS = spaceWriters(INDEX, { floors: { space: 150, alias: 65, files: 39 } });
 const WRITER_FUNCTION_FLOOR = 110;
 const READ_DOOR_FLOOR = 100;
 

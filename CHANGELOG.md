@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** `ythril_positions_building_spaces` counts only the spaces this instance serves and reaches 0 after the 6.0 carry; it counted spaces deleted before the upgrade.
 - **Sync:** a space created with the id of a space deleted before the 6.0 upgrade is ready when its create answers, instead of answering `503 positions_building` until the next minute.
 - **Sync:** an edge that arrives (push, pull, import) and breaks its label's `endpoints` or `functional` rule is counted in `schemaViolations`; it is still stored, never refused.
+- **Spaces:** renaming a space on Windows no longer fails, or leaves its upload folder behind, while a file under it is still open; the move waits for it for about five seconds, and reports the rename as incomplete if the file is still held.
+- **Spaces:** deleting a space no longer waits without limit on the search service: each collection's search indexes are given 15 seconds, and the face gallery index goes with the space.
 - **Audit:** a tool call that is refused or fails now leaves one audit row at the status it was answered, on MCP and on `POST /api/<tool>`: a refused or failed read (when the log records reads), a write refused before its space resolved, and a refused act.
 - **Audit:** `POST /api/brain/recall`, `/api/brain/similar` and `…/traverse` leave one audit row per call, not two.
 
