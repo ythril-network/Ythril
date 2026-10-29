@@ -310,6 +310,11 @@ export async function updateFileMeta(
   },
   /** Dot-notation paths to remove, applied AFTER the merge — the only way to unset. See the block below. */
   deleteFieldsPaths?: string[],
+  /**
+   * Told the entity ids whose `linkEntities` link was taken back because the entity was deleted while the file's links were written (`link_target_removed`,
+   * Q-305): the file stays written, and the door says which link was not kept in its answer's `warnings` (`linkTargetRemovedWarnings`), as every record door does.
+   */
+  onLinksTakenBack?: (entityIds: readonly string[]) => void,
 ): Promise<FileMetaDoc | null> {
   // Refused before anything is read; the store write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'files');
@@ -457,11 +462,12 @@ export async function updateFileMeta(
    * labeller, which appends through here rather than writing the array itself.
    */
   if (opts.linkEntities !== undefined || opts.linkFacts !== undefined || opts.linkChronos !== undefined) {
-    await reconcileLinks(spaceId, normalised, 'file', {
+    const { takenBack } = await reconcileLinks(spaceId, normalised, 'file', {
       ...(opts.linkEntities !== undefined ? { entity: opts.linkEntities } : {}),
       ...(opts.linkFacts !== undefined ? { fact: opts.linkFacts } : {}),
       ...(opts.linkChronos !== undefined ? { chrono: opts.linkChronos } : {}),
     }, existing.author ?? authorRef());
+    if (takenBack.length > 0) onLinksTakenBack?.(takenBack);
   }
 
   // Face recognition side-effects when entity links change.

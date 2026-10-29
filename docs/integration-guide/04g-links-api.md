@@ -57,10 +57,13 @@ add-only trap. Under `strictLinkage` every id must resolve, and the call is refu
 link that points at nothing. A refused id stores nothing — the record included — and so does a refused entry of the
 same call's `edges` ([A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing)).
 
-**An entity deleted while the write runs is reported, not refused.** The ids are checked before the write and a delete can land between the check and the
+**An entity deleted while a record's write runs is reported, not refused.** The ids are checked before the write and a delete can land between the check and the
 link rows; the write checks the entities again afterwards. A link whose entity is gone is taken back (removed with its tombstone), the record that carried it
 stays written, and the answer's `warnings` carries a row whose `reason` starts `link_target_removed` and names the entity (`field` is `linkEntities`, `value` the
-entity id) — on `fact` and `chrono` creates and updates, REST and MCP alike. A batch's `connections.links` does not count it.
+entity id) — on `fact` and `chrono` creates and updates, on the `link*` fields written inline with any record, and on a file's `linkEntities`
+(`PATCH …/file-meta`, `update_file_meta`), REST and MCP alike. A batch's `connections.links` does not count it: its rows say how many links were written, and
+carry no warning. A link created on its own (`POST …/links`, `save_link`) is the one write whose whole job is the link, so it is refused instead
+([Create a Link](#create-a-link)).
 
 **The 4.x spelling is REFUSED, by name.** A body carrying `entityIds`, `memoryIds` or `chronoIds` gets a
 `400` naming the field to send instead — the same sentence on both doors, and the ids do not change. The

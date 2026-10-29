@@ -70,6 +70,20 @@ describe('an edge or link racing an entity removal never survives it', { skip },
   const edgesNaming = (space, id) => door.coll(space, 'edges').find({ $or: [{ from: id }, { to: id }] }).toArray();
   const tombstoneOf = (space, id) => door.coll(space, 'tombstones').findOne({ _id: id });
   const seed = (space, ...ids) => door.coll(space, 'entities').insertMany(ids.map(id => build.entity(space, id, 4)));
+  /**
+   * The race a link write has: the entity is deleted AFTER the reconcile's existence check and BEFORE its row write, so the first write to the strict
+   * space's links collection is preceded by the delete (raw, as a door's delete leaves the entity). `stop()` puts the collection method back.
+   */
+  function deleteEntityBeforeFirstLinkWrite(entityId) {
+    const proto = Object.getPrototypeOf(door.coll(S, 'links'));
+    const original = proto.bulkWrite;
+    let raced = false;
+    proto.bulkWrite = async function racing(...args) {
+      if (!raced && this.collectionName === `${S}_links`) { raced = true; await door.coll(S, 'entities').deleteOne({ _id: entityId }); }
+      return original.apply(this, args);
+    };
+    return { raced: () => raced, stop: () => { proto.bulkWrite = original; } };
+  }
 
   describe('the remover side', () => {
     it('a plain delete takes back an edge this instance wrote after the door read the blockers, with its tombstone', async () => {
@@ -269,14 +283,7 @@ describe('an edge or link racing an entity removal never survives it', { skip },
     it('a link created to an entity deleted while it was written is refused 409 link_target_removed on both doors, stores nothing and sends no updated event (never a 500)', async () => {
       await seed(S, ENT_UUID);
       await door.coll(S, 'facts').insertOne(build.fact(S, 'fact-f', 4));
-      // The entity is deleted AFTER the reconcile's existence check and BEFORE its row write: the first write to the links collection is preceded by the delete.
-      const proto = Object.getPrototypeOf(door.coll(S, 'links'));
-      const original = proto.bulkWrite;
-      let raced = false;
-      proto.bulkWrite = async function racing(...args) {
-        if (!raced && this.collectionName === `${S}_links`) { raced = true; await door.coll(S, 'entities').deleteOne({ _id: ENT_UUID }); }
-        return original.apply(this, args);
-      };
+      const race = deleteEntityBeforeFirstLinkWrite(ENT_UUID);
       const seen = [];
       const off = bus.subscribeBrainChanges(S, ev => seen.push(ev));
       try {
@@ -285,9 +292,9 @@ describe('an edge or link racing an entity removal never survives it', { skip },
           assert.equal(err.id, ENT_UUID);
           return true;
         });
-        assert.ok(raced, 'the entity was never deleted mid-write: the test did not build the race');
+        assert.ok(race.raced(), 'the entity was never deleted mid-write: the test did not build the race');
         await new Promise(r => setTimeout(r, 100));
-      } finally { off(); proto.bulkWrite = original; }
+      } finally { off(); race.stop(); }
       assert.deepEqual(seen.map(e => e.event), [], 'a fact.updated went out for a link that is not there');
       assert.equal(await door.coll(S, 'links').countDocuments({ to: ENT_UUID }), 0, 'the link to the deleted entity is stored');
       // REST and MCP answer it from the same mapper: 409, { error, code, id }.
@@ -296,6 +303,36 @@ describe('an edge or link racing an entity removal never survives it', { skip },
         assert.equal(a.status, 409);
         assert.deepEqual(a.body, { error: err.message, code: 'link_target_removed', id: ENT_UUID });
       }
+    });
+
+    it('inline connections on a record write: a link to an entity deleted while it was written is reported as a link_target_removed warning, and not counted', async () => {
+      const { applyConnections } = await import('../../server/dist/brain/write-connections.js');
+      await seed(S, ENT_UUID);
+      await door.coll(S, 'facts').insertOne(build.fact(S, 'fact-f', 4));
+      const race = deleteEntityBeforeFirstLinkWrite(ENT_UUID);
+      let out;
+      try { out = await applyConnections(S, 'fact-f', 'fact', { linkEntities: [ENT_UUID] }, author()); } finally { race.stop(); }
+      assert.ok(race.raced(), 'the test did not build the race');
+      assert.equal(out.links, 0, 'a link that was taken back was counted as written');
+      assert.equal(out.warnings.length, 1, 'the taken-back link left no warning: it was dropped silently');
+      assert.match(out.warnings[0].reason, /^link_target_removed: /);
+      assert.equal(out.warnings[0].value, ENT_UUID);
+      assert.equal(await door.coll(S, 'links').countDocuments({ to: ENT_UUID }), 0);
+    });
+
+    it('a file\'s linkEntities: a link to an entity deleted while it was written is told to the door (which answers it as a warning), and the file stays written', async () => {
+      const files = await import('../../server/dist/files/file-meta.js');
+      await seed(S, ENT_UUID);
+      await door.coll(S, 'files').insertOne(build.filemeta(S, 'race/a.txt', 4));
+      const race = deleteEntityBeforeFirstLinkWrite(ENT_UUID);
+      let told;
+      let updated;
+      try { updated = await files.updateFileMeta(S, 'race/a.txt', { linkEntities: [ENT_UUID] }, undefined, (ids) => { told = ids; }); } finally { race.stop(); }
+      assert.ok(race.raced(), 'the test did not build the race');
+      assert.ok(updated, 'the file record was not written');
+      assert.deepEqual(told, [ENT_UUID], 'the file writer dropped the link and said nothing: a caller cannot tell');
+      assert.match(gone.linkTargetRemovedWarnings(told)[0].reason, /^link_target_removed: /);
+      assert.equal(await door.coll(S, 'links').countDocuments({ to: ENT_UUID }), 0);
     });
 
     it('control: a link created to an entity that is there answers the row and sends the updated event', async () => {
