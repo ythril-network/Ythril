@@ -22,8 +22,8 @@
  */
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { heldFileAt, fileKeyOf, peerFileKey, spaceRoot } from './sandbox.js';
-import { lstatIfPresent, isMissingPath } from './stored-bytes.js';
+import { heldFileAt, fileKeyOf, peerFileKey, resolveSafePathChecked, spaceRoot } from './sandbox.js';
+import { bytesPresent, lstatIfPresent, isMissingPath } from './stored-bytes.js';
 
 /**
  * The absolute path of the file `userPath` names in `spaceId` and its key, or `null` when nothing is held under any spelling of it.
@@ -50,4 +50,35 @@ export async function heldSpellingOf(spaceId: string, userPath: string): Promise
     held.push(spelling);
   }
   return heldFileAt(spaceId, held.join('/'));
+}
+
+/**
+ * Where the bytes a caller's path names are on the disk, whatever spelling they are held under: the NFC resolution when something is
+ * there, else the file {@link heldSpellingOf} finds, else the NFC resolution (where nothing is). The one question every ACT on a file asks
+ * (delete, move) before it looks at the disk, so an act and the byte doors that read the same listing name the same file.
+ *
+ * ## What it prevents
+ *
+ * The listing reports the disk's spelling and the byte doors found the file under it, while delete and move resolved only the NFC spelling:
+ * a delete of a listed name answered 204 and published a tombstone with the bytes still on the disk (the settle found nothing at the NFC
+ * path), or answered "not found" for a file GET served; a move answered "not found". A caller of an act looks here and not at
+ * `resolveSafePathChecked` and then `bytesPresent`, which is the half that drops the held spelling.
+ *
+ * A DIRECTORY held under another spelling is not found here: the acts on a directory resolve by its NFC name as they always have, and a
+ * file's delete must never unlink a tree it matched by accident.
+ *
+ * @throws RangeError when the path leaves the space or names a symlinked escape. Any other failure to look at the disk is thrown as it came.
+ */
+export async function storedAbsOf(spaceId: string, userPath: string): Promise<string> {
+  const abs = await resolveSafePathChecked(spaceId, userPath);
+  if (await lstatIfPresent(abs) !== null) return abs;
+  const held = await heldSpellingOf(spaceId, userPath);
+  if (held === null) return abs;
+  const there = await lstatIfPresent(held.abs);
+  return there !== null && !there.isDirectory() ? held.abs : abs;
+}
+
+/** Whether bytes are held for the path a caller named, under any spelling of it ({@link storedAbsOf}): `bytesPresentAt` for a file's act. */
+export async function bytesHeldAt(spaceId: string, userPath: string): Promise<boolean> {
+  return bytesPresent(await storedAbsOf(spaceId, userPath));
 }

@@ -51,6 +51,7 @@ import { NotFoundError, RequestRefusal } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import fs from 'fs/promises';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
+import { storedAbsOf } from './held-spelling.js';
 import { bytesPresent, deleteStoredIfPresent, isMissingPath } from './stored-bytes.js';
 import { ConfirmRequired, FileSystemFault, SpaceRootRefused } from './act-answers.js';
 import { fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, retireFileMetaUnder } from './file-meta.js';
@@ -85,7 +86,8 @@ let steps: Partial<DeleteSteps> | null = null;
 export function setDeleteStepsForTest(next: Partial<DeleteSteps> | null): void { steps = next; }
 
 export async function deleteFileCascade(spaceId: string, filePath: string, actor?: WebhookActor): Promise<void> {
-  const abs = await resolveSafePathChecked(spaceId, filePath);
+  // The bytes under whichever spelling they are held (Q-581): the name a listing gives acts on the file the byte doors serve under it.
+  const abs = await storedAbsOf(spaceId, filePath);
   const present = await bytesPresent(abs);
   // No bytes: a LIVE file record at the path is a delete a failure stopped, owed to completion. A flagged one (a soft
   // delete that finished) and a derived one (chunk, face) are not — the file is already gone, so the answer is not found.

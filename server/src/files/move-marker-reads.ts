@@ -25,7 +25,8 @@ import path from 'node:path';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { linksStartingFrom, aFileUnderHoldsALink } from '../brain/link-adjacency.js';
-import { bytesPresentAt, classifyDestination, destinationStateAt, isOneNameUnderTwoSpellings, lstatIfPresent, realPathsAgree } from './stored-bytes.js';
+import { bytesHeldAt, storedAbsOf } from './held-spelling.js';
+import { classifyDestination, destinationStateAt, isOneNameUnderTwoSpellings, lstatIfPresent, realPathsAgree } from './stored-bytes.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { hasLiveFileRecordAt } from './file-meta.js';
 import { jobIdClausesOf, movedId, movedRoot, type PathKind } from './moved-paths.js';
@@ -40,9 +41,9 @@ export interface MovedBytes { isDirectory: boolean; size: number; mtimeMs: numbe
 /** The identity of a stat: what a move's marker records (`bytesIdentityAt`) and what is compared with it ({@link isTheMovedBytes}), read the one way. */
 const viewOf = (st: BigIntStats): MovedBytes => ({ isDirectory: st.isDirectory(), size: Number(st.size), mtimeMs: Number(st.mtimeNs) / 1e6 });
 
-/** What is at `rel` on the disk, exactly (`bigint`), or `null` when the path does not exist — the one failure read as an answer; any other is thrown, as {@link bytesPresentAt} throws it. */
+/** What is at `rel` on the disk, exactly (`bigint`), or `null` when the path does not exist — the one failure read as an answer; any other is thrown, as {@link bytesHeldAt} throws it. */
 async function lstatAt(spaceId: string, rel: string): Promise<BigIntStats | null> {
-  return lstatIfPresent(await resolveSafePathChecked(spaceId, rel), { bigint: true });
+  return lstatIfPresent(await storedAbsOf(spaceId, rel), { bigint: true });
 }
 
 /**
@@ -73,7 +74,7 @@ export function isTheMovedBytes(atTo: MovedBytes, marker: { size?: number; mtime
  * HALF-MADE LINK (the same inode, two names, and this marker: `classifyDestination`, the one decision the step that placed them asks) or as
  * one entry that has taken the new spelling (a case-only rename, {@link pairOnDisk}) — or `null` when they have not. The one spelling of "the
  * bytes have moved", asked by `moveIsOwed` (which then judges whether they are the moved ones) and by `abandonMove`. A path that cannot be
- * looked at is thrown, as {@link bytesPresentAt} throws it.
+ * looked at is thrown, as {@link bytesHeldAt} throws it.
  *
  * **A marked half-link counts as moved**, so every remover of a marker keeps the marker of a move whose last step was an unlink that did
  * not happen, and housekeeping can finish it. **So does a renamed entry**: its old spelling still answers, and what says the move is
@@ -153,7 +154,7 @@ export type PathAfterAct = 'gone' | 'here' | 'owed';
  * The pair is read only for names that are one name under case folding, which a move to another name never is.
  */
 export async function whatBecameOfPath(spaceId: string, row: { path: string; move?: MovePair | undefined }): Promise<PathAfterAct> {
-  if (!(await bytesPresentAt(spaceId, row.path))) return 'gone';
+  if (!(await bytesHeldAt(spaceId, row.path))) return 'gone';
   const to = row.move ? movedId(row.path, row.move.from, row.move.to) : null;
   if (!row.move || to === null || to === row.path || !isOneNameUnderTwoSpellings(row.path, to)) return 'here';
   if (await pairOnDisk(spaceId, row.path, to) !== 'one-entry-new-spelling') return 'here';

@@ -5,7 +5,7 @@ import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 import { StringDecoder } from 'node:string_decoder';
 import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterruptedLink, DestinationOccupied, lstatIfPresent } from './stored-bytes.js';
-import { heldSpellingOf } from './held-spelling.js';
+import { heldSpellingOf, storedAbsOf } from './held-spelling.js';
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
 import { admitSpaceWrite, assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
 import { fsRefusalOf } from './destination.js';
@@ -232,7 +232,7 @@ export async function moveFile(
   { begun }: { begun: boolean },
 ): Promise<void> {
   await admitSpaceWrite(spaceId, 'files', async () => {
-    const srcAbs = await resolveSafePathChecked(spaceId, srcPath);
+    const srcAbs = await storedAbsOf(spaceId, srcPath);   // where the bytes are held, under whichever spelling (Q-581)
     const dstAbs = await resolveSafePathChecked(spaceId, dstPath);
     await placeIfFree(srcAbs, dstAbs, toDocId(dstPath), { begun });
   });
@@ -247,7 +247,7 @@ export async function moveFile(
  * @returns whether a name was removed.
  */
 export async function finishHalfLinkedMove(spaceId: string, srcPath: string, dstPath: string): Promise<boolean> {
-  return finishInterruptedLink(await resolveSafePathChecked(spaceId, srcPath), await resolveSafePathChecked(spaceId, dstPath));
+  return finishInterruptedLink(await storedAbsOf(spaceId, srcPath), await resolveSafePathChecked(spaceId, dstPath));
 }
 
 /** Recursively sum file sizes under a directory. Returns 0 if dir doesn't exist. */

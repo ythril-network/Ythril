@@ -244,6 +244,9 @@ Content-Type: application/json
 { "destination": "reports/final.docx" }
 ```
 
+The source is found as a download finds it: a file this instance holds under another Unicode form of the name (the decomposed spelling a
+listing reports) is the file named, and its bytes are the ones moved. MCP `move_file` does the same.
+
 **Response** `200`:
 
 ```json
@@ -349,6 +352,9 @@ DELETE /api/files/:spaceId?path=reports/q1.pdf
 ```
 
 **Response** `204`. A failure that none of the answers below describes is `500 { "error": "Failed to delete" }`, for a file and a directory alike.
+
+The file is found as a download finds it: a name the listing reports in its decomposed spelling deletes the bytes held under that spelling,
+and the tombstone is at the file's NFC key. MCP `delete_file` does the same.
 
 **A directory.** Deleting a directory needs `{ "confirm": true }` in the request body (a boolean: any other value is
 `400`). Without it the answer is `422` with `{ "error", "code": "confirm_required", "path" }` and nothing is deleted. The

@@ -122,7 +122,7 @@ import { highestStored } from '../util/index-top.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { eachUnitOfSpace } from '../util/housekeeping-walk.js';
 import { withinWriteBound } from '../db/write-bound.js';
-import { bytesPresentAt } from './stored-bytes.js';
+import { bytesHeldAt } from './held-spelling.js';
 import { whatBecameOfPath } from './move-marker-reads.js';
 import { ActNotRecorded } from './act-answers.js';
 import { parentOfSidecar } from './moved-paths.js';
@@ -900,7 +900,7 @@ interface HeldForArrivals {
  * nothing whatever the disk says, so it is not looked at.
  *
  * Read by path through {@link FILE_TOMBSTONE_QUERIES}' by-path question, then one look at the disk per path that has such a row
- * (`bytesPresentAt`: only a missing path is an answer). Never `heldFileTombstones`: that one is the published ones, which the stray
+ * (`bytesHeldAt`, under any spelling the bytes are held under: only a missing path is an answer). Never `heldFileTombstones`: that one is the published ones, which the stray
  * drain reads and which must not widen.
  */
 async function actedPendingTombstones(
@@ -912,7 +912,7 @@ async function actedPendingTombstones(
   let cause: unknown;
   for (const [p, here] of speaking) {
     try {
-      if (!await bytesPresentAt(spaceId, p)) gone.set(p, here);
+      if (!await bytesHeldAt(spaceId, p)) gone.set(p, here);
     } catch (err) {
       unlooked.set(p, here);
       cause ??= err;
