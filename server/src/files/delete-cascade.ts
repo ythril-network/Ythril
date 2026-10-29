@@ -56,7 +56,7 @@ import { ConfirmRequired, FileSystemFault, SpaceRootRefused } from './act-answer
 import { fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, retireFileMetaUnder } from './file-meta.js';
 import { forgetPathKeyedCache } from './path-keyed-cache.js';
 import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
-import { rootsOfDirectory } from './derived-rows.js';
+import { rootsOfDirectoryPages } from './derived-rows.js';
 import { cancelJobsOwnedBy } from './media/job-queue.js';
 import { deleteConversionArtifactsByPrefix } from './converters/pipeline.js';
 import { removeFileHere, removeLinksOfDeletedFiles } from './remove-file-here.js';
@@ -271,9 +271,11 @@ async function removeWhatADirectoryLeftBesideItsRows(spaceId: string, dirPath: s
   await unlessTheStoreFailed(`deleteConversionArtifactsByPrefix error ${at}`, () => deleteConversionArtifactsByPrefix(spaceId, dirPath));
   // The cached hash of every file the tree held, as one file's delete forgets its own: the cache must not advertise a path nothing holds.
   await unlessTheStoreFailed(`forgetPathKeyedCache error ${at}`, () => forgetPathKeyedCache(spaceId, { under: [dirPath] }));
-  // The embed jobs of the files the tree held, read from their rows (the rows derived from them went with the sidecars, above).
-  await unlessTheStoreFailed(`retireEmbedWorkOfRemovedRows error ${at}`,
-    async () => retireEmbedWorkOfRemovedRows(spaceId, { ids: await rootsOfDirectory(spaceId, dirPath) }));
+  // The embed jobs of the files the tree held, read from their rows (the rows derived from them went with the sidecars, above), a page of roots at
+  // a time: the act has no use for the whole list, so a directory of any size is never held whole.
+  await unlessTheStoreFailed(`retireEmbedWorkOfRemovedRows error ${at}`, async () => {
+    for await (const ids of rootsOfDirectoryPages(spaceId, dirPath)) await retireEmbedWorkOfRemovedRows(spaceId, { ids });
+  });
 }
 
 /**

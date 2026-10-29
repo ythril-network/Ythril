@@ -27,7 +27,7 @@
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { embedJobId, enqueueEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from '../brain/embed-queue.js';
-import { rootsOfDirectory, rowsOfFiles } from './derived-rows.js';
+import { rootsOfDirectoryPages, rowsOfFiles } from './derived-rows.js';
 import { movedId, movedRoot, type PathKind } from './moved-paths.js';
 import { sidecarsOwnedBy } from './sidecar-disk.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -71,10 +71,16 @@ async function requeue(spaceId: string, move: { src: string; dst: string; kind: 
   const from = movedRoot(src);
   const to = movedRoot(dst);
   if (!from || !to) return;
-  const files = spaceCollection(spaceId, 'files');
   const unplacedThere = new Set((move.unplaced ?? []).map(p => movedId(p, from, to)).filter((p): p is string => p !== null));
   const owned = (await sidecarsOwnedBy(spaceId, to, kind)).filter(s => !unplacedThere.has(s.path));
-  const { ids } = await rowsOfFiles(spaceId, kind === 'file' ? [to] : await rootsOfDirectory(spaceId, to), owned);
+  // A page of roots at a time (a directory of any size is never held whole): what is done per page is idempotent, and the sidecars `owned` are asked of each.
+  if (kind === 'file') { await requeuePage(spaceId, from, to, (await rowsOfFiles(spaceId, [to], owned)).ids); return; }
+  for await (const roots of rootsOfDirectoryPages(spaceId, to)) await requeuePage(spaceId, from, to, (await rowsOfFiles(spaceId, roots, owned)).ids);
+}
+
+/** The rows of one set of moved files (at their NEW ids) are queued again, and the jobs of their old ids go. */
+async function requeuePage(spaceId: string, from: string, to: string, ids: ReadonlySet<string>): Promise<void> {
+  const files = spaceCollection(spaceId, 'files');
   // A flagged row (a soft delete's audit record) has no embed work: it is neither queued nor counted as moved.
   const rows = [...(await readStoredById<{ _id: string; parentFileId?: string }>(files, [...ids], { parentFileId: 1 }, { filter: NOT_A_FLAGGED_ROW })).values()];
   if (rows.length === 0) return;
