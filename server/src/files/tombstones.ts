@@ -127,7 +127,7 @@ import { ActNotRecorded } from './act-answers.js';
 import { parentOfSidecar } from './moved-paths.js';
 import { decideSlice, fileTombstonePosition, movesToAskAbout, type SliceDecision } from './tombstone-publish-rules.js';
 import {
-  ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, FILE_TOMBSTONE_PART, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
+  ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, legacyTombstonePage, FILE_TOMBSTONE_PART, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
   type MoveMarker, type PrunableRow, type StoredFileTombstone,
 } from './tombstone-store.js';
 import { issuedHereStamp } from '../sync/issued-here.js';
@@ -964,21 +964,33 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
   // SAME budget as the loop above (`pagesUsed`): a backlog of them is no longer one command that holds the space for as long as it is long, and the
   // next pass takes what this one left (the rows removed are the cursor). A row with a move's marker is the exception — the marker may be the only
   // record of a move still owed — so those are read, in order, and judged ({@link removeUnlessOwed}).
-  const legacy = { ...PUBLISHED, positionAt: { $exists: false }, deletedAt: { $lte: upTo } };
-  const unmarked = asFilter<StoredFileTombstone>({ ...legacy, 'move.from': { $exists: false } });
+  const legacy = { upTo, limit: FILE_TOMBSTONE_PAGE };
+  let afterUnmarked: string | undefined;
   while (pagesUsed < PRUNE_PAGES_PER_PASS) {
     pagesUsed++;
-    const ids = (await tombstonesOf(spaceId).find(unmarked, { projection: { _id: 1 } }).sort({ _id: 1 }).limit(FILE_TOMBSTONE_PAGE).toArray()).map(r => r._id);
-    if (ids.length === 0) break;
-    removed += (await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: ids } }))).deletedCount ?? 0;
-    if (ids.length < FILE_TOMBSTONE_PAGE) break;
+    const page = await legacyTombstonePage<{ _id: string }>(spaceId, { ...legacy, marked: false }, { _id: 1 }, afterUnmarked);
+    if (page.rows.length === 0) break;
+    removed += (await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: page.rows.map(r => r._id) } }))).deletedCount ?? 0;
+    if (page.end) break;
+    afterUnmarked = page.last;
   }
   if (pagesUsed >= PRUNE_PAGES_PER_PASS) return removed;
-  const marked = await tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>({ ...legacy, 'move.from': { $exists: true } }), { projection: { move: 1 } })
-    .sort({ _id: 1 }).limit(FILE_TOMBSTONE_PAGE).toArray();
-  removed += await removeUnlessOwed(spaceId, marked, PUBLISHED);
+  // The rows with a marker are KEPT while their move is owed, so they do not leave the head the way the rows above do: a cursor, kept between
+  // passes like the main loop's, takes the page behind the ones kept, or more than the first page of owed rows would starve every row after it.
+  let afterMarked: string | undefined = legacyMarkedResume.get(spaceId);
+  while (pagesUsed < PRUNE_PAGES_PER_PASS) {
+    pagesUsed++;
+    const page = await legacyTombstonePage<{ _id: string; move?: MoveMarker }>(spaceId, { ...legacy, marked: true }, { move: 1 }, afterMarked);
+    removed += await removeUnlessOwed(spaceId, page.rows, PUBLISHED);
+    if (page.end) { legacyMarkedResume.delete(spaceId); break; }
+    afterMarked = page.last;
+    legacyMarkedResume.set(spaceId, afterMarked!);
+  }
   return removed;
 }
+
+/** Where the last pass stopped among the legacy rows that carry a move's marker, so the next resumes after it: absent once a pass reaches their end. */
+const legacyMarkedResume = new Map<string, string>();
 
 const PRUNABLE = { _id: 1, path: 1, positionAt: 1, move: 1 } as const;
 

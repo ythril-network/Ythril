@@ -26,6 +26,7 @@ import type { FileTombstoneDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { dropIndexesIfPresent } from '../db/index-names.js';
 import { inChunks } from '../util/chunks.js';
+import { idKeysetPage, type IdPage } from '../db/id-keyset-page.js';
 import { isoKeysetFilters, isoKeysetSort, tieThenRange, type IsoPosition } from '../util/seq-keyset.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 
@@ -235,6 +236,22 @@ export async function readTombstonesById<T extends object>(
   spaceId: string, ids: readonly string[], projection: Record<string, 1>, filter?: Record<string, unknown>,
 ): Promise<Map<string, T>> {
   return readStoredById<T>(spaceCollection(spaceId, 'fileTombstones'), ids, projection, filter ? { filter } : {});
+}
+
+/**
+ * A page of the published tombstones stored before positions existed (no `positionAt`) that `deletedAt` says were acknowledged, after the
+ * id the caller last saw: the prune's legacy leftovers, those with no move's marker (`marked: false`) or those with one. The one `_id`
+ * pager (`db/id-keyset-page.ts`) holds the sort, the limit and the cursor, so a caller resumes after what it examined instead of reading the
+ * first page again: a row that is KEPT (a marker whose move is still owed) is passed, never read for ever at the head.
+ */
+export function legacyTombstonePage<T extends { _id: string }>(
+  spaceId: string, q: { upTo: string; marked: boolean; limit: number }, projection: Record<string, 1>, after: string | undefined,
+): Promise<IdPage<T>> {
+  return idKeysetPage<T>({
+    collection: spaceCollection(spaceId, 'fileTombstones'),
+    filter: { ...PUBLISHED, positionAt: { $exists: false }, deletedAt: { $lte: q.upTo }, 'move.from': { $exists: q.marked } },
+    projection, size: q.limit,
+  }, after);
 }
 
 /** What the prune reads of a row. */
