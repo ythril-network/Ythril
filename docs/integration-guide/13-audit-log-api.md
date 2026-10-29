@@ -22,15 +22,20 @@ for a fault of the server (a stored file that cannot be read, a file-system erro
 upstream service did not answer. Entries written before this change record these as **400**, which read as "the caller sent something wrong". MCP answers 200 at the transport layer even when the tool errors, so a status
 taken from the HTTP response would log every rejected write as a success.
 
-**Every refusal of a WRITE tool is a row**, whichever way it is refused, as the REST middleware records every response of
-a mutating route: a schema or merge refusal, a record the call names and cannot find, a conflict, a store failure, and a
-call turned away before the handler ran (bad arguments, the token's rights, the rate limit). Before 5.7.0 only a
-refusal the handler itself returned was a row, so the same refused write left a row or not by how the refusal happened
-to be said. A refusal carries **no change list** — a refused edit changed nothing, and its intended values would claim
-that it had.
+**A call to an audited tool is one row at the status it was answered — success, refusal or failure — whichever way it
+ends**, on MCP and on `POST /api/<tool>`, as the REST middleware records every response of a route: a schema or merge
+refusal, a record the call names and cannot find, a conflict, a store failure, a fault of the server, a refused act, and
+a call turned away before the handler ran (bad arguments, arguments that are not an object, a space that does not exist,
+the token's rights, the rate limit). The only filter is `audit.logReads`, which drops **read** tools at every status,
+exactly as it drops a REST read: a refused or failed `recall`, `filter` or `read_file` is a row when the log records
+reads, and none when it does not. The row names the space the call named, when that space exists; a name that does not
+exist is not written to the log. A refusal carries **no change list** — a refused edit changed nothing, and its intended
+values would claim that it had. An unknown tool is no operation and writes nothing. A REST route that runs a tool and has
+its own audited path (`POST /api/brain/recall`, `/api/brain/similar`, `/api/brain/spaces/:spaceId/traverse`) leaves one row,
+under its own path: it used to leave a second under `/api/<tool>`.
 
 Read tools (`query`, `recall`, `traverse`, `list_*`, `read_file`, …) follow the same rule as REST reads —
-recorded only when `audit.logReads` is on. Three tools record nothing at all and say why in
+recorded only when `audit.logReads` is on, whatever status they answered. Three tools record nothing at all and say why in
 `server/src/mcp/audit-map.ts`: `help` (returns this instance's own documentation), and `network_peers`
 (reads local config, with no REST counterpart that is audited either).
 
@@ -163,7 +168,7 @@ paths do not fill the audit log with content.
 
 ### Tracked operations
 
-Audit entries are recorded for all write operations and (when `logReads` is enabled) read operations across the API surface:
+Audit entries are recorded for all write operations and (when `logReads` is enabled) read operations across the API surface, each at the status answered — success, refusal or failure:
 
 | Category | Operations |
 |----------|-----------|

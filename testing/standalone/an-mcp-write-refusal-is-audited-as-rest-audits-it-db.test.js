@@ -23,6 +23,9 @@
  *  - **A refusal changes nothing and is audited as a refusal**: its row carries no `changes` (a refused edit changed nothing
  *    and its intended values would claim one), as the REST row does.
  *
+ * The rule is now held for every audited tool, reads and pre-resolution refusals included, by
+ * `a-failed-tool-call-is-audited-as-rest-audits-it-db.test.js` (Q-444); this file keeps the schema-refusal cases of the record writes.
+ *
  * ## Seen red
  *
  * On 85c4c564 the tools that throw (`update_entity`, `update_fact`, `update_edge`, `update_chrono`, `save_fact`, `save_edge`) leave no

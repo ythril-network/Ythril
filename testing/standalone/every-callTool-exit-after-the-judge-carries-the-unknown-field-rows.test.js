@@ -72,7 +72,9 @@ describe('callTool answers every outcome of a judged call through withUnknownFie
   const fn = bodyOfEndingWith(src, 'dispatchTool', 'status: caught.status, callSpace', 'the callTool dispatch');
 
   it('callTool answers what the dispatch answers, unchanged, so the exits judged below are the exits of the call', () => {
-    assert.match(bodyOf(src, 'callTool', 'callTool'), /return\s+await\s+dispatchTool\(/, 'callTool no longer returns the dispatch\'s answer as it is');
+    // Inside `auditedToolCall` (Q-444), which returns the outcome it was handed as it is and writes the audit row at its one exit.
+    assert.match(bodyOf(src, 'callTool', 'callTool'), /return\s+await\s+auditedToolCall\([^;]*=>\s*dispatchTool\(req, admitted, facts\)\)/,
+      'callTool no longer returns the dispatch\'s answer as it is');
   });
 
   it('callTool calls the judge, and routes at least one exit through the wrapper (a floor: no judge means nothing to check)', () => {
