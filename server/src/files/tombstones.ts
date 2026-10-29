@@ -946,7 +946,9 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
   let removed = 0;
   let after: IsoPosition = pruneResume.get(spaceId) ?? ISO_READ_START;
   let reachedEnd = false;
-  for (let pages = 0; pages < PRUNE_PAGES_PER_PASS; pages++) {
+  let pagesUsed = 0;
+  while (pagesUsed < PRUNE_PAGES_PER_PASS) {
+    pagesUsed++;
     const page = await ask<PrunableRow>(spaceId, FILE_TOMBSTONE_QUERIES.prunePage({ after, cap, upTo, limit: FILE_TOMBSTONE_PAGE }), PRUNABLE);
     removed += await removeUnlessKept(spaceId, page);
     const last = page[page.length - 1];
@@ -957,14 +959,23 @@ export async function pruneFileTombstonesUpTo(spaceId: string, upTo: string): Pr
   if (!reachedEnd) { pruneResume.set(spaceId, after); return removed; }
   pruneResume.delete(spaceId);
   // Stored before positions existed (the boot pass, which runs before any prune, gives each its own): judged by `deletedAt`, as it
-  // always was. One delete and not a page loop: a row here is a leftover of the upgrade, and neither of the two reasons to keep a
-  // row applies to it (a pending tombstone beside it was written by an act that began after the upgrade, which published it with
-  // an `origin`). A row with a move's marker is the exception — the marker may be the only record of a move still owed — so those
-  // are read and judged ({@link removeUnlessOwed}), and the rest go in the one delete.
+  // always was. A row here is a leftover of the upgrade, and neither of the two reasons to keep a row applies to it (a pending tombstone
+  // beside it was written by an act that began after the upgrade, which published it with an `origin`), so they go by id in pages out of the
+  // SAME budget as the loop above (`pagesUsed`): a backlog of them is no longer one command that holds the space for as long as it is long, and the
+  // next pass takes what this one left (the rows removed are the cursor). A row with a move's marker is the exception — the marker may be the only
+  // record of a move still owed — so those are read, in order, and judged ({@link removeUnlessOwed}).
   const legacy = { ...PUBLISHED, positionAt: { $exists: false }, deletedAt: { $lte: upTo } };
-  removed += (await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ ...legacy, 'move.from': { $exists: false } }))).deletedCount ?? 0;
+  const unmarked = asFilter<StoredFileTombstone>({ ...legacy, 'move.from': { $exists: false } });
+  while (pagesUsed < PRUNE_PAGES_PER_PASS) {
+    pagesUsed++;
+    const ids = (await tombstonesOf(spaceId).find(unmarked, { projection: { _id: 1 } }).sort({ _id: 1 }).limit(FILE_TOMBSTONE_PAGE).toArray()).map(r => r._id);
+    if (ids.length === 0) break;
+    removed += (await tombstonesOf(spaceId).deleteMany(asFilter<StoredFileTombstone>({ _id: { $in: ids } }))).deletedCount ?? 0;
+    if (ids.length < FILE_TOMBSTONE_PAGE) break;
+  }
+  if (pagesUsed >= PRUNE_PAGES_PER_PASS) return removed;
   const marked = await tombstonesOf(spaceId).find(asFilter<StoredFileTombstone>({ ...legacy, 'move.from': { $exists: true } }), { projection: { move: 1 } })
-    .limit(FILE_TOMBSTONE_PAGE).toArray();
+    .sort({ _id: 1 }).limit(FILE_TOMBSTONE_PAGE).toArray();
   removed += await removeUnlessOwed(spaceId, marked, PUBLISHED);
   return removed;
 }

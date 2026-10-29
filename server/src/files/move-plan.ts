@@ -229,7 +229,9 @@ export async function planMove(spaceId: string, src: string, dst: string, kind: 
   const to = movedRoot(dst);
   if (!from || !to) throw new RangeError('A move needs two paths below the space root');
 
-  // The roots: a file's own id; a directory's are the delete's too (`rootsOfDirectory`).
+  // The roots: a file's own id; a directory's are the delete's too (`rootsOfDirectory`). THE ONE CALLER THAT HOLDS THEM ALL, on purpose: a plan is
+  // grouped by its highest ancestor, sorted and packed into batches by size, none of which a page at a time can do. Every other caller pages
+  // (`rootsOfDirectoryPages`), and `every-roots-of-a-directory-read-is-paged-unless-a-plan-needs-them-all.test.js` holds it to this one.
   const roots = kind === 'file' ? [from] : await rootsOfDirectory(spaceId, from);
   const { ids } = await rowsOfFiles(spaceId, roots, await sidecarsOwnedBy(spaceId, from, kind));
 

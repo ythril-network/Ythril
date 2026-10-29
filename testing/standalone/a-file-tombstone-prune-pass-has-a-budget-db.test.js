@@ -57,4 +57,21 @@ describe('a file tombstone prune pass has a budget', { skip }, () => {
     assert.equal(first + second, total, `two passes removed ${first + second} of ${total}`);
     assert.equal(await count(), 0, 'a row past the first pass was not removed by the second');
   });
+
+  it('rows stored before positions existed are removed in pages out of the same budget: no single command removes the whole backlog', async () => {
+    const { PRUNE_PAGES_PER_PASS, FILE_TOMBSTONE_PAGE } = tombstones;
+    const total = (PRUNE_PAGES_PER_PASS + 5) * FILE_TOMBSTONE_PAGE;
+    const at = (i) => new Date(Date.UTC(2026, 0, 1) + i * 1000).toISOString();
+    // No `positionAt`: what a release before positions stored. Judged by `deletedAt`.
+    const rows = Array.from({ length: total }, (_, i) => ({ _id: `l${String(i).padStart(6, '0')}`, spaceId: S, path: `g${i}.txt`, deletedAt: at(i) }));
+    for (let i = 0; i < rows.length; i += 5_000) await acts.door.coll(S, 'file_tombstones').insertMany(rows.slice(i, i + 5_000));
+    const acked = at(total);
+
+    const first = await tombstones.pruneFileTombstonesUpTo(S, acked);
+    assert.ok(first <= PRUNE_PAGES_PER_PASS * FILE_TOMBSTONE_PAGE, `one pass removed ${first} legacy rows: more than ${PRUNE_PAGES_PER_PASS} pages`);
+    assert.ok(first > 0 && await count() === total - first, 'the first pass removed nothing, or the count does not add up');
+    const second = await tombstones.pruneFileTombstonesUpTo(S, acked);
+    assert.equal(first + second, total, `two passes removed ${first + second} of ${total}`);
+    assert.equal(await count(), 0);
+  });
 });
