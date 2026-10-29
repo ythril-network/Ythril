@@ -185,9 +185,11 @@ export async function takeBackEdgesToGoneEntities(spaceId: string, edges: readon
   if (gone.size === 0) return refused;
   for (const goneId of gone) {
     const naming = edges.filter(e => entityEndsOf(e).some(end => end.id === goneId));
-    for (const e of naming) if (!refused.has(e._id)) refused.set(e._id, entityEndsOf(e).find(end => end.id === goneId)!);
-    // Only a row that STILL names the gone entity: an edge a merge's settle moved meanwhile is the survivor's now.
-    await removeRecords(spaceId, 'edge', naming.map(e => e._id), undefined, { filter: edgeEndsAt(goneId, 'entity') });
+    // Only a row that STILL names the gone entity is removed, and only what was removed is refused: an edge a merge's settle moved meanwhile is the
+    // survivor's now, and the write that made it succeeded (answering 409 "nothing is stored" for an edge that exists would send the caller to retry against
+    // the entity that is gone).
+    const removed = await removeRecords(spaceId, 'edge', naming.map(e => e._id), undefined, { filter: edgeEndsAt(goneId, 'entity') });
+    for (const e of naming) if (removed.has(e._id) && !refused.has(e._id)) refused.set(e._id, entityEndsOf(e).find(end => end.id === goneId)!);
   }
   return refused;
 }
@@ -204,7 +206,10 @@ export async function takeBackLinksToGoneEntities(
   if (toEntity.length === 0) return new Map();
   const gone = await goneEntityEnds(spaceId, toEntity.map(r => r.to));
   if (gone.size === 0) return new Map();
-  const taken = toEntity.filter(r => gone.has(r.to));
+  // Only a row that is STILL stored: one a merge's settle re-keyed onto the survivor meanwhile is the survivor's now (not removed, not reported, no second
+  // tombstone for an id the settle already buried).
+  const stored = await readStoredById(spaceCollection(spaceId, 'links'), toEntity.filter(r => gone.has(r.to)).map(r => r._id), { _id: 1 });
+  const taken = toEntity.filter(r => gone.has(r.to) && stored.has(r._id));
   await removeWithTombstones(spaceId, 'links', taken.map(r => ({ _id: r._id, type: 'link' as const, originalSeq: r.seq })), { filter: { spaceId } });
   return new Map(taken.map(r => [r._id, r.to]));
 }
