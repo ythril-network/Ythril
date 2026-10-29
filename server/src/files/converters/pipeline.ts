@@ -34,8 +34,8 @@ import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
 import { enqueueMediaJob, cancelJobsOwnedBy } from '../media/job-queue.js';
 import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, sidecarsOwnedBy, type PathKind, type Sidecar } from '../moved-paths.js';
-import { deleteRowsDerivedFrom, rootsOfDirectory, rowsOfFiles } from '../derived-rows.js';
-import { retireFileMeta } from '../file-meta.js';
+import { deleteRowsDerivedFrom, rootsOfDirectoryPages, rowsOfFiles } from '../derived-rows.js';
+import { retireFileMetaMany } from '../file-meta.js';
 import { READ_CHUNK, readStoredById } from '../../db/read-by-id.js';
 import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
 import { embedConcurrency } from './embed-concurrency.js';
@@ -654,19 +654,29 @@ export async function deleteConversionArtifacts(
  * the file's left the arrivals' rows, the directory's left those and the rows two levels down (bundle-71, Q-349).
  */
 async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[], owned: readonly Sidecar[]): Promise<void> {
+  await removeSidecarRows(spaceId, roots, owned);
+  await removeSidecarBytesAndCache(spaceId, owned);
+}
+
+/** The ROW half of {@link removeWhatSidecarsLeft}: steps 1 to 4, for `roots` and `owned`, which a directory's delete runs once per page of roots. */
+async function removeSidecarRows(spaceId: string, roots: readonly string[], owned: readonly Sidecar[]): Promise<void> {
   assertSpaceTakesWrites(spaceId, 'files');
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // The selection a move carries as well (`rowsOfFiles`): what the roots and the sidecars' rows leave, at every level.
-  const { atSidecars, ids } = await rowsOfFiles(spaceId, roots, owned);
-  await deleteRowsDerivedFrom(spaceId, ids);
+  const { atSidecars, ids, parents } = await rowsOfFiles(spaceId, roots, owned);
+  await deleteRowsDerivedFrom(spaceId, parents);
   const derivedHere = atSidecars.filter(r => r.parentFileId !== undefined).map(r => r._id);
   for (const part of inChunks(derivedHere, READ_CHUNK)) await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }));
-  for (const r of atSidecars) if (r.parentFileId === undefined) await retireFileMeta(spaceId, r._id);
+  // The rows an arrival made, retired as the file's own is: ONE write per chunk of ids, however many there are.
+  await retireFileMetaMany(spaceId, atSidecars.filter(r => r.parentFileId === undefined).map(r => r._id));
   // The embed jobs of every row taken above — read from the rows, never by an id prefix — and not the roots': a root is the caller's
   // (a re-conversion keeps its file).
   const rootSet = new Set(roots);
   await retireEmbedWorkOfRemovedRows(spaceId, { ids: [...ids].filter(id => !rootSet.has(id)) });
+}
 
+/** The BYTES and cache half of {@link removeWhatSidecarsLeft} (step 5), run once after the last row page. */
+async function removeSidecarBytesAndCache(spaceId: string, owned: readonly Sidecar[]): Promise<void> {
   await removeSidecarBytes(spaceId, owned);
   await forgetPathKeyedCache(spaceId, { ids: owned.filter(s => s.shape === 'file').map(s => s.path), under: owned.filter(s => s.shape === 'tree').map(s => s.path) });
 }
@@ -706,7 +716,12 @@ export async function deleteConversionArtifactsByPrefix(
 
   // The roots are the move's too (`rootsOfDirectory`). What derives from them — chunks, the rows of their sidecars, the caption and
   // face rows of an extracted image — is found by the walk the single file's remover shares.
-  await removeWhatSidecarsLeft(spaceId, await rootsOfDirectory(spaceId, dir), sidecarsOf(dir, 'directory'));
+  // The roots a page at a time: the rows of each page go before the next is read, and the bytes and the cache once after the last (the sidecar trees' own rows
+  // come with the first page's call: they depend on the directory, not on a page).
+  const owned = sidecarsOf(dir, 'directory');
+  await removeSidecarRows(spaceId, [], owned);
+  for await (const roots of rootsOfDirectoryPages(spaceId, dir)) await removeSidecarRows(spaceId, roots, []);
+  await removeSidecarBytesAndCache(spaceId, owned);
 
   log.info(`Deleted conversion artifacts under ${peerText(spaceId)}/${peerText(dir)}/`);
 }

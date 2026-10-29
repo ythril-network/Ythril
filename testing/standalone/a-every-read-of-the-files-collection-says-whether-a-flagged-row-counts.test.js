@@ -132,6 +132,7 @@ const EXEMPT = {
   'server/src/files/move-cascade.ts:carryBatch': 'the landed read-back of a batch: whether its first row is at the new id and no longer at the old one, whatever the row is; it surfaces nothing',
   'server/src/files/move-links.ts:convergeLinks': 'reads the author of the files whose links move, for the link rows written for them; it surfaces nothing',
   'server/src/files/derived-rows.ts:rowsDerivedFrom': 'by parent: lists the rows derived from some files, so a delete can remove them',
+  'server/src/files/tombstones.ts:decideMetadataByRow': 'reads the row at the path a pending delete would shadow, flagged or live: a flagged row is the deletion itself and decides the arrival as shadowed (`metaDecidedByRow`)',
   'server/src/brain/suppression-sweep.ts:sweepFiles': 'removes the stored VECTORS of what is suppressed; taking a vector off a flagged row is the intent, and it surfaces nothing',
   'server/src/brain/suppression-sweep.ts:dropFileVectors': 'removes vectors from the rows derived from a file; it surfaces nothing',
   'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors': 'the vector sweep over the record collections of a space, files included; it surfaces nothing',

@@ -38,8 +38,8 @@ export async function removeOnlyTheRecordNamed(spaceId: string, rel: string): Pr
   const id = toDocId(rel);
   await cancelMediaJob(spaceId, id);
   await cancelJobsOwnedBy(spaceId, id, 'file');
-  const { ids } = await rowsOfFiles(spaceId, [id], []);
-  await deleteRowsDerivedFrom(spaceId, ids);
+  const { ids, parents } = await rowsOfFiles(spaceId, [id], []);
+  await deleteRowsDerivedFrom(spaceId, parents);
   // The embed jobs of the record and of the rows derived from it. The hash cache entry stays: it is keyed by the on-disk spelling, which
   // still names the bytes the other spelling's record stands on.
   await retireEmbedWorkOfRemovedRows(spaceId, { ids: [...ids] });
