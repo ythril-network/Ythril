@@ -28,6 +28,9 @@ const N = 'q305loose';
 const PEER = 'q305-some-peer';
 /** A real entity id: the link input is held to the id shape. */
 const ENT_UUID = '0d3f6c1e-5b0a-4c53-9a7e-2f1d8b6a9c10';
+/** The landing position (microseconds) a row written just now carries, and one written an hour ago: a late row and an older one. */
+const nowPos = () => Date.now() * 1000;
+const HOUR_AGO = () => nowPos() - 3_600_000_000;
 
 describe('an edge or link racing an entity removal never survives it', { skip }, () => {
   let door; let author; let entities; let merge; let cascade; let commit; let readSet; let planEdgeMod; let planFactMod; let edgeIdFor; let linkIdFor; let gone;
@@ -55,8 +58,8 @@ describe('an edge or link racing an entity removal never survives it', { skip },
   beforeEach(async () => { await door.wipe(S); await door.wipe(N); });
 
   /** An edge this instance wrote: its own author, no delivery. What a write that landed after a remover's read looks like. */
-  const localEdge = (space, from, to, label = 'knows', seq = 9) =>
-    build.edge(space, edgeIdFor(from, to, label), seq, { from, to, label, author: author() });
+  const localEdge = (space, from, to, label = 'knows', seq = 9, pos = nowPos()) =>
+    build.edge(space, edgeIdFor(from, to, label), seq, { from, to, label, author: author(), pos });
   /** An edge a peer delivered: another author, and the delivery stamp. */
   const peerEdge = (space, from, to, label = 'knows', seq = 9) =>
     build.edge(space, edgeIdFor(from, to, label), seq, { from, to, label, deliveredBy: PEER });
@@ -81,10 +84,31 @@ describe('an edge or link racing an entity removal never survives it', { skip },
       await seed(S, 'ent-e');
       await door.coll(S, 'facts').insertOne(build.fact(S, 'fact-f', 4));
       const id = linkIdFor('fact-f', 'fact', 'ent-e', 'entity');
-      await door.coll(S, 'links').insertOne(build.link(S, id, 6, { from: 'fact-f', fromKind: 'fact', to: 'ent-e', toKind: 'entity', author: author() }));
+      await door.coll(S, 'links').insertOne(build.link(S, id, 6, { from: 'fact-f', fromKind: 'fact', to: 'ent-e', toKind: 'entity', author: author(), pos: nowPos() }));
       assert.equal(await entities.deleteEntity(S, 'ent-e'), true);
       assert.equal(await door.coll(S, 'links').countDocuments({ to: 'ent-e' }), 0, 'a link to the deleted entity survived');
       assert.equal((await tombstoneOf(S, id))?.originalSeq, 6, 'the link\'s tombstone is missing or does not carry its version');
+    });
+
+    it('an unguarded delete (the TTL sweep\'s, an orphan fork\'s) takes back only what landed after it began: an older edge and link are left as they were before this bundle', async () => {
+      await seed(S, 'ent-e', 'ent-x', 'ent-y');
+      await door.coll(S, 'facts').insertMany([build.fact(S, 'fact-old', 4), build.fact(S, 'fact-late', 4)]);
+      const oldEdge = localEdge(S, 'ent-x', 'ent-e', 'knows', 9, HOUR_AGO());
+      const lateEdge = localEdge(S, 'ent-y', 'ent-e', 'knows', 9);
+      const oldId = linkIdFor('fact-old', 'fact', 'ent-e', 'entity');
+      const lateId = linkIdFor('fact-late', 'fact', 'ent-e', 'entity');
+      await door.coll(S, 'edges').insertMany([oldEdge, lateEdge]);
+      await door.coll(S, 'links').insertMany([
+        build.link(S, oldId, 6, { from: 'fact-old', fromKind: 'fact', to: 'ent-e', toKind: 'entity', author: author(), pos: HOUR_AGO() }),
+        build.link(S, lateId, 6, { from: 'fact-late', fromKind: 'fact', to: 'ent-e', toKind: 'entity', author: author(), pos: nowPos() }),
+      ]);
+      assert.equal(await entities.deleteEntity(S, 'ent-e'), true);
+      assert.ok(await door.coll(S, 'edges').findOne({ _id: oldEdge._id }), 'an edge written an hour before the delete was removed by it: the settle took more than the race stragglers');
+      assert.ok(await door.coll(S, 'links').findOne({ _id: oldId }), 'a link written an hour before the delete was removed by it');
+      assert.equal(await tombstoneOf(S, oldEdge._id), null, 'a tombstone was written for the older edge');
+      assert.equal(await tombstoneOf(S, oldId), null, 'a tombstone was written for the older link');
+      assert.equal(await door.coll(S, 'edges').findOne({ _id: lateEdge._id }), null, 'the late edge survived the delete');
+      assert.equal(await door.coll(S, 'links').findOne({ _id: lateId }), null, 'the late link survived the delete');
     });
 
     it('a cascade whose list moved after its preview is refused and removes nothing (pinned)', async () => {

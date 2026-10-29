@@ -83,32 +83,52 @@ export interface GoneEnd { id: string; side: 'from' | 'to' }
  * are still owed. `executeMerge` logs it instead, because its merge has committed and the writer side still catches its own edge.
  */
 export async function settleReferencesToRemovedEntity(
-  spaceId: string, entityId: string, opts: { survivorId?: string; actor?: WebhookActor } = {},
+  spaceId: string, entityId: string, opts: SettleHow,
 ): Promise<SettledReferences> {
   if (!isStrictLinkage(spaceId)) return NOTHING_SETTLED();
   if ((await readStoredById(spaceCollection(spaceId, 'entities'), [entityId], { _id: 1 })).size > 0) return NOTHING_SETTLED();
   // Imported where it runs: `relink-references.ts` reaches `links.ts`, which reaches the commit, which calls this module's writer-side checks.
   const relink = await import('./relink-references.js');
-  const settled = opts.survivorId !== undefined
+  const settled = 'survivorId' in opts
     ? await moveReferencesToSurvivor(relink, spaceId, entityId, opts.survivorId)
-    : await takeBackReferencesWrittenHere(relink, spaceId, entityId, opts.actor);
+    : await takeBackReferencesWrittenHere(relink, spaceId, entityId, opts.removalBegan, opts.actor);
   const counts = `${settled.removedEdges.length} edge(s) and ${settled.removedLinks.length} link(s) taken back, ${settled.relinked} edge(s) moved`;
   if (settled.removedEdges.length + settled.removedLinks.length + settled.relinked + settled.collapsedEdgeIds.length > 0) {
-    log.info(`entity ${opts.survivorId !== undefined ? 'merge' : 'delete'}: references written to '${peerText(entityId)}' in '${peerText(spaceId)}' while it was being removed were settled: ${counts}`);
+    log.info(`entity ${'survivorId' in opts ? 'merge' : 'delete'}: references written to '${peerText(entityId)}' in '${peerText(spaceId)}' while it was being removed were settled: ${counts}`);
   }
   return settled;
 }
 
-/** A delete: the edges and links that name the entity and THIS instance wrote, removed with their tombstones. */
+/**
+ * How the removal went, which decides what is settled: a merge names the survivor the rest moves to; a delete names the record position it BEGAN at
+ * (`removeRecords`' `began`), so what it takes back is bounded to what landed since.
+ */
+export type SettleHow = { survivorId: string } | { removalBegan: number; actor?: WebhookActor };
+
+/**
+ * How far before the removal's start a row may have landed and still be taken back by a delete's settle, in record-position microseconds. A door reads
+ * what references the entity (the blockers) a moment before it deletes; a row that lands in that interval was never seen by the guard and is just as much
+ * a straggler as one that lands after the delete began. A minute is long over the interval and short against any row that was already there to be seen.
+ */
+export const SETTLE_LOOKBACK_MICROS = 60_000_000;
+
+/**
+ * A delete: the edges and links that name the entity, THIS instance wrote, and that landed since the removal began (less {@link SETTLE_LOOKBACK_MICROS}),
+ * removed with their tombstones. An older row is left as it was before the bundle: an unguarded delete (the TTL sweep's, an orphan fork's) never
+ * read the references, so it is not entitled to take what was there to be read. A row's `pos` is where THIS instance landed it, restamped by every
+ * local write, so what matches is a row written or last rewritten in the window.
+ */
 async function takeBackReferencesWrittenHere(
-  relink: Relink, spaceId: string, entityId: string, actor: WebhookActor | undefined,
+  relink: Relink, spaceId: string, entityId: string, removalBegan: number, actor: WebhookActor | undefined,
 ): Promise<SettledReferences> {
   const settled = NOTHING_SETTLED();
+  const landedSince = { pos: { $gte: removalBegan - SETTLE_LOOKBACK_MICROS } };
+  const mine = andPredicates(writtenHereFilter(), landedSince)!;
   const edgeIds = (await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .find(andPredicates(relink.edgesOfRecord(spaceId, entityId, 'entity'), writtenHereFilter()) as never, { projection: { _id: 1 } })
+    .find(andPredicates(relink.edgesOfRecord(spaceId, entityId, 'entity'), mine) as never, { projection: { _id: 1 } })
     .toArray() as Array<Pick<EdgeDoc, '_id'>>).map(e => e._id);
   if (edgeIds.length > 0) settled.removedEdges = [...await removeRecords(spaceId, 'edge', edgeIds, actor)];
-  const links = await relink.linkRowsOfRecord(spaceId, entityId, 'entity', writtenHereFilter());
+  const links = await relink.linkRowsOfRecord(spaceId, entityId, 'entity', mine);
   if (links.length > 0) {
     await removeWithTombstones(spaceId, 'links', links.map(l => ({ _id: l._id, type: 'link' as const, originalSeq: l.seq })), { filter: { spaceId } });
     settled.removedLinks = links.map(l => l._id);
