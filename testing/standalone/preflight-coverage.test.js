@@ -181,7 +181,12 @@ describe('preflight invokes the offline subset within the platform limit', () =>
     const { timingReporterFlags } = await import('../_shared/timing-reporter-flags.mjs');
     const runs = offlineRuns(splitStandalone());
     assert.ok(runs.length >= 2, `the offline plan has ${runs.length} batch(es); expected the pure and db halves`);
-    const flags = timingReporterFlags({ suite: 'preflight', batch: 'pure-99', scope: 'subset' });   // as preflight calls it
+    // As preflight calls it, but into a folder of its own: the default is the checkout's results folder, which a test must not create.
+    const { scratchRoot } = await import('../../scripts/_shared/scratch-root.mjs');
+    const { mkdtempSync, mkdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    mkdirSync(scratchRoot(), { recursive: true });
+    const flags = timingReporterFlags({ suite: 'preflight', batch: 'pure-99', scope: 'subset', dir: mkdtempSync(join(scratchRoot(), 'flags-')) });
     const longest = Math.max(...runs.map(r => ['node', '--test', ...r.args, ...flags.args, ...r.files].join(' ').length));
     const code = stripComments(script);
     const viaShell = /run\(`node --test \$\{\[\.\.\.r\.args, \.\.\.flags\.args/.test(code);
