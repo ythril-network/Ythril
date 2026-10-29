@@ -32,7 +32,8 @@
 import { eachIdPage } from '../db/id-keyset-page.js';
 import { READ_CHUNK } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { withinWriteBound } from '../db/write-bound.js';
+import { boundOperationMs } from '../db/write-bound.js';
+import { listReadMaxMs } from '../brain/tag-filter.js';
 import { toDocId } from '../util/paths.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -59,11 +60,15 @@ const indexes = new Map<string, Promise<Map<string, string[]>>>();
 async function legacyIndexOf(spaceId: string): Promise<Map<string, string[]>> {
   let built = indexes.get(spaceId);
   if (built === undefined) {
-    built = withinWriteBound(async () => {
+    built = (async () => {
       const index = new Map<string, string[]>();
       // A page at a time (`eachIdPage`): the candidates are few, but the read is of every id of the space's rows and its answer is never unbounded.
       await eachIdPage<{ _id: string }>(
-        { collection: spaceCollection(spaceId, 'files'), filter: { _id: { $regex: LEGACY_ID_CANDIDATE }, ...LIVE_FILE_ROW }, projection: { _id: 1 }, size: READ_CHUNK },
+        { collection: spaceCollection(spaceId, 'files'), filter: { _id: { $regex: LEGACY_ID_CANDIDATE }, ...LIVE_FILE_ROW }, projection: { _id: 1 }, size: READ_CHUNK,
+          // Inside a walk's scope (the sync cycle) the scope bounds each page; a request has none, so the page carries a SERVER deadline of its own. A scope opened
+          // here instead puts the driver's `timeoutMS` on the read, which a store that fails fast is retried against for the whole bound: a request that takes
+          // thirty seconds to answer 503 (`a-store-failure-answers-alike-on-every-door-db`).
+          ...(boundOperationMs() === undefined ? { maxTimeMS: listReadMaxMs(false) } : {}) },
         async rows => {
           for (const { _id } of rows) {
             const id = String(_id);
@@ -75,7 +80,7 @@ async function legacyIndexOf(spaceId: string): Promise<Map<string, string[]>> {
         },
       );
       return index;
-    });
+    })();
     indexes.set(spaceId, built);
     // A read that failed is not cached: the next need asks again.
     built.catch((err: unknown) => { if (indexes.get(spaceId) === built) indexes.delete(spaceId); reportSpaceFailure(INDEX_STEP, spaceId, err, { when: 'next touch' }); });

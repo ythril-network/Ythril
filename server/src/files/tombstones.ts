@@ -106,7 +106,8 @@ import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import type { FileTombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { authorRef } from '../config/author.js';
 import { log, peerText } from '../util/log.js';
-import { throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
+import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
+import { storeIsNotAnswering } from '../db/store-condition.js';
 import { reportSpaceFailure, reportSpaceRecovered } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -255,6 +256,18 @@ export function fileTombstoneSeedFallbackCounts(): Readonly<Record<string, numbe
 /** The step a seed that could not be read is said under: every status of failure, through the shared reporter (one line per window and space). */
 const SEED_STEP = declareStep('File tombstone clock seed');
 
+/**
+ * Say a failed READ that comes before a write the act's door will answer (the clock's seed, the rows a tombstone erases): through the shared reporter for
+ * every status, counted and once per window, but a failure on the STORE's side without the driver's text. That text is logged once, by the door that
+ * answers the request (`a-store-failure-answers-alike-on-every-door-db`): said here too it is logged once per layer, with the internal names it carries,
+ * in the first request of a window that meets a store that is down.
+ */
+function reportReadBeforeAnAnswer(step: string, spaceId: string, err: unknown, opts: Parameters<typeof reportSpaceFailure>[3]): void {
+  const storeSide = classifyReadFailure(err).status >= 500;
+  reportSpaceFailure(step, spaceId, storeSide ? new Error('a store-side failure; the door that answers the request logs its text') : err,
+    storeSide && storeIsNotAnswering(err) ? { ...opts, kind: 'store-down' } : opts);
+}
+
 const fileTombstonePositions: PositionStream<string> = createPositionStream({
   name: 'file tombstone position',
   unit: 'milliseconds',
@@ -268,7 +281,7 @@ const fileTombstonePositions: PositionStream<string> = createPositionStream({
     policy: 'wall-clock',
     report: (err, spaceId) => {
       seedFallbacks.set(spaceId, (seedFallbacks.get(spaceId) ?? 0) + 1);
-      reportSpaceFailure(SEED_STEP, spaceId, err, { when: 'next write' });
+      reportReadBeforeAnAnswer(SEED_STEP, spaceId, err, { when: 'next write' });
     },
   },
 });
@@ -484,7 +497,7 @@ async function readFileRows(spaceId: string, ids: readonly string[]): Promise<{ 
     // the one failure the doors are held to (a failed bulk write, `a-store-failure-answers-alike-on-every-door-db`) from
     // ever being met. Said through the shared reporter for every status (once per window), and the tombstones it stamps say their
     // version is unknown, not absent.
-    reportSpaceFailure(VERSION_READ_STEP, spaceId, err, { count: ids.length, when: 'next write' });
+    reportReadBeforeAnAnswer(VERSION_READ_STEP, spaceId, err, { count: ids.length, when: 'next write' });
     return { rows: new Map(), known: false };
   }
 }
