@@ -329,6 +329,14 @@ See [Admin API](12a-data-management-api.md#post-apiadmindatarestore) for the who
 - **The audit operation `data.restore` is now `data.restore.requested`, and `data.migrate` is `data.migrate.requested`**; the
   outcome is a row of its own when the set ends ([Audit log](13-audit-log-api.md)). Change saved audit queries.
 
+**Upgrading past 6.0.1 writes an audit row for every refused or failed tool call, on MCP and on `POST /api/<tool>`.** A
+call to an audited tool is one row at the status it was answered, as a REST request is. With `audit.logReads` on, a
+refused or failed **read** (`recall`, `filter`, `similar`, `read_file`, `list_*`) is now a row, at `400`, `403`, `404` or
+`500`; with it off, reads still write nothing. A write refused before its space resolved (a space that does not exist,
+arguments that are not an object) is now a row, and so is a refused act. A write refused for the token's rights now names
+its space. Expect more rows with a `4xx` or `5xx` status in the log, and none with a change list; nothing already stored
+changes, and a rollback only stops writing them.
+
 ## Rolling Back
 
 **Nothing but `config.json.pre-6.0` brings the proxies back, and that copy exists only if the upgrade converted proxies.** A rollback to 5.6.x does not need it: the 6.0 `config.json` is read by 5.6, which keeps the keys it does not know (the next section). A 5.x build does not read

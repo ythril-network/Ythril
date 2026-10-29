@@ -133,9 +133,11 @@ The write tools answer the schema exactly as the REST routes do ([Schema Validat
   `structuredContent`, as REST does.
 - **A key the record's type does not declare** is judged by the space's mode (`strict` refuses a key the write adds);
   every write tool's `properties` description says so in one sentence.
-- **A refusal is a row in the audit trail**, as the REST middleware records every response of a mutating route: a
-  schema or merge refusal, a record that was not found, a conflict, a store failure, a call refused for its arguments,
-  its rights or its rate. It carries no change list — a refused edit changed nothing.
+- **A refusal or a failure is a row in the audit trail**, as the REST middleware records every response of an audited
+  route: a schema or merge refusal, a record that was not found, a conflict, a store failure, a fault, a call refused for
+  its arguments, its rights or its rate, and one refused before its space resolved (a space that does not exist,
+  arguments that are not an object). A refused or failed **read** is a row when `audit.logReads` is on, as a REST read
+  is. It carries no change list — a refused edit changed nothing.
 
 ### The same tools over plain HTTP
 

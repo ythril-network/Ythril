@@ -365,6 +365,20 @@ export { isOidc };
 
 // ── Middleware ──────────────────────────────────────────────────────────────
 
+/** The request's full path as this middleware matches it: `originalUrl` without its query (see the `finish` callback below). */
+function requestPath(req: Request): string {
+  return (req.originalUrl || req.url).split('?')[0]!;
+}
+
+/**
+ * Does a `ROUTE_RULES` row audit this request? A route that dispatches a tool (`restToolCaller`) asks it, so the tool door does not
+ * write a second row for a call this middleware already records (Q-444). Read from the same table and the same path the
+ * middleware matches, so a rule added or removed later moves the row between the two writers and never doubles or drops it.
+ */
+export function routeAuditsRequest(req: Request): boolean {
+  return resolveOperation(req.method, requestPath(req)) !== null;
+}
+
 export function auditMiddleware(req: Request, res: Response, next: NextFunction): void {
   const start = process.hrtime.bigint();
   /*
@@ -384,7 +398,7 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
     // instead of "/api/brain/general/facts") because Express strips the
     // mount prefix for sub-routers and the response finishes within that
     // router context.
-    const fullPath = (req.originalUrl || req.url).split('?')[0];
+    const fullPath = requestPath(req);
 
     // Skip paths that are not API calls or are audit-log reads themselves
     if (!fullPath.startsWith('/api/') && !fullPath.startsWith('/mcp')) return;

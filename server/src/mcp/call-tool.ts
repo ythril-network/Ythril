@@ -33,7 +33,7 @@
  * whichever door its author was not using that day.
  */
 import { getConfig } from '../config/loader.js';
-import { log, currentRequestId, peerText } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { TOOL_RIGHTS, toolTakesAView } from '../auth/space-rights.js';
@@ -65,12 +65,7 @@ import { answerUnknownWriteFields, writeBodyOfToolCall, writeDoorOfTransport } f
 import { judgedOperationOfTool, isBatchWriteOperation } from '../contract/judged-write-operations.js';
 import type { UnknownFieldRow } from '../contract/unknown-field-rows.js';
 import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
-import { logAuditEntry } from '../audit/audit.js';
-import { auditChanges, type AuditChange } from '../audit/audit-changes.js';
-
-/** What a tool hands the audit entry through `recordChanges` (Q-50) — the pair a REST route sets as `req.auditSnapshots`. */
-type AuditSnapshots = { before: Record<string, unknown>; after: Record<string, unknown> } | { explicit: AuditChange[] };
-import { mcpAuditOperation, mcpActOperation, isMcpReadOperation } from './audit-map.js';
+import { auditedToolCall, type ToolAuditFacts } from './tool-call-audit.js';
 import { toolCallsTotal, toolFailuresTotal } from '../metrics/registry.js';
 /** Who is calling, for the rung checks and the audit trail. Snapshotted by the door at its own edge. */
 export interface ToolCaller {
@@ -84,6 +79,11 @@ export interface ToolCaller {
   oidcSubject: string | null;
   /** Which door. Recorded in the audit trail so the transport stays recoverable; changes nothing else. */
   transport: 'mcp' | 'rest';
+  /**
+   * The REST request this call serves is audited by a `ROUTE_RULES` row already (`routeAuditsRequest`), so the tool door writes
+   * no row of its own: one call, one row (Q-444). Set only by `restToolCaller`.
+   */
+  auditedByRoute?: boolean;
 }
 
 export interface ToolCallOutcome {
@@ -153,14 +153,18 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   // return of the dispatch below (a refusal of a later space, a handler that threw) can leave a count behind.
   const admitted: (() => void)[] = [];
   try {
-    return await dispatchTool(req, admitted);
+    // The audit row of the call is written at THIS exit, once, whatever the dispatch answered (`auditedToolCall`, Q-444).
+    return await auditedToolCall(req.name, req.caller, req.args, facts => dispatchTool(req, admitted, facts));
   } finally {
     for (const release of admitted) release();
   }
 }
 
-/** The body of {@link callTool}: every release it owes is pushed onto `admitted`, which the caller releases however this ends. */
-async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Promise<ToolCallOutcome> {
+/**
+ * The body of {@link callTool}: every release it owes is pushed onto `admitted`, which the caller releases however this ends.
+ * It records NOTHING: what the audit row must say that only this function knows goes onto `facts`, and `auditedToolCall` writes the row.
+ */
+async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], facts: ToolAuditFacts): Promise<ToolCallOutcome> {
   const { name, args: a, caller } = req;
   const { rights } = caller;
   const cfg = getConfig();
@@ -187,6 +191,14 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
   // Unknown tools carry no flags and fall through the gates to be reported below, as they always did.
   const tool = TOOLS_BY_NAME.get(name);
 
+  /*
+   * The space the audit row names is the one the REST path would name, and only a space that EXISTS: a caller's spelling of one that does not
+   * is never written to the trail. Said here, before any refusal below, so a call refused for what the token may see names its space as the REST
+   * route's does; the loop below says it again for each space it checks, and after the loop it is the first one named.
+   */
+  const namedSpace = typeof a['space'] === 'string' ? a['space'].trim() : '';
+  if (cfg.spaces.some(s => s.id === namedSpace)) facts.auditSpace = namedSpace;
+
   // A retired proxy id answers 410 to every caller, before anything about the caller or the tool is asked (visibility, reach, rung): the id
   // was public, it is not a view, and what happened to it is the answer however little the caller may do.
   const namedRetired = retiredIdNamedIn(a['space'], cfg);
@@ -198,25 +210,13 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
   const notASpace = tool && !toolTakesAView(name) ? ownViewNamedIn(ownerKey, a['space'], cfg) : null;
   if (notASpace) return refuse(notASpace.status, `Error: ${notASpace.body.error}`);
 
-  /*
-   * A refusal of a WRITE tool is a row in the trail, whichever way it is refused (R6-13): the REST middleware records every response
-   * of a mutating route, and a tool door that recorded only what the handler returned left the refusals a tool THROWS, a call the
-   * dispatcher refused on its arguments and a call the token's rights refused out of the trail — so the same refused write left a row
-   * or not by how the refusal happened to be said. `auditSpace` is the space the REST path would name, and only a space that exists
-   * is named (a caller's spelling of one that does not is not written to the trail). An ACT is recorded by its own rule below.
-   */
-  const refuseAudited = (status: number, text: string, auditSpace = '', callSpace = '', structuredContent?: Record<string, unknown>): ToolCallOutcome => {
-    if (tool?.mutating && mcpActOperation(name) === null) recordToolCall(caller, name, auditSpace, status, 0, a);
-    return refuse(status, text, callSpace, structuredContent);
-  };
-
   // Reachability, from the same predicate that builds `tools/list` — so a listing cannot advertise a tool
   // this refuses. Filtering the list stays advisory; this is the enforcement point.
   if (tool && !toolIsVisible(tool, rights)) {
     // A space-creating tool is refused in the REST create's own sentence (Q-134): one predicate, one refusal.
     const createRefusal = tool.createsSpaces ? createSpacesRefusal({ rights }) : null;
-    if (createRefusal) return refuseAudited(403, `Error (403): ${createRefusal}`);
-    return refuseAudited(403, tool.admin
+    if (createRefusal) return refuse(403, `Error (403): ${createRefusal}`);
+    return refuse(403, tool.admin
       ? `Error: tool '${name}' requires a token with instance-admin rights`
       // Without its own branch a space-admin tool would be refused as "mutates, and this token holds no
       // write rung", which names the wrong missing thing — a token can hold write everywhere and still
@@ -325,26 +325,28 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
         ? refuse(410, unknown.body.error, '', { ...unknown.body })
         : refuse(unknown.status, `Error: ${unknown.body.error}`);
     }
+    // A space that exists (a name that does not was refused above): the row of a refusal below names it.
+    facts.auditSpace = sid;
     if (!accessibleSpaceIds.includes(sid)) {
-      return refuseAudited(403, `Error: token does not have access to '${sid}'`, sid);
+      return refuse(403, `Error: token does not have access to '${sid}'`);
     }
     const rightsRefusal = toolRightsRefusal(name, rights, sid);
-    if (rightsRefusal) return refuseAudited(403, rightsRefusal, sid);
+    if (rightsRefusal) return refuse(403, rightsRefusal);
     // And the space-admin question, for the tools that configure ONE space. `toolIsVisible` admitted anyone
     // administering *a* space, because it runs before a space is named; this is where one exists.
     const adminRefusal = spaceAdminRefusal(tool, rights, sid);
-    if (adminRefusal) return refuseAudited(403, adminRefusal, sid);
+    if (adminRefusal) return refuse(403, adminRefusal);
     // A peer token naming a space held while a wipe is applied on one side: the sync doors' 423, on this door too (W13) — and one
     // naming a space that is not held is counted in its fence until the call ends, as on every door (`sync/peer-space-admission.ts`).
     if (peerId) {
       const admission = admitPeerToolCall(peerId, sid);
-      if ('held' in admission) return refuseAudited(admission.held.status, admission.held.text, sid, '', { ...admission.held.body });
+      if ('held' in admission) return refuse(admission.held.status, admission.held.text, '', { ...admission.held.body });
       admitted.push(admission.release);
     }
   }
   const callSpace = rawSpace;
-  // Taken before the handler runs, outside the `try`, so the catch's audit entry has its duration too.
-  const startedAt = Date.now();
+  // Every named space passed existence, reach and the rung: the row of what happens from here names the first one (a view's members replace it below).
+  facts.auditSpace = callSpace;
   // Which door asked, in the judge's and the metric's vocabulary: `POST /api/<tool>` arrives as transport `rest` and is the `tool` door.
   const writeDoor = writeDoorOfTransport(caller.transport);
 
@@ -370,12 +372,12 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
      * looks through the wrapper to the failure it holds and would answer a stored record as a retryable `503`. The
      * answer is the one the REST door's error handler gives (`connectionsNotWrittenAnswer`), carried in
      * `structuredContent`; and the call is audited as a write of the record it named, which the arguments of a create
-     * cannot (`recordToolCall` otherwise runs only on a call the handler answered).
+     * cannot (`facts.writtenId`, read by the one row `auditedToolCall` writes).
      */
     if (err instanceof ConnectionsNotWritten) {
       const connectionsNotWritten = connectionsNotWrittenAnswer(err, `tool ${name}`);
       log.warn(`tool '${peerText(name)}' stored its ${err.written.kind} and failed its connections in space '${peerText(callSpace || 'global')}', answered ${connectionsNotWritten.status}`);
-      recordToolCall(caller, name, callSpace, connectionsNotWritten.status, Date.now() - startedAt, a, undefined, err.written.id);
+      facts.writtenId = err.written.id;
       return {
         result: { content: [{ type: 'text' as const, text: connectionsNotWritten.body.error }], isError: true, structuredContent: { ...connectionsNotWritten.body } },
         status: connectionsNotWritten.status, callSpace,
@@ -435,7 +437,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     /*
      * A file act's refusal or failure (the kinds `files/act-answers.ts` defines): the status and body every REST door answers
      * (`answerFileActFailure`), the body carried as `structuredContent`.
-     * Not a `ToolRefusal`: that is raised before the work and is neither logged nor audited, and these come from an act that ran.
+     * Not a `ToolRefusal`: that is raised before the work and is not logged as a failure, and these come from an act that ran.
      */
     // An answer that is the server's own leaves the cause in the log (reported inside, as the REST door's is).
     const fileAct = answerFileActFailure(err, `tool ${name}`);
@@ -500,6 +502,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
 
   /** The members every view this call named reads, deduplicated (undefined when it named none): what is recorded and announced. */
   const viewSpacesRead = viewReads.size > 0 ? [...new Set([...viewReads.values()].flat())] : undefined;
+  facts.viewSpaces = viewSpacesRead;
 
   /** The unknown-field rows of this call, once the judge has run; every answer from there on is given through `withUnknownFieldRows`. */
   let rows: readonly UnknownFieldRow[] = [];
@@ -531,7 +534,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
       const judged = answerUnknownWriteFields(writeBodyOfToolCall(a, judgedOperation), judgedOperation, callSpace, writeDoor);
       rows = judged.rows;
       if (judged.refused) {
-        return withUnknownFieldRows(refuseAudited(400, `Error: ${judged.refusal!.error}`, callSpace, callSpace, { ...judged.refusal }), rows);
+        return withUnknownFieldRows(refuse(400, `Error: ${judged.refusal!.error}`, callSpace, { ...judged.refusal }), rows);
       }
     }
     // Enforce the advertised inputSchema before the handler runs — except partial-success tools
@@ -539,7 +542,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
     // tolerated (its unknown arguments were answered above); everything nested is still held to the closed schema.
     if (!tool.skipSchemaValidation) {
       const argErr = validatorFor(accessibleSpaceIds, ownViewIds).validate(tool, a, { tolerateTopLevel: judgedOperation !== null });
-      if (argErr) return withUnknownFieldRows(refuseAudited(400, `Error: ${argErr}`, callSpace, callSpace), rows);
+      if (argErr) return withUnknownFieldRows(refuse(400, `Error: ${argErr}`, callSpace), rows);
     }
     /*
      * The destructive-call throttle, immediately before the handler runs — which is the LAST point at
@@ -558,9 +561,8 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
      */
     const rateKey = caller.tokenId ?? caller.ip;
     if (tool.heavy && !consumeHeavyToolCall(rateKey)) {
-      return withUnknownFieldRows(refuseAudited(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace, callSpace), rows);
+      return withUnknownFieldRows(refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace), rows);
     }
-    let snapshots: AuditSnapshots | undefined;
     const handlerSpaceIds = withoutHeldFor(toolReach(name, rights, accessibleSpaceIds), peerId);
     const result = await tool.handle({
       args: a,
@@ -584,85 +586,21 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[]): Pro
       viewReads,
       actor: { tokenId: caller.tokenId, tokenLabel: caller.tokenLabel },
       auditIdentity: { authMethod: caller.authMethod, oidcSubject: caller.oidcSubject },
-      recordChanges: (before, after) => { snapshots = { before, after }; },
-      recordAuditChanges: (changes) => { snapshots = { explicit: changes }; },
+      recordChanges: (before, after) => { facts.snapshots = { before, after }; },
+      recordAuditChanges: (changes) => { facts.snapshots = { explicit: changes }; },
     });
     // A tool that returns `isError` failed on its own terms, so the status has to come from the RESULT or
     // every rejected write would be logged as a success. 422: the call was well-formed and it was refused.
     // A failed act after a passed vote is a FAILURE the act's tool answers with `spaceActFailureAnswer`'s body (design v5 section 2.2
     // v4 (3)): 500, as the REST route answers it - not the 422 of a call that was refused.
     const status = result?.isError ? (isSpaceActFailure(result) ? 500 : 422) : 200;
-    recordToolCall(caller, name, callSpace, status, Date.now() - startedAt, a, snapshots, undefined, viewSpacesRead);
     // A read through a view says which members it read (the answer is narrowed to what the caller reads now, never silently).
     return withUnknownFieldRows({ result: result && !result.isError ? announceViewMembers(result, viewSpacesRead) : result, status, callSpace }, rows);
   } catch (err) {
     const answer = answerThrown(err);
-    /*
-     * An ACT that threw after it ran is recorded with the status that is answered: the REST middleware records every response
-     * of the route, and a tool door that recorded only the answered run would leave the failed run — the one that spent the
-     * credentials and then failed — out of the trail. A refusal is not a run (`ToolRefusal` is raised before the work), and a
-     * stored record whose connections failed has recorded itself (`ConnectionsNotWritten`, below). Every other tool is
-     * unchanged: a failed write is recorded by its caller's own entry or not at all, as before.
-     *
-     * A WRITE tool's refusal is recorded whatever threw it (R6-13, `Q-315`): a schema refusal, a merge refusal, a record the call names
-     * and cannot find, a conflict, a store failure — at the status that is answered, as the REST middleware records every response of a
-     * mutating route. Only the two tools that caught their own schema refusal and RETURNED it were recorded before, so a refused
-     * `update_entity` left no row while a refused `save_entity` did, and removing those two catches would have taken theirs away.
-     * No change list: a refused edit changed nothing and its intended values would claim one (`recordToolCall`). A stored record
-     * whose connections failed has recorded itself (`ConnectionsNotWritten`).
-     */
-    const isAct = mcpActOperation(name) !== null;
-    if (!(err instanceof ConnectionsNotWritten) && (isAct ? !(err instanceof ToolRefusal) : tool?.mutating)) {
-      recordToolCall(caller, name, callSpace, answer.status, Date.now() - startedAt, a, undefined, undefined, viewSpacesRead);
-    }
+    // Recorded by `auditedToolCall`, at the status `answer` carries: a refusal, a conflict, a store failure and a fault are each one row.
     return withUnknownFieldRows(answer, rows);
   }
-}
-
-/**
- * Write one audit entry per tool call, whichever door it came through.
- *
- * Under the operation the capability records, not `mcp.<tool>` — a compliance reader asks who created a
- * fact, not who invoked a tool, and two names for one act makes every query have to know both. `path`
- * carries the transport and the tool name, so which door is still recoverable.
- *
- * The REST door is audited from here rather than by `audit/middleware.ts`: a `ROUTE_RULES` row per tool
- * would be forty-five hand-written copies of a mapping `mcpAuditOperation` already derives, and the row
- * that was forgotten is an unaudited mutation.
- */
-function recordToolCall(caller: ToolCaller, toolName: string, spaceId: string, status: number,
-  durationMs: number, args: unknown, snapshots?: AuditSnapshots, writtenId?: string, viewSpaces?: readonly string[]): void {
-  // The ARGUMENTS, because a capability with two subjects is audited under the subject of the call:
-  // `network_sync` with a `peerId` records what the per-peer route records (`Q-37`).
-  const act = mcpActOperation(toolName);
-  const operation = act ?? mcpAuditOperation(toolName, args);
-  if (!operation) return;                       // deliberately not an audited operation — see audit-map.ts
-  if (!act && isMcpReadOperation(operation) && !getConfig().audit?.logReads) return;
-  logAuditEntry({
-    requestId: currentRequestId() ?? null,
-    tokenId: caller.tokenId ?? null,
-    tokenLabel: caller.tokenLabel ?? null,
-    authMethod: caller.authMethod,
-    oidcSubject: caller.oidcSubject,
-    ip: caller.ip,
-    method: caller.transport === 'mcp' ? 'MCP' : 'POST',
-    path: caller.transport === 'mcp' ? `http:${toolName}` : `/api/${toolName}`,
-    // A read through a personal view is ONE row with no space and the members read: nothing in it names the view.
-    spaceId: viewSpaces ? null : (spaceId || null),
-    ...(viewSpaces ? { spaces: [...viewSpaces] } : {}),
-    // Q-50: the record the call acted on, as the REST entry names it from the path. A tool's `id` argument is always
-    // its subject's id, so an operator filtering the log by record finds the MCP edit beside the REST one.
-    // `writtenId`: a create whose record landed and whose connections failed names the record it stored (`Q-170`) —
-    // its arguments carry no id to name it by.
-    entryId: writtenId ?? (typeof (args as Record<string, unknown> | null)?.['id'] === 'string' ? (args as Record<string, string>)['id']! : null),
-    operation,
-    status,
-    durationMs,
-    // Q-50: the same `changes` the REST twin's entry carries, and on the same condition — only a call that
-    // succeeded, because a refused edit changed nothing and its intended values would claim one.
-    ...(status < 400 && snapshots
-      ? { changes: 'explicit' in snapshots ? snapshots.explicit : auditChanges(operation, snapshots.before, snapshots.after) } : {}),
-  });
 }
 
 /**

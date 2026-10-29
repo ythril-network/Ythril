@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MCP:** `read_file` on a missing file answers `404` through `POST /api/read_file`, as the extract does, not `400`.
 - **Sync:** `ythril_positions_building_spaces` counts only the spaces this instance serves and reaches 0 after the 6.0 carry; it counted spaces deleted before the upgrade.
 - **Sync:** a space created with the id of a space deleted before the 6.0 upgrade is ready when its create answers, instead of answering `503 positions_building` until the next minute.
+- **Audit:** a tool call that is refused or fails now leaves one audit row at the status it was answered, on MCP and on `POST /api/<tool>`: a refused or failed read (when the log records reads), a write refused before its space resolved, and a refused act.
+- **Audit:** `POST /api/brain/recall`, `/api/brain/similar` and `…/traverse` leave one audit row per call, not two.
 
 ## [6.0.1] — 2026-10-28
 

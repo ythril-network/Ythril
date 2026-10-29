@@ -418,9 +418,9 @@ made — the settings dialog, the API or an assistant) shows which **types, prop
 (*typeSchemas.entity.service.rules* — *added: adult*), and a change to the space's own rules as *rules*. Names only: a
 rule's expression and message are never recorded, because an expression names the properties it reads and a message is
 whatever its author wrote. A type the edit did not mention is not shown as removed. Setting the stamp check to `0`
-minutes (`stampSkew.warnMinutes`) is a recorded field of the same row. **A write an assistant tried and was refused is a
-row too** (with the status of the refusal and no change list, because nothing changed), so a refused attempt is as visible
-here as one made through the API. A **schema check** (`space.schema.validate`) is recorded only when the audit log is set to record reads.
+minutes (`stampSkew.warnMinutes`) is a recorded field of the same row. **A call an assistant made that was refused or failed is a
+row too**, at the status it got (and with no change list, because nothing changed), so a refused attempt is as visible
+here as one made through the API. Reads are included when the audit log is set to record reads, the same rule as the API. A **schema check** (`space.schema.validate`) is recorded only when the audit log is set to record reads.
 
 **Personal views are in the log too, and the log never names them.** Making, renaming, deleting, copying or claiming a personal view is a row (`view.create`, `view.update`, `view.delete`, `view.copy`, `view.claim`) that holds the owner's key and **how many** spaces the view lists — never its name and never which spaces, because a view is its owner's and the log is read by an admin. A **read through a view** is one row with no single space: the row's **spaces** field lists the spaces that read actually reached, and the row counts one call in the Usage panel of each of those spaces and nothing under the view. Like any read, it is written only when the audit log is set to record reads. Releasing a reserved id after the 6.0 upgrade is `space.retired_id.purge` (see [Settings → Spaces](04-settings.md#after-the-60-upgrade-what-became-of-the-read-across-spaces)).
 

@@ -30,7 +30,9 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { DISPATCH_SOURCES } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
-import { balancedFrom } from './_structural-window.mjs';
+import { balancedFrom, blockAfter } from './_structural-window.mjs';
+import { stripComments } from './_strip-comments.mjs';
+import { trackedSources } from './_sources.mjs';
 
 let MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, MCP_READ_OPERATIONS, mcpAuditOperation,
   isMcpReadOperation, MCP_ACT_OPERATIONS;
@@ -39,9 +41,9 @@ let ALL_TOOLS;
 
 const MIDDLEWARE = 'server/src/audit/middleware.ts';
 /*
- * The DISPATCH, not the door. `recordToolCall` moved into `mcp/call-tool.ts` when both doors started
- * calling one function — and an audit entry written by the dispatch is what makes a tool call logged
- * identically whichever door it arrived at.
+ * The DISPATCH, not the door: `callTool` runs in `mcp/call-tool.ts` for both doors, and the audit row of every call is written by
+ * `auditedToolCall` (`mcp/tool-call-audit.ts`) at its one exit (Q-444) - which is what makes a tool call logged identically whichever
+ * door it arrived at.
  */
 const ROUTER = DISPATCH_SOURCES[0];
 
@@ -253,42 +255,55 @@ describe('MCP audit coverage', () => {
       'these operations exist only on the MCP side — reuse the REST vocabulary so entries are comparable');
   });
 
-  it('the dispatcher actually calls the recorder', () => {
-    // The map is inert on its own. This is the wiring, and it is the line a refactor would drop.
+  /*
+   * ONE exit writes the row (Q-444, bundle-98): `auditedToolCall` records in a `finally`, so no refusal branch inside the dispatch can record
+   * or skip on its own. The recorder is private to `mcp/tool-call-audit.ts`; its source is the subject, and the set of sources is DERIVED
+   * from the tracked server tree (with a floor) so a second call site anywhere is found.
+   */
+  const AUDIT_WRAPPER = 'server/src/mcp/tool-call-audit.ts';
+  const auditSource = () => stripComments(readFileSync(AUDIT_WRAPPER, 'utf8'));
+  const serverSources = () => trackedSources('server/src', { floor: 300 }).map(f => ({ file: f, text: stripComments(readFileSync(f, 'utf8')) }));
+
+  it('the dispatch writes its row through one wrapper, and the recorder has exactly one call site in the whole server', () => {
+    const calls = serverSources().flatMap(({ file, text }) =>
+      [...text.matchAll(/\brecordToolCall\(/g)].map(() => file));
+    // The declaration `function recordToolCall(` is one match too: one declaration and one call, both in the wrapper's module.
+    assert.deepEqual(calls, [AUDIT_WRAPPER, AUDIT_WRAPPER],
+      `recordToolCall must be declared and called only in ${AUDIT_WRAPPER}; found it in: ${calls.join(', ')}`);
     const src = readFileSync(ROUTER, 'utf8');
+    assert.match(src, /return await auditedToolCall\(req\.name, req\.caller, req\.args, /,
+      'callTool must run the dispatch inside auditedToolCall, whichever door it arrived at');
+  });
+
+  it('the one call is inside auditedToolCall\'s finally, so nothing the dispatch returns or throws can skip it', () => {
+    const src = auditSource();
+    const at = src.indexOf('export async function auditedToolCall');
+    assert.ok(at > 0, 'auditedToolCall is gone — re-anchor this gate');
+    const body = blockAfter(src, src.indexOf('{', src.indexOf('Promise<T> {', at)), 'auditedToolCall');
+    const fin = body.indexOf('finally');
+    assert.ok(fin > 0, 'auditedToolCall has no finally');
+    const inFinally = blockAfter(body, fin, 'the finally of auditedToolCall');
+    assert.match(inFinally, /recordToolCall\(caller, name, status, /, 'the finally does not record the call at the status answered');
+    assert.equal([...body.matchAll(/\brecordToolCall\(/g)].length, 1, 'auditedToolCall records more than once, or outside its finally');
+    // Nothing above the finally reads the transport or the tool to decide WHETHER to record: that is `recordToolCall`'s one question (the operation and `logReads`).
+    assert.doesNotMatch(body.slice(0, fin), /mutating|mcpActOperation|ToolRefusal/, 'the wrapper decides per kind of tool whether to record');
+  });
+
+  it('no refusal branch of the dispatch records or skips on its own', () => {
+    const src = stripComments(readFileSync(ROUTER, 'utf8'));
+    assert.doesNotMatch(src, /refuseAudited|recordToolCall|mcpActOperation|mcpAuditOperation|logAuditEntry/,
+      'the dispatch records (or decides whether to record) by itself again: a branch that records is the second implementation Q-444 removed');
+  });
+
+  it('the status recorded is the status answered, never the transport\'s or a literal', () => {
+    // MCP answers 200 at the transport layer even when a tool refuses, so a status read from the HTTP response would log every
+    // rejected write as successful. The status is the outcome's, which the dispatch takes from `isError` for a returned result.
+    const dispatch = readFileSync(ROUTER, 'utf8');
     // A failed act after a passed vote is the one error result answered 500 (bundle-106, design v5 section 2.2 v4 (3)); still from the RESULT.
-    assert.match(src, /const status = result\?\.isError \? (?:\(isSpaceActFailure\(result\) \? 500 : 422\)|422) : 200;/,
+    assert.match(dispatch, /const status = result\?\.isError \? (?:\(isSpaceActFailure\(result\) \? 500 : 422\)|422) : 200;/,
       'the audit status must be taken from the RESULT, not from the transport');
-    assert.match(src, /recordToolCall\(caller, name, callSpace, status,/,
-      'the dispatch must record every call, whichever door it arrived at');
-    assert.match(src, /function recordToolCall\(/, 'the recorder must exist in the dispatch');
-  });
-
-  it('an act that throws after it ran is recorded with the status answered, and a refusal is not recorded', () => {
-    // The REST middleware records every response of an act's route; the tool door would otherwise record only the run that
-    // was answered. The wiring is source-level because the recorder is private to the dispatch.
-    const src = readFileSync(ROUTER, 'utf8');
-    const at = src.indexOf('const answer = answerThrown(err);');
-    assert.ok(at > 0, 'the catch no longer answers through `answerThrown`');
-    const end = src.indexOf('return withUnknownFieldRows(answer, rows);', at);
-    assert.ok(end > at, 'the catch arm no longer ends by returning its answer with the unknown-field rows — re-anchor this window');
-    const window = src.slice(at, end);
-    assert.match(window, /mcpActOperation\(name\) !== null/, 'only an act is recorded on a throw: every other tool keeps its behaviour');
-    assert.match(window, /!\(err instanceof ToolRefusal\)/, 'a refusal is raised before the run and is not a run');
-    assert.match(window, /recordToolCall\(caller, name, callSpace, answer\.status,/, 'the status recorded is the status answered');
-  });
-
-  it('a tool that fails is not recorded as a success', () => {
-    // MCP answers 200 at the transport layer even when a tool refuses, so a status read from the HTTP
-    // response would log every rejected write as successful. The status has to come from `isError`.
-    const src = readFileSync(ROUTER, 'utf8');
-    const at = src.indexOf('recordToolCall(caller, name, callSpace');
-    assert.ok(at > 0);
-    /*
-     * The call expression, bounded by its own closing paren. This is the shape where a magic window is at its most
-     * dangerous: the assertion is that something is ABSENT, so a window falling short passes by looking at less.
-     */
-    const call = balancedFrom(src, at, 'the recordToolCall call');
+    const src = auditSource();
+    const call = balancedFrom(src, src.indexOf('recordToolCall(caller, name, status,'), 'the recordToolCall call');
     assert.ok(!/status: 200/.test(call), 'status must not be hardcoded to 200');
   });
 });
