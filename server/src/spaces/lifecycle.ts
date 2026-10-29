@@ -44,7 +44,7 @@ import { eachSpace, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { refusalText, storeFailureAnswer, throwIfStoreSide } from '../brain/store-failure.js';
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
-import { createReadyCounter } from '../sync/positions-owed.js';
+import { createReadyCounter, finishPositionsOf } from '../sync/positions-owed.js';
 import { forgetVersionMark } from '../util/version-mark.js';
 import { builtInRefusal } from './built-in-space.js';
 import { logInternalAudit } from '../audit/audit.js';
@@ -534,6 +534,10 @@ export async function createSpace(opts: {
   await initSpace(opts.id, { waitForVectorReady: false });
   // An empty space owes no positions: its counter document is written ready, so it never reads as one a 5.6 build left (`sync/positions-owed.ts`).
   await createReadyCounter(opts.id);
+  // An id reused over a counter document a deleted space left behind (kept on purpose, so the id continues above every version it
+  // handed out) may still owe that space's first carry: done inline, as a restore does, so the space is ready before the create
+  // answers rather than at the next tick (Q-648). A space that owes nothing costs the one read.
+  await finishPositionsOf(opts.id);
   space.indexStatus = 'building';
   // Safe to commit the `cfg` captured before the await, and worth knowing why, because the same
   // shape is NOT safe a few functions down: `cfg` is a TOP-LEVEL reference, and a reload refreshes

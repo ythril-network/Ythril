@@ -96,6 +96,13 @@ const EXEMPT = {
     + 'of what it now suppresses (bundle-30 R5) — local derived fields of records already held; no arriving record',
   'server/src/brain/suppression-sweep.ts:sweepFiles':
     'the files half of sweepSuppressedVectors, above',
+  // Q-648: a door that CREATES a space (a peer's announced space adopted, a concluded addition round) runs the space's owed carry
+  // inline, so an id reused over a kept counter document is ready when created.
+  'server/src/sync/positions-owed.ts:carryRows':
+    'the positions carry of a space this instance is creating: it gives rows this instance already holds a landing position and a '
+    + '`writtenHere` mark, both local-only. No arriving document, no version stamped, nothing counted as landed',
+  'server/src/sync/positions-owed.ts:repairRows':
+    'the positions repair, the same unit of the same owed work as carryRows above: local positions on rows already held',
   'server/src/sync/fill-file-meta.ts:fillFileMetaFromStray':
     'the stray-filemeta drain\'s recovery (Q-219), reached through writeArrivals only with `fillOnly`, which no door '
     + 'sets: it fills a row this instance made, or applies the seq accept at the write, and never creates a row',

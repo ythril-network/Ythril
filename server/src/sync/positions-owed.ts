@@ -284,12 +284,15 @@ async function owingSpaces(): Promise<Array<{ spaceId: string; kind: PositionsOw
   return docs.filter(d => configured.has(d._id)).map(d => ({ spaceId: d._id, kind: d.positionsOwed as PositionsOwed }));
 }
 
-/** Set `ythril_positions_building_spaces` from the counter documents: what is owed now, by kind. */
+/**
+ * Set `ythril_positions_building_spaces` from what the job will work on: the spaces this instance serves that owe now, by kind
+ * ({@link owingSpaces}, the one reading of "owes" for both). A counter document outlives its space on purpose (a reused id continues
+ * above it), and one the first carry marked is never worked while its space is not served; counted, it held the gauge above 0 for
+ * good on an instance whose every space was ready (Q-648).
+ */
 async function refreshBuildingGauge(): Promise<void> {
-  const owed = await counters().aggregate<{ _id: string; n: number }>([
-    { $match: { positionsOwed: { $in: ['carry', 'repair'] } } }, { $group: { _id: '$positionsOwed', n: { $sum: 1 } } },
-  ]).toArray();
-  for (const kind of ['carry', 'repair'] as const) positionsBuildingSpaces.labels({ kind }).set(owed.find(o => o._id === kind)?.n ?? 0);
+  const owing = await owingSpaces();
+  for (const kind of ['carry', 'repair'] as const) positionsBuildingSpaces.labels({ kind }).set(owing.filter(o => o.kind === kind).length);
 }
 
 /** Mark a READY space as owing a repair. A space that owes already (a carry included) is left as it is; one with no counter document is not created. */
