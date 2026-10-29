@@ -32,6 +32,9 @@ export const RECORDER_ENV_PREFIX = 'YTHRIL_TEST_RUNS_';
 /** Set by `node --test` in every process it starts; meaningful only to those. */
 const RUNNER_CONTEXT_ENV = 'NODE_TEST_CONTEXT';
 
+/** Is this process one `node --test` started (a test file), as opposed to a runner? The one place the runner's wire is named. */
+export const isTestChild = (env = process.env) => Boolean(env[RUNNER_CONTEXT_ENV]);
+
 
 /**
  * @param {Record<string,string>} [extra] merged over the result (the timing reporter's own variables)
