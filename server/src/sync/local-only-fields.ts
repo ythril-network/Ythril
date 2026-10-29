@@ -342,14 +342,23 @@ export function stripLocalOnly<T extends object>(doc: T): T {
  *
  * `patch` wins over the old row, as the spread it replaces; the stamp and `syncBase` win over `patch`, and the write guard is
  * absent from the result whatever `patch` holds.
+ *
+ * **The one row that is the SAME record at its key** (`{ sameRecord: true }`, the re-key of a legacy file row, Q-413) keeps `deliveredBy` and
+ * `syncBase`: nothing about the file's identity changed, only the spelling of its id, so who delivered it and the hash each peer agreed on still
+ * hold. Everything else here (the guard, the position class, `writtenHere`) goes for it as for every copy. A parameter and not a second helper,
+ * so the drop of the stale position stays in one place.
  */
-export function rekeyedRow<T extends object, P extends object>(old: T, patch: P): Omit<T, keyof P | 'deliveredBy' | 'syncBase'> & P & { deliveredBy: '' } {
-  const out = { ...old, ...patch, deliveredBy: '' } as Record<string, unknown>;
-  delete out['syncBase'];
+export function rekeyedRow<T extends object, P extends object>(old: T, patch: P): Omit<T, keyof P | 'deliveredBy' | 'syncBase'> & P & { deliveredBy: '' };
+export function rekeyedRow<T extends object, P extends object>(old: T, patch: P, opts: { sameRecord: true }): Omit<T, keyof P> & P;
+export function rekeyedRow<T extends object, P extends object>(old: T, patch: P, opts: { sameRecord?: boolean } = {}): object {
+  const out = { ...old, ...patch } as Record<string, unknown>;
+  // `sameRecord`: the row is not a NEW record but the same file's row put at its key (the re-key of a legacy file row, Q-413), so what this instance
+  // knows of it stays: who delivered it and the per-peer hash it agreed on. A copy to another identity drops both, as above (bundle-88 review F7).
+  if (opts.sameRecord !== true) { out['deliveredBy'] = ''; delete out['syncBase']; }
   for (const f of WRITE_GUARD_FIELDS) delete out[f];
   // The old row's position sits where the OLD record landed, below peers' marks, so a re-keyed row that kept it would never be
   // offered on; and the old row's provenance (`writtenHere`) says nothing of this write. The caller's `withLandingStamp` patch puts
   // fresh ones on. A field `patch` names is the caller's own and stays, whatever class it is in.
   for (const f of LANDING_STAMPED) if (!(f in patch)) delete out[f];
-  return out as Omit<T, keyof P | 'deliveredBy' | 'syncBase'> & P & { deliveredBy: '' };
+  return out;
 }

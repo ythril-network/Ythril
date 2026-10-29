@@ -170,6 +170,17 @@ describe('a pre-bundle-71 file row is found and re-keyed by every door', { skip 
     });
   }
 
+  describe('the same record at its key keeps what this instance knows of it (2, bundle-88 review F7)', () => {
+    const shape = SHAPES[2];
+    it('the re-key keeps the per-peer agreed hash and the deliverer', async () => {
+      await plant(shape, { syncBase: { [PEER]: 'a'.repeat(64) }, deliveredBy: PEER });
+      await fileRowIdFor(S, shape.key);
+      const row = await expectAtKey(shape, { seq: 7 });
+      assert.deepEqual(row.syncBase, { [PEER]: 'a'.repeat(64) }, 'the re-key dropped the agreed hash: a file that differs from the peer\'s copy is judged with no base');
+      assert.equal(row.deliveredBy, PEER, 'the re-key blanked the deliverer of the record');
+    });
+  });
+
   describe('a row already at the key (3)', () => {
     const shape = SHAPES[2];
     const atKey = (seq, description) => build.filemeta(S, shape.key, seq, { description, tags: ['legacy', 'peer'], sizeBytes: 3, createdAt: T0, updatedAt: T0 });
