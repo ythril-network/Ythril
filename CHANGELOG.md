@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** a space created with the id of a space deleted before the 6.0 upgrade is ready when its create answers, instead of answering `503 positions_building` until the next minute.
 - **Sync:** an edge that arrives (push, pull, import) and breaks its label's `endpoints` or `functional` rule is counted in `schemaViolations`; it is still stored, never refused.
 - **Spaces:** renaming a space on Windows no longer fails, or leaves its upload folder behind, while a file under it is still open; the move waits for it for about five seconds, and reports the rename as incomplete if the file is still held.
+- **Spaces:** a rename into an id whose upload folder is empty or holds only an old upload's leftovers is no longer stopped by it (it blocked every other space operation for a day); a non-empty files folder still stops it, and the answer no longer names the server's data path.
 - **Spaces:** deleting a space no longer waits without limit on the search service: each collection's search indexes are given 15 seconds, and the face gallery index goes with the space.
+- **Spaces:** a delete that could not drop a collection's search indexes in time now says so in the log; a create or rename under that id meanwhile answers `503` `space_still_being_removed` with `Retry-After`; send it again in a few seconds.
 - **Audit:** a tool call that is refused or fails now leaves one audit row at the status it was answered, on MCP and on `POST /api/<tool>`: a refused or failed read (when the log records reads), a write refused before its space resolved, and a refused act.
 - **Audit:** `POST /api/brain/recall`, `/api/brain/similar` and `…/traverse` leave one audit row per call, not two.
 

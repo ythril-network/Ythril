@@ -48,7 +48,7 @@ export function sendStoreFailure(res: express.Response, answer: StoreFailureAnsw
  * The one writer of `Retry-After`: every answer that says when to retry carries its wait as `retryAfterSeconds` (the store's, a file
  * act's, a tool outcome's), and this is the only place it becomes a header — so the header's spelling and unit cannot differ by door.
  */
-function sendRetryAfter(res: express.Response, retryAfterSeconds: number | undefined): void {
+export function sendRetryAfter(res: express.Response, retryAfterSeconds: number | undefined): void {
   if (retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(retryAfterSeconds));
 }
 

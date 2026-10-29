@@ -30,9 +30,10 @@ export function toResult(r: NetworkActResult, done: string): ToolResult {
     // The refusal code rides in structuredContent, as it rides in the REST body (Q-133); the text is unchanged.
     const code = 'code' in r && r.code ? r.code : undefined;
     const deadline = 'deadline' in r && r.deadline ? r.deadline : undefined;
+    const retryable = 'retryable' in r && r.retryable ? true : undefined;
     return {
       content: [{ type: 'text' as const, text: `Error (${r.status}): ${r.error}` }], isError: true,
-      ...(code ? { structuredContent: { error: r.error, code, ...(deadline ? { deadline } : {}) } } : {}),
+      ...(code ? { structuredContent: { error: r.error, code, ...(deadline ? { deadline } : {}), ...(retryable ? { retryable } : {}) } } : {}),
     };
   }
   if (r.status === 204) return { content: [{ type: 'text' as const, text: done }], structuredContent: { ok: true } };

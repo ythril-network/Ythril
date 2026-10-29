@@ -12,7 +12,7 @@
  * `pendingSpaceOp` marker, and every later space delete and rename on the instance was refused behind it.
  *
  * Node retries the errors a concurrent writer causes — `ENOTEMPTY`, `EBUSY`, `EPERM`, `EMFILE`, `ENFILE` — when told
- * to, waiting `retryDelay × attempt` between tries. Ten tries at 100 ms is about five and a half seconds, far longer
+ * to, waiting `retryDelay × attempt` before each retry. Ten retries (eleven attempts) at 100 ms is about five and a half seconds, far longer
  * than any writer that started before the space stopped taking writes (`spaces/space-write-gate.ts`) needs to finish.
  * The gate stops new writers; this outlasts the ones already in flight. Either alone leaves a window.
  *
@@ -30,12 +30,25 @@
  * too, and waiting five seconds for the same refusal helps nobody. A missing source answers `'absent'`, so a rename that
  * is resumed after its directory already moved is not an error.
  *
+ * ## A destination that is not data
+ *
+ * A destination that exists is refused, and a caller that can PROVE what is there is not data says so (`replaceDestination`), here, so the
+ * decision is made in one place and the refusal stays the default. `'if-empty'`: an empty directory is removed (`rmdir`, which cannot
+ * remove one that gained an entry) and the move goes on. `'staging'`: a directory of any content is removed through `removeTree` first, for
+ * a caller whose tree is upload staging that no configured space owns: a rename's `.chunks/<new>`, left by an old run or a late writer and
+ * swept only after a day, which otherwise kept the rename's marker (and with it every other space operation) for that day. Never for a
+ * tree that may hold a space's bytes: a non-empty `files/<new>` is refused. A destination that is not a directory is refused either way.
+ *
+ * The refusal is built as node builds one (`code`, `syscall`, `path`, `dest`) and its message names no path: a door words a file-system
+ * error from its code alone (`util/fs-failure-words.ts`), which it can only do for an error that says it is one. Built with a `code` and no
+ * `syscall`, it was answered as its message, which named the server's data root.
+ *
  * `mustExist` keeps a caller's `force: false` meaning — a folder delete that should report a missing folder.
  */
 import fs from 'node:fs/promises';
-import { bytesPresent, isMissingPath } from './stored-bytes.js';
+import { lstatIfPresent, isMissingPath } from './stored-bytes.js';
 
-/** Retries for what a concurrent holder causes; see the docblock for the arithmetic. */
+/** Retries (not attempts: one more attempt than this is made) for what a concurrent holder causes; see the docblock for the arithmetic. */
 export const TREE_RETRIES = 10;
 export const TREE_RETRY_DELAY_MS = 100;
 
@@ -54,21 +67,26 @@ export async function removeTree(dir: string, opts: { mustExist?: boolean } = {}
   });
 }
 
+/** What a move may do about a destination that already exists: clear an empty directory, or clear upload staging of any content. Absent: refuse. */
+export type ReplaceDestination = 'if-empty' | 'staging';
+
 /**
- * Move a directory tree to a path that does not exist yet, waiting out what holds it.
+ * Move a directory tree to a path that does not exist yet (or, by `replaceDestination`, to one that holds nothing worth keeping), waiting
+ * out what holds it.
  *
- * `'absent'`: the source is not there (nothing to move, or it already moved). It throws when the destination exists, and
- * with the last error when a holder outlasts the retries.
+ * `'absent'`: the source is not there (nothing to move, or it already moved). `'replaced'`: moved after a destination that held entries
+ * was removed (`'staging'`; the caller says so in its log: an empty directory removed is `'moved'`). It throws when the destination exists
+ * and may not be replaced, and with the last error when a holder outlasts the retries.
  */
-export async function moveTree(src: string, dst: string): Promise<'moved' | 'absent'> {
-  if (!(await bytesPresent(src))) return 'absent';
-  if (await bytesPresent(dst)) {
-    throw Object.assign(new Error(`EEXIST: the destination already exists, rename '${src}' -> '${dst}'`), { code: 'EEXIST' });
-  }
+export async function moveTree(
+  src: string, dst: string, opts: { replaceDestination?: ReplaceDestination } = {},
+): Promise<'moved' | 'absent' | 'replaced'> {
+  if ((await lstatIfPresent(src)) === null) return 'absent';
+  const cleared = await clearDestination(src, dst, opts.replaceDestination);
   for (let attempt = 1; ; attempt++) {
     try {
       await fs.rename(src, dst);
-      return 'moved';
+      return cleared ? 'replaced' : 'moved';
     } catch (err) {
       const code = codeOf(err);
       if (isMissingPath(err)) return 'absent';
@@ -76,4 +94,27 @@ export async function moveTree(src: string, dst: string): Promise<'moved' | 'abs
       await wait(TREE_RETRY_DELAY_MS * attempt);
     }
   }
+}
+
+/** The refusal of a destination that exists, as node words its own (`syscall`), with a message that names no path. */
+const destinationExists = (src: string, dst: string): Error =>
+  Object.assign(new Error('EEXIST: file already exists, rename'), { code: 'EEXIST', syscall: 'rename', path: src, dest: dst });
+
+/** Make room at `dst` when `policy` allows and what is there is not data; throws the refusal otherwise. True when entries were removed. */
+async function clearDestination(src: string, dst: string, policy: ReplaceDestination | undefined): Promise<boolean> {
+  const there = await lstatIfPresent(dst);
+  if (there === null) return false;
+  if (policy === undefined || !there.isDirectory()) throw destinationExists(src, dst);
+  if ((await fs.readdir(dst)).length === 0) {
+    // `rmdir` removes an empty directory and nothing else: a writer that put an entry there since the listing makes it fail, not lose it.
+    try {
+      await fs.rmdir(dst);
+    } catch (err) {
+      throw codeOf(err) === 'ENOTEMPTY' ? destinationExists(src, dst) : err;
+    }
+    return false;
+  }
+  if (policy !== 'staging') throw destinationExists(src, dst);
+  await removeTree(dst);
+  return true;
 }

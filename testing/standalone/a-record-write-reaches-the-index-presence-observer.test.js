@@ -40,7 +40,7 @@ import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { readTrackedSources } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
-import { between } from './_structural-window.mjs';
+import { between, bodyOf } from './_structural-window.mjs';
 
 const require = createRequire(import.meta.url);
 const { Collection } = require('mongodb');
@@ -222,16 +222,28 @@ describe('6. only the lifecycle builds or drops a collection\'s search indexes',
   const sources = readTrackedSources('server/src', SCAN).map(s => ({ ...s, code: blankComments(s.text) }));
   const BUILDERS = /\b(ensureCollectionSearchIndexes|dropCollectionSearchIndexes|ensureVectorSearchIndex)\s*\(/;
   const ALLOWED = new Set(['server/src/spaces/vector-index.ts', 'server/src/spaces/search-index-presence.ts']);
-  // A module that may DROP and never build, and why: the rule above is about a space that stays, where a drop loses its search.
+  // A FUNCTION that may DROP and never build, and why: the rule above is about a space that stays, where a drop loses its search. The
+  // allowance is the named function's body and nothing else in its file, so a second drop elsewhere in the module is not covered by a
+  // reason that names `dropSpaceData` only (bundle-95 review, D5).
   const DROP_ONLY = new Map([
-    ['server/src/spaces/lifecycle.ts', 'dropSpaceData: the space is being deleted, so there is no search to lose, and the drop is the one function that names every index of a collection (Q-176)'],
+    ['server/src/spaces/lifecycle.ts', { fn: 'dropSpaceData', why: 'the space is being deleted, so there is no search to lose, and the drop is the one function that names every index of a collection (Q-176)' }],
   ]);
   const BUILDS = /\b(ensureCollectionSearchIndexes|ensureVectorSearchIndex)\s*\(/;
+  /** Whether `file` calls a per-collection builder only inside its allowed function, and that function does drop. */
+  const dropOnlyWithin = (file) => {
+    const allowance = DROP_ONLY.get(file);
+    if (!allowance) return false;
+    // The body is read line by line and joined with LF, so the source is split the same way before the body is cut out of it.
+    const code = sources.find(x => x.file === file).code.split(/\r?\n/).join('\n');
+    const body = bodyOf(code, allowance.fn, `the drop-only allowance for ${file}`);
+    assert.ok(BUILDERS.test(body), `the drop-only allowance for ${file} is stale: ${allowance.fn} no longer calls a builder`);
+    return !BUILDS.test(code) && !BUILDERS.test(code.replace(body, ''));
+  };
 
   it('no other module calls the per-collection builders', () => {
     const callers = sources.filter(s => BUILDERS.test(s.code)).map(s => s.file);
     assert.ok(callers.includes('server/src/spaces/search-index-presence.ts'), 'the lifecycle no longer calls the builders — the scan is broken');
-    const outside = callers.filter(f => !ALLOWED.has(f) && !(DROP_ONLY.has(f) && !BUILDS.test(sources.find(x => x.file === f).code)));
+    const outside = callers.filter(f => !ALLOWED.has(f) && !dropOnlyWithin(f));
     for (const f of DROP_ONLY.keys()) assert.ok(callers.includes(f), `the drop-only allowance for ${f} is stale: it no longer calls a builder`);
     assert.deepEqual(outside, [],
       `${outside.join(', ')} builds or drops a search index directly — on an empty collection that is the cost this rule `

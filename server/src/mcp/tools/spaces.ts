@@ -236,7 +236,7 @@ export const space_renameTool: ToolHandler = {
     + '`PATCH /api/spaces/:id/rename`: 409 when `newId` exists, or (with `code: space_name_in_use`) when another space '
     + 'already syncs under that name in one of this instance\'s networks, or (with `code: space_being_restored` or '
     + '`space_being_migrated`, at once, nothing registered) while a restore or migration of the instance stands; 400 for a built-in space or an invalid id; '
-    + '404 for an unknown space. A connection opened before the rename still lists the old id until it reconnects.',
+    + '404 for an unknown space; 503 (with `code: space_still_being_removed`, `retryable: true`) when `newId` is the id of a space deleted a moment ago whose search-index drop is still running, nothing registered. A connection opened before the rename still lists the old id until it reconnects.',
   mutating: true,
   spaceAdmin: true,
   spaceRequired: true,
@@ -651,7 +651,8 @@ export const save_spaceTool: ToolHandler = {
     + 'unless you pass meta saying otherwise — with no typeSchemas defined yet that accepts every type, so it does '
     + 'not block an empty space. A personal view is not made here: use `view_create`. '
     + 'Set `faceDescriptorDims` HERE if you are bringing your own recogniser: it can be changed later with `update_space`, but ONLY while the space has never held a face descriptor, so getting it right at creation is the reliable path. Refusals match POST /api/spaces exactly, including 422 for a $ref to a schema-library entry that '
-    + 'does not exist and 409 when the id is taken.',
+    + 'does not exist and 409 when the id is taken, and 503 (`structuredContent.code: space_still_being_removed`, `retryable: true`) when the id is that of a space deleted a moment ago whose '
+    + 'search-index drop is still running: nothing was written, call again in a few seconds.',
   mutating: true,
   createsSpaces: true,
   inputSchema: (_s: ToolSchemas) => ({
@@ -735,6 +736,14 @@ export const save_spaceTool: ToolHandler = {
         content: [{ type: 'text' as const, text: `Error (409): ${result.error}` }],
         isError: true,
         structuredContent: { outcome: 'conflict' },
+      };
+    }
+    if (result.outcome === 'retry') {
+      // 503 on REST with `Retry-After`: MCP has no header, so `retryable` rides beside the code in the structured content.
+      return {
+        content: [{ type: 'text' as const, text: `Error (503): ${result.error}` }],
+        isError: true,
+        structuredContent: { outcome: 'retry', code: result.code, retryable: true },
       };
     }
     if (result.outcome === 'failed') {

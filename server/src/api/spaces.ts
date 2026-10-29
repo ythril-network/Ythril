@@ -48,7 +48,7 @@ import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { sendCaughtFailure, sendStoreFailure } from './send-failure.js';
+import { sendCaughtFailure, sendStoreFailure, sendRetryAfter } from './send-failure.js';
 import { answeredUnknownSpace, sendLostSpace } from './write-target-answer.js';
 
 export const spacesRouter = Router();
@@ -100,6 +100,11 @@ spacesRouter.patch('/:id/rename', globalRateLimit, requireAdminOrSpaceAdminMfaSc
   // One mapping from a failed rename to its status, shared with the `space_rename` tool (Q-139).
   const r = await renameSpaceAct(oldId, parsed.data);
   if (r.status === 200) { res.json({ space: spaceForWire(r.space) }); return; }
+  if (r.status === 503) {
+    sendRetryAfter(res, r.retryAfterSeconds);
+    res.status(503).json({ error: r.error, code: r.code, retryable: true });
+    return;
+  }
   res.status(r.status).json(r.code ? { error: r.error, code: r.code } : { error: r.error });
 });
 
@@ -288,6 +293,11 @@ spacesRouter.post('/', globalRateLimit, requireCreateSpacesMfa, async (req, res)
   const result = await applySpaceCreate(decision.plan, { tokenId: req.authToken?.id ?? null });
   if (result.outcome === 'conflict') {
     res.status(409).json({ error: result.error });
+    return;
+  }
+  if (result.outcome === 'retry') {
+    sendRetryAfter(res, result.retryAfterSeconds);
+    res.status(503).json({ error: result.error, code: result.code, retryable: true });
     return;
   }
   if (result.outcome === 'failed') {
