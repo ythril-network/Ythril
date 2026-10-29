@@ -33,6 +33,7 @@ import { holdDocumentLock } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 import { seedClaim } from './_media-claim.mjs';
 import { forkIdOf } from './_fork-kinds.mjs';
+import { stripFullLineComments } from './_strip-comments.mjs';
 
 export const AUTHOR = { instanceId: 'push-door-peer', instanceLabel: 'Peer' };
 export const T0 = '2026-09-01T00:00:00.000Z';
@@ -159,6 +160,39 @@ export async function seedHolderSpace(door, space) {
  * client, when its test has one), read when a case RUNS, so the table can be built when the tests are registered, before the door is open.
  * Fixtures are literal on purpose — the derivation decides a case is owed, not this table.
  */
+/**
+ * The server modules a holder case's `lock` may name, each with why it is not a write on the server's client. A `lock` is a FIXTURE step: it runs on
+ * the fixture's client, which has no clock, so that an option the server's client carries on purpose (a URI `timeoutMS`, the relay's lateness) ends
+ * only the write under test. A lock that calls a server module which writes (`writePendingFileTombstones`, `upsertFileMeta`) puts that write on the
+ * SERVER's client and dies of the very option the variant sets, on a loaded runner, as "during the lock: Timed out during socket read" (Q-649).
+ * Keyed `module` or `module.function`, as `ctx.mods` spells them.
+ */
+export const LOCK_MAY_CALL = {
+  plan: 'upsert-plan: derives the id a fork is stored under (`holdForkLock`); it reads and writes nothing',
+  'linkId.linkIdFor': 'a pure function of its arguments',
+  'files.writeFile': 'writes the BYTES to the disk; no store write',
+};
+
+/**
+ * Every `ctx.mods.<module>[.<function>]` a holder case's `lock` names, by case: the question "which server code does a fixture step reach?". A lock that
+ * is the string `'counter'` names none. The source is read with its comment-only lines removed, so prose about a module is not a call.
+ * @param {Record<string, Array<{ label: string, lock: unknown }>>} holders  `holderCases(ctx, S)`
+ * @returns {{ inspected: number, calls: Array<{ holder: string, label: string, call: string }> }}
+ */
+export function serverCallsOfLocks(holders) {
+  const calls = [];
+  let inspected = 0;
+  for (const [holder, cases] of Object.entries(holders)) {
+    for (const c of cases) {
+      if (typeof c.lock !== 'function') continue;
+      inspected++;
+      const source = stripFullLineComments(String(c.lock));
+      for (const m of source.matchAll(/ctx\.mods\.(\w+)(?:\.(\w+))?/g)) calls.push({ holder, label: c.label, call: m[2] ? `${m[1]}.${m[2]}` : m[1] });
+    }
+  }
+  return { inspected, calls };
+}
+
 /** The orphaned fork each space's `resolveOrphan` case seeded, by space: its id is derived when the lock seeds it, and the run resolves that row. */
 const orphanOf = new Map();
 
@@ -327,7 +361,8 @@ export function holderCases(ctx, S) {
         // A move a stalled repetition left owed is remembered in this process by its pair of paths (`MoveStillOwed`), so every repetition moves a pair of its own.
         const n = ctx.moveRun = (ctx.moveRun ?? 0) + 1;
         await ctx.mods.files.writeFile(S, `move-src-${n}.md`, 'bytes to move');
-        await ctx.mods.fileMeta.upsertFileMeta(S, `move-src-${n}.md`, 13);
+        // The row is the fixture's too (the shape `seedHolderSpace` gives `HELD_FILE`), not the server's `upsertFileMeta`, which writes on the server's client (Q-649).
+        await (ctx.fixture ?? ctx.door).coll(S, 'files').insertOne({ _id: `move-src-${n}.md`, spaceId: S, path: `move-src-${n}.md`, tags: [], sizeBytes: 13, createdAt: T0, updatedAt: T0, seq: SEEDED_COUNTER });
         return holdDocumentLock(mongo(), `${S}_files`, { insert: { _id: `move-dst-${n}.md`, spaceId: S, path: `move-dst-${n}.md` } });
       },
       run: () => ctx.mods.moveCascade.moveFileCascade(S, `move-src-${ctx.moveRun}.md`, `move-dst-${ctx.moveRun}.md`),
@@ -338,8 +373,14 @@ export function holderCases(ctx, S) {
     'server/src/files/tombstones.ts:publishSlice': [{
       label: 'a file tombstone published: its position stamp, inside its hold', positionHold: true, collection: `${S}_file_tombstones`,
       lock: async () => {
-        // The act's pending row, written first; the publish's upsert of it is what waits behind the lock.
-        const pending = await ctx.mods.fileTombstones.writePendingFileTombstones(S, ['position.md']);
+        // The act's pending row, written first; the publish's upsert of it is what waits behind the lock. A fixture step, so it is written
+        // through the fixture's client and not by the server's `writePendingFileTombstones`: that runs on the SERVER's client, which in the
+        // client-timeout variant carries the URI's `timeoutMS` and died of it on a loaded runner (Q-649). The shape is the one it writes
+        // (`StoredFileTombstone`: `pending`, `writtenAt`, `settleAt`, the path and a fresh id); the handle leaves out `generation`, which
+        // `confirmFileTombstones` then reads as the space's own, the one `writePendingFileTombstones` would have stamped a moment before.
+        const now = new Date().toISOString();
+        const pending = { spaceId: S, docs: [{ _id: `pending-position-${(ctx.pendingRun = (ctx.pendingRun ?? 0) + 1)}`, spaceId: S, path: 'position.md', deletedAt: now, writtenAt: now, settleAt: now, pending: true }] };
+        await (ctx.fixture ?? ctx.door).coll(S, 'file_tombstones').insertOne({ ...pending.docs[0] });
         (ctx.pendings ??= new Map()).set(S, pending);
         return holdDocumentLock((ctx.fixture ?? ctx.door).mongo, `${S}_file_tombstones`, { filter: { _id: pending.docs[0]._id } });
       },
