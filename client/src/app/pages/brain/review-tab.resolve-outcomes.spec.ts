@@ -108,7 +108,7 @@ function setup(lang: Lang, conApi: Record<string, unknown>) {
   f.detectChanges();
   const c = f.componentInstance;
   c.sub.set('contradictions');
-  c.loadContradictions();
+  c.conState.load('work');
   toasts.length = 0;
   rendered = () => { f.detectChanges(); return (f.nativeElement as HTMLElement).textContent ?? ''; };
   buttons = () => { f.detectChanges(); return [...(f.nativeElement as HTMLElement).querySelectorAll('button')].map(b => b.textContent?.trim() ?? ''); };
@@ -118,7 +118,7 @@ function setup(lang: Lang, conApi: Record<string, unknown>) {
 /** Keep A on a card whose resolve answers `answer`; what was toasted. */
 function keepA(lang: Lang, answer: () => Observable<unknown>): string[] {
   const { c, toasts } = setup(lang, { keepSide: answer });
-  c.keepSide(c.conRows()[0], 'a');
+  c.conState.keepSide('work', c.conState.rows()[0], 'a');
   return [...toasts];
 }
 
@@ -174,7 +174,7 @@ describe('ReviewTabComponent: what a resolve tells the reviewer', () => {
     const failing = (status: number, error: Record<string, unknown>) => () => throwError(() => new HttpErrorResponse({ status, error }));
     const failedToast = (via: 'keepSide' | 'resolveContradiction', answer: () => Observable<unknown>) => {
       const { c, toasts } = setup('en', { [via]: answer });
-      if (via === 'keepSide') c.keepSide(c.conRows()[0], 'a'); else c.resolveContradiction(c.conRows()[0], 'edited');
+      if (via === 'keepSide') c.conState.keepSide('work', c.conState.rows()[0], 'a'); else c.conState.resolve('work', c.conState.rows()[0], 'edited');
       expect(toasts.length, JSON.stringify(toasts)).toBe(1);
       return toasts[0]!;
     };
@@ -238,7 +238,7 @@ describe('ReviewTabComponent: what a resolve tells the reviewer', () => {
   it('a dismiss refused 409 alreadyResolved (a race with a resolve) is said from a key, in en, de and pl', () => {
     for (const lang of LANGS) {
       const { c, toasts } = setup(lang, { dismissContradiction: () => throwError(() => new HttpErrorResponse({ status: 409, error: { code: 'alreadyResolved', error: 'SERVER-SENTENCE' } })) });
-      c.dismissContradiction(c.conRows()[0]);
+      c.conState.dismiss('work', c.conState.rows()[0]);
       expect(toasts.length, JSON.stringify(toasts)).toBe(1);
       expect(toasts[0], `${lang}: the server's sentence was toasted`).not.toContain('SERVER-SENTENCE');
       expect(keysRenderedIn(lang, toasts[0]!, {}).length, `${lang}: the toast is not the text of any key: ${toasts[0]}`).toBeGreaterThan(0);
