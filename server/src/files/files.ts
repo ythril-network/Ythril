@@ -4,7 +4,8 @@ import { sha256Hex } from '../util/sha256-hex.js';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 import { StringDecoder } from 'node:string_decoder';
-import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterruptedLink, DestinationOccupied } from './stored-bytes.js';
+import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterruptedLink, DestinationOccupied, lstatIfPresent } from './stored-bytes.js';
+import { heldSpellingOf } from './held-spelling.js';
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
 import { admitSpaceWrite, assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
 import { fsRefusalOf } from './destination.js';
@@ -67,8 +68,9 @@ export async function ensureSpaceFilesDir(spaceId: string): Promise<void> {
 export async function readFileWindow(
   spaceId: string, filePath: string, req: { skip: number; maxChars: number; maxBytes: number | null },
 ): Promise<MarkdownWindow> {
+  // At its NFC spelling, else under the spelling its holder keeps it (`heldSpellingOf`, the lookup the REST byte door makes too, Q-581).
   const abs = await resolveSafePathChecked(spaceId, filePath);
-  const source = await openStoredRead(abs);
+  const source = await openStoredRead(await lstatIfPresent(abs) === null ? ((await heldSpellingOf(spaceId, filePath))?.abs ?? abs) : abs);
   try {
     const decoder = new StringDecoder('utf8');
     const keep = req.maxChars + 1;
