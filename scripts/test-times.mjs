@@ -87,7 +87,7 @@
 import { inflateRawSync, crc32 } from 'node:zlib';
 import { readFileSync, readdirSync, writeFileSync, appendFileSync, mkdirSync, existsSync, unlinkSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve, sep, isAbsolute } from 'node:path';
 import { assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
 import {
   TEST_RUN_SPEC, TEST_RUN_SCHEMA, TEST_RUN_RETENTION_DAYS, telemetryTypeDeclaration, checkTelemetryProperties, upsertTelemetryRecord,
@@ -99,7 +99,7 @@ import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
 import { readCappedBody } from './_shared/capped-body.mjs';
 import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
-import { readTimingLog, TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
+import { readTimingLog, timingResultsDir, TEST_RESULTS_DIR_ENV } from '../testing/_shared/timing-reporter.mjs';
 import { maskText } from './_shared/mask-text.mjs';
 import { waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
@@ -121,9 +121,10 @@ export const FORMAT_VERSION = 1;
 /** Runs `--record-ci` examines in one walk. */
 export const BACKFILL_RUNS = 30;
 
-/** Relative to the working directory: the recorder reads the checkout it is run in. */
-const RESULTS_DIR = TIMING_RESULTS_FOLDER;
-const UNRECORDED_DIR = join(RESULTS_DIR, 'unrecorded');
+/** The recorder reads the checkout it is run in: `test-results/` in the working directory, or the folder `YTHRIL_TEST_RESULTS_DIR` names (an absolute path; `timingResultsDir` decides). */
+const resultsDir = () => timingResultsDir(process.cwd());
+const unrecordedDir = () => join(resultsDir(), 'unrecorded');/** A path inside the working directory as the working directory's own relative path, forward slashes; one outside it (a moved results folder) as it is. */
+const shown = (p) => { const r = relative(process.cwd(), p).split(sep).join('/'); return r.startsWith('..') || isAbsolute(r) ? p : r; };
 
 /**
  * The properties of one `Test-Run` entry (`TEST_RUN_SCHEMA`), how long one is kept, and the declaration that is sent to the
@@ -497,26 +498,26 @@ const stopsEverything = (err) => !(err instanceof YthrilApiError) || err.status 
 const unrecordedName = (payload) => `${payload.properties.recordKey.replace(/[^A-Za-z0-9._-]/g, '_')}.json`;
 
 function keepPayload(payload, why) {
-  mkdirSync(UNRECORDED_DIR, { recursive: true });
+  mkdirSync(unrecordedDir(), { recursive: true });
   const name = unrecordedName(payload);
-  writeFileSync(join(UNRECORDED_DIR, name), JSON.stringify(payload));
-  console.log(`test-times: not recorded: ${why}; kept test-results/unrecorded/${name}`);
+  writeFileSync(join(unrecordedDir(), name), JSON.stringify(payload));
+  console.log(`test-times: not recorded: ${why}; kept ${shown(join(unrecordedDir(), name))}`);
 }
 
 /** Write the kept payloads that can now be written; whatever cannot stays where it is. */
 async function drainUnrecorded(api, shownUrl) {
-  if (!existsSync(UNRECORDED_DIR)) return;
+  if (!existsSync(unrecordedDir())) return;
   let drained = 0;
-  for (const name of readdirSync(UNRECORDED_DIR).filter(n => n.endsWith('.json')).sort()) {
-    const file = join(UNRECORDED_DIR, name);
+  for (const name of readdirSync(unrecordedDir()).filter(n => n.endsWith('.json')).sort()) {
+    const file = join(unrecordedDir(), name);
     let payload;
     try {
       payload = JSON.parse(readFileSync(file, 'utf8'));
       if (payload?.type !== CHRONO_TYPE || payload?.space !== SPACE) throw new Error('not a Test-Run payload');
       assertConforms(payload.properties);
-    } catch (err) { console.log(`test-times: left test-results/unrecorded/${name}: ${err.message}`); continue; }
+    } catch (err) { console.log(`test-times: left ${shown(join(unrecordedDir(), name))}: ${err.message}`); continue; }
     try { await recordPayload(api, payload); unlinkSync(file); drained++; } catch (err) {
-      console.log(`test-times: left test-results/unrecorded/${name}: ${whyOf(err, shownUrl)}`);
+      console.log(`test-times: left ${shown(join(unrecordedDir(), name))}: ${whyOf(err, shownUrl)}`);
       if (stopsEverything(err)) break;
     }
   }
@@ -535,7 +536,7 @@ function specsTrackedAt(commit) {
  * recorded is not that commit's run (the file outlives the run that wrote it), so it is a reason and not a record.
  */
 function localClientPayload({ root, commit, branch, dirty }) {
-  const report = readClientReport(RESULTS_DIR, { strictTimes: true });
+  const report = readClientReport(resultsDir(), { strictTimes: true });
   const committedAtMs = Number(git('log', '-1', '--format=%ct', commit)) * 1000;
   if (report.startMs < committedAtMs) throw new Error('client report older than this commit: it is not this commit\'s run');
   const summary = summariseClient({ report, root, trackedSpecs: specsTrackedAt(commit) });
@@ -551,8 +552,8 @@ function localClientPayload({ root, commit, branch, dirty }) {
  */
 function localPayloads() {
   const root = process.cwd();
-  const results = timingResultFiles(RESULTS_DIR);
-  const hasClient = existsSync(join(RESULTS_DIR, CLIENT_RESULTS));
+  const results = timingResultFiles(resultsDir());
+  const hasClient = existsSync(join(resultsDir(), CLIENT_RESULTS));
   if (!results.length && !hasClient) return { payloads: [], problems: [] };
   const commit = git('rev-parse', 'HEAD');
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
@@ -1312,6 +1313,7 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
   --record                 record the run in test-results/ (one Test-Run entry per suite: each node suite's *.jsonl,
                            and the client's ${CLIENT_RESULTS}, which a preflight run writes); exits 0 whenever it could not
                            record, and keeps the payload in test-results/unrecorded/ for the next one. Run by hand.
+                           (test-results/ is the folder ${TEST_RESULTS_DIR_ENV} names, an absolute path, when it is set.)
   --record-ci [<runId>]    record the completed CI runs (push to main of ${REPO}, ci.yml) not yet recorded, the client
                            job's included (its artifact's ${CLIENT_RESULTS}); walks newest first and stops at the first
                            completely recorded run or after ${BACKFILL_RUNS} runs, and says the newest run it listed.

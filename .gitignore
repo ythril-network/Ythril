@@ -5,9 +5,6 @@ node_modules/
 dist/
 .angular/
 
-# Scratch for agents and tools - never committed; anything under it is registered (scripts/unregistered-local-files.mjs)
-tmp/
-
 # Local Docker data volumes - bind mounts, never committed
 local-data/
 
@@ -31,7 +28,8 @@ testing/sync/configs/*/backup.json
 testing/package.json
 testing/package-lock.json
 
-# Timing results - one JSONL per test run, written by testing/_shared/timing-reporter.mjs (bundle-56)
+# Timing results - one JSONL per test run, written by testing/_shared/timing-reporter.mjs (bundle-56). Where YTHRIL_TEST_RESULTS_DIR is not set
+# (CI, anyone without it) they land here; there is deliberately no rule for a scratch folder: scratch goes outside every checkout (scripts/_shared/scratch-root.mjs)
 test-results/
 
 # Env files

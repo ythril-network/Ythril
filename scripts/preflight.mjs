@@ -35,9 +35,9 @@ import { join } from 'node:path';
 import { splitStandalone, offlineRuns } from '../testing/_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../testing/_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
-import { TIMING_RESULTS_FOLDER } from '../testing/_shared/timing-reporter.mjs';
+import { timingResultsDir } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
-import { CLIENT_RESULTS } from './_shared/client-results.mjs';
+import { CLIENT_RESULTS, clientCommandWritingTo } from './_shared/client-results.mjs';
 
 /**
  * `--static`, and nothing else: an unknown argument is refused rather than ignored, because `--statc` falling through
@@ -50,8 +50,8 @@ if (unknownArgs.length) {
   process.exit(2);
 }
 
-/** Where the client's Vitest JSON report is written; the path ci.yml's client step and the recorder read. */
-const CLIENT_REPORT = join(TIMING_RESULTS_FOLDER, CLIENT_RESULTS);
+/** Where the client's Vitest JSON report is written; the path ci.yml's client step and the recorder read (the results folder is `timingResultsDir`'s). */
+const CLIENT_REPORT = join(timingResultsDir(process.cwd()), CLIENT_RESULTS);
 
 /** Gates that read SOURCE only — no build required, so they run first and fail fastest. */
 const SOURCE_GATES = [
@@ -91,8 +91,8 @@ function gate(name, why, file) {
 console.log('Preflight — the checks that catch failures with no error message.\n');
 
 // A file git does not track that only a catch-all rule (*.log, *.txt) hides is clutter nobody is told about: agent runs left logs,
-// a stack dump, test output and stray worktree copies in the checkout this way (Q-626). Scratch goes to tmp/, a rule that names a
-// place. It asks git alone, so it is the cheapest step here and runs first, in both modes.
+// a stack dump, test output and stray worktree copies in the checkout this way (Q-626). Scratch goes outside every checkout (scratchRoot), not to a folder in it. The check names a
+// place for what stays local. It asks git alone, so it is the cheapest step here and runs first, in both modes.
 console.log('\n── no untracked file hidden only by a catch-all ignore rule ──');
 try { run('node scripts/unregistered-local-files.mjs'); } catch {
   failures.push({ name: 'unregistered-local-files', why: 'a file git does not track that no rule naming a place registers: clutter the catch-all ignore rules hide' });
@@ -315,7 +315,7 @@ console.log(STATIC ? '\n── client unit tests: not in a static run ──' : 
 rmSync(CLIENT_REPORT, { force: true });
 if (!STATIC) {
   let clientOutcome = 'success';
-  try { run('npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json'); } catch {
+  try { run(clientCommandWritingTo('npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json', CLIENT_REPORT, join(timingResultsDir(process.cwd(), {}), CLIENT_RESULTS))); } catch {
     clientOutcome = 'failure';
     failures.push({ name: 'test:client', why: 'component behaviour, and translation keys missing from de/pl' });
   }

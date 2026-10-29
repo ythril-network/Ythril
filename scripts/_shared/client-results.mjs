@@ -47,6 +47,26 @@ import { isCount } from './measurements.mjs';
 /** The client's report inside the results folder: written by the client's test run (CI's client job, preflight), downloaded beside the node results. */
 export const CLIENT_RESULTS = 'client.json';
 
+/**
+ * The client run's command, ci.yml's character for character while the report goes where ci.yml's command writes it, and with
+ * only that path replaced when the results folder has moved (`YTHRIL_TEST_RESULTS_DIR`).
+ *
+ * The command runs in `client/`, so the path in it is relative to THAT folder (`../test-results/client.json`) and means the
+ * checkout's own results folder; a moved folder needs the report's absolute path, quoted, forward slashes. What it prevents:
+ * the client tests run, pass, and write their report to the old place while the recorder reads the new one, which reads as "the
+ * client did not run". A command with no `--outputFile` to replace THROWS rather than run unchanged for the same reason.
+ *
+ * @param {string} command ci.yml's client command (the one literal `ci-workflow-is-sound` holds equal to the workflow's)
+ * @param {string} report the absolute path of the report this run must write
+ * @param {string} defaultReport the absolute path ci.yml's command writes it to (the results folder with nothing moved)
+ */
+export function clientCommandWritingTo(command, report, defaultReport) {
+  const flag = /(--outputFile(?:\.json)?=)\S+/;
+  if (!flag.test(command)) throw new Error('the client command has no --outputFile to point at the results folder');
+  if (report === defaultReport) return command;
+  return command.replace(flag, (_, name) => `${name}"${report.replaceAll('\\', '/')}"`);
+}
+
 // A vitest report names absolute paths (or repo-relative ones once `mask-client-report.mjs` has rewritten it), and a gate reader
 // wants repo-relative ones: REPO_ROOT is the repository the script lives in.
 /** Forward-slash path, relative to the repository when it lies inside it (one outside it is kept as it came). */

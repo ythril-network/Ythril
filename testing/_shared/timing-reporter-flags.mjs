@@ -41,13 +41,17 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { TIMING_ENV, TIMING_SCOPES, DEFAULT_TIMING_SCOPE, TIMING_RESULTS_FOLDER } from './timing-reporter.mjs';
+import { TIMING_ENV, TIMING_SCOPES, DEFAULT_TIMING_SCOPE, timingResultsDir } from './timing-reporter.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPORTER_URL = pathToFileURL(join(HERE, 'timing-reporter.mjs')).href;
+const REPO = resolve(HERE, '..', '..');
 
-/** Where timing files go by default; gitignored. */
-export const TIMING_RESULTS_DIR = resolve(HERE, '..', '..', TIMING_RESULTS_FOLDER);
+/**
+ * Where this repository's timing files go: `test-results/` in the checkout, or the folder `YTHRIL_TEST_RESULTS_DIR` names.
+ * A function and not a constant, so the answer is the environment's at the time of the call.
+ */
+export const defaultTimingResultsDir = () => timingResultsDir(REPO);
 
 /** A plain name: it becomes part of a file name and must not be able to leave the folder. */
 const PLAIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -66,7 +70,7 @@ function plainName(kind, value) {
  * @param {object}  p
  * @param {string}  p.suite  the suite: standalone, integration, sync, redteam, preflight
  * @param {string|number} p.batch the invocation inside it: pure-1, db-2, 1
- * @param {string}  [p.dir]  where the file goes; default `<repo>/test-results`
+ * @param {string}  [p.dir]  where the file goes; default `<repo>/test-results`, or the folder YTHRIL_TEST_RESULTS_DIR names
  * @param {boolean} [p.stdoutIsTTY] default `process.stdout.isTTY`, which is what node itself keys its default on
  * @param {'full'|'subset'|'files'} [p.scope] what the run covers, which only the runner knows: the whole suite, a
  *   subset of it, or named files. Written into the sentinel. Default `subset`: a run that does not say is never
@@ -75,7 +79,7 @@ function plainName(kind, value) {
  *   `args` go after `--test`; `env` is merged into the child's environment; `destination` is the absolute file.
  */
 export function timingReporterFlags({
-  suite, batch, dir = TIMING_RESULTS_DIR, stdoutIsTTY = Boolean(process.stdout.isTTY), scope = DEFAULT_TIMING_SCOPE,
+  suite, batch, dir = defaultTimingResultsDir(), stdoutIsTTY = Boolean(process.stdout.isTTY), scope = DEFAULT_TIMING_SCOPE,
 } = {}) {
   const suiteName = plainName('suite', suite);
   const batchName = plainName('batch', batch);
@@ -106,7 +110,7 @@ export function timingReporterFlags({
  *
  * @returns {number} how many files were removed
  */
-export function clearTimingResults(suite, { dir = TIMING_RESULTS_DIR } = {}) {
+export function clearTimingResults(suite, { dir = defaultTimingResultsDir() } = {}) {
   const prefix = `${plainName('suite', suite)}-`;
   let removed = 0;
   try {
