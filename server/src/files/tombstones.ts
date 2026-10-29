@@ -107,6 +107,8 @@ import type { FileTombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { authorRef } from '../config/author.js';
 import { log, peerText } from '../util/log.js';
 import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
+import { reportSpaceFailure } from '../util/space-failure.js';
+import { declareStep } from '../util/housekeeping-signals.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { DetachedWork } from '../util/detached-work.js';
 import { inChunks } from '../util/chunks.js';
@@ -320,7 +322,7 @@ export async function forgetFileTombstonesOf(spaceId: string, opts: { except?: s
 const publishLock = keyedLock();
 
 /** A pending tombstone about to be published: while pending, `deletedAt` is when it was written. */
-type ToPublish = Pick<StoredFileTombstone, '_id' | 'path' | 'deletedAt' | 'move' | 'issuer' | 'rowSeq' | 'contentHash' | 'writtenAt'>;
+type ToPublish = Pick<StoredFileTombstone, '_id' | 'path' | 'deletedAt' | 'move' | 'issuer' | 'rowSeq' | 'contentHash' | 'writtenAt' | 'versionUnknown'>;
 
 /**
  * THE one way a tombstone is published — confirmed by its act, settled from the disk by a failed step, a retried
@@ -380,22 +382,43 @@ async function publishOnePerPath(spaceId: string, docs: readonly ToPublish[], ge
 }
 
 /** What {@link publishSlice} reads of the rows already stored for its paths. */
-const STORED_FOR_PUBLISH = { _id: 1, path: 1, deletedAt: 1, positionAt: 1, pending: 1, rowSeq: 1, writtenAt: 1, origin: 1, storedVia: 1, move: 1 } as const;
+const STORED_FOR_PUBLISH = { _id: 1, path: 1, deletedAt: 1, positionAt: 1, pending: 1, rowSeq: 1, writtenAt: 1, origin: 1, storedVia: 1, move: 1, issuer: 1 } as const;
 /** When a pending row was put: its `writtenAt`, or — for one written before it existed — its `deletedAt`. */
 const writtenOf = (t: { writtenAt?: string | undefined; deletedAt: string }): string => t.writtenAt ?? t.deletedAt;
 
 /**
- * Whether the published tombstone `p` COVERS the pending one `c`: this instance published it itself, after `c` was written (both
- * by this instance's own clock), and — when both name a version of the file — at a version `c` does not exceed. Only an own
- * publication can cover: a relayed tombstone says a PEER deleted the path, which tells nobody that this instance's own delete
- * happened, and its position is its receive time.
+ * Whether `p` is a tombstone THIS instance published itself: stamped `origin: 'own'`, or — for a row published before `origin` existed
+ * (bundle-71) — carrying no `origin` and no `storedVia` (nothing relayed it here) with this instance as its `issuer`. Without the second
+ * form the leftover pending row of an act published before the upgrade was published a second time by the first settle after it.
  */
+function isOwnPublication(p: StoredFileTombstone): boolean {
+  if (p.pending || p.storedVia !== undefined) return false;
+  if (p.origin !== undefined) return p.origin === 'own';
+  return p.issuer !== undefined && p.issuer === authorRef().instanceId;
+}
+
+/**
+ * Whether the published tombstone `p` COVERS the pending one `c`: this instance published it itself ({@link isOwnPublication}), after
+ * `c` was written (both by this instance's own clock), and, by what each names of the version it erased (`rowSeq`):
+ *
+ * | `c`                          | `p`          | covers                                                                                |
+ * |------------------------------|--------------|---------------------------------------------------------------------------------------|
+ * | its version read failed      | any          | no: nobody knows which version `c` erased, so it is published                          |
+ * | versioned                    | versioned    | when `p`'s version is not below `c`'s                                                 |
+ * | versioned                    | none         | no: `p` was written when the path had no row, and `c` erases a version made since     |
+ * | none (the path had no row)   | none         | yes: no version was uploaded between the two, they are one delete                     |
+ * | none (the path had no row)   | versioned    | yes: `p` erased a file the path has not held since `c` was written                    |
+ *
+ * Only an own publication can cover: a relayed tombstone says a PEER deleted the path, which tells nobody that this instance's own
+ * delete happened, and its position is its receive time. */
 function covers(p: StoredFileTombstone, c: ToPublish): boolean {
-  if (p.pending || p.origin !== 'own' || p.storedVia !== undefined) return false;
+  if (!isOwnPublication(p)) return false;
   const at = fileTombstonePosition(p);
   if (at === undefined || at <= writtenOf(c)) return false;
-  const versioned = typeof p.rowSeq === 'number' && p.rowSeq > 0 && typeof c.rowSeq === 'number' && c.rowSeq > 0;
-  return !versioned || (p.rowSeq as number) >= (c.rowSeq as number);
+  if (c.versionUnknown === true) return false;
+  const named = (t: { rowSeq?: number | undefined }): t is { rowSeq: number } => typeof t.rowSeq === 'number' && t.rowSeq > 0;
+  if (named(c)) return named(p) && p.rowSeq >= c.rowSeq;
+  return true;
 }
 
 /**
@@ -474,7 +497,7 @@ async function publishSlice(
             ...(w.writtenAt !== undefined ? { writtenAt: w.writtenAt } : {}),
             ...(w.move ? { move: w.move } : {}),
           },
-          $unset: { pending: '' as const, settleAt: '' as const },
+          $unset: { pending: '' as const, settleAt: '' as const, versionUnknown: '' as const },
         }),
         upsert: true,
       } }));
@@ -507,21 +530,26 @@ async function dropPendingById(spaceId: string, ids: readonly string[]): Promise
   }
 }
 
-/** The file rows of `ids` (a row's id is its path), with what a tombstone records of the version it erases. */
-async function readFileRows(spaceId: string, ids: readonly string[]): Promise<Map<string, Pick<FileMetaDoc, 'seq' | 'sha256'>>> {
+/** The step a failed read of the rows a tombstone erases is reported under. */
+const VERSION_READ_STEP = declareStep('File tombstone version read');
+
+/**
+ * The file rows of `ids` (a row's id is its path), with what a tombstone records of the version it erases, and whether they were READ:
+ * `known: false` is a read that failed, which is not "the path has no row" and is said apart (`versionUnknown` on the tombstone, so
+ * {@link covers} never takes it for a delete of nothing).
+ */
+async function readFileRows(spaceId: string, ids: readonly string[]): Promise<{ rows: Map<string, Pick<FileMetaDoc, 'seq' | 'sha256'>>; known: boolean }> {
   try {
-    return await readStoredById<Pick<FileMetaDoc, 'seq' | 'sha256'>>(spaceCollection(spaceId, 'files'), ids, { seq: 1, sha256: 1 });
+    return { rows: await readStoredById<Pick<FileMetaDoc, 'seq' | 'sha256'>>(spaceCollection(spaceId, 'files'), ids, { seq: 1, sha256: 1 }), known: true };
   } catch (err) {
     // Never the act's failure. The stamps are what a tombstone KNOWS of the version it erases, and a bare tombstone shadows
     // less (the stated limit of one held from before this release) and deletes exactly as it did. A store that is down fails
     // the write that follows, which is where the act answers it: failing here instead put a READ before the write and kept
     // the one failure the doors are held to (a failed bulk write, `a-store-failure-answers-alike-on-every-door-db`) from
-    // ever being met. The store's own failure is not said here either: the driver's text is logged once, by the door that
-    // answers it, and the write that follows meets the same fault.
-    if (classifyReadFailure(err).status < 500) {
-      log.warn(`file tombstones for ${peerText(spaceId)} (${ids.length}): the rows they erase could not be read, so they carry no version: ${peerText(err)}`);
-    }
-    return new Map();
+    // ever being met. Said through the shared reporter for every status (once per window), and the tombstones it stamps say their
+    // version is unknown, not absent.
+    reportSpaceFailure(VERSION_READ_STEP, spaceId, err, { count: ids.length, when: 'next write' });
+    return { rows: new Map(), known: false };
   }
 }
 
@@ -570,7 +598,7 @@ export async function writePendingFileTombstones(
   // version and content hash of each file ROW. The hash is the row's, never the bytes' — the bytes may be the next thing
   // to go, and a row hash costs no read of them. A path with no row (derived sidecar, an orphan) is stamped with the issuer
   // alone: a version and a hash it does not have are not guessed.
-  const rows = await readFileRows(spaceId, unique);
+  const { rows, known } = await readFileRows(spaceId, unique);
   const issuer = authorRef().instanceId;
   const pending: PendingFileTombstones = { spaceId, generation, docs: unique.map((p): StoredFileTombstone => {
     const row = rows.get(p);
@@ -580,6 +608,8 @@ export async function writePendingFileTombstones(
       // This instance's own act: the local mark "issued here" (`sync/issued-here.ts`), which no arrival carries and no peer's text can set.
       ...issuedHereStamp(),
       ...(typeof row?.seq === 'number' ? { rowSeq: row.seq } : {}),
+      // The read failed: no row means nothing was read, and the tombstone says so (`covers`).
+      ...(!known ? { versionUnknown: true as const } : {}),
       ...(typeof row?.sha256 === 'string' && row.sha256 !== '' ? { contentHash: row.sha256 } : {}),
     };
   }) };
@@ -682,7 +712,7 @@ interface Settled {
 }
 
 /** The fields a settle reads of a pending tombstone: what {@link publishOnePerPath} needs to publish it. */
-const TO_PUBLISH = { _id: 1, path: 1, deletedAt: 1, move: 1, issuer: 1, rowSeq: 1, contentHash: 1, writtenAt: 1 } as const;
+const TO_PUBLISH = { _id: 1, path: 1, deletedAt: 1, move: 1, issuer: 1, rowSeq: 1, contentHash: 1, writtenAt: 1, versionUnknown: 1 } as const;
 
 /**
  * THE settle rule, one copy for every caller: the disk decides each pending tombstone (`whatBecameOfPath`). Its path still has bytes, so

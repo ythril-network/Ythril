@@ -78,6 +78,12 @@ export interface StoredFileTombstone extends FileTombstoneDoc {
   /** Who made the published row: `own` (this instance published it) or `relayed` (a peer's, kept to be passed on). A row
    *  with neither stamp is never taken for one this instance published, so it never suppresses an own tombstone. */
   origin?: 'own' | 'relayed';
+  /**
+   * `true` on a PENDING tombstone whose act could not read the file row it erases (the read failed), so it names no `rowSeq` for a reason other than
+   * "the path had no row". Never on the wire (`WIRE` lists the wire fields) and never hashed (file tombstones are not read by `brain/merkle.ts`);
+   * dropped when the row is published. `covers` never lets another publication cover a tombstone carrying it.
+   */
+  versionUnknown?: true;
 }
 
 /** A tombstone whose act has happened: the only kind any reader outside the act's own bookkeeping may see. */
