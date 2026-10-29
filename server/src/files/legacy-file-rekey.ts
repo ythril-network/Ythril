@@ -53,7 +53,7 @@ export async function rekeyLegacy(spaceId: string, key: string, ids: readonly st
       await withLandingStamp(spaceId, [arrivalRow(keep.seq ?? 0)], async ([landing]) => {
         await rekeyRows<FileMetaDoc>(filesColl, session, {
           moves: [{ from: best, to: key }],
-          rebuild: (row) => rekeyedRow(row, { _id: key, path: key, ...landing }),
+          rebuild: (row) => rekeyedRow(row, { _id: key, path: key, ...landing }, { sameRecord: true }),   // the same file's row at its key: it keeps its deliverer and per-peer base
           refuse: (to) => new StaleRekeyPlan(`a row appeared at '${to}' since the re-key was planned`),
           ...(atKey !== undefined ? { replacements: { replaced: [key] } } : flaggedAtKey ? { replacements: { flagged: [key] } } : {}),
         });
