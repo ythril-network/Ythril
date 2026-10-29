@@ -46,7 +46,7 @@ import { andPredicates } from '../db/and-predicates.js';
 import { writtenHereFilter } from '../sync/written-here.js';
 import { toDocId } from '../util/paths.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import type { LinkDoc } from '../config/types.js';
+import type { AuthorRef, LinkDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { isDerivedRowOf } from '../files/moved-paths.js';
@@ -422,6 +422,20 @@ export async function fileLinksThisInstanceWrote(
       ...(createdUntil === undefined ? {} : { createdAt: { $lte: createdUntil } }),
     }, writtenHereFilter()) as never), { projection: { _id: 1, seq: 1 } }).toArray() as Array<{ _id: string; seq?: number }>;
   return rows.map(r => ({ _id: r._id, seq: r.seq }));
+}
+
+/**
+ * The link rows starting from any of the file ids `froms`, each with the author that wrote it (absent where a row was written before authorship was
+ * stamped): what a re-key of a file's row carries to its key (`files/move-links.ts`, `carryLinksToKey`), which has to keep each link under the instance
+ * that wrote it. Chunked by the caller (an `$in` of ids).
+ */
+export async function fileLinksWithAuthors(
+  spaceId: string, froms: readonly string[],
+): Promise<Array<LinkEnd & { author?: AuthorRef }>> {
+  if (froms.length === 0) return [];
+  return await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .find(asFilter<LinkDoc>({ fromKind: 'file', from: { $in: [...froms] } }), { projection: { from: 1, fromKind: 1, to: 1, toKind: 1, author: 1 } })
+    .toArray() as Array<LinkEnd & { author?: AuthorRef }>;
 }
 
 /**

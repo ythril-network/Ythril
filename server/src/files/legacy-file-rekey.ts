@@ -20,7 +20,8 @@ import { decideArrivals } from './tombstones.js';
 import { deleteRowsDerivedFrom, rowsOfFiles } from './derived-rows.js';
 import { cancelJobsOwnedBy, cancelMediaJob } from './media/job-queue.js';
 import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
-import { carryLinksToKey, dropLinkRowsLocally } from './move-links.js';
+import { carryLinksToKey } from './move-links.js';
+import { removeFileLinkRowsLocally } from '../brain/links.js';
 import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
 import { LIVE_FILE_ROW } from './live-file-row.js';
 import type { FileMetaDoc } from '../config/types.js';
@@ -97,6 +98,6 @@ async function removeWhatTheOldIdsHold(spaceId: string, rows: readonly string[],
   });
   // What is keyed by the old ids' paths goes with them (the hash cache entry the re-key did not carry), as every remover of file rows forgets it.
   await forgetPathKeyedCache(spaceId, { ids: [...rows] });
-  // The old ids' own link rows go from THIS instance's collection, with no tombstone (`dropLinkRowsLocally`): carried above, or the row did not survive.
-  await dropLinkRowsLocally(spaceId, rows);
+  // The old ids' own link rows go from THIS instance's collection, with no tombstone (`removeFileLinkRowsLocally`): carried above, or the row did not survive.
+  await removeFileLinkRowsLocally(spaceId, rows);
 }

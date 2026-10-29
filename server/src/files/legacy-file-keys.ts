@@ -23,7 +23,7 @@
  * the one at the key); when a held tombstone shadows the legacy row's version it is removed here, as an arrival it would shadow is refused. **The
  * links are this instance's rows too, and are handled the same way: no tombstone of any kind, links included.** A legacy row whose data survives has
  * every link carried to its key under the author that wrote it (`carryLinksToKey`), nothing the key held is removed, and one that loses or is shadowed
- * has its link rows removed from this instance's own collection (`dropLinkRowsLocally`) and nobody is told.
+ * has its link rows removed from this instance's own collection (`removeFileLinkRowsLocally`) and nobody is told.
  *
  * **This module is the cheap half: the index and the entry points.** The re-key itself is `files/legacy-file-rekey.ts`, loaded on the first row that
  * needs it (a dynamic import, as `file-meta.ts` loads its own heavy neighbours): it reaches the tombstones, the derived rows, the jobs and the links, which
