@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Data:** the Data page's "accepted" line for a restore or migrate is replaced by the end sentence when the act ended before its first poll, and once by "cannot finish, abandon it" when every unfinished space needs an abandon.
 
+- **Sync:** a file delete made while the file's record could not be read is published to peers even when an earlier delete of the same path was published first, so a peer that holds the newer version of the file deletes it too; a delete published before the upgrade no longer lets the same act's leftover be published a second time.
 - **Files:** a bad `imagesLimit` or `imagesSkip` on `GET …/files/extract` is refused naming the parameter you sent, not `imageslimit`.
 - **Files:** a file moved back to its old path, or onto a path whose earlier file was deleted, now reaches peers; a file uploaded again at a path that held another instance's deleted file reaches peers too.
 - **MCP:** `read_file` on a missing file answers `404` through `POST /api/read_file`, as the extract does, not `400`.
