@@ -33,7 +33,8 @@ import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/typ
 import type { StepProgress } from './types.js';
 import { log, peerText } from '../../util/log.js';
 import { enqueueMediaJob, cancelJobsOwnedBy } from '../media/job-queue.js';
-import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, sidecarsOwnedBy, type PathKind, type Sidecar } from '../moved-paths.js';
+import { convertedFileOf, extractedTreeOf, movedRoot, sidecarsOf, type PathKind, type Sidecar } from '../moved-paths.js';
+import { sidecarsOwnedBy } from '../sidecar-disk.js';
 import { deleteRowsDerivedFrom, rootsOfDirectoryPages, rowsOfFiles } from '../derived-rows.js';
 import { retireFileMetaMany } from '../file-meta.js';
 import { READ_CHUNK, readStoredById } from '../../db/read-by-id.js';

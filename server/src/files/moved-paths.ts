@@ -17,12 +17,12 @@
  * `_extracted/<p>/` itself, and each spelling was right for a FILE and wrong for a DIRECTORY, or the other way round: a
  * directory `g.md/` has its converted tree at `_converted/g.md/`, which is exactly where the converted Markdown of a FILE
  * `g` goes, so a delete of the file removed the tree of a directory it never named. {@link sidecarsOf} answers it by KIND,
- * {@link sidecarsOwnedBy} drops the one candidate the disk says belongs to a directory, {@link parentOfSidecar} is the inverse.
+ * {@link parentOfSidecar} is the inverse. The one question that needs the disk (which candidate belongs to a directory) is `files/sidecar-disk.ts`'s.
+ *
+ * @pure-rules  Its import closure reaches no code that does I/O (`the-shadow-rules-import-no-io`): the algebra of paths is decided over strings.
  */
 import { toDocId } from '../util/paths.js';
 import { escapeRegex } from '../util/redos.js';
-import { resolveSafePathChecked } from './sandbox.js';
-import { isStoredDirectory } from './stored-bytes.js';
 
 /**
  * The two sidecar roots a conversion writes under, mirroring the original file's path. Exported for the one question that is
@@ -61,7 +61,7 @@ export const convertedFileOf = (p: string): string => `${CONVERTED_ROOT}${rootOf
 export const extractedTreeOf = (p: string): string => `${EXTRACTED_ROOT}${rootOfSidecarOwner(p)}`;
 
 /**
- * The sidecar paths of `p`, by its kind and nothing else (pure; the disk's say is {@link sidecarsOwnedBy}).
+ * The sidecar paths of `p`, by its kind and nothing else (pure; the disk's say is `sidecarsOwnedBy` in `files/sidecar-disk.ts`).
  *
  *  - a FILE owns its converted Markdown, `_converted/<p>.md`, and the tree of its extracted images, `_extracted/<p>/`;
  *  - a DIRECTORY owns two trees, `_converted/<p>/` and `_extracted/<p>/`, one entry per file under it.
@@ -83,23 +83,6 @@ export function sidecarsOf(p: string, kind: PathKind): Sidecar[] {
  */
 export function idsUnder(paths: ReadonlyArray<Pick<Sidecar, 'path' | 'shape'>>): Array<{ _id: string | { $regex: string } }> {
   return paths.map(s => s.shape === 'file' ? { _id: s.path } : { _id: { $regex: `^${escapeRegex(`${s.path}/`)}` } });
-}
-
-/**
- * The sidecars of `p` that are really its own: {@link sidecarsOf}, less the one the disk says belongs to somebody else.
- *
- * For a FILE `g` the converted Markdown is `_converted/g.md` — which is also the converted TREE of a directory `g.md/`
- * standing beside it. A directory there is not the file's, and removing or moving it as if it were takes a tree the delete
- * never named. The check is here, behind the one function every caller reaches, so no caller can leave it out. A failure to
- * look at the path is thrown, never read as "not a directory" (`isStoredDirectory`).
- */
-export async function sidecarsOwnedBy(spaceId: string, p: string, kind: PathKind): Promise<Sidecar[]> {
-  const owned: Sidecar[] = [];
-  for (const s of sidecarsOf(p, kind)) {
-    if (s.shape === 'file' && await isStoredDirectory(await resolveSafePathChecked(spaceId, s.path))) continue;
-    owned.push(s);
-  }
-  return owned;
 }
 
 /**
@@ -215,15 +198,6 @@ export function movedPairs(ids: Iterable<string>, src: string, dst: string): Arr
 }
 
 /**
- * What the path at `relPath` is on disk — a directory or, whatever else, a file: the kind its sidecars and jobs are asked by.
- * Read from the disk and never inferred from whether it has children: an empty directory has none and is still a directory, whose
- * trees are not a file's converted Markdown. A path the sandbox refuses is its `RangeError`; a failure to look is thrown.
- */
-export async function kindAt(spaceId: string, relPath: string): Promise<PathKind> {
-  return await isStoredDirectory(await resolveSafePathChecked(spaceId, relPath)) ? 'directory' : 'file';
-}
-
-/**
  * The `_id` clauses (for an `$or`) that select the jobs belonging to `p` as a `kind`: its own path and every sidecar it owns
  * ({@link jobPathsOf}, {@link idsUnder}). The one selection of "the jobs of this path", asked by the delete that cancels them, the
  * move that holds and re-keys them, and the probe that asks whether a move is still owed — which is why it is here, in a leaf both
@@ -252,19 +226,4 @@ export function jobPathsOf(p: string, kind: PathKind): Array<Pick<Sidecar, 'path
   const root = movedRoot(p);
   if (!root) return [];
   return [{ path: root, shape: kind === 'directory' ? 'tree' : 'file' }, ...sidecarsOf(root, kind)];
-}
-
-/**
- * The sidecar paths that belong to `src` — a directory's two trees, or a file's converted Markdown and its extracted tree, by
- * `kind` (what `src` IS, read from the disk by the caller: `isStoredDirectory`) — with where each goes when `src` moves to
- * `dst`. Only the sidecars that are `src`'s own ({@link sidecarsOwnedBy}); whether they are on disk is the caller's to ask.
- */
-export async function movedSidecars(
-  spaceId: string, src: string, dst: string, kind: PathKind,
-): Promise<Array<{ from: string; to: string }>> {
-  const target = sidecarsOf(dst, kind);
-  return (await sidecarsOwnedBy(spaceId, src, kind)).flatMap(s => {
-    const to = target.find(t => t.role === s.role);
-    return to === undefined ? [] : [{ from: s.path, to: to.path }];
-  });
 }

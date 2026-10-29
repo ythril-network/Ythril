@@ -8,7 +8,7 @@
  * it. If a tombstone raises this instance's counter V (an arrival does, today), one planted at `MAX_INGEST_SEQ` drags V to the
  * ceiling and every later create is stamped above what peers accept. And the other way: a QUIET instance whose counter is far below
  * a deletion another instance issued re-creates the edge at V + 1, below that deletion, and every relay holding the tombstone
- * refuses the create for good (`heldTombstoneRefuses`, `sync/upsert-plan.ts`).
+ * refuses the create for good (`heldTombstoneRefuses`, `sync/held-tombstone-rules.ts`).
  *
  * ## The rules this file holds (rev 8 decisions 1, 2)
  *

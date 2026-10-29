@@ -19,7 +19,7 @@
  * `already_newer`.
  */
 import { readStoredById, type ReadFields } from '../db/read-by-id.js';
-import { isNewerCopy } from './upsert-plan.js';
+import { isNewerCopy } from './held-tombstone-rules.js';
 
 /** How the stored copy stands to the planned version: the same version, a newer one, or neither (another index collided, or the copy is gone). */
 export type StoredCopy = 'same-version' | 'newer' | 'other';

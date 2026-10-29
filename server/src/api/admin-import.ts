@@ -63,7 +63,7 @@ import { log, logSafe, peerList, peerText } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { boundedRows } from '../brain/write-validation.js';
 import { watchArrivals, recordedOf, sayRecorded, type RecordedFamilies } from '../sync/arrival-recording.js';
-import { isNewerCopy } from '../sync/upsert-plan.js';
+import { isNewerCopy } from '../sync/held-tombstone-rules.js';
 import { writeArrivals, arrivalId, arrivalRefusal, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
 import { PageStoppedError } from '../sync/page-stopped.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';

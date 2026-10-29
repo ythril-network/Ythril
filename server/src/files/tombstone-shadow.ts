@@ -12,8 +12,10 @@
  * The rule written twice. Every door a file's metadata or bytes arrive by (the metadata writer, the manifest pull, the byte
  * doors, the stray drain) asks the one predicate that lives here; a door that compared a seq or a hash of its own would be the
  * weaker copy that wins silently.
+ *
+ * @pure-rules  Its import closure reaches no code that does I/O (`the-shadow-rules-import-no-io`): a rule that asks the disk is not this one.
  */
-import { heldTombstoneRefuses, isNewerVersionByTheIssuer } from '../sync/upsert-plan.js';
+import { heldTombstoneRefuses, isNewerVersionByTheIssuer } from '../sync/held-tombstone-rules.js';
 import { StoreTimeout } from '../db/write-timeout.js';
 import { parentOfSidecar } from './moved-paths.js';
 

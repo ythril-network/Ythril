@@ -28,7 +28,8 @@ import { linksStartingFrom, aFileUnderHoldsALink } from '../brain/link-adjacency
 import { bytesPresentAt, classifyDestination, destinationStateAt, isOneNameUnderTwoSpellings, lstatIfPresent, realPathsAgree } from './stored-bytes.js';
 import { resolveSafePathChecked } from './sandbox.js';
 import { hasLiveFileRecordAt } from './file-meta.js';
-import { jobIdClausesOf, kindAt, movedId, movedRoot, type PathKind } from './moved-paths.js';
+import { jobIdClausesOf, movedId, movedRoot, type PathKind } from './moved-paths.js';
+import { kindAt } from './sidecar-disk.js';
 
 /** The two paths a move names. */
 export interface MovePair { from: string; to: string }
