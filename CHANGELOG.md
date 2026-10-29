@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Brain:** merging entity A no longer moves the edges of a fact or chrono entry that holds A's id, and resolving a fork of a fact or chrono entry no longer moves the edges of an entity holding its id: an edge end is matched by kind as well as id, by the merge plan, its bound, the relink and the Review fork count alike.
+
 ## [6.1.0] — 2026-10-29
 
 **A minor release: MCP `network_sync` and `read_file` take the parameters their REST doors already had, and file sync now carries moved, re-uploaded and decomposed-name files that 6.0 left behind.**

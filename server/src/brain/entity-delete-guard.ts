@@ -26,6 +26,7 @@
 import { readStoredById } from '../db/read-by-id.js';
 import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { findEntityReferences, type BacklinkEntry } from './entities.js';
+import { endsOfRecord } from './edge-ends-of-record.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
 
@@ -61,14 +62,14 @@ function describe(b: BacklinkEntry): string {
  * *"is every kind of reference found"* and has its own gate, so widening what it returns would put a second
  * responsibility inside it. This asks a narrower question about the rows it already found.
  */
-async function endsOfEdges(spaceId: string, entityId: string, ids: readonly string[]): Promise<Map<string, 'from' | 'to' | 'both'>> {
+async function endsOfEdges(spaceId: string, entityId: string, targetKind: RefKind, ids: readonly string[]): Promise<Map<string, 'from' | 'to' | 'both'>> {
   if (ids.length === 0) return new Map();
-  const docs = await readStoredById<{ _id: string; from?: string; to?: string }>(
-    spaceCollection(spaceId, 'edges'), ids, { from: 1, to: 1 });
+  const docs = await readStoredById<{ _id: string; from?: string; to?: string; fromKind?: RefKind; toKind?: RefKind }>(
+    spaceCollection(spaceId, 'edges'), ids, { from: 1, to: 1, fromKind: 1, toKind: 1 });
   const out = new Map<string, 'from' | 'to' | 'both'>();
   for (const d of docs.values()) {
-    const isFrom = d.from === entityId;
-    const isTo = d.to === entityId;
+    // By id AND kind, as the scan that found the rows did (`edge-ends-of-record.ts`): a fact holding this id is not an end of the entity.
+    const { from: isFrom, to: isTo } = endsOfRecord(d, entityId, targetKind);
     // A self-loop is one document with two matching ends. Reporting `from` alone would send the caller
     // looking for an edge whose other end is the same record.
     if (isFrom && isTo) out.set(String(d._id), 'both');
@@ -103,7 +104,7 @@ export async function entityDeleteBlockers(spaceId: string, entityId: string, ta
   const found = await findEntityReferences(spaceId, entityId, targetKind);
   if (found.length === 0) return null;
 
-  const ends = await endsOfEdges(spaceId, entityId,
+  const ends = await endsOfEdges(spaceId, entityId, targetKind,
     found.filter(b => b.type === 'edge').map(b => b._id));
   const backlinks: BacklinkEntry[] = found.map(b => {
     const end = b.type === 'edge' ? ends.get(b._id) : undefined;

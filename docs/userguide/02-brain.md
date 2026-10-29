@@ -132,7 +132,8 @@ so a rule added later must never leave you stuck with two copies of something. F
 afterwards, or widen the rule on the space's Schema tab.
 
 **A merge happens whole or not at all — and a very large one is refused before it starts.** Everything that
-pointed at the absorbed record moves in one step. If that record has more than **2500** links, relationships and
+pointed at the absorbed record moves in one step; a relationship to a *different* record that merely has the same
+id (a fact or an event can) is left where it is. If that record has more than **2500** links, relationships and
 face labels between them, the merge is refused with *merge_too_large*, and nothing changes: a step that size
 would pause syncing of the whole space while it ran. The message names both records and how many of each kind
 the absorbed one has, and says what would fit: delete at least as many of its relationships or links as it is

@@ -32,6 +32,7 @@ import { writeInOneCommands } from '../db/one-command.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { edgeIdFor } from './edge-id.js';
 import { edgeEndpointKind } from './entity-refs.js';
+import { edgeEndsAt, endIsRecord, endsOfRecord, relinkedEnds } from './edge-ends-of-record.js';
 import { linkIdFor } from './links.js';
 import { rekeyEdges, embedQueueWorkFor, type EdgeRekey } from './edge-rekey.js';
 import { enqueueWriteEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from './embed-queue.js';
@@ -49,10 +50,11 @@ export type RelinkKind = Extract<RefKind, 'entity' | 'fact' | 'chrono'>;
 /**
  * The edges of a record, either end, FORK ROWS INCLUDED. ONE definition for what a record's removal must deal with: the fork resolve, and the entity delete's
  * guard and cascade (a fork edge ending at the record is a reference to it). A reader that means "the relationships of this record" asks
- * {@link relationshipEdgesOfRecord} instead.
+ * {@link relationshipEdgesOfRecord} instead. An end is matched by id AND kind (`edge-ends-of-record.ts`): an edge of a fact that holds the record's id
+ * is not an edge of the record (Q-321).
  */
-export function edgesOfRecord(spaceId: string, id: string) {
-  return asFilter<EdgeDoc>({ spaceId, $or: [{ from: id }, { to: id }] });
+export function edgesOfRecord(spaceId: string, id: string, kind: RelinkKind) {
+  return asFilter<EdgeDoc>({ spaceId, ...edgeEndsAt(id, kind) });
 }
 
 /**
@@ -60,8 +62,8 @@ export function edgesOfRecord(spaceId: string, id: string) {
  * relink read: a fork edge is not a second relationship of the record, so it is no duplicate, no endpoint-rule break and no contradiction of its subject (Q-624,
  * design rev 4 section 6). The clause is inside, so no detection can drop it.
  */
-export function relationshipEdgesOfRecord(spaceId: string, id: string) {
-  return asFilter<EdgeDoc>({ spaceId, $or: [{ from: id }, { to: id }], ...CHOSEN_VERSION_ROWS });
+export function relationshipEdgesOfRecord(spaceId: string, id: string, kind: RelinkKind) {
+  return asFilter<EdgeDoc>({ spaceId, ...edgeEndsAt(id, kind), ...CHOSEN_VERSION_ROWS });
 }
 
 /**
@@ -90,12 +92,13 @@ async function storedEdgeIdentities(
   edgeColl: ReturnType<typeof col<EdgeDoc>>, spaceId: string,
   relinked: ReadonlyArray<{ edge: EdgeDoc; from: string; to: string }>, session: ClientSession,
 ): Promise<Set<string>> {
-  const kindIs = (k: string | undefined): unknown => (edgeEndpointKind(k as RefKind | undefined) === 'entity' ? { $in: [null, 'entity'] } : k);
   // The dedupe the collision rule rests on: one key per identity, however many stored edges hold it.
   const keys: Set<string> = new Set();
   for (let i = 0; i < relinked.length; i += IDENTITIES_PER_READ) {
     const tuples = relinked.slice(i, i + IDENTITIES_PER_READ).map(r => ({
-      from: r.from, to: r.to, label: r.edge.label, fromKind: kindIs(r.edge.fromKind), toKind: kindIs(r.edge.toKind),
+      label: r.edge.label,
+      ...endIsRecord('from', r.from, edgeEndpointKind(r.edge.fromKind)),
+      ...endIsRecord('to', r.to, edgeEndpointKind(r.edge.toKind)),
     }));
     const found = await edgeColl
       .find(asFilter<EdgeDoc>({ spaceId, $or: tuples, ...CHOSEN_VERSION_ROWS }),
@@ -118,21 +121,17 @@ export interface EdgeRelink {
  * the fork resolve moves those too, see `rekeyEdges`).
  */
 export async function relinkEdgesOfRecord(
-  spaceId: string, { absorbedId, survivorId, moveForeign = false }: { absorbedId: string; survivorId: string; moveForeign?: boolean },
+  spaceId: string, { absorbedId, survivorId, kind, moveForeign = false }: { absorbedId: string; survivorId: string; kind: RelinkKind; moveForeign?: boolean },
   { now, session }: { now: string; session: ClientSession },
 ): Promise<EdgeRelink> {
   const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
   // WITH their vectors: a re-key carries the stored document across, embedding included (`rekeyEdges`). The ids first, then the documents by id in
   // chunks: inside the transaction a read must come back in one batch (`db/write-bound.ts`), and a hub's edges with their vectors are far more than one batch holds.
   const ids = (await edgeColl
-    .find(relationshipEdgesOfRecord(spaceId, absorbedId), { session, projection: { _id: 1 } })
+    .find(relationshipEdgesOfRecord(spaceId, absorbedId, kind), { session, projection: { _id: 1 } })
     .toArray() as Array<Pick<EdgeDoc, '_id'>>).map(e => e._id);
   const edges = [...(await readStoredById<EdgeDoc>(spaceCollection(spaceId, 'edges'), ids, 'carried', { session })).values()];
-  const relinked = edges.map(edge => ({
-    edge,
-    from: edge.from === absorbedId ? survivorId : edge.from,
-    to: edge.to === absorbedId ? survivorId : edge.to,
-  }));
+  const relinked = edges.map(edge => ({ edge, ...relinkedEnds(edge, absorbedId, survivorId, kind) }));
 
   /*
    * Collisions are found by IDENTITY, keyed through `edgeIdFor` because it length-prefixes each part (a joined string collides two relationships the
@@ -174,9 +173,9 @@ export async function relinkEdgesOfRecord(
     const versions = await versionsFor(spaceId, inPlace.map(r => r.edge._id), { parts: ['edges'], session });
     await withLandingStamp(spaceId, versions.map(v => localRow(v.version)), (patches) => writeInOneCommands(inPlace.map((r, i) => {
       const updates: Record<string, unknown> = { updatedAt: now, ...patches[i]! };
-      if (r.edge.from === absorbedId) updates['from'] = survivorId;
-      if (r.edge.to === absorbedId) updates['to'] = survivorId;
-      return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: UNSET_GUARD } } };
+      // The ends the relink moved (`relinkedEnds`), by kind as well as id: `r.from`/`r.to` already hold them.
+      updates['from'] = r.from;
+      updates['to'] = r.to;      return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: UNSET_GUARD } } };
     }), (slice, { ordered }) => edgeColl.bulkWrite(asBulk<EdgeDoc>(slice), { ordered, session }), { ordered: true }), 'relink.edge');
   }
 
@@ -186,23 +185,26 @@ export async function relinkEdgesOfRecord(
    * not a relationship of the record), and they are never edited in place: `remintForks` inserts each under an id that derives from its new subject,
    * version and body, and removes the old id behind a tombstone, in this transaction. Past the fork cap it throws, and the transaction writes nothing.
    */
-  const forkEdges = await edgeColl.find(asFilter<EdgeDoc>({ spaceId, $or: [{ from: absorbedId }, { to: absorbedId }], forkOf: { $exists: true } }),
-    { session, projection: { _id: 1, forkOf: 1, from: 1, to: 1, label: 1 } }).toArray() as unknown as Array<Pick<EdgeDoc, '_id' | 'from' | 'to' | 'label'> & { forkOf: string }>;
+  const forkEdges = await edgeColl.find(asFilter<EdgeDoc>({ spaceId, ...edgeEndsAt(absorbedId, kind), forkOf: { $exists: true } }),
+    { session, projection: { _id: 1, forkOf: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 } }).toArray() as unknown as Array<Pick<EdgeDoc, '_id' | 'from' | 'to' | 'label' | 'fromKind' | 'toKind'> & { forkOf: string }>;
   if (forkEdges.length > 0) {
     const becameOf = new Map<string, string>();
     toRelink.forEach((r, i) => becameOf.set(r.edge._id, moved[i]?.edge._id ?? r.edge._id));
     for (const d of duplicates) {
-      const from = d.from === absorbedId ? survivorId : d.from;
-      const to = d.to === absorbedId ? survivorId : d.to;
-      const holder = await edgeColl.findOne(asFilter<EdgeDoc>({ spaceId, from, to, label: d.label, ...CHOSEN_VERSION_ROWS }), { session, projection: { _id: 1 } });
+      // The holder is the stored edge of the SAME identity: the relinked ends, and the kinds the duplicate carries (a holder of another end kind is no holder).
+      const ends = relinkedEnds(d, absorbedId, survivorId, kind);
+      const holder = await edgeColl.findOne(asFilter<EdgeDoc>({
+        spaceId, label: d.label, ...endIsRecord('from', ends.from, edgeEndpointKind(d.fromKind)), ...endIsRecord('to', ends.to, edgeEndpointKind(d.toKind)), ...CHOSEN_VERSION_ROWS,
+      }), { session, projection: { _id: 1 } });
       if (holder) becameOf.set(d._id, holder._id);
     }
     const repoints = new Map<string, ForkRepoint>();
     for (const f of forkEdges) {
       if (repoints.has(f.forkOf)) continue;
+      const ends = endsOfRecord(f, absorbedId, kind);
       repoints.set(f.forkOf, {
         oldSubject: f.forkOf, newSubject: becameOf.get(f.forkOf) ?? f.forkOf,
-        patch: { ...(f.from === absorbedId ? { from: survivorId } : {}), ...(f.to === absorbedId ? { to: survivorId } : {}) },
+        patch: { ...(ends.from ? { from: survivorId } : {}), ...(ends.to ? { to: survivorId } : {}) },
       });
     }
     await remintForks(spaceId, 'edge', [...repoints.values()], { session, now });
@@ -225,8 +227,7 @@ export async function relinkLinksOfRecord(
   const affected = await linkColl.find(linksOfRecord(spaceId, absorbedId, kind), { session }).toArray() as LinkDoc[];
   if (affected.length === 0) return;
   const moves = affected.map(link => {
-    const from = link.from === absorbedId ? survivorId : link.from;
-    const to = link.to === absorbedId ? survivorId : link.to;
+    const { from, to } = relinkedEnds(link, absorbedId, survivorId, kind);
     return { link, from, to, newId: linkIdFor(from, link.fromKind, to, link.toKind) };
   });
   const held = await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'links'), moves.map(m => m.newId), { _id: 1 }, { session });

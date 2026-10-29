@@ -25,6 +25,7 @@ import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
 import type { EdgeRekey } from './edge-rekey.js';
 import { relinkEdgesOfRecord, relinkLinksOfRecord, settleRekeyedEmbeds, edgesOfRecord, relationshipEdgesOfRecord, linksOfRecord } from './relink-references.js';
+import { endsOfRecord, relinkedEnds } from './edge-ends-of-record.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
@@ -295,7 +296,7 @@ async function detectEndpointRuleBreaks(
   const edgeColl = col<EdgeDoc>(spaceCollection(spaceId, 'edges'));
   // The relationships of the absorbed record, never a fork edge of one: a fork is an unchosen version and breaks no endpoint rule of its own (Q-624).
   const moving = await edgeColl
-    .find(relationshipEdgesOfRecord(spaceId, absorbedId), { projection: PLAN_EDGE_PROJECTION })
+    .find(relationshipEdgesOfRecord(spaceId, absorbedId, 'entity'), { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
   if (moving.length === 0) return [];
 
@@ -307,19 +308,16 @@ async function detectEndpointRuleBreaks(
    * Counted over the survivor's own edges plus the moving ones, with the relink applied to both ends.
    */
   const survivorEdges = await edgeColl
-    .find(relationshipEdgesOfRecord(spaceId, survivor._id), { projection: PLAN_EDGE_PROJECTION })
+    .find(relationshipEdgesOfRecord(spaceId, survivor._id, 'entity'), { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
-  const afterFrom = (e: EdgeDoc) => (e.from === absorbedId ? survivor._id : e.from);
-  const afterTo = (e: EdgeDoc) => (e.to === absorbedId ? survivor._id : e.to);
   // The edge as it will be AFTER the relink, counted by identity (`SubjectEdges`, `functional-subject.ts`): two rows that
   // relink onto the same (from, to, label) are one edge afterwards, which is what `duplicateEdgeWarnings` is separately about.
-  const afterRelink = (e: EdgeDoc) => ({ from: afterFrom(e), to: afterTo(e), label: e.label, fromKind: e.fromKind, toKind: e.toKind });
+  const afterRelink = (e: EdgeDoc) => ({ ...relinkedEnds(e, absorbedId, survivor._id, 'entity'), label: e.label, fromKind: e.fromKind, toKind: e.toKind });
   const subjectEdges = new SubjectEdges([...survivorEdges, ...moving].map(afterRelink));
 
   const out: EndpointRuleWarning[] = [];
   for (const e of moving) {
-    const isFrom = e.from === absorbedId;
-    const isTo = e.to === absorbedId;
+    const { from: isFrom, to: isTo } = endsOfRecord(e, absorbedId, 'entity');
     const end: 'from' | 'to' | 'both' = isFrom && isTo ? 'both' : isFrom ? 'from' : 'to';
 
     /*
@@ -352,12 +350,12 @@ async function detectDuplicateEdges(
 
   // All relationships currently referencing the absorbed entity (a fork edge is not one: it is no duplicate of its subject, Q-624)
   const absorbedEdges = await edgeColl
-    .find(relationshipEdgesOfRecord(spaceId, absorbedId), { projection: PLAN_EDGE_PROJECTION })
+    .find(relationshipEdgesOfRecord(spaceId, absorbedId, 'entity'), { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
 
   // All relationships currently referencing the survivor entity
   const survivorEdges = await edgeColl
-    .find(relationshipEdgesOfRecord(spaceId, survivorId), { projection: PLAN_EDGE_PROJECTION })
+    .find(relationshipEdgesOfRecord(spaceId, survivorId, 'entity'), { projection: PLAN_EDGE_PROJECTION })
     .toArray() as EdgeDoc[];
 
   const warnings: DuplicateEdgeWarning[] = [];
@@ -372,8 +370,7 @@ async function detectDuplicateEdges(
 
   // For each absorbed edge, compute what its triplet would be after relinking
   for (const e of absorbedEdges) {
-    const newFrom = e.from === absorbedId ? survivorId : e.from;
-    const newTo = e.to === absorbedId ? survivorId : e.to;
+    const { from: newFrom, to: newTo } = relinkedEnds(e, absorbedId, survivorId, 'entity');
     // Relinking substitutes one ENTITY id for another, so the kinds are unchanged by it and travel with the
     // edge. Dropping them would report two edges that differ only in endpoint kind as duplicates of each other.
     const key = edgeIdFor(newFrom, newTo, e.label, e.fromKind, e.toKind);
@@ -641,7 +638,7 @@ export interface MergeRefusal {
  */
 function relinkFilters(spaceId: string, absorbedId: string) {
   return {
-    edges: edgesOfRecord(spaceId, absorbedId),
+    edges: edgesOfRecord(spaceId, absorbedId, 'entity'),
     links: linksOfRecord(spaceId, absorbedId, 'entity'),
     faces: asFilter<FileMetaDoc>({ spaceId, faceEntityId: absorbedId }),
   };
@@ -832,7 +829,7 @@ async function relinkAndAbsorb(
   // ── 1. Relink edges ──────────────────────────────────────────────────
   // The one relink (`brain/relink-references.ts`, shared with Review's fork resolve): duplicates deleted with their tombstones, the rest re-keyed, or
   // written in place where a peer authored the edge. Its collision reads are bounded by `MERGE_MAX_RELINKS`, the bound the merge was refused at.
-  const { rekeyed, deletedDuplicateEdgeIds } = await relinkEdgesOfRecord(spaceId, { absorbedId: absorbed._id, survivorId: survivor._id }, { now, session });
+  const { rekeyed, deletedDuplicateEdgeIds } = await relinkEdgesOfRecord(spaceId, { absorbedId: absorbed._id, survivorId: survivor._id, kind: 'entity' }, { now, session });
 
   /*
    * ── 2. Relink FILE metadata: the face labels ──────────────────────────

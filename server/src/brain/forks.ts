@@ -313,7 +313,7 @@ export async function remintForks(
     const follow = [...out.reminted, ...[...holders].map(([from, to]) => ({ from, to: newIdOf.get(to) ?? to }))];
     const relink = await relinkModule();
     for (const { from, to } of follow) {
-      const edges = await relink.relinkEdgesOfRecord(spaceId, { absorbedId: from, survivorId: to }, { now, session });
+      const edges = await relink.relinkEdgesOfRecord(spaceId, { absorbedId: from, survivorId: to, kind }, { now, session });
       out.rekeyed.push(...edges.rekeyed);
       out.deletedDuplicateEdgeIds.push(...edges.deletedDuplicateEdgeIds);
       await relink.relinkLinksOfRecord(spaceId, { absorbedId: from, survivorId: to, kind }, { now, session });
@@ -509,10 +509,11 @@ async function referencesTo(spaceId: string, kind: ForkKind, ids: readonly strin
   const wanted = new Set(ids);
   const ends = await col<{ from: string; to: string }>(spaceCollection(spaceId, 'edges')).aggregate<{ _id: string; n: number }>([
     { $match: { $or: [{ from: { $in: [...ids] } }, { to: { $in: [...ids] } }] } },
-    { $project: { ends: { $setUnion: [['$from'], ['$to']] } } },
+    // An end is an id AND a kind (`edge-ends-of-record.ts`; an absent kind is an entity): an edge of a fact holding a fork entity's id does not reference it.
+    { $project: { ends: { $setUnion: [[{ id: '$from', kind: { $ifNull: ['$fromKind', 'entity'] } }], [{ id: '$to', kind: { $ifNull: ['$toKind', 'entity'] } }]] } } },
     { $unwind: '$ends' },
-    { $match: { ends: { $in: [...ids] } } },
-    { $group: { _id: '$ends', n: { $sum: 1 } } },
+    { $match: { 'ends.id': { $in: [...ids] }, 'ends.kind': kind } },
+    { $group: { _id: '$ends.id', n: { $sum: 1 } } },
   ], { maxTimeMS: listReadMaxMs(false) }).toArray();
   for (const e of ends) if (wanted.has(e._id)) out.get(e._id)!.edgeCount = e.n;
   const [pointing, starting] = await Promise.all([linksPointingAt(spaceId, ids), linksStartingFrom(spaceId, ids)]);
@@ -778,7 +779,7 @@ export async function resolveFork(spaceId: string, raw: Readonly<Record<string, 
       const deletedDuplicateEdgeIds: string[] = [];
       if (kind !== 'edge') {
         for (const g of gone) {
-          const edges = await relink.relinkEdgesOfRecord(spaceId, { absorbedId: g._id, survivorId: parentId, moveForeign: true }, { now, session });
+          const edges = await relink.relinkEdgesOfRecord(spaceId, { absorbedId: g._id, survivorId: parentId, kind, moveForeign: true }, { now, session });
           rekeyed.push(...edges.rekeyed);
           deletedDuplicateEdgeIds.push(...edges.deletedDuplicateEdgeIds);
           await relink.relinkLinksOfRecord(spaceId, { absorbedId: g._id, survivorId: parentId, kind }, { now, session });
