@@ -116,6 +116,7 @@ import { countFileArrival } from '../files/bytes-arrived.js';
 import { isComparableIso } from '../util/comparable-iso.js';
 import { admitSpaceWriteUnit, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 import { RequestRefusal } from '../util/errors.js';
+import { adoptLegacyRow, forgetLegacyIndex } from '../files/legacy-file-keys.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -409,6 +410,8 @@ export async function writeArrivals(
 ): Promise<ArrivalOutcome> {
   if (!(BRAIN_COLLECTIONS as readonly string[]).includes(family)) throw new Error(`writeArrivals: '${family}' is not a record family`);
   const restore = opts.restore === true;
+  // A restore does not refuse an id that is not its path's key, so it can bring legacy ids back: what was learned of the space's legacy ids is forgotten (Q-413).
+  if (restore && family === 'files') forgetLegacyIndex(spaceId);
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const queued: Doc[] = [];
   const out: ArrivalOutcome = {
@@ -467,6 +470,8 @@ export async function writeArrivals(
   // A file's metadata a held tombstone covers is not written (Q-229): by VERSION, so a newer one passes. A restore is the
   // operator's own instruction and is never judged by one. Asked of the one predicate every arrival of a file asks.
   if (family === 'files' && !restore && toWrite.length > 0) {
+    // A row this instance holds under a spelling bundle-71 no longer writes is put at the key the arrival names before anything is compared with it (Q-413).
+    for (const d of toWrite) await adoptLegacyRow(spaceId, d._id);
     const { shadowed, undecided, cause } = await decideArrivals(spaceId, toWrite.map(d => ({ id: d._id, path: d._id, kind: 'meta' as const, seq: d.seq ?? 0,
       author: (d.author as { instanceId?: string } | undefined)?.instanceId, deliveredBy: opts.deliveredBy })));
     if (shadowed.size > 0) out.tombstoned.push(...shadowed);

@@ -94,6 +94,7 @@ import { log, peerList, peerText } from '../util/log.js';
 import { removeSidecarsAMoveCouldNotPlace } from './converters/pipeline.js';
 import { carryPathKeyedCache, forgetPathKeyedCache } from './path-keyed-cache.js';
 import { requeueEmbedWorkOfMovedRows } from './file-embed-work.js';
+import { adoptLegacyRowsUnder } from './legacy-file-keys.js';
 
 const why = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -405,6 +406,9 @@ export async function moveFileCascade(spaceId: string, src: string, dst: string,
   // must not leave a tombstone behind it.
   await resolveSafePathChecked(spaceId, src);
   await resolveSafePathChecked(spaceId, dst);
+  // The records at either end stored under a spelling bundle-71 no longer writes are put at their keys first, so the plan reads them (Q-413).
+  await adoptLegacyRowsUnder(spaceId, src);
+  await adoptLegacyRowsUnder(spaceId, dst);
   await runMoveOnce(spaceId, src, dst, async () => {
     if (!(await bytesPresentAt(spaceId, src))) {
       await finishOrRefuse(spaceId, src, dst);

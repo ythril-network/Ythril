@@ -242,6 +242,14 @@ Absence says nothing on its own: a document from an older sender lacks every key
 - **Which peers are sent it.** A push carries `authoredKeys` and an omitted `tags` only to a peer known to run 5.7.0 or later; one that reports no version, an unparseable one or an older one gets the shape every version accepts: no `authoredKeys`, and `tags: []` for a row with none. A v5.6.9 receiver refuses a document with a key it does not declare or without `tags`, discards it and still answers `200`. A peer that reports the newer version and refuses a page anyway (it was rolled back) is offered that page once more on the older wire, and is treated as older until its reported version changes. Each fallback to the older wire is warned once per peer per window. A pull has no such cut: a puller before this release strips the keys it does not declare and removes nothing.
 - **So a removal reaches a peer only when both ends run this release**, and one made while a peer ran an older version reaches it on the file's next edit after it upgrades.
 
+### A row stored under a spelling that is not its key (before bundle-71)
+
+A file row whose `_id` is not the key of its path is refused by `fileKeyRefusal`, so a row an older release stored that way was never accepted
+by an upgraded peer. The sender puts such a row at its key itself, lazily: the first door that needs the file's row, and the sync cycle's read of
+every top-level row (never boot). The re-key **keeps the version** (`seq`, author, creation time, metadata) and **takes a new landing position**,
+which is what makes the row served; it writes no tombstone and deletes nothing on any other instance. A row already at the key keeps the higher
+version (the one at the key on a tie), and a row a held tombstone shadows is removed locally. See [Upgrading](integration-guide/02b-upgrading.md).
+
 ### `lastPosReceived` update
 
 After all seven transfers are pulled, `lastPosReceived[spaceId]` is advanced to the **minimum** of the positions they are complete through ([watermarks](#watermarks)) and written to config. On the next cycle it is passed as `afterPos`, so the peer returns only what landed after that point.

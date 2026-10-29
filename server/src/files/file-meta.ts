@@ -13,6 +13,7 @@
  */
 
 import { toDocId } from '../util/paths.js';
+import { adoptLegacyRow, adoptLegacyRowsUnder } from './legacy-file-keys.js';
 import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
@@ -68,6 +69,35 @@ import { isLocalFileField, stripDerivedStages } from './derived-fields.js';
 // drift from `updateFileMeta`'s.
 
 /**
+ * THE one door from a caller's path to a file row id: the path's key (`toDocId`), with the row stored under a spelling bundle-71 no longer writes
+ * put at that key first (`files/legacy-file-keys.ts`, Q-413: what it prevents, and why it is lazy). Every function below that turns a caller's path into a
+ * row id asks it, and `toDocId` is spelled nowhere else in this file but {@link fileDirPrefixFor}: a lookup that built the key itself would be the
+ * one that never finds the old row (`every-file-row-id-comes-through-one-door.test.js`).
+ */
+export async function fileRowIdFor(spaceId: string, filePath: string): Promise<string> {
+  const key = toDocId(filePath);
+  await adoptLegacyRow(spaceId, key);
+  return key;
+}
+
+/** {@link fileRowIdFor} for one path or many, each id once. */
+async function fileRowIdsFor(spaceId: string, filePaths: string | readonly string[]): Promise<string[]> {
+  const ids = new Set<string>();
+  for (const p of typeof filePaths === 'string' ? [filePaths] : filePaths) ids.add(await fileRowIdFor(spaceId, p));
+  return [...ids];
+}
+
+/**
+ * {@link fileRowIdFor} for a directory: its key with no trailing slash (empty for the space's root, which callers refuse), after every legacy row at
+ * or under it has been put at its key — the prefix form every `...ByPrefix` / `...Under` function uses, so a regular expression over ids finds them.
+ */
+export async function fileDirPrefixFor(spaceId: string, dirPath: string): Promise<string> {
+  const norm = toDocId(dirPath).replace(/\/?$/, '');
+  if (norm) await adoptLegacyRowsUnder(spaceId, norm);
+  return norm;
+}
+
+/**
  * Create or update the metadata record for a file after a write.
  * On first write `createdAt` is set; subsequent writes update `updatedAt` and
  * `sizeBytes`.  `description`, `tags`, and `properties` are only updated when supplied.
@@ -80,7 +110,7 @@ export async function upsertFileMeta(
 ): Promise<void> {
   // Refused before anything is read; the store write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'files');
-  const normalised = toDocId(filePath);
+  const normalised = await fileRowIdFor(spaceId, filePath);
   const now = new Date().toISOString();
 
   const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
@@ -174,6 +204,7 @@ export async function recordArrivedFile(
 ): Promise<void> {
   assertSpaceTakesWrites(spaceId, 'files');
   const { key: normalised } = await peerFileKey(spaceId, filePath);
+  await adoptLegacyRow(spaceId, normalised);
   const now = new Date().toISOString();
   // A record NEW here takes this instance's file retention window, as an upload does; one already stored keeps its
   // expiry, because arriving bytes are not an authored write and must not re-slide it.
@@ -232,7 +263,7 @@ export async function getFileMeta(spaceId: string, filePath: string): Promise<Fi
   return await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
     // A deleted file's audit record is not a file record: every door that reads one through here — the inspect route,
     // the audit before-snapshot, the extract route's parent — must answer "not found", as it does for a hard delete.
-    .findOne(asFilter<FileMetaDoc>({ _id: toDocId(filePath), ...NOT_A_FLAGGED_ROW }), { projection: NEVER_RETURNED_PROJECTION }) as FileMetaDoc | null;
+    .findOne(asFilter<FileMetaDoc>({ _id: await fileRowIdFor(spaceId, filePath), ...NOT_A_FLAGGED_ROW }), { projection: NEVER_RETURNED_PROJECTION }) as FileMetaDoc | null;
 }
 
 /**
@@ -291,7 +322,7 @@ export async function updateFileMeta(
     ...(opts.linkChronos !== undefined ? { chrono: opts.linkChronos } : {}),
   });
 
-  const normalised = toDocId(filePath);
+  const normalised = await fileRowIdFor(spaceId, filePath);
   // The flag is read HERE, where the edit is decided, so every write below it is governed by one read: a flagged row
   // returns null and the doors answer 404. Editing one would write a description, tags and properties onto an audit
   // record, re-queue the embed job the strip removed, and reconcile links off a file that is gone.
@@ -474,7 +505,7 @@ export async function deleteFileMeta(
   spaceId: string,
   filePaths: string | readonly string[],
 ): Promise<void> {
-  const ids = [...new Set((typeof filePaths === 'string' ? [filePaths] : filePaths).map(toDocId))];
+  const ids = await fileRowIdsFor(spaceId, filePaths);
   if (ids.length === 0) return;
   await admitSpaceWrite(spaceId, 'files', async () => {
     const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
@@ -494,7 +525,7 @@ export async function deleteFileMetaByPrefix(
   dirPath: string,
   { onRetired }: RetireUnderOptions = {},
 ): Promise<void> {
-  const norm = toDocId(dirPath).replace(/\/?$/, '');
+  const norm = await fileDirPrefixFor(spaceId, dirPath);
   if (!norm) return; // guard: empty path would match everything
   // Escape regex special characters in the prefix so a path like "my.dir/"
   // doesn't accidentally match "myXdir/" etc.
@@ -546,7 +577,7 @@ async function retireLiveRowsInPages(
  * remove it last.
  */
 export async function fileRecordPaths(spaceId: string, path: string): Promise<string[]> {
-  const filter = liveFileRecords(path, 'at-or-under');
+  const filter = await liveFileRecords(spaceId, path, 'at-or-under');
   if (!filter) return [];
   // `LIVE_FILE_ROW` here as well as in `liveFileRecords`: the predicate belongs to the READ, so a caller handing this
   // function another filter cannot make it answer about a chunk or an audit row.
@@ -561,7 +592,7 @@ export async function fileRecordPaths(spaceId: string, path: string): Promise<st
  * record id under a folder to answer one bit.
  */
 export async function hasLiveFileRecordAt(spaceId: string, path: string): Promise<boolean> {
-  return anyLiveFileRecord(spaceId, liveFileRecords(path, 'at-or-under'));
+  return anyLiveFileRecord(spaceId, await liveFileRecords(spaceId, path, 'at-or-under'));
 }
 
 /**
@@ -572,12 +603,12 @@ export async function hasLiveFileRecordAt(spaceId: string, path: string): Promis
  * {@link hasLiveFileRecordAt} is at-or-under and answers a move's question, not this one.
  */
 export async function hasLiveFileRecordExactlyAt(spaceId: string, path: string): Promise<boolean> {
-  return anyLiveFileRecord(spaceId, liveFileRecords(path, 'exactly-at'));
+  return anyLiveFileRecord(spaceId, await liveFileRecords(spaceId, path, 'exactly-at'));
 }
 
 /** Whether any live file record is strictly under `dir/` — what a directory delete a store failure stopped still owes. */
 export async function hasLiveFileRecordUnder(spaceId: string, dir: string): Promise<boolean> {
-  return anyLiveFileRecord(spaceId, liveFileRecords(dir, 'under'));
+  return anyLiveFileRecord(spaceId, await liveFileRecords(spaceId, dir, 'under'));
 }
 
 async function anyLiveFileRecord(spaceId: string, filter: Filter<FileMetaDoc> | null): Promise<boolean> {
@@ -593,8 +624,9 @@ async function anyLiveFileRecord(spaceId: string, filter: Filter<FileMetaDoc> | 
  * `'at-or-under'` is both. Never a derived record, never a soft-deleted one. `null` for an empty path, which would
  * match everything.
  */
-function liveFileRecords(path: string, scope: 'under' | 'exactly-at' | 'at-or-under'): Filter<FileMetaDoc> | null {
-  const norm = toDocId(path).replace(/\/?$/, '');
+async function liveFileRecords(spaceId: string, path: string, scope: 'under' | 'exactly-at' | 'at-or-under'): Promise<Filter<FileMetaDoc> | null> {
+  // A row stored under a legacy spelling is put at its key before the key is looked up (`fileRowIdFor`, `fileDirPrefixFor`).
+  const norm = scope === 'exactly-at' ? (await fileRowIdFor(spaceId, path)).replace(/\/?$/, '') : await fileDirPrefixFor(spaceId, path);
   if (!norm) return null;
   const under = { _id: { $regex: '^' + escapeRegex(norm + '/') } };
   const reach = scope === 'under' ? under : scope === 'exactly-at' ? { _id: norm } : { $or: [{ _id: norm }, under] };
@@ -618,7 +650,7 @@ export async function markFileMetaDeleted(
   spaceId: string,
   filePaths: string | readonly string[],
 ): Promise<void> {
-  const ids = [...new Set((typeof filePaths === 'string' ? [filePaths] : filePaths).map(toDocId))];
+  const ids = await fileRowIdsFor(spaceId, filePaths);
   if (ids.length === 0) return;
   await admitSpaceWrite(spaceId, 'files', async () => {
     const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
@@ -697,7 +729,7 @@ export async function markFileMetaDeletedByPrefix(
   dirPath: string,
   { onRetired }: RetireUnderOptions = {},
 ): Promise<void> {
-  const norm = toDocId(dirPath).replace(/\/?$/, '');
+  const norm = await fileDirPrefixFor(spaceId, dirPath);
   if (!norm) return; // guard: empty path would match everything
   const escaped = escapeRegex(norm + '/');
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));

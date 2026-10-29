@@ -21,6 +21,17 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 
 **Breaking changes**, when they occur, will be listed in `CHANGELOG.md` with migration steps.
 
+**File rows stored before bundle-71 under another spelling of their path.** Until bundle-71 a file row's id was the caller's text as it came:
+no Unicode normalisation, no collapse of `//`, `.` and `..`. A file a macOS peer delivered under a decomposed name, or one uploaded as `a//b`
+or `./a`, was stored under that id. Since then the id is the path's canonical key, so such a row was invisible to every door and an
+upgraded peer counted it in `filemeta.rejected` each time it was offered (a divergent leaf of the space hash meanwhile). **Nothing migrates at
+boot.** The first door that needs the file's row (a read, an edit, an upload, a delete, a move, a peer's metadata for it) puts it at its key,
+and a networked space converges on its first sync cycle, which reads every top-level row; an un-networked space converges file by file as they
+are touched. The row keeps its version, author, creation time and metadata and takes a new landing position, which is how it reaches peers. When
+a row already stands at the key the higher version wins (the one at the key on a tie), and a row a held delete shadows is removed here as an
+arrival it shadows would be. **No tombstone is written and nothing a peer holds is deleted.** A failure is logged once per window and the row
+stays where it was until the next touch.
+
 **Upgrading to 6.0 turns every proxy space into personal views. It is breaking, and a 5.x build cannot read the result.**
 A proxy was a space whose `proxyFor` listed other spaces, shared by everyone who could reach it. It is no longer a space:
 the same idea is now a **personal view**, a named list of spaces that one token reads through
