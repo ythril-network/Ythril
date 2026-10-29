@@ -24,7 +24,12 @@
  *  (e) a breaking edge that arrives again, as a newer version, records nothing the second time (the replaced copy had it);
  *  (f) an end that resolves to nothing is not checked: a dangling end records no `fromType` / `toType`;
  *  (g) an `off` space records nothing and stores the same arrival;
- *  (h) a `strict` space stores every one of them and never mints the write guard: the recorder refuses nothing.
+ *  (h) a `strict` space stores every one of them and never mints the write guard: the recorder refuses nothing;
+ *  (i) a FORK neither counts nor is counted for `functional` ("a fork is never another edge", decision P-6): an equal-seq divergent copy of an
+ *      edge of a subject that already breaks the rule adds no edge to it, and a fork row that arrives before an edge of its subject is not
+ *      another edge for it;
+ *  (j) an edge end that names an entity FORK row is left unresolved (not checked) and never stops the recording of the page: a property
+ *      violation of another edge of the page is still recorded, and the recorder reports no failure.
  *
  * ## What each door can say
  *
@@ -40,6 +45,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { arrivalHarness } from './_arrival-doors.mjs';
+import { forkIdOf } from './_fork-kinds.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -53,11 +59,15 @@ const metaOf = (validationMode) => ({
   suppressEmbeddings: true,
   typeSchemas: {
     entity: { person: {}, org: {} },
-    edge: { worksAt: { functional: true, endpoints: { from: ['person'], to: ['org'] } } },
+    edge: {
+      worksAt: { functional: true, endpoints: { from: ['person'], to: ['org'] } },
+      // A label with a property rule and neither endpoint nor functional rule: the violation that must still be recorded beside an edge whose end names a fork row.
+      rated: { propertySchemas: { score: { type: 'number' } } },
+    },
   },
 });
 
-const POOL = { strict: 3, warn: 10, off: 3 };
+const POOL = { strict: 3, warn: 12, off: 3 };
 const SHARED = 2;
 const names = (prefix, n) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
 const PULL_POOL = Object.fromEntries(MODES.map(m => [m, names(`aepull${m}`, POOL[m])]));
@@ -221,6 +231,48 @@ describe('an arriving edge is recorded against the endpoint and functional rules
         assert.deepEqual([...held.keys()].sort(), ['A', 'F1', 'F2'], 'a strict space refused an arriving edge: the recorder never refuses');
         assert.equal(held.get('F2')?._functionalGuard, undefined, 'an arrival minted the write guard: a second edge for a subject must be able to land');
         assertRecorded(name, d, obs, [['F2', ['functional']], ['A', ['fromType', 'toType']]]);
+      });
+
+      /** Everything a door said, as one text: the rows' fields where it has rows, else the log lines and the history row. */
+      const saidOf = (obs) => `${obs.rows.map(r => r.field).join(' ')}\n${obs.lines.join('\n')}\n${obs.history ?? ''}`;
+      const recorderFailures = (obs) => obs.lines.filter(l => /Recording what .* failed/.test(l));
+
+      it('(i1) a fork of an edge of a subject that already breaks `functional` adds no edge to it, so records nothing', async () => {
+        if (name === 'import') return;   // an import is a restore: it replaces, it never plans a fork
+        const space = await fresh('warn');
+        await seedEntities(space);
+        // The subject already holds two worksAt edges: a breach this arrival did not introduce.
+        await seedEdges(space, [worksAt(space, 'E1', 'p1', 'o1', 5), worksAt(space, 'E2', 'p1', 'o2', 6)]);
+        const obs = await d.arrive(space, [worksAt(space, 'E1', 'p1', 'o1', 5, { description: 'the other version' })]);
+        const forks = await door.coll(space, 'edges').countDocuments({ forkOf: 'E1' });
+        assert.equal(forks, 1, 'the divergent copy was not planned as a fork, so this case shows nothing');
+        assertRecorded(name, d, obs, []);
+      });
+
+      it('(i2) a fork row that arrives before an edge of its subject is not another edge for it: the later edge records nothing', async () => {
+        const space = await fresh('warn');
+        await seedEntities(space);
+        const row = worksAt(space, 'tmp', 'p1', 'o1', 5, { description: 'an unchosen version', forkOf: 'ghost-parent', forkAt: 5 });
+        const fork = { ...row, _id: await forkIdOf('edges', 'ghost-parent', 5, row) };
+        const obs = await d.arrive(space, [fork, worksAt(space, 'E2', 'p1', 'o2', 6)]);
+        assert.ok((await storedEdges(space)).has('E2'), 'the edge was not stored');
+        assertRecorded(name, d, obs, []);
+      });
+
+      it('(j) an end that names an entity fork row is left unresolved, and the page is still recorded', async () => {
+        const space = await fresh('warn');
+        await seedEntities(space);
+        // `pfork` is a person's unchosen version: reading it as an end is refused, and its type would break `to: [org]` if it were read.
+        await door.coll(space, 'entities').insertOne({ ...build.entity(space, 'pfork', 5, { type: 'person' }), forkOf: 'p1', forkAt: 1 });
+        const obs = await d.arrive(space, [
+          worksAt(space, 'A', 'p2', 'pfork', 10),
+          build.edge(space, 'B', 11, { from: 'o1', to: 'o2', label: 'rated', properties: { score: 'high' } }),
+        ]);
+        assert.deepEqual([...(await storedEdges(space)).keys()].sort(), ['A', 'B'], 'an arrival was not stored');
+        assert.deepEqual([...recordedBy(d, obs).fields], [], `a rule field was recorded for the end that names a fork row (${saidOf(obs)})`);
+        if (d.counted) assert.equal(obs.batchCount, 1, `the door counted other than the one document with the property violation (${saidOf(obs)})`);
+        assert.match(saidOf(obs), /properties\.score/, `the property violation of the second edge was not recorded (${saidOf(obs)})`);
+        assert.deepEqual(recorderFailures(obs), [], 'the recorder reported a failure for the page');
       });
     });
   }

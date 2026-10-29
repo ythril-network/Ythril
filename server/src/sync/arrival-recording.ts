@@ -109,11 +109,14 @@ const NOT_AN_EDGE = endsNotResolved('the family is not edges, so there are no en
  * what an arrival recorded under-reported for exactly those two rules (Q-443). Every version of one id shares one triplet, so they share
  * ends: asked once per id, in the page's order. A read that fails throws into {@link watchArrivals}' own catch: the recorder fails and the
  * write goes on (rule 5).
+ *
+ * A fork neither counts nor is counted for `functional`, and an end that names an entity fork row is unresolved rather than refused (the
+ * refusal is the local write's and would end the recording of the whole page): both are `resolveEdgeEndsOfPage`'s, asked with `'unresolved'`.
  */
 async function endsOfArrivals(spaceId: string, kind: KnowledgeType, docs: readonly Doc[]): Promise<(doc: Doc) => EdgeEnds> {
   if (kind !== 'edge') return () => NOT_AN_EDGE;
   const first = [...new Map(docs.map(d => [d._id, d] as const)).values()];
-  const resolved = await resolveEdgeEndsOfPage(spaceId, first);
+  const resolved = await resolveEdgeEndsOfPage(spaceId, first, 'unresolved');
   const byId = new Map(first.map((d, i) => [d._id, resolved[i]!] as const));
   return (doc) => byId.get(doc._id) ?? NOT_AN_EDGE;
 }

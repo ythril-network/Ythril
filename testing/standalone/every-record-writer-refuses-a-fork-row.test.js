@@ -170,7 +170,7 @@ describe('the claims the exemptions make are true', () => {
     // `stored` is a method of a class, which the call graph does not index by name: its body is read from the source, from its declaration
     // line to the closing brace at the same indent.
     const src = stripComments(readFileSync('server/src/brain/write-plan/read-set.ts', 'utf8'));
-    const at = src.search(/^ {2}stored\(kind: ReadKind, id: string\)[^\n]*\{\s*$/m);
+    const at = src.search(/^ {2}stored\(kind: ReadKind, id: string(?:, forkRow: ForkRows = 'refuse')?\)[^\n]*\{\s*$/m);
     assert.ok(at > -1, 'read-set.ts has no `stored(kind, id)` method: the door every planner reads a stored copy through moved or changed shape');
     const method = src.slice(at, src.indexOf('\n  }\n', at));
     assert.ok(/\brefuseForkEdit\b/.test(method), 'ReadSet.stored() does not refuse a fork row: a save_* or save_bulk by id onto a fork edits it in place');

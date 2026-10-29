@@ -16,7 +16,8 @@
  *    (`classifyEdgeUpsertAgainst` defaults the parameter to `{}`, so a caller that left it out would be a call with no ends the default hid);
  *  - `endsNotResolved('<reason>')`, whose reason is a string literal that is not blank: the site says why it has no ends where a reviewer reads it.
  *
- * Not accepted: no argument, `{}`, a variable initialised to `{}`, `undefined` / `null`.
+ * Not accepted: no argument, `{}`, a variable initialised to `{}`, `undefined` / `null` — and `{}` however it is dressed: `{} as Ends`, `({})`, or
+ * an arm of a choice (`c ? ends : {}`, `ends ?? {}`, `ends || {}`), on the argument or on the initializer of the variable it names.
  *
  * ## Where the subjects come from
  *
@@ -102,19 +103,38 @@ function edgeValidationSites(checker, sources, homes, nameOf) {
     return parts.every(p => p.isStringLiteral()) ? parts.map(p => p.value) : null;
   };
 
-  const isEmptyLiteral = (e) => ts.isObjectLiteralExpression(e) && e.properties.length === 0;
+  /** An expression without the wrappers that change its type and not its value: `x as T`, `(x)`, `x!`, `x satisfies T`. */
+  const unwrapped = (e) => {
+    while (ts.isAsExpression(e) || ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+    return e;
+  };
+
+  /**
+   * Is this expression an empty `{}` — as written, however wrapped, or as an ARM of a choice (`c ? ends : {}`, `ends ?? {}`, `ends || {}`)?
+   * An arm counts because the call then hands no ends whenever that arm is taken, and a gate that read only the whole expression would pass
+   * the one spelling that hides the empty object behind a condition.
+   */
+  const isEmptyLiteral = (expr) => {
+    const e = unwrapped(expr);
+    if (ts.isObjectLiteralExpression(e)) return e.properties.length === 0;
+    if (ts.isConditionalExpression(e)) return isEmptyLiteral(e.whenTrue) || isEmptyLiteral(e.whenFalse);
+    if (ts.isBinaryExpression(e) && [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(e.operatorToken.kind)) {
+      return isEmptyLiteral(e.left) || isEmptyLiteral(e.right);
+    }
+    return false;
+  };
 
   /** What is wrong with the ends argument of this call, or null. A forwarded parameter reports `{ forwarded }` to make its function a subject. */
   const verdictOf = (call, index) => {
     const arg = call.arguments[index];
     if (!arg) return { problem: `no ends argument (position ${index + 1})` };
-    const e = ts.isAsExpression(arg) || ts.isParenthesizedExpression(arg) ? arg.expression : arg;
-    if (isEmptyLiteral(e)) return { problem: 'the ends are an empty `{}`' };
+    const e = unwrapped(arg);
+    if (isEmptyLiteral(e)) return { problem: 'the ends are an empty `{}`, or an arm of a choice is' };
     if (e.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(e) && e.text === 'undefined')) return { problem: 'the ends are `undefined` / `null`' };
     if (ts.isIdentifier(e)) {
       const decl = checker.getSymbolAtLocation(e)?.valueDeclaration;
       if (decl && ts.isVariableDeclaration(decl) && decl.initializer && isEmptyLiteral(decl.initializer)) {
-        return { problem: `the ends are \`${e.text}\`, a variable initialised to \`{}\`` };
+        return { problem: `the ends are \`${e.text}\`, a variable initialised to \`{}\` (or to a choice with an empty arm)` };
       }
       if (decl && ts.isParameter(decl)) return { forwarded: decl };
     }
@@ -197,12 +217,16 @@ describe('the rule, on literal snippets', () => {
     `), []);
   });
 
-  it('refuses no argument, an empty literal, a variable initialised to {}, undefined, and an unexplained endsNotResolved', () => {
+  it('refuses no argument, an empty literal (however wrapped, or an arm of a choice), a variable initialised to one, undefined, and an unexplained endsNotResolved', () => {
     const cases = {
       'no argument': 'function f(m: object, r: object) { return validateEdge(m, r); }',
       'empty literal': 'function f(m: object, r: object) { return validateEdge(m, r, {}); }',
       'variable initialised to {}': 'function f(m: object, r: object) { const e = {}; return validateEdge(m, r, e); }',
       'undefined': 'function f(m: object, r: object) { return validateEdge(m, r, undefined); }',
+      'a variable initialised to {} with an `as` on the initializer': 'function f(m: object, r: object) { const e = {} as Ends; return validateEdge(m, r, e); }',
+      'a conditional with an empty-object arm': 'function f(m: object, r: object, c: boolean, ends: Ends) { return validateEdge(m, r, c ? ends : {}); }',
+      'a conditional with an empty-object arm, in a variable': 'function f(m: object, r: object, c: boolean, ends: Ends) { const e = c ? {} : ends; return validateEdge(m, r, e); }',
+      'a fallback to an empty object': 'function f(m: object, r: object, ends?: Ends) { return validateEdge(m, r, ends ?? {}); }',
       'a blank reason': 'function f(m: object, r: object) { return violationsOfRecord(m, \'edge\', r, endsNotResolved(\'  \')); }',
       'a reason that is not a literal': 'function f(m: object, r: object, why: string) { return violationsOfRecord(m, \'edge\', r, endsNotResolved(why)); }',
       'violationsOfRecord with no ends, for a kind that can be an edge': 'function f(m: object, r: object, k: Kind) { return violationsOfRecord(m, k, r); }',
