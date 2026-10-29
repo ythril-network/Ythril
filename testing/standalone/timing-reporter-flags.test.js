@@ -41,8 +41,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, statSync, re
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { timingReporterFlags } from '../_shared/timing-reporter-flags.mjs';
-import { readTimingLog, TIMING_RESULTS_FOLDER } from '../_shared/timing-reporter.mjs';
+import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
+import { readTimingLog, TIMING_RESULTS_FOLDER, TEST_RESULTS_DIR_ENV } from '../_shared/timing-reporter.mjs';
 import { splitStandalone, offlineRuns } from '../_shared/standalone-split.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { loadAllWorkflows, jobEntries, stepsOf, shellOf } from '../_shared/ci-workflow.mjs';
@@ -105,8 +105,20 @@ describe('timingReporterFlags: the flags', () => {
     const f = timingReporterFlags({ suite: 'standalone', batch: 'pure-3', dir, stdoutIsTTY: false });
     assert.equal(dirname(f.destination), resolve(dir));
     assert.equal(basename(f.destination), 'standalone-pure-3.jsonl');
-    const d = timingReporterFlags({ suite: 'standalone', batch: 1, stdoutIsTTY: false });
-    assert.equal(dirname(d.destination), resolve(ROOT, 'test-results'));
+    const saved = process.env[TEST_RESULTS_DIR_ENV];
+    try {
+      delete process.env[TEST_RESULTS_DIR_ENV];
+      const d = timingReporterFlags({ suite: 'standalone', batch: 1, stdoutIsTTY: false });
+      assert.equal(dirname(d.destination), resolve(ROOT, 'test-results'));
+      // The variable moves the default folder out of the checkout, for the writer and for the clearing of an earlier run's files alike.
+      process.env[TEST_RESULTS_DIR_ENV] = join(tmp, 'moved');
+      const m = timingReporterFlags({ suite: 'standalone', batch: 1, stdoutIsTTY: false });
+      assert.equal(dirname(m.destination), resolve(tmp, 'moved'));
+      writeFileSync(m.destination, 'x\n');
+      assert.equal(clearTimingResults('standalone'), 1, 'the clearing reads the folder the writer used');
+    } finally {
+      if (saved === undefined) delete process.env[TEST_RESULTS_DIR_ENV]; else process.env[TEST_RESULTS_DIR_ENV] = saved;
+    }
   });
 
   it('refuses a suite or batch that could leave the folder, or is not a name', () => {

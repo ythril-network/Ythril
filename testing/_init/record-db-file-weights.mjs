@@ -19,10 +19,10 @@
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DB_FILE_WEIGHTS_PATH, SLOW_SECONDS } from '../_shared/db-shard-plan.mjs';
-import { TIMING_RESULTS_DIR } from '../_shared/timing-reporter-flags.mjs';
+import { defaultTimingResultsDir } from '../_shared/timing-reporter-flags.mjs';
 import { readTimingResults } from '../../scripts/_shared/timing-results.mjs';
 
-const dir = resolve(process.argv[2] ?? TIMING_RESULTS_DIR);
+const dir = resolve(process.argv[2] ?? defaultTimingResultsDir());
 const per = new Map();
 // `readTimingResults` refuses a folder with no results, an incomplete file or no test event: the one reader of this folder.
 for (const row of readTimingResults(dir).lines) {

@@ -18,8 +18,8 @@ production build and its budgets, takes about five minutes against the full run'
 pass. Its first step, `scripts/unregistered-local-files.mjs`, fails when the checkout holds a file git does not track that no rule naming a
 place registers: a file `git status` lists as untracked, or one that only a catch-all ignore rule (`*.log`, `*.txt`, any `*.<ext>` or other
 pattern with a `*` and no `/` in `.gitignore`, and a stray `.DS_Store` or `Thumbs.db`) hides. It prints each path with the rule that hid it,
-and exits 1. Scratch (logs, stack dumps, test output, request payloads, throwaway scripts) goes under `tmp/`, which is gitignored and
-registered; a file you mean to keep local needs a `.gitignore` rule that names its path, as `config/config.json` has. Then run the suites your change reaches. A maintainer's bundle then has its one full run on
+and exits 1. Scratch (logs, stack dumps, test output, request payloads, throwaway scripts) goes outside every checkout, under the folder `YTHRIL_TEMP_ROOT` names
+(an absolute path; unset, a `ythril` folder in the operating system's temporary folder; `scripts/_shared/scratch-root.mjs` decides), and no `.gitignore` rule registers a scratch folder inside one; a file you mean to keep local needs a `.gitignore` rule that names its path, as `config/config.json` has. Then run the suites your change reaches. A maintainer's bundle then has its one full run on
 CI, before its pull request (see [The CI job graph](#the-ci-job-graph)), and a commit made after that run reruns locally only
 the test files its diff reaches.
 
@@ -149,6 +149,8 @@ before it reaches a log.
 **On your machine**, the same JSONL lands in `test-results/` (gitignored). Every runner (`run-suite`, `run-standalone`,
 preflight) clears its own suite's earlier files first, so what is there is only the last run's, one file per `node --test`
 invocation: `test-results/<suite>-<batch>.jsonl`.
+
+`YTHRIL_TEST_RESULTS_DIR` moves that folder out of the checkout: an absolute path, honoured by every runner, by `test-times.mjs` and by preflight's client report (`client.json`). Unset, the folder is `test-results/` in the checkout, which is what CI uses and uploads, so CI is unchanged; a relative value is refused. The test children a runner starts do not inherit it (`testChildEnv`). The folder's place is decided in one function, `timingResultsDir` in `testing/_shared/timing-reporter.mjs`.
 
 ### The line shape
 

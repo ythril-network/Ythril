@@ -30,7 +30,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { testChildEnv } from './test-child-env.mjs';
-import { TIMING_RESULTS_FOLDER } from './timing-reporter.mjs';
+import { TIMING_RESULTS_FOLDER, timingResultsDir } from './timing-reporter.mjs';
 import { makeScratchRepo } from './scratch-git-repo.mjs';
 import { buildZip } from './zip-builder.mjs';
 import { jobEntries, loadCi } from './ci-workflow.mjs';
@@ -49,7 +49,8 @@ export const SCRIPT = resolve(import.meta.dirname, '..', '..', 'scripts', 'test-
  */
 export function makeWorkdir({ dirty = false, untracked = false, branch = 'main', tracked = [] } = {}) {
   const { dir, git, cleanup } = makeScratchRepo({ prefix: 'test-times-', branch });
-  writeFileSync(join(dir, '.gitignore'), `${TIMING_RESULTS_FOLDER}/\n`);
+  const ignoreLine = `${TIMING_RESULTS_FOLDER}/\n`;
+  writeFileSync(join(dir, '.gitignore'), ignoreLine);
   writeFileSync(join(dir, 'a.txt'), 'one\n');
   for (const file of tracked) {
     mkdirSync(dirname(join(dir, file)), { recursive: true });
@@ -129,7 +130,7 @@ export function wholeJsonl(lines, { suite, batch, sentinel = 'ok', truncated = f
 
 /** Write one results file into `<dir>/test-results/<suite>-<batch>.jsonl` and return its path. */
 export function writeResults(dir, spec) {
-  const out = join(dir, TIMING_RESULTS_FOLDER);
+  const out = timingResultsDir(dir, {}); // the scratch repository's own default folder: the recorder under test runs with the variable scrubbed (cleanEnv)
   mkdirSync(out, { recursive: true });
   const path = join(out, `${spec.suite}-${spec.batch}.jsonl`);
   writeFileSync(path, jsonlFor(spec));
@@ -315,7 +316,7 @@ export const zipRequests = (github, from) => github.requests.slice(from).filter(
 
 /** Write `<dir>/test-results/client.json`, where a local run leaves the client's report, and return its path. */
 export function writeClientReport(dir, report) {
-  const out = join(dir, TIMING_RESULTS_FOLDER);
+  const out = timingResultsDir(dir, {}); // the scratch repository's own default folder: the recorder under test runs with the variable scrubbed (cleanEnv)
   mkdirSync(out, { recursive: true });
   const path = join(out, 'client.json');
   writeFileSync(path, typeof report === 'string' ? report : JSON.stringify(report));

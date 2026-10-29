@@ -284,3 +284,23 @@ describe('readClientResults keeps the gate readers\' acceptance and fields', () 
     assert.equal(got.unexpected.length, 3, `two skips and one pending: ${JSON.stringify(got.unexpected)}`);
   });
 });
+
+describe('the client command writes its report where the results folder is', () => {
+  const COMMAND = 'npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json';
+  const DEFAULT_REPORT = '/work/Ythril/test-results/client.json';
+
+  it('is ci.yml\'s command untouched while the report goes to the default place', () => {
+    assert.equal(reader.clientCommandWritingTo(COMMAND, DEFAULT_REPORT, DEFAULT_REPORT), COMMAND);
+  });
+
+  it('replaces only the report path with the absolute one, quoted, forward slashes, when the folder is moved', () => {
+    const moved = reader.clientCommandWritingTo(COMMAND, 'E:\\TMP\\Ythril\\log\\test-results\\client.json', DEFAULT_REPORT);
+    assert.equal(moved, COMMAND.replace('../test-results/client.json', '"E:/TMP/Ythril/log/test-results/client.json"'));
+  });
+
+  it('refuses a command with no --outputFile, moved or not, rather than run it and write the report nowhere', () => {
+    for (const report of [DEFAULT_REPORT, '/elsewhere/client.json']) {
+      assert.throws(() => reader.clientCommandWritingTo('npm run test:client', report, DEFAULT_REPORT), /--outputFile/);
+    }
+  });
+});

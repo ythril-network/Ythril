@@ -33,12 +33,13 @@ describe('testChildEnv: what a child inherits', () => {
     YTHRIL_TEST_RUNS_URL: 'https://record.example',
     YTHRIL_TEST_RUNS_TOKEN: 'secret',
     YTHRIL_TEST_RUNS_FUTURE_THING: 'x',
+    YTHRIL_TEST_RESULTS_DIR: '/somewhere/else/test-results',
     ythril_test_runs_lower: 'y',
     YTHRIL_URL: 'https://not-the-recorder.example',
     HOME: '/home/x',
   };
 
-  it('drops the runner wire and every recorder variable, whatever its case', () => {
+  it('drops the runner wire, the results folder and every recorder variable, whatever its case', () => {
     const env = testChildEnv({}, base);
     assert.deepEqual(Object.keys(env).sort(), ['HOME', 'PATH', 'YTHRIL_URL']);
   });

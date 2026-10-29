@@ -6,13 +6,12 @@
  * Q-626, 2026-10-27. Agent runs left logs, a bash stack dump, test output and stray worktree copies in the owner's
  * checkout, and nothing reported them: `*.log` and `*.txt` in `.gitignore` hide build and test output, so `git status`
  * stayed clean around exactly the files that should have been noticed. A catch-all rule exists to hide output; it does
- * not say "this is where such files belong". Scratch goes to `tmp/`, which is a rule that names a place.
+ * not say "this is where such files belong". Scratch goes outside every checkout (`scratchRoot`, `scripts/_shared/scratch-root.mjs`); the first answer, a gitignored `tmp/` in the checkout, registered the clutter instead of keeping it out, and its rule is gone, so a `tmp/` is unregistered like any other stray.
  *
  * ## The rule
  *
  * A path git does not track is REGISTERED only when `git check-ignore -v --no-index` matches it to a rule that names a
- * place, from a `.gitignore` or from `.git/info/exclude`: `node_modules/`, `dist/`, `local-data/`, `config/config.json`,
- * `tmp/`. It is UNREGISTERED when it is
+ * place, from a `.gitignore` or from `.git/info/exclude`: `node_modules/`, `dist/`, `local-data/`, `config/config.json`. It is UNREGISTERED when it is
  *
  * - not ignored at all (`git status` says `??`), or
  * - ignored only by a CATCH-ALL: a rule whose pattern has no `/` (a trailing one aside) and has a `*` in it, such as
@@ -40,6 +39,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntryPoint, readFlags } from './_shared/script-cli.mjs';
+import { SCRATCH_ROOT_ENV, scratchRoot } from './_shared/scratch-root.mjs';
 
 /** Bare file names that are editor or operating-system noise: a rule naming one registers no place. */
 const NOISE_NAMES = new Set(['.DS_Store', 'Thumbs.db']);
@@ -127,6 +127,11 @@ export function unregisteredLocalFiles(root) {
   return found;
 }
 
+/** Where scratch goes, for the message: the scratch root, or the reason it cannot be named (a bad variable must not read as a git failure). */
+function scratchPlace() {
+  try { return scratchRoot(); } catch (error) { return `the folder named by ${SCRATCH_ROOT_ENV} (${error.message})`; }
+}
+
 function main(argv) {
   const { values, stray } = readFlags(argv.filter(a => a !== '--catch-all'), ['--root']);
   if (stray.length) { console.error(`unregistered-local-files: unknown argument(s) ${stray.join(' ')}; the ones it takes are --root <dir> and --catch-all`); return 2; }
@@ -140,7 +145,7 @@ function main(argv) {
     const found = unregisteredLocalFiles(root);
     for (const { path, why } of found) console.log(`${path}  (${why})`);
     if (found.length === 0) return 0;
-    console.error(`\n${found.length} path(s) in ${root} that git does not track and no rule registers as a place. Scratch goes under tmp/ (gitignored); `
+    console.error(`\n${found.length} path(s) in ${root} that git does not track and no rule registers as a place. Scratch goes outside every checkout, under ${scratchPlace()}; `
       + 'a file you mean to keep local needs a .gitignore rule that names its path, not a catch-all; anything else: delete it.');
     return 1;
   } catch (error) {

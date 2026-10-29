@@ -132,10 +132,12 @@ describe('unregistered-local-files', () => {
     for (const known of ['*.log', '*.txt']) assert.ok(derived.includes(known), `${known} is a catch-all in .gitignore and the derivation did not find it: ${derived.join(' ')}`);
     // A rule that names a place is not one, whatever it says about the paths under it.
     const text = readFileSync(join(REPO_ROOT, '.gitignore'), 'utf8');
-    for (const place of ['node_modules/', 'dist/', 'tmp/', 'test-results/']) {
+    for (const place of ['node_modules/', 'dist/', 'test-results/']) {
       assert.ok(text.split(/\r?\n/).includes(place), `.gitignore must hold the place rule ${place}`);
       assert.ok(!derived.includes(place), `${place} names a place and must not be a catch-all`);
     }
+    // Scratch is not kept in the checkout, so no rule registers a folder for it: a `tmp/` there is a stray like any other.
+    assert.ok(!text.split(/\r?\n/).some(l => /^\/?tmp\/?$/.test(l.trim())), '.gitignore registers tmp/ as a place: scratch goes outside every checkout (scratchRoot)');
   });
 
   it('refuses an argument it does not know', () => {

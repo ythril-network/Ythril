@@ -35,7 +35,7 @@
  * derive from it; none of them keeps a second list of the fields.
  */
 import { openSync, writeSync, closeSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // The token shapes a failure, a test name or a skip reason may carry are masked by the ONE list (`secret-masking.mjs`).
 import { maskSecrets } from './secret-masking.mjs';
@@ -43,12 +43,40 @@ import { maskSecrets } from './secret-masking.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
- * The folder the timing files go in, by name, relative to a checkout — gitignored, uploaded by CI as `test-results/`.
- * The helper resolves it against the repository, the recorder against its working directory, and the test harness
- * against a scratch repository: three roots, one spelling, so a rename cannot leave one of them writing where the
- * others do not look.
+ * The folder the timing files go in by default, by name, relative to a checkout — gitignored, uploaded by CI as `test-results/`.
+ * This is a NAME, not a place: nothing joins it to a root itself, because the place is {@link timingResultsDir}'s to decide
+ * (an env var can move it out of the checkout). It stays exported for what really needs the name: the `.gitignore` entry of a
+ * scratch repository, and the check that git ignores it.
  */
 export const TIMING_RESULTS_FOLDER = 'test-results';
+
+/** The variable that moves the results folder out of a checkout: an absolute path. Unset or empty, the folder is `test-results` in the checkout. */
+export const TEST_RESULTS_DIR_ENV = 'YTHRIL_TEST_RESULTS_DIR';
+
+/**
+ * Where the run's results go: THE answer, for every reader and every writer of the results folder (the runners' reporter
+ * flags, the recorder, the weights script, preflight's client report, the test harness).
+ *
+ * What it prevents: a machine that wants no generated files in a checkout (several worktrees, a read-only tree, a disk that
+ * is not the work disk) moving the folder for the writers and not the readers, so the recorder reads an older run from the
+ * place nothing writes to any more. One function decides; a hand-spelled folder elsewhere is refused by
+ * `a-results-folder-has-one-reader-and-one-name`.
+ *
+ * `root` is the checkout the default folder lives in: the flags helper resolves it against the repository, the recorder
+ * against its working directory, the test harness against a scratch repository. A value that is not an absolute path THROWS,
+ * naming the variable: a relative one would mean a different folder for each caller's working directory, which is the split
+ * this prevents. CI sets nothing, so CI keeps `test-results/` in the checkout, which its jobs upload.
+ *
+ * @param {string} root the checkout (absolute, or relative to the working directory)
+ * @param {NodeJS.ProcessEnv} [env] default `process.env`; pass `{}` to ask for the default folder of a scratch repository
+ * @returns {string} an absolute path
+ */
+export function timingResultsDir(root, env = process.env) {
+  const named = env[TEST_RESULTS_DIR_ENV];
+  if (named === undefined || named === '') return resolve(root, TIMING_RESULTS_FOLDER);
+  if (!isAbsolute(named)) throw new Error(`${TEST_RESULTS_DIR_ENV} must be an absolute path, not ${JSON.stringify(named)}`);
+  return resolve(named);
+}
 
 /** Env names the helper sets and this reporter reads — one place, so the two cannot drift. */
 export const TIMING_ENV = Object.freeze({
