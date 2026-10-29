@@ -298,7 +298,7 @@ describe('a move takes everything a delete would, and does it in a bounded numbe
     const jobOf = (id) => embedJobs().findOne({ _id: queue.embedJobId('file', id) });
     const cacheAt = (key) => hashes().findOne({ _id: key });
     /** What the next manifest walk answers, `path -> sha256`. */
-    const manifestNow = async () => new Map((await manifest.buildFileManifest(S)).map(e => [e.path, e.sha256]));
+    const manifestNow = async () => new Map((await manifest.buildFileManifest(S)).map(e => [e.diskPath, e.sha256]));
     const LATER = () => new Date(Date.now() + 24 * 3_600_000);
 
     /** The Nth `insertMany` on the files collection runs `act` first (or throws `act` when it is an Error). The batch's rows are written by it. */

@@ -186,7 +186,7 @@ describe('one space\'s trouble does not stop the prunes', { skip }, () => {
     it('the record half failing does not stop the file half or the spaces behind it; it is said once, with its half named', async () => {
       const db = mongo.getDb();
       await seed(FAILING); await seed(OK);
-      await db.collection(`${FAILING}_tsrc`).insertOne({ _id: 'x' });
+      await db.collection(`${FAILING}_tsrc`).insertOne({ _id: 'x', deletedAt: '2000-01-01T00:00:00.000Z' });
       let first, second;
       try {
         // A view takes no write: the record tombstones' delete fails at the command.
@@ -211,7 +211,7 @@ describe('one space\'s trouble does not stop the prunes', { skip }, () => {
     it('the file half failing does not stop the record half; it is said once, with its half named', async () => {
       const db = mongo.getDb();
       await seed(FAILING); await seed(OK);
-      await db.collection(`${FAILING}_tsrc`).insertOne({ _id: 'x' });
+      await db.collection(`${FAILING}_tsrc`).insertOne({ _id: 'x', deletedAt: '2000-01-01T00:00:00.000Z' });
       let ran;
       try {
         await withCollectionAsView(db, `${FAILING}_file_tombstones`, `${FAILING}_tsrc`, async () => {

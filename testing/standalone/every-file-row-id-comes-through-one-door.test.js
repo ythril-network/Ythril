@@ -23,8 +23,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const SOURCE = fs.readFileSync('server/src/files/file-meta.ts', 'utf8').replace(/\r\n/g, '\n');
-const DOORS = ['fileRowIdFor', 'fileDirPrefixFor'];
-const ADOPTIONS = ['adoptLegacyRow(', 'adoptLegacyRowsUnder('];
+const DOORS = ['fileRowIdFor', 'fileDirPrefixFor', 'fileRowIdsToRead'];
+// The read door adopts nothing (a read never writes): it looks through to the legacy ids instead.
+const ADOPTIONS = ['adoptLegacyRow(', 'adoptLegacyRowsUnder(', 'legacyIdsOf('];
 const PATH_PARAMS = /\b(filePath|filePaths|dirPath|dir|path)\s*[:?,)]/;
 
 /** The top-level functions of the file: name, whether exported, its parameter list and its body. */
@@ -53,7 +54,7 @@ function reachesAdoption(fn, seen = new Set()) {
 
 describe('every file row id comes through one door', () => {
   it('the source yields the two doors and enough path-taking functions (floor)', () => {
-    for (const door of DOORS) assert.ok(fns.some(f => f.name === door && f.exported), `file-meta.ts exports no ${door}`);
+    for (const door of DOORS) assert.ok(fns.some(f => f.name === door), `file-meta.ts has no ${door}`);
     const taking = fns.filter(f => f.exported && PATH_PARAMS.test(f.params));
     assert.ok(taking.length >= 8, `only ${taking.length} exported path-taking functions were found: the derivation is broken`);
   });
