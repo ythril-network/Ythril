@@ -80,14 +80,12 @@ import { recreatedSince } from './tombstone-shadow.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { heldFileTombstoneIds, storeRelayedFileTombstones, type RelayedFileTombstone } from './tombstones.js';
 import { RequestRefusal } from '../util/errors.js';
-
-/** The longest path a tombstone may name. A path is a peer's text, and it reaches the file system and the database. */
-const MAX_TOMBSTONE_PATH = 4096;
+import { MAX_PEER_PATH_LENGTH } from '../util/request-bounds.js';
 
 /** The wire shape of one file tombstone. Unknown keys are stripped, so what is stored is only what is declared here. */
 const FileTombstoneShape = z.object({
   _id: z.string().min(1).max(MAX_CURSOR_ID_LENGTH),
-  path: z.string().min(1).max(MAX_TOMBSTONE_PATH),
+  path: z.string().min(1).max(MAX_PEER_PATH_LENGTH),
   deletedAt: z.string().refine(isComparableIso, 'not an ISO timestamp'),
   issuer: z.string().max(MAX_ISSUER).optional(),
   rowSeq: z.number().optional(),

@@ -89,6 +89,12 @@ export const BOUND_BY_FIELD: Readonly<Record<string, number>> = Object.freeze({
   edgeLabels: MAX_EDGE_LABELS,
 });
 
+/**
+ * The longest path a PEER may name, in a file tombstone and in a file-metadata document alike (`_id` and `path`). A path is a peer's text, and
+ * it reaches the file system and the database: one number, so the second schema that names a peer's path cannot invent its own (or none).
+ */
+export const MAX_PEER_PATH_LENGTH = 4096;
+
 /** The refusal for a list over its bound — one wording, so a caller comparing the doors reads one sentence. */
 export function tooManyError(field: string, got: number, max: number): string {
   return `\`${field}\` may hold at most ${max} entries (got ${got})`;
