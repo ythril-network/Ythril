@@ -44,6 +44,8 @@ import { envInt } from '../config/env-num.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { eachSpace, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
+import { reportSpaceFailure } from '../util/space-failure.js';
+import { trackSearchIndexDrop, settleSearchIndexDropsOf } from './search-index-drops-in-flight.js';
 import { refusalText, storeFailureAnswer, throwIfStoreSide } from '../brain/store-failure.js';
 import { grantCreatorAdmin } from '../auth/creator-grant.js';
 import { createReadyCounter, finishPositionsOf } from '../sync/positions-owed.js';
@@ -180,6 +182,9 @@ const FINALIZE_CONCURRENCY = 3;
 /** The step names the walks below report under (`util/housekeeping-walk.ts`), declared once so their counters start at 0. */
 const SPACE_INIT_STEP = declareStep('space init');
 const INDEX_CONFIRMATION_STEP = declareStep('index confirmation');
+/** A deleted space's search-index drop (`dropSpaceData`), said through the shared reporter and not a line of its own: once per window, and counted. */
+const INDEX_DROP_STEP = declareStep('space delete search-index drop');
+const INDEX_DROP_RETRIED = 'by the collection drop that follows';
 
 /**
  * The spaces a config reload owes an init: added by a reload and not yet initialised, or initialised and failed.
@@ -502,6 +507,10 @@ export async function createSpace(opts: {
   const cfg = getConfig();
   // A pre-6.0 proxy's id stays reserved until an instance admin purges what it still holds: a new space under it would meet that data.
   assertNotRetiredSpaceId(opts.id);
+  // A delete of this id whose search-index drop is still running (its bound ended, the call did not) would drop the index this space is
+  // about to build: wait for it, or refuse as retryable (`SpaceStillBeingRemoved`), before anything is written. Asked first, so the
+  // "already exists" below is judged after the wait.
+  await settleSearchIndexDropsOf(opts.id);
   if (cfg.spaces.some(s => s.id === opts.id)) {
     throw new Error(`Space '${opts.id}' already exists`);
   }
@@ -583,10 +592,19 @@ export async function dropSpaceData(
   // recreated under the same name. Its two calls (list, drop) are mongot's and no store bound ends them, so each collection is bounded
   // by `SPACE_ACT_SEARCH_INDEX_MS` here, inside the function that every delete and every resumed delete runs: whatever mongot is doing,
   // the delete waits for it that long and no longer (Q-176). A failure or a timeout is non-fatal — the collection drop below cleans up.
+  //
+  // A bound does not cancel the call. Each drop is registered for as long as it RUNS (`trackSearchIndexDrop`), so a create or a rename into
+  // this id waits for it, or is refused as retryable, instead of building an index the orphaned drop then removes (it names by prefix).
   await Promise.all(VECTOR_INDEXED_COLLECTIONS.map(suffix => withinTimeBound(
-    dropCollectionSearchIndexes(spaceId, suffix), spaceActKnob('SPACE_ACT_SEARCH_INDEX_MS'), `the search indexes of ${spaceId}_${suffix}`,
-  ).catch(err => {
-    log.warn(`Could not drop the search indexes of ${peerText(spaceId)}_${suffix}: ${peerText(err)}`);
+    trackSearchIndexDrop(spaceId, dropCollectionSearchIndexes(spaceId, suffix)), spaceActKnob('SPACE_ACT_SEARCH_INDEX_MS'), `the search indexes of ${spaceId}_${suffix}`,
+  ).then(done => {
+    // A collection whose indexes could not be listed or dropped answers false (and says why at debug): the collection drop below cleans
+    // up, but a delete that loses its index step without a word is the weaker of the two old ones, so it is said here (Q-176 review, D4).
+    if (!done) {
+      reportSpaceFailure(INDEX_DROP_STEP, spaceId, new Error(`the search indexes of ${spaceId}_${suffix} could not all be listed or dropped, or a swap is running on the collection`), { unit: suffix, when: INDEX_DROP_RETRIED });
+    }
+  }, err => {
+    reportSpaceFailure(INDEX_DROP_STEP, spaceId, err, { unit: suffix, when: INDEX_DROP_RETRIED });
   })));
 
   // 2. Drop all MongoDB collections associated with this space.

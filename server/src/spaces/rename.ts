@@ -28,6 +28,7 @@ import { refusalText } from '../brain/store-failure.js';
 import { SPACE_ACT_KINDS, isInstanceWide } from '../config/types-space-acts.js';
 import { SpaceNotWritableError, spaceWriteClosedAnswer, type SpaceWriteClosedCode } from './space-write-gate.js';
 import { moveTree } from '../files/remove-tree.js';
+import { settleSearchIndexDropsOf, SpaceStillBeingRemoved, SPACE_STILL_BEING_REMOVED, SPACE_STILL_BEING_REMOVED_RETRY_AFTER_S } from './search-index-drops-in-flight.js';
 
 /**
  * Record that one step of `moveSpaceData` failed, in words that are ours.
@@ -176,24 +177,31 @@ export async function moveSpaceData(
   // (Q-171): on Windows any handle under a directory fails its rename at once. A directory that is not there is `'absent'`
   // — the space had none, or the move already happened — and is not an error; anything else is a failed step, which keeps the
   // marker so the rename resumes. The chunk directory's failure used to be swallowed, leaving `.chunks/<old>` behind.
+  //
+  // What may already stand at the destination is `moveTree`'s decision, asked with what this caller knows: the rename refused a new id that
+  // is configured, so nobody owns `.chunks/<new>` and whatever it holds is upload staging a past run or a late writer left (swept only after a
+  // day; kept, it held this rename's marker and every other space operation behind it): replaced. `files/<new>` may hold real bytes: only an
+  // empty directory is moved into, a non-empty one fails the step and is never deleted.
   try {
     // Bounded when an act runs it (`fileTree`): a stuck mount fails the attempt instead of holding the lane.
-    if (await fileTree(() => moveTree(oldDir, newDir)) === 'moved') {
+    if (await fileTree(() => moveTree(oldDir, newDir, { replaceDestination: 'if-empty' })) === 'moved') {
       log.debug(`Moved files directory ${peerText(oldDir)} → ${peerText(newDir)}`);
     }
   } catch (err) {
-    stepFailed('Could not move files directory', err, errors);
+    stepFailed(`Could not move files directory ${oldId} → ${newId}`, err, errors);
   }
 
   // 3. Move chunked-upload directory if it exists
   const oldChunks = path.resolve(dataRoot, '.chunks', oldId);
   const newChunks = path.resolve(dataRoot, '.chunks', newId);
   try {
-    if (await fileTree(() => moveTree(oldChunks, newChunks)) === 'moved') {
-      log.debug(`Moved chunk uploads directory ${peerText(oldChunks)} → ${peerText(newChunks)}`);
+    const moved = await fileTree(() => moveTree(oldChunks, newChunks, { replaceDestination: 'staging' }));
+    if (moved === 'replaced') {
+      log.warn(`Removed leftover chunked-upload staging of '${peerText(newId)}' (no configured space owns it) to move the chunk uploads of '${peerText(oldId)}' into its place`);
     }
+    if (moved !== 'absent') log.debug(`Moved chunk uploads directory ${peerText(oldChunks)} → ${peerText(newChunks)}`);
   } catch (err) {
-    stepFailed('Could not move chunk uploads directory', err, errors);
+    stepFailed(`Could not move chunk uploads directory ${oldId} → ${newId}`, err, errors);
   }
 
   // Usage history follows the space. `space_activity` is instance-wide and its bucket `_id` embeds the
@@ -412,7 +420,9 @@ defineSpaceActBody('rename', renameSpaceUnqueued);
 /** A rename's answer as both doors give it: the renamed space, or the status and sentence of the refusal. */
 export type RenameSpaceResult =
   | { status: 200; space: SpaceConfig }
-  | { status: 400 | 404 | 409 | 500; error: string; code?: NetworkRefusalCode | SpaceWriteClosedCode };
+  | { status: 400 | 404 | 409 | 500; error: string; code?: NetworkRefusalCode | SpaceWriteClosedCode }
+  /** The id is not free yet (`space_still_being_removed`): retryable, `Retry-After` on REST and `retryable` beside the code on MCP. */
+  | { status: 503; error: string; code: typeof SPACE_STILL_BEING_REMOVED; retryable: true; retryAfterSeconds: number };
 
 /**
  * Rename a space from a request body — the ONE mapping from what `renameSpace` throws to what a caller is told
@@ -423,6 +433,10 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
   const parsed = RenameSpaceBody.safeParse(body);
   if (!parsed.success) return { status: 400, error: refusalOfParse(parsed.error).error };
   try {
+    // A delete of `newId` whose search-index drop is still running would drop the index of the collections this rename moves under it
+    // (`createSpace` waits for the same drops, for the same reason): waits for it or refuses as retryable, before anything registers.
+    // Here and not in `renameSpace`, whose first statement is the runner's (`every-space-act-goes-through-the-runner`).
+    await settleSearchIndexDropsOf(parsed.data.newId);
     return { status: 200, space: await renameSpace(oldId, parsed.data.newId) };
   } catch (err) {
     // Typed, not matched on wording (Q-133): a refusal whose sentence changes must not fall through to a 500.
@@ -432,6 +446,9 @@ export async function renameSpaceAct(oldId: string, body: unknown): Promise<Rena
     const closed = spaceWriteClosedAnswer(err);
     if (closed) return { status: closed.status, error: closed.body.error, code: closed.body.code };
     if (err instanceof ReservedSpaceIdError) return { status: 409, error: err.message };
+    if (err instanceof SpaceStillBeingRemoved) {
+      return { status: 503, error: err.message, code: err.code, retryable: true, retryAfterSeconds: SPACE_STILL_BEING_REMOVED_RETRY_AFTER_S };
+    }
     if (err instanceof RenameIncompleteError) return { status: 500, error: err.message };
     // The store's failure is not a refusal: `refusalText` rethrows it, so each door answers it as every door does
     // (bundle-30 I12), and only then are the words read (bundle-53 G7, Q-335). A driver refusal comes back in our words.

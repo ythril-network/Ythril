@@ -151,6 +151,14 @@ most current open models emit 512.
 **A database that cannot answer while a space is created is a `503`**, retryable and with `Retry-After`, in our words
 and never the `409` or `404` of the driver's message that the same failure was once read as ([Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field)).
 
+**An id whose space was deleted a moment ago can be `503` `space_still_being_removed`.** A delete gives the search service
+15 seconds to drop the deleted space's search indexes and then goes on without it; if that call is still running, a space created
+under the same id would have its new index removed by it. So a create under that id waits up to those 15 seconds for the drop to
+settle and, if it is still running, answers `503` `{ "error", "code": "space_still_being_removed", "retryable": true }` with
+`Retry-After`. Nothing was written: send the same request again. `save_space` answers the same (`Error (503)`, `structuredContent`
+`{ "outcome": "retry", "code": "space_still_being_removed", "retryable": true }`), and so does a rename whose `newId` is such an id
+([Rename a Space](#rename-a-space)).
+
 ---
 
 ### Group spaces under one id: a personal view
@@ -221,7 +229,8 @@ The rename atomically:
 | `409`  | `newId` already exists |
 | `409`  | `code: "space_name_in_use"` — another space already syncs under `newId` in one of this instance's networks; nothing is moved. Pick another name |
 | `409`  | `code: "space_being_restored"` or `"space_being_migrated"` — a restore or migration of the instance stands, so the rename is refused at once and nothing is registered; send it again once the act completes ([acts](06c-space-deletion-and-wipe-api.md#every-kind-of-act)). A standing deletion or wipe of the space is refused `409` as well, without a code |
-| `500`  | Partial rename failure (collections may be in an inconsistent state) |
+| `500`  | Partial rename failure (collections may be in an inconsistent state). The sentence names which step stopped, in our words, with no server path in it |
+| `503`  | `code: "space_still_being_removed"`, `retryable: true`, with `Retry-After` — `newId` is the id of a space deleted a moment ago whose search-index drop is still running; nothing is registered or moved. Send it again in a few seconds ([Create a Space](#create-a-space)) |
 | `503`  | The database could not answer, in a step of the rename or while finishing a pending one. Retryable, with `Retry-After`, in our words and not the driver's; it is never reported as one of the refusals above ([Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field)) |
 
 **A rename or delete that did not finish does not block the next one.** Each records its intent before it moves

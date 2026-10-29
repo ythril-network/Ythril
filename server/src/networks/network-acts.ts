@@ -53,6 +53,7 @@ import { warnOnce } from '../util/warn-once.js';
 import { rereadOwedOf } from '../sync/full-reread.js';
 import { spaceRecordCount } from '../spaces/record-count.js';
 import { askerOwnerKey, unknownSpaceAnswer } from '../spaces/unknown-space.js';
+import type { SPACE_STILL_BEING_REMOVED } from '../spaces/search-index-drops-in-flight.js';
 
 type Caller = Parameters<typeof visibleNetworks>[0] & { id?: string };
 
@@ -80,6 +81,8 @@ export type NetworkActResult =
    * structured content. `deadline` rides with `round_expired` alone: when the round's voting closed, as the round carries it.
    */
   | { status: 400 | 403 | 404 | 409 | 410 | 500 | 502; error: string; code?: NetworkRefusalCode | SpaceWriteClosedCode | 'space_retired'; deadline?: string }
+  /** A space rename into an id whose deleted space's search-index drop is still running (`space_still_being_removed`): retryable; REST sends `Retry-After`, MCP `retryable` beside the code. */
+  | { status: 503; error: string; code: typeof SPACE_STILL_BEING_REMOVED; retryable: true; retryAfterSeconds: number }
   /**
    * What ANOTHER instance answered, relayed as it came: a join's apply or finalize refused by the inviter. REST
    * sends `upstream` verbatim, as it always has; MCP reads `error` — the inviter's own sentence when it gave one.

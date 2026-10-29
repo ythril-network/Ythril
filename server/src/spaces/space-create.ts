@@ -34,6 +34,7 @@ import { retiredSpaceFieldError } from '../brain/retired-write-fields.js';
 import { ReservedSpaceIdError } from './unknown-space.js';
 import { refusalText } from '../brain/store-failure.js';
 import { reportServerFailure } from '../util/report-failure.js';
+import { SpaceStillBeingRemoved, SPACE_STILL_BEING_REMOVED, SPACE_STILL_BEING_REMOVED_RETRY_AFTER_S } from './search-index-drops-in-flight.js';
 
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
@@ -128,10 +129,15 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
  * or you already have it), versus something broke (retry, or read the log). REST maps them to 409 and 500; a tool
  * says which one. Collapsing them would make "already exists" indistinguishable from a storage failure, and the
  * first is often a successful retry of a request whose response was lost.
+ *
+ * `retry` is a third thing again: the id is free in the config but the search-index drop of the space that held it is still running
+ * (`search-index-drops-in-flight.ts`), so nothing was written and the same request will do in a few seconds. REST answers `503` with
+ * `Retry-After`, a tool says `retryable` beside the code, on both the body `{ error, code, retryable }`.
  */
 export type SpaceCreateOutcome =
   | { outcome: 'created'; space: SpaceConfig }
   | { outcome: 'conflict'; error: string }
+  | { outcome: 'retry'; error: string; code: typeof SPACE_STILL_BEING_REMOVED; retryAfterSeconds: number }
   | { outcome: 'failed'; error: string };
 
 /**
@@ -146,6 +152,10 @@ export async function applySpaceCreate(plan: SpaceCreatePlan, creator: SpaceCrea
     const space = await createSpace(plan.args, creator);
     return { outcome: 'created', space };
   } catch (err) {
+    // The deleted space's index drop has not settled: retryable, nothing written (`createSpace` refused before it wrote anything).
+    if (err instanceof SpaceStillBeingRemoved) {
+      return { outcome: 'retry', error: err.message, code: err.code, retryAfterSeconds: SPACE_STILL_BEING_REMOVED_RETRY_AFTER_S };
+    }
     // A pre-6.0 proxy's reserved id: the id is not free, which is a conflict in our words (an instance admin purges it first).
     if (err instanceof ReservedSpaceIdError) return { outcome: 'conflict', error: err.message };
     // The store's failure is not this function's to word: `refusalText` rethrows it, so each door answers it as every
