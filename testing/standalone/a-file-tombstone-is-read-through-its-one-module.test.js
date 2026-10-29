@@ -94,13 +94,13 @@ describe('the stray drain reads only published tombstones; every arrival site as
     assert.ok(callers.size >= 1, 'no source calls heldFileTombstones — the derivation looks in the wrong place');
     assert.deepEqual([...callers].sort(), Object.keys(PUBLISHED_ONLY_READERS).sort(),
       'a source other than the declared published-only readers asks heldFileTombstones: an ARRIVAL asks decideArrivals / '
-      + 'shadowedArrivals / bytesShadowed, which also counts a pending delete whose bytes are already gone');
+      + 'bytesShadowed, which also counts a pending delete whose bytes are already gone');
   });
 
   it('a published-only reader never asks the wider predicate, and heldFileTombstones reads only PUBLISHED rows', () => {
     for (const f of Object.keys(PUBLISHED_ONLY_READERS)) {
       const code = blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
-      assert.doesNotMatch(code, /\b(decideArrivals|shadowedArrivals|bytesShadowed)\b/,
+      assert.doesNotMatch(code, /\b(decideArrivals|bytesShadowed)\b/,
         `${f} is a published-only reader and asks the predicate that counts a pending delete too`);
     }
     const owner = blankComments(readFileSync(join(REPO_ROOT, LIFECYCLE), 'utf8'));

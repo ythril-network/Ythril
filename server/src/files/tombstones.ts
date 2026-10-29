@@ -107,7 +107,7 @@ import type { FileTombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { authorRef } from '../config/author.js';
 import { log, peerText } from '../util/log.js';
 import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
-import { reportSpaceFailure } from '../util/space-failure.js';
+import { reportSpaceFailure, reportSpaceRecovered } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { DetachedWork } from '../util/detached-work.js';
@@ -135,7 +135,7 @@ import {
   abandonMove, createMoveMarkerPager, markerDocOf, moveMarker, MOVE_MARKER_KEEP_MS, movesStillOwed, removeUnlessOwed,
 } from './move-markers.js';
 import {
-  heldByPath, erasedContent, erasedBy, shadowDecision, cannotTellIfDeleted, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
+  heldByPath, erasedContent, erasedBy, shadowDecision, cannotTellIfDeleted, metaDecidedByRow, pathsDecidingArrivals, parentShadows, recreatedSince, STORED_ROW_PROJECTION,
   type HeldFileTombstone, type FileArrival, type ArrivalVerdicts, type StoredFileRow,
 } from './tombstone-shadow.js';
 
@@ -711,6 +711,9 @@ interface Settled {
   unresolved: string[];
 }
 
+/** The step a pending tombstone whose path cannot be looked at is reported under. */
+const SETTLE_LOOK_STEP = declareStep('File tombstone settle: path cannot be looked at');
+
 /** The fields a settle reads of a pending tombstone: what {@link publishOnePerPath} needs to publish it. */
 const TO_PUBLISH = { _id: 1, path: 1, deletedAt: 1, move: 1, issuer: 1, rowSeq: 1, contentHash: 1, writtenAt: 1, versionUnknown: 1 } as const;
 
@@ -731,9 +734,12 @@ async function settleFromTheDisk(spaceId: string, rows: readonly ToPublish[], ge
     try {
       const after = await whatBecameOfPath(spaceId, t);
       if (after === 'gone') gone.push(t); else if (after === 'here') here.push(t._id); else unresolved.push(t._id);
+      // The path was looked at (whatever the answer): the next time it cannot be, that is news again.
+      reportSpaceRecovered(SETTLE_LOOK_STEP, spaceId, t.path);
     } catch (err) {
       unresolved.push(t._id);
-      log.warn(`File tombstone for ${peerText(spaceId)}/${peerText(t.path)} left pending: its path cannot be looked at: ${peerText(err)}`);
+      // Said once per window per path through the shared reporter, and counted every pass (it stays pending, served to nobody).
+      reportSpaceFailure(SETTLE_LOOK_STEP, spaceId, err, { unit: t.path, when: 'next cycle' });
     }
   }
   await dropPendingById(spaceId, here);
@@ -1054,7 +1060,7 @@ function keepsAfterPrune(row: PrunableRow, pendingPaths: ReadonlySet<string>, ke
  * waiting to be published, and in that window every peer that still holds the file would otherwise bring it back. It shadows
  * exactly as a published one does — by version for metadata, by content hash for bytes. One whose path still has bytes
  * shadows nothing. When the path cannot be looked at (anything but "it does not exist"), an arrival that tombstone would shadow is
- * `undecided`: the door fails closed ({@link shadowedArrivals}), the manifest pull leaves it for the next cycle.
+ * `undecided`: a metadata arrival is then decided by the stored row ({@link metaDecidedByRow}); for bytes the door fails closed (`bytesShadowed`, a retryable 503 for the one path) and the manifest pull leaves it for the next cycle.
  *
  * **A sidecar is judged by its PARENT's tombstone too** (Q-349): the tombstones read for an arrival at `_converted/<p>.md` or under
  * `_extracted/<p>/` include the ones held for `<p>`, and {@link shadowedByParent} decides whether they shadow it — the same two
@@ -1082,24 +1088,35 @@ async function judgeArrivals(spaceId: string, read: HeldForArrivals, arrivals: r
     for (const p of pathsDecidingArrivals([a.path])) withUnlooked.set(p, [...(read.held.get(p) ?? []), ...(read.unlooked.get(p) ?? [])]);
   }
   const undecided = await shadowedAgainst(spaceId, withUnlooked, waiting);
+  await decideMetadataByRow(spaceId, undecided, shadowed, arrivals);
   return { shadowed, undecided, ...(undecided.size > 0 ? { cause: read.cause } : {}) };
 }
 
 /**
- * Which of `arrivals` a held tombstone shadows ({@link decideArrivals}), for a door that cannot go on without the answer: an
- * arrival it could not decide throws a retryable `503` ({@link cannotTellIfDeleted}) and nothing is stored. Returns the ids.
+ * Decide the undecided METADATA arrivals from the stored row at their deciding path (the arrival's own, or a sidecar's parent's): the row
+ * answers what the disk could not ({@link metaDecidedByRow}, which says why). A shadowed one joins `shadowed`, a not-shadowed one leaves
+ * `undecided`, and what stays undecided is the one case that cannot occur. Bytes are left as they are. One read of the rows for all of them.
  */
-export async function shadowedArrivals(spaceId: string, arrivals: readonly FileArrival[]): Promise<Set<string>> {
-  const { shadowed, undecided, cause } = await decideArrivals(spaceId, arrivals);
-  if (undecided.size > 0) throw cannotTellIfDeleted(cause);
-  return shadowed;
+async function decideMetadataByRow(
+  spaceId: string, undecided: Set<string>, shadowed: Set<string>, arrivals: readonly FileArrival[],
+): Promise<void> {
+  const metas = arrivals.filter((a): a is FileArrival & { kind: 'meta'; seq: number } => a.kind === 'meta' && undecided.has(a.id));
+  if (metas.length === 0) return;
+  const decidingPath = (a: FileArrival): string => parentOfSidecar(a.path)?.parent ?? a.path;
+  const rows = await readStoredById<StoredFileRow>(spaceCollection(spaceId, 'files'), metas.map(decidingPath), STORED_ROW_PROJECTION);
+  for (const a of metas) {
+    const verdict = metaDecidedByRow(a.seq, rows.get(decidingPath(a)));
+    if (verdict === 'undecided') continue;
+    undecided.delete(a.id);
+    if (verdict === 'shadowed') shadowed.add(a.id);
+  }
 }
 
 /**
  * Whether a PEER's bytes for `path` are shadowed — the byte door's question, which asks by path FIRST: the hash of the bytes
  * (`sha256Of`, called only when needed, and awaited) is computed only when some tombstone for the path — published, or pending and
  * not looked at — carries a content hash to compare it with, so a path nobody deleted — nearly every upload — costs the indexed
- * reads and no hashing of the body. A path that cannot be looked at throws a retryable `503` ({@link shadowedArrivals}).
+ * reads and no hashing of the body. A path that cannot be looked at throws a retryable `503` ({@link cannotTellIfDeleted}) for that path.
  */
 export async function bytesShadowed(spaceId: string, path: string, sha256Of: () => string | Promise<string>): Promise<boolean> {
   const asked = pathsDecidingArrivals([path]);
@@ -1112,7 +1129,7 @@ export async function bytesShadowed(spaceId: string, path: string, sha256Of: () 
   return shadowed.has(path);
 }
 
-/** {@link shadowedArrivals} over tombstones already read: the decision per arrival, and the live-row read bytes need. */
+/** {@link decideArrivals} over tombstones already read: the decision per arrival, and the live-row read bytes need. */
 async function shadowedAgainst(
   spaceId: string, held: ReadonlyMap<string, HeldFileTombstone[]>, arrivals: readonly FileArrival[],
 ): Promise<Set<string>> {

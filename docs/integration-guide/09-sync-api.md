@@ -374,8 +374,11 @@ receiver.
 tombstone rather than a brain one, so the metadata page carries no tombstones of its own. A metadata
 arrival that a held file tombstone covers (its `rowSeq` is at or above the arriving `seq`) is counted in the
 batch answer's `filemeta.tombstoned`, not stored, and not `rejected`: the sender reads it as delivered. The
-counter is additive and appears only when it is above zero; an older receiver never sends it, so read a missing one as zero. See
-[File Sync Artifacts](#file-sync-artifacts).
+counter is additive and appears only when it is above zero; an older receiver never sends it, so read a missing one as zero.
+**A path the receiver cannot look at never fails the page.** When a pending delete's path cannot be looked at on the receiver's disk, the
+receiver decides a file's metadata from its stored row instead (no live row: it is `tombstoned`; a live row at the delete's version or
+above: the usual `skipped`), the other documents of the page are stored, and the answer is a `200`; the byte door's retryable `503` is
+for that one path's bytes only. See [File Sync Artifacts](#file-sync-artifacts).
 
 > **Metadata written before 4.0 has no `seq`, and the page cursor is `seq > n`.** So it does not reach a
 > peer until the record is next written. `npm run links:convert` stamps the ones already stored —

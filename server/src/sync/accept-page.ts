@@ -222,7 +222,7 @@ export async function acceptArrivingPage(
         const diverged: Array<{ index: number; doc: Arrived }> = [];
         while (pending.length > 0) {
           const out = await writePage(spaceId, key, pending.map(l => l.at(-1)!.doc), { from: peer, deliveredBy });
-          const skipped = new Set([...out.newerLocal, ...out.derived]);
+          const skipped = new Set([...out.newerLocal, ...out.derived, ...out.undecided]);
           const split = new Set(out.diverged);
           const dup = new Set(out.duplicates);
           const covered = new Set(out.tombstoned);
