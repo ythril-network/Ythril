@@ -25,6 +25,7 @@ import type { Stats } from 'node:fs';
 import path from 'node:path';
 import { heldFileAt, fileKeyOf, peerFileKey, resolveSafePath, resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { bytesPresent, lstatIfPresent, isMissingPath } from './stored-bytes.js';
+import { RequestRefusal } from '../util/errors.js';
 
 /**
  * Whether a name could be held under another Unicode spelling that normalises to it: the one question that decides whether a missing segment is worth
@@ -127,13 +128,13 @@ export async function storedDirOf(spaceId: string, userPath: string): Promise<st
  * which lists through {@link storedDirOf}, listed it: the two doors gave different answers for one folder.
  */
 export async function heldEntryOf(spaceId: string, userPath: string): Promise<{ stat: Stats; heldAbs: string | null } | null> {
-  // A path that leaves the space (or names it) is refused by throwing a RangeError: for a read door that is "nothing here", as the member loop
+  // A path that leaves the space (or names it) is refused by throwing a RequestRefusal: for a read door that is "nothing here", as the member loop
   // always read it. Any other failure to look is thrown, never read as an answer about the bytes.
   let nfcAbs: string;
-  try { nfcAbs = resolveSafePath(spaceId, userPath); } catch (err) { if (err instanceof RangeError) return null; throw err; }
+  try { nfcAbs = resolveSafePath(spaceId, userPath); } catch (err) { if (err instanceof RequestRefusal) return null; throw err; }
   const nfc = await statIfPresent(nfcAbs);
   if (nfc !== null) return { stat: nfc, heldAbs: null };
-  const held = await heldSpellingOf(spaceId, userPath).catch((err: unknown) => { if (err instanceof RangeError) return null; throw err; });
+  const held = await heldSpellingOf(spaceId, userPath).catch((err: unknown) => { if (err instanceof RequestRefusal) return null; throw err; });
   const stat = held === null ? null : await statIfPresent(held.abs);
   return held !== null && stat !== null ? { stat, heldAbs: held.abs } : null;
 }
