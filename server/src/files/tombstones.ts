@@ -106,8 +106,9 @@ import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import type { FileTombstoneDoc, FileMetaDoc } from '../config/types.js';
 import { authorRef } from '../config/author.js';
 import { log, peerText } from '../util/log.js';
-import { classifyReadFailure, throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
+import { throwIfStoreSide, unlessTheStoreFailed } from '../brain/store-failure.js';
 import { reportSpaceFailure, reportSpaceRecovered } from '../util/space-failure.js';
+import { fileTombstoneSeedFallbackTotal } from '../metrics/registry.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { DetachedWork } from '../util/detached-work.js';
@@ -251,6 +252,9 @@ export async function positionLegacyFileTombstones(spaceId: string): Promise<num
  * The seed reads the highest `positionAt` stored (the `{ positionAt, _id }` index, read backwards) through the store's own accessor, so a restart with
  * the wall clock behind what an earlier run handed out cannot stamp below a position a peer has acknowledged.
  */
+/** The step a seed that could not be read is said under: every status of failure, through the shared reporter (one line per window and space). */
+const SEED_STEP = declareStep('File tombstone clock seed');
+
 const fileTombstonePositions: PositionStream<string> = createPositionStream({
   name: 'file tombstone position',
   unit: 'milliseconds',
@@ -263,9 +267,8 @@ const fileTombstonePositions: PositionStream<string> = createPositionStream({
   onSeedFailure: {
     policy: 'wall-clock',
     report: (err, spaceId) => {
-      if (classifyReadFailure(err).status < 500) {
-        log.warn(`file tombstone clock for ${peerText(spaceId)} could not be seeded from the stored positions: ${peerText(err)}`);
-      }
+      fileTombstoneSeedFallbackTotal.labels({ space: spaceId }).inc();
+      reportSpaceFailure(SEED_STEP, spaceId, err, { when: 'next write' });
     },
   },
 });

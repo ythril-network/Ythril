@@ -932,6 +932,19 @@ export const fileMoveRowsReplacedTotal = new Counter({
 });
 fileMoveRowsReplacedTotal.labels({ space: '' }).inc(0);
 
+/**
+ * Stamps a file tombstone took from the wall clock alone because the clock's seed (the highest stored `positionAt`) could not be read.
+ * The restart guarantee is the seed's, so each of these is a stamp that rests on the wall clock being ahead of what an earlier run
+ * handed out; the line beside it (`File tombstone clock seed`) says why, and this says how often.
+ */
+export const fileTombstoneSeedFallbackTotal = new Counter({
+  name: 'ythril_file_tombstone_seed_fallback_total',
+  help: 'File tombstone stamps taken from the wall clock alone because the clock seed could not be read',
+  labelNames: ['space'] as const,
+  registers: [register],
+});
+fileTombstoneSeedFallbackTotal.labels({ space: '' }).inc(0);
+
 /** Moves whose bytes were taken by a rename because the file system refused a hard link, which is what a move's no-overwrite guarantee is built on. */
 export const fileMoveLinkFallbackTotal = new Counter({
   name: 'ythril_file_move_link_fallback_total',
