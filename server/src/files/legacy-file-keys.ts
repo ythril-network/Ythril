@@ -39,6 +39,7 @@ import { boundOperationMs } from '../db/write-bound.js';
 import { listReadMaxMs } from '../brain/tag-filter.js';
 import { toDocId } from '../util/paths.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
+import { storeIsNotAnswering } from '../db/store-condition.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { isActRefusal } from '../spaces/space-write-gate.js';
 import { LIVE_FILE_ROW } from './live-file-row.js';
@@ -86,8 +87,13 @@ async function legacyIndexOf(spaceId: string): Promise<Map<string, string[]>> {
       return index;
     })();
     indexes.set(spaceId, built);
-    // A read that failed is not cached: the next need asks again.
-    built.catch((err: unknown) => { if (indexes.get(spaceId) === built) indexes.delete(spaceId); reportSpaceFailure(INDEX_STEP, spaceId, err, { when: 'next touch' }); });
+    // A read that failed is not cached: the next need asks again. A store that is not answering is NOT said here: the caller goes on without the
+    // index, meets the same outage at its own next operation and says it there once (a request's 503, a walk's verdict), so the outage is not said
+    // twice with the driver's text (`a-store-failure-answers-alike-on-every-door-db`).
+    built.catch((err: unknown) => {
+      if (indexes.get(spaceId) === built) indexes.delete(spaceId);
+      if (!storeIsNotAnswering(err)) reportSpaceFailure(INDEX_STEP, spaceId, err, { when: 'next touch' });
+    });
   }
   return built.catch(() => new Map<string, string[]>());
 }
