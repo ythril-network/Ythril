@@ -410,7 +410,7 @@ export async function writeArrivals(
 ): Promise<ArrivalOutcome> {
   if (!(BRAIN_COLLECTIONS as readonly string[]).includes(family)) throw new Error(`writeArrivals: '${family}' is not a record family`);
   const restore = opts.restore === true;
-  // A restore does not refuse an id that is not its path's key, so it can bring legacy ids back: what was learned of the space's legacy ids is forgotten (Q-413).
+  // A restore does not refuse an id that is not its path's key, so it can bring legacy ids back: what was learned of the space's legacy ids is forgotten (Q-413) — here, and again after each chunk has landed.
   if (restore && family === 'files') forgetLegacyIndex(spaceId);
   const where = `${restore ? 'import' : 'sync'} ${family}${opts.from ? ` from ${opts.from}` : ''}`;
   const queued: Doc[] = [];
@@ -659,6 +659,9 @@ export async function writeArrivals(
       }
     } finally {
       leaveWriteUnit();
+      // Forgotten AGAIN now the chunk has landed (or stopped part way): a door that built the index between the forget at the top and this write cached one
+      // without the legacy ids this chunk brought back, and would keep it for the life of the process (bundle-88 review F5).
+      if (restore && family === 'files') forgetLegacyIndex(spaceId);
       // The chunk is written (or the page stopped): its updates are not read again, and `updateFor` built every one of them
       // up front to size the page — kept to the end, a page would be held twice over (round V, S6).
       for (const d of chunk) { updates.delete(d._id); landingOf.delete(d._id); }
