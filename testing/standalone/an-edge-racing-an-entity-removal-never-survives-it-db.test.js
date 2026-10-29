@@ -262,6 +262,33 @@ describe('an edge or link racing an entity removal never survives it', { skip },
       assert.equal(await door.coll(S, 'edges').countDocuments({ to: 'file-gone' }), 0, 'the edge now ending at a gone entity is stored');
     });
 
+    it('an edge the merge\'s settle already moved to the survivor is not refused: the writer\'s check removes and reports only what it removed', async () => {
+      await seed(S, 'ent-s', 'ent-a', 'ent-y');
+      assert.equal((await merge.mergeEntities(S, 'ent-s', 'ent-a', [])).kind, 'merged');
+      // The writer landed this edge against the absorbed entity; the merge's settle (the remover's side, run first) re-keyed it onto the survivor;
+      // then the writer's check runs with the edge it wrote.
+      const late = localEdge(S, 'ent-y', 'ent-a');
+      await door.coll(S, 'edges').insertOne(late);
+      assert.equal((await gone.settleReferencesToRemovedEntity(S, 'ent-a', { survivorId: 'ent-s' })).relinked, 1);
+      const refused = await gone.takeBackEdgesToGoneEntities(S, [{ _id: late._id, from: 'ent-y', to: 'ent-a' }]);
+      assert.equal(refused.size, 0, 'the writer was told its edge was removed (409 endpoint_removed) although the merge moved it onto the survivor');
+      assert.ok(await door.coll(S, 'edges').findOne({ from: 'ent-y', to: 'ent-s', label: 'knows' }), 'the moved edge is gone from the survivor');
+    });
+
+    it('a link the merge\'s settle already re-keyed onto the survivor is not reported taken back, and gets no second tombstone', async () => {
+      await seed(S, 'ent-s', 'ent-a');
+      await door.coll(S, 'facts').insertOne(build.fact(S, 'fact-f', 4));
+      assert.equal((await merge.mergeEntities(S, 'ent-s', 'ent-a', [])).kind, 'merged');
+      const oldId = linkIdFor('fact-f', 'fact', 'ent-a', 'entity');
+      await door.coll(S, 'links').insertOne(build.link(S, oldId, 6, { from: 'fact-f', fromKind: 'fact', to: 'ent-a', toKind: 'entity', author: author(), pos: nowPos() }));
+      await gone.settleReferencesToRemovedEntity(S, 'ent-a', { survivorId: 'ent-s' });
+      const tombBefore = await tombstoneOf(S, oldId);
+      const taken = await gone.takeBackLinksToGoneEntities(S, [{ _id: oldId, to: 'ent-a', toKind: 'entity', seq: 6 }]);
+      assert.equal(taken.size, 0, 'a link that the merge moved was reported taken back (link_target_removed: "not kept")');
+      assert.ok(await door.coll(S, 'links').findOne({ _id: linkIdFor('fact-f', 'fact', 'ent-s', 'entity') }), 'the moved link is gone from the survivor');
+      assert.deepEqual(await tombstoneOf(S, oldId), tombBefore, 'the old id\'s tombstone was rewritten');
+    });
+
     it('control: in a space without strictLinkage an edge to an entity deleted between plan and commit is stored', async () => {
       await seed(N, 'ent-e', 'ent-x');
       const plan = await planEdgeThenRemoveEnd(N, 'ent-x', 'ent-e');
