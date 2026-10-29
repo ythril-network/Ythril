@@ -61,7 +61,7 @@ const MEM = 'aaaaaaaa-0000-4000-8000-00000000000m'.replace('m', '1');
 const CHR = 'aaaaaaaa-0000-4000-8000-00000000000c'.replace('c', '2');
 const FILE = 'notes/spec.md';
 
-let mongo, edgesMod, entitiesMod, erMod, linksConversion;
+let mongo, traverseMod, entitiesMod, erMod, linksConversion;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
@@ -86,7 +86,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     }, null, 2), { mode: 0o600 });
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
-    edgesMod = await import('../../server/dist/brain/edges.js');
+    traverseMod = await import('../../server/dist/brain/traverse-graph.js');
     entitiesMod = await import('../../server/dist/brain/entities.js');
     // The ER model is read through `space-shape`, the one place it is built since `Q-95` (it caches the stored
     // half and joins the declared half on every read).
@@ -157,7 +157,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
   it('the modules are the ones this file thinks they are', () => {
     // Floors every case below. A renamed export would make each one throw rather than assert, and a file
     // that throws in `before` reports zero failures for the property it exists to pin.
-    assert.equal(typeof edgesMod.traverseGraph, 'function', 'traverseGraph');
+    assert.equal(typeof traverseMod.traverseGraph, 'function', 'traverseGraph');
     assert.equal(typeof entitiesMod.findEntityReferences, 'function', 'findEntityReferences');
     assert.equal(typeof erMod.actualSchemaOf, 'function', 'actualSchemaOf');
   });
@@ -188,7 +188,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
      * Slice 2 must reproduce this exactly. If the defaults change, that is a product decision and belongs in
      * the CHANGELOG, not in a quietly different test.
      */
-    const res = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100);
+    const res = await traverseMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100);
     const kinds = reachedKinds(res);
     assert.deepEqual(kinds, ['chrono'],
       `default traverse reached ${JSON.stringify(kinds)} — chrono on, memory and file off is the 3.x default`);
@@ -199,7 +199,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     // One assertion per flag, because a flag that turns on two classes is indistinguishable from a working
     // one when they are tested together.
     const kindsWith = async (chrono, mem, file) => {
-      const r = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, chrono, mem, file);
+      const r = await traverseMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, chrono, mem, file);
       return reachedKinds(r);
     };
     // MEASURED, not assumed — and my first draft of this file assumed wrong, which is the argument for
@@ -227,11 +227,11 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
      * else — a walk that emitted it again as a neighbour would be a cycle the `visited` set exists to
      * prevent.
      */
-    const off = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, false, false, false);
+    const off = await traverseMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, false, false, false);
     assert.deepEqual(off.nodes.map(n => [n._id, n.depth]), [[ENT, 0]],
       'a walk from a lone entity reaches nothing and reports ITSELF, so an empty answer means a bad id');
 
-    const on = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, true, true, true);
+    const on = await traverseMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, true, true, true);
     const origin = on.nodes.filter(n => n._id === ENT);
     assert.equal(origin.length, 1, 'the origin appears exactly once, however much the walk reaches');
     assert.equal(origin[0].depth, 0, 'and only at depth 0 — never again as something it reached');
@@ -241,7 +241,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     // The label is what lets `edgeLabels` include or exclude a derived link like any modelled one, and what
     // lets a reader tell a modelled relationship from a derived one. Slice 2 keeps it DERIVED from the two
     // endpoint kinds rather than storing it — so this is the string that must not move.
-    const res = await edgesMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, true, true, true);
+    const res = await traverseMod.traverseGraph([SPACE], ENT, 'both', undefined, 2, 100, true, true, true);
     const labels = [...new Set(res.edges.map(e => e.label))].sort();
     assert.deepEqual(labels, ['chrono.entityIds', 'fact.entityIds', 'file.entityIds'],
       `the three derived labels are the contract: got ${JSON.stringify(labels)}`);
@@ -297,7 +297,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     const chrono = await coll('chrono').findOne({ _id: CHR });
     assert.deepEqual(chrono.memoryIds, [MEM], 'the data says this chrono entry names that memory');
 
-    const res = await edgesMod.traverseGraph([SPACE], MEM, 'both', undefined, 2, 100, true, true, true);
+    const res = await traverseMod.traverseGraph([SPACE], MEM, 'both', undefined, 2, 100, true, true, true);
     assert.ok(res.nodes.some(n => n._id === CHR),
       'a traverse from the memory does not reach the chrono entry that names it. `chrono.memoryIds` has been '
       + 'stored, resolvability-checked, replicated and documented since 3.x with no reader at all; 2b is what '
@@ -309,7 +309,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     const file = await coll('files').findOne({ _id: FILE });
     assert.deepEqual(file.memoryIds, [MEM], 'the data says this file names that memory');
 
-    const res = await edgesMod.traverseGraph([SPACE], MEM, 'both', undefined, 2, 100, true, true, true);
+    const res = await traverseMod.traverseGraph([SPACE], MEM, 'both', undefined, 2, 100, true, true, true);
     assert.ok(res.nodes.some(n => n._id === FILE),
       'a traverse from the memory does not reach the file that names it');
   });
@@ -318,7 +318,7 @@ describe('the 3.x link baseline — what the array walk answered', { skip }, () 
     const file = await coll('files').findOne({ _id: FILE });
     assert.deepEqual(file.chronoIds, [CHR], 'the data says this file names that chrono entry');
 
-    const res = await edgesMod.traverseGraph([SPACE], CHR, 'both', undefined, 2, 100, true, true, true);
+    const res = await traverseMod.traverseGraph([SPACE], CHR, 'both', undefined, 2, 100, true, true, true);
     assert.ok(res.nodes.some(n => n._id === FILE),
       'a traverse from the chrono entry does not reach the file that names it');
   });

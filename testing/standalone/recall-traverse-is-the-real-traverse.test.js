@@ -39,7 +39,7 @@ import { bodyOf, balancedFrom } from './_structural-window.mjs';
 const EDGES = stripComments(
   readFileSync('server/src/brain/frontier-query.ts', 'utf8')
   + readFileSync('server/src/brain/recall-seed-traversal.ts', 'utf8')
-  + readFileSync('server/src/brain/edges.ts', 'utf8'),
+  + readFileSync('server/src/brain/traverse-graph.ts', 'utf8'),
 );
 const ANSWER = stripComments(readFileSync('server/src/brain/traversed-answer.ts', 'utf8'));
 const ROWS = stripComments(readFileSync('server/src/brain/row-graphs.ts', 'utf8'));

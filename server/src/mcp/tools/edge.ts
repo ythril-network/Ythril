@@ -2,7 +2,8 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { shapeError } from '../../brain/write-shape.js';
 import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, waitForEmbeddingSchema, DELETION_REACH, FORKS_GO_WITH_THEIR_SUBJECT, FORK_ROWS_ARE_READ_ONLY } from './shared.js';
 import { validateDeleteFields } from '../../brain/delete-fields.js';
-import { deleteEdge, getEdgeById, traverseGraph, updateEdgeById, upsertEdge } from '../../brain/edges.js';
+import { deleteEdge, getEdgeById, updateEdgeById, upsertEdge } from '../../brain/edges.js';
+import { traverseGraph } from '../../brain/traverse-graph.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { type UpdateValidation } from '../../brain/write-validation.js';

@@ -252,7 +252,7 @@ describe('a fork row is not a second relationship: every reader of the edges col
     assert.ok(readers.length >= 60, `only ${readers.length} reader(s) of the edges collection found: the derivation is broken`);
     assert.ok(readers.filter(r => r.named.includes('literal')).length >= 20, 'too few readers name the edges collection by its literal');
     const keys = new Set(readers.map(r => r.key.replace('server/src/', '')));
-    for (const k of ['brain/edge-lookup.ts:findEdgeByTriplet', 'brain/edges.ts:traverseGraph', 'brain/recall-seed-traversal.ts:readFrontierEdges',
+    for (const k of ['brain/edge-lookup.ts:findEdgeByTriplet', 'brain/traverse-graph.ts:traverseGraph', 'brain/recall-seed-traversal.ts:readFrontierEdges',
       'brain/er-model.ts:readErShape', 'brain/merge.ts:detectDuplicateEdges', 'brain/merge.ts:detectEndpointRuleBreaks',
       'brain/relink-references.ts:relinkEdgesOfRecord', 'brain/edges.ts:listEdges', 'brain/entity-delete-guard.ts:endsOfEdges']) {
       assert.ok(keys.has(k), `${k} reads the edges collection and the derivation did not find it: it is blind to that shape`);

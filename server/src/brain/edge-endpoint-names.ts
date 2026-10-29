@@ -140,7 +140,7 @@ export async function withEndpointNames<T extends EdgeEndpoints>(
   return edges.map(e => ({ ...e, fromName: nameMap.get(e.from), toName: nameMap.get(e.to) }));
 }
 
-/** The node shape a graph walk emits. Structural only — `TraverseNode` in `edges.ts` is the public name.
+/** The node shape a graph walk emits. Structural only — `TraverseNode` in `traverse-graph.ts` is the public name.
  *  Declared here rather than imported so this module does not depend on the walk it serves. */
 export interface TraverseNodeShape {
   _id: string; name: string; type: string; depth: number;

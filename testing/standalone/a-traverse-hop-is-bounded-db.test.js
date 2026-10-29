@@ -54,7 +54,7 @@ const SPACE = 'general';
 const HUB = 'aaaaaaaa-0000-4000-8000-000000000001';
 const START = 'aaaaaaaa-0000-4000-8000-000000000002';
 
-let mongo, edgesMod;
+let mongo, traverseMod;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 const src = (p) => stripComments(fs.readFileSync(p, 'utf8'));
@@ -71,7 +71,7 @@ describe('a traverse hop is bounded', { skip }, () => {
     }, null, 2), { mode: 0o600 });
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
-    edgesMod = await import('../../server/dist/brain/edges.js');
+    traverseMod = await import('../../server/dist/brain/traverse-graph.js');
   });
 
   after(async () => {
@@ -85,7 +85,7 @@ describe('a traverse hop is bounded', { skip }, () => {
 
   it('the module is the one this gate thinks it is', () => {
     // Floors everything below: a renamed export would make each case throw rather than assert.
-    assert.equal(typeof edgesMod.traverseGraph, 'function');
+    assert.equal(typeof traverseMod.traverseGraph, 'function');
   });
 
   it('a hub whose edges all lead back to visited nodes REPORTS truncation', async () => {
@@ -103,7 +103,7 @@ describe('a traverse hop is bounded', { skip }, () => {
       Array.from({ length: 200 }, (_, i) => edge(`e-back-${i}`, HUB, START)),
     );
 
-    const res = await edgesMod.traverseGraph([SPACE], START, 'both', undefined, 2, 5, false, false, false);
+    const res = await traverseMod.traverseGraph([SPACE], START, 'both', undefined, 2, 5, false, false, false);
     assert.equal(res.truncated, true,
       'the hop read more edges than its budget and reported a complete graph — the bound is not being applied '
       + 'or not being reported');
@@ -119,7 +119,7 @@ describe('a traverse hop is bounded', { skip }, () => {
     await coll('entities').insertMany([entity(START, 'start'), entity(HUB, 'hub')]);
     await coll('edges').insertOne(edge('e-only', START, HUB));
 
-    const res = await edgesMod.traverseGraph([SPACE], START, 'both', undefined, 2, 50, false, false, false);
+    const res = await traverseMod.traverseGraph([SPACE], START, 'both', undefined, 2, 50, false, false, false);
     assert.equal(res.truncated, false, 'a graph well inside every budget was reported as truncated');
     /*
      * START FIRST, at depth 0, then what the walk reached.
@@ -144,7 +144,7 @@ describe('a traverse hop is bounded', { skip }, () => {
     await coll('edges').insertMany(Array.from({ length: 30 }, (_, i) =>
       edge(`e-out-${i}`, HUB, `bbbbbbbb-0000-4000-8000-${String(i).padStart(12, '0')}`)));
 
-    const res = await edgesMod.traverseGraph([SPACE], START, 'both', undefined, 2, 6, false, false, false);
+    const res = await traverseMod.traverseGraph([SPACE], START, 'both', undefined, 2, 6, false, false, false);
     assert.equal(res.truncated, true);
     assert.ok(res.nodes.length >= 2, 'the hop threw away what it had read');
     assert.ok(res.nodes.some(n => n._id === HUB), 'the hub itself is missing from a walk that reached it');
@@ -162,7 +162,7 @@ describe('both traversals bound the read, not just one', () => {
      * Asserted structurally because "documents read" is not observable from outside: the behavioural cases above
      * pin the reporting, and this pins that the other path cannot quietly lack it.
      */
-    for (const f of ['server/src/brain/edges.ts', 'server/src/brain/recall-seed-traversal.ts']) {
+    for (const f of ['server/src/brain/traverse-graph.ts', 'server/src/brain/recall-seed-traversal.ts']) {
       const s = src(f);
       const at = s.indexOf('frontierEdgeQuery(');
       assert.ok(at > 0, `${f} no longer builds a frontier edge query — re-anchor this gate`);

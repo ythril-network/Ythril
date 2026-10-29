@@ -16,7 +16,7 @@
  * `frontierEdgeQuery` was itself written twice once, with the copies disagreeing, so duplicating it during the
  * extraction that separates its callers would have repeated the exact defect it exists to fix.
  *
- * `syntheticEdgeId` stays in `edges.ts`: the standalone traversal builds those ids too, and the id format is a
+ * `syntheticEdgeId` lives in `edge-id.ts`: the standalone traversal builds those ids too, and the id format is a
  * fact about edges rather than about this walk.
  */
 
@@ -34,7 +34,7 @@ import { frontierEdgeQuery, type TraverseNarrowing } from './frontier-query.js';
 import { edgeEndpointKind } from './entity-refs.js';
 import { endpointRecordsByKind } from './edge-endpoint-names.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import { syntheticEdgeId } from './edges.js';
+import { syntheticEdgeId } from './edge-id.js';
 import type { EdgeDoc, EntityDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 

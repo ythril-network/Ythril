@@ -42,7 +42,7 @@ process.env['CONFIG_PATH'] = CONFIG_PATH;
 const SPACE = 'general';
 const HUB = 'aaaaaaaa-0000-4000-8000-0000000c0193';
 
-let mongo, loader, bulkMod, edgeMod, factMod, chronoMod, REF_KINDS, BULK_BODY_KEYS;
+let mongo, loader, bulkMod, edgeMod, traverseMod, factMod, chronoMod, REF_KINDS, BULK_BODY_KEYS;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 
@@ -62,7 +62,7 @@ function writeConfig(strictLinkage) {
 
 /** What a one-hop walk from the hub reaches: each node's id and the kind the walk reported for it. */
 async function reachedFromHub(direction) {
-  const res = await edgeMod.traverseGraph([SPACE], HUB, direction, undefined, 1, 100, false, false, false, true);
+  const res = await traverseMod.traverseGraph([SPACE], HUB, direction, undefined, 1, 100, false, false, false, true);
   return res.nodes.filter(n => n._id !== HUB).map(n => `${n.kind ?? 'entity'}:${n._id}`).sort();
 }
 
@@ -73,6 +73,7 @@ describe('a $ref edge end takes the kind of the record it names', { skip }, () =
     writeConfig(true);
     bulkMod = await import('../../server/dist/brain/bulk.js');
     edgeMod = await import('../../server/dist/brain/edges.js');
+    traverseMod = await import('../../server/dist/brain/traverse-graph.js');
     factMod = await import('../../server/dist/brain/fact.js');
     chronoMod = await import('../../server/dist/brain/chrono.js');
     ({ REF_KINDS } = await import('../../server/dist/config/types-knowledge.js'));
