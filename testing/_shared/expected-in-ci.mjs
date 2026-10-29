@@ -42,6 +42,12 @@ const CONFLICT_CASE_WHY = 'a conflict copy renamed to another spelling of its ow
   + 'and it runs for real in the local preflight on the NTFS development machine. The rule it holds (an alias is a placement to finish, never an occupant) is the '
   + 'rule of a move, and is held on CI by the pure classifier test (a-destination-is-classified-by-inode-link-count-and-marker)';
 
+const OPEN_HANDLE_CAUSE = 'a directory rename here does not fail on an open handle';
+const OPEN_HANDLE_WHY = 'a held handle under a directory makes its rename fail (EPERM) only on Windows; on the Linux CI runner the rename succeeds '
+  + 'whatever is open inside, so the failure these cases retry through cannot be produced there. They run for real in the local preflight on the '
+  + 'Windows development machine; on CI the rule (every space directory move goes through moveTree, which retries) is held by the static gate '
+  + 'every-space-directory-move-goes-through-move-tree, and the long-hold resume case of the same file runs everywhere';
+
 /** @type {Readonly<Record<string, { causes: string[], why: string }>>} */
 export const EXPECTED_IN_CI = Object.freeze({
   'testing/standalone/an-extraction-describes-the-conversation-it-names.test.js': { causes: ['corpus not fetched'], why: CORPUS_WHY },
@@ -53,6 +59,7 @@ export const EXPECTED_IN_CI = Object.freeze({
   'testing/standalone/a-half-made-link-is-finished-or-undone-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CASE_SENSITIVE_WHY },
   'testing/standalone/a-peer-tombstone-for-an-old-spelling-keeps-the-bytes-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CASE_SENSITIVE_WHY },
   'testing/standalone/a-conflict-resolution-never-replaces-an-unrelated-file-db.test.js': { causes: [CASE_SENSITIVE_CAUSE], why: CONFLICT_CASE_WHY },
+  'testing/standalone/a-space-rename-survives-a-concurrent-holder-db.test.js': { causes: [OPEN_HANDLE_CAUSE], why: OPEN_HANDLE_WHY },
 });
 
 /**
