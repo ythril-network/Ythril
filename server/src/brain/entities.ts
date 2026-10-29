@@ -26,6 +26,7 @@ import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
 import { listReadMaxMs, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
+import { edgeEndsAt } from './edge-ends-of-record.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
@@ -491,12 +492,9 @@ export async function findEntityReferences(spaceId: string, targetId: string, ta
 
   // Edges referencing this record as from or to. Edge endpoints carry their own kind since 3.7, so an edge
   // whose `from` is a fact is found here too — and `fromKind`/`toKind` are absent on a pre-3.7 edge,
-  // which means entity, which is why the kind is matched permissively for that case alone.
-  const kindMatches = (side: string) => targetKind === 'entity'
-    ? { $or: [{ [side]: targetId, [`${side}Kind`]: { $exists: false } }, { [side]: targetId, [`${side}Kind`]: 'entity' }] }
-    : { [side]: targetId, [`${side}Kind`]: targetKind };
+  // which means entity, which is why the kind is matched permissively for that case alone (`edge-ends-of-record.ts`).
   const edges = await col<EdgeDoc>(spaceCollection(spaceId, 'edges'))
-    .find(asFilter<EdgeDoc>({ spaceId, $or: [kindMatches('from'), kindMatches('to')] }), { projection: { _id: 1 } })
+    .find(asFilter<EdgeDoc>({ spaceId, ...edgeEndsAt(targetId, targetKind) }), { projection: { _id: 1 } })
     .toArray() as Array<{ _id: string }>;
   for (const e of edges) backlinks.push({ type: 'edge', _id: e._id });
 

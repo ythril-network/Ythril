@@ -111,18 +111,18 @@ describe('backlinks cover every entity reference', () => {
 
   it('edges are scanned on both endpoints', () => {
     const body = backlinkFn();
-    assert.match(body, /kindMatches\('from'\)/, 'an edge referencing the record as `from` is a backlink');
-    assert.match(body, /kindMatches\('to'\)/, 'an edge referencing the record as `to` is a backlink');
     /*
-     * And the KIND is compared, which is new and is the half that would be silently wrong.
+     * Both endpoints, and the KIND compared, which is the half that would be silently wrong.
      *
      * An edge endpoint has carried its own kind since 3.7, so `{ from: id }` alone matches an edge whose
      * `from` is a MEMORY with the same id as the entity being deleted. Ids are UUIDs from one space, so that
-     * is not a collision anybody would notice until it happened once.
+     * is not a collision anybody would notice until it happened once. Since Q-321 the scan asks the one module that
+     * spells "this edge's end is record X of kind K" (`edgeEndsAt`: both ends, the kind inside), and
+     * `edge-ends-of-record.test.js` holds what the clause says.
      */
-    assert.match(body, /\$\{side\}Kind/,
-      'the edge scan ignores the endpoint KIND, so a delete is blocked by an edge pointing at a different '
-      + 'record that happens to share the id');
+    assert.match(body, /edgeEndsAt\(targetId, targetKind\)/,
+      'the edge scan does not ask `edgeEndsAt` for the record and its kind, so an edge end of another kind that '
+      + 'shares the id would block the delete, or an end of this record would not');
   });
   it('the face reference is still scanned, and still reported as its own type', () => {
     // Both doors filter `b.type !== 'face'` to make face labels non-blocking. That distinction only works
