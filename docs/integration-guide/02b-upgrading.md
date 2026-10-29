@@ -25,9 +25,9 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 no Unicode normalisation, no collapse of `//`, `.` and `..`. A file a macOS peer delivered under a decomposed name, or one uploaded as `a//b`
 or `./a`, was stored under that id. Since then the id is the path's canonical key, so such a row was invisible to every door and an
 upgraded peer counted it in `filemeta.rejected` each time it was offered (a divergent leaf of the space hash meanwhile). **Nothing migrates at
-boot.** The first door that needs the file's row (a read, an edit, an upload, a delete, a move, a peer's metadata for it) puts it at its key,
+boot.** The first door that WRITES the file's row (an edit, an upload, a delete, a move, a peer's metadata for it) puts it at its key,
 and a networked space converges on its first sync cycle, which reads every top-level row; an un-networked space converges file by file as they
-are touched. The row keeps its version, author, creation time and metadata and takes a new landing position, which is how it reaches peers. When
+are written. A read (a download, an inspect) finds the row where it is and writes nothing, so a token that can only read never causes a write. The row keeps its version, author, creation time and metadata and takes a new landing position, which is how it reaches peers. When
 a row already stands at the key the higher version wins (the one at the key on a tie), and a row a held delete shadows is removed here as an
 arrival it shadows would be. The row's links follow it to its key (each under the instance that wrote it), or, when the row does not survive,
 leave this instance's own link rows. **No tombstone is written, for the file or for a link, and nothing a peer holds is deleted.** A failure is logged once per window and the row
