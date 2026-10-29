@@ -292,7 +292,9 @@ refused.
 **Two writes at the same moment cannot both get through.** In a *strict* space, if two writes both try to give someone
 a second manager at once, one is stored and the other is refused exactly as if it had come second, with the same
 message. In a *warn* space both are stored and reported. A link that comes in by a sync, an import or a merge is stored
-and shown by **Validate** rather than refused, so Validate is where the ones that got past are found.
+and shown by **Validate** rather than refused, so Validate is where the ones that got past are found. A sync or an import
+also counts it in its schema report, so the count an operator reads there includes the second manager and the wrong kind
+of end that arrived.
 
 **A missing end is refused too, when the space's *Strict linkage* is on.** An edge whose far end is not there — an
 entity, a fact, a chrono entry or a file — is turned away the same way, however it arrives, and nothing is saved.

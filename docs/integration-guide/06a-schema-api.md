@@ -725,6 +725,14 @@ never stops the write (it warns once and is counted in `ythril_schema_recorder_f
 | the log | one line per space and peer per window, names and counts |
 | metrics | `ythril_schema_violations_recorded_total{source}` |
 
+**An arriving edge is judged by its label's `endpoints` and `functional` rules too**, against what *this* instance stores, so
+`fromType`, `toType` and `functional` are recorded like any other field. The type of an end is the type of the entity this
+instance holds (an entity that arrives in the same page counts); an end that resolves to nothing — a dangling end, or an entity
+that arrives later — is not checked, and an edge is not judged again when its missing end arrives. `functional` is counted
+against the edges this instance stores plus the earlier edges of the same page, and the row falls on the **arriving** edge that
+gives its subject another one: the stored edge is never recounted, and an edge that arrives again as a newer version records
+nothing the copy it replaced did not. The edge is stored in every mode, `strict` included.
+
 ### An edge label can declare its ends, and whether a subject may have more than one (3.7)
 
 Two fields on an **edge** type schema, refused on the other three collections rather than silently ignored —
@@ -764,7 +772,8 @@ edits an edge — the two edge routes, `save_edge`, `update_edge`, per item thro
 an entity, fact or chrono write (refused before the record is written, so nothing is stored). The violation names
 `fromType`, `toType` or `functional` as its field, and the reason says which types the label admits. In a `warn`
 space it is reported in the response instead of refused, like every other schema rule. An edge that arrives from a
-sync peer or an import is stored as it was written, and a merge reports instead of refusing.
+sync peer or an import is stored as it was written and recorded in the arrival's `schemaViolations` (see
+[What arrivals record](#what-arrivals-record)), and a merge reports instead of refusing.
 
 **Writers that run at the same time cannot both win.** In a `strict` space an instance's own writers — the two edge
 routes, `save_edge`, `update_edge`, a bulk item and an inline edge — leave a subject at most one edge under a
@@ -773,7 +782,8 @@ winner and refused with the same `functional` violation a write made afterwards 
 keeps losing, because the subject keeps changing under it, answers `409` and writes nothing, and a relabel onto an
 identity another edge already holds answers `409 edge_identity_taken`. What this does not cover: a `warn` or `off`
 space stores the second edge (`warn` reports it), and an edge that arrives from a sync peer, a merge or an import is
-stored and reported, never refused — so a subject can still hold two, and `validate-schema` lists them. The
+stored and reported (in the arrival's own record as well as in `validate-schema`), never refused — so a subject can
+still hold two. The
 guarantee is in place from a new space's set-up, and for a space that existed before the upgrade once the background
 index pass has reached it; a space where it could not be built says so (`index _functionalGuard_1 on edges` under the `Space indexes` or `query indexes` step in
 [Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and is tried again by the next index pass,

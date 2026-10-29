@@ -53,10 +53,9 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
-import { build, peerToken } from './_push-door.mjs';
-import { openPullDoor } from './_pull-door.mjs';
+import { build } from './_push-door.mjs';
+import { arrivalHarness } from './_arrival-doors.mjs';
 import { undeclaredKeySpaces, spaceOf, MODES, namesTheKey } from './_undeclared-key-doors.mjs';
-import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -90,9 +89,9 @@ async function freshSpace(doorName, mode) {
   return id;
 }
 
-let door, engine, importMod, log, pusher = 0;
-
-const nextPeer = () => peerToken(`ukrec-peer-${++pusher}`);
+/** The four doors and what drives them are `_arrival-doors.mjs`'s, shared with every test of what an arrival records. */
+const harness = arrivalHarness({ peerPrefix: 'ukrec-peer-' });
+let door;
 
 /** A `service` entity (the type declaring `status`), carrying `props` beside a declared `status`. */
 const entity = (space, id, seq, props = {}) => build.entity(space, id, seq, { type: 'service', properties: { status: 'up', ...props } });
@@ -101,92 +100,17 @@ const keys = (...names) => Object.fromEntries(names.map(k => [k, SECRET]));
 const seed = (space, docs) => door.coll(space, 'entities').insertMany(docs.map(d => ({ ...d })));
 const storedOf = async (space) => new Map((await door.coll(space, 'entities').find({}).toArray()).map(d => [d._id, d]));
 
-/** Every log line the server writes while `fn` runs — the three levels a recorder or the cycle can speak at. */
-async function capturing(fn) {
-  const lines = [];
-  const orig = { warn: log.warn, error: log.error, info: log.info };
-  for (const k of Object.keys(orig)) log[k] = (...a) => { lines.push(a.join(' ')); };
-  try { return { result: await fn(), lines }; } finally { Object.assign(log, orig); }
-}
-
-/** One sync cycle of the real engine, and the history row it wrote (written without the cycle awaiting it). */
-async function cycle() {
-  const since = new Date().toISOString();
-  const { result, lines } = await capturing(async () => {
-    const out = await engine.runSyncForNetwork(door.NET);
-    await door.settled();
-    return out;
-  });
-  let row;
-  await waitFor(async () => {
-    row = (await door.mongo.col('_sync_history').find({ networkId: door.NET, triggeredAt: { $gte: since } }).toArray())[0];
-    return row !== undefined;
-  }, 10_000, 100, undefined, { what: 'the sync history row of the cycle that pulled the page' });
-  return { out: result, lines, history: JSON.stringify(row) };
-}
-
 /**
- * What one arrival left in every sink its door has.
- * @typedef {object} Observation
- * @property {Array<{ id: string, field: string, reason: string, value?: unknown }>} rows  per-document rows (push single, import)
- * @property {string[]} lines          every log line during the arrival
- * @property {string|null} history     the pull's sync history row, as text
- * @property {number|null} batchCount  the batch's count of documents recorded
- * @property {string} valueSinks       everything built FOR the record, as text: the lines, the history, and the import rows
+ * The four doors (`_arrival-doors.mjs`), each with what it holds for an arrival that is NOT stored: `unstored` builds one on that door.
  */
-
-/**
- * The four doors, each as "these documents arrive in this space". `perDocRows` says the door answers WHICH documents were
- * recorded, `counted` that it answers HOW MANY (the pull answers neither, so a declared violation, whose name no log line can
- * tell from another property's, is not held there), `unstored` builds an arrival that is not stored on that door.
- */
-const DOORS = {
-  'push (single)': {
-    perDocRows: true, counted: false,
-    async arrive(space, docs) {
-      const obs = { rows: [], lines: [], history: null, batchCount: null, valueSinks: '' };
-      for (const d of docs) {
-        const { result, lines } = await capturing(() => door.push('/entities', d, { spaceId: space, token: nextPeer() }));
-        assert.equal(result.code, 200, `POST /entities for '${d._id}' answered ${result.code}: ${JSON.stringify(result.body)}`);
-        for (const v of result.body.schemaViolations ?? []) obs.rows.push({ id: d._id, field: v.field, reason: v.reason, value: v.value });
-        obs.lines.push(...lines);
-      }
-      obs.valueSinks = obs.lines.join('\n');   // the response's own rows echo the value today and stay as they are
-      return obs;
-    },
-    unstored: (space, id, props) => ({ seed: [entity(space, id, 9)], doc: entity(space, id, 5, props) }),
-  },
-  'push (batch)': {
-    perDocRows: false, counted: true,
-    async arrive(space, docs) {
-      const { result, lines } = await capturing(() => door.push('/batch-upsert', { entities: docs }, { spaceId: space, token: nextPeer() }));
-      assert.equal(result.code, 200, `POST /batch-upsert answered ${result.code}: ${JSON.stringify(result.body)}`);
-      return { rows: [], lines, history: null, batchCount: result.body.entities.schemaViolations, valueSinks: lines.join('\n') };
-    },
-    unstored: (space, id, props) => ({ seed: [entity(space, id, 9)], doc: entity(space, id, 5, props) }),
-  },
-  pull: {
-    perDocRows: false, counted: false,
-    async arrive(space, docs) {
-      door.state.records = { [space]: { entities: docs } };
-      const { out, lines, history } = await cycle();
-      assert.equal(out.errors, 0, `the pull cycle failed: ${JSON.stringify(out)} ${lines.join(' | ')}`);
-      return { rows: [], lines, history, batchCount: null, valueSinks: `${lines.join('\n')}\n${history}` };
-    },
-    unstored: (space, id, props) => ({ seed: [entity(space, id, 9)], doc: entity(space, id, 5, props) }),
-  },
-  import: {
-    perDocRows: true, counted: true,
-    async arrive(space, docs) {
-      const { result, lines } = await capturing(() => importMod.importDocuments(space, { entities: docs }));
-      const reported = result.results.entities.schemaViolations ?? [];
-      const rows = reported.flatMap(r => r.violations.map(v => ({ id: r._id, field: v.field, reason: v.reason, value: v.value })));
-      return { rows, lines, history: null, batchCount: reported.length, valueSinks: `${lines.join('\n')}\n${JSON.stringify(reported)}` };
-    },
-    // A restore replaces whatever is held, so "older" does not exist there; what the writer refuses is a document with no seq.
-    unstored: (space, id, props) => { const doc = entity(space, id, 5, props); delete doc.seq; return { seed: [], doc }; },
-  },
+const UNSTORED = {
+  'push (single)': (space, id, props) => ({ seed: [entity(space, id, 9)], doc: entity(space, id, 5, props) }),
+  'push (batch)': (space, id, props) => ({ seed: [entity(space, id, 9)], doc: entity(space, id, 5, props) }),
+  pull: (space, id, props) => ({ seed: [entity(space, id, 9)], doc: entity(space, id, 5, props) }),
+  // A restore replaces whatever is held, so "older" does not exist there; what the writer refuses is a document with no seq.
+  import: (space, id, props) => { const doc = entity(space, id, 5, props); delete doc.seq; return { seed: [], doc }; },
 };
+const DOORS = Object.fromEntries(Object.entries(harness.doors('entities')).map(([name, d]) => [name, { ...d, unstored: UNSTORED[name] }]));
 
 const rowsNaming = (obs, key) => obs.rows.filter(r => r.field === `properties.${key}`);
 const linesNaming = (obs, key) => obs.lines.filter(l => l.includes(key));
@@ -197,12 +121,9 @@ const recordedOf = (obs, candidates) => candidates.filter(k => recorded(obs, k))
 
 describe('an arrival records an undeclared key once, and only what it added', { skip }, () => {
   before(async () => {
-    door = await openPullDoor({ suite: 'undeclkeysrecord', spaces: ALL_SPACES, meta: META });
-    engine = await import('../../server/dist/sync/engine.js');
-    importMod = await import('../../server/dist/api/admin-import.js');
-    ({ log } = await import('../../server/dist/util/log.js'));
+    door = await harness.open({ suite: 'undeclkeysrecord', spaces: ALL_SPACES, meta: META });
   });
-  after(async () => { await door?.close(); });
+  after(async () => { await harness.close(); });
 
   for (const [name, d] of Object.entries(DOORS)) {
     describe(name, () => {

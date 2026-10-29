@@ -31,6 +31,14 @@
  *    on: a refused page would be offered again for ever, and a quiet failure would leave the operator reading "nothing wrong" where
  *    there was something.
  *
+ * ## An edge is judged with its ends (`Q-443`)
+ *
+ * `endpoints` and `functional` need what an edge does not carry: the type of the entity at each end, and how many other edges its subject
+ * holds. {@link watchArrivals} resolves them from THIS instance's store and the page's earlier edges (`resolveEdgeEndsOfPage`, the rule the local
+ * write path asks too) and judges the arriving document and the copy it replaces with the SAME ends, so a break the copy held is not recorded
+ * again. A read that fails is a recorder failure (rule 5): the page is stored, never refused. The guard `_functionalGuard` is not this module's
+ * business and is never minted by an arrival.
+ *
  * ## What it is not
  *
  * It is not a validator (`spaces/schema-validation.ts` decides what breaks a schema) and not a classifier (`brain/write-validation.ts`
@@ -46,8 +54,9 @@ import { readStoredById } from '../db/read-by-id.js';
 import { classifyUpdateViolations, deltaBetween } from '../brain/write-validation.js';
 import { recordViewOf, viewSourceProjection, type RecordView } from '../brain/record-view.js';
 import {
-  getSpaceMeta, judgesKeys, violationsOfRecord, applyValidation, type SchemaViolation,
+  getSpaceMeta, judgesKeys, violationsOfRecord, applyValidation, endsNotResolved, type EdgeEnds, type SchemaViolation,
 } from '../spaces/schema-validation.js';
+import { resolveEdgeEndsOfPage } from '../brain/write-plan/plan-edge.js';
 import { schemaRecorderFailuresTotal, schemaViolationsRecordedTotal, type SCHEMA_RECORDING_SOURCES } from '../metrics/registry.js';
 import { log, logSafe, peerList, peerText, NAME_QUOTED } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -87,6 +96,28 @@ export interface ArrivalWatch {
   held: Map<string, { rows: SchemaViolation[]; view: RecordView }>;
 }
 
+/** What a family with no edge in it is judged with: nothing to resolve, said once. */
+const NOT_AN_EDGE = endsNotResolved('the family is not edges, so there are no ends to resolve');
+
+/**
+ * The ends each arriving document is judged with, by document: for an edge the ends THIS instance resolves from what it stores and from
+ * the page's earlier edges (`resolveEdgeEndsOfPage`, the one rule the local write path also asks), for any other kind {@link NOT_AN_EDGE}.
+ *
+ * ## What it prevents
+ *
+ * An edge judged with no ends is never found to break `endpoints` or `functional` (the validator reads an absent field as "not looked"), so
+ * what an arrival recorded under-reported for exactly those two rules (Q-443). Every version of one id shares one triplet, so they share
+ * ends: asked once per id, in the page's order. A read that fails throws into {@link watchArrivals}' own catch: the recorder fails and the
+ * write goes on (rule 5).
+ */
+async function endsOfArrivals(spaceId: string, kind: KnowledgeType, docs: readonly Doc[]): Promise<(doc: Doc) => EdgeEnds> {
+  if (kind !== 'edge') return () => NOT_AN_EDGE;
+  const first = [...new Map(docs.map(d => [d._id, d] as const)).values()];
+  const resolved = await resolveEdgeEndsOfPage(spaceId, first);
+  const byId = new Map(first.map((d, i) => [d._id, resolved[i]!] as const));
+  return (doc) => byId.get(doc._id) ?? NOT_AN_EDGE;
+}
+
 /**
  * Look at `docs` BEFORE they are written: which of them carry a violation of the space's schema, and, for those, what the copy they will
  * replace held. `null` when there is nothing to record — the family has no type schema, the space does not judge (`off`), no document has a
@@ -100,9 +131,10 @@ export async function watchArrivals(spaceId: string, collection: BrainCollection
     if (!meta || !judgesKeys(meta)) return null;
     const found = new Map<Doc, SchemaViolation[]>();
     let judged = 0;
+    const endsOf = await endsOfArrivals(spaceId, kind, docs);
     for (const doc of docs) {
       // The one switch by kind (`violationsOfRecord`), handed the document whole: never a literal of the fields a rule happens to read.
-      const rows = violationsOfRecord(meta, kind, doc);
+      const rows = violationsOfRecord(meta, kind, doc, endsOf(doc));
       if (rows.length > 0) found.set(doc, rows);
       if (++judged % YIELD_EVERY === 0) await yieldToEventLoop();
     }
@@ -111,7 +143,10 @@ export async function watchArrivals(spaceId: string, collection: BrainCollection
     // the fields a view is built from (`viewSourceProjection`), the only thing judged here, so no vector rides along with a page of them.
     const copies = await readStoredById<Doc>(spaceCollection(spaceId, collection), [...new Set([...found.keys()].map(d => d._id))], viewSourceProjection(kind));
     const held = new Map<string, { rows: SchemaViolation[]; view: RecordView }>();
-    for (const [id, copy] of copies) held.set(id, { rows: violationsOfRecord(meta, kind, copy), view: recordViewOf(kind, copy) });
+    // The copy is judged with the ends of the document that replaces it: an arrival lands on its own triplet, so both have the same two ends,
+    // and a break the copy already held is then the same row — which is what keeps a re-delivery from being recorded again (`recordedOf`).
+    const byId = new Map([...found.keys()].map(d => [d._id, d] as const));
+    for (const [id, copy] of copies) held.set(id, { rows: violationsOfRecord(meta, kind, copy, endsOf(byId.get(id)!)), view: recordViewOf(kind, copy) });
     return { spaceId, kind, meta, found, held };
   } catch (err) {
     recorderFailed(spaceId, source, err);

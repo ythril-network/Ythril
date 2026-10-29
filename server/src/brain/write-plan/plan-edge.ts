@@ -35,6 +35,7 @@ import { storedEdgeKind, edgeEndpointKind, missingRefsRefusal } from '../entity-
 import { resolveEdgeEndpointNames } from '../edge-endpoint-names.js';
 import type { EdgeDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
+import { yieldToEventLoop } from '../../util/yield-to-event-loop.js';
 import { ReadSet, type ReadWant, type Triplet } from './read-set.js';
 import type { WritePlan } from './types.js';
 import { convergeResult, finishInsert, vectorBeforeWrite } from './plan-steps.js';
@@ -145,10 +146,84 @@ export function guardFor(spaceId: string, from: string, label: string): string |
 export async function resolveEdgeEndsForWrite(
   spaceId: string, input: Pick<EdgeInput, 'from' | 'to' | 'label' | 'opts'>,
 ): Promise<ResolvedEdgeEnds> {
+  const [ends] = await resolveEdgeEndsOfPage(spaceId, [{
+    from: input.from, to: input.to, label: input.label, fromKind: input.opts?.fromKind, toKind: input.opts?.toKind,
+  }]);
+  return ends!;
+}
+
+/** An edge as a page of them carries it: the stored shape, which a peer or a backup may have filled with anything — every field may be absent or not a string. */
+export interface EdgeOfPage { from?: unknown; to?: unknown; label?: unknown; fromKind?: unknown; toKind?: unknown; [field: string]: unknown }
+
+/** Edges judged between two turns of the event loop, as the arrival recorder does (R6-1). */
+const ENDS_YIELD_EVERY = 50;
+
+/**
+ * The ends of every edge of a page, by index — the page's version of `resolveEdgeEndsForWrite`, which is its one-edge case, so a write, a
+ * patch and an arrival resolve the type of an end and the count of a functional subject by ONE rule (`resolvedEnds`).
+ *
+ * ## What it prevents
+ *
+ * The arrival recorder judged an edge with no ends, so `endpoints` and `functional` were never checked for what a peer sent or an admin
+ * restored: the local write path resolved them, the arrival did not, and the statistic an operator reads under-reported (Q-443). The
+ * resolution is here, beside the rule that reads it, and not a second copy beside the recorder.
+ *
+ * ## What it answers
+ *
+ * - **Only a label that declares a rule costs a read.** An edge whose label declares neither `endpoints` nor `functional` gets `{}` and
+ *   no round trip; a page of such edges reads nothing. The rest share ONE read set: one by-id read of the entities the ends name (chunked by
+ *   its reader) and one read of the edges at the functional subjects (chunked at 500). No triplet and no existence is asked.
+ * - **The page's EARLIER edges at a subject count as held**, as a batch write counts them (`sameBody`), grouped by `functionalSubjectKey` so
+ *   the work grows with the size of a subject and not of the page. The row therefore falls on the edge that gives its subject another one;
+ *   a stored edge that arrives again is not another edge (an edge is not its own duplicate, by identity), and a fork of it is not either.
+ * - **An end that resolves to nothing has no type** (`undefined`, not `null`): a dangling end, or an entity that arrives in a later page, is
+ *   unchecked. It reads what THIS instance stores, never what the sender believed (D-9).
+ * - **A row that cannot be an edge** (a `from`, `to` or `label` that is not a string — the subject count throws on one) gets `{}`: the
+ *   writer refuses such a document, and a recorder must not be the thing that stops a page.
+ */
+export async function resolveEdgeEndsOfPage(spaceId: string, edges: readonly EdgeOfPage[]): Promise<ResolvedEdgeEnds[]> {
+  const meta = getSpaceMeta(spaceId);
+  const governed = (label: string): boolean => {
+    const schema = meta?.typeSchemas?.edge?.[label];
+    return schema?.functional === true || schema?.endpoints !== undefined;
+  };
+  const kindOf = (kind: unknown): RefKind | undefined => (typeof kind === 'string' ? kind as RefKind : undefined);
+  const judged: Array<{ at: number; input: Pick<EdgeInput, 'from' | 'to' | 'label' | 'opts'>; functional: boolean }> = [];
+  edges.forEach((e, at) => {
+    const { from, to, label } = e;
+    if (typeof from !== 'string' || typeof to !== 'string' || typeof label !== 'string' || !governed(label)) return;
+    const fromKind = kindOf(e.fromKind);
+    const toKind = kindOf(e.toKind);
+    judged.push({
+      at, functional: isFunctionalLabel(spaceId, label),
+      input: { from, to, label, opts: { ...(fromKind ? { fromKind } : {}), ...(toKind ? { toKind } : {}) } },
+    });
+  });
+  const out: ResolvedEdgeEnds[] = edges.map(() => ({}));
+  if (judged.length === 0) return out;
+
   const view = new ReadSet(spaceId);
-  const { records, functional } = edgeWant(spaceId, input as EdgeInput);
-  await view.load({ records, ...(functional ? { functional } : {}) });
-  return resolvedEnds(view, input, isFunctionalLabel(spaceId, input.label));
+  const entityEnds = judged.flatMap(({ input }) => [
+    ...(edgeEndpointKind(input.opts?.fromKind) === 'entity' ? [input.from] : []),
+    ...(edgeEndpointKind(input.opts?.toKind) === 'entity' ? [input.to] : []),
+  ]);
+  const subjects = judged.filter(j => j.functional).map(({ input }) => ({ from: input.from, label: input.label }));
+  await view.load({ records: { entity: entityEnds }, ...(subjects.length > 0 ? { functional: subjects } : {}) });
+
+  const earlier = new Map<string, Triplet[]>();
+  let n = 0;
+  for (const { at, input, functional } of judged) {
+    const key = functionalSubjectKey(input.from, input.label);
+    const before = earlier.get(key) ?? [];
+    out[at] = resolvedEnds(view, input, functional, undefined, before);
+    if (functional) {
+      const triplet: Triplet = { from: input.from, to: input.to, label: input.label, fromKind: input.opts?.fromKind, toKind: input.opts?.toKind };
+      if (before.length === 0) earlier.set(key, before);
+      before.push(triplet);
+    }
+    if (++n % ENDS_YIELD_EVERY === 0) await yieldToEventLoop();
+  }
+  return out;
 }
 
 /**
