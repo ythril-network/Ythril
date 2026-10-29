@@ -253,7 +253,7 @@ export const update_chronoTool: ToolHandler = {
     + '- `status` — `upcoming`, `active`, `completed`, `overdue`, `cancelled`. What you set here is the '
     + 'STORED value. ' + WHAT_A_PASSED_DATE_MEANS + '\n'
     + '- `confidence` — 0 to 1, for entries that are predictions rather than records.\n'
-    + '- `tags` / `linkEntities` / `linkFacts` — each REPLACES the stored list.\n'
+    + '- `tags` / `linkEntities` / `linkFacts` — each REPLACES the stored list. A link to an entity deleted while the write ran is taken back and reported in `warnings` (`link_target_removed`); the entry stays written.\n'
     + '- `description` — replaced when sent.\n'
     + '- `properties` — MERGED key by key. String, number or boolean values only. Use `deleteFields` with '
     + '`properties.<key>` to remove one.\n'

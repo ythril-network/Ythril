@@ -180,9 +180,9 @@ export async function reconcileLinks(
    * repair it. Measured: a space with one such link converted to zero and reported `-1 link(s) created`.
    */
   opts: { additive?: boolean } = {},
-): Promise<{ added: number; removed: number }> {
+): Promise<{ added: number; removed: number; takenBack: string[] }> {
   const classes = Object.keys(desired) as RefKind[];
-  if (classes.length === 0) return { added: 0, removed: 0 };
+  if (classes.length === 0) return { added: 0, removed: 0, takenBack: [] };
 
   /*
    * Skipped for the CONVERSION, and both halves of that are deliberate. It is additive and reads its

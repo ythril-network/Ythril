@@ -172,6 +172,11 @@ is holding the delete, not the neighbourhood.
 showed you, so if anything gained a link to this entity in the meantime, the delete stops and asks again
 with the new list rather than removing something you were never shown.
 
+**A relationship saved at the very moment its entity is deleted or merged does not survive it.** If another save lands against an entity while it is being
+deleted, the relationship (or link) your instance wrote is taken back with it; if the entity was merged, it moves to the entity that remains. A save that
+loses this race is refused with *"the entity ... was deleted or merged while it was being saved"* and nothing is stored, and a fact or event saved with a
+link to such an entity is kept, without the link, and shows a warning. What a peer sent you is left alone: it is theirs.
+
 **A fact, event or file that names the entity stops the whole thing, before anything is removed.** Those are
 records of their own, so the cascade never deletes them — and when one is there, the cascade removes no link
 either. Edit those records to drop the reference, then try again. A very large hub is removed a few hundred

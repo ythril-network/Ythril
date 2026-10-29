@@ -368,6 +368,8 @@ POST /api/brain/spaces/:spaceId/edges
 
 **Response** `201`: Full edge doc.
 
+**An entity end that goes away while the edge is written is refused `409` `endpoint_removed`** (`strictLinkage` spaces; `{ "error", "code", "id" }`, `id` the entity). The ends are read before the edge is written, and a delete or merge of that entity can land in between; the write checks again afterwards, and when the entity is gone the edge is taken back (removed with its tombstone, so no peer is told of it) and nothing is stored. Read the graph again before retrying. A `PATCH` that sets an end's `fromKind` or `toKind` to entity answers the same. A batch (`save_bulk`) carries the code on the item's error row. The delete side does its half too: an edge or link THIS instance wrote that landed against an entity while it was being deleted is taken back with it, and one that landed against the absorbed entity of a merge is moved to the survivor. An edge a peer delivered is never touched by either (it is the peer's data, and sync's own link-violation record covers it).
+
 | Field | Required | Description |
 |-------|----------|-------------|
 | `from` | yes | Source record id — an entity UUID v4 unless `fromKind` says otherwise, and a space-relative PATH when `fromKind` is `file`. Returns `400` `{ "error" }` for the wrong shape, and, when `strictLinkage` is on, `400` with the `schema_violation` body (`field` `from`) for an id that names nothing, of whichever kind `fromKind` names. |

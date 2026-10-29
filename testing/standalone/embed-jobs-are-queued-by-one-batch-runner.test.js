@@ -94,7 +94,8 @@ describe('one batch runner queues embed jobs', () => {
     assert.ok(roots.length >= 1, `${COMMIT} does not exist (or holds no function) — the write lane still enqueues per record`);
     const { seen } = walkFrom(INDEX, roots);
     assert.ok(RUNNERS.some(r => seen.has(r.key)), `${COMMIT} does not reach the jobs runner`);
-    const other = ALL.filter(s => s.collection === JOBS && seen.has(s.key) && !RUNNERS.includes(s))
+    // QUEUEING is the question: the commit also RETIRES the jobs of an edge it takes back (`retireEmbedJobs`, a delete: Q-305), which queues nothing.
+    const other = ALL.filter(s => s.collection === JOBS && seen.has(s.key) && !RUNNERS.includes(s) && !['deleteOne', 'deleteMany'].includes(s.op))
       .map(s => `${s.key}:${s.line} ${s.op}`);
     assert.deepEqual(other, [], 'the commit writes the jobs collection outside the batch runner');
   });

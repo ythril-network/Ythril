@@ -31,7 +31,7 @@ export const save_edgeTool: ToolHandler = {
   description: 'Create or update a directed relationship between two entities.\n\n'
     + 'IDENTITY IS THE TRIPLET `(from, to, label)` — there is no id anywhere in the call, so EVERY repeat of the same triplet is an update of the existing edge and nothing in the arguments suggests it. Properties merge over what is stored; an absent `properties` means "leave them alone", not "clear them". Change the label and you have a second, different edge rather than a renamed one.\n\n'
     + 'DIRECTION IS PART OF THE MEANING. `from`/`to` are not interchangeable, and `depends_on` reversed is a different claim about the world. A traversal follows them separately (`direction: outbound|inbound|both`), so a reversed edge is not merely untidy — it is unreachable from the side that should have found it.\n\n'
-    + 'Both endpoints must name records that exist when the space uses strict linkage — entities by default, or a fact, chrono entry or file when `fromKind`/`toKind` says so; that is a refusal, not a dangling edge. And an edge IS a searchable record: it carries its own embedding and competes with knowledge for a recall\'s result slots, which is why `recall` has a `types` filter.\n\n'
+    + 'Both endpoints must name records that exist when the space uses strict linkage — entities by default, or a fact, chrono entry or file when `fromKind`/`toKind` says so; that is a refusal, not a dangling edge. So is an entity end that was deleted or merged while the edge was being written (`409` `endpoint_removed`; the edge was taken back, so read the graph again before retrying). And an edge IS a searchable record: it carries its own embedding and competes with knowledge for a recall\'s result slots, which is why `recall` has a `types` filter.\n\n'
     + 'A LABEL CAN DICTATE WHAT SITS AT EACH END, AND HOW MANY. A space may declare that `reports_to` runs from a person to a person, and that a person reports to at most one manager; this write is REFUSED when it breaks either, with `fromType`, `toType` or `functional` as the violation field and the admitted types in the reason. Read `typeSchemas.edge` from `space_meta` before inventing a label, or expect the refusal to teach you the model one edge at a time. A subject holds at most ONE edge under a functional label, whatever its `to`; "another edge" means a different `to` or end kind. Re-writing the same edge is never a cardinality breach — an edge is not its own duplicate. Writers that run at the same time cannot both win: in a strict space the loser is refused exactly as a sequential second write is, and only one that keeps losing answers a conflict (409). An endpoint that resolves to nothing is not a type breach, because a space may permit dangling references.\n\n'
     + 'IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.\n\n'
     + UNKNOWN_ARGUMENT_RULE,
@@ -198,7 +198,8 @@ export const update_edgeTool: ToolHandler = {
     + '\n'
     + 'RESPONSE: one line with the edge\'s id and its new `seq` — the edge\'s version, which a peer compares to know '
     + 'whether this copy is newer. An edge whose next version would pass the ceiling is refused (`409` `record_version_at_ceiling`, nothing '
-    + 'written). An id that does not exist is an error, not a silent no-op.\n\n'
+    + 'written). A patch that sets an end\'s kind to entity is refused (`409` `endpoint_removed`) when that entity was deleted meanwhile, and the edge is taken back. '
+    + 'An id that does not exist is an error, not a silent no-op.\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,

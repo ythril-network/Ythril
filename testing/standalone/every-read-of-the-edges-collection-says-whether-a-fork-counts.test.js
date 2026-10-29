@@ -115,6 +115,10 @@ const EXEMPT = {
   ...reasoned('a fork edge ending at the record is a reference to it: the delete guard and the cascade preview count it and the cascade removes it', [
     'brain/entity-delete-guard.ts:endsOfEdges', 'brain/entities.ts:findEntityReferences', 'brain/forks.ts:referencesTo',
   ]),
+  // ── Q-305: the settle after an entity removal reads what still names the removed entity, a fork edge included
+  ...reasoned('a fork edge written here that still names the removed entity is a reference to a gone record, taken back with the rest (delete) or found so the relink moves it (merge)', [
+    'brain/gone-entity-references.ts:takeBackReferencesWrittenHere', 'brain/gone-entity-references.ts:moveReferencesToSurvivor',
+  ]),
   // ── it reads by id: the id was chosen by something that already decided whether a fork counts
   ...reasoned('by id: the caller names the row, so the question whether a fork counts was answered where the id was chosen', [
     'brain/edges.ts:getEdgeById', 'brain/edges.ts:updateEdgeById', 'brain/traverse-bodies.ts:withTraverseBodies',

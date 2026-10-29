@@ -26,6 +26,7 @@ import { edgeIdFor } from './edge-id.js';
 import type { EdgeRekey } from './edge-rekey.js';
 import { relinkEdgesOfRecord, relinkLinksOfRecord, settleRekeyedEmbeds, edgesOfRecord, relationshipEdgesOfRecord, linksOfRecord } from './relink-references.js';
 import { endsOfRecord, relinkedEnds } from './edge-ends-of-record.js';
+import { settleReferencesToRemovedEntity } from './gone-entity-references.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
@@ -779,6 +780,18 @@ export async function executeMerge(
     { landed: async (w) => (await entityColl.countDocuments(asFilter<EntityDoc>(atReadSeq(survivor._id, w.seq)), { limit: 1 })) === 1 });
 
   Object.assign(survivor, { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq: written.seq, ...embeddingFields });
+
+  /*
+   * An edge or link written to the absorbed entity while the merge ran touches no document the merge's transaction wrote, so it is no write conflict and
+   * would survive naming an entity that is gone. The remover's half of the two-sided check (`brain/gone-entity-references.ts`, Q-305): what still names
+   * the absorbed id moves to the survivor. Never fails the merge, which has committed; the writer's own check still catches the edge it wrote.
+   */
+  try {
+    const late = await settleReferencesToRemovedEntity(spaceId, absorbed._id, { survivorId: survivor._id });
+    written.deletedDuplicateEdgeIds.push(...late.collapsedEdgeIds);
+  } catch (err) {
+    log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but what was written to it meanwhile could not be moved: ${peerText(err)}`);
+  }
 
   /*
    * Now that the transaction has committed. The queue takes no session, so touching it inside the transaction let

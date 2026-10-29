@@ -1620,6 +1620,7 @@
   "networks.refusal.space_name_in_use": "Another space already syncs under that name in this network. Choose another name.",
   "networks.refusal.round_expired": "Voting on this round has closed. Your vote was not counted.",
   "networks.refusal.record_version_at_ceiling": "The version of record {{id}} is at the highest number sync accepts, so this instance can no longer change or delete it. The instance that wrote it still can.",
+  "networks.refusal.endpoint_removed": "The entity {{id}} at one end of this relationship was deleted or merged while it was being saved, so the relationship was taken back. Reload the graph and try again.",
   "networks.wizard.continue": "Continue",
   "networks.wizard.back": "Back",
   "networks.wizard.step1.resultItem": "Result: use the public hostname as myUrl/instanceUrl in join flows.",

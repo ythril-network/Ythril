@@ -110,10 +110,12 @@ export class WriteConflict extends Error {
 /** What the commit did with one plan. */
 export type CommitOutcome =
   /** `linksAdded`: link rows the reconcile created for this record — what a batch reports as connections. */
-  | { readonly ok: true; readonly seq: number; readonly linksAdded?: number }
+  | { readonly ok: true; readonly seq: number; readonly linksAdded?: number; readonly linksTakenBack?: readonly string[] }
   /**
    * `code`: a refusal that has a wire code of its own — `record_version_at_ceiling` (the record's version is at the highest number sync
-   * accepts, so this instance cannot change it). A batch carries it on the item's row; a single-record door throws it
-   * (`planAndCommitOne`) so REST answers `409` and MCP the same code and sentence.
+   * accepts, so this instance cannot change it) and `endpoint_removed` (an edge's entity end was deleted or merged while the edge was written, so the edge
+   * was taken back; `removedEnd` names the end). A batch carries it on the item's row; a single-record door throws it
+   * (`planAndCommitOne`) so REST answers `409` and MCP the same code and sentence. `linksTakenBack` (on a written record): the entities whose link
+   * rows were taken back because the entity was deleted meanwhile (`link_target_removed`).
    */
-  | { readonly ok: false; readonly reason: string; readonly stale?: boolean; readonly code?: string };
+  | { readonly ok: false; readonly reason: string; readonly stale?: boolean; readonly code?: string; readonly removedEnd?: { readonly id: string; readonly side: 'from' | 'to' } };

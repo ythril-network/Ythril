@@ -214,7 +214,7 @@ export const update_factTool: ToolHandler = {
     + '- `tags` — REPLACES the stored list. See above.\n'
     + '- `linkEntities` — REPLACES the stored links. UUID v4 each, and in a space with strict linkage every one '
     + 'must resolve to an entity that exists in the member space this write lands in. Before 3.0 this path '
-    + 'checked nothing and wrote any string through as a link.\n'
+    + 'checked nothing and wrote any string through as a link. A link to an entity deleted while the write ran is taken back and reported in `warnings` (`link_target_removed`); the fact stays written.\n'
     + '- `description` — replaced when sent.\n'
     + '- `properties` — MERGED key by key. String, number or boolean values only.\n'
     + '- `deleteFields` — dot-notation paths to remove, permanently and with no undo. System fields are '

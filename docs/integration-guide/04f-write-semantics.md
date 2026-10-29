@@ -242,6 +242,12 @@ file. A connection field a record does not take is an unknown field. They mean e
 A body carrying only a connection field is a valid patch. Change a record's links this way rather than by
 deleting and re-creating it, which costs the record its id and its history.
 
+**A reference written while its entity is deleted or merged is taken back (`strictLinkage` spaces).** A write checks that an edge's entity ends and a link's
+target exist, and a delete or merge of that entity can commit between the check and the write; no write conflict is reported, because the two touch different
+documents. So each side checks again after its own write: an edge whose entity is gone is refused `409` `endpoint_removed` and a link is taken back with a
+`link_target_removed` warning, and the delete or merge takes back (delete) or moves to the survivor (merge) what this instance wrote to the entity meanwhile.
+A peer's row is never changed by this. See [Upsert an Edge](04b-graph-api.md#upsert-an-edge) and [Links](04g-links-api.md).
+
 **A connection the write cannot honour changes nothing — the other fields of the patch included.** An `edges` entry
 the space's schema refuses, or on a `strictLinkage` space whose far end names nothing (of any kind), answers `422`
 with the `schema_violation` body and `field` naming the entry (`edges[0].to`); a `link*` id that names nothing, or a

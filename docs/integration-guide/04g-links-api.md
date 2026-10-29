@@ -57,6 +57,11 @@ add-only trap. Under `strictLinkage` every id must resolve, and the call is refu
 link that points at nothing. A refused id stores nothing — the record included — and so does a refused entry of the
 same call's `edges` ([A refused connection writes nothing](04-brain-api.md#a-refused-connection-writes-nothing)).
 
+**An entity deleted while the write runs is reported, not refused.** The ids are checked before the write and a delete can land between the check and the
+link rows; the write checks the entities again afterwards. A link whose entity is gone is taken back (removed with its tombstone), the record that carried it
+stays written, and the answer's `warnings` carries a row whose `reason` starts `link_target_removed` and names the entity (`field` is `linkEntities`, `value` the
+entity id) — on `fact` and `chrono` creates and updates, REST and MCP alike. A batch's `connections.links` does not count it.
+
 **The 4.x spelling is REFUSED, by name.** A body carrying `entityIds`, `memoryIds` or `chronoIds` gets a
 `400` naming the field to send instead — the same sentence on both doors, and the ids do not change. The
 call is refused whole, so a body carrying one stores nothing. `[]` and `null` are

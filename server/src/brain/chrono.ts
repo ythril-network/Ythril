@@ -1,4 +1,5 @@
 import { reconcileLinks, assertDesiredLinks } from './links.js';
+import { takenBackLinkWarnings } from './gone-entity-references.js';
 import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
@@ -125,10 +126,13 @@ export async function createChrono(
    * The DOOR, and nothing else. Every rule a chrono write applies is in `write-plan/plan-chrono.ts`, decided
    * against a read set; the write is the commit's. A batch asks for the same plans in bulk (`Q-99` part 3).
    */
-  const input: ChronoInput = { fields, ttlDays, opts };
+  // A link taken back because its entity was deleted while this was written is a warning on the answer (`link_target_removed`, Q-305).
+  const takenBack = takenBackLinkWarnings(opts?.onValidation);
+  const input: ChronoInput = { fields, ttlDays, opts: takenBack.onValidation ? { ...opts, onValidation: takenBack.onValidation } : opts };
   // Refused before the plan pays for an embedding; the commit asks again per stage, for a write admitted just before an act registers.
   assertSpaceTakesWrites(spaceId, 'chrono');
   const done = await planAndCommitOne(spaceId, chronoWant(input), view => planChrono(spaceId, input, view));
+  takenBack.announce(done.linksTakenBack);
   const entry = { ...done.plan.result, seq: done.seq } as unknown as ChronoEntry;
   // `chrono.updated`, not `created`, on a converge — a subscriber must be able to tell a retry from a new entry.
   if (actor) {
@@ -154,6 +158,8 @@ export async function updateChrono(
 ): Promise<ChronoEntry | null> {
   // Refused before anything is read; the write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'chrono');
+  // A link taken back because its entity was deleted while this was written is a warning on the answer (`link_target_removed`, Q-305).
+  const takenBack = takenBackLinkWarnings(onValidation);
   const existing = await col<ChronoEntry>(spaceCollection(spaceId, 'chrono'))
     .findOne(asFilter<ChronoEntry>({ _id: id, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as ChronoEntry | null;
@@ -245,7 +251,7 @@ export async function updateChrono(
   {
     const check = classifyChronoUpsertAgainst(getSpaceMeta(spaceId), existing, recordAfterPatch(existing, $set, $unset));
     if (check.blocked) throw new SchemaViolationError(check);
-    onValidation?.(check);
+    takenBack.onValidation?.(check);
   }
 
   applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
@@ -296,7 +302,7 @@ export async function updateChrono(
   if (updates.linkEntities !== undefined) desired.entity = updates.linkEntities;
   if (updates.linkFacts !== undefined) desired.fact = updates.linkFacts;
   if (Object.keys(desired).length > 0) {
-    await reconcileLinks(spaceId, updatedChrono._id, 'chrono', desired, updatedChrono.author);
+    takenBack.announce((await reconcileLinks(spaceId, updatedChrono._id, 'chrono', desired, updatedChrono.author)).takenBack);
   }
   if (actor) emitWebhookEvent({ event: 'chrono.updated', spaceId, entry: eventEntryOf(updatedChrono), ...actor });
   return withoutVector(updatedChrono);
