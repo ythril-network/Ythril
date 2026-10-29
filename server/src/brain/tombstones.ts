@@ -12,6 +12,7 @@ import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { TOMBSTONE_COLLECTION, type BrainCollection } from '../config/types-knowledge.js';
 import { admitSpaceWrite } from '../spaces/space-write-gate.js';
 import { inHeldTransaction } from './held-transaction.js';
+import { readStoredById } from '../db/read-by-id.js';
 
 /*
  * A tombstone a PEER delivered is applied by `applyPeerTombstones` (`sync/tombstone-apply.ts`), not here: this
@@ -183,7 +184,7 @@ export async function removeWithTombstones(
         await writeTombstones(spaceId, chunk, chunkVersions, s);
       }, {
         // A commit whose answer was lost may have landed: it did when none of the chunk's rows is stored any more (under the filter that narrowed the delete).
-        landed: async () => (await coll.countDocuments(asFilter<{ _id: string }>(andPredicates({ _id: { $in: chunk.map(t => t._id) } }, filter) as never), { limit: 1 })) === 0,
+        landed: async () => (await readStoredById(spaceCollection(spaceId, part), chunk.map(t => t._id), { _id: 1 }, filter ? { filter } : {})).size === 0,
       });
     }
   });
