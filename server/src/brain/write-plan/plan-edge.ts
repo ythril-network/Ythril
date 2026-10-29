@@ -36,7 +36,7 @@ import { resolveEdgeEndpointNames } from '../edge-endpoint-names.js';
 import type { EdgeDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { yieldToEventLoop } from '../../util/yield-to-event-loop.js';
-import { ReadSet, type ReadWant, type Triplet } from './read-set.js';
+import { ReadSet, type ForkRows, type ReadWant, type Triplet } from './read-set.js';
 import type { WritePlan } from './types.js';
 import { convergeResult, finishInsert, vectorBeforeWrite } from './plan-steps.js';
 
@@ -180,8 +180,15 @@ const ENDS_YIELD_EVERY = 50;
  *   unchecked. It reads what THIS instance stores, never what the sender believed (D-9).
  * - **A row that cannot be an edge** (a `from`, `to` or `label` that is not a string — the subject count throws on one) gets `{}`: the
  *   writer refuses such a document, and a recorder must not be the thing that stops a page.
+ * - **A fork neither counts nor is counted for `functional`** ("a fork is never another edge", P-6). A row carrying a string `forkOf` — the
+ *   unchosen version of an edge, planned as a fork here or replicated as one — is given no count, and its triplet is never added to the page's
+ *   earlier edges, so it records no `functional` for a subject it adds nothing to and gives no later edge of the page another one to meet. Its
+ *   ENDS are resolved like any edge's: it is the same relationship as its parent, and `endpoints` judges what the sender chose.
+ * - **An end that names an entity FORK row is unresolved** under `forkEnds: 'unresolved'` (the arrival recorder): an unchosen version is not
+ *   what an end names, and the refusal a write meets (`ForkRowReadOnly`) would end the recording of the whole page, property violations
+ *   included. The default `'refuse'` is the local write path's, which keeps that refusal: a patch onto a fork row stays refused.
  */
-export async function resolveEdgeEndsOfPage(spaceId: string, edges: readonly EdgeOfPage[]): Promise<ResolvedEdgeEnds[]> {
+export async function resolveEdgeEndsOfPage(spaceId: string, edges: readonly EdgeOfPage[], forkEnds: ForkRows = 'refuse'): Promise<ResolvedEdgeEnds[]> {
   const meta = getSpaceMeta(spaceId);
   const governed = (label: string): boolean => {
     const schema = meta?.typeSchemas?.edge?.[label];
@@ -194,8 +201,9 @@ export async function resolveEdgeEndsOfPage(spaceId: string, edges: readonly Edg
     if (typeof from !== 'string' || typeof to !== 'string' || typeof label !== 'string' || !governed(label)) return;
     const fromKind = kindOf(e.fromKind);
     const toKind = kindOf(e.toKind);
+    const fork = typeof e.forkOf === 'string';
     judged.push({
-      at, functional: isFunctionalLabel(spaceId, label),
+      at, functional: !fork && isFunctionalLabel(spaceId, label),
       input: { from, to, label, opts: { ...(fromKind ? { fromKind } : {}), ...(toKind ? { toKind } : {}) } },
     });
   });
@@ -215,7 +223,7 @@ export async function resolveEdgeEndsOfPage(spaceId: string, edges: readonly Edg
   for (const { at, input, functional } of judged) {
     const key = functionalSubjectKey(input.from, input.label);
     const before = earlier.get(key) ?? [];
-    out[at] = resolvedEnds(view, input, functional, undefined, before);
+    out[at] = resolvedEnds(view, input, functional, undefined, before, forkEnds);
     if (functional) {
       const triplet: Triplet = { from: input.from, to: input.to, label: input.label, fromKind: input.opts?.fromKind, toKind: input.opts?.toKind };
       if (before.length === 0) earlier.set(key, before);
@@ -244,13 +252,13 @@ export async function resolveEdgeEndsOfPage(spaceId: string, edges: readonly Edg
  */
 function resolvedEnds(
   view: ReadSet, input: Pick<EdgeInput, 'from' | 'to' | 'label' | 'opts'>, functional: boolean,
-  subject?: EdgeSubject, sameBody: readonly Triplet[] = [],
+  subject?: EdgeSubject, sameBody: readonly Triplet[] = [], forkEnds: ForkRows = 'refuse',
 ): ResolvedEdgeEnds {
   const out: ResolvedEdgeEnds = {};
   // The subject's type is the type its record will HAVE, so it is never read back from the store (which holds the old one).
   const typeOf = (id: string): string | null | undefined => {
     if (id === subject?.id) return subject.type;
-    const doc = view.stored('entity', id);
+    const doc = view.stored('entity', id, forkEnds);
     return doc === null ? undefined : (typeof doc['type'] === 'string' ? doc['type'] : null);
   };
   if (edgeEndpointKind(input.opts?.fromKind) === 'entity') {

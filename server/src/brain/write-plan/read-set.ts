@@ -93,6 +93,9 @@ export function mergeWants(wants: readonly ReadWant[]): ReadWant {
   return { records, exist, triplets, functional, nameTypes };
 }
 
+/** What a read of a stored record does with a fork row: refuse it (a write's read), or answer it as unresolved (a look). */
+export type ForkRows = 'refuse' | 'unresolved';
+
 export class ReadSet {
   private readonly records = new Map<ReadKind, Map<string, StoredRecord | null>>();
   /** Per kind: whether an id names a stored record, for the ids only asked about (`ReadWant.exist`). */
@@ -174,12 +177,19 @@ export class ReadSet {
     }
   }
 
-  /** The record as stored (or as this batch has planned it), `null` when absent. Throws when never loaded. */
-  stored(kind: ReadKind, id: string): StoredRecord | null {
+  /**
+   * The record as stored (or as this batch has planned it), `null` when absent. Throws when never loaded.
+   *
+   * A FORK row is refused (`forkRow: 'refuse'`, the default): this is the one door every planner reads a stored copy through, so a save by id
+   * onto one stops here (Q-624 §8, S7). A reader that only LOOKS (the arrival recorder asking what type an edge's end has) says
+   * `'unresolved'` and is answered `null`, as for a record nothing holds: an unchosen version is not what an end names, and a refusal
+   * meant for a write must not stop the recording of a page of arrivals (Q-443).
+   */
+  stored(kind: ReadKind, id: string, forkRow: ForkRows = 'refuse'): StoredRecord | null {
     const held = this.recordsOf(kind);
     if (!held.has(id)) throw new Error(`read set: ${kind} '${id}' was asked about but never loaded`);
     const row = held.get(id)!;
-    // The one door every planner reads a stored copy through, so a save by id onto a FORK row is refused here (Q-624 §8, S7): the row is read whole.
+    if (forkRow === 'unresolved' && row && typeof row['forkOf'] === 'string') return null;
     refuseForkEdit(kind, row);
     return row;
   }

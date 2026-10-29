@@ -731,7 +731,10 @@ instance holds (an entity that arrives in the same page counts); an end that res
 that arrives later — is not checked, and an edge is not judged again when its missing end arrives. `functional` is counted
 against the edges this instance stores plus the earlier edges of the same page, and the row falls on the **arriving** edge that
 gives its subject another one: the stored edge is never recounted, and an edge that arrives again as a newer version records
-nothing the copy it replaced did not. The edge is stored in every mode, `strict` included.
+nothing the copy it replaced did not. A **fork** (an unchosen version of an edge, `forkOf` set) neither counts nor is counted for
+`functional`: a fork of an edge of a subject that already holds two adds none, and a fork row earlier in a page is not another
+edge for a later one. An end that names an entity **fork row** is treated as unresolved too (not checked), and never stops the
+rest of the page from being recorded. The edge is stored in every mode, `strict` included.
 
 ### An edge label can declare its ends, and whether a subject may have more than one (3.7)
 
