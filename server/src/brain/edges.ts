@@ -27,6 +27,7 @@ import { planEdge, edgeWant, resolveEdgeEndsForWrite, guardFor, type EdgeInput }
 import { writeRelabel } from './write-plan/guarded-relabel.js';
 import { FUNCTIONAL_GUARD, UNSET_GUARD } from '../sync/local-only-fields.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
+import { refuseEdgeToGoneEntity } from './gone-entity-references.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
@@ -305,6 +306,7 @@ export async function updateEdgeById(
    * alike. Stamped when the new label is functional and the space refuses (`guardFor`, the one place that asks).
    */
   const relabelled = updates.label !== undefined && updates.label !== existing.label;
+  const kindChanged = updates.fromKind !== undefined || updates.toKind !== undefined;
   const functionalGuard = relabelled ? guardFor(spaceId, existing.from, newLabel) : undefined;
   const relabelTarget = { id: existing._id, from: existing.from, to: existing.to, label: newLabel, fromKind: existing.fromKind, toKind: existing.toKind };
 
@@ -358,6 +360,7 @@ export async function updateEdgeById(
       { landed: async (r) => r === null || (await collection.countDocuments(
         asFilter<EdgeDoc>(atReadSeq(r.edge._id, r.edge.seq)), { limit: 1 })) === 1 }), classify);
     if (moved) {
+      if (kindChanged) await refuseEdgeToGoneEntity(spaceId, moved.edge);   // Q-305: an end changed to an entity that is gone
       // The queue AFTER the write, and here rather than inside `rekeyEdge` — see `embedQueueWorkFor`. There
       // is no transaction on this path, so the write is already durable. The embed text is built from the
       // label and the endpoint names, so a re-key always changes it.
@@ -409,6 +412,7 @@ export async function updateEdgeById(
   }).inc();
   // Nothing matched, so nothing was written; the response below is built from `existing`.
   if (!beforeWrite) return null;
+  if (kindChanged) await refuseEdgeToGoneEntity(spaceId, recordAfterPatch(existing, $set, $unset) as unknown as EdgeDoc);   // Q-305
 
   const result = {
     ...existing,

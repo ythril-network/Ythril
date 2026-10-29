@@ -75,12 +75,14 @@ before(async () => {
   // And the `code` a write at its version ceiling answers (`409`, the four update tools and the fork resolve name it), from the constant the doors answer with.
   const { RECORD_VERSION_AT_CEILING } = await import('../../server/dist/brain/write-precondition.js');
   // And the `code` an ordinary edit of a fork row, or a re-key past the fork cap, answers (Q-624: `fork_row_read_only`, `fork_cap`), from their one list.
-  const { FORK_REFUSAL_CODES } = await import('../../server/dist/util/errors.js');
+  const { FORK_REFUSAL_CODES, ENDPOINT_REMOVED } = await import('../../server/dist/util/errors.js');
+  // And the warning a link taken back because its entity was deleted meanwhile carries (`link_target_removed`, Q-305), from its constant.
+  const { LINK_TARGET_REMOVED } = await import('../../server/dist/brain/gone-entity-references.js');
   assert.ok(FORK_REFUSAL_CODES?.length >= 2, 'the fork refusal codes were not read');
   // And the `code` a create or a rename answers while a deleted space's search-index drop still runs (`space_still_being_removed`), from its constant.
   const { SPACE_STILL_BEING_REMOVED } = await import('../../server/dist/spaces/search-index-drops-in-flight.js');
   ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
-    ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, SPACE_STILL_BEING_REMOVED];
+    ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 

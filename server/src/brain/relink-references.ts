@@ -26,6 +26,7 @@
  */
 import type { ClientSession } from 'mongodb';
 import { col, asFilter, asBulk } from '../db/mongo.js';
+import { andPredicates } from '../db/and-predicates.js';
 import { versionsFor } from '../util/version-stamp.js';
 import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
 import { writeInOneCommands } from '../db/one-command.js';
@@ -76,6 +77,19 @@ export function linksOfRecord(spaceId: string, id: string, kind: RelinkKind) {
   return kind === 'entity'
     ? asFilter<LinkDoc>({ spaceId, $or: [{ to: id, toKind: 'entity' }, { from: id, fromKind: 'entity' }] })
     : asFilter<LinkDoc>({ spaceId, $or: [{ from: id, fromKind: kind }, { to: id, toKind: kind }] });
+}
+
+/**
+ * The ids and versions of the links on the end of a record, optionally narrowed (`narrowedTo`, ANDed: the delete's settle asks only for the rows this instance wrote).
+ * Read here, beside {@link linksOfRecord}, because this module is where the links collection is opened for "what names this record"; a caller that needs the rows to
+ * remove them gets them from here rather than opening the collection with its own idea of a link row.
+ */
+export async function linkRowsOfRecord(
+  spaceId: string, id: string, kind: RelinkKind, narrowedTo?: Record<string, unknown>,
+): Promise<Array<Pick<LinkDoc, '_id' | 'seq'>>> {
+  return await col<LinkDoc>(spaceCollection(spaceId, 'links'))
+    .find(andPredicates(linksOfRecord(spaceId, id, kind), narrowedTo) as never, { projection: { _id: 1, seq: 1 } })
+    .toArray() as Array<Pick<LinkDoc, '_id' | 'seq'>>;
 }
 
 /** How many identities one collision read asks for: an `$or` of this many exact tuples. */

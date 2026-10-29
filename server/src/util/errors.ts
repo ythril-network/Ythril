@@ -150,6 +150,24 @@ export class ForkCapRefusal extends Error {
   }
 }
 
+/** The code of the refusal below. A constant, never a literal at a site: the clients' words are keyed by it (`networks.refusal.endpoint_removed`). */
+export const ENDPOINT_REMOVED = 'endpoint_removed';
+
+/**
+ * An edge was written while the entity at one of its ends was deleted or merged away, in a `strictLinkage` space (Q-305). The write read that the end existed and
+ * landed after the delete, which touches another document, so the store reports no conflict; the writer's own check after its write found the entity gone and
+ * took the edge back. `409`, `{ error, code, id }` on every door that answers a write (`connectionRefusalAnswer`; MCP carries the same body and sentence).
+ */
+export class EndpointRemoved extends Error {
+  override readonly name = 'EndpointRemoved';
+  readonly code = ENDPOINT_REMOVED;
+  readonly status = 409 as const;
+  constructor(readonly id: string, readonly side: 'from' | 'to') {
+    super(`The entity '${id}' at this edge's ${side} end was deleted or merged while the edge was written; the edge was taken back (or moved with a merge). `
+      + 'Read the graph again before retrying.');
+  }
+}
+
 /**
  * A peer answered a sync request in the 5.x shape: a page with no `through`, `head` or `positions`, or a push answer without `positions: 1`. 6.0 pages
  * by position and a 5.x peer cannot be synced with by these rules, so the client THROWS this from both parsers (`sync/wire-answer.ts`); the engine ends

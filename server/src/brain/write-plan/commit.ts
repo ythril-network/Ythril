@@ -43,6 +43,8 @@ import { writeFilterFor, RecordVersionAtCeiling, RECORD_VERSION_AT_CEILING } fro
 import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { linkIdFor } from '../link-id.js';
 import { removeWithTombstones } from '../tombstones.js';
+import { takeBackEdgesToGoneEntities, takeBackLinksToGoneEntities } from '../gone-entity-references.js';
+import { EndpointRemoved, ENDPOINT_REMOVED } from '../../util/errors.js';
 import type { AuthorRef, EdgeDoc, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
@@ -91,8 +93,7 @@ export async function commitPlans(spaceId: string, plans: readonly WritePlan[]):
     } finally {
       leaveWriteUnit();
     }
-    landed.push(...stageLanded);
-    await afterStage(spaceId, plans, stageLanded, outcomes);
+    landed.push(...await afterStage(spaceId, plans, stageLanded, outcomes));
   }
 
   runDupeRules(spaceId, landed.map(i => plans[i]!).filter(p => p.dupeRules));
@@ -236,11 +237,41 @@ async function readSeqs(collName: string, ids: readonly string[]): Promise<Map<s
   return new Map([...stored].map(([id, d]) => [id, d.seq]));
 }
 
-/** A landed stage's link rows and embed jobs. Never throws: the records are stored, and saying otherwise lies. */
-async function afterStage(
+/**
+ * The writer's half of the two-sided check (`brain/gone-entity-references.ts`, Q-305): an edge that landed against an entity deleted or merged away
+ * since it was planned is taken back and its outcome says so. Returns the indexes of the edges taken back. Never throws: a failure to take one back is said,
+ * and the edge keeps the outcome it had (a stored edge reported failed would invite a resend), so what is owed is in the log.
+ */
+async function refuseEdgesToGoneEntities(
   spaceId: string, plans: readonly WritePlan[], landed: readonly number[], outcomes: Array<CommitOutcome | undefined>,
-): Promise<void> {
-  if (landed.length === 0) return;
+): Promise<Set<number>> {
+  const taken = new Set<number>();
+  try {
+    const refused = await takeBackEdgesToGoneEntities(spaceId, landed.map(i => {
+      const r = plans[i]!.result as { from: string; to: string; fromKind?: RefKind; toKind?: RefKind };
+      return { _id: plans[i]!.id, from: r.from, to: r.to, fromKind: r.fromKind, toKind: r.toKind };
+    }));
+    for (const i of landed) {
+      const end = refused.get(plans[i]!.id);
+      if (!end) continue;
+      taken.add(i);
+      outcomes[i] = { ok: false, reason: new EndpointRemoved(end.id, end.side).message, code: ENDPOINT_REMOVED, removedEnd: end };
+    }
+  } catch (err) {
+    log.warn(`write commit: ${landed.length} edge(s) written to '${peerText(spaceId)}' could not be checked against entities removed meanwhile: ${peerText(err)}`);
+  }
+  return taken;
+}
+
+/** A landed stage's link rows and embed jobs. Returns the indexes that still stand. Never throws: the records are stored, and saying otherwise lies. */
+async function afterStage(
+  spaceId: string, plans: readonly WritePlan[], stageLanded: readonly number[], outcomes: Array<CommitOutcome | undefined>,
+): Promise<number[]> {
+  if (stageLanded.length === 0) return [];
+  // Before the links and embed jobs: an edge taken back has nothing to link or embed.
+  const takenBack = plans[stageLanded[0]!]!.kind === 'edge' ? await refuseEdgesToGoneEntities(spaceId, plans, stageLanded, outcomes) : new Set<number>();
+  const landed = stageLanded.filter(i => !takenBack.has(i));
+  if (landed.length === 0) return [];
   const withLinks = landed.filter(i => plans[i]!.links);
   if (withLinks.length > 0) {
     try {
@@ -249,7 +280,7 @@ async function afterStage(
       })));
       withLinks.forEach((i, k) => {
         const o = outcomes[i];
-        if (o?.ok) outcomes[i] = { ...o, linksAdded: counts[k]!.added };
+        if (o?.ok) outcomes[i] = { ...o, linksAdded: counts[k]!.added, ...(counts[k]!.takenBack.length > 0 ? { linksTakenBack: counts[k]!.takenBack } : {}) };
       });
     } catch (err) {
       // The records are stored, so their outcomes stay `ok`: reporting them failed would invite a resend that
@@ -265,6 +296,7 @@ async function afterStage(
       log.warn(`write commit: ${toQueue.length} record(s) in '${peerText(spaceId)}' were written but not queued for embedding: ${peerText(String(err))}`);
     });
   }
+  return landed;
 }
 
 /** Insert-time duplicate rules for the landed records that asked for them — bounded, and never awaited by the write. */
@@ -303,7 +335,7 @@ export interface LinkReconcile {
  */
 export async function reconcileLinkRows(
   spaceId: string, records: readonly LinkReconcile[], opts: { additive?: boolean } = {},
-): Promise<Array<{ added: number; removed: number }>> {
+): Promise<Array<{ added: number; removed: number; takenBack: string[] }>> {
   // Refused before the rows are read; the removals and additions below are admitted and counted again, at the instant they are made.
   assertSpaceTakesWrites(spaceId, 'links');
   const wantedBy = records.map(r => {
@@ -335,14 +367,14 @@ export async function reconcileLinkRows(
   }
 
   const removals: string[] = [];
-  const additions: Array<{ _id: string; r: LinkReconcile; to: string; toKind: RefKind }> = [];
+  const additions: Array<{ _id: string; r: LinkReconcile; at: number; to: string; toKind: RefKind }> = [];
   const counts = records.map((r, i) => {
     const have = new Set(existingBy[i]);
     const removed = opts.additive ? [] : existingBy[i]!.filter(id => !wantedBy[i]!.has(id));
     const added = [...wantedBy[i]!].filter(([id]) => !have.has(id));
     removals.push(...removed);
-    for (const [_id, { to, toKind }] of added) additions.push({ _id, r, to, toKind });
-    return { added: added.length, removed: removed.length };
+    for (const [_id, { to, toKind }] of added) additions.push({ _id, r, at: i, to, toKind });
+    return { added: added.length, removed: removed.length, takenBack: [] as string[] };
   });
 
   const tombstones = col<TombstoneDoc>(spaceCollection(spaceId, 'tombstones'));
@@ -370,6 +402,14 @@ export async function reconcileLinkRows(
         }))), { ordered: false });
         await tombstones.deleteMany(asFilter<TombstoneDoc>({ _id: { $in: additions.map(a => a._id) } }));
       }, 'link.reconcile.add');
+      // The writer's half of the two-sided check (Q-305): a row that names an entity deleted meanwhile is taken back, and the record that carried it keeps its write.
+      const taken = await takeBackLinksToGoneEntities(spaceId, additions.map((a, i) => ({ _id: a._id, to: a.to, toKind: a.toKind, seq: versions[i]!.version })));
+      for (const a of additions) {
+        const entityId = taken.get(a._id);
+        if (entityId === undefined) continue;
+        counts[a.at]!.added--;
+        counts[a.at]!.takenBack.push(entityId);
+      }
     }
   });
   return counts;

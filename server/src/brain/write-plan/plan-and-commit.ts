@@ -21,6 +21,7 @@ import { healStaleMarker } from './heal-stale-marker.js';
 import { FUNCTIONAL_GUARD } from '../../sync/local-only-fields.js';
 import { WriteConflict, type CommitOutcome, type WritePlan } from './types.js';
 import { RecordVersionAtCeiling, RECORD_VERSION_AT_CEILING } from '../write-precondition.js';
+import { EndpointRemoved } from '../../util/errors.js';
 
 /** The write guard an INSERT plan carries (an edge under a functional label in a space that refuses), or `undefined`. */
 function guardOf(plan: WritePlan): string | undefined {
@@ -73,11 +74,13 @@ export async function planAndCommitOne<R extends { plan: WritePlan }>(
   spaceId: string,
   want: ReadWant,
   planOne: (view: ReadSet) => Promise<R>,
-): Promise<R & { seq: number }> {
+): Promise<R & { seq: number; linksTakenBack: readonly string[] }> {
   const { planned, outcome } = await planAndCommit(spaceId, want, planOne, 2);
-  if (outcome.ok) return { ...planned, seq: outcome.seq };
+  if (outcome.ok) return { ...planned, seq: outcome.seq, linksTakenBack: outcome.linksTakenBack ?? [] };
   if ('conflict' in outcome) throw outcome.conflict;
   // The record's version is at the ceiling: the same typed refusal every other stamping site throws, not a message in a plain `Error`.
   if ('code' in outcome && outcome.code === RECORD_VERSION_AT_CEILING) throw new RecordVersionAtCeiling(planned.plan.id);
+  // An edge whose entity end was deleted or merged while it was written, taken back by the commit (Q-305): the typed refusal, 409 on both doors.
+  if ('removedEnd' in outcome && outcome.removedEnd) throw new EndpointRemoved(outcome.removedEnd.id, outcome.removedEnd.side);
   throw new Error(outcome.reason);
 }

@@ -27,6 +27,7 @@
  */
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
+import { andPredicates } from '../db/and-predicates.js';
 import { inChunks } from '../util/chunks.js';
 import { log, peerText } from '../util/log.js';
 import { inHeldTransaction } from './held-transaction.js';
@@ -49,13 +50,19 @@ export const RECORD_REMOVAL_CHUNK = 500;
  * What a kind needs once its removal committed, besides the embed jobs every kind retires: the one place the per-kind difference lives. A kind with
  * nothing to add says so with a function that does nothing, so a new kind cannot be added without deciding.
  */
-export const AFTER_REMOVAL: Readonly<Record<RemovableKind, (spaceId: string, ids: readonly string[]) => Promise<void>>> = {
+export const AFTER_REMOVAL: Readonly<Record<RemovableKind, (spaceId: string, ids: readonly string[], actor?: WebhookActor) => Promise<void>>> = {
   // The links a deleted fact or chrono entry STARTS describe a connection whose subject no longer exists, and nothing else would ever remove them.
   // Links pointing AT one belong to the readers' slice: removing them would delete another record's data.
   fact: async (spaceId, ids) => { await (await import('./links.js')).removeLinksFromMany(spaceId, ids, 'fact'); },
   chrono: async (spaceId, ids) => { await (await import('./links.js')).removeLinksFromMany(spaceId, ids, 'chrono'); },
   // Erasure has to reach the biometric copy too (`unlabelFacesForEntities`). Imported where it runs: `entities.ts` removes through this module.
-  entity: async (spaceId, ids) => { await (await import('./entities.js')).unlabelFacesForEntities(spaceId, [...ids]); },
+  entity: async (spaceId, ids, actor) => {
+    await (await import('./entities.js')).unlabelFacesForEntities(spaceId, [...ids]);
+    // An edge or link written to the entity after its remover read the references (Q-305): taken back here, in the one place every door's delete passes,
+    // so none can omit it. A merge's absorbed entity is settled by `executeMerge`, which moves them instead.
+    const { settleReferencesToRemovedEntity } = await import('./gone-entity-references.js');
+    for (const id of ids) await settleReferencesToRemovedEntity(spaceId, id, actor ? { actor } : {});
+  },
   edge: async () => {},
 };
 
@@ -63,13 +70,16 @@ export const AFTER_REMOVAL: Readonly<Record<RemovableKind, (spaceId: string, ids
  * Remove `ids` (records of `kind` in `spaceId`) with their tombstones; returns the ids that were stored and are now gone. The space is asked whether it
  * takes writes of this kind's collection by the delete itself (`removeWithTombstones` is an admitted, counted unit), so a refusal aborts the chunk and
  * nothing is removed.
+ *
+ * `opts.filter` narrows what is removed to the stored rows that also match it, ANDed into the read of the chunk's seqs and into the delete: the writer's
+ * take-back of an edge removes it only while it still names the entity that is gone (Q-305), so a row moved or rewritten meanwhile is not removed.
  */
 export async function removeRecords(
-  spaceId: string, kind: RemovableKind, ids: readonly string[], actor?: WebhookActor,
+  spaceId: string, kind: RemovableKind, ids: readonly string[], actor?: WebhookActor, opts: { filter?: Record<string, unknown> } = {},
 ): Promise<Set<string>> {
   const gone = new Set<string>();
   for (const chunk of inChunks(ids, RECORD_REMOVAL_CHUNK)) {
-    const { removed, forks } = await removeChunk(spaceId, kind, chunk);
+    const { removed, forks } = await removeChunk(spaceId, kind, chunk, opts.filter);
     if (removed.size === 0) continue;
     for (const id of removed) gone.add(id);
     try {
@@ -78,23 +88,26 @@ export async function removeRecords(
       log.warn(`${kind} removal: ${removed.size} ${kind}(s) were deleted in '${peerText(spaceId)}' but their embed jobs were not retired: ${peerText(err)}`);
     }
     if (forks.length > 0) await settleRemovedForks(spaceId, kind, forks);
-    await AFTER_REMOVAL[kind](spaceId, [...removed]);
+    await AFTER_REMOVAL[kind](spaceId, [...removed], actor);
     if (actor) for (const _id of removed) emitWebhookEvent({ event: `${kind}.deleted`, spaceId, entry: { _id }, ...actor });
   }
   return gone;
 }
 
 /** One chunk: its stored seqs, the forks, the delete and the tombstones, in ONE held transaction (see the module docblock). */
-async function removeChunk(spaceId: string, kind: RemovableKind, ids: readonly string[]): Promise<{ removed: Set<string>; forks: string[] }> {
+async function removeChunk(
+  spaceId: string, kind: RemovableKind, ids: readonly string[], narrowedTo?: Record<string, unknown>,
+): Promise<{ removed: Set<string>; forks: string[] }> {
   const family = TOMBSTONE_COLLECTION[kind];
   const collName = spaceCollection(spaceId, family);
+  const filter = andPredicates({ spaceId }, narrowedTo)!;
   return inHeldTransaction(spaceId, `${kind}.remove`, async (session) => {
-    const stored = await readStoredById<{ _id: string; seq?: number }>(collName, ids, { seq: 1 }, { session, filter: { spaceId } });
+    const stored = await readStoredById<{ _id: string; seq?: number }>(collName, ids, { seq: 1 }, { session, filter });
     if (stored.size === 0) return { removed: new Set<string>(), forks: [] };
     // The records' unresolved versions go with them, each behind a tombstone issued here, in this transaction (Q-624 §7).
     const forks = await removeForksOf(spaceId, kind, [...stored.keys()], { session });
     await removeWithTombstones(spaceId, family,
-      [...stored.values()].map(r => ({ _id: r._id, type: kind, originalSeq: r.seq })), { session, filter: { spaceId } });
+      [...stored.values()].map(r => ({ _id: r._id, type: kind, originalSeq: r.seq })), { session, filter });
     return { removed: new Set(stored.keys()), forks };
   }, {
     // A commit whose answer was lost may have landed: it did when none of the chunk's records is stored any more.

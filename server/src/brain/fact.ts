@@ -6,6 +6,7 @@
  * duplicate check; nothing here is imported back by those modules.
  */
 import { reconcileLinks, assertDesiredLinks } from './links.js';
+import { takenBackLinkWarnings } from './gone-entity-references.js';
 import { type ContradictionWarning } from './insert-contradictions.js';
 import { col, asFilter, asUpdate } from '../db/mongo.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
@@ -92,10 +93,13 @@ export async function saveFact(
    * against a read set; the write is the commit's (`write-plan/commit.ts`). A batch asks for the same plans
    * in bulk, so this and `bulkWrite` cannot come to mean different things (`Q-99` part 3).
    */
-  const input: FactInput = { fact, linkEntities, tags, description, properties, type, opts, ttlDays, id };
+  // A link taken back because its entity was deleted while this was written is a warning on the answer (`link_target_removed`, Q-305).
+  const takenBack = takenBackLinkWarnings(opts?.onValidation);
+  const input: FactInput = { fact, linkEntities, tags, description, properties, type, opts: takenBack.onValidation ? { ...opts, onValidation: takenBack.onValidation } : opts, ttlDays, id };
   // Refused before the plan pays for an embedding; the commit asks again per stage, for a write admitted just before an act registers.
   assertSpaceTakesWrites(spaceId, 'facts');
   const done = await planAndCommitOne(spaceId, factWant(input), view => planFact(spaceId, input, view));
+  takenBack.announce(done.linksTakenBack);
   const stored = { ...done.plan.result, seq: done.seq } as unknown as FactDoc;
   // `fact.updated`, not `created`, on a converge — a subscriber must be able to tell a retry from a new record.
   if (actor) {
@@ -123,6 +127,8 @@ export async function updateFact(
 ): Promise<FactDoc | null> {
   // Refused before anything is read; the store write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'facts');
+  // A link taken back because its entity was deleted while this was written is a warning on the answer (`link_target_removed`, Q-305).
+  const takenBack = takenBackLinkWarnings(onValidation);
   const existing = await col<FactDoc>(spaceCollection(spaceId, 'facts'))
     .findOne(asFilter<FactDoc>({ _id: memoryId, spaceId }),
       { projection: NEVER_RETURNED_PROJECTION }) as FactDoc | null;
@@ -195,7 +201,7 @@ export async function updateFact(
   {
     const check = classifyFactUpsertAgainst(getSpaceMeta(spaceId), existing, recordAfterPatch(existing, $set, $unset));
     if (check.blocked) throw new SchemaViolationError(check);
-    onValidation?.(check);
+    takenBack.onValidation?.(check);
   }
 
   // Re-embed whenever any content field changes
@@ -260,7 +266,7 @@ export async function updateFact(
   //
   // `deleteFields` no longer reaches the links: it names RECORD fields, and the links are not one any more.
   if (updates.linkEntities !== undefined) {
-    await reconcileLinks(spaceId, result._id, 'fact', { entity: updates.linkEntities }, result.author);
+    takenBack.announce((await reconcileLinks(spaceId, result._id, 'fact', { entity: updates.linkEntities }, result.author)).takenBack);
   }
   if (actor) emitWebhookEvent({ event: 'fact.updated', spaceId, entry: eventEntryOf(result), ...actor });
   return result;
