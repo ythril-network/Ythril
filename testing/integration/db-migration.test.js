@@ -23,6 +23,7 @@ import { fileURLToPath } from 'url';
 import { INSTANCES, get, post, del, reqJson, readRecord } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { waitFor, waitForReading } from '../_shared/wait-for.mjs';
+import { restoreLeavingOutStrays } from '../_shared/restore-leaving-out-strays.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
@@ -416,7 +417,7 @@ describe('Backup + Restore — round-trip', () => {
 
     // 5. Restore from the backup: a set of space acts since bundle-157, answered 202, its end read from GET /restore (maintenance
     //    holds until then)
-    const restoreR = await adminPost('/api/admin/data/restore', { backupId });
+    const restoreR = await restoreLeavingOutStrays(body => adminPost('/api/admin/data/restore', body), backupId, { mustKeep: ['general'] });
     assert.equal(restoreR.status, 202, `restore: ${JSON.stringify(restoreR.body)}`);
     const report = await waitForReading(
       () => adminGet('/api/admin/data/restore'),
