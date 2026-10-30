@@ -66,6 +66,16 @@ describe('an arriving link whose id does not derive is refused', { skip }, () =>
       `the log does not name the refused id and why: ${JSON.stringify(lines)}`);
   });
 
+  // The review of bundle-45, #11: an operator can alert on the refusal without reading the log.
+  it('push: the refusal is counted, by family and verdict', async () => {
+    const { syncArrivalsSetAsideTotal } = await import('../../server/dist/metrics/registry.js');
+    const valueOf = async () => (await syncArrivalsSetAsideTotal.get()).values.find(v => v.labels.family === 'links' && v.labels.verdict === 'underivedId')?.value ?? 0;
+    const before = await valueOf();
+    const r = await door.push('/batch-upsert', { links: [linkOf(1), linkOf(2, { _id: randomUUID() }), linkOf(3, { _id: randomUUID() })] }, { spaceId: S });
+    assert.equal(r.code, 200, JSON.stringify(r.body));
+    assert.equal(await valueOf() - before, 2, 'the two refused links were not counted as underivedId');
+  });
+
   it('pull: the same page — the derived link lands, the other is not stored and is named', async () => {
     await door.reset({ direction: 'pull' });
     const remote = door.remoteOf(S);

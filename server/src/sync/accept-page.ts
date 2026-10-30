@@ -77,7 +77,7 @@ import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { assertPositionsReady } from './positions-ready.js';
 import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
 import { EdgeIdentityBuilding } from '../util/errors.js';
-import { syncInvalidForksTotal, recordsFailingTheirSchema } from '../metrics/registry.js';
+import { syncInvalidForksTotal, syncArrivalsSetAsideTotal, recordsFailingTheirSchema } from '../metrics/registry.js';
 
 type Arrived = Record<string, unknown> & ArrivalDoc;
 
@@ -401,6 +401,7 @@ export async function acceptArrivingPage(
       const underived = (results[key].docs as Array<Arrived | undefined>).filter((_, i) => results[key].verdicts[i] === 'underivedId').map(d => d!._id);
       warnArrivalsNotStored(where, spaceId, key, 'REFUSED — the id does not derive from the link\'s endpoints, so it is a second name for a relationship; '
         + 'the sender will not be asked for it again', underived);
+      if (underived.length > 0) syncArrivalsSetAsideTotal.inc({ family: key, verdict: 'underivedId' }, underived.length);
     }
     // A file row that differs at the seq this instance holds and loses the tie (Q-426) is kept as it stands and named here, once per page: it is not "already
     // current", and the peer converges on this copy by the same rule. Derived over every family, as the line above: only files can answer it today.
@@ -408,6 +409,7 @@ export async function acceptArrivingPage(
       const kept = (results[key].docs as Array<Arrived | undefined>).filter((_, i) => results[key].verdicts[i] === 'divergenceKept').map(d => d!._id);
       warnArrivalsNotStored(where, spaceId, key, 'KEPT as this instance holds them — the same version with other content, and this instance\'s copy is the one '
         + 'the tie rule names; the peer converges on it', kept);
+      if (kept.length > 0) syncArrivalsSetAsideTotal.inc({ family: key, verdict: 'divergenceKept' }, kept.length);
     }
     // What landed is handed to the door's linkage check, which checks it once the door's transfer is whole — never
     // here, page by page, where a target later in the same transfer would be recorded missing (bundle-30 I8).

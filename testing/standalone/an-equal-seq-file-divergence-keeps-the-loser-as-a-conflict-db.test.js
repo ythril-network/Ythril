@@ -138,6 +138,16 @@ describe('an equal-seq file divergence keeps the lower hash as the row and the o
     });
   }
 
+  // The review of bundle-45, #11: the instance whose row stands counts what it kept, so an operator can see it without reading the log.
+  it('the copy the tie keeps is counted as divergenceKept, once for the pair', async () => {
+    const { syncArrivalsSetAsideTotal } = await import('../../server/dist/metrics/registry.js');
+    const valueOf = async () => (await syncArrivalsSetAsideTotal.get()).values.find(v => v.labels.family === 'filemeta' && v.labels.verdict === 'divergenceKept')?.value ?? 0;
+    await fresh();
+    const before = await valueOf();
+    await exchange('batch');
+    assert.equal(await valueOf() - before, 1, 'one of the two instances keeps its row, and that is counted once');
+  });
+
   // The review of bundle-45, #2: a pair that differs only in a stamp the two instances took independently has nothing for a user to decide (the conflict's table
   // would be empty). The rows still converge on one copy, which the hash needs; no conflict is recorded on either side.
   for (const via of ['batch', 'pull']) {
