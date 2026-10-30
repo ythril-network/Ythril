@@ -551,8 +551,9 @@ peer's update of a record no longer erases the receiver's vector (`embedding`), 
 its file sync bases (`syncBase`) or an edge's write guard (`_functionalGuard`, kept only while the edge's `from` and `label` are the stored ones) — they are carried across the replace, so an update whose embedded text did not change is not
 re-embedded and the record stays searchable meanwhile. **Unless the receiver suppresses it:** an arriving record its
 own mark, this instance's type schema or this space keeps out of semantic search carries the retention stamps,
-`syncBase` and the write guard only, and holds no vector, model or `matchedText` afterwards — they described content the receiver no
-longer embeds, and `matchedText` would keep removed text findable by lexical search. A file's derived passages lose
+`syncBase` and the write guard only, and holds no vector or model afterwards — they described content the receiver no
+longer embeds, and the stored `matchedText` would keep removed text findable by lexical search. It is stored with the receiver's own `matchedText` of the content
+that arrived instead, built the way a local suppressed write's is, so it stays findable by its words. A file's derived passages lose
 their vectors with it. Every arrival is also stamped with the peer that delivered it (`deliveredBy`, local to the receiver and never sent on), which is what the [deletion rule](#tombstones) reads.
 
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding

@@ -26,8 +26,11 @@
  *     from what arrived, and the stored copy's are carried across the replace server-side, in the same update — so
  *     a peer's edit does not erase this instance's vector, its retention stamps or its file sync bases. Except:
  *     an arrival this instance SUPPRESSES (`record > schema > space`, this instance's tiers) carries the record
- *     tier only, never the vector, its model or `matchedText`, which describe content it no longer embeds
- *     (`Q-230`); and a RESTORE carries nothing from the copy it replaces — the backup's own record-tier fields come
+ *     tier and the write guard from the stored copy, never its vector, model or `matchedText`, which describe content
+ *     it no longer embeds (`Q-230`), and is stored with THIS instance's own `matchedText` of the arriving content, built
+ *     by this instance's text builder as a local suppressed write's is (`Q-262`): the record stays findable by its words,
+ *     and nothing queues it, so nothing would write the text later (a file's is written after the merge,
+ *     `embedArrivedFiles`, because it depends on fields the arrival does not carry); and a RESTORE carries nothing from the copy it replaces — the backup's own record-tier fields come
  *     with the document (`RESTORED_LOCAL_FIELDS`), and what the backup does not carry is absent (`Q-234`).
  *     **Who delivered the version is stamped last** (`deliveredBy`, bundle-51): the delivering peer's id, or `''`
  *     when nobody delivered it (an admin push), written AFTER the carried fields so the stored stamp never survives a
@@ -102,7 +105,8 @@ import { isWrittenHere } from './written-here.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
 import { retentionSpace, retentionStamps } from '../brain/ttl.js';
-import { isDerived } from '../brain/embed-record.js';
+import { isDerived, buildEmbedTexts } from '../brain/embed-record.js';
+import { derivedFieldsForWrite } from '../brain/derived-text-on-write.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { fileMetaForWire } from '../api/sync/_shared.js';
@@ -376,10 +380,31 @@ function guardCarry(doc: Doc, field: string): unknown {
  */
 function replacementFor(
   doc: Doc, defaults: Doc, carried: ReadonlySet<string>, deliveredBy: string, landing: ArrivalLanding, guarded: ReadonlySet<string> = new Set(),
+  own: Record<string, unknown> = {},
 ): unknown[] {
   // `guarded`: the carried fields that are write guards, kept only while the record's subject is unchanged.
+  // `own`: what THIS instance derived from the arriving content (a suppressed record's `matchedText`), merged after `doc` so neither
+  // a default nor a carried field can override it.
   const kept = Object.fromEntries([...carried].map(f => [f, guarded.has(f) ? guardCarry(doc, f) : `$${f}`]));
-  return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, kept, { $literal: doc }, { $literal: { deliveredBy } }, { $literal: landing }] } }];
+  return [{ $replaceWith: { $mergeObjects: [{ $literal: defaults }, kept, { $literal: doc }, { $literal: own }, { $literal: { deliveredBy } }, { $literal: landing }] } }];
+}
+
+/**
+ * The `matchedText` of the arrivals this instance suppresses, by id — through the one rule of what a write may store beside a
+ * vector (`derivedFieldsForWrite`: the text, and no vector). A file has none here: its text depends on the row as merged.
+ */
+async function suppressedTexts(
+  spaceId: string, family: BrainCollection, recordType: BrainEmbedRecordType | null, docs: readonly Doc[],
+): Promise<Map<string, Record<string, unknown>>> {
+  const out = new Map<string, Record<string, unknown>>();
+  if (family === 'files' || recordType === null || docs.length === 0) return out;
+  const texts = await buildEmbedTexts(spaceId, recordType, docs);
+  for (let i = 0; i < docs.length; i++) {
+    const text = texts[i];
+    if (text === null || text === undefined) continue;
+    out.set(docs[i]!._id, (await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' })).set);
+  }
+  return out;
 }
 
 /**
@@ -503,6 +528,11 @@ export async function writeArrivals(
     [d._id, recordType === null || fillOnly ? {} as Doc : receiverStamps(d, recordType, space)]));
   const suppressed = new Set(recordType === null || fillOnly ? []
     : toWrite.filter(d => embeddingSuppressedFor(spaceId, recordType, d, meta)).map(d => d._id));
+  // What an arrival this instance suppresses is stored with: this instance's OWN text of what arrived (`Q-262`), built by its own
+  // builder as a local suppressed write's is, and never the stored copy's (`carriedFields`). Nothing queues a suppressed record, so
+  // nothing would write it later. A file's text depends on fields the arrival does not carry, so a file's is written after the merge
+  // (`embedArrivedFiles`).
+  const ownText = await suppressedTexts(spaceId, family, recordType, toWrite.filter(d => suppressed.has(d._id)));
   // A restore tells the operator what it removes: read BEFORE the write, which replaces the rows. A count is a diagnostic, so a read
   // that fails leaves it unsaid and never fails the restore (the writes below fail, and say so, if the store is not answering).
   const removable = family === 'files' && restore
@@ -521,7 +551,7 @@ export async function writeArrivals(
     const carried = carriedFields({ restore, suppressed: quiet });
     // A write guard (`_functionalGuard`, an edge's) crosses only while `from` and `label` are the stored ones: carry-if-unchanged.
     const guarded = new Set([...carried].filter(f => WRITE_GUARD_FIELDS.has(f)));
-    return replacementFor(d, stamps, carried, stampOfArrival({ restore, doc: d, deliveredBy: deliveredByOf(d) }), landing, guarded);
+    return replacementFor(d, stamps, carried, stampOfArrival({ restore, doc: d, deliveredBy: deliveredByOf(d) }), landing, guarded, ownText.get(d._id));
   };
   // The landing each document's update holds by reference: a stand-in while the page is measured, the chunk's own positions once its
   // `withLandingStamp` has taken them (set in place, below), so the memo below is still the only place an update is built.

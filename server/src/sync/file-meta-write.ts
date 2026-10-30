@@ -47,7 +47,8 @@
  *   delivered by another peer is that peer's. A restore stores the backup's own (`''` when it has none); the stray drain's
  *   fill passes none, and the stored stamp stays.
  * - **An arrival this instance suppresses** loses every derived field (`embedding`, `embeddingModel`,
- *   `matchedText`): they describe content it no longer embeds, and `matchedText` would keep removed text findable.
+ *   `matchedText`): they describe content it no longer embeds, and `matchedText` would keep removed text findable. The
+ *   row is then given this instance's own `matchedText` of the merged row (`Q-262`), by `embedArrivedFiles` after the merge.
  */
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
