@@ -19,6 +19,7 @@
  */
 import { col, asBulk, asFilter } from '../db/mongo.js';
 import { getConfig } from '../config/loader.js';
+import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { derivedV4Id } from '../util/derived-id.js';
 import { fileContentHash } from '../brain/merkle.js';
@@ -60,11 +61,15 @@ export async function recordMetadataConflicts(
     spaceId, kind: 'metadata', originalPath: d.fileId, losing: losingMetadataOf(d.row), seq: d.seq,
     peerInstanceId: peer.instanceId, peerInstanceLabel: peer.label, detectedAt: at,
   }));
-  const r = await col<MetadataConflictDoc>(spaceCollection(spaceId, 'conflicts')).bulkWrite(asBulk<MetadataConflictDoc>(docs.map(({ _id, ...rest }) => ({
-    updateOne: { filter: { _id }, update: { $setOnInsert: rest }, upsert: true },
-  }))), { ordered: false });
-  const written = new Set(Object.keys(r.upsertedIds ?? {}).map(i => docs[Number(i)]!._id));
-  return [...written];
+  const written: string[] = [];
+  // 1000 rows at a time: the rows of one accepted page, each a bounded description, tags and properties beside an id (`a-bounded-bulk-write-is-one-command`).
+  for (const chunk of inChunks(docs, ROWS_PER_BULK_COMMAND)) {
+    const r = await col<MetadataConflictDoc>(spaceCollection(spaceId, 'conflicts')).bulkWrite(asBulk<MetadataConflictDoc>(chunk.map(({ _id, ...rest }) => ({
+      updateOne: { filter: { _id }, update: { $setOnInsert: rest }, upsert: true },
+    }))), { ordered: false });
+    written.push(...Object.keys(r.upsertedIds ?? {}).map(i => chunk[Number(i)]!._id));
+  }
+  return written;
 }
 
 /**
