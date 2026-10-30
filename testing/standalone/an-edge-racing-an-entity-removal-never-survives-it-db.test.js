@@ -21,6 +21,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'q305strict';
@@ -307,7 +308,7 @@ describe('an edge or link racing an entity removal never survives it', { skip },
           return true;
         });
         assert.ok(race.raced(), 'the entity was never deleted mid-write: the test did not build the race');
-        await new Promise(r => setTimeout(r, 100));
+        await elapse(100, 'absence window: an updated event for the refused link would arrive within it, and none may');
       } finally { off(); race.stop(); }
       assert.deepEqual(seen.map(e => e.event), [], 'a fact.updated went out for a link that is not there');
       assert.equal(await door.coll(S, 'links').countDocuments({ to: ENT_UUID }), 0, 'the link to the deleted entity is stored');
@@ -357,7 +358,7 @@ describe('an edge or link racing an entity removal never survives it', { skip },
       try {
         const link = await links.addLink(S, 'fact-f', 'fact', ENT_UUID, 'entity', {});
         assert.equal(link.to, ENT_UUID);
-        await new Promise(r => setTimeout(r, 100));
+        await elapse(100, 'absence window: the updated event is mirrored onto the bus after the write returns, and the list is read once it has had that long');
       } finally { off(); }
       assert.deepEqual(seen.map(e => e.event), ['fact.updated']);
     });

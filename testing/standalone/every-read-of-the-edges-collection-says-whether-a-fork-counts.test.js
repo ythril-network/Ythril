@@ -91,7 +91,7 @@ const EXEMPT = {
     'sync/tombstone-apply.ts:applyPeerTombstones', 'sync/engine.ts:runSyncForMember', 'util/position-keyset.ts:readAfterPosition',
     'sync/record-position-stream.ts:positionFloor', 'sync/positions-owed.ts:carryRows', 'sync/positions-rollback.ts:rollBackPositions',
     'sync/delivered-by-backfill.ts:stampCollection', 'util/version-stamp.ts:heldTermsOf', 'util/version-stamp.ts:highestVersionBelowCap',
-    'brain/merkle.ts:collectionLeaves', 'brain/record-removal.ts:removeChunk', 'spaces/lifecycle.ts:wipeSpaceUnqueued',
+    'brain/merkle.ts:collectionLeaves', 'brain/record-removal.ts:removeChunk', 'brain/record-removal.ts:removeRecords', 'spaces/lifecycle.ts:wipeSpaceUnqueued',
     'spaces/lifecycle.ts:initSpace', 'spaces/record-count.ts:spaceRecordCount', 'spaces/schema-validate-door.ts:walkStored',
     'brain/embed-record.ts:embedStoredRecord', 'brain/suppression-sweep.ts:sweepSuppressedVectors', 'brain/ttl-sweep.ts:expiredPage',
     'brain/ttl-sweep.ts:isStored', 'brain/queue-embed-sweep.ts:countUnswept', 'brain/queue-embed-sweep.ts:queueEmbedSweep',
