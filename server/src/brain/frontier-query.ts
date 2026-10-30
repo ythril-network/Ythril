@@ -41,6 +41,10 @@ export interface TraverseNarrowing extends LinkInclusion {
  *
  * **A fork edge is not a neighbour** (Q-624): it carries its subject's endpoints, so following it would walk the same relationship twice. The clause
  * (`CHOSEN_VERSION_ROWS`) is inside this builder, so no traversal can drop it.
+ *
+ * **It matches an edge's end by id alone, and that is a stated exemption, not a gap** (`an-edge-end-is-matched-by-kind-as-well-as-id`, Q-321): a walk's node
+ * is its id throughout (the visited set, the frontier, the neighbour hydration, the shared window's reads), so a kind match here alone would leave the walk
+ * conflating a fact with an entity that holds its id. What a walk's node is, is the owner's to change, in all of those places at once.
  */
 export function frontierEdgeQuery(
   spaceId: string,
