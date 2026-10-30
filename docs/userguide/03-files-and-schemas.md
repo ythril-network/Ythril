@@ -246,10 +246,10 @@ Open **Conflicts** from the sidebar to see them. For each conflict choose what t
 
 | Option | Result |
 |--------|--------|
-| **Keep mine (apply again)** | Your displaced metadata is applied to the file again, as an edit you make now. It then wins on every connected brain |
-| **Keep theirs (dismiss)** | The metadata now on the file stays and your displaced metadata is dismissed |
+| **Keep mine (apply again)** | Your displaced metadata is written to the file again **on this brain**, as an edit you make now: a new version of the file's metadata here, with every field the table shows put back (the description and where it came from, the tags, the properties and whether embeddings are suppressed). The other connected brains then receive it the way they receive any edit. If a field cannot be put back, the page says which and the row stays |
+| **Keep theirs (dismiss)** | The metadata now on the file stays and your displaced metadata is dismissed. Nothing is written |
 
-The brain whose metadata was kept has no such row. Nothing here changes what another brain holds.
+The brain whose metadata was kept has no such row, and a pair that differs only in a stamp (when the file was created, or who wrote it) is settled the same way and leaves no row, because there is nothing to choose between. Neither option decides anything on another brain: Keep mine is an ordinary edit here that syncs like any other, and nothing reaches into another brain's copy. When you select several rows to resolve together, the list offers only the options every selected row accepts.
 
 Every conflict about a file's copy ends in one of these four. There is no dismiss: a conflict closes only by one of these, so an incoming copy is never left behind under its conflict name.
 

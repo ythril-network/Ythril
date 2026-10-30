@@ -9,8 +9,9 @@
  *
  * ## The two ways the stored copy can move in the gap, each parked on a gate
  *
- *  - **a local edit** stamps a higher seq: the swap's guard fails, the stored (edited) copy stays and the push is `skipped`; the displaced text is already
- *    stored as a fork, so nothing was lost either way;
+ *  - **a local edit** stamps a higher seq: the swap's guard fails, the stored (edited) copy stays and the push is `skipped`. The displaced (stored) text is
+ *    already stored as a fork, so it is not lost. The ARRIVING text is not kept anywhere on this instance: it is superseded by the local edit, as it would be
+ *    had the edit landed before the push (an ordinary edit that comes first wins by seq), and it still exists on the peer that sent it;
  *  - **another body lands at the SAME seq** (a racing push of a third copy): `seq` alone would have been satisfied, and the swap would have replaced a
  *    version the planner never saw. The guard names the body, so the swap is refused, the divergence is not retried as a swap, and the arriving copy is kept as a
  *    fork under the id its body derives: three bodies, all stored.
