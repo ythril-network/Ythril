@@ -279,7 +279,7 @@ describe('a merged file is queued in one place', () => {
     // Moved out of sync/file-meta-write.ts into a module of its own (bundle-48: an import cycle through the wire schema).
     const files = src('server/src/sync/embed-arrived-files.ts');
     const queue = bodyOf(files, 'embedArrivedFiles');
-    assert.match(queue, /restore \|\| holdsBlob\(r\)/, 'embedArrivedFiles no longer decides on held bytes or a restore');
+    // "Held bytes, or a restore" is pinned by behaviour, not by its spelling: `a-peers-file-metadata-is-queued-only-where-its-bytes-are-db`.
     assert.match(queue, /enqueueIngestedRecords\(spaceId, 'file', /, 'embedArrivedFiles queues past the receiver\'s suppression');
     assert.match(queue, /embeddingSuppressedFor\(spaceId, 'file', doc, meta\)\) quiet\.push/,
       'embedArrivedFiles no longer asks the receiver whether a landed file is suppressed');
