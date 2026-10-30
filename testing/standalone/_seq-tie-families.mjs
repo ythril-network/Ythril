@@ -27,13 +27,32 @@ const MAKE = Object.freeze({
   facts: build.fact, entities: build.entity, chrono: build.chrono, filemeta: build.filemeta, edges: build.edge, links: build.link,
 });
 
+/**
+ * Make the links of these families carry the id their endpoints derive (Q-222), for a test whose records go through a door that
+ * PLANS them: the planner refuses any other id, so a fixture that names its own would be refused whole. The name handed to `make`
+ * becomes the endpoints', and the id is read from the document, so a caller reads ids off the documents, never off the names.
+ *
+ * Opt-in and called by the test once its door is open, because the derivation lives in a module that reads the config when it is
+ * imported: imported here, at load, it would read it before the door had said where it is. A test that only SEEDS records into the
+ * store needs none of it.
+ */
+export function deriveLinkIds(families, linkIdFor) {
+  const links = families.find(f => f.payloadKey === 'links');
+  assert.ok(links, 'no links family — the derivation is broken');
+  links.make = (space, id, seq, extra = {}) => {
+    const link = build.link(space, id, seq, extra);
+    return { ...link, _id: linkIdFor(link.from, link.fromKind, link.to, link.toKind) };
+  };
+}
+
 /** `[{ payloadKey, collection, make(space, id, seq, extra), tombstoneType | null }]`, one per replicated family. */
 export async function replicatedFixtureFamilies() {
   const { REPLICATED_FAMILIES } = await import('../../server/dist/sync/replicated-families.js');
+  const makers = MAKE;
   const { TOMBSTONE_TYPES, TOMBSTONE_COLLECTION } = await import('../../server/dist/config/types.js');
   assert.ok(REPLICATED_FAMILIES.length >= 6, `only ${REPLICATED_FAMILIES.length} replicated families — the derivation is broken`);
   return REPLICATED_FAMILIES.map((f) => {
-    const make = MAKE[f.payloadKey];
+    const make = makers[f.payloadKey];
     assert.ok(make, `no document builder for the '${f.payloadKey}' family — add it to MAKE in _seq-tie-families.mjs, or it goes unchecked`);
     // A family whose deletions ride in its page: the tombstone type whose collection name is this family's. Files have none.
     const tombstoneType = TOMBSTONE_TYPES.find(t => TOMBSTONE_COLLECTION[t] === f.collection) ?? null;

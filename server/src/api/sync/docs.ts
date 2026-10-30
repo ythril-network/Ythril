@@ -444,7 +444,7 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
       entities: { ...entStats, rejected: rejected('entities', 'forkRefused') },
       edges: { ...edgeStats, rejected: rejected('edges', 'forkRefused') },
       chrono: { ...chronoStats, rejected: rejected('chrono', 'forkRefused', 'unknownType') },
-      links: { ...linkStats, rejected: rejected('links') },
+      links: { ...linkStats, rejected: rejected('links', 'underivedId') },
       filemeta: { ...fileMetaStats, rejected: rejected('filemeta') },
     }));
   } catch (err) {

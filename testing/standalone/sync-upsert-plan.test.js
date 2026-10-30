@@ -28,10 +28,11 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { base, ALTERNATE, MAIN_FIELD, REDACTION_MARKS, AUTHOR, OTHER_AUTHOR, T0, T1 } from './_fork-body-fixtures.mjs';
 
-let planArrivals, retagToLocalSpace, authored;
+let planArrivals, retagToLocalSpace, authored, linkIdFor;
 
 before(async () => {
   ({ planArrivals, retagToLocalSpace } = await import('../../server/dist/sync/upsert-plan.js'));
+  ({ linkIdFor } = await import('../../server/dist/brain/link-id.js'));
   // Q-624: the hash leaf the door reads a stored copy's body through. Absent before it is written, which these cases then do not need; once
   // it is written, a stored copy at an equal seq must carry it (see `writes`), and the cases below that need it say so.
   try { authored = await import('../../server/dist/sync/authored-content.js'); } catch { authored = undefined; }
@@ -331,8 +332,11 @@ describe('planArrivals — the page accept, decided as sequential processing dec
       assert.equal(split.forks[0].doc.forkOf, 'p');
     }
     // Links and file metadata carry no body of their own to disagree about (a link's body is its identity), so an equal seq is a skip.
-    const link = { _id: 'l', seq: 5, from: 'a', fromKind: 'fact', to: 'b', toKind: 'entity', author: AUTHOR, createdAt: T0, spaceId: 's' };
+    // Under the id its endpoints derive: any other id is refused before an equal seq is asked (`underivedId`, Q-222).
+    const link = { _id: linkIdFor('a', 'fact', 'b', 'entity'), seq: 5, from: 'a', fromKind: 'fact', to: 'b', toKind: 'entity', author: AUTHOR, createdAt: T0, spaceId: 's' };
     assert.deepEqual(plan('links', [link, { ...link, createdAt: T1 }]).verdicts, ['upserted', 'skipped']);
+    assert.deepEqual(plan('links', [{ ...link, _id: 'l' }]).verdicts, ['underivedId'],
+      'a link whose id does not derive from its endpoints was planned for a write');
   });
 
   it('a tombstone at or above the seq tombstones; one below is cleaned only when the record lands', () => {

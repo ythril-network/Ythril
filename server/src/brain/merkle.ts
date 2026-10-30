@@ -30,7 +30,8 @@
 import { createHash } from 'node:crypto';
 import { col, asFilter } from '../db/mongo.js';
 import { buildFileManifest } from '../files/manifest.js';
-import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
+import { BRAIN_COLLECTIONS, type BrainCollection, type RefKind } from '../config/types-knowledge.js';
+import { linkIdFor } from './link-id.js';
 import { collectionStamp, joinStamps, readAtStamp, type Stamped } from '../db/space-generation.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { LruMap } from '../util/lru-map.js';
@@ -205,6 +206,25 @@ export function fileContentHash(doc: Record<string, unknown>, blank: readonly st
 }
 
 /**
+ * A link's document with its `_id` turned into the id its endpoints derive (`linkIdFor`) — what its leaf is taken over (Q-222).
+ *
+ * ## What this prevents
+ *
+ * A link's body IS its identity: two rows naming one relationship are one record to the hash. Hashed by the stored `_id`, a
+ * relationship held under an id that does not derive (a row a peer pushed before the planner refused such ids, or one a
+ * conversion left beside the derived row) and the same relationship under its derived id on another instance gave two
+ * different leaves for one record, so their roots differed for ever with nothing missing on either side — a permanent false
+ * alarm, which teaches an operator to ignore the signal that means data is missing.
+ *
+ * For every link under its derived id (which is every link a current writer made) the leaf is byte-identical to what it was, so a
+ * mixed-version network changes nothing for those and converges only the rows that were already divergent. A delete of one id of
+ * two that name one relationship still shows: the identity is then held on one side only.
+ */
+function byRelationship(link: Record<string, unknown>): Record<string, unknown> {
+  return { ...link, _id: linkIdFor(String(link['from']), link['fromKind'] as RefKind, String(link['to']), link['toKind'] as RefKind) };
+}
+
+/**
  * The sorted leaves of one record collection of a space, read in full.
  *
  * ALL SIX COLLECTIONS are hashed, and `files` joined the list on the owner's `P-32` ruling — each for the same
@@ -242,7 +262,7 @@ async function collectionLeaves(spaceId: string, collType: BrainCollection): Pro
     // replicates in neither direction, so hashing its record reports a divergence every cycle between two
     // members that hold the same data. The predicate the peer manifest uses, imported (`Q-307`, `R8`).
     if (collType === 'files' && isInstanceLocalFile(String((doc as { _id?: unknown })._id ?? ''))) continue;
-    leaves.push(docLeaf(collType, doc as Record<string, unknown>));
+    leaves.push(docLeaf(collType, collType === 'links' ? byRelationship(doc as Record<string, unknown>) : doc as Record<string, unknown>));
   }
   return leaves.sort();
 }

@@ -363,6 +363,13 @@ export async function acceptArrivingPage(
         + '(or the row is its own fork, or an edge changed whether it is one); they are not offered again', malformed);
       if (malformed.length > 0) syncInvalidForksTotal.inc({ family }, malformed.length);
     }
+    // A link whose id does not derive from its endpoints (Q-222) is refused by the planner and named here, once per family and page, because this
+    // is the side that knows why. Derived over every family: only links can answer it today, and a family that learns to is named without an edit.
+    for (const { payloadKey: key } of REPLICATED_FAMILIES) {
+      const underived = (results[key].docs as Array<Arrived | undefined>).filter((_, i) => results[key].verdicts[i] === 'underivedId').map(d => d!._id);
+      warnArrivalsNotStored(where, spaceId, key, 'REFUSED — the id does not derive from the link\'s endpoints, so it is a second name for a relationship; '
+        + 'the sender will not be asked for it again', underived);
+    }
     // What landed is handed to the door's linkage check, which checks it once the door's transfer is whole — never
     // here, page by page, where a target later in the same transfer would be recorded missing (bundle-30 I8).
     for (const { key, doc } of landed) opts.linkage.add(key, doc);

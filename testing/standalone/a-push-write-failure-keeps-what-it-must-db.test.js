@@ -48,11 +48,12 @@ const SINGLE = [
 const VIEWED = 'pushview';
 const PLAIN = 'pushdup';
 
-let door;
+let door, linkIdFor;
 
 describe('a push write failure keeps what it must', { skip }, () => {
   before(async () => {
     door = await openPushDoor({ suite: 'pushfault', spaces: [GUARDED, VIEWED, PLAIN].map(id => ({ id, label: id, folders: [], meta: {} })) });
+    ({ linkIdFor } = await import('../../server/dist/brain/link-id.js'));
     const db = door.mongo.getDb();
     // One validator per family a SINGLE route stores, each refusing the text 'POISON' in a field it requires.
     for (const [part, field] of Object.entries(POISONED_FIELD)) {
@@ -159,13 +160,23 @@ describe('a push write failure keeps what it must', { skip }, () => {
       assert.deepEqual([r.body.edges.duplicateTriplets, r.body.edges.upserted, r.body.edges.skipped], [1, 0, 0], JSON.stringify(r.body.edges));
       assert.equal((await door.coll(PLAIN, 'edges').findOne({ _id: 'g2' })).label, 'likes');
     });
-    it('batch-upsert: a link under another id for endpoints already linked is skipped, never a 500', async () => {
+    it('batch-upsert: a link under another id for endpoints already linked is refused, never a 500', async () => {
       const ends = { from: 'X', fromKind: 'fact', to: 'Y', toKind: 'entity' };
       await door.coll(PLAIN, 'links').insertOne(build.link(PLAIN, 'l1', 5, ends));
       const r = await door.push('/batch-upsert', { links: [build.link(PLAIN, 'l2', 6, ends)] }, { spaceId: PLAIN });
       assert.equal(r.code, 200,
         `a duplicate link answered ${r.code} (${JSON.stringify(r.body)}): the sender re-sends that page for ever and the `
         + 'links channel to this instance never advances again');
+      // `l2` does not derive from its endpoints, so it is refused by the planner (Q-222) before the unique index is asked.
+      assert.deepEqual([r.body.links.rejected, r.body.links.upserted], [1, 0], JSON.stringify(r.body.links));
+      assert.equal(await door.coll(PLAIN, 'links').countDocuments({}), 1);
+    });
+    it('batch-upsert: a link under its derived id for endpoints held under another id is skipped, never a 500', async () => {
+      const ends = { from: 'X', fromKind: 'fact', to: 'Y', toKind: 'entity' };
+      await door.coll(PLAIN, 'links').insertOne(build.link(PLAIN, 'l1', 5, ends));
+      const derived = linkIdFor(ends.from, ends.fromKind, ends.to, ends.toKind);
+      const r = await door.push('/batch-upsert', { links: [build.link(PLAIN, derived, 6, ends)] }, { spaceId: PLAIN });
+      assert.equal(r.code, 200, `a link colliding with a stored row under another id answered ${r.code} (${JSON.stringify(r.body)})`);
       assert.deepEqual([r.body.links.skipped, r.body.links.upserted], [1, 0], JSON.stringify(r.body.links));
       assert.equal(await door.coll(PLAIN, 'links').countDocuments({}), 1);
     });
