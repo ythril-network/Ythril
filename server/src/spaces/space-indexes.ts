@@ -199,6 +199,8 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
    */
   ...LINK_INDEXES.map(ix => plain('links', ix.keys, declaredOptions(ix))),
   plain('conflicts', { detectedAt: -1 }),
+  // The linkage check's adoption read: the violations of the documents of one accepted page, by `docId` (`sync/linkage-check.ts` `oldRecordsOf`, inside the check's write bound).
+  plain('linkViolations', { docId: 1 }),
   // The list query: equality on `status`, sorted by score then recency.
   plain('dupeCandidates', { status: 1, score: -1, detectedAt: -1 }),
   // The Review list's query exactly (`.sort({ confidence: -1, detectedAt: -1 })` under a status filter), and the type filter of
