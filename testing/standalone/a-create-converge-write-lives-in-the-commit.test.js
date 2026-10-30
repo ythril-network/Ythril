@@ -106,7 +106,7 @@ const EXEMPT = {
   'server/src/spaces/lifecycle.ts:wipeSpaceUnqueued': 'the space wipe (its body, run by the space-act runner)',
   'server/src/spaces/_shared.ts:repairStaleSpaceIds': 'repair: rewrites a stale spaceId field in every collection',
   // sync ingest and import: the receiver stores what a peer or a restore sent, through ONE writer (`Q-107` part 1;
-  // CLAUDE.md, "What a receiver does after the write"). It replaced `ingestBrainDoc` (push, import) and the pull's
+  // y-flows convention `convention-ythril-an-arrival-is-stored-by-one-writer`). It replaced `ingestBrainDoc` (push, import) and the pull's
   // `batchUpsertBySeq`, and the routes' inline `$setOnInsert`, which is why the docs.ts orphan exemption is gone.
   'server/src/sync/arrivals.ts:writeArrivals': 'sync push, pull and admin import: the arrival writer',
   'server/src/sync/positions-owed.ts:carryRows': 'the first carry into position space (bundle-81): local-only position fields on rows already held, once per space; never a create or a converge',

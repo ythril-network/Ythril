@@ -308,7 +308,7 @@ describe('the record tier of suppression reaches the receiver', () => {
      *
      * ## This said "all four" and looped over four of six (`Q-5`)
      *
-     * `CLAUDE.md` records the same failure being paid for once already: a gate's hand-written list of four
+     * The same failure was already paid for once (y-flows convention `convention-a-test-derives-its-set`): a gate's hand-written list of four
      * missed `LinkDoc`, "so every assertion ran over the old four and reported clean about a document
      * nobody had checked". This was the identical bug in a different file, and its title made the wider
      * claim while the loop did not.

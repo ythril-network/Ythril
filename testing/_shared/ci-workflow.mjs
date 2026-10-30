@@ -11,7 +11,7 @@
  *
  * Every question a gate asks of a workflow — which jobs are there, which steps run `npm ci`, what a step's
  * `if:` says, which jobs another one waits for — has one answer here, so a gate cannot answer it from a window
- * of characters. It is the same defect `CLAUDE.md` names as the one this repo produces most (one rule, several
+ * of characters. It is the same defect the y-flows convention `convention-find-every-instance` names (one rule, several
  * implementations), arriving in the gates that guard the workflow.
  *
  * ## What it does NOT do

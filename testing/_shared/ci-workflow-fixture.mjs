@@ -9,7 +9,7 @@
  * run against this document and against single deliberate breakages of it. If a mutation of this shape does not
  * make its rule fire, the rule is a claim and not a gate.
  *
- * It is a FIXTURE, so it is allowed to be literal (`CLAUDE.md`: a fixture that derives its expectations from the
+ * It is a FIXTURE, so it is allowed to be literal (y-flows convention `convention-a-test-derives-its-set`: a fixture that derives its expectations from the
  * code under test asserts that the code equals itself). It is not a copy of `ci.yml`: it carries one job of each
  * kind the rules distinguish — an install-only job, the job that builds and publishes the image, three stack
  * jobs, the advisory job and the gate — and nothing else. It is written in the shape the job graph is planned in

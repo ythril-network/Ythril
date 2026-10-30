@@ -599,7 +599,7 @@ export const schema_updateTool: ToolHandler = {
      * **The names come from this tool's own `inputSchema`, not from a second list beside it.** They were a
      * hard-coded array of five, and adding `whenDuePasses` to the schema without also adding it there meant
      * the field was declared, accepted by the dispatcher, and then SILENTLY DROPPED before the write — the
-     * REST door storing it and this one not, which `CLAUDE.md` names as worse than either door refusing.
+     * REST door storing it and this one not, which the y-flows convention `convention-ythril-both-doors-same-parameters` names as worse than either door refusing.
      * The schema is the contract, so the schema is the list.
      */
     const declared = forwardedArgNames(schema_updateTool, NOT_META);

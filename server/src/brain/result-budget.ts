@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { log, peerText } from '../util/log.js';
 
 /**
- * TWO DEFAULTS, ONE PER DOOR — a sanctioned divergence, not drift (`CLAUDE.md`, "MCP and REST are ONE API").
+ * TWO DEFAULTS, ONE PER DOOR — a sanctioned divergence, not drift (y-flows convention `convention-ythril-sanctioned-door-divergences`).
  *
  * Both doors take the same parameters with the same floor, ceiling and refusals; only the number applied when
  * the caller says nothing differs. An MCP result lands in the agent's own context and meets a per-result

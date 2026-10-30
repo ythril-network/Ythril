@@ -64,7 +64,7 @@ export interface TraverseOption {
    * the storage: the ends of a link are of different KINDS, so its orientation is implied by where you
    * started. `docs/integration-guide/04a-recall-api.md` already said it that way; the source did not.
    *
-   * The lesson is the one `CLAUDE.md` states about schema descriptions: write the GUARANTEE, not the
+   * The lesson is the one the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` states about schema descriptions: write the GUARANTEE, not the
    * mechanism. A reason given as a mechanism has to be revisited every time the mechanism gains a case,
    * and nobody does — so it goes on being read after it stops being true.
    */

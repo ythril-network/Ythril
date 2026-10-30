@@ -60,7 +60,7 @@ export const delete_entity_previewTool: ToolHandler = {
 
     /*
      * Narrowed by the CONNECTION's accessible spaces, which is the MCP half of the same rule the route
-     * expresses with `memberSpacesForRequest` — `CLAUDE.md` states it as one rule against two sources of
+     * expresses with `memberSpacesForRequest` — the y-flows convention `convention-ythril-both-doors-same-parameters` states it as one rule against two sources of
      * scope, and it is not one surface offering less.
      *
      * The first version of this used `resolveMemberSpaces` to match `delete_entity`, and that was the wrong

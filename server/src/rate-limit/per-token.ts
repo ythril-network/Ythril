@@ -75,7 +75,7 @@ export const MAX_PER_MINUTE = 1_000_000;
 /**
  * Why a requested per-token limit is unacceptable, or `null` when it is fine.
  *
- * One function so the REST route and the MCP tool cannot disagree — `CLAUDE.md`'s most expensive lesson is one
+ * One function so the REST route and the MCP tool cannot disagree — the y-flows convention `convention-find-every-instance` names one
  * rule with two implementations, and here the weaker one would be handing out quota nobody granted. The message
  * is returned rather than thrown so each surface can attach it to its own status code.
  */

@@ -9,7 +9,7 @@
  * through MCP could create a text file and could never create a byte file**, while `POST /api/files/*` had
  * taken `{ content, encoding: 'base64' }` throughout.
  *
- * `CLAUDE.md` is explicit that this is the same defect as a missing capability: *a capability present on
+ * The y-flows convention `convention-ythril-both-doors-same-parameters` is explicit that this is the same defect as a missing capability: *a capability present on
  * both surfaces still violates the rule if one door accepts less*. Storage, type sniffing, the media
  * pipeline, the quota check and the chunking were already shared — only the door was narrower.
  *

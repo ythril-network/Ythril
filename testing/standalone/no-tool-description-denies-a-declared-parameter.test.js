@@ -3,7 +3,7 @@
  *
  * ## What was believed, and what it cost
  *
- * An MCP tool's `inputSchema` description is what a caller reads WHILE constructing arguments, and `CLAUDE.md` says to treat it as
+ * An MCP tool's `inputSchema` description is what a caller reads WHILE constructing arguments, and the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` says to treat it as
  * code. `filter` told its caller *"there is no sort parameter, but `skip` pages through that order"* for as long as the schema
  * declared `sort` and `dir`. A caller who read the sentence believed it, and nobody reports a capability they were told they did not
  * have, so the sentence stayed wrong until a reviewer read it against the schema. It is the same defect as the `recall` description

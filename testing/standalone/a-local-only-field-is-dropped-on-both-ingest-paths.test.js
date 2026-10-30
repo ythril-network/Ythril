@@ -12,7 +12,7 @@
  *  - `_expireAt` and `_contentExpireAt` — computed from THIS instance's retention policy, and
  *    `brain/ttl-sweep.ts` deletes every record whose `_expireAt` has passed, across every space, through the
  *    normal delete path. **A stamp taken from a peer therefore lets one instance decide when another
- *    deletes its data** — which is the sentence `CLAUDE.md` already uses to explain the hash exclusion.
+ *    deletes its data** — which is the sentence the y-flows convention `convention-ythril-my-instance-is-my-data` uses to explain the hash exclusion.
  *
  * **There are TWO ingest paths and only one of them dropped these.** Push arrives at
  * `api/sync/_shared.ts` and is validated by an `Incoming*` schema that declares none of the five, so zod
@@ -20,7 +20,7 @@
  * `bulkWrite` of `replaceOne`s, and validated nothing — so **a pulled record carried the sender's vector and
  * the sender's retention stamp, and both were stored.**
  *
- * One rule, two implementations, the weaker winning silently — the shape `CLAUDE.md` names as this
+ * One rule, two implementations, the weaker winning silently — the shape the y-flows convention `convention-find-every-instance` names as this
  * codebase's most expensive. It is invisible from both ends: nothing errors, nothing is logged, and the
  * deletion that eventually follows looks like the local retention policy working.
  *
@@ -50,7 +50,7 @@ const src = (f) => stripComments(readFileSync(f, 'utf8'));
 /**
  * The five, READ OUT OF `merkle.ts` rather than written here.
  *
- * `CLAUDE.md` states the equivalence this depends on as a rule: a field that is hashed must replicate. So
+ * The y-flows convention `convention-ythril-a-new-field-is-replicated-or-local-and-says-so` states the equivalence this depends on as a rule: a field that is hashed must replicate. So
  * the fields excluded from the hash are exactly the fields that must not be taken from a peer, and a second
  * list here would be the thing this gate exists to prevent.
  */

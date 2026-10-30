@@ -515,7 +515,7 @@ place**, and a change that adds a second is the defect this repository produces 
 - **An arriving document is recorded, not refused**, at one site (`sync/arrival-recording.ts`), by every door that stores
   a peer's documents or a restore.
 - **A capability change is all five places** — route, tool, integration guide, user guide, rights — in the same commit, as the
-  repository's `CLAUDE.md` says; for rules and the live check that is `06a-schema-api.md`, `16-mcp.md`, `07-tokens-api.md`, the
+  y-flows convention `convention-five-places-one-commit` says; for rules and the live check that is `06a-schema-api.md`, `16-mcp.md`, `07-tokens-api.md`, the
   Schema tab page of the user guide and the field-rights table in `auth/space-field-rights.ts`.
 
 The decision behind these is record 10 in [Decision records](decisions.md).

@@ -26,7 +26,7 @@
  *
  * `optional-index-cannot-fail-a-space.test.js`, `no-polling-a-deleted-space.test.js` and
  * `index-ready-poll.test.js` each hand-rolled the same body-finding loop within hours of each other. That is the
- * defect `CLAUDE.md` names as the one this repo produces most — one rule, several implementations — arriving in
+ * defect the y-flows convention `convention-find-every-instance` names — one rule, several implementations — arriving in
  * the test suite instead of the product.
  */
 import assert from 'node:assert/strict';
@@ -113,7 +113,7 @@ export function bodyOfEndingWith(src, name, tail, label = name) {
  *
  * Three files had already hand-rolled the bracket walker independently — `client-bodies-match-server.test.js`,
  * `credential-bodies-are-strict.test.js` and `no-boot-migration-on-synced-data.test.js` — which is the defect
- * `CLAUDE.md` names as this repo's most frequent, arriving in the test suite. None of the three skips strings or
+ * the y-flows convention `convention-find-every-instance` names, arriving in the test suite. None of the three skips strings or
  * comments, so a brace inside a string literal or a `// }` silently ends the window early: the same failure as a
  * magic number, wearing structure's clothes.
  * ---------------------------------------------------------------------------------------------------------------

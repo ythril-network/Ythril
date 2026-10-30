@@ -3,7 +3,7 @@
  *
  * ## The rule
  *
- * CLAUDE.md, "MCP and REST are ONE API with two doors": same refusals, same error text. `POST /api/views` and `PATCH /api/views/:id` answer
+ * The y-flows convention `convention-ythril-both-doors-same-parameters` (MCP and REST are ONE API with two doors): same refusals, same error text. `POST /api/views` and `PATCH /api/views/:id` answer
  * a missing, empty, over-long or malformed `members` with the view act's coded refusal (`view_members_empty`, `view_members_limit`, ...),
  * while `view_create` / `view_update` - on MCP and on the REST tool door - were refused by the dispatcher's inputSchema check
  * (`minItems`, `maxItems`, `type`) in the validator's words, before the act ran, with no code: a client translating by code got nothing on

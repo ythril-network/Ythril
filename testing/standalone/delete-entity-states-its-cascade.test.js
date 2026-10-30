@@ -7,7 +7,7 @@
  * `delete_entity`'s description ends its refusal paragraph with *"There is no cascade."* — written before `P-29`
  * gave the delete a cascade (`delete_entity_preview` mints a token; `cascadeToken` on the delete quotes it back).
  * The parameter list two screens further down says the opposite, so the tool now describes one behaviour two ways,
- * and the one an agent reads first is the wrong one. `CLAUDE.md`: a schema description is the authoritative
+ * and the one an agent reads first is the wrong one. The y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost`: a schema description is the authoritative
  * reference, and nobody reports a capability they were told they did not have — the integrator who designed around a
  * stale `recall` sentence is the precedent.
  *

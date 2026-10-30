@@ -5,7 +5,7 @@
  *
  * `mcp-rest-parity` asks whether a capability exists on both doors, and `a-tool-and-its-route-take-the-same-
  * parameters` asks whether they take the same parameter NAMES. Neither asks whether `limit` is 1–200 on one door
- * and 1–1000 on the other — and that is the shape `CLAUDE.md` names: *"a `400` on one door and a silent default
+ * and 1–1000 on the other — and that is the shape the y-flows convention `convention-ythril-both-doors-same-parameters` names: *"a `400` on one door and a silent default
  * on the other is worse than either alone"*. This compares, per shared parameter, the `minimum` / `maximum` /
  * `minLength` / `maxLength` / `minItems` / `maxItems`, the `enum`, and whether it is required.
  *

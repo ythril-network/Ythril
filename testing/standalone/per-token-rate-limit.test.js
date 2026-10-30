@@ -195,7 +195,7 @@ describe('one rule, both write paths, and the read surface agrees', () => {
   const routes = stripComments(readFileSync('server/src/api/tokens.ts', 'utf8'));
 
   it('create and PATCH both use the SHARED refusal', () => {
-    // Two copies of "what is an acceptable quota" is the defect CLAUDE.md names most expensive, and here the
+    // Two copies of "what is an acceptable quota" is the defect the y-flows convention `convention-find-every-instance` names, and here the
     // weaker copy would be handing out quota nobody granted.
     assert.equal([...routes.matchAll(/rateLimitRefusal\(/g)].length, 2,
       'both write paths must consult the shared refusal — no more, no fewer');

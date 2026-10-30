@@ -131,7 +131,7 @@ describe('so no matrix means no reach', () => {
  * call, opened with `if (!rights || !space) return null` — no matrix, so allow — and no assertion anywhere
  * looked at it.
  *
- * The precedent for this correction is in `CLAUDE.md`, about a different gate and the same mistake: *"A gate
+ * The precedent for this correction is the y-flows convention `convention-a-test-derives-its-set`, about a different gate and the same mistake: *"A gate
  * scoped to one mechanism concludes about all of them."* So these cases ask the question of every guard that
  * can be handed an absent matrix, and they CALL the guards rather than reading their source — a source test
  * cannot tell live code from dead, and the first version of the MCP guard's own check was a grep that passed

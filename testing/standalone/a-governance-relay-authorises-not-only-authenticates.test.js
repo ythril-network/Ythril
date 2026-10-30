@@ -22,7 +22,7 @@
  *
  * ## Why the fix is a predicate and not two guards
  *
- * This is the defect `CLAUDE.md` names as the repo's commonest, with a security blast radius: one rule —
+ * This is the defect the y-flows convention `convention-find-every-instance` names, with a security blast radius: one rule —
  * *only the peer itself, or an instance administrator* — expressed twice, and the weaker copy is the one in
  * front of the route. Two inline checks would be the same bug waiting to drift, so the question is answered
  * once, by `peerRelayCaller`, and both routes take its verdict.

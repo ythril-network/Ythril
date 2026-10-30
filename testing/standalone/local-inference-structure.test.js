@@ -11,7 +11,7 @@
  * shutdown that closes the database before it has stopped the thing writing to it. Each is written once by
  * somebody who meant well, and none of them changes a single test result.
  *
- * ## How they are written (CLAUDE.md, "a gate concludes about MORE than it checks")
+ * ## How they are written (y-flows convention `convention-a-test-derives-its-set`: a gate concludes about MORE than it checks)
  *
  *  - **The set is derived, never listed.** Every `server/src` source through `git ls-files` (with the not-yet-
  *    committed ones, so the gate refuses BEFORE the push and not after), comments stripped so a sentence that

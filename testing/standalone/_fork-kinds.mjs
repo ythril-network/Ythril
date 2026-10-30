@@ -9,7 +9,7 @@
  * planner (`FORKING_FAMILIES`, `sync/upsert-plan.ts`), floored, and every member must have a fixture here: a family the planner
  * gains and this file lacks FAILS, loudly, instead of being skipped.
  *
- * What is chosen here, not derived, and why that is allowed: a fixture is literal (`CLAUDE.md`, "A test fixture is allowed to be
+ * What is chosen here, not derived, and why that is allowed: a fixture is literal (y-flows convention `convention-a-test-derives-its-set`: "A test fixture is allowed to be
  * literal"). Which field a case edits to make two copies say different things is the one per-kind value no module states
  * for the tests; the design's `mainField` (section 9) is the same value and is the presentation field Review shows.
  *

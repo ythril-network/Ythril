@@ -64,7 +64,7 @@ describe('help says its own tool list is filtered', () => {
   });
 
   it('points at the tool schemas as the authoritative reference', () => {
-    // CLAUDE.md: a stale sentence in a schema is invisible, because nobody reports a capability they were
+    // y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost`: a stale sentence in a schema is invisible, because nobody reports a capability they were
     // told they did not have. help() saying the schemas are authoritative is what makes them get read.
     assert.match(HELP, /AUTHORITATIVE REFERENCE/, 'say which source wins');
     assert.match(HELP, /inputSchema/, 'and name it precisely');

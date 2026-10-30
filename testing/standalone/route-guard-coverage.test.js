@@ -208,7 +208,7 @@ const EXEMPT = new Map([
   //
   // The trigger carried `requireAdmin` from 4.4 and is REMOVED in 5.0, so the router-wide reason is finally
   // true of every route on the router. An exemption whose reason covers one route and is applied to the whole
-  // router is the shape `CLAUDE.md` warns about, and this file is where it should have been caught.
+  // router is the shape the y-flows convention `convention-a-test-derives-its-set` warns about, and this file is where it should have been caught.
   // mcpRouter is deliberately NOT here any more. `requireMcpAuth` is in AUTH_GUARDS above, so the gate
   // can now see that the router is guarded instead of being told to look away. It remains exempt from the
   // READ-ONLY check below, where the original reason was true: a read-only token does reach the

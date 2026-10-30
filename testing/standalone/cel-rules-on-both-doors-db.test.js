@@ -1,6 +1,6 @@
 /**
  * A rule is written, refused, replaced and reported the same way on every door that can write one — and only by a caller with
- * the rung that governs it (F-46, rulings R6-5, R6-12; the CLAUDE.md rule that REST and MCP are one API with two doors).
+ * the rung that governs it (F-46, rulings R6-5, R6-12; the y-flows convention `convention-ythril-both-doors-same-parameters`: REST and MCP are one API with two doors).
  *
  * ## The doors, and why each is here
  *

@@ -61,7 +61,7 @@ at all in a `warn` or `off` space; and a space that already holds two edges unde
 - `server/src/brain/write-plan/heal-stale-marker.ts` and `server/src/brain/write-plan/guarded-relabel.ts` — the phantom
   heal and a relabel's refusals.
 - `server/src/sync/local-only-fields.ts` — the write-guard class beside the restored and derived ones.
-- `CLAUDE.md` (the receiver section) — the invariant; `docs/integration-guide/06a-schema-api.md` — the guarantee;
+- the y-flows convention `convention-ythril-receiver-decides-after-the-write` — the invariant; `docs/integration-guide/06a-schema-api.md` — the guarantee;
   `docs/integration-guide/02b-upgrading.md` — upgrade and rollback.
 - `testing/standalone/a-functional-label-holds-under-concurrent-writers-db.test.js` and
   `testing/standalone/every-edge-writer-says-what-it-does-with-the-functional-guard.test.js` — the race, and every writer held

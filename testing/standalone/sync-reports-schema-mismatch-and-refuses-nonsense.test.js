@@ -82,7 +82,7 @@ describe('sync reports a schema mismatch and refuses nonsense', () => {
      *
      * This read `['memStats', 'entStats', 'edgeStats', 'chronoStats']` under the title *"every per-type
      * stat"*. `linkStats` and `fileMetaStats` exist and were in neither, so the title was a claim about the
-     * whole set made by a loop over two thirds of it — the shape `CLAUDE.md` now has a section for.
+     * whole set made by a loop over two thirds of it — the shape the y-flows convention `convention-a-test-derives-its-set` is about.
      *
      * **Both omissions are correct, and that is exactly why they have to be stated.** A schema violation is
      * measured against a type schema, and neither of those two records has a type to look one up by: a link

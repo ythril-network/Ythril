@@ -94,7 +94,7 @@ describe('both doors take the same three flags', () => {
   for (const { flag } of FLAGS) {
     it(`${flag} reaches recall on REST and MCP`, () => {
       /*
-       * One API, two doors. A flag on one surface and not the other is the parity defect `CLAUDE.md` calls
+       * One API, two doors. A flag on one surface and not the other is the door-parity defect (y-flows convention `convention-ythril-both-doors-same-parameters`), which is
        * the most expensive lesson in this codebase — and it is what made this row's own subject invisible:
        * the standalone tool had these flags all along.
        */

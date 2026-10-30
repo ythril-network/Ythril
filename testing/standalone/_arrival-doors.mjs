@@ -6,7 +6,7 @@
  *
  * The arrival recorder is one function behind four doors: the single push routes (`POST /api/sync/<family>`, a page of one), `POST
  * /api/sync/batch-upsert`, the engine's PULL (a real sync cycle against a fake peer) and the admin import. A rule held on one door only is
- * the weaker door winning (CLAUDE.md, "the defect class this repo produces most"), so a test of what an arrival records is written ONCE
+ * the weaker door winning (y-flows convention `convention-find-every-instance`), so a test of what an arrival records is written ONCE
  * and run over all four. The table of the four was written inside the undeclared-key test and was about to be copied into the test of the
  * edge rules; each copy would answer what a door says in its own words, and a door whose answer changed would be fixed in one of them.
  *

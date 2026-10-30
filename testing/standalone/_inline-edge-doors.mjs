@@ -21,7 +21,7 @@
  *   (`applyConnections(`) or hands the body to `bulkWrite(`. Read out of the source with `mountedRoutesWithSource`.
  *
  * `inlineEdgeDoors` THROWS when the two disagree — a door one surface has and the other lacks is the parity defect
- * (`CLAUDE.md`, "MCP and REST are ONE API with two doors"), and a table built from one side alone would report clean
+ * (y-flows convention `convention-ythril-both-doors-same-parameters`: MCP and REST are ONE API with two doors), and a table built from one side alone would report clean
  * about it. It also throws for a door it has no way to drive (a kind it holds no fixture for), because a door the table
  * cannot call is a door the rule silently stopped covering.
  *

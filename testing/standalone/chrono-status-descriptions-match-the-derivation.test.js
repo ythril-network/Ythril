@@ -17,7 +17,7 @@
  *
  * `docs/integration-guide/04c-chrono-api.md` described it CORRECTLY the whole time. Two surfaces, one
  * behaviour, two contradictory descriptions — and the wrong one was the one an agent reads while
- * constructing arguments. That is the exact cost CLAUDE.md records for a stale schema sentence.
+ * constructing arguments. That is the exact cost the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` names for a stale schema sentence.
  *
  * ## Why this asserts against the function, not against the docs
  *

@@ -788,7 +788,7 @@ describe('Recall filter — MCP recall tool accepts filter', () => {
 
   it('MCP recall accepts an arbitrary field key, and still refuses a JavaScript operator', async (t) => {
     // Both halves on the MCP door, because the widening and the guard have to agree across both — the
-    // pair `CLAUDE.md`'s parity section was written from.
+    // pair the door-parity rule (y-flows convention `convention-ythril-both-doors-same-parameters`) was written from.
     if (!requireEmbedding(t, embeddingAvailable)) return;
     const ok = await session.callTool('recall', {
       space: SPACE,

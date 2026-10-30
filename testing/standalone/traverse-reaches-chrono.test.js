@@ -31,7 +31,7 @@
  *
  * Every rule below used to be read out of `traverseGraph`, where the chrono scan sat inline beside a
  * near-identical memory scan and a near-identical file scan. `recall`'s expansion then needed the same three,
- * which would have made SIX copies of one rule in one file — the defect `CLAUDE.md` names as the one this
+ * which would have made SIX copies of one rule in one file — the defect the y-flows convention `convention-find-every-instance` names as the one this
  * repo produces most. The scan moved into `link-frontier.ts` and both traversals call it.
  *
  * So these assertions read from two files now, and they are stronger for it: the rule is enforced once for

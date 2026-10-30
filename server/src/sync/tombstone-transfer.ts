@@ -7,7 +7,7 @@
  * one protocol phase never got read together. That cost something specific: the pull's `!resp.ok` branch **did not
  * exist**. A peer answering `503` to a tombstone fetch applied nothing, logged nothing, and the cycle advanced its
  * watermark past the deletions anyway. The push side had a warn for the same case. One phase, two implementations,
- * and the weaker one silently won — which `CLAUDE.md` names as the defect this codebase produces most.
+ * and the weaker one silently won — which the y-flows convention `convention-find-every-instance` names as a defect.
  *
  * ## Both return a `TransferOutcome`, and that is the point
  *

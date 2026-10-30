@@ -16,7 +16,7 @@
  *
  * A list of forbidden calls — `insertOne`, `updateMany`, `bulkWrite` — is a list somebody has to keep
  * complete against a driver they do not own, and the day it misses one is the day it passes over the defect.
- * See *A gate concludes about MORE than it checks* in `CLAUDE.md`.
+ * See *A gate concludes about MORE than it checks* in the y-flows convention `convention-a-test-derives-its-set`.
  *
  * So this inverts it: the preview may call `countDocuments` and `aggregate` on a collection, and nothing
  * else. A new call fails here until somebody looks at it, which for this function is exactly the review

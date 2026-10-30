@@ -16,7 +16,7 @@
  * can come back as three. A caller asking for topK 80 and reading only `results` is working from a handful
  * of records with no error anywhere. Three flows in the fleet were doing exactly that.
  *
- * `help()` tells callers the tool schema IS the authoritative reference, and CLAUDE.md records what a stale
+ * `help()` tells callers the tool schema IS the authoritative reference, and the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` records what a stale
  * sentence there already cost: The fleet integrator read *"filter applied after vector search"*, believed it, and built a
  * skill that avoided filtered recall.
  *

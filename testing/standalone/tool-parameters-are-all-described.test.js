@@ -119,7 +119,7 @@ describe('the claims those descriptions make are still true', () => {
   /**
    * Several new sentences say a bound is enforced on `save_chrono`/`save_edge` and NOT on `save_bulk`.
    * That is true because of one line, and if the line goes the sentences become lies that read as facts —
-   * which is the exact cost CLAUDE.md records for a stale schema description.
+   * which is the exact cost the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` records for a stale schema description.
    */
   it('bulk_write really does skip per-item schema validation', () => {
     const bulk = ALL_TOOLS.find(t => t.name === 'save_bulk');

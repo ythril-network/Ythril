@@ -18,7 +18,7 @@
  * true of BOTH traversals — the `traverse` tool and `recall(traverse: n)` — and reads as neither, because a
  * reader has to already know there are two before the word tells them anything.
  *
- * `help()` says the tool schema is the authoritative reference, and CLAUDE.md records what a stale sentence
+ * `help()` says the tool schema is the authoritative reference, and the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` records what a stale sentence
  * there already cost: The fleet integrator read *"filter applied after vector search"*, believed it, and built a skill
  * that avoided filtered recall. An ambiguous sentence is cheaper than a wrong one and not by much.
  *

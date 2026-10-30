@@ -1,7 +1,7 @@
 /**
  * The orphan, claim and purge doors are the instance admin's, say no more than they must, and are one capability on both doors
  * (Q-531, bundle-100, plan rev 3.1 "Lifecycle", "Migration"; rev 3.2 "Migration", "Doors and answers", the data-integrity and
- * integration vets; CLAUDE.md "MCP and REST are ONE API with two doors").
+ * integration vets; y-flows convention `convention-ythril-both-doors-same-parameters`: MCP and REST are ONE API with two doors).
  *
  * ## The contract these tests fix (the plan names the doors, not their spelling; this file is where the spelling is chosen)
  *

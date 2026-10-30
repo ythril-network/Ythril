@@ -3,7 +3,7 @@
  *
  * ## The hole this fills
  *
- * *"MCP and REST are ONE API with two doors"*, and `CLAUDE.md` is explicit that parameters count too, being
+ * *"MCP and REST are ONE API with two doors"*, and the y-flows convention `convention-ythril-both-doors-same-parameters` is explicit that parameters count too, being
  * *"the half that hides"*. Two gates covered it and between them left most of that half unchecked:
  * `mcp-rest-parity.test.js` compares which CAPABILITIES exist, and `client-bodies-match-server.test.js`
  * compares parameters over a hard-coded map of four. `16-mcp.md` documents forty-six pairs.

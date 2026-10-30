@@ -3,7 +3,7 @@
  *
  * ## The rule
  *
- * "My instance = my data" (CLAUDE.md): no action this instance takes decides what a peer holds, and a re-key is housekeeping, not an act of
+ * "My instance = my data" (y-flows convention `convention-ythril-my-instance-is-my-data`): no action this instance takes decides what a peer holds, and a re-key is housekeeping, not an act of
  * a user. It repairs where THIS instance keeps a row, so what it does to the row's links is local too:
  *
  *  1. The legacy row's data survives (it wins, nothing at the key beats it): its links are carried to the key, every one of them, each

@@ -60,7 +60,7 @@ export function toolReach(toolName: string, rights: TokenRights | undefined, rea
  *
  * Owner, 2026-09-05: *"no matrix = refuse - no fallback no backwards compatibility anymore."* That swept
  * `tokenReachesSpace` and `editorScopeFor`. **This was the third copy and it was missed**, which is the
- * defect class `CLAUDE.md` names as this repo's commonest — and it appeared at the shortest distance yet,
+ * defect class the y-flows convention `convention-find-every-instance` names — and it appeared at the shortest distance yet,
  * because `spaceAdminRefusal` twenty lines above already refuses an absent matrix. One file, both answers.
  *
  * It could not reach data: `mcp/router.ts` resolves a connection's accessible spaces as

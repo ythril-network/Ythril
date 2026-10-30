@@ -8,7 +8,7 @@
  * `validate(Memory|Entity|Edge|Chrono)`. The knowledge type "memory" was renamed "fact" (the validator is `validateFact`,
  * the classifier `classifyFactUpsertAgainst`), and neither expression was touched: a call to either placed in a door matched
  * nothing, so the fact doors were covered by a gate that could not see them. A gate that reaches for a literal list of the
- * kinds is the same defect with a later expiry date (CLAUDE.md, "A gate concludes about MORE than it checks").
+ * kinds is the same defect with a later expiry date (y-flows convention `convention-a-test-derives-its-set`: a gate concludes about MORE than it checks).
  *
  * ## The two sets
  *

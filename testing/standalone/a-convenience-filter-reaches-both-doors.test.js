@@ -8,7 +8,7 @@
  * only), `properties` (a value scan), and `search` (freetext over the collection's own text fields).
  *
  * So a browser can ask for *"facts tagged release"* and an agent cannot. Both doors are present and one
- * accepts less, which `CLAUDE.md` names in those words as the half of the parity rule that hides — and it
+ * accepts less, which the y-flows convention `convention-ythril-both-doors-same-parameters` names in those words as the half of the parity rule that hides — and it
  * hid here for as long as the capability map paired the tool with the routes and called the pair answered.
  *
  * ## Why a module rather than five more lines in the tool

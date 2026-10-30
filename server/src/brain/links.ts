@@ -17,7 +17,7 @@
  * Nine write paths touch those six arrays, and every REST route and MCP tool delegates to one of three
  * writer functions rather than writing an array itself. So the hook is `reconcileLinks`, called from those
  * three, and nothing else in the codebase may write to a links collection. A per-writer copy of "work out
- * what changed and add or remove rows" is the shape `CLAUDE.md` names as the one this codebase produces
+ * what changed and add or remove rows" is the shape the y-flows convention `convention-find-every-instance` names as the one this codebase produces
  * most — and here the weaker copy would not fail, it would leave a link record describing a connection its
  * own record no longer claims.
  *

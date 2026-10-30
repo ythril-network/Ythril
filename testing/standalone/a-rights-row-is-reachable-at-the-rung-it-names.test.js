@@ -24,7 +24,7 @@
  * admin first.
  *
  * A route that genuinely is admin-shaped belongs in `NOT_AREA_SCOPED` with its reason — that is the
- * distinction `CLAUDE.md` calls the trap, and it is why this is a gate rather than a comment.
+ * distinction the y-flows pitfall `pitfall-ythril-wrong-kind-of-rights-row` calls the trap, and it is why this is a gate rather than a comment.
  *
  * ## Derived, and it starts with an exemption list that should SHRINK
  *

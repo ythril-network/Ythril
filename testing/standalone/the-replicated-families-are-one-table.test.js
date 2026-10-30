@@ -16,7 +16,7 @@
  *
  * The defect it prevents is additive: nothing breaks when a seventh family is added to one list and not
  * the other. It compiles, it runs, and one direction silently ignores a whole record type. That is the
- * shape `CLAUDE.md` names as this repo's most expensive, and it has already cost one release here.
+ * shape the y-flows convention `convention-find-every-instance` names, and it has already cost one release here.
  *
  * Run: node --test testing/standalone/the-replicated-families-are-one-table.test.js
  */

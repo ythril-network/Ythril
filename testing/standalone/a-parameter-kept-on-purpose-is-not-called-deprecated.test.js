@@ -19,7 +19,7 @@
  *
  * ## Why this is derived rather than a check on `crossSpace`
  *
- * `CLAUDE.md`: *assert the RULE, not the site* — a case naming one parameter does not survive a second
+ * Y-flows convention `convention-a-test-derives-its-set`: *assert the RULE, not the site* — a case naming one parameter does not survive a second
  * parameter being kept for the same reason next year, and the two read identically in a diff. So the subject
  * is **every** parameter whose own description claims permanence, found by reading the tool registry.
  *

@@ -8,7 +8,7 @@
  *
  * Four doors, one rule: the single push routes (`POST /api/sync/entities`, a page of one), `POST /api/sync/batch-upsert`, the
  * engine's PULL (a real sync cycle against a fake peer), and the admin import. A rule held on one door only is the weaker door
- * winning (CLAUDE.md, "the defect class this repo produces most").
+ * winning (y-flows convention `convention-find-every-instance`).
  *
  *  1. **Stored in every mode, recorded in strict and warn.** A document of a type that declares `status` and carries a key it
  *     does not declare is stored in strict, warn and off alike (the control, green on the unchanged base), and recorded in

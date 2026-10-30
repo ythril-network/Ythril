@@ -103,7 +103,7 @@ describe('both doors call the SAME guard', () => {
   });
 
   it('the field is on BOTH bodies with the same bounds', () => {
-    // Parity of the parameter, which CLAUDE.md names as the half that hides. Bounds counted rather than
+    // Parity of the parameter, which the y-flows convention `convention-ythril-both-doors-same-parameters` names as the half that hides. Bounds counted rather than
     // eyeballed: a wider bound on one door is a narrowing on the other, dressed as an omission.
     const bounded = [...SCHEMAS.matchAll(/faceDescriptorDims: z\.number\(\)\.int\(\)\.min\(64\)\.max\(4096\)\.optional\(\)/g)];
     assert.equal(bounded.length, 2,

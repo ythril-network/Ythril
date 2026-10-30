@@ -81,7 +81,7 @@ async function createEntity(space, name, description) {
  *
  * A flat list is what allowed that. A caller cannot hand this two pairs and have one silently ignored when
  * the parameter IS a list of pairs, so the shape is the guard - see `a gate concludes about MORE than it
- * checks` in CLAUDE.md, which is the same failure one level up.
+ * checks` in the y-flows convention `convention-a-test-derives-its-set`, which is the same failure one level up.
  */
 const waitForPairsIndexed = async (space, pairs, timeoutMs) => {
   // A floor, because an empty list would make this resolve instantly and every case after it race the index.

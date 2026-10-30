@@ -8,7 +8,7 @@
  * THEN `$match`, then `$limit`. So "exhaustive" scored only the nearest window, and a matching record outside
  * it was dropped. Measured on a 40k-record space: 39 of 40 single-record filters on an undeclared property
  * answered `count: 0`, `truncated: false`, while `filter` found the record. Nothing told the caller. The
- * schema description, `help()` and CLAUDE.md all promised the opposite.
+ * schema description, `help()` and the project's own rules all promised the opposite.
  *
  * ## What this pins, and the traps each case avoids
  *

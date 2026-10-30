@@ -77,7 +77,7 @@ function sha256hex(input: string): string {
  * going unreported. The schedule is local; what it did to the record is not.
  */
 /*
- * READ FROM `sync/local-only-fields.ts`, which is the same set for the same reason. `CLAUDE.md` states
+ * READ FROM `sync/local-only-fields.ts`, which is the same set for the same reason. The y-flows convention `convention-ythril-a-new-field-is-replicated-or-local-and-says-so` states
  * the equivalence as a rule — a field that is hashed must replicate — so a field excluded here is exactly
  * a field ingest must drop, and two lists of one set is how one of them goes wrong.
  *

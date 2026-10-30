@@ -17,7 +17,7 @@
  * than renaming.
  *
  * One rule, four implementations, and the missing one on the most destructive verb. That is the defect
- * `CLAUDE.md` names as this repo's most-produced, arriving as an omission rather than as a weaker copy.
+ * the y-flows convention `convention-find-every-instance` names, arriving as an omission rather than as a weaker copy.
  *
  * ## Why the assertion is "all of them" and not "DELETE too"
  *

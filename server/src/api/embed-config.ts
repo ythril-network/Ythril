@@ -17,7 +17,7 @@
  * ## One validator, two dispositions — and that is deliberate
  *
  * `isValidEmbedOrigin` is the single rule, shared with the config-file path. A second copy in this route, or in the
- * client, would be the defect `CLAUDE.md` names as this repo's most frequent — and here the weaker copy would be
+ * client, would be the defect the y-flows convention `convention-find-every-instance` names (one rule, several copies) — and here the weaker copy would be
  * deciding who may frame and restyle the admin UI.
  *
  * What differs is what happens to a bad entry, and it differs because the situations differ:

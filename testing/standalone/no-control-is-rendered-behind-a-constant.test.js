@@ -43,7 +43,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
  * function, so nothing about the call site suggests the answer is fixed. A `signal(false)` that is never
  * `set` is the same thing arrived at differently, and is left to a future pass: proving a signal is never
  * written needs the whole component, and a rule that is only half-checkable is worse than a narrow one
- * that is exact. See *A gate concludes about MORE than it checks* in CLAUDE.md.
+ * that is exact. See *A gate concludes about MORE than it checks* in the y-flows convention `convention-a-test-derives-its-set`.
  */
 const CONSTANT_COMPUTED = /(?:readonly\s+)?(\w+)\s*=\s*computed\s*(?:<[^>]*>)?\s*\(\s*\(\s*\)\s*(?::\s*boolean\s*)?=>\s*(true|false)\s*\)/g;
 

@@ -1,7 +1,7 @@
 /**
  * Launching a bundled entry point, in a build and in a checkout: `util/entry-path.ts`.
  *
- * ## Why it is a module (Q-99 part 1, CLAUDE.md "reuse, or build one worth reusing")
+ * ## Why it is a module (Q-99 part 1, y-flows convention `convention-reuse-or-build-for-reuse`)
  *
  * `api/local-agent.ts` already knew how to start one of the server's own entry points: use the compiled `.js` when
  * it exists, otherwise in a development checkout run the `.ts` through the hoisted `tsx` command line, and say

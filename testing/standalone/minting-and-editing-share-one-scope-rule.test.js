@@ -32,7 +32,7 @@
  *
  * ## Why a gate rather than just the fix
  *
- * `CLAUDE.md` names one rule with two implementations as the defect this repo produces most, and says the
+ * The y-flows convention `convention-find-every-instance` names one rule with two implementations as a defect, and says the
  * weaker one wins silently. Here the weaker one was a PRIVILEGE boundary reading a deprecated field, with
  * a comment two hundred lines away asserting that the unification had already happened. A comment cannot
  * hold that; a gate can.

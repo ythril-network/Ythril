@@ -26,7 +26,7 @@ export const RESOLVED_ELSEWHERE = '_resolvedElsewhere' as const;
  *
  * ## Why they are one list with two consumers
  *
- * `CLAUDE.md` states the equivalence: **a field that is hashed must replicate.** Turn it round and the same
+ * The y-flows convention `convention-ythril-a-new-field-is-replicated-or-local-and-says-so` states the equivalence: **a field that is hashed must replicate.** Turn it round and the same
  * sentence defines this list — a field that must not replicate must not be hashed, or every cycle logs a
  * `MERKLE_DIVERGENCE` for a space where nothing is wrong. So the set the space hash excludes and the set
  * ingest drops are the same set, and writing them separately means one of them is eventually wrong.
