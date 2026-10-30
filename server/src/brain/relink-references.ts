@@ -92,6 +92,16 @@ export async function linkRowsOfRecord(
     .toArray() as Array<Pick<LinkDoc, '_id' | 'seq'>>;
 }
 
+/** How many links are on the end of a record, counted up to `limit` (a count past what a caller will act on need not be exact): {@link linkRowsOfRecord}'s count. */
+export async function countLinkRowsOfRecord(spaceId: string, id: string, kind: RelinkKind, limit: number): Promise<number> {
+  return await col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(linksOfRecord(spaceId, id, kind), { limit });
+}
+
+/** Which of the link rows `ids` are stored right now (by id, one read per chunk): what a writer's take-back asks before it removes and reports a row. */
+export async function storedLinkRowIds(spaceId: string, ids: readonly string[]): Promise<Set<string>> {
+  return new Set((await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'links'), ids, { _id: 1 })).keys());
+}
+
 /** How many identities one collision read asks for: an `$or` of this many exact tuples. */
 const IDENTITIES_PER_READ = 200;
 

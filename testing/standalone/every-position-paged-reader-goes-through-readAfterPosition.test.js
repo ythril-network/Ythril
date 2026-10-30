@@ -117,6 +117,11 @@ const EXEMPT = [
     why: 'the prune: delete every tombstone below the position every peer has acknowledged. A delete by bound, not a read',
     holds: inDelete,
   },
+  {
+    file: 'server/src/brain/gone-entity-references.ts', fn: 'takeBackReferencesWrittenHere', kind: 'range', by: 'slot',
+    why: 'the delete\'s settle: rows THIS instance landed at or after the position the removal began (less a lookback), to take back as stragglers. A one-off bound on what is deleted, not a page of positions a reader continues',
+    holds: (e) => (/removalBegan\s*-\s*SETTLE_LOOKBACK_MICROS/.test(bodyOf(rawByFile.get(e.file) ?? '', e.function)) ? null : 'the range is not the removal\'s start position less the lookback'),
+  },
 ];
 
 const exemptionFor = (e) => EXEMPT.find(x => x.kind === e.kind

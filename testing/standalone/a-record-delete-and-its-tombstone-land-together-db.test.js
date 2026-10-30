@@ -27,6 +27,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { withValidator } from './_write-faults.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -194,7 +195,7 @@ describe('a record is removed together with its tombstone, on every path', { ski
     const off = bus.subscribeBrainChanges(SPACE, ev => seen.push(ev));
     try {
       await assert.rejects(() => removal.removeRecords(SPACE, 'fact', [FACT], {}), /the links-from removal failed/, 'a failed cascade did not fail the call');
-      await new Promise(r => setTimeout(r, 100));
+      await elapse(100, 'absence window: the deleted event is mirrored onto the bus after the call settles, and the list is read once it has had that long');
     } finally { off(); removal.AFTER_REMOVAL.fact = original; }
     assert.equal(await coll('facts').findOne({ _id: FACT }), null, 'the fixture: the removal itself stood');
     assert.deepEqual(seen.map(e => [e.event, e.entry?._id]), [['fact.deleted', FACT]], 'the removal stood and its deleted event was lost with the cascade');

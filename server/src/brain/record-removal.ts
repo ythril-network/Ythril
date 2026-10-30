@@ -33,7 +33,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { andPredicates } from '../db/and-predicates.js';
 import { inChunks } from '../util/chunks.js';
 import { log, peerText } from '../util/log.js';
-import { settledPositionCap } from '../util/position-clock.js';
+import { nextUnheldPosition } from '../util/position-clock.js';
 import { recordPositions } from '../sync/record-position-stream.js';
 import { inHeldTransaction } from './held-transaction.js';
 import { removeWithTombstones } from './tombstones.js';
@@ -90,9 +90,10 @@ export async function removeRecords(
     // Read outside any transaction first: a removal of ids that are not stored (a 404 delete, a TTL race, a take-back another writer made first) is one read,
     // and opens no transaction and no position floor only to read nothing.
     if ((await readStoredById(spaceCollection(spaceId, TOMBSTONE_COLLECTION[kind]), chunk, { _id: 1 }, { filter })).size === 0) continue;
-    // The record position the removal begins at: a row that lands from here on (or is in flight now) carries a position at or above it. What a kind's
-    // cascade takes back as a straggler is bounded by it, so a removal with no guard of its own cannot take rows older than itself.
-    began ??= await settledPositionCap(recordPositions, spaceId);
+    // The record position the removal begins at: a stamp taken now (never held: nothing pages by it), so any position handed out later is above it. What a
+    // kind's cascade takes back as a straggler is bounded by it (less a lookback that covers a write already in flight), so a removal with no guard of its own
+    // cannot take rows older than itself.
+    began ??= await nextUnheldPosition(recordPositions, spaceId);
     const { removed, forks } = await removeChunk(spaceId, kind, chunk, opts.filter);
     if (removed.size === 0) continue;
     for (const id of removed) gone.add(id);

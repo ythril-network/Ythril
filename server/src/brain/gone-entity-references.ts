@@ -54,7 +54,7 @@ import { edgeEndpointKind, missingRefs } from './entity-refs.js';
 import { edgeEndsAt, type EdgeEnds } from './edge-ends-of-record.js';
 import { EndpointRemoved, LINK_TARGET_REMOVED } from '../util/errors.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
-import type { EdgeDoc, LinkDoc } from '../config/types.js';
+import type { EdgeDoc } from '../config/types.js';
 import type { UpdateValidation } from './write-validation.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 
@@ -155,7 +155,7 @@ async function moveReferencesToSurvivor(relink: Relink, spaceId: string, absorbe
   // The cheap read first, counted to one past the bound: the common case is that nothing arrived (no transaction is opened), and a count past the bound need not be exact.
   const [edgeCount, linkCount] = await Promise.all([
     col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(relink.edgesOfRecord(spaceId, absorbedId, 'entity'), { limit: maxRelinks + 1 }),
-    col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(relink.linksOfRecord(spaceId, absorbedId, 'entity'), { limit: maxRelinks + 1 }),
+    relink.countLinkRowsOfRecord(spaceId, absorbedId, 'entity', maxRelinks + 1),
   ]);
   if (edgeCount + linkCount === 0) return settled;
   if (edgeCount + linkCount > maxRelinks) {
@@ -227,7 +227,7 @@ export async function takeBackLinksToGoneEntities(
   if (gone.size === 0) return new Map();
   // Only a row that is STILL stored: one a merge's settle re-keyed onto the survivor meanwhile is the survivor's now (not removed, not reported, no second
   // tombstone for an id the settle already buried).
-  const stored = await readStoredById(spaceCollection(spaceId, 'links'), toEntity.filter(r => gone.has(r.to)).map(r => r._id), { _id: 1 });
+  const stored = await (await import('./relink-references.js')).storedLinkRowIds(spaceId, toEntity.filter(r => gone.has(r.to)).map(r => r._id));
   const taken = toEntity.filter(r => gone.has(r.to) && stored.has(r._id));
   await removeWithTombstones(spaceId, 'links', taken.map(r => ({ _id: r._id, type: 'link' as const, originalSeq: r.seq })), { filter: { spaceId } });
   return new Map(taken.map(r => [r._id, r.to]));
