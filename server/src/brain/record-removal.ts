@@ -20,7 +20,10 @@
  *     terminal would outlive it for ever), what the unresolved versions leave (their jobs and the links they start), the kind's own cascade
  *     ({@link AFTER_REMOVAL}: a fact's and a chrono entry's links FROM it, an entity's face labels) and one `<kind>.deleted` per removed record, the
  *     contract a subscriber mirrors the graph by. A failure to retire is said and never undone: the removal stands. The kind's cascade is thrown, as
- *     it always was: the record is gone and a caller that survived it would answer a delete whose links are still owed.
+ *     it always was: the record is gone and a caller that survived it would answer a delete whose links are still owed. **The events go out either way**
+ *     (a `finally`): the records are gone and tombstoned once the chunk committed, so a subscriber is told whatever the cascade did, and a failed cascade still fails the call.
+ *
+ * A chunk none of whose ids is stored is one read and nothing more (no transaction, no position floor), so a 404 delete and a TTL race cost what they cost before the transaction.
  *
  * A record already removed by somebody else is simply not in the answer; a failure part-way leaves the chunks before it removed and the rest untouched,
  * so a re-run continues. The TTL sweep deletes through the per-kind deleters, so it inherits all of this and needs nothing of its own.
@@ -81,10 +84,15 @@ export async function removeRecords(
   spaceId: string, kind: RemovableKind, ids: readonly string[], actor?: WebhookActor, opts: { filter?: Record<string, unknown> } = {},
 ): Promise<Set<string>> {
   const gone = new Set<string>();
-  // The record position the removal begins at: a row that lands from here on (or is in flight now) carries a position at or above it. What a kind's
-  // cascade takes back as a straggler is bounded by it, so a removal with no guard of its own cannot take rows older than itself.
-  const began = await settledPositionCap(recordPositions, spaceId);
+  const filter = andPredicates({ spaceId }, opts.filter)!;
+  let began: number | undefined;
   for (const chunk of inChunks(ids, RECORD_REMOVAL_CHUNK)) {
+    // Read outside any transaction first: a removal of ids that are not stored (a 404 delete, a TTL race, a take-back another writer made first) is one read,
+    // and opens no transaction and no position floor only to read nothing.
+    if ((await readStoredById(spaceCollection(spaceId, TOMBSTONE_COLLECTION[kind]), chunk, { _id: 1 }, { filter })).size === 0) continue;
+    // The record position the removal begins at: a row that lands from here on (or is in flight now) carries a position at or above it. What a kind's
+    // cascade takes back as a straggler is bounded by it, so a removal with no guard of its own cannot take rows older than itself.
+    began ??= await settledPositionCap(recordPositions, spaceId);
     const { removed, forks } = await removeChunk(spaceId, kind, chunk, opts.filter);
     if (removed.size === 0) continue;
     for (const id of removed) gone.add(id);
@@ -93,9 +101,14 @@ export async function removeRecords(
     } catch (err) {
       log.warn(`${kind} removal: ${removed.size} ${kind}(s) were deleted in '${peerText(spaceId)}' but their embed jobs were not retired: ${peerText(err)}`);
     }
-    if (forks.length > 0) await settleRemovedForks(spaceId, kind, forks);
-    await AFTER_REMOVAL[kind](spaceId, [...removed], actor, began);
-    if (actor) for (const _id of removed) emitWebhookEvent({ event: `${kind}.deleted`, spaceId, entry: { _id }, ...actor });
+    try {
+      if (forks.length > 0) await settleRemovedForks(spaceId, kind, forks);
+      await AFTER_REMOVAL[kind](spaceId, [...removed], actor, began);
+    } finally {
+      // The records are gone and their tombstones are written, whatever the cascade after them did: the event a subscriber mirrors the graph by is sent either way,
+      // and a failed cascade still fails the call (the throw leaves through here).
+      if (actor) for (const _id of removed) emitWebhookEvent({ event: `${kind}.deleted`, spaceId, entry: { _id }, ...actor });
+    }
   }
   return gone;
 }
