@@ -269,12 +269,32 @@ function mergeSorted(lists: readonly (readonly string[])[]): string[] {
 /** Spaces whose leaves are kept, least recently asked for dropped first: one sync cycle asks for a handful. */
 const MERKLE_CACHE_SPACES = 16;
 
+/**
+ * Leaves the cache keeps in all, across spaces (Q-336). A count of spaces alone bounds nothing: one entry holds every
+ * leaf of a space, so sixteen of them was sixteen of the largest. A leaf is a 64-character one-byte string, about
+ * 80 bytes on the V8 heap, and a slot of 8 bytes in its array, so about 90 bytes as measured: this many is a heap of about 45 MB,
+ * and at most `MERKLE_LEAF_BYTES_CEILING` each, which is 60 MB. The cost is measured and held to that ceiling by
+ * `a-merkle-leaf-costs-what-its-ceiling-says`, so the sentence cannot go stale while the numbers in it read as true.
+ */
+export const MERKLE_CACHE_MAX_LEAVES = 500_000;
+
+/** What one cached leaf may cost on the heap, in bytes: the figure `MERKLE_CACHE_MAX_LEAVES` is counted in. */
+export const MERKLE_LEAF_BYTES_CEILING = 120;
+
 /** What is kept for one space: each collection's leaves at the stamp they were read at, and the last root. */
 interface CachedSpace {
   collections: Map<BrainCollection, Stamped<string[]>>;
   last?: { stamps: string; files: string[]; result: MerkleResult };
 }
-const cached = new LruMap<string, CachedSpace>(MERKLE_CACHE_SPACES);
+
+/** The leaves an entry holds: every collection's, and the file leaves of its last root. */
+function leavesHeld(entry: CachedSpace): number {
+  let n = entry.last?.files.length ?? 0;
+  for (const stamped of entry.collections.values()) n += stamped.value.length;
+  return n;
+}
+const cached = new LruMap<string, CachedSpace>(MERKLE_CACHE_SPACES, undefined,
+  { weigh: leavesHeld, maxWeight: MERKLE_CACHE_MAX_LEAVES });
 
 function cacheOf(spaceId: string): CachedSpace {
   const hit = cached.get(spaceId);
@@ -307,6 +327,16 @@ const sameList = (a: readonly string[], b: readonly string[]): boolean => a.leng
  */
 export async function computeMerkleRoot(spaceId: string): Promise<MerkleResult> {
   const entry = cacheOf(spaceId);
+  try {
+    return await computeInto(spaceId, entry);
+  } finally {
+    // The entry grew or shrank while it was filled, and the cache weighs an entry when it is SET (Q-336). Only an
+    // entry the cache still holds: one dropped meanwhile (the space deleted, or the budget) is not brought back.
+    if (cached.peek(spaceId) === entry) cached.set(spaceId, entry);
+  }
+}
+
+async function computeInto(spaceId: string, entry: CachedSpace): Promise<MerkleResult> {
   const parts: string[][] = [];
   const stamps: string[] = [];
   let stable = true;

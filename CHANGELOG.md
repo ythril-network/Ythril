@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sync:** after an upgrade, a dangling end that an older version had already recorded as a link violation is no longer recorded a second time, nor announced again as `link_violation.created`, when it is next checked: the old record is replaced by the current one and keeps its original `detectedAt`.
+- **Sync:** the cache of Merkle leaves is bounded by the number of leaves it holds, not only by the number of spaces, so one very large space can no longer hold unbounded memory.
 - **Config:** on Windows, saving `config.json`, the secrets file or the schema library no longer fails while another program has the file open for a moment.
 - **Brain:** a deleted fact, chrono entry, entity or link is removed together with its tombstone, by the delete doors, the TTL sweep and the link reconcile. A tombstone the store refuses now fails the delete and keeps the record.
 - **Brain:** merging entity A no longer moves the edges of a fact or chrono entry that holds A's id, and resolving a fork of a fact or chrono entry no longer moves an entity's edges: an edge end is matched by kind as well as id.
