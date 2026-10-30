@@ -25,6 +25,9 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 every record whose stored text is not its current text (`stale` in its answer): a record whose text changed while its embedding job could
 not be queued, which kept the vector and the lexical text of its previous content, and a record a peer sent that this instance
 suppresses, which was stored without lexical text. The call reads every record of the space once. Nothing runs it for you.
+**The first run after upgrading is a partial reindex.** It also re-embeds every record written under an older text format, every record with no
+stored text at all, and every edge whose endpoint was renamed since it was embedded, which may be a large share of an older space, up to the
+`limit` of the call (call again once the worker has drained what it queued).
 
 **File rows stored before bundle-71 under another spelling of their path.** Until bundle-71 a file row's id was the caller's text as it came:
 no Unicode normalisation, no collapse of `//`, `.` and `..`. A file a macOS peer delivered under a decomposed name, or one uploaded as `a//b`
