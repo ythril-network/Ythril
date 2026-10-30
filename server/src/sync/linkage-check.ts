@@ -27,7 +27,8 @@
  *
  * A violation's `_id` is derived from what it says — the document, the field, the target — and written with
  * `$setOnInsert`, so checking the same edge again (an edit lands, a page is re-sent) finds the record already there.
- * The webhook fires only for the one that was new.
+ * The webhook fires only for the one that was new. A record an instance made before ids were derived (a random uuid) is
+ * adopted by the derived one when its end is checked again, not duplicated beside it (`oldRecordsOf`, Q-336).
  *
  * It only RECORDS, never throws: sync ingest is validated, counted and let in, and a refusal would hold the
  * watermark and stop the channel. A failure to record is logged once per run.
@@ -183,7 +184,49 @@ async function missingTargets(
   return missing;
 }
 
-/** Record each dangling end once — by its derived id, `$setOnInsert` — and announce only the ones that are new. */
+/** What identifies a dangling end by what its record SAYS — the fields a pre-bundle-30 row shares with the derived one. */
+const endOf = (v: Pick<LinkViolationDoc, 'docType' | 'docId' | 'field' | 'reason'>): string =>
+  JSON.stringify([v.docType, v.docId, v.field, v.reason]);
+
+/**
+ * The records of these ends that a RANDOM id names — what an instance upgraded from before bundle-30 holds — by the
+ * derived id that now names the end: the ids to remove, and the earliest date any of them was detected.
+ *
+ * ## What this prevents (Q-336)
+ *
+ * Before bundle-30 a violation was inserted with a random uuid and nothing dedupes it. Its `docId`, `docType`, `field` and
+ * `reason` are the ones this check writes today, but its id is not the derived one, so the first re-landing of an old
+ * dangling end after the upgrade filed a SECOND record of it and announced `link_violation.created` for something the
+ * operator had been told long ago. No boot migration: the adoption happens when the end is checked again, in the one read
+ * this check already makes of the collection.
+ *
+ * Read by `docId` (the one field every end of a document shares), and matched in memory on the rest. A row whose id IS a
+ * derived one of this batch is the record itself, not an old one.
+ */
+async function oldRecordsOf(spaceId: string, docs: ReadonlyMap<string, LinkViolationDoc>):
+  Promise<Map<string, { ids: string[]; detectedAt: string }>> {
+  const derivedByEnd = new Map<string, string>();
+  for (const doc of docs.values()) derivedByEnd.set(endOf(doc), doc._id);
+  const docIds = [...new Set([...docs.values()].map(d => d.docId))];
+  const rows = await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations'))
+    .find({ docId: { $in: docIds } } as never, { projection: { docId: 1, docType: 1, field: 1, reason: 1, detectedAt: 1 } })
+    .toArray();
+  const old = new Map<string, { ids: string[]; detectedAt: string }>();
+  for (const row of rows) {
+    const derived = derivedByEnd.get(endOf(row));
+    if (derived === undefined || docs.has(row._id)) continue;
+    const seen = old.get(derived);
+    if (!seen) old.set(derived, { ids: [row._id], detectedAt: row.detectedAt });
+    else { seen.ids.push(row._id); if (row.detectedAt < seen.detectedAt) seen.detectedAt = row.detectedAt; }
+  }
+  return old;
+}
+
+/**
+ * Record each dangling end once — by its derived id, `$setOnInsert` — and announce only the ones that are new. An end an
+ * old random-id record already names is ADOPTED (`oldRecordsOf`): the derived record takes the earliest old
+ * `detectedAt`, the old ones are removed once it is stored, and nothing is announced, because the end is not new.
+ */
 async function recordViolations(spaceId: string, sender: string, missing: ReadonlyArray<Target & { reason: string }>): Promise<void> {
   if (missing.length === 0) return;
   const detectedAt = new Date().toISOString();
@@ -193,13 +236,19 @@ async function recordViolations(spaceId: string, sender: string, missing: Readon
     docs.set(_id, { _id, spaceId, docId: t.docId, docType: t.docType, field: t.field,
       reason: t.reason, peerInstanceId: sender, detectedAt });
   }
-  const all = [...docs.values()];
-  const res = await col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations')).bulkWrite(
+  const old = await oldRecordsOf(spaceId, docs);
+  const all = [...docs.values()].map(doc => ({ ...doc, detectedAt: old.get(doc._id)?.detectedAt ?? doc.detectedAt }));
+  const violations = col<LinkViolationDoc>(spaceCollection(spaceId, 'linkViolations'));
+  const res = await violations.bulkWrite(
     all.map(doc => ({ updateOne: { filter: { _id: doc._id } as never, update: { $setOnInsert: doc } as never, upsert: true } })),
     { ordered: false },
   );
+  // After the derived records are stored, so a failure in between leaves both and the next check adopts again.
+  const adopted = [...old.values()].flatMap(o => o.ids);
+  if (adopted.length > 0) await violations.deleteMany({ _id: { $in: adopted } } as never);
   for (const index of Object.keys(res.upsertedIds ?? {})) {
     const doc = all[Number(index)]!;
+    if (old.has(doc._id)) continue;
     emitWebhookEvent({ event: 'link_violation.created', spaceId, entry: doc as unknown as Record<string, unknown> });
   }
 }

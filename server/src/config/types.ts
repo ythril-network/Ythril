@@ -1990,7 +1990,7 @@ export interface ConflictDoc {
  * remediate (fix the document, disable strictLinkage, or leave network).
  */
 export interface LinkViolationDoc {
-  _id: string;            // UUID v4
+  _id: string;            // derived from the end it records (`linkage-check.ts`); a random UUID v4 before bundle-30, adopted by the derived one when the end is checked again
   spaceId: string;
   docId: string;          // ID of the violating document — an id, or a path when docType is 'file'
   /*
