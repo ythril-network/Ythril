@@ -4,10 +4,10 @@
  * A link's id IS its relationship (`linkIdFor`), and the space hash takes a link over that identity. A relationship linked on both peers must therefore
  * leave both holding one row under one id and the same space hash.
  *
- *  - **Case 1, green on every build** (ids derive): a link made on A reaches B under the one derived id, one cycle, the roots agree. It states that the
- *    ordinary case never was the defect. (The design's wording was "created independently on both peers"; that case is NOT green, because the two
- *    creations carry their own `createdAt` and `updatedAt` at the one seq 1, the leaf hashes them, and an equal-seq link is skipped. It is a different defect
- *    from the id's, outside this ticket: see the slice's report.)
+ *  - **Case 1, red until the link's leaf left its author and stamps out**: the same link created independently on BOTH peers. The two creations carry their
+ *    own author, `createdAt` and `updatedAt` at the one seq 1, an equal-seq link is skipped on arrival (the two rows say one thing), and the leaf hashed
+ *    those, so the roots differed for ever. That is the ticket's title. The leaf is now the relationship and its seq (`byRelationship`, `merkle.ts`).
+ *    (A link made on A alone and delivered to B never was the defect: ids derive. Case 1b keeps that ordinary path covered.)
  *  - **Case 2, the case that was red**: the harness pushes the relationship to A under an id that does NOT derive from its endpoints (a forged one, or
  *    a collision row an old migration left), while B creates the same relationship locally. Before the fix A stored it under that id, B's derived copy hit
  *    A's unique endpoint index and answered `duplicate` for ever, and the roots differed because a leaf hashed the stored `_id`. Now the planner refuses the
@@ -77,7 +77,21 @@ describe('one relationship linked on two peers converges, between real instances
   const agree = async () => (await rootOf(INSTANCES.a, tokenA)) === (await rootOf(INSTANCES.b, tokenB))
     && JSON.stringify(await linkIdsOn(INSTANCES.a, tokenA)) === JSON.stringify(await linkIdsOn(INSTANCES.b, tokenB));
 
-  it('case 1: a link created on A reaches B under the one derived id: after one cycle the roots agree (green on every build: ids derive)', async () => {
+  it('case 1: the same link created independently on both peers: after one cycle the roots agree', async () => {
+    const from = randomUUID(), to = randomUUID();
+    await plantEnds(from, to);
+    const idOnA = await createLink(INSTANCES.a, tokenA, from, to);
+    const idOnB = await createLink(INSTANCES.b, tokenB, from, to);
+    assert.equal(idOnB, idOnA, 'fixture check: both peers derive one id for one relationship');
+    await syncUntil(INSTANCES.a, tokenA, net.networkId, agree, 'both peers to hold the same links and one space hash', {
+      timeoutMs: 40_000,
+      onTimeout: async () => JSON.stringify({ a: await linkIdsOn(INSTANCES.a, tokenA), b: await linkIdsOn(INSTANCES.b, tokenB), roots: [await rootOf(INSTANCES.a, tokenA), await rootOf(INSTANCES.b, tokenB)] }),
+    });
+    assert.deepEqual(await linkIdsOn(INSTANCES.b, tokenB), [idOnA]);
+    assert.equal(await rootOf(INSTANCES.a, tokenA), await rootOf(INSTANCES.b, tokenB));
+  });
+
+  it('case 1b: a link created on A reaches B under the one derived id: after one cycle the roots agree (ids derive)', async () => {
     const from = randomUUID(), to = randomUUID();
     await plantEnds(from, to);
     const idOnA = await createLink(INSTANCES.a, tokenA, from, to);

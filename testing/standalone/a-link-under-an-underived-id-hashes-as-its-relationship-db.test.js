@@ -13,8 +13,9 @@
  * ## What is asserted
  *
  * - the same relationship under the derived id in one space and a random v4 id in another gives equal roots;
- * - a link under its derived id hashes exactly as it did before (the leaf is the document's own `docLeaf`), so a network
- *   of mixed versions disagrees about nothing it did not already disagree about;
+ * - the same relationship made independently on two instances, each with its own author and its own stamps at one seq, gives
+ *   equal roots: a link's leaf is its relationship identity and seq only, and a link has no authored content beyond its
+ *   endpoints (Q-222; the leaf used to take the author and both stamps, which is the case this file's later cases hold red);
  * - sensitivity: a link to another endpoint, and the same relationship with another seq, move the root, so "equal" means
  *   something.
  *
@@ -85,12 +86,26 @@ describe('a link under an underived id hashes as its relationship', { skip }, ()
       'a link under an id that does not derive hashes by that id, so one relationship is two records to the root');
   });
 
-  it('a link under its derived id hashes exactly as its own document does, as it always did', async () => {
-    const stored = link(HERE, derived());
-    await mongo.col(spaceCollection(HERE, 'links')).insertOne(stored);
-    // One leaf and no files: the root of a single leaf is that leaf.
-    assert.equal(await root(HERE), merkle.docLeaf('links', stored),
-      'the leaf of a link under its derived id changed — a mixed-version network would disagree about every link');
+  it('the same relationship created independently on two instances (own author, own timestamps, one seq) gives the same root', async () => {
+    await mongo.col(spaceCollection(HERE, 'links')).insertOne(link(HERE, derived(), {
+      author: { instanceId: 'peer-a', instanceLabel: 'A' }, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', seq: 1,
+    }));
+    await mongo.col(spaceCollection(THERE, 'links')).insertOne(link(THERE, derived(), {
+      author: { instanceId: 'peer-b', instanceLabel: 'B' }, createdAt: '2026-09-02T12:34:56.000Z', updatedAt: '2026-09-02T12:34:56.000Z', seq: 1,
+    }));
+    assert.equal(await root(THERE), await root(HERE),
+      'a link carries no authored content beyond its endpoints; its author and stamps are when and by whom it was made here, and an '
+      + 'equal-seq link is skipped on arrival, so hashing them keeps two instances that made one relationship apart for ever');
+  });
+
+  it('a link\'s leaf is its relationship at its seq, and nothing about who made it or when', async () => {
+    const one = link(HERE, derived());
+    const other = link(HERE, derived(), { author: { instanceId: 'x', instanceLabel: 'X' }, createdAt: '2027-01-01T00:00:00.000Z', updatedAt: '2027-01-02T00:00:00.000Z' });
+    await mongo.col(spaceCollection(HERE, 'links')).insertOne(one);
+    const withOne = await root(HERE);
+    await mongo.col(spaceCollection(HERE, 'links')).deleteMany({});
+    await mongo.col(spaceCollection(HERE, 'links')).insertOne(other);
+    assert.equal(await root(HERE), withOne, 'the leaf moved with the link\'s author or stamps');
   });
 
   it('is still sensitive: another endpoint, or another seq, moves the root', async () => {
