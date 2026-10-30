@@ -88,6 +88,16 @@ import { TokenViewCopyComponent } from './token-view-copy.component';
                  [placeholder]="'tokens.create.labelPlaceholder' | transloco" maxlength="200" />
         </div>
 
+        <!-- The quota, editable here as well as while minting: lowering a bulk client's limit used to mean
+             revoking the token and minting another. Same keys and attributes as the create form, because it is
+             the same control. Empty means inherit the instance value. -->
+        <div class="field" style="margin-bottom:14px;">
+          <label for="tokenRateLimit">{{ 'tokens.create.rateLimit' | transloco }}</label>
+          <input id="tokenRateLimit" type="number" class="styled-input" [(ngModel)]="draftRateLimit" name="rateLimit"
+                 min="1" step="1" [placeholder]="'tokens.create.rateLimitInherit' | transloco" />
+          <div class="hint">{{ 'tokens.create.rateLimitHint' | transloco }}</div>
+        </div>
+
         <label style="display:block;margin-bottom:6px;">{{ 'tokens.create.permission' | transloco }}</label>
         <app-rights-matrix [rights]="draft()" [spaces]="spaceIds()" (changed)="draft.set($event)"/>
 
@@ -180,6 +190,14 @@ export class TokenRightsDialogComponent {
   /** Same reasoning for the label: prefilled, so saving without touching it is not a rename to empty. */
   draftName = '';
   /**
+   * The token's OWN requests-per-minute limit, `null` when it inherits the instance value.
+   *
+   * Prefilled from `rateLimitPerMinute`, never from `rateLimitEffective`: the effective value of a token that
+   * inherits is the instance's, and prefilling it would turn "inherit" into a pinned number on the next save.
+   * An emptied number input yields `null` (or '' in some browsers), which {@link save} reads as "inherit".
+   */
+  draftRateLimit: number | null = null;
+  /**
    * The two instance-level flags, which had no control at all until now.
    *
    * They are part of the matrix the server already stores and PATCH already accepts — `migrateToken` sets
@@ -223,6 +241,7 @@ export class TokenRightsDialogComponent {
     const r = this.token().rights;
     if (r) this.draft.set({ ...r } as TokenRights);
     this.draftName = this.token().name;
+    this.draftRateLimit = this.token().rateLimitPerMinute ?? null;
     this.draftMfa = this.token().mfa ?? 'inherit';
   }
 
@@ -235,10 +254,17 @@ export class TokenRightsDialogComponent {
     const trimmed = this.draftName.trim();
     const renamed = trimmed && trimmed !== this.token().name;
     const mfaChanged = this.draftMfa !== (this.token().mfa ?? 'inherit');
+    // The quota is sent only when it changed: a number when set or changed, `null` when a set value was emptied
+    // (the only way to say "inherit again"), absent when untouched so a token that inherits keeps inheriting.
+    // An empty input is `null` or '' depending on the browser; both mean empty.
+    const rateNow = (this.draftRateLimit as number | string | null) === '' || this.draftRateLimit == null
+      ? null : Number(this.draftRateLimit);
+    const rateWas = this.token().rateLimitPerMinute ?? null;
     this.authApi.updateToken(this.token().id, {
       rights: this.draft(),
       ...(renamed ? { name: trimmed } : {}),
       ...(mfaChanged ? { mfa: this.draftMfa } : {}),
+      ...(rateNow !== rateWas ? { rateLimitPerMinute: rateNow } : {}),
     }, this.totpCode.trim() || undefined).subscribe({
       next: ({ token }) => { this.saving.set(false); this.saved.emit(token); },
       error: (err) => {
