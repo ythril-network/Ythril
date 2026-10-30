@@ -229,7 +229,13 @@ export function storedEdgeKind(kind: RefKind | undefined): RefKind | undefined {
   return kind === undefined || kind === 'entity' ? undefined : kind;
 }
 
-/** Read an edge endpoint's kind. Absent means `entity` — the one place that reading lives. */
+/**
+ * Read an edge endpoint's kind. Absent means `entity` — the one place that reading lives.
+ *
+ * It answers "what kind of record does this endpoint point at?" and prevents a second spelling of the default: the REST route, the MCP
+ * tool, the bulk importer, sync's link-violation check and the embed-text resolver each had their own, correct while every endpoint was
+ * an entity and wrong in a different way once one was not. {@link storedEdgeKind} is the matching question for what to STORE.
+ */
 export function edgeEndpointKind(kind: RefKind | undefined): RefKind {
   return kind ?? 'entity';
 }

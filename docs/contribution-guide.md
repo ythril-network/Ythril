@@ -525,7 +525,9 @@ place**, and a change that adds a second is the defect this repository produces 
   a peer's documents or a restore.
 - **A capability change is all five places** — route, tool, integration guide, user guide, rights — in the same commit, as the
   y-flows convention `convention-five-places-one-commit` says; for rules and the live check that is `06a-schema-api.md`, `16-mcp.md`, `07-tokens-api.md`, the
-  Schema tab page of the user guide and the field-rights table in `auth/space-field-rights.ts`.
+  Schema tab page of the user guide and the field-rights table in `auth/space-field-rights.ts`. The user-guide page is the one of the
+  surface an operator uses, listed in [the page index of the user guide](userguide.md#which-page-documents-which-surface) (a search parameter is the Brain page,
+  a token control `04-settings.md`, a model or media control `04a-media-and-embedding.md`, retention and audit `05-storage-data-and-audit.md`), not the Brain page by habit.
 
 The decision behind these is record 10 in [Decision records](decisions.md).
 

@@ -447,6 +447,15 @@ from `testing/_shared`). The delay and listener gate reads every other tracked `
 `scripts/`, not the client's `*.spec.ts` (Vitest's own, run with fake timers); the poll gate reads `testing/` and the
 client specs too. Neither sees a `for…of` loop (bounded by its list) or a recursive poll (`setTimeout(poll, …)`).
 
+## Shared derivations
+
+A gate that concludes about a whole set reads the set out of the code, through one helper, and never from a list of its own. For the
+documents sync validates a push with, that helper is `testing/_shared/incoming-sync-schemas.mjs`: `incomingSchemas` derives every
+`Incoming…Doc` schema from `server/dist/sync/incoming-schemas.js` (a module export of that name with a zod `.shape`), and
+`embeddableIncomingSchemas` derives the ones whose records can carry text to embed. It carries the floor inside, so a broken import throws
+instead of handing a loop an empty set. A gate that asserts something of the incoming schemas calls it; never count them in a test or in
+prose, because a hand-written list is how a gate once reported clean about a document it never checked.
+
 ## How a new test file reaches CI
 
 A test file that no job runs is not a test. Two derived checks hold that, one on what CI selects and one on what actually

@@ -82,6 +82,11 @@ export function mergeTagsAndProperties(
  * A copy is returned rather than the stored reference: `deleteFields` mutates what it is handed, and
  * aliasing the document just read from the driver is a defect waiting for the first caller that does
  * both in one request.
+ *
+ * ## The question it answers, and what it prevents
+ *
+ * "What properties does a patch store?" A patch writer that spelled the `undefined` case itself would drop it or turn it into an empty
+ * map, which erases the stored properties of a record the caller said nothing about. The case is inside, so no writer can leave it out.
  */
 export function mergePropertiesOrKeep(
   existing?: RecordProperties | null,
