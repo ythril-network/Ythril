@@ -47,7 +47,7 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-reembed-converges-'
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
 
-let mongo, reembed;
+let mongo, reembed, buildEmbedText;
 const c = (space, part) => mongo.col(`${space}_${part}`);
 const VEC = [0.1, 0.2, 0.3, 0.4];
 const now = '2026-01-01T00:00:00.000Z';
@@ -61,7 +61,14 @@ const isTextlessDerived = (doc) => typeof doc.parentFileId === 'string'
 
 const COLL = { fact: 'facts', entity: 'entities', edge: 'edges', chrono: 'chrono', file: 'files' };
 
-/** Stand in for the worker: give a record with text a vector, unset a textless one's, delete the job. */
+/**
+ * A record as the worker (or a local write of a suppressed record) leaves it: with the text it searches beside it. The repair sweep
+ * compares that text with the one the builder gives today, so a fixture that holds a vector, or is suppressed, WITHOUT its text is a
+ * stale record, not a settled one.
+ */
+const withText = async (space, kind, doc) => ({ ...doc, matchedText: await buildEmbedText(space, kind, doc) });
+
+/** Stand in for the worker: give a record with text a vector and the text it was made from, unset a textless one's, delete the job. */
 async function stubDrain(space) {
   const queued = await c(space, 'embed_jobs').find({}).toArray();
   for (const job of queued) {
@@ -70,7 +77,7 @@ async function stubDrain(space) {
     if (doc && job.recordType === 'file' && isTextlessDerived(doc)) {
       await coll.updateOne({ _id: doc._id }, { $unset: { embedding: '', embeddingModel: '', matchedText: '' } });
     } else if (doc) {
-      await coll.updateOne({ _id: doc._id }, { $set: { embedding: VEC, embeddingModel: 'stub' } });
+      await coll.updateOne({ _id: doc._id }, { $set: { embedding: VEC, embeddingModel: 'stub', matchedText: await buildEmbedText(space, job.recordType, doc) } });
     }
     await c(space, 'embed_jobs').deleteOne({ _id: job._id });
   }
@@ -89,6 +96,7 @@ describe('the reembed backfill converges (real MongoDB)', { skip }, () => {
     mongo = await openTestMongo('reembedconverges');
     (await import('../../server/dist/config/loader.js')).loadConfig();
     reembed = await import('../../server/dist/brain/reembed.js');
+    ({ buildEmbedText } = await import('../../server/dist/brain/embed-record.js'));
     (await import('../../server/dist/brain/embed-queue.js')).resetEmbedPendingHint();
   });
 
@@ -110,11 +118,11 @@ describe('the reembed backfill converges (real MongoDB)', { skip }, () => {
       // A text chunk of it: derived WITH content, vectorless — owed a vector.
       file('docs/top.md#chunk0', { parentFileId: 'docs/top.md', chunkIndex: 0, headingText: 'Intro', content: 'The first section.' }),
       // A photo that already has its vector, and a FACE chunk of it: derived, no text, only a face vector.
-      file('photos/p.jpg', { embedding: VEC }),
+      await withText(SPACE, 'file', file('photos/p.jpg', { embedding: VEC })),
       file('photos/p.jpg#face-chunk0', { parentFileId: 'photos/p.jpg', chunkIndex: 0, faceEmbedding: VEC }),
       // A converted document: the original has its vector; the converted record and an extracted image are
       // derived and carry no content.
-      file('docs/x.pdf', { embedding: VEC }),
+      await withText(SPACE, 'file', file('docs/x.pdf', { embedding: VEC })),
       file('_converted/docs/x.pdf.md', { parentFileId: 'docs/x.pdf' }),
       file('_extracted/docs/x.pdf/image-0.png', { parentFileId: 'docs/x.pdf' }),
       // A derived record whose content is an EMPTY string is textless too.
@@ -135,6 +143,7 @@ describe('the reembed backfill converges (real MongoDB)', { skip }, () => {
     }
     assert.deepEqual(ids, ['fact:f1', 'file:docs/top.md', 'file:docs/top.md#chunk0']);
     assert.equal(res.enqueued, 3);
+    assert.equal(res.stale, 0, 'a record that holds a vector beside its own text is not stale');
     assert.deepEqual(res.byKind, { fact: 1, file: 2 });
   });
 
@@ -164,7 +173,8 @@ describe('the reembed backfill converges (real MongoDB)', { skip }, () => {
   });
 
   it("the space-wide suppressed ('all') branch still reports its candidates as skipped", async () => {
-    await c(QUIET, 'facts').insertMany([fact(QUIET, 'q1'), fact(QUIET, 'q2')]);
+    // Suppressed as a local write leaves them: with the text the lexical channel searches (a record without it is the repair's, `stale`).
+    await c(QUIET, 'facts').insertMany([await withText(QUIET, 'fact', fact(QUIET, 'q1')), await withText(QUIET, 'fact', fact(QUIET, 'q2'))]);
     const res = await reembed.reembedSpace(QUIET);
     assert.equal(res.enqueued, 0);
     assert.equal(res.skippedSuppressed, 2, 'a space whose suppression is still on must say so, not look like a no-op');
@@ -174,9 +184,9 @@ describe('the reembed backfill converges (real MongoDB)', { skip }, () => {
 
   it('a page of suppressed records at the front does not block the records behind it', async () => {
     await c(SPACE, 'facts').insertMany([
-      fact(SPACE, 'a-1', { suppressEmbeddings: true }),
-      fact(SPACE, 'a-2', { suppressEmbeddings: true }),
-      fact(SPACE, 'a-3', { suppressEmbeddings: true }),
+      await withText(SPACE, 'fact', fact(SPACE, 'a-1', { suppressEmbeddings: true })),
+      await withText(SPACE, 'fact', fact(SPACE, 'a-2', { suppressEmbeddings: true })),
+      await withText(SPACE, 'fact', fact(SPACE, 'a-3', { suppressEmbeddings: true })),
       fact(SPACE, 'z-1'),
       fact(SPACE, 'z-2'),
     ]);

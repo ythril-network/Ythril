@@ -405,6 +405,13 @@ violation, the one a write made afterwards gets, with nothing written. Only a wr
 the subject keeps changing under it, answers `409` as above. Writing the same edge twice is not a loss — both writers
 converge on the one edge.
 
+**A converge keeps the previous lexical text until its embedding job runs.** Rewriting an existing fact, entity, chrono entry or edge
+by its id (or its triplet) without `waitForEmbedding` stores the new content and queues a job, and the record keeps the
+vector **and the lexical text of its previous content** until that job has run, so the two always describe the same words
+(the job told them apart by that text, and a new text beside an old vector made it conclude the record was already embedded and never
+re-embed it). That is the window an update and a peer's arrival already have, a few seconds on a live worker. A record whose job could
+not be queued is found by [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill), which queues an updated record as well as one with no vector.
+
 ### What a read never sends, and what you can drop
 
 **The embedding vector is never returned — by any endpoint, on either door, and there is no parameter that
@@ -523,7 +530,8 @@ suppressed as well.
 > suppresses embedding — the write succeeds, and nothing changes. On a record no other tier suppresses,
 > `false` does restore the vector. To un-suppress a whole type or space, clear its `suppressEmbeddings` and
 > then run [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill), because nothing backfills on
-> its own.
+> its own. That call also queues a record whose text changed while its job could not be queued (it keeps the vector and the lexical
+> text of its previous content, so "has no vector" cannot see it).
 
 ### Marking a record as no longer true
 

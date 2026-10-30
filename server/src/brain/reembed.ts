@@ -13,6 +13,13 @@
  * will find it". **There was no such sweep** — the comment described a repair mechanism that had never been
  * built, which is exactly the kind of reassurance that stops anyone looking. This is that sweep, on demand.
  *
+ * ## An UPDATE whose job was lost is the same gap, and "has no vector" does not see it
+ *
+ * A record whose text changed while its job could not be queued keeps the vector and the lexical text of its previous content,
+ * so it is not vectorless. The repair therefore also queues every record whose stored `matchedText` differs from the text its
+ * builder gives today (`stale`, `queue-embed-sweep.ts`): the pair a write stores (`derived-text-on-write.ts`) is the record of what
+ * is owed, so nothing else has to remember it.
+ *
  * ## It ENQUEUES, and does not embed
  *
  * A space can hold a million records and the model is the slow part. Embedding inline would time out the request
@@ -72,10 +79,15 @@ export const REEMBED_MAX_LIMIT = 50_000;
 
 export interface ReembedResult {
   spaceId: string;
-  /** Records with no vector that are not suppressed — the ones a job was queued for. */
+  /** Records a job was queued for: those with no vector that are not suppressed, and the `stale` ones. */
   enqueued: number;
   /** Candidates skipped because suppression still applies at some tier. */
   skippedSuppressed: number;
+  /**
+   * Of `enqueued`, the records queued because their stored text differs from their current text: a vector made from text the record
+   * no longer has (an update whose job was lost), or a suppressed record whose lexical text is missing or old.
+   */
+  stale: number;
   /** Per-kind breakdown of what was enqueued, so an operator can see WHERE the gap was. */
   byKind: Record<string, number>;
   /** Candidates left over after `limit`. Zero when the space is fully swept. */
@@ -85,11 +97,17 @@ export interface ReembedResult {
 }
 
 /**
- * Queue an embedding job for every record in the space that has no vector and is not suppressed.
+ * Queue an embedding job for every record in the space that has no vector and is not suppressed, and for every record whose stored
+ * text differs from its current text (a vector made from text it no longer has, or a suppressed record whose lexical text is missing
+ * or old).
+ *
+ * The second half is the repair of an update whose job was lost: the record kept the vector and the lexical text of its previous
+ * content, so "has no vector" cannot see it. It costs one read of every record of the space per call (the `stale` walk,
+ * `queueEmbedSweep`), while `limit` still bounds what is queued.
  *
  * `kinds` narrows the sweep; omitted means all of them. `limit` bounds one call — see the class comment on why the
  * remainder is reported rather than hidden. The walk is `queueEmbedSweep`'s, shared with the reindex; what is this
- * capability's own is the cap, the background lane, and the "vectorless" match. A derived record with no text of
+ * capability's own is the cap, the background lane, and the "vectorless" and "stale" matches. A derived record with no text of
  * its own (a face chunk, a converted copy) is never a candidate: nothing gives it a vector, so a backfill that queued
  * it would report it as remaining work on every call for ever.
  */
@@ -101,12 +119,20 @@ export async function reembedSpace(
   const swept = await queueEmbedSweep(spaceId, {
     kinds, match: 'vectorless', limit: cap, priority: EMBED_PRIORITY.background,
   });
+  // The records whose stored text is not their current text, under what is left of the one cap: the two walks select disjoint records,
+  // so the cap is shared, never spent twice.
+  const stale = await queueEmbedSweep(spaceId, {
+    kinds, match: 'stale', limit: cap - swept.enqueued, priority: EMBED_PRIORITY.background,
+  });
+  const byKind: Record<string, number> = { ...swept.byKind };
+  for (const [kind, n] of Object.entries(stale.byKind)) byKind[kind] = (byKind[kind] ?? 0) + n;
   const result: ReembedResult = {
     spaceId,
-    enqueued: swept.enqueued,
+    enqueued: swept.enqueued + stale.enqueued,
     skippedSuppressed: swept.skippedSuppressed,
-    byKind: swept.byKind,
-    remaining: swept.remaining,
+    stale: stale.stale,
+    byKind,
+    remaining: swept.remaining + stale.remaining,
     truncated: false,
   };
   result.truncated = result.remaining > 0;

@@ -21,6 +21,11 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 
 **Breaking changes**, when they occur, will be listed in `CHANGELOG.md` with migration steps.
 
+**After upgrading to the release that repairs stale embeddings, run `POST /api/spaces/:id/reembed` once per space.** It now also queues
+every record whose stored text is not its current text (`stale` in its answer): a record whose text changed while its embedding job could
+not be queued, which kept the vector and the lexical text of its previous content, and a record a peer sent that this instance
+suppresses, which was stored without lexical text. The call reads every record of the space once. Nothing runs it for you.
+
 **File rows stored before bundle-71 under another spelling of their path.** Until bundle-71 a file row's id was the caller's text as it came:
 no Unicode normalisation, no collapse of `//`, `.` and `..`. A file a macOS peer delivered under a decomposed name, or one uploaded as `a//b`
 or `./a`, was stored under that id. Since then the id is the path's canonical key, so such a row was invisible to every door and an
