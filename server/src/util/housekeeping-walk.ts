@@ -53,9 +53,16 @@
  * ## What it does not do
  *
  * It does not choose the spaces: the caller passes `concreteSpaces()` or `concreteSpaceIds()`. It does not bound what is not a
- * database operation (a model call, a directory walk). Request routes and the sync engine are not walks of this kind. Space
+ * database operation (a model call, a directory walk), and it does not cover work that has a budget of its own: index builds, the bulk
+ * link conversion and the scrape-time collectors. Request routes and the sync engine are not walks of this kind. Space
  * initialisation is: boot (`initAllSpaces`) and a reload (`initAddedSpaces`) both run each space as its own step
  * (`initOwedSpaces`), because a boot that could not initialise one space went on serving anyway, with the rest half initialised.
+ *
+ * ## What it promises, and no more
+ *
+ * An error or a hang in one space does not stop the others. Two things do stop a walk, each reported as such: the store is not answering
+ * (`storeDown`), and the store is stalled (`stalled`, K spaces in a row timing out in one tick). A space that timed out is passed over
+ * until its quarantine ends or a write for it lifts it.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { housekeepingOpMs, withinHousekeepingBound } from '../db/write-bound.js';

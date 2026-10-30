@@ -879,6 +879,10 @@ export interface WipeResult {
  *  Scoped strictly to the target space — no cross-space side effects.
  *
  *  The returned counts reflect the number of documents actually deleted.
+ *
+ *  It answers "remove this space's data, and nothing else", and it is the one wipe of a space's data: four per-collection bulk deletes
+ *  (edges, entities, memories, chrono) were one rule written four times, differing in two real ways that became parameters, and the
+ *  entities' face-label cascade (`unlabelAllFaces`) is inside it so no caller can wipe entities and leave labelled faces pointing at nobody.
  */
 export async function wipeSpace(spaceId: string, types?: WipeCollectionType[]): Promise<WipeResult> {
   return runSpaceAct(registerOwnSpaceAct(soloWipe(spaceId, types)), { waiter: true }).then(settled => actAnswer(settled, () => wipeResultOf(settled.counts)));

@@ -40,6 +40,15 @@ export const RESOLVED_ELSEWHERE = '_resolvedElsewhere' as const;
  * RESTORE carries nothing from the copy it replaces. The admin export leaves out the derived half and a restore
  * keeps the backup's record-tier half (`RESTORED_LOCAL_FIELDS` below) — never the replaced copy's (`Q-234`).
  *
+ * ## The classes, each named by the constant that lists it
+ *
+ * Read the classes from this module's exports, never from a count written elsewhere: {@link LOCAL_ONLY_FIELDS} is the whole set;
+ * {@link RESTORED_LOCAL_FIELDS} is the record tier a restore keeps from its own backup (`writtenHere` among it); {@link WRITE_GUARD_FIELDS}
+ * is the edge's functional guard; {@link POSITION_FIELDS} is the landing position (`pos`, `posAtSeq`); {@link TOMBSTONE_LOCAL_FIELDS} is
+ * what a stored tombstone keeps for itself (`storedVia`, `issuedHere` and the position); {@link DECISION_OWED_FIELDS} is the decision a
+ * fork row still owes here; and `ORDER_ONLY_FIELDS` (`brain/recall-shape.ts`) is `pos` as a field a read may order by and no answer returns.
+ * What is in none of the restored, write-guard or position lists is {@link DERIVED_LOCAL_FIELDS}.
+ *
  * ## What each one is, and what taking a peer's copy would do
  *
  * - **`embedding` / `embeddingModel`** — computed by this instance's model. Ranking one model's vectors
@@ -84,7 +93,7 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The third class of local-only field: a marker THIS instance's store collides on, which is a pure function of the record
+ * The write-guard class of local-only field: a marker THIS instance's store collides on, which is a pure function of the record
  * that carries it (`_functionalGuard === functionalSubjectKey(from, label)`, `brain/functional-subject.ts`).
  *
  * Neither half of the older split fits it, so it is named:
@@ -117,7 +126,7 @@ export const WRITE_GUARD_FIELDS: ReadonlySet<string> = new Set([FUNCTIONAL_GUARD
 export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt', 'syncBase', 'deliveredBy', WRITTEN_HERE, RESOLVED_ELSEWHERE]);
 
 /**
- * The fifth class of local-only field: A DECISION OWED HERE (Q-624, design rev 4 §9a). `_resolvedElsewhere` on a fork row says that another
+ * The decision-owed class of local-only field: A DECISION OWED HERE (Q-624, design rev 4 §9a). `_resolvedElsewhere` on a fork row says that another
  * instance resolved its own copy of this unchosen version behind a tombstone this instance's deletion authority declined, so the fork stays
  * here, listed in Review as resolved elsewhere, until THIS instance's user decides it (owner, 2026-10-25: my instance, my data).
  *
@@ -132,7 +141,7 @@ export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', 
 export const DECISION_OWED_FIELDS: ReadonlySet<string> = new Set([RESOLVED_ELSEWHERE]);
 
 /**
- * The fourth class of local-only field: where a record sits in THIS instance's stream (bundle-81, design rev 8 §2). `pos` is the position
+ * The landing-position class of local-only field: where a record sits in THIS instance's stream (bundle-81, design rev 8 §2). `pos` is the position
  * the record landed at (`util/position-clock.ts`) and `posAtSeq` the version it was taken for, so a row whose `posAtSeq` is not its `seq`
  * changed without a position (a 5.6 build `$set` it and kept `pos`) and is found and repaired at re-upgrade.
  *
