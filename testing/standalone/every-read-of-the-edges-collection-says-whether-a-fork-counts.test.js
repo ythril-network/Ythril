@@ -79,7 +79,7 @@ const reasoned = (reason, keys) => Object.fromEntries(keys.map(k => [`server/src
 const EXEMPT = {
   // ── a fork is a record: the readers that list, count, search, rank, hash, page, export or remove records see it, as a fact fork is seen today (design section 6, P4)
   ...reasoned('a fork row is a record of the space, as a fact fork is: this reader lists, counts, searches, ranks or reports records and shows a fork marked `forkOf`', [
-    'brain/edges.ts:listEdges', 'brain/query.ts:queryBrain', 'brain/query.ts:countBrain', 'brain/lexical-search.ts:lexicalSearch',
+    'brain/list-edges.ts:listEdges', 'brain/query.ts:queryBrain', 'brain/query.ts:countBrain', 'brain/lexical-search.ts:lexicalSearch',
     'brain/recall.ts:recallByType', 'brain/recall.ts:introduceLexicalOnly', 'brain/recall.ts:checkDuplicates', 'brain/recall.ts:hydrateFreshHits',
     'brain/recall.ts:getEntryEmbedding', 'spaces/completeness.ts:gatherCompletenessFacts', 'brain/space-shape.ts:build',
     'mcp/tools/spaces.ts:list_spacesTool.handle', 'mcp/tools/spaces.ts:space_statsTool.handle',
@@ -260,7 +260,7 @@ describe('a fork row is not a second relationship: every reader of the edges col
     const keys = new Set(readers.map(r => r.key.replace('server/src/', '')));
     for (const k of ['brain/edge-lookup.ts:findEdgeByTriplet', 'brain/traverse-graph.ts:traverseGraph', 'brain/recall-seed-traversal.ts:readFrontierEdges',
       'brain/er-model.ts:readErShape', 'brain/merge.ts:detectDuplicateEdges', 'brain/merge.ts:detectEndpointRuleBreaks',
-      'brain/relink-references.ts:relinkEdgesOfRecord', 'brain/edges.ts:listEdges', 'brain/entity-delete-guard.ts:endsOfEdges']) {
+      'brain/relink-references.ts:relinkEdgesOfRecord', 'brain/list-edges.ts:listEdges', 'brain/entity-delete-guard.ts:endsOfEdges']) {
       assert.ok(keys.has(k), `${k} reads the edges collection and the derivation did not find it: it is blind to that shape`);
     }
     assert.ok([...keys].some(k => k.startsWith('api/brain/search.ts:GET ')), 'an inline route handler was not found: the routes are not registered');

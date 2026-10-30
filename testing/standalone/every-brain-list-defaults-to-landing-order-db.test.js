@@ -82,7 +82,7 @@ describe('every Brain list defaults to landing order', { skip }, () => {
     // The four lists with a function of their own: the REST list routes call these and pass no default of theirs.
     const [facts, chrono, entities, edges] = await Promise.all([
       import('../../server/dist/brain/fact.js'), import('../../server/dist/brain/chrono.js'),
-      import('../../server/dist/brain/entities.js'), import('../../server/dist/brain/edges.js'),
+      import('../../server/dist/brain/entities.js'), import('../../server/dist/brain/list-edges.js'),
     ]);
     lists = {
       facts: (s) => facts.listFacts(s, {}, 100, 0), chrono: (s) => chrono.listChrono(s, {}, 100, 0),
