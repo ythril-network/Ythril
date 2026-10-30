@@ -13,7 +13,7 @@ import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
 import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
-import { mergeTags, mergeProperties } from '../merge-fields.js';
+import { mergeTags, mergeProperties, mergePropertiesOrKeep } from '../merge-fields.js';
 import { type SimilarMatch } from '../recall.js';
 import type { DupeCheckOpts } from '../write-options.js';
 import type { ChronoEntry, ChronoType, ChronoStatus } from '../../config/types.js';
@@ -90,7 +90,11 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   const tags = fields.tags ?? [];
 
   // A suppressed record stays findable lexically: `derivedFieldsForWrite` stores its text with no vector.
-  const embedText = chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
+  // The text is the record the write STORES: on a converge the merge (see `planFact`), exactly what the `$set` below writes.
+  const embedText = existing
+    ? chronoEmbedText(fields.title, fields.type, status, fields.description ?? existing.description,
+      mergeTags(existing.tags, tags), mergePropertiesOrKeep(existing.properties, fields.properties))
+    : chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
   // Suppression wins over `waitForEmbedding`, on the record the write LEAVES (`Q-194`).
   const { suppressed, vector } = await vectorBeforeWrite({
     spaceId, kind: 'chrono', existing, schemaKey: { type: fields.type }, stated: opts?.suppressEmbeddings,
