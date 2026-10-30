@@ -73,7 +73,7 @@ export interface SettledReferences {
 /** `relink-references.ts`, loaded where it is used (see {@link settleReferencesToRemovedEntity}). */
 type Relink = typeof import('./relink-references.js');
 
-const NOTHING_SETTLED =(): SettledReferences => ({ removedEdges: [], removedLinks: [], relinked: 0, collapsedEdgeIds: [] });
+const NOTHING_SETTLED = (): SettledReferences => ({ removedEdges: [], removedLinks: [], relinked: 0, collapsedEdgeIds: [] });
 
 /** An edge as the writer-side check reads it: its identity and its ends. */
 export type EdgeToCheck = EdgeEnds & { _id: string; from: string; to: string };
