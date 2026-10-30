@@ -81,7 +81,10 @@ export interface ReembedResult {
   spaceId: string;
   /** Records a job was queued for: those with no vector that are not suppressed, and the `stale` ones. */
   enqueued: number;
-  /** Candidates skipped because suppression still applies at some tier. */
+  /**
+   * Candidates left alone because suppression still applies at some tier. A suppressed record owed its lexical text is not here: it is
+   * queued (its job writes the text and calls no model) and counted in `stale`, or in `remaining` when past the cap.
+   */
   skippedSuppressed: number;
   /**
    * Of `enqueued`, the records queued because their stored text differs from their current text: a vector made from text the record
@@ -129,7 +132,9 @@ export async function reembedSpace(
   const result: ReembedResult = {
     spaceId,
     enqueued: swept.enqueued + stale.enqueued,
-    skippedSuppressed: swept.skippedSuppressed,
+    // A suppressed record owed its lexical text is queued (counted in `stale`, and in `remaining` past the cap), so it is not also a
+    // record left alone: the vectorless walk saw it as skipped, and the stale walk says which of those it took back.
+    skippedSuppressed: Math.max(0, swept.skippedSuppressed - stale.staleSuppressed),
     stale: stale.stale,
     byKind,
     remaining: swept.remaining + stale.remaining,
