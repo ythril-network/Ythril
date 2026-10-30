@@ -163,7 +163,7 @@ export class EndpointRemoved extends Error {
   readonly code = ENDPOINT_REMOVED;
   readonly status = 409 as const;
   constructor(readonly id: string, readonly side: 'from' | 'to') {
-    super(`The entity '${id}' at this edge's ${side} end was deleted or merged while the edge was written; the edge was taken back (or moved with a merge). `
+    super(`The entity '${id}' at this edge's ${side} end was deleted or merged while the edge was written; the edge was taken back. `
       + 'Read the graph again before retrying.');
   }
 }
@@ -183,7 +183,7 @@ export class LinkTargetRemoved extends Error {
   readonly code = LINK_TARGET_REMOVED;
   readonly status = 409 as const;
   constructor(readonly id: string) {
-    super(`The entity '${id}' this link points at was deleted or merged while the link was written; the link was not kept. Read the graph again before retrying.`);
+    super(`The entity '${id}' this link points at was deleted or merged while the link was written; nothing is stored under this link. Read the graph again before retrying.`);
   }
 }
 

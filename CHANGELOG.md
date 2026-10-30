@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Brain:** a deleted fact, chrono entry, entity or link is removed together with its tombstone, by the delete doors, the TTL sweep and the link reconcile. A tombstone the store refuses now fails the delete and keeps the record.
 - **Brain:** merging entity A no longer moves the edges of a fact or chrono entry that holds A's id, and resolving a fork of a fact or chrono entry no longer moves an entity's edges: an edge end is matched by kind as well as id.
-- **Brain:** in a `strictLinkage` space an edge or link written while its entity is deleted or merged no longer survives naming it: the delete takes back what this instance wrote meanwhile, a merge moves it, and a save that loses the race is refused `409` `endpoint_removed`.
+- **Brain:** in a `strictLinkage` space an edge or link written while its entity is deleted or merged no longer survives naming it: the delete takes back what this instance wrote once it began, a merge moves it, and a save whose edge was taken back is refused `409` `endpoint_removed`; a link created on its own is refused `409` `link_target_removed`, and one written inside a record (fact, entry, file, inline) is reported in `warnings`.
 
 ## [6.1.0] — 2026-10-29
 

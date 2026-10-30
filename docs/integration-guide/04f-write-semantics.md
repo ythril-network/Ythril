@@ -244,9 +244,13 @@ deleting and re-creating it, which costs the record its id and its history.
 
 **A reference written while its entity is deleted or merged is taken back (`strictLinkage` spaces).** A write checks that an edge's entity ends and a link's
 target exist, and a delete or merge of that entity can commit between the check and the write; no write conflict is reported, because the two touch different
-documents. So each side checks again after its own write: an edge whose entity is gone is refused `409` `endpoint_removed` and a link is taken back with a
-`link_target_removed` warning, and the delete or merge takes back (delete) or moves to the survivor (merge) what this instance wrote to the entity meanwhile.
-A peer's row is never changed by this. See [Upsert an Edge](04b-graph-api.md#upsert-an-edge) and [Links](04g-links-api.md).
+documents. So each side checks again after its own write: an edge whose entity is gone is refused `409` `endpoint_removed`, a link written as part of a record is
+taken back with a `link_target_removed` warning (a link written on its own is refused `409` with the same code), and the delete or merge settles what landed
+against the entity meanwhile. A **delete** takes back only rows THIS instance wrote that landed once the delete began (older rows are left, and a peer's rows are
+never removed by it); a **merge** moves what landed against the absorbed entity to the survivor, as the merge itself moves every other edge of it, a peer's
+included (written as a new local version that replicates, and a colliding duplicate removed with its tombstone), and moves nothing past the merge's own bound of
+relinks. A write whose edge or link a merge moved is not refused: it is written, on the survivor, and only a row that was actually taken back is refused or
+reported. See [Upsert an Edge](04b-graph-api.md#upsert-an-edge) and [Links](04g-links-api.md).
 
 **A connection the write cannot honour changes nothing — the other fields of the patch included.** An `edges` entry
 the space's schema refuses, or on a `strictLinkage` space whose far end names nothing (of any kind), answers `422`
