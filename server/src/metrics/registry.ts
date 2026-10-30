@@ -1472,6 +1472,22 @@ export const syncInvalidForksTotal = new Counter({
 });
 
 /**
+ * What the arrival path did with documents it did NOT store as offered, where the receiver's own rule decided it and the sender is not told as a failure
+ * (the review of bundle-45, #11), by family and `verdict`: `underivedId` (a link whose id is not the one its endpoints derive: refused, and the sender is
+ * told `rejected`) and `divergenceKept` (a file row at the version this instance holds, with other content, that lost the tie: this instance's row stands,
+ * nothing is written, and the peer converges on it). Beside the receiver's one line per page, so an operator can alert on either without reading the log.
+ */
+export const SYNC_ARRIVAL_SET_ASIDE_VERDICTS = ['underivedId', 'divergenceKept'] as const;
+
+export const syncArrivalsSetAsideTotal = new Counter({
+  name: 'ythril_sync_arrivals_set_aside_total',
+  help: 'Arriving documents not stored as offered because this instance\'s own rule decided so, by family and verdict (underivedId, divergenceKept)',
+  labelNames: ['family', 'verdict'] as const,
+  registers: [register],
+});
+for (const verdict of SYNC_ARRIVAL_SET_ASIDE_VERDICTS) syncArrivalsSetAsideTotal.labels({ family: '', verdict }).inc(0);
+
+/**
  * Marks written on a fork row because another instance resolved its own copy and this instance's deletion authority declined the removal (Q-624, design
  * rev 4 §9a and §13): by the decline branch of the tombstone apply, and by the arrival half of the planner (a fork arriving after such a tombstone). The fork
  * stays, listed in Review as resolved elsewhere, for this instance's user to decide. The decline itself is still counted on
