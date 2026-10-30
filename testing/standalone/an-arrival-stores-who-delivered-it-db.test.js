@@ -56,8 +56,21 @@ const THIRD = { instanceId: 'third-party-author', instanceLabel: 'Third' };
 
 let door, LOCAL, bytes;
 
-const idFor = (key, tag) => (key === 'filemeta' ? `docs/${tag}.md` : `${key}-${tag}`);
-const make = (key, id, seq, extra = {}) => build[KIND[key]](S, id, seq, { author: THIRD, ...extra });
+/** A link's id is the one its endpoints derive and the planner refuses any other (Q-222): `idFor` hands out that id and remembers the name whose endpoints made it. */
+const linkNames = new Map();
+let linkIdFor;
+const idFor = (key, tag) => {
+  if (key === 'filemeta') return `docs/${tag}.md`;
+  if (key !== 'links') return `${key}-${tag}`;
+  const name = `${key}-${tag}`;
+  const l = build.link(S, name, 0);
+  const id = linkIdFor(l.from, l.fromKind, l.to, l.toKind);
+  linkNames.set(id, name);
+  return id;
+};
+const make = (key, id, seq, extra = {}) => (key === 'links'
+  ? { ...build.link(S, linkNames.get(id) ?? id, seq, { author: THIRD, ...extra }), _id: id }
+  : build[KIND[key]](S, id, seq, { author: THIRD, ...extra }));
 const families = () => Object.entries(FAMILIES).map(([key, f]) => ({ key, ...f }));
 const stamp = async (fam, id) => (await door.coll(S, fam.coll).findOne({ _id: id }))?.deliveredBy;
 /**
@@ -77,6 +90,7 @@ describe('an arrival stores who delivered it', { skip }, () => {
     door = await openPullDoor({ suite: 'tsdeliv', spaces: [S] });
     bytes = await openByteDoor();
     LOCAL = await import('../../server/dist/sync/local-only-fields.js');
+    ({ linkIdFor } = await import('../../server/dist/brain/link-id.js'));
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => { await door.reset(); });
