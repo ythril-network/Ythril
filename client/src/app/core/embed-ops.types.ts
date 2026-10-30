@@ -19,6 +19,8 @@ export interface ReembedResult {
   enqueued: number;
   skippedSuppressed: number;
   byKind: Record<string, number>;
+  /** Of `enqueued`, the records queued because their stored text is not their current text (a vector made from older text). */
+  stale: number;
   remaining: number;
   truncated: boolean;
 }
