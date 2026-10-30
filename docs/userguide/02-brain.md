@@ -79,8 +79,11 @@ tags, linked entities and properties.
 **Deleting:** Each row has a **✕** button. A small inline confirmation appears — click **Yes** to confirm, **No** to cancel.
 
 **Conflict copies:** when two connected brains change the same record (a fact, an entity, a chrono entry or an edge) differently
-before they sync, both versions are kept: the second arrives as a **fork**, a conflict copy that names the record it diverged from
-(`forkOf`). Forks are listed, embedded and found by search like any record, and settled in **Review > Forks**. A fork cannot be edited,
+before they sync, both versions are kept: one stays the record and the other becomes a **fork**, a conflict copy that names the record it
+diverged from (`forkOf`). Which one stays the record is not decided by which brain synced first: the version with the lower content hash is
+the record on every brain, so two brains end with the same record and the same fork. On a brain whose own version has the lower hash that is
+the one it already had; on the other, the version it held becomes the fork and the incoming one becomes the record, and you may see the text of
+a record change after a sync. Nothing is lost either way: the other text is in the fork. Forks are listed, embedded and found by search like any record, and settled in **Review > Forks**. A fork cannot be edited,
 only kept there or deleted; deleting or expiring the original deletes its forks with it. In the Entities, Edges, Facts and Chrono lists a fork
 carries a **Fork in Review** marker that opens Review > Forks on that kind. To list them here: the **Query** tab, Filter
 mode, filter `{"forkOf": "<the original's id>"}`, or `{"forkOf": null}` to leave every fork out.

@@ -31,7 +31,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
-import { forkingFamilies, copyOf, arrivalDoors, FORK_FIXTURE } from './_fork-kinds.mjs';
+import { forkingFamilies, copyOf, copyBeating, arrivalDoors, FORK_FIXTURE } from './_fork-kinds.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -56,15 +56,22 @@ describe('a fork keeps its divergent copy\'s createdAt', { skip }, () => {
       const failures = [];
       for (const family of FAMILIES) {
         const field = FORK_FIXTURE[family].field;
+        // Q-324: the LOWER-hash copy is the parent, so the fork is whichever copy has the higher one. Both orders are held here: the divergent copy that ARRIVES
+        // and loses the tie is the fork (as it was), and the stored copy that LOSES it becomes the fork with ITS stamps (the receiver's own copy, kept as it was).
+        for (const arrivingLoses of [true, false]) {
+        const stamped = { author: { ...PEER_AUTHOR }, createdAt: WRITTEN_THEN, updatedAt: WRITTEN_THEN };
+        const loser = copyOf(family, S, 'f', 5, 'the copy that loses the tie', stamped);
+        const winner = await copyBeating(family, S, 'f', 5, loser, 'the copy that wins the tie', { author: { ...PEER_AUTHOR } });
         await door.reset();
-        await door.coll(S, family).insertOne(copyOf(family, S, 'f', 5, 'mine', { author: { ...PEER_AUTHOR } }));
-        await DOORS[via](family, { [S]: [copyOf(family, S, 'f', 5, 'theirs', { author: { ...PEER_AUTHOR }, createdAt: WRITTEN_THEN, updatedAt: WRITTEN_THEN })] });
+        await door.coll(S, family).insertOne(arrivingLoses ? winner : loser);
+        await DOORS[via](family, { [S]: [arrivingLoses ? loser : winner] });
         await door.settled();
         const fork = await door.coll(S, family).findOne({ forkOf: 'f' });
         if (!fork) { failures.push(`${via}/${family}: the equal-seq divergent copy was not forked at all`); continue; }
-        if (fork[field] !== 'theirs') failures.push(`${via}/${family}: the fork says ${JSON.stringify(fork[field])}`);
+        if (fork[field] !== loser[field]) failures.push(`${via}/${family}: the fork says ${JSON.stringify(fork[field])}`);
         if (fork.createdAt !== WRITTEN_THEN) failures.push(`${via}/${family}: the fork was born ${fork.createdAt}, not when its body was written (${WRITTEN_THEN})`);
         if (fork.updatedAt !== WRITTEN_THEN) failures.push(`${via}/${family}: the fork was last updated ${fork.updatedAt}, not when its body was (${WRITTEN_THEN})`);
+        }
       }
       assert.deepEqual(failures, [], `${failures.length} divergence(s): ${failures.join('; ')}`);
     });

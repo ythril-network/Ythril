@@ -28,7 +28,10 @@
  *  4. **No counter moves.** An arrival never raises the space's version counter (D-19 B, Q-241): a peer's version is the peer's, kept
  *     as it arrived, and the stamp of a local write over it is computed from the record it replaces (`util/version-stamp.ts`).
  *     A page's records take their positions in the writer, one block per chunk.
- *  5. **Forks**, last: a fork is a LOCAL write and takes a local version, stamped above the record it forks from (the stored
+ *  5. **Forks**, then the parent swaps: an arriving copy that wins the equal-seq tie (`arrivingWinsTie`, Q-324) turns the stored copy into a fork
+ *     (written here with the others, keeping that copy's own stamps and delivery stamp) and only then replaces the parent at its own seq under
+ *     `equalSeqSwapGuard`, so a failed parent write leaves both texts stored. A swap the guard or a unique index refuses is kept as a fork of the
+ *     arriving copy instead. A fork is a LOCAL write and takes a local version, stamped above the record it forks from (the stored
  *     copy), so it sorts above the arrival that caused it — and a parent at the ceiling refuses its fork (`rejected`). It keeps
  *     the divergent copy's `createdAt` and `updatedAt`: the fork holds what the other peer wrote, when it wrote it, and "now"
  *     would give it a fresh retention window and make two receivers store two documents under one derived fork id. It lands as
@@ -63,7 +66,9 @@ import type { LinkageCheck } from './linkage-check.js';
 import { writeArrivals, warnArrivalsNotStored, convergeFileStamps, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
 import { writeResolvedElsewhere } from './resolved-elsewhere.js';
 import { admitArrivals } from './arrival-shape.js';
-import { planArrivals, type ArrivalPlan, type StoredCopy, bodyHashesOf, isForkingFamily, FORKING_FAMILIES, MAX_FORK_DEPTH, MAX_FORKS_PER_RECORD, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
+import { planArrivals, equalSeqSwapGuard, forkIdFor, type ArrivalPlan, type StoredCopy, bodyHashesOf, isForkingFamily, FORKING_FAMILIES, MAX_FORK_DEPTH, MAX_FORKS_PER_RECORD, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
+import { authoredContentHash } from './authored-content.js';
+import { rekeyedRow } from './local-only-fields.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF, familyOf, type PayloadKey, type ReplicatedFamily } from './replicated-families.js';
 import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTombstones } from './push-reads.js';
 import { watchArrivals, recordedOf, sayRecorded, summarise, type ArrivalWatch, type RecordedSummary } from './arrival-recording.js';
@@ -154,6 +159,8 @@ export async function acceptArrivingPage(
 
     // ── 2-3. plan and write, family by family ────────────────────────────────────────────────────────────────
     const forks: Array<{ key: PayloadKey; index: number; doc: Arrived }> = [];
+    /** The parent swaps (Q-324): arriving copies that won the tie at an equal seq, written AFTER the fork each one made of the copy it displaces. */
+    const swaps: Array<{ key: PayloadKey; index: number; doc: Arrived; stored: Readonly<Record<string, unknown>>; loserForkId: string }> = [];
     const landed: Array<{ key: PayloadKey; index: number; doc: Arrived }> = [];
     // What each family's documents carried against the space's schema, looked at BEFORE they were written (the copy they replace is gone
     // afterwards), and what it came to for the ones that landed (`sync/arrival-recording.ts`).
@@ -212,8 +219,9 @@ export async function acceptArrivingPage(
           log.warn(`${peerText(where)}: space '${peerText(spaceId)}': legacy fact fork ids from 5.6.0-5.6.1 cannot be verified; admitted under its stored parent`);
         }
         for (const f of plan.forks) forks.push({ key, index: items[f.index]!.index, doc: f.doc });
-        // Every version the plan may write: the newest of each id, and the older ones a failed write falls back to.
-        watches.set(key, await watchArrivals(spaceId, collection, [...plan.accepts.values()].flatMap(list => list.map(a => a.doc)), door));
+        for (const s of plan.swaps) swaps.push({ key, index: items[s.index]!.index, doc: s.doc, stored: s.stored, loserForkId: s.loserForkId });
+        // Every version the plan may write: the newest of each id, and the older ones a failed write falls back to — and the copies that swap in.
+        watches.set(key, await watchArrivals(spaceId, collection, [...plan.accepts.values()].flatMap(list => list.map(a => a.doc)).concat(plan.swaps.map(s => s.doc)), door));
 
         // The winners, then — for any whose write failed — the version accepted before it, until each id lands
         // or runs out of versions.
@@ -280,7 +288,11 @@ export async function acceptArrivingPage(
           const marks = plan.marks.map(m => ({ id: sound[key][m.index]!.doc._id, entry: m.entry })).filter(m => landedIds.has(m.id));
           await writeResolvedElsewhere(spaceId, marks.map(m => ({ collection, kind: tombType ?? collection, id: m.id, entry: m.entry })));
         }
-        if (diverged.length > 0) forks.push(...await forkDiverged(spaceId, key, diverged, res, { door, deliveredBy }));
+        if (diverged.length > 0) {
+          const again = await forkDiverged(spaceId, key, diverged, res, { door, deliveredBy });
+          forks.push(...again.forks);
+          swaps.push(...again.swaps);
+        }
       }
     } catch (err) {
       failure = { err };
@@ -307,9 +319,11 @@ export async function acceptArrivingPage(
     if (failure) { say(); throw failure.err; }
 
     // ── 5. forks ─────────────────────────────────────────────────────────────────────────────────────────────
-    try {
+    // The fork rows of `list`, written family by family; returns `${family}:${id}` of every fork that did not land (its document is answered `rejected`).
+    const writeForks = async (list: typeof forks): Promise<Set<string>> => {
+      const notLanded = new Set<string>();
       for (const family of FORKING_FAMILIES) {
-        const ofFamily = forks.filter(f => f.key === family);
+        const ofFamily = list.filter(f => f.key === family);
         if (ofFamily.length === 0) continue;
         // A divergence the write found meanwhile (Q-232) forks an edge too: the same hold as the page's (above), asked again because the space may have been ready then.
         if (family === 'edges' && !(await edgeIdentityAdmitsForks(spaceId))) throw new EdgeIdentityBuilding(spaceId);
@@ -323,8 +337,11 @@ export async function acceptArrivingPage(
         let forkOut: ArrivalOutcome | undefined;
         if (live.length > 0) {
           // The divergent copy's own createdAt and updatedAt, never "now" — see step 5 of the module docblock.
+          // The fork a STORED copy became keeps whoever delivered that copy (Q-324): stamped with this page's deliverer it would never be offered back to
+          // the peer that displaced it, which has not seen the text.
+          const delivered = new Map(swaps.map(s => [s.loserForkId, String(s.stored['deliveredBy'] ?? '')]));
           forkOut = await writePage(spaceId, family, live.map(({ f, version }) => ({ ...f.doc, seq: version })),
-            { from: peer, deliveredBy, deferEnqueue: true });
+            { from: peer, deliveredBy, deferEnqueue: true, deliveredByOf: delivered });
         }
         await forkOut?.enqueue();
         const liveIds = new Set(live.map(l => l.f.doc._id));
@@ -336,9 +353,19 @@ export async function acceptArrivingPage(
           if (!failed.has(f.doc._id)) continue;
           results[f.key].verdicts[f.index] = 'rejected';
           results[f.key].forkIds[f.index] = undefined;
+          notLanded.add(`${family}:${f.doc._id}`);
         }
         record(family, ofFamily.filter(f => !failed.has(f.doc._id)), forkWatch);
       }
+      return notLanded;
+    };
+    try {
+      const forkFailed = await writeForks(forks);
+      // The parent swaps, AFTER every fork (Q-324): a swap whose loser fork did not land is not made, so the displaced text is never stored nowhere.
+      const refusedSwaps = await landSwaps(spaceId, swaps.filter(s => !forkFailed.has(`${s.key}:${s.loserForkId}`)), results, landed, record, watches, { peer, deliveredBy });
+      // A swap the store could not take for a reason of the record (a unique index another record holds, a body moved meanwhile) keeps today's outcome:
+      // the arriving copy is kept as a fork under the id ITS body derives, so both texts are stored. Named once per page below.
+      if (refusedSwaps.length > 0) await writeForks(refusedSwaps);
     } finally {
       // Said once for the page, whatever the forks did: what landed is stored, and an operator is told what it carried.
       say();
@@ -380,7 +407,7 @@ export async function acceptArrivingPage(
 }
 
 /** Store one family's documents through the arrival writer, with the family's own record type (`null`: links). */
-async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrived[], opts: { from: string; deliveredBy: string | undefined; deferEnqueue?: boolean }): Promise<ArrivalOutcome> {
+async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrived[], opts: { from: string; deliveredBy: string | undefined; deferEnqueue?: boolean; deliveredByOf?: ReadonlyMap<string, string> }): Promise<ArrivalOutcome> {
   const { collection } = familyOf(key);
   return await writeArrivals(spaceId, collection, RECORD_TYPE_OF[collection], docs, opts);
 }
@@ -393,7 +420,7 @@ async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrive
 async function forkDiverged(
   spaceId: string, key: PayloadKey, diverged: ReadonlyArray<{ index: number; doc: Arrived }>, res: AcceptedFamily,
   { door, deliveredBy }: { door: ArrivalDoor; deliveredBy: string | undefined },
-): Promise<Array<{ key: PayloadKey; index: number; doc: Arrived }>> {
+): Promise<{ forks: Array<{ key: PayloadKey; index: number; doc: Arrived }>; swaps: Array<{ key: PayloadKey; index: number; doc: Arrived; stored: Readonly<Record<string, unknown>>; loserForkId: string }> }> {
   const docs = diverged.map(d => d.doc);
   const kind = familyOf(key).collection as PlannedFamily;
   const stored = await readPushStored(spaceId, kind, docs);
@@ -406,7 +433,58 @@ async function forkDiverged(
     res.verdicts[diverged[k]!.index] = v;
     res.forkIds[diverged[k]!.index] = again.forkIds[k];
   });
-  return again.forks.map(f => ({ key, index: diverged[f.index]!.index, doc: f.doc }));
+  return {
+    forks: again.forks.map(f => ({ key, index: diverged[f.index]!.index, doc: f.doc })),
+    // The copy that wins the tie against what is stored NOW swaps in, under the same rule as the first plan (Q-324), written after its fork like any swap.
+    swaps: again.swaps.map(s => ({ key, index: diverged[s.index]!.index, doc: s.doc, stored: s.stored, loserForkId: s.loserForkId })),
+  };
+}
+
+/**
+ * Write the parent swaps of a page (Q-324): each arriving copy that won the tie replaces the stored copy it was planned against, at the SAME seq, under
+ * `equalSeqSwapGuard`. Called once every loser fork is stored, so a swap that cannot be made leaves both texts stored.
+ *
+ * A swap that lands is a landing like any arrival (its own position, its embed queued, its references checked). One the guard refused because a newer
+ * copy is stored is `skipped` (the stored copy moved on). One the store refused for the record's own reasons — a unique index another record holds, or a
+ * body that changed at the same seq since it was read — keeps the outcome a divergence had before the tie: the arriving copy is returned as a fork
+ * row under the id ITS body derives, for the caller to write, so no text is lost; it is not planned again, so a swap never retries itself.
+ */
+async function landSwaps(
+  spaceId: string, swaps: ReadonlyArray<{ key: PayloadKey; index: number; doc: Arrived; stored: Readonly<Record<string, unknown>> }>,
+  results: Record<PayloadKey, AcceptedFamily>, landed: Array<{ key: PayloadKey; index: number; doc: Arrived }>,
+  record: (key: PayloadKey, entries: ReadonlyArray<{ index: number; doc: Arrived }>, watch: ArrivalWatch | null) => void,
+  watches: ReadonlyMap<PayloadKey, ArrivalWatch | null>, { peer, deliveredBy }: { peer: string; deliveredBy: string | undefined },
+): Promise<Array<{ key: PayloadKey; index: number; doc: Arrived }>> {
+  const arrivingForks: Array<{ key: PayloadKey; index: number; doc: Arrived }> = [];
+  for (const { payloadKey: key, collection } of REPLICATED_FAMILIES) {
+    const mine = swaps.filter(s => s.key === key);
+    if (mine.length === 0) continue;
+    const guards = new Map(mine.map(s => [s.doc._id, equalSeqSwapGuard(collection, s.doc._id, s.doc.seq, s.stored)]));
+    const { collection: coll } = familyOf(key);
+    const out = await writeArrivals(spaceId, coll, RECORD_TYPE_OF[coll], mine.map(s => s.doc), { from: peer, deliveredBy, swapGuards: guards });
+    const done = new Set([...out.inserted, ...out.updated]);
+    const kept = new Set([...out.newerLocal, ...out.derived, ...out.undecided, ...out.tombstoned]);
+    const split = new Set([...out.diverged, ...out.duplicates]);
+    const refused = new Map(out.refused.map(r => [r._id, r.reason]));
+    const here: Array<{ key: PayloadKey; index: number; doc: Arrived }> = [];
+    for (const s of mine) {
+      const id = s.doc._id;
+      const res = results[key];
+      if (done.has(id)) { here.push({ key, index: s.index, doc: s.doc }); continue; }
+      res.forkIds[s.index] = undefined;
+      if (refused.has(id)) { res.verdicts[s.index] = 'rejected'; res.reasons[s.index] = refused.get(id); continue; }
+      if (split.has(id)) {
+        const forkId = forkIdFor(id, s.doc.seq, authoredContentHash(collection, s.doc).text);
+        arrivingForks.push({ key, index: s.index, doc: rekeyedRow(s.doc, { _id: forkId, forkOf: id, forkAt: s.doc.seq }) as unknown as Arrived });
+        res.verdicts[s.index] = 'forked'; res.forkIds[s.index] = forkId;
+        continue;
+      }
+      if (kept.has(id)) res.verdicts[s.index] = 'skipped';
+    }
+    landed.push(...here);
+    record(key, here, watches.get(key) ?? null);
+  }
+  return arrivingForks;
 }
 
 /** `verdict:count` pairs, for the debug line. */

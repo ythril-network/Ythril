@@ -80,7 +80,7 @@ function plannerVerdicts() {
   return out;
 }
 
-let door, families, tombstoneTypeOf, schemaOf, singleRouteOf, forking, linkIdFor;
+let door, families, tombstoneTypeOf, schemaOf, singleRouteOf, forking, linkIdFor, P, H;
 
 /**
  * The endpoints of each link fixture id `idFor` hands out: a link's id IS its endpoints' (Q-222), so a link row's id is read off the
@@ -208,11 +208,22 @@ function rows() {
     const t = TEXT[key];
     const withIdentity = (id, extra) => (key === 'edges' ? { from: 'from-f', to: 'to-f', label: 'relates', ...extra } : extra);
     const forkRow = (s, id, seq, text) => make(key, s, id, seq, withIdentity(id, { [t]: text, forkOf: 'f' }));
+    // Q-324: at an equal seq the LOWER-hash copy is the parent, so the two orders are two rows. Which of two literal texts is lower is the server's to say
+    // (`tieHashes`), so it is asked here and never assumed.
+    const [parentText, forkText] = (() => {
+      const one = 'one body', other = 'the other body';
+      const [h1, h2] = H.tieHashes(H.authoredContentHash(key, make(key, 's', 'f', 5, { [t]: one })), H.authoredContentHash(key, make(key, 's', 'f', 5, { [t]: other })));
+      return P.arrivingWinsTie(h1, h2) ? [one, other] : [other, one];
+    })();
     out.push(
-      { name: `${key}: an equal-seq divergent copy forks`, family: key, verdict: 'forked', aliased: true,
-        seed: (s) => ({ stored: [make(key, s, 'f', 5, { [t]: 'mine' })] }),
-        page: (s) => [make(key, s, 'f', 5, { [t]: 'theirs' })],
-        check: (snap) => has(snap, 'f', t, 'mine') && snap.docs.some(d => d.forkOf === 'f' && d[t] === 'theirs') },
+      { name: `${key}: an equal-seq divergent copy that loses the tie forks, and the stored copy stays the parent`, family: key, verdict: 'forked', aliased: true,
+        seed: (s) => ({ stored: [make(key, s, 'f', 5, { [t]: parentText })] }),
+        page: (s) => [make(key, s, 'f', 5, { [t]: forkText })],
+        check: (snap) => has(snap, 'f', t, parentText) && snap.docs.some(d => d.forkOf === 'f' && d[t] === forkText) },
+      { name: `${key}: an equal-seq divergent copy that wins the tie takes the parent slot, and the stored copy becomes the fork`, family: key, verdict: 'forked', aliased: true,
+        seed: (s) => ({ stored: [make(key, s, 'f', 5, { [t]: forkText })] }),
+        page: (s) => [make(key, s, 'f', 5, { [t]: parentText })],
+        check: (snap) => has(snap, 'f', t, parentText) && snap.docs.filter(d => d.forkOf === 'f').length === 1 && snap.docs.some(d => d.forkOf === 'f' && d[t] === forkText) },
       { name: `${key}: a divergent copy at the fan-out cap is refused, nothing written`, family: key, verdict: 'forkRefused',
         seed: (s) => ({ stored: [make(key, s, 'f', 5, { [t]: 'mine' }),
           ...Array.from({ length: 10 }, (_, i) => forkRow(s, `sib-${i}`, 20 + i, `sib ${i}`))] }),
@@ -320,6 +331,8 @@ describe('push and pull decide alike (Q-204, Q-225)', { skip }, () => {
     ({ TOMBSTONE_TYPE_OF: tombstoneTypeOf } = await import('../../server/dist/config/types.js'));
     ({ linkIdFor } = await import('../../server/dist/brain/link-id.js'));
     forking = await forkingFamilies();
+    P = await import('../../server/dist/sync/upsert-plan.js');
+    H = await import('../../server/dist/sync/authored-content.js');
     const shared = await import('../../server/dist/api/sync/_shared.js');
     const schemas = new Map(incomingSchemas(shared));
     const { FAMILIES } = await import('./_push-door.mjs');
@@ -347,7 +360,8 @@ describe('push and pull decide alike (Q-204, Q-225)', { skip }, () => {
     // Every kind that forks has its three fork rows (forked, the cap, the malformed row), so a kind added to the planner is covered at once.
     for (const key of forking) {
       const have = ROWS.filter(r => r.family === key && ['forked', 'forkRefused', 'invalidFork'].includes(r.verdict)).map(r => r.verdict).sort();
-      assert.deepEqual(have, ['forkRefused', 'forked', 'invalidFork'], `${key}: fork rows present: ${have}`);
+      // `forked` twice: the arriving copy loses the tie and forks, and it wins and the stored copy becomes the fork (Q-324).
+      assert.deepEqual(have, ['forkRefused', 'forked', 'forked', 'invalidFork'], `${key}: fork rows present: ${have}`);
     }
     const uncovered = families.filter(f => !ROWS.some(r => r.family === f.payloadKey)).map(f => f.payloadKey);
     assert.deepEqual(uncovered, [], `replicated families with no row: ${uncovered}`);

@@ -68,6 +68,34 @@ export function copyOf(family, space, id, seq, text, extra = {}) {
 }
 
 /**
+ * Which of two copies of one record at one version is the parent and which the fork (Q-324): the one the server's OWN tie rule
+ * (`tieHashes` and `arrivingWinsTie`) names. Asked of the server and never re-derived here, so a fixture cannot assert that the
+ * rule equals itself; the fixtures' texts are literal, so which of them wins is read, never assumed.
+ *
+ * @param arriving the copy that arrives at an instance holding `stored`
+ * @returns `{ parent, fork }`, each one of the two documents handed in
+ */
+export async function splitByTie(family, arriving, stored) {
+  const { arrivingWinsTie } = await import('../../server/dist/sync/upsert-plan.js');
+  const { authoredContentHash, tieHashes } = await import('../../server/dist/sync/authored-content.js');
+  const [a, s] = tieHashes(authoredContentHash(family, arriving), authoredContentHash(family, stored));
+  return arrivingWinsTie(a, s) ? { parent: arriving, fork: stored } : { parent: stored, fork: arriving };
+}
+
+/**
+ * A copy of `family` whose body is the PARENT against `other` under the tie rule (its hash is the lower one), found by trying `${prefix} 0`, `${prefix} 1`, ...
+ * The fixture a test that wants "the stored copy stays and the arriving one forks" needs: the order is the server's, so it is searched for and never assumed.
+ * The mirror image needs no helper: hand the same search the roles the other way round.
+ */
+export async function copyBeating(family, space, id, seq, other, prefix, extra = {}) {
+  for (let n = 0; n < 10000; n++) {
+    const candidate = copyOf(family, space, id, seq, `${prefix} ${n}`, extra);
+    if ((await splitByTie(family, other, candidate)).parent === candidate) return candidate;
+  }
+  throw new Error(`${family}: no body under '${prefix}' beats the other copy under the tie rule`);
+}
+
+/**
  * The three doors an arrival comes through that take a page of copies, each with one way to deliver `docsBySpace` (local space id
  * -> the documents of `family` it is handed): the single route, `POST /batch-upsert`, and the pull (the real engine against the
  * door's fake peer, which serves every space of the map in one cycle). The one place that spells them, because a door a test

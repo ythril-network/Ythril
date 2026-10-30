@@ -145,6 +145,17 @@ export interface ArrivalOptions {
    * It changes how a files record is written, never whether one is admitted (shape and chunk refusal still run).
    */
   fillOnly?: boolean;
+  /**
+   * The documents of this write that are PARENT SWAPS (Q-324), by id: each replaces the stored copy at its OWN seq, under the guard the planner built from that
+   * stored copy (`equalSeqSwapGuard`) instead of `seqGuard`, which admits only a lower seq. Every other document keeps `seqGuard`. Ignored by a restore.
+   */
+  swapGuards?: ReadonlyMap<string, Record<string, unknown>>;
+  /**
+   * The delivery stamp of a document that is NOT the page's deliverer's, by id (Q-324): the fork a STORED copy became keeps whoever delivered that copy
+   * (`''` when nobody did). The page's deliverer is the peer that sent the copy that displaced it, and stamping the fork with it would keep the fork from ever
+   * being offered back to that peer — which has never seen the displaced text. Ignored by a restore.
+   */
+  deliveredByOf?: ReadonlyMap<string, string>;
 }
 
 /** One document refused, by id and in words a log reader and an integrator can act on. */
@@ -499,7 +510,9 @@ export async function writeArrivals(
       return new Map<string, number>();
     })
     : new Map<string, number>();
-  const filterOf = (d: Doc): Record<string, unknown> => (restore ? { _id: d._id } : seqGuard(d._id, d.seq));
+  /** Who delivered the version this document carries: the page's deliverer, but for a fork a stored copy BECAME, whoever delivered that copy (`deliveredByOf`). */
+  const deliveredByOf = (d: Doc): string | undefined => opts.deliveredByOf?.get(d._id) ?? opts.deliveredBy;
+  const filterOf = (d: Doc): Record<string, unknown> => (restore ? { _id: d._id } : opts.swapGuards?.get(d._id) ?? seqGuard(d._id, d.seq));
   const updateOf = (d: Doc, landing: MutableLanding): unknown => {
     const quiet = suppressed.has(d._id);
     const stamps = defaults.get(d._id) ?? ({} as Doc);
@@ -507,7 +520,7 @@ export async function writeArrivals(
     const carried = carriedFields({ restore, suppressed: quiet });
     // A write guard (`_functionalGuard`, an edge's) crosses only while `from` and `label` are the stored ones: carry-if-unchanged.
     const guarded = new Set([...carried].filter(f => WRITE_GUARD_FIELDS.has(f)));
-    return replacementFor(d, stamps, carried, stampOfArrival({ restore, doc: d, deliveredBy: opts.deliveredBy }), landing, guarded);
+    return replacementFor(d, stamps, carried, stampOfArrival({ restore, doc: d, deliveredBy: deliveredByOf(d) }), landing, guarded);
   };
   // The landing each document's update holds by reference: a stand-in while the page is measured, the chunk's own positions once its
   // `withLandingStamp` has taken them (set in place, below), so the memo below is still the only place an update is built.
@@ -518,7 +531,7 @@ export async function writeArrivals(
       // The written-here bit is the one predicate's, asked of what will be STORED (the delivery stamp this landing writes, never the document's own claim).
       landing = {
         pos: Number.MAX_SAFE_INTEGER, posAtSeq: Number.MAX_SAFE_INTEGER,
-        ...(isWrittenHere({ author: d.author as { instanceId?: unknown } | null | undefined, deliveredBy: stampOfArrival({ restore, doc: d, deliveredBy: opts.deliveredBy }) }) ? { writtenHere: true as const } : {}),
+        ...(isWrittenHere({ author: d.author as { instanceId?: unknown } | null | undefined, deliveredBy: stampOfArrival({ restore, doc: d, deliveredBy: deliveredByOf(d) }) }) ? { writtenHere: true as const } : {}),
       };
       landingOf.set(d._id, landing);
     }
