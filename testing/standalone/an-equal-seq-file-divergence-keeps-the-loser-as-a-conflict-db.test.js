@@ -57,7 +57,7 @@ const meta = (space, text, extra = {}) => build.filemeta(space, ID, SEQ, {
   description: text, tags: ['t'], author: { ...PEER_AUTHOR }, createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', ...extra,
 });
 /** What an instance stores of its own copy: the wire shape and its own machinery. */
-const stored = (space, text) => ({ ...meta(space, text), path: ID, deliveredBy: THIRD, sizeBytes: 4, sha256: 'b'.repeat(64), pos: SEQ, posAtSeq: SEQ });
+const stored = (space, text, extra = {}) => ({ ...meta(space, text, extra), path: ID, deliveredBy: THIRD, sizeBytes: 4, sha256: 'b'.repeat(64), pos: SEQ, posAtSeq: SEQ });
 
 const deliver = {
   batch: async (docsBySpace) => {
@@ -83,14 +83,14 @@ function winnerOf(x, y) {
 }
 
 /** Both instances hold their own copy; each is then handed the other's. Returns what each copy said. */
-async function exchange(via) {
+async function exchange(via, { xExtra = {}, yExtra = {}, sameText = false } = {}) {
   await fresh();
-  const x = meta(A, 'what instance A wrote');
-  const y = meta(B, 'what instance B wrote');
-  await door.coll(A, 'files').insertOne(stored(A, x.description));
-  await door.coll(B, 'files').insertOne(stored(B, y.description));
+  const x = meta(A, 'what instance A wrote', xExtra);
+  const y = meta(B, sameText ? 'what instance A wrote' : 'what instance B wrote', yExtra);
+  await door.coll(A, 'files').insertOne(stored(A, x.description, xExtra));
+  await door.coll(B, 'files').insertOne(stored(B, y.description, yExtra));
   for (const space of SPACES) await door.raiseVersionTo(space, SEQ);
-  await deliver[via]({ [A]: [meta(A, y.description)], [B]: [meta(B, x.description)] });
+  await deliver[via]({ [A]: [meta(A, y.description, yExtra)], [B]: [meta(B, x.description, xExtra)] });
   await door.settled();
   return { x, y };
 }
@@ -138,6 +138,18 @@ describe('an equal-seq file divergence keeps the lower hash as the row and the o
     });
   }
 
+  // The review of bundle-45, #2: a pair that differs only in a stamp the two instances took independently has nothing for a user to decide (the conflict's table
+  // would be empty). The rows still converge on one copy, which the hash needs; no conflict is recorded on either side.
+  for (const via of ['batch', 'pull']) {
+    it(`${via}: two copies that differ only in createdAt converge on one row and record no conflict`, async () => {
+      await exchange(via, { sameText: true, xExtra: { createdAt: '2026-08-01T00:00:00.000Z' }, yExtra: { createdAt: '2026-08-02T00:00:00.000Z' } });
+      const [ra, rb] = [await row(A), await row(B)];
+      assert.equal(ra.createdAt, rb.createdAt, 'the two instances hold different copies');
+      assert.equal((await merkle.computeMerkleRoot(A)).root, (await merkle.computeMerkleRoot(B)).root, 'the space hashes differ after the exchange');
+      assert.deepEqual([await conflicts(A), await conflicts(B)], [[], []], 'a conflict was recorded whose table would show nothing');
+    });
+  }
+
   describe('the conflict is resolved by its instance\'s user', () => {
     const resolve = (space, id, action, extra = {}) => callRoute(conflictsRouter, 'post', '/:id/resolve', { params: { id }, body: { action, ...extra }, authToken: ADMIN_TOKEN });
 
@@ -159,6 +171,50 @@ describe('an equal-seq file divergence keeps the lower hash as the row and the o
       assert.deepEqual(await conflicts(space), []);
     });
 
+    // Every field the conflict's table shows is re-applied, the two record markers among them (the review of bundle-45, #1): a difference only in a marker
+    // used to close the conflict with a 200 and change nothing. Both orientations, so whichever of the two copies the tie names as the loser is the one kept.
+    for (const [name, withMarkers, without] of [
+      ['A carries the markers', { suppressEmbeddings: true, descriptionSource: 'generated' }, {}],
+      ['B carries the markers', {}, { suppressEmbeddings: true, descriptionSource: 'generated' }],
+    ]) it(`keep-local re-applies suppressEmbeddings and descriptionSource as the displaced copy had them (${name})`, async () => {
+      const { x, y } = await exchange('batch', { sameText: true, xExtra: withMarkers, yExtra: without });
+      const { loser } = winnerOf(x, y);
+      const space = loser === x ? A : B;
+      const [c] = await conflicts(space);
+      assert.ok(c, 'no conflict was recorded for the copy that lost');
+      const answer = await resolve(space, c._id, 'keep-local');
+      assert.equal(answer.code, 200, JSON.stringify(answer.body));
+      const after = await row(space);
+      assert.equal(after.suppressEmbeddings, loser.suppressEmbeddings, `suppressEmbeddings is ${after.suppressEmbeddings}, the displaced copy had ${loser.suppressEmbeddings}`);
+      assert.equal(after.descriptionSource, loser.descriptionSource, `descriptionSource is ${after.descriptionSource}, the displaced copy had ${loser.descriptionSource}`);
+      assert.ok(after.seq > SEQ, `the re-applied row is at ${after.seq}`);
+      assert.deepEqual(await conflicts(space), []);
+    });
+
+    // The other direction, set up directly: which of two copies loses the tie is the hash's to say, so a displaced copy that CARRIES the markers is written as the conflict.
+    it('keep-local puts back the markers the displaced copy carried', async () => {
+      const { space, c } = await lost();
+      await door.coll(space, 'conflicts').updateOne({ _id: c._id }, { $set: { 'losing.suppressEmbeddings': true, 'losing.descriptionSource': 'extracted' } });
+      const answer = await resolve(space, c._id, 'keep-local');
+      assert.equal(answer.code, 200, JSON.stringify(answer.body));
+      const after = await row(space);
+      assert.equal(after.suppressEmbeddings, true);
+      assert.equal(after.descriptionSource, 'extracted');
+      assert.equal(after.description, c.losing.description, 'the displaced description is not what stands');
+    });
+
+    it('keep-local on metadata it cannot apply answers 400 naming the field, and closes nothing', async () => {
+      const { space, c } = await lost();
+      // A property whose name holds a dot cannot be named by a removal path, and the displaced copy has no such property: it would stay.
+      await door.coll(space, 'files').updateOne({ _id: ID }, { $set: { properties: { 'a.b': 1 } } });
+      const before = JSON.stringify(await row(space));
+      const answer = await resolve(space, c._id, 'keep-local');
+      assert.equal(answer.code, 400, JSON.stringify(answer.body));
+      assert.match(answer.body.error, /properties\.a\.b/, 'the refusal does not name the field it could not apply');
+      assert.equal(JSON.stringify(await row(space)), before, 'a refused keep-local changed the row');
+      assert.equal((await conflicts(space)).length, 1, 'a refused keep-local closed the conflict');
+    });
+
     it('keep-incoming closes the conflict and touches no row', async () => {
       const { space, c } = await lost();
       const before = JSON.stringify(await row(space));
@@ -166,6 +222,19 @@ describe('an equal-seq file divergence keeps the lower hash as the row and the o
       assert.equal(answer.code, 200, JSON.stringify(answer.body));
       assert.equal(JSON.stringify(await row(space)), before);
       assert.deepEqual(await conflicts(space), []);
+    });
+
+    // The review of bundle-45, #12: the answer depends on the conflict's kind, not on the target named. A token that may not write files in the target space is
+    // told `not_a_file_copy`, as every token is, and not `403` for a target the resolution never touches.
+    it('save-to-space on a metadata conflict answers not_a_file_copy before any check of the target space', async () => {
+      const { space, c } = await lost();
+      const target = space === A ? B : A;
+      const area = { knowledge: 'none', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none' };
+      const rights = { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [space]: { ...area, dataQuality: 'write' }, [target]: { ...area, dataQuality: 'write', files: 'read' } } };
+      const answer = await callRoute(conflictsRouter, 'post', '/:id/resolve', { params: { id: c._id }, body: { action: 'save-to-space', targetSpaceId: target }, authToken: { id: 't', name: 'test', rights } });
+      assert.equal(answer.code, 400, JSON.stringify(answer.body));
+      assert.equal(answer.body.code, 'not_a_file_copy', JSON.stringify(answer.body));
+      assert.equal((await conflicts(space)).length, 1, 'a refused resolution closed the conflict');
     });
 
     it('keep-both and save-to-space are refused: there is no copy of the file to place', async () => {

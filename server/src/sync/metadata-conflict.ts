@@ -22,11 +22,28 @@ import { getConfig } from '../config/loader.js';
 import { inChunks, ROWS_PER_BULK_COMMAND } from '../util/chunks.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { derivedV4Id } from '../util/derived-id.js';
-import { fileContentHash } from '../brain/merkle.js';
+import { fileContentHash, FILE_HASH_PROJECTION } from '../brain/merkle.js';
 import type { LosingFileMetadata, MetadataConflictDoc } from '../config/types.js';
 
+/**
+ * The fields of a metadata conflict a user can SEE and `keep-local` can APPLY: the ones the Conflicts page's table compares (its `METADATA_FIELDS`, which a test
+ * holds equal to this list). The row's `author` and its two stamps are kept in the record, and are not something a user chooses between.
+ */
+export const SHOWN_METADATA_KEYS = ['description', 'descriptionSource', 'tags', 'properties', 'suppressEmbeddings'] as const;
+
 /** The fields of a file row that are its authored half, as a conflict holds them: read from the row, never listed here a second time beyond the type. */
-const LOSING_KEYS = ['description', 'descriptionSource', 'tags', 'properties', 'suppressEmbeddings', 'author', 'createdAt', 'updatedAt'] as const;
+const LOSING_KEYS = [...SHOWN_METADATA_KEYS, 'author', 'createdAt', 'updatedAt'] as const;
+
+/**
+ * Whether a displaced row said anything a user could see differently from the row that displaces it. Two copies that differ only in a stamp or the author (a
+ * `createdAt` the two instances took independently) are one description to a reader: the row is still swapped, because the hash needs the same copy on both,
+ * and no conflict is recorded, because its table would be empty and "Keep mine" would change nothing a user can see (the review of bundle-45, #2).
+ */
+export function differsInWhatIsShown(displaced: Readonly<Record<string, unknown>>, by: Readonly<Record<string, unknown>>): boolean {
+  // The hash's own projection with everything not shown blanked: the same canonical form the tie compares, so equal here means equal to a reader.
+  const hidden = Object.keys(FILE_HASH_PROJECTION).filter(k => !(SHOWN_METADATA_KEYS as readonly string[]).includes(k));
+  return fileContentHash(displaced as Record<string, unknown>, hidden) !== fileContentHash(by as Record<string, unknown>, hidden);
+}
 
 /** What the displaced row said: its authored half, with only the keys it had. */
 export function losingMetadataOf(row: Readonly<Record<string, unknown>>): LosingFileMetadata {
@@ -40,23 +57,26 @@ export function metadataConflictIdFor(spaceId: string, fileId: string, seq: numb
   return derivedV4Id('ythril.meta-conflict', spaceId, fileId, String(seq), fileContentHash(row as Record<string, unknown>));
 }
 
-/** One displaced row: the file it was the row of, the version, and what it said. */
+/** One displaced row: the file it was the row of, the version, what it said, and the row that displaces it (`by`). */
 export interface DisplacedMetadata {
   fileId: string;
   seq: number;
   row: Readonly<Record<string, unknown>>;
+  by: Readonly<Record<string, unknown>>;
 }
 
 /**
- * Keep each displaced row as a metadata conflict. Returns the ids of the records THIS call wrote, so a replace that does not happen can take back
- * exactly those. Throws when the store cannot take them: the replace is then not made (the caller does not reach it).
+ * Keep each displaced row as a metadata conflict, except one that said nothing a user could see differently from the row that displaces it
+ * ({@link differsInWhatIsShown}: it is swapped all the same, but there is nothing to decide). Returns the ids of the records THIS call wrote, so a replace
+ * that does not happen can take back exactly those. Throws when the store cannot take them: the replace is then not made (the caller does not reach it).
  */
 export async function recordMetadataConflicts(
   spaceId: string, displaced: readonly DisplacedMetadata[], peer: { instanceId: string; label: string },
 ): Promise<string[]> {
-  if (displaced.length === 0) return [];
+  const worth = displaced.filter(d => differsInWhatIsShown(d.row, d.by));
+  if (worth.length === 0) return [];
   const at = new Date().toISOString();
-  const docs = displaced.map((d): MetadataConflictDoc => ({
+  const docs = worth.map((d): MetadataConflictDoc => ({
     _id: metadataConflictIdFor(spaceId, d.fileId, d.seq, d.row),
     spaceId, kind: 'metadata', originalPath: d.fileId, losing: losingMetadataOf(d.row), seq: d.seq,
     peerInstanceId: peer.instanceId, peerInstanceLabel: peer.label, detectedAt: at,
