@@ -189,7 +189,8 @@ export async function relinkEdgesOfRecord(
       const updates: Record<string, unknown> = { updatedAt: now, ...patches[i]! };
       // The ends the relink moved (`relinkedEnds`), by kind as well as id: `r.from`/`r.to` already hold them.
       updates['from'] = r.from;
-      updates['to'] = r.to;      return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: UNSET_GUARD } } };
+      updates['to'] = r.to;
+      return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: UNSET_GUARD } } };
     }), (slice, { ordered }) => edgeColl.bulkWrite(asBulk<EdgeDoc>(slice), { ordered, session }), { ordered: true }), 'relink.edge');
   }
 
