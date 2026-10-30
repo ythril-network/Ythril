@@ -344,7 +344,7 @@ Click **Create Token**. The dialog asks for:
 
 - **Label**
 - **Expires (optional)**
-- **Requests per minute** — this token's own rate limit; leave it empty to inherit the instance default
+- **Requests per minute** — this token's own rate limit; leave it empty to inherit the instance default. The token's edit dialog changes it later, and emptying it there goes back to the instance default
 - **Permission level** — the per-space rights matrix
 - **Instance-level rights**, a separate block at the bottom of the dialog with two checkboxes
 
@@ -526,12 +526,6 @@ Two numbers, and the second is the one that answers questions:
 
 When a client goes over, its requests get **429 Too Many Requests** and a `Retry-After` telling it how long to
 wait. Other tokens are unaffected — the budget is per token, which is the entire point.
-
-#### Changing it later
-
-Open the token's edit dialog from the token list: **Requests per minute** shows the number set on this token, or
-nothing when it uses the instance's number. Type a new number and save to change it; empty the box and save to go
-back to the instance's number. The same refusals as on create apply.
 
 #### If the box refuses your number
 
