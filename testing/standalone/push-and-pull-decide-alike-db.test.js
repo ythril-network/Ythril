@@ -80,7 +80,7 @@ function plannerVerdicts() {
   return out;
 }
 
-let door, families, tombstoneTypeOf, schemaOf, singleRouteOf, forking, linkIdFor, P, H;
+let door, families, tombstoneTypeOf, schemaOf, singleRouteOf, forking, linkIdFor, P, H, M;
 
 /**
  * The endpoints of each link fixture id `idFor` hands out: a link's id IS its endpoints' (Q-222), so a link row's id is read off the
@@ -165,6 +165,27 @@ function rows() {
         page: (s) => [make(key, s, id, 5, { updatedAt: '2026-10-05T00:00:00.000Z' })],
         check: (snap) => has(snap, id, 'seq', 5) && has(snap, id, 'updatedAt', '2026-10-05T00:00:00.000Z') },
       ] : []),
+      // The equal-seq TIE of a file row with OTHER authored content (Q-426): the lower `fileContentHash` is the row on both doors. When the stored copy is the higher one it is
+      // replaced at the same seq and kept as a metadata conflict (verdict `converged`); when it is the lower it stands and nothing is written (`divergenceKept`). Which of two
+      // literal texts is lower is the server's to say, so it is asked and never assumed.
+      ...(key === 'filemeta' ? (() => {
+        const [lowText, highText] = (() => {
+          const one = 'one description', other = 'the other description';
+          const hashOf = (d) => M.fileContentHash(make(key, 's', 'f.md', 5, { description: d }));
+          return hashOf(one) < hashOf(other) ? [one, other] : [other, one];
+        })();
+        return [
+          { name: `${key}: an equal-seq copy with other content that loses the tie is kept out, and the stored row stands`, family: key, verdict: 'divergenceKept', aliased: true,
+            seed: (s) => ({ stored: [make(key, s, 'f.md', 5, { description: lowText })] }),
+            page: (s) => [make(key, s, 'f.md', 5, { description: highText })],
+            check: (snap) => has(snap, 'f.md', 'description', lowText) && snap.conflicts.length === 0 },
+          { name: `${key}: an equal-seq copy with other content that wins the tie replaces the stored row, which is kept as a conflict`, family: key, verdict: 'converged', aliased: true,
+            seed: (s) => ({ stored: [make(key, s, 'f.md', 5, { description: highText })] }),
+            page: (s) => [make(key, s, 'f.md', 5, { description: lowText })],
+            check: (snap) => has(snap, 'f.md', 'description', lowText) && has(snap, 'f.md', 'seq', 5)
+              && snap.conflicts.length === 1 && snap.conflicts[0].kind === 'metadata' && snap.conflicts[0].losing.description === highText },
+        ];
+      })() : []),
       { name: `${key}: a wrong-typed field is refused (Q-225)`, family: key, verdict: 'rejected',
         seed: () => ({}), page: (s) => [make(key, s, id, 5, { [wrongTypedField(key)]: 12345 })],
         check: (snap) => !has(snap, id) },
@@ -285,7 +306,9 @@ async function snapshot(local, key, knownIds) {
   });
   const tombstones = await door.coll(local, 'tombstones').find({}, { projection: { _id: 1, seq: 1, type: 1, instanceId: 1, storedVia: 1 } })
     .sort({ _id: 1 }).toArray();
-  return { docs, tombstones };
+  // The conflicts a file row's equal-seq tie kept (Q-426), the moment each was detected left out: it is the moment each door ran.
+  const conflicts = (await door.coll(local, 'conflicts').find({}).sort({ _id: 1 }).toArray()).map(({ detectedAt: _at, ...rest }) => rest);
+  return { docs, tombstones, conflicts };
 }
 
 async function seedLocal(local, seeded) {
@@ -304,6 +327,8 @@ async function seedLocal(local, seeded) {
 /** Run one row through one door; returns the stored outcome. */
 async function through(doorName, row, local) {
   await door.reset();
+  // The reset clears a door's conflicts only when it opened with file support, and a row's snapshot reads them (Q-426).
+  for (const space of [L, LA]) await door.coll(space, 'conflicts').deleteMany({});
   const remote = door.remoteOf(local);
   const seeded = { family: row.family, ...row.seed(local) };
   await seedLocal(local, seeded);
@@ -333,6 +358,7 @@ describe('push and pull decide alike (Q-204, Q-225)', { skip }, () => {
     forking = await forkingFamilies();
     P = await import('../../server/dist/sync/upsert-plan.js');
     H = await import('../../server/dist/sync/authored-content.js');
+    M = await import('../../server/dist/brain/merkle.js');
     const shared = await import('../../server/dist/api/sync/_shared.js');
     const schemas = new Map(incomingSchemas(shared));
     const { FAMILIES } = await import('./_push-door.mjs');

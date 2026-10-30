@@ -65,6 +65,7 @@ import { TOMBSTONE_TYPE_OF } from '../config/types.js';
 import type { LinkageCheck } from './linkage-check.js';
 import { writeArrivals, warnArrivalsNotStored, convergeFileStamps, type ArrivalOutcome, type ArrivalRefusal } from './arrivals.js';
 import { writeResolvedElsewhere } from './resolved-elsewhere.js';
+import { metadataConflictIdFor, recordMetadataConflicts, dropMetadataConflicts, peerLabelFor } from './metadata-conflict.js';
 import { admitArrivals } from './arrival-shape.js';
 import { planArrivals, equalSeqSwapGuard, forkIdFor, type ArrivalPlan, type StoredCopy, bodyHashesOf, isForkingFamily, FORKING_FAMILIES, MAX_FORK_DEPTH, MAX_FORKS_PER_RECORD, type ArrivalDoc, type ArrivalDoor, type ArrivalVerdict, type PlannedFamily } from './upsert-plan.js';
 import { authoredContentHash } from './authored-content.js';
@@ -221,7 +222,7 @@ export async function acceptArrivingPage(
         for (const f of plan.forks) forks.push({ key, index: items[f.index]!.index, doc: f.doc });
         for (const s of plan.swaps) swaps.push({ key, index: items[s.index]!.index, doc: s.doc, stored: s.stored, loserForkId: s.loserForkId });
         // Every version the plan may write: the newest of each id, and the older ones a failed write falls back to — and the copies that swap in.
-        watches.set(key, await watchArrivals(spaceId, collection, [...plan.accepts.values()].flatMap(list => list.map(a => a.doc)).concat(plan.swaps.map(s => s.doc)), door));
+        watches.set(key, await watchArrivals(spaceId, collection, [...plan.accepts.values()].flatMap(list => list.map(a => a.doc)).concat(plan.swaps.map(s => s.doc), plan.fileSwaps.map(s => s.doc)), door));
 
         // The winners, then — for any whose write failed — the version accepted before it, until each id lands
         // or runs out of versions.
@@ -278,6 +279,9 @@ export async function acceptArrivingPage(
             if (!done.has(c.doc._id)) res.verdicts[items[c.index]!.index] = 'skipped';
           }
         }
+        // The file rows that win an equal-seq tie (Q-426): the metadata each displaces is kept as a conflict, then the row is replaced at its own seq.
+        await landFileSwaps(spaceId, key, plan.fileSwaps.map(s => ({ index: items[s.index]!.index, doc: s.doc, stored: s.stored })),
+          results, landed, { peer, deliveredBy });
         if (tombType !== undefined) {
           for (const [id, c] of plan.tombstoneCleanups) if (!c.onLanding) cleanups.push({ id, below: c.below });
           await deleteSupersededTombstones(spaceId, tombType, cleanups);
@@ -292,6 +296,7 @@ export async function acceptArrivingPage(
           const again = await forkDiverged(spaceId, key, diverged, res, { door, deliveredBy });
           forks.push(...again.forks);
           swaps.push(...again.swaps);
+          await landFileSwaps(spaceId, key, again.fileSwaps, results, landed, { peer, deliveredBy });
         }
       }
     } catch (err) {
@@ -397,6 +402,13 @@ export async function acceptArrivingPage(
       warnArrivalsNotStored(where, spaceId, key, 'REFUSED — the id does not derive from the link\'s endpoints, so it is a second name for a relationship; '
         + 'the sender will not be asked for it again', underived);
     }
+    // A file row that differs at the seq this instance holds and loses the tie (Q-426) is kept as it stands and named here, once per page: it is not "already
+    // current", and the peer converges on this copy by the same rule. Derived over every family, as the line above: only files can answer it today.
+    for (const { payloadKey: key } of REPLICATED_FAMILIES) {
+      const kept = (results[key].docs as Array<Arrived | undefined>).filter((_, i) => results[key].verdicts[i] === 'divergenceKept').map(d => d!._id);
+      warnArrivalsNotStored(where, spaceId, key, 'KEPT as this instance holds them — the same version with other content, and this instance\'s copy is the one '
+        + 'the tie rule names; the peer converges on it', kept);
+    }
     // What landed is handed to the door's linkage check, which checks it once the door's transfer is whole — never
     // here, page by page, where a target later in the same transfer would be recorded missing (bundle-30 I8).
     for (const { key, doc } of landed) opts.linkage.add(key, doc);
@@ -420,20 +432,26 @@ async function writePage(spaceId: string, key: PayloadKey, docs: readonly Arrive
 async function forkDiverged(
   spaceId: string, key: PayloadKey, diverged: ReadonlyArray<{ index: number; doc: Arrived }>, res: AcceptedFamily,
   { door, deliveredBy }: { door: ArrivalDoor; deliveredBy: string | undefined },
-): Promise<{ forks: Array<{ key: PayloadKey; index: number; doc: Arrived }>; swaps: Array<{ key: PayloadKey; index: number; doc: Arrived; stored: Readonly<Record<string, unknown>>; loserForkId: string }> }> {
+): Promise<{
+  forks: Array<{ key: PayloadKey; index: number; doc: Arrived }>;
+  swaps: Array<{ key: PayloadKey; index: number; doc: Arrived; stored: Readonly<Record<string, unknown>>; loserForkId: string }>;
+  fileSwaps: FileSwap[];
+}> {
   const docs = diverged.map(d => d.doc);
   const kind = familyOf(key).collection as PlannedFamily;
   const stored = await readPushStored(spaceId, kind, docs);
   const hashOf = bodyHashesOf(kind);
   // No tombstones: the first plan already found none governing these documents.
   const again = planArrivals(docs, { kind, door, stored, deliveredBy, tombstones: new Map(), hashOf,
-    ...await readForkContext(spaceId, kind, docs, stored, hashOf) });
+    ...(isForkingFamily(kind) ? await readForkContext(spaceId, kind, docs, stored, hashOf) : {}) });
   again.verdicts.forEach((v, k) => {
-    if (v !== 'forked' && v !== 'forkRefused') return;
+    // A file's divergence (Q-426) is decided by the same tie: the row it displaces is swapped (below) or stands.
+    if (v !== 'forked' && v !== 'forkRefused' && v !== 'divergenceKept' && !(v === 'converged' && again.fileSwaps.some(s => s.index === k))) return;
     res.verdicts[diverged[k]!.index] = v;
     res.forkIds[diverged[k]!.index] = again.forkIds[k];
   });
   return {
+    fileSwaps: again.fileSwaps.map(s => ({ index: diverged[s.index]!.index, doc: s.doc, stored: s.stored })),
     forks: again.forks.map(f => ({ key, index: diverged[f.index]!.index, doc: f.doc })),
     // The copy that wins the tie against what is stored NOW swaps in, under the same rule as the first plan (Q-324), written after its fork like any swap.
     swaps: again.swaps.map(s => ({ key, index: diverged[s.index]!.index, doc: s.doc, stored: s.stored, loserForkId: s.loserForkId })),
@@ -485,6 +503,46 @@ async function landSwaps(
     record(key, here, watches.get(key) ?? null);
   }
   return arrivingForks;
+}
+
+/** A file row that won an equal-seq tie, as the door holds it: `index` is the page's own, `stored` the row it displaces (kept as a conflict). */
+interface FileSwap { index: number; doc: Arrived; stored: Readonly<Record<string, unknown>> }
+
+/**
+ * Write the file rows that WON an equal-seq tie (Q-426): first the metadata each displaces, kept as a conflict of this instance's own, then the row itself, at the
+ * SAME seq, under `equalSeqSwapGuard` naming the stored row the verdict rested on. The order is the one the forking families keep (`landSwaps`): a state in
+ * which the displaced metadata is stored nowhere never exists.
+ *
+ * A swap that lands is a landing like any arrival (its own position, its embed queued when this instance holds the bytes). One the guard refused, because the
+ * stored row moved on in the gap, leaves the stored row standing and is `divergenceKept`: the conflicts THIS call wrote for it are taken back, because nothing was
+ * displaced, and a conflict that was already there is never touched. A file tombstone held for the path covers it (`tombstoned`). A write that THROWS keeps its
+ * conflicts: it may have landed, and one conflict too many is a decision for the user while one too few is a description lost.
+ */
+async function landFileSwaps(
+  spaceId: string, key: PayloadKey, swaps: readonly FileSwap[], results: Record<PayloadKey, AcceptedFamily>,
+  landed: Array<{ key: PayloadKey; index: number; doc: Arrived }>, { peer, deliveredBy }: { peer: string; deliveredBy: string | undefined },
+): Promise<void> {
+  if (swaps.length === 0) return;
+  const { collection } = familyOf(key);
+  const idOf = (s: FileSwap): string => metadataConflictIdFor(spaceId, s.doc._id, s.doc.seq, s.stored);
+  const written = new Set(await recordMetadataConflicts(spaceId,
+    swaps.map(s => ({ fileId: s.doc._id, seq: s.doc.seq, row: s.stored })), { instanceId: deliveredBy ?? '', label: peerLabelFor(deliveredBy, peer) }));
+  const guards = new Map(swaps.map(s => [s.doc._id, equalSeqSwapGuard(collection, s.doc._id, s.doc.seq, s.stored)]));
+  const out = await writeArrivals(spaceId, collection, RECORD_TYPE_OF[collection], swaps.map(s => s.doc), { from: peer, deliveredBy, swapGuards: guards });
+  const done = new Set([...out.inserted, ...out.updated]);
+  const covered = new Set(out.tombstoned);
+  const refused = new Map(out.refused.map(r => [r._id, r.reason]));
+  const notMade: string[] = [];
+  for (const s of swaps) {
+    const id = s.doc._id;
+    if (done.has(id)) { landed.push({ key, index: s.index, doc: s.doc }); continue; }
+    results[key].forkIds[s.index] = undefined;
+    if (covered.has(id)) results[key].verdicts[s.index] = 'tombstoned';
+    else if (refused.has(id)) { results[key].verdicts[s.index] = 'rejected'; results[key].reasons[s.index] = refused.get(id); }
+    else results[key].verdicts[s.index] = 'divergenceKept';
+    if (written.has(idOf(s))) notMade.push(idOf(s));
+  }
+  await dropMetadataConflicts(spaceId, notMade);
 }
 
 /** `verdict:count` pairs, for the debug line. */

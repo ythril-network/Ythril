@@ -24,6 +24,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { linkIdFor } from '../../server/dist/brain/link-id.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
@@ -141,7 +142,8 @@ async function syncMemory(space, id, fact, linkTo, seq) {
   for (const to of linkTo ?? []) {
     const lr = await syncPost(INSTANCES.a, token(), `/api/sync/batch-upsert?spaceId=${space}`, {
       links: [{
-        _id: `link-${id}-${to}`, spaceId: space, from: id, fromKind: 'fact', to, toKind: 'entity',
+        // A link's id IS its relationship (`linkIdFor`): the planner refuses any other id (Q-222).
+        _id: linkIdFor(id, 'fact', to, 'entity'), spaceId: space, from: id, fromKind: 'fact', to, toKind: 'entity',
         author: { instanceId: 'test', instanceLabel: 'Test' }, createdAt: now, updatedAt: now, seq: seq + 1,
       }],
     });

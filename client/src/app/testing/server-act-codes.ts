@@ -38,6 +38,21 @@ export function serverActCodes(): string[] {
   return codes;
 }
 
+const CONFLICTS_ROUTE = resolve(__dirname, '../../../../server/src/api/conflicts.ts');
+
+/**
+ * The codes the conflicts route answers with of its own, beside the file acts' (`NotAFileCopy`, Q-426: a METADATA conflict has no copy to keep or move).
+ * They are spelled in `api/conflicts.ts` as `readonly code = '<code>'` on a refusal class, and nowhere in `act-answers.ts`. Throws on none, for the reason
+ * `serverActCodes` does.
+ */
+export function serverConflictCodes(): string[] {
+  const codes = [...stripComments(readFileSync(CONFLICTS_ROUTE, 'utf8')).matchAll(/readonly code = '([a-z_]+)'/g)].map(m => m[1]!);
+  if (codes.length < 1) {
+    throw new Error(`found no refusal code in ${CONFLICTS_ROUTE}, so the class moved or its spelling changed, and a check over each code would report clean about nothing.`);
+  }
+  return codes;
+}
+
 const SPACE_ACT_KINDS = resolve(__dirname, '../../../../server/src/config/types-space-acts.ts');
 
 /**

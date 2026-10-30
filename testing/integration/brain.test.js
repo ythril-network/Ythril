@@ -21,6 +21,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, patch, readRecord, readCollection, filterRest } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { linkIdFor } from '../../server/dist/brain/link-id.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -409,7 +410,8 @@ describe('Brain — memory list filtering', () => {
       for (const to of links) {
         const lr = await post(INSTANCES.a, tokenA, '/api/sync/batch-upsert?spaceId=general', {
           links: [{
-            _id: `link-${seed._id}-${to}`, spaceId: 'general',
+            // A link's id IS its relationship (`linkIdFor`): the planner refuses any other id (Q-222), so a fixture that names its own is refused whole.
+            _id: linkIdFor(seed._id, 'fact', to, 'entity'), spaceId: 'general',
             from: seed._id, fromKind: 'fact', to, toKind: 'entity',
             author, createdAt: now, updatedAt: now, seq: seqBase++,
           }],

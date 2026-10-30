@@ -935,11 +935,29 @@ export interface VoteOutcomeEntry {
   summary?: string;
 }
 
+/** The authored metadata a file row had when a peer's copy displaced it at an equal version (`MetadataConflictDoc.losing`). */
+export interface LosingFileMetadata {
+  description?: string;
+  descriptionSource?: string;
+  tags?: string[];
+  properties?: Record<string, string | number | boolean>;
+  suppressEmbeddings?: boolean;
+}
+
 export interface ConflictRecord {
   id: string;
   spaceId: string;
   originalPath: string;
-  conflictPath: string;
+  /**
+   * `'copy'`: a peer's copy of the file, kept beside it under `conflictPath`. `'metadata'` (Q-426): metadata of the file that lost an equal-version tie, held in
+   * `losing`, with the metadata that stands now in `current` (absent when the file is gone). A record from before the field existed is a copy.
+   */
+  kind?: 'copy' | 'metadata';
+  /** A copy's conflict path: a metadata conflict has no copy of the file, so none. */
+  conflictPath?: string;
+  losing?: LosingFileMetadata;
+  current?: LosingFileMetadata;
+  seq?: number;
   detectedAt: string;
   peerInstanceId: string;
   peerInstanceLabel: string;

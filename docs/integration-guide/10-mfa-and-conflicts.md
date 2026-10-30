@@ -126,6 +126,8 @@ and to a total across all accessible spaces — so a token spanning many spaces 
 response. When `truncated` is `true` the caller has **not** seen every conflict (resolve some and re-list to
 see the rest); `returned` is how many were included. The `link-violations` list is bounded the same way.
 
+**Every conflict has a `kind`.** `"copy"` is the one the list always held: a peer's copy of a file kept beside yours, with `conflictPath`. `"metadata"` (new) is a file's **metadata** that lost an equal-version tie to the copy a peer delivered ([sync protocol](../sync-protocol.md#files-at-an-equal-seq-q-426)): there is no copy of the file, so it has no `conflictPath`. It carries `losing`, the authored metadata this instance had and the peer's copy displaced (`description`, `descriptionSource`, `tags`, `properties`, `suppressEmbeddings`, `author`, `createdAt`, `updatedAt`, each only if it had one); `seq`, the version both copies shared; and `current`, the authored metadata that stands on the file now (absent when the file is gone). A client written before `kind` existed reads a metadata conflict as a copy with no `conflictPath`: read `kind` first. Both kinds are one capability on this one route, under the same token rights.
+
 ---
 
 ### Get Conflict
@@ -162,6 +164,8 @@ POST /api/conflicts/:id/resolve
 | `keep-incoming` | Replaces your file with the conflict copy. The one action that replaces a file: your local one |
 | `keep-both` | Keeps both files; with `rename`, moves the conflict copy to that path |
 | `save-to-space` | **Moves** the conflict copy to another space (it leaves this one), removes the conflict |
+
+**A `metadata` conflict takes two of the four.** `keep-local` applies the displaced metadata (`losing`) again as an ordinary local edit of the file's metadata, so it takes a new version and wins on every instance by it; a key the displaced metadata lacks is removed from the row, and the conflict closes only once the edit is made. When the file no longer has a metadata record it is `400` and the conflict stays (use `keep-incoming` to dismiss it). `keep-incoming` accepts the row that stands: the conflict closes and no row is touched. `keep-both` and `save-to-space` are `400` with `code: "not_a_file_copy"`, on the single route and as a bulk item's `code`, because there is no copy of the file to place.
 
 `keep-both` with a `rename` and `save-to-space` put the copy where **you** chose, and they never replace what stands there:
 a file, a directory, a symbolic link or a file record with no bytes yet (a peer's file whose content has not arrived) at

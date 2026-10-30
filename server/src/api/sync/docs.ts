@@ -416,7 +416,8 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     // stored, so not `upserted`, and something written, so not `skipped`. Without it the row was in no counter at all.
     const fileConverged = count('filemeta', 'converged');
     const fileMetaStats = {
-      upserted: count('filemeta', 'upserted'), skipped: count('filemeta', 'skipped'),
+      // `divergenceKept` (Q-426) is a file row the stored copy beat at the same version: nothing stored, so `skipped` on the wire, and said in the receiver's log.
+      upserted: count('filemeta', 'upserted'), skipped: count('filemeta', 'skipped') + count('filemeta', 'divergenceKept'),
       ...(fileTombstoned > 0 ? { tombstoned: fileTombstoned } : {}),
       ...(fileConverged > 0 ? { converged: fileConverged } : {}),
     };

@@ -93,10 +93,11 @@ import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
 import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, NOT_CARRIED_BY_BACKUP, WRITE_GUARD_FIELDS, WRITTEN_HERE, carriedFields, stampOfArrival } from './local-only-fields.js';
-import { retagToLocalSpace, seqGuard, divergesFrom, forkRowVerdict, isForkingFamily } from './upsert-plan.js';
+import { retagToLocalSpace, seqGuard, divergesFrom, forkRowVerdict, isForkingFamily, CONVERGE_BLANKED } from './upsert-plan.js';
 import { isNewerCopy } from './held-tombstone-rules.js';
 import { authoredContentHash, bodyProjectionOf } from './authored-content.js';
 import { readBackDuplicates } from './duplicate-readback.js';
+import { fileContentHash, FILE_HASH_PROJECTION } from '../brain/merkle.js';
 import { isWrittenHere } from './written-here.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
@@ -662,9 +663,12 @@ export async function writeArrivals(
         // on a unique index other than `_id`.
         // A family that forks is compared by BODY, so the read-back reads the body the hash is made of; any other family has none to disagree about.
         const forking = isForkingFamily(family);
-        for (const { planned: d, held: stored, relation } of await readBackDuplicates<Doc, Doc>(collName, dupes, forking ? bodyProjectionOf(family) : {})) {
+        // A FILE is compared by the authored half the space hash sees (Q-426): the same seq with other content is a divergence of a file too, planned again by
+        // the tie, where it used to be taken for the version that was written.
+        for (const { planned: d, held: stored, relation } of await readBackDuplicates<Doc, Doc>(collName, dupes, forking ? bodyProjectionOf(family) : family === 'files' ? FILE_HASH_PROJECTION : {})) {
           const held = forking && stored ? { ...stored, bodyHash: authoredContentHash(family, stored) } : stored;
           if (!restore && relation === 'same-version' && forking && divergesFrom(family, d, held)) out.diverged.push(d._id);
+          else if (!restore && relation === 'same-version' && family === 'files' && stored && fileContentHash(stored, CONVERGE_BLANKED) !== fileContentHash(d, CONVERGE_BLANKED)) out.diverged.push(d._id);
           else if (!restore && relation === 'same-version') landed.push(d);
           else if (!restore && relation === 'newer') out.newerLocal.push(d._id);
           else out.duplicates.push(d._id);

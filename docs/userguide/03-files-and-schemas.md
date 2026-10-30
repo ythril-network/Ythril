@@ -242,7 +242,16 @@ Open **Conflicts** from the sidebar to see them. For each conflict choose what t
 | **Keep both** | Both versions are kept (you can rename the incoming copy) |
 | **Move to space** | The incoming version is moved to a different space (it leaves this one), then the conflict is removed |
 
-Every conflict ends in one of these four. There is no dismiss: a conflict closes only by one of these, so an incoming copy is never left behind under its conflict name.
+**A conflict about a file's description, tags or properties.** When two connected brains hold the same file with different descriptions, tags or properties at the same version, they settle it by one rule that both apply (the lower hash of the metadata becomes the file's metadata on both), so they agree without anyone choosing. The metadata that **your** brain had and gave up is not thrown away: it appears in Conflicts as a **Metadata differs** row, where a table shows each field that differs, yours and the one now on the file. There are only two options, because there is no second copy of the file to keep or move:
+
+| Option | Result |
+|--------|--------|
+| **Keep mine (apply again)** | Your displaced metadata is applied to the file again, as an edit you make now. It then wins on every connected brain |
+| **Keep theirs (dismiss)** | The metadata now on the file stays and your displaced metadata is dismissed |
+
+The brain whose metadata was kept has no such row. Nothing here changes what another brain holds.
+
+Every conflict about a file's copy ends in one of these four. There is no dismiss: a conflict closes only by one of these, so an incoming copy is never left behind under its conflict name.
 
 **Keep both with a new name, and Move to space, never replace anything.** If a file, a folder or a file waiting for its content already
 has the name you chose (in the other space, for Move to space), the answer is that something already stands there: nothing is moved,
