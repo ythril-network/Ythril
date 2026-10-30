@@ -35,7 +35,8 @@ export const ReembedBody = z.object({
 
 /** Mounted from `api/spaces.ts` so the route path stays `/api/spaces/:id/reembed`. */
 export function registerReembedRoute(spacesRouter: Router): void {
-  // POST /api/spaces/:id/reembed — queue embeddings for records that have none.
+  // POST /api/spaces/:id/reembed — queue embeddings for records that have none, and for records whose stored text is not
+  // their current text (`stale`, which reads every record of the space once per call).
   //
   // The way back from `suppressEmbeddings`. Kept thin on purpose: the sweep, the suppression check and the
   // bounding all live in `brain/reembed.ts`, because `api/spaces.ts` is already a frozen god-file and a route

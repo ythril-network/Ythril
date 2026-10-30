@@ -102,7 +102,7 @@ import { authoredContentHash, bodyProjectionOf } from './authored-content.js';
 import { readBackDuplicates } from './duplicate-readback.js';
 import { fileContentHash, FILE_HASH_PROJECTION } from '../brain/merkle.js';
 import { isWrittenHere } from './written-here.js';
-import { enqueueIngestedRecords } from '../brain/embed-queue.js';
+import { enqueueIngestedRecords, EMBED_REPAIR_HINT } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
 import { retentionSpace, retentionStamps } from '../brain/ttl.js';
 import { isDerived, buildEmbedTexts } from '../brain/embed-record.js';
@@ -716,8 +716,8 @@ export async function writeArrivals(
       queued.push(...landed);
       if (!opts.deferEnqueue) {
         await out.enqueue().catch((err: unknown) => log.warn(`${logSafe(where)}: ${landed.length} landed record(s) in `
-          + `space '${peerText(spaceId)}' could not be queued for embedding (${logSafe(err instanceof Error ? err.message : String(err))}); `
-          + 'they are stored, and a reindex queues them'));
+          + `space '${peerText(spaceId)}' could not be queued for embedding (${logSafe(err instanceof Error ? err.message : String(err))}). `
+          + EMBED_REPAIR_HINT));
       }
     }
   }

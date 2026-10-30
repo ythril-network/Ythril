@@ -183,7 +183,8 @@ export const EMBED_JOB_INDEXES: Array<Record<string, 1>> = [
  * recall forever, with no error, no metric and nothing to grep for.
  *
  * The repair now exists and is `POST /api/spaces/:id/reembed` (`brain/reembed.ts`), which queues a job for every
- * record with no vector. It is **on demand, not periodic** — say that precisely, because "it will be picked up"
+ * record with no vector and for every record whose stored text is not its current text (an update whose job was
+ * lost). A failed enqueue warns, as a batch's does (`enqueueWriteEmbedJobs`), naming that repair. It is **on demand, not periodic** — say that precisely, because "it will be picked up"
  * and "an operator can pick it up" are different promises, and only one of them is true here.
  */
 export async function enqueueEmbedJob(
@@ -192,13 +193,10 @@ export async function enqueueEmbedJob(
   recordId: string,
   { priority }: { priority: EmbedPriority },
 ): Promise<void> {
-  // The write lane's ops through the one runner, so a single write and a batch cannot queue differently.
-  try {
-    await runEmbedJobOps(spaceId, [{ recordType, recordId }],
-      (type, id, now) => writeJobOps(spaceId, type, id, now, { priority }));
-  } catch {
-    /* see the note above — a queue failure must never fail the write it was announcing */
-  }
+  // The write lane's batch with one record: the same runner and ops, and the same warning when it fails, so a single write and a
+  // batch cannot queue differently or fail differently (it used to fail silently, which is how a file's metadata write lost its job
+  // without a trace). It never throws into the write it was announcing.
+  await enqueueWriteEmbedJobs(spaceId, [{ recordType, recordId }], { priority });
 }
 
 /**
@@ -279,6 +277,18 @@ export async function enqueueEmbedJobs(
 }
 
 /**
+ * What an operator is told to do about records whose embed job was not queued: the ONE spelling of the remedy, for every warning that
+ * names it (the write lane's here, the arrival writer's in `sync/arrivals.ts`).
+ *
+ * It says what is true for both cases. A NEW record has no vector until a job runs; an UPDATED one keeps the vector and the lexical
+ * text of its previous content, so "queues every record that has no vector" was false for it, and the repair it names is
+ * `POST /api/spaces/:id/reembed`, which queues both (`stale`, `brain/reembed.ts`). A second spelling is how a warning ended up naming
+ * a reindex, a different and heavier operation (`the-embed-repair-remedy-has-one-spelling`).
+ */
+export const EMBED_REPAIR_HINT = 'They are stored. A new record has no vector until a job runs; an updated one keeps the vector and '
+  + 'the lexical text of its previous content. POST /api/spaces/:id/reembed queues both.';
+
+/**
  * Queue the records a WRITE just stored — `enqueueEmbedJob`'s semantics for a batch, which the write commit uses.
  *
  * Every field is reset (a new write is new content, so it must not inherit a verdict or a backoff earned on the
@@ -299,8 +309,7 @@ export async function enqueueWriteEmbedJobs(
   } catch (err) {
     const failed = records.length;
     log.warn(`embed queue: ${failed} record(s) written to '${peerText(spaceId)}' were NOT queued for embedding `
-      + `(${peerText(err)}). They are stored and findable by text; `
-      + 'POST /api/spaces/:id/reembed queues every record that has no vector.');
+      + `(${peerText(err)}). ${EMBED_REPAIR_HINT}`);
     return { queued: 0, failed };
   }
 }

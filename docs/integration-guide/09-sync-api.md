@@ -562,7 +562,8 @@ entity included) and by pull alike. Nothing has to ask for this and there is no 
 
 **Upgrading: records pulled by an earlier version were never queued.** A record this instance PULLED from a peer before this
 release was stored without an embed job and has no vector here. [`POST /api/spaces/:id/reembed`](06-spaces-api.md#re-embed-backfill)
-queues every record of a space that has none; run it once per synced space after upgrading.
+queues every record of a space that has none, and every record whose text changed while its job could not be queued (an updated record keeps the vector
+and the lexical text of its previous content, which "has none" cannot see); run it once per synced space after upgrading.
 
 **The receiver's retention applies to what arrives.** A record that carries no retention stamp of this instance
 is stamped by this instance's policy (type schema over space), counted from the record's own `createdAt` — so a

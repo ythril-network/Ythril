@@ -24,7 +24,8 @@ import { stripComments } from './_strip-comments.mjs';
 const SOURCES = trackedSources('server/src', { floor: 200 });
 const code = new Map(SOURCES.map(f => [f, stripComments(readFileSync(f, 'utf8'))]));
 
-const DEFINITION = /export const EMBED_REPAIR_HINT\b[\s\S]*?;/;
+// To the `';` that ends the statement: the sentence itself holds semicolons.
+const DEFINITION = /export const EMBED_REPAIR_HINT\b[\s\S]*?'\s*;/;
 const SAYS_QUEUES = /\bre-?(?:embed|index)\b[^'"`\n]{0,40}\bqueues\b/i;
 
 describe('the embed repair remedy has one spelling', () => {
