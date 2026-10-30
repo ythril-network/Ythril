@@ -92,7 +92,8 @@ const EXEMPT = {
   'server/src/brain/link-adjacency.ts:docsFromCollection': 'the narrowing is the link class\'s own `scope`, ANDed into the read, and for files that scope IS `LIVE_FILE_ROW` (`SCOPE`, link-adjacency.ts) — so a linked file node is never a chunk and never a flagged row',
   'server/src/files/extract-listing.ts:readExtractListing': 'its reads select CHILD rows by `parentFileId`, which a flag is never set on; whether the FILE is still here is the parent read, `getFileMeta`, which both doors that call it (`GET …/files/extract` and `read_file`) make first and which carries the predicate',
   'server/src/brain/dupe-scanner.ts:unchosenVersionsAmong': 'its collection is the one of a duplicate-scan type (fact, entity or chrono), never `files`, and it reads the `forkOf` of the ids a scan found',
-  'server/src/brain/dupe-scanner.ts:recordMatchedText': 'reads `matchedText` alone, which the flag write strips, so a flagged row already answers the empty string a predicate would answer for it',
+  'server/src/brain/dupe-scanner.ts:owesItsJob': 'its collection is the one of a duplicate-scan type (fact, entity or chrono), never `files`, and it reads one record the scanner just found by id',
+  'server/src/brain/dupe-scanner.ts:recordMatchedText':'reads `matchedText` alone, which the flag write strips, so a flagged row already answers the empty string a predicate would answer for it',
   // ── it handles the collection, not the files in it
   'server/src/spaces/lifecycle.ts:wipeSpaceUnqueued': 'the wipe body hands the collection to the runner\'s batched delete, which reads each batch\'s ids to delete EVERY row, flagged ones included, on purpose',
   'server/src/spaces/lifecycle.ts:initSpace': 'creates the space\'s collections and indexes and samples a fact for the embedding model; reads no file for any caller',

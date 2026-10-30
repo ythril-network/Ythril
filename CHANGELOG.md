@@ -36,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Embeddings:** `POST /api/spaces/:id/reembed` and `space_reembed` also queue records whose stored text is not their current text (`stale` in the answer), such as an update whose embed job was never queued. The call now reads every record of the space once.
 - **Embeddings:** rewriting an existing fact, entity, chrono entry or edge by its id with new text now re-embeds it; the old vector was kept. Until the job has run, the record keeps its previous lexical text.
 - **Embeddings:** the warning for a failed enqueue says the repair covers updated records too, and a failed enqueue of a single local write, a file's metadata among them, now warns.
-- **Embeddings:** after upgrading, run `POST /api/spaces/:id/reembed` once per space: it queues records already stale and suppressed records a peer sent that have no lexical text. The first run is a partial reindex: it also re-embeds records written under an older text format, records with no stored text, and edges whose endpoint was renamed since they were embedded, which may be a large share of an older space.
+- **Embeddings:** after upgrading, run `POST /api/spaces/:id/reembed` once per space: it queues records already stale and suppressed records a peer sent that have no lexical text.
+- **Embeddings:** the first `reembed` after upgrading is a partial reindex: it also re-embeds records written under an older text format, records with no stored text, and edges whose endpoint was renamed.
 
 ## [6.1.0] — 2026-10-29
 
