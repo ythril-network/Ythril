@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tokens:** an existing token's **Requests per minute** can be changed in Settings > Tokens, or emptied to inherit the instance value again; `PATCH /api/tokens/:id` takes `rateLimitPerMinute: null` to clear it. A value over the instance ceiling is refused with the same message as on create.
+
 ### Changed
 
 - **Brain:** no user-facing effect: the edge-list read moved from `brain/edges.ts` to `brain/list-edges.ts`, with its behaviour unchanged.
