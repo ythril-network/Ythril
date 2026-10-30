@@ -12,7 +12,7 @@ import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
 import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
-import { mergeTags, mergeProperties } from '../merge-fields.js';
+import { mergeTags, mergeProperties, mergePropertiesOrKeep } from '../merge-fields.js';
 import { type SimilarMatch } from '../recall.js';
 import type { DupeCheckOpts } from '../write-options.js';
 import type { FactDoc } from '../../config/types.js';
@@ -76,8 +76,12 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
   if (check.blocked) throw new SchemaViolationError(check);
   opts?.onValidation?.(check);
 
-  // No entity names: a fact embeds its own content. See `factEmbedText` for the measurement.
-  const embedText = factEmbedText(fact, tags, description, properties);
+  // No entity names: a fact embeds its own content. See `factEmbedText` for the measurement. The text is the record the write
+  // STORES: on a converge the merge (tags union, properties shallow-merge, description kept when the write names none), exactly
+  // what the `$set` below writes, so a text stored or embedded here is the text the queued job would build (as `planEntity` does).
+  const embedText = existing
+    ? factEmbedText(fact, mergeTags(existing.tags, tags), description ?? existing.description, mergePropertiesOrKeep(existing.properties, properties))
+    : factEmbedText(fact, tags, description, properties);
 
   /*
    * Embed now, or hand it to the queue? An insert-time duplicate/contradiction check needs the vector BEFORE the
