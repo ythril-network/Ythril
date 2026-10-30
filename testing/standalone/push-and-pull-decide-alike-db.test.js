@@ -80,18 +80,31 @@ function plannerVerdicts() {
   return out;
 }
 
-let door, families, tombstoneTypeOf, schemaOf, singleRouteOf, forking;
+let door, families, tombstoneTypeOf, schemaOf, singleRouteOf, forking, linkIdFor;
+
+/**
+ * The endpoints of each link fixture id `idFor` hands out: a link's id IS its endpoints' (Q-222), so a link row's id is read off the
+ * endpoints it names and `make` looks them up again by that id.
+ */
+const linkEnds = new Map();
 
 /** A fresh fixture for a family, authored by the delivering peer unless a row says otherwise. */
 const make = (key, space, id, seq, extra = {}) => {
   const b = { facts: build.fact, entities: build.entity, edges: build.edge, chrono: build.chrono, links: build.link,
     filemeta: build.filemeta }[key];
   assert.ok(b, `no fixture builder for family '${key}' — add one to _push-door.mjs build`);
-  return b(space, id, seq, { author: { ...PEER_AUTHOR }, ...extra });
+  return b(space, id, seq, { author: { ...PEER_AUTHOR }, ...(key === 'links' ? linkEnds.get(id) : undefined), ...extra });
 };
 /** The text-like field a row changes to make two copies differ — one the family's schema DECLARES (a link has none). */
 const TEXT = { facts: 'fact', entities: 'name', edges: 'description', chrono: 'title', links: null, filemeta: 'description' };
-const idFor = (key, n) => (key === 'filemeta' ? `docs/${n}.md` : `${key}-${n}`);
+function idFor(key, n) {
+  if (key === 'filemeta') return `docs/${n}.md`;
+  if (key !== 'links') return `${key}-${n}`;
+  const ends = { from: `from-${key}-${n}`, fromKind: 'fact', to: `to-${key}-${n}`, toKind: 'entity' };
+  const id = linkIdFor(ends.from, ends.fromKind, ends.to, ends.toKind);
+  linkEnds.set(id, ends);
+  return id;
+}
 
 /** The first required string field of the family's schema that the fixture carries, other than `_id`/`spaceId`. */
 function wrongTypedField(key) {
@@ -218,15 +231,22 @@ function rows() {
     const twin = key === 'edges'
       ? { from: 'ent-a', to: 'ent-b', label: 'knows' }
       : { from: 'fact-a', fromKind: 'fact', to: 'ent-b', toKind: 'entity' };
+    // A link has ONE admissible id for its endpoints (Q-222), so a second id for them is refused before a unique key is in question
+    // (`underivedId`, below): the in-page rule is read on the edges, and the link rows are the two ways a unique key can still collide.
+    const one = key === 'links' ? linkIdFor(twin.from, twin.fromKind, twin.to, twin.toKind) : `${key}-one`;
     out.push(
-      { name: `${key}: two ids, one unique key, in one page: the first accepted wins`, family: key, verdict: 'duplicate', single: false,
-        seed: () => ({}), page: (s) => [make(key, s, `${key}-one`, 5, twin), make(key, s, `${key}-two`, 6, twin)],
-        check: (snap) => has(snap, `${key}-one`) && !has(snap, `${key}-two`) },
+      ...(key === 'edges' ? [{ name: `${key}: two ids, one unique key, in one page: the first accepted wins`, family: key, verdict: 'duplicate', single: false,
+        seed: () => ({}), page: (s) => [make(key, s, one, 5, twin), make(key, s, `${key}-two`, 6, twin)],
+        check: (snap) => has(snap, one) && !has(snap, `${key}-two`) }] : []),
       { name: `${key}: a record holding a stored record's unique key under another id is not applied`, family: key, verdict: 'duplicate',
-        seed: (s) => ({ stored: [make(key, s, `${key}-held`, 3, twin)] }), page: (s) => [make(key, s, `${key}-new`, 5, twin)],
-        check: (snap) => has(snap, `${key}-held`) && !has(snap, `${key}-new`) },
+        seed: (s) => ({ stored: [make(key, s, `${key}-held`, 3, twin)] }), page: (s) => [make(key, s, key === 'links' ? one : `${key}-new`, 5, twin)],
+        check: (snap) => has(snap, `${key}-held`) && !has(snap, key === 'links' ? one : `${key}-new`) },
     );
   }
+  // A link whose id is not the one its endpoints derive is refused whole (Q-222), on every door, beside a derived page-mate that lands.
+  out.push({ name: 'links: a link whose id does not derive from its endpoints is refused, nothing written', family: 'links', verdict: 'underivedId',
+    seed: () => ({}), page: (s) => [make('links', s, 'links-forged', 5), make('links', s, idFor('links', 'r'), 6)],
+    check: (snap) => !has(snap, 'links-forged') && has(snap, idFor('links', 'r')) });
   // File metadata: a parentFileId that is not a string is a chunk claim the schema refuses, never a top-level file.
   for (const [what, v] of [['a number', 42], ['zero', 0], ['false', false], ['null', null], ['an object', {}], ['an array', ['x']]]) {
     out.push({ name: `filemeta: a parentFileId that is ${what} is refused (Q-225)`, family: 'filemeta', verdict: 'rejected',
@@ -298,6 +318,7 @@ describe('push and pull decide alike (Q-204, Q-225)', { skip }, () => {
     door = await openPullDoor({ suite: 'push-pull-alike', spaces: [L, LA], spaceMap: { [RA]: LA } });
     ({ REPLICATED_FAMILIES: families } = await import('../../server/dist/sync/replicated-families.js'));
     ({ TOMBSTONE_TYPE_OF: tombstoneTypeOf } = await import('../../server/dist/config/types.js'));
+    ({ linkIdFor } = await import('../../server/dist/brain/link-id.js'));
     forking = await forkingFamilies();
     const shared = await import('../../server/dist/api/sync/_shared.js');
     const schemas = new Map(incomingSchemas(shared));

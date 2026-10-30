@@ -111,7 +111,7 @@ export async function pullFamily(o: {
       }
       for (const verdict of written.verdicts) {
         // A fork dropped at its cap and a malformed fork row are refused, not stored: counted as the receiver's own rules refusing them (Q-624).
-        if (verdict === 'rejected' || verdict === 'forkRefused' || verdict === 'invalidFork') { refused++; continue; }
+        if (verdict === 'rejected' || verdict === 'forkRefused' || verdict === 'invalidFork' || verdict === 'underivedId') { refused++; continue; }
         if (verdict === 'converged') converged++;
         count++;
       }

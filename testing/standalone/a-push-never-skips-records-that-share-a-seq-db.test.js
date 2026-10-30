@@ -37,7 +37,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openPullDoor } from './_pull-door.mjs';
-import { replicatedFixtureFamilies, tieRun, missingAndRepeated } from './_seq-tie-families.mjs';
+import { replicatedFixtureFamilies, deriveLinkIds, tieRun, missingAndRepeated } from './_seq-tie-families.mjs';
 import { readMark } from './_b81b-positions.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -84,6 +84,7 @@ describe('a push never skips a record that shares its seq', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'tiepush', spaces: [S], direction: 'push' });
     ({ LOCAL_ONLY_FIELDS } = await import('../../server/dist/sync/local-only-fields.js'));
+    deriveLinkIds(families, (await import('../../server/dist/brain/link-id.js')).linkIdFor);   // the planner refuses any other link id (Q-222)
     ME = { instanceId: door.instanceId, instanceLabel: 'Receiver' };
   });
   after(async () => { await door?.close(); });

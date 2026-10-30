@@ -33,7 +33,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
-import { replicatedFixtureFamilies, tieRun, missingAndRepeated } from './_seq-tie-families.mjs';
+import { replicatedFixtureFamilies, deriveLinkIds, tieRun, missingAndRepeated } from './_seq-tie-families.mjs';
 import { positioned, readMark } from './_b81b-positions.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -89,6 +89,7 @@ describe('a sync page never skips a record that shares its position', { skip }, 
   before(async () => {
     door = await openPullDoor({ suite: 'tiepull', spaces: [S] });
     ({ raiseVersionTo } = await import('../../server/dist/util/version-stamp.js'));
+    deriveLinkIds(families, (await import('../../server/dist/brain/link-id.js')).linkIdFor);   // the planner refuses any other link id (Q-222)
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => { await door.reset(); });

@@ -247,9 +247,13 @@ export interface ArrivalPlanInput {
  * What became of one arriving document. `inserted`/`updated` are the facts family's spelling of `upserted`.
  * `duplicate` and `rejected` are never decided here — they are what a WRITE can still say (a unique index other
  * than `_id`, a store refusal), and the door overwrites the winner's verdict with them.
+ *
+ * `underivedId` (Q-222): a link whose `_id` is not the one its endpoints derive (`linkIdFor`). Refused, never stored,
+ * counted `rejected` on the wire and by a pull as refused. What it prevents: one relationship held under two ids on two
+ * instances, which a peer's unique endpoint index then answers `duplicate` for ever.
  */
 export type ArrivalVerdict = 'inserted' | 'updated' | 'upserted' | 'skipped' | 'tombstoned' | 'forked'
-  | 'forkRefused' | 'invalidFork' | 'unknownType' | 'duplicate' | 'rejected' | 'converged';
+  | 'forkRefused' | 'invalidFork' | 'unknownType' | 'duplicate' | 'rejected' | 'converged' | 'underivedId';
 
 export interface ArrivalPlan<T extends ArrivalDoc> {
   /** One verdict per input document, in input order — what sequential processing would have answered. */
@@ -553,6 +557,7 @@ export function heldTombstoneLeavesFork(held: HeldTombstone, author: string | un
  * - "The copy" is the stored one OVERLAID by every version this page accepted before it, so `[5, 6]` is
  *   inserted-then-updated and `[9, 3]` is inserted-then-skipped. The counters count ITEMS, as processing them in
  *   order counted them; the write is the final winner per id.
+ * - A link whose `_id` is not the one its endpoints derive (`linkIdFor`) is `underivedId`, whatever else is true of it (Q-222).
  * - A unique-index collision WITHIN the page (two ids, one edge triplet or one link's endpoints) is decided here,
  *   first accepted wins, rather than left to the execution order of an unordered bulk write.
  *
@@ -625,6 +630,10 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
       plan.verdicts[i] = 'unknownType';
       return;
     }
+    // A link's id IS its relationship (`linkIdFor`), and every writer here derives it. An id that does not derive is a second name for a
+    // relationship this instance holds under the derived one, or will: refused on both doors, by the one planner (Q-222). Asked before
+    // anything is consulted, so no stored copy, tombstone or page-mate is read for a row that is not admissible.
+    if (kind === 'links' && doc._id !== uniqueKey(kind, doc)) { plan.verdicts[i] = 'underivedId'; return; }
     // What this page accepted for the id so far overlays what is stored; a family that forks compares it by body, a file by its own fields.
     const accepted = overlay.get(doc._id);
     const cur: StoredCopy | undefined = accepted === undefined ? stored.get(doc._id) : forking ? copyOf(accepted) : accepted;
