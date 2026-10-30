@@ -17,16 +17,22 @@
  * ## What each side does
  *
  *  - **The remover** ({@link settleReferencesToRemovedEntity}, reached from `removeRecords`' per-kind step and from `executeMerge`, so no door can omit it)
- *    reads the edges and links that name the removed entity NOW. A DELETE takes back those THIS instance wrote, with their tombstones; a MERGE moves what is
- *    left to the survivor, the way the merge itself moved the rest.
+ *    reads the edges and links that name the removed entity NOW. A DELETE takes back those THIS instance wrote that landed once the removal began, with
+ *    their tombstones (an older row was never a straggler, and an unguarded delete such as the TTL sweep's has not read the references); a MERGE moves what is
+ *    left to the survivor, the way the merge itself moved the rest, up to the merge's own bound.
  *  - **The writer** ({@link takeBackEdgesToGoneEntities}, {@link takeBackLinksToGoneEntities}, called from the one commit and the one link-row writer) re-reads
  *    its entity ends after the write and takes back what names a gone entity: an edge is refused `409 endpoint_removed`, a link is dropped and reported
- *    (`link_target_removed`), the record that carried it stays written.
+ *    (`link_target_removed`: a warning when it was part of a record, which stays written; a `409` when the link was the whole write). It refuses and reports
+ *    only what it actually removed: a row the merge's settle moved onto the survivor in the meantime is the survivor's, and the write succeeded.
  *
  * ## My instance = my data
  *
  * A DELETE removes only rows this instance wrote (`writtenHereFilter`). A peer's edge that names the entity is the arrival writer's and the link-violation
  * recorder's business, never removed here: no action on one instance decides what another instance holds.
+ *
+ * A MERGE is different, and says so: it MOVES what still names the absorbed entity, a peer's row included, as the merge itself moves every edge of the
+ * absorbed entity (`relinkEdgesOfRecord`, `moveForeign` off). An edge a peer authored is written in place as a new local version that replicates, and the peer
+ * judges it by its own rules (its deletion authority may decline the tombstone of a colliding duplicate); that is the merge's own relink and not a second rule.
  *
  * ## Only a strictLinkage space
  *
