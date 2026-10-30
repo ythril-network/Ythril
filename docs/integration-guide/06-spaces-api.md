@@ -311,10 +311,10 @@ all of it would be worse off than one who got an error.
 | Field | Meaning |
 |-------|---------|
 | `enqueued` | Records a job was queued for. Embedding happens in the background afterwards. |
-| `skippedSuppressed` | Candidates skipped because suppression **still applies**. See the note below. |
+| `skippedSuppressed` | Candidates left alone because suppression **still applies**. A suppressed record with stale text is not one: it is queued and counted in `stale`. See the note below. |
 | `stale` | Of `enqueued`, the records queued because their stored text differs from their current text: a vector made from text the record no longer has, or a suppressed record whose lexical text is missing or old. |
 | `byKind` | Where the gap was, per record kind. |
-| `remaining` | Candidates left after `limit` **that can actually be embedded**. Counted over the whole space, not over this page. Suppressed records are never counted here — see the note below. |
+| `remaining` | Candidates left after `limit` **that are owed a job**. Counted over the whole space, not over this page. A suppressed record whose text is current is never counted here, one with stale text is (its job writes the text, no model call). See the note below. |
 | `truncated` | `true` when `remaining > 0` — call again to continue. |
 
 > **Turn suppression off first.** A record that is still suppressed at any tier is skipped, so that a backfill
@@ -326,15 +326,11 @@ partial work with no record of where it stopped. Queuing is idempotent per recor
 same space converges instead of duplicating work. **Nothing is truncated silently** — when more candidates remain than
 `limit` allowed, `remaining` says how many.
 
-**`remaining` counts only work that can be done, and that distinction is load-bearing.** Suppression is applied
-in the query, so a suppressed record never reaches `remaining`; it is reported under `skippedSuppressed` instead.
-A space whose suppression is still on therefore answers `remaining: 0`, `truncated: false` — *there is no work*,
-which is a different statement from *there is work left* and the one you can act on.
+**`remaining` counts only work that is owed, and that distinction is load-bearing.** A suppressed record whose text is current never reaches `remaining`; it is reported under `skippedSuppressed`. A space whose suppression is still on, with every text current, answers `remaining: 0`, `truncated: false` — *there is no work*, which is not *there is work left*. A suppressed record whose text is stale is owed its text (no model call): it is queued, counted in `stale` and `enqueued`, in `remaining` when past `limit`, and never under `skippedSuppressed`.
 
-> **Fixed in 2.6.1.** Before that, `remaining` counted every record without a vector, suppressed ones included,
-> and the candidate query had no sort. So a page of suppressed records at the front of a collection came back
-> unchanged on every call, blocked every embeddable record behind it, and `truncated: true` said "call again to
-> continue" — a loop that could not converge. If you scripted against `truncated`, it terminates now.
+**The call reads the whole space each time, and there is no cursor.** A repeat call re-reads from the start, and what you queued stays stale until the worker has drained it, so `enqueued` and `remaining` do not move before then.
+
+> **Fixed in 2.6.1.** `remaining` once counted suppressed records and the query had no sort, so a page of suppressed records at the front blocked every embeddable record behind it and `truncated: true` never converged. It terminates now.
 
 ---
 

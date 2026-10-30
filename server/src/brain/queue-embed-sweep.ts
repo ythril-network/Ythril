@@ -138,6 +138,12 @@ export interface SweepResult {
   remaining: number;
   /** Of `enqueued`, the records queued because their stored text was not their current text (`match: 'stale'`). */
   stale: number;
+  /**
+   * Of the owed records (queued, or left over past `limit`), those that are suppressed and hold no vector: the `vectorless` walk also
+   * counts them under `skippedSuppressed`, so a caller that adds the two walks subtracts this from that count and each record is
+   * counted once. Only the `stale` walk sets it.
+   */
+  staleSuppressed: number;
 }
 
 /** The records of a kind a sweep considers at all, before suppression. */
@@ -202,7 +208,7 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
   if (opts.match === 'stale') return await queueStaleSweep(spaceId, opts);
   const match = opts.match;
   const cap = opts.limit ?? Number.POSITIVE_INFINITY;
-  const result: SweepResult = { enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0, stale: 0 };
+  const result: SweepResult = { enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0, stale: 0, staleSuppressed: 0 };
 
   for (const { kind, resumeHere } of kindsFrom(opts.kinds ?? EMBED_SWEEP_KINDS, opts.after)) {
     const coll = col(spaceCollection(spaceId, COLLECTION[kind] as 'facts'));
@@ -295,7 +301,7 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
  */
 async function queueStaleSweep(spaceId: string, opts: SweepOptions): Promise<SweepResult> {
   const cap = opts.limit ?? Number.POSITIVE_INFINITY;
-  const result: SweepResult = { enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0, stale: 0 };
+  const result: SweepResult = { enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0, stale: 0, staleSuppressed: 0 };
   for (const { kind, resumeHere } of kindsFrom(opts.kinds ?? EMBED_SWEEP_KINDS, opts.after)) {
     const coll = col(spaceCollection(spaceId, COLLECTION[kind] as 'facts'));
     const walk = coll.aggregate([
@@ -314,8 +320,11 @@ async function queueStaleSweep(spaceId: string, opts: SweepOptions): Promise<Swe
         const text = texts[i];
         const id = doc['_id'];
         if (typeof id !== 'string' || text === null || text === undefined || doc['matchedText'] === text) return;
+        const suppressed = embeddingSuppressedFor(spaceId, kind, doc);
         // Not owed: no vector and not suppressed — the `vectorless` walk queues it.
-        if (doc['holdsVector'] !== true && !embeddingSuppressedFor(spaceId, kind, doc)) return;
+        if (doc['holdsVector'] !== true && !suppressed) return;
+        // Owed and suppressed with no vector: the `vectorless` walk counted it as skipped too (see `staleSuppressed`).
+        if (doc['holdsVector'] !== true) result.staleSuppressed++;
         if (result.enqueued + owed.length < cap) owed.push(id); else result.remaining++;
       });
       if (owed.length === 0) return;

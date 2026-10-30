@@ -305,18 +305,23 @@ export const space_reembedTool: ToolHandler = {
     + 'STALE RECORDS ARE QUEUED TOO, and `stale` counts them: a record that keeps the vector and the lexical text of its '
     + 'previous content because its job was never queued, and a suppressed record whose lexical text is missing or old '
     + '(its job writes the text without calling the model). FINDING THEM READS EVERY RECORD OF THE SPACE ONCE PER CALL '
-    + '(`limit` bounds what is queued, never what is read), so a large space pays for a pass over its records each time.\n\n'
+    + '(`limit` bounds what is queued, never what is read), so a large space pays for a pass over its records each time. '
+    + 'Calling again re-reads from the start: what you queued stays stale until the worker has drained it, so '
+    + '`enqueued` and `remaining` do not move before then.\n\n'
     // NAMING THE OTHER TOOL WOULD BE THE DEFECT HERE. Rebuilding every vector is instance-admin, this is
     // not, so a standard token sees this description and cannot see that tool — and a description that
     // sends a caller to something they will be refused is worse than one that describes the boundary.
     // `readonly-tool-descriptions-cannot-name-mutating-tools` is the same rule one rung down.
-    + 'IT DOES NOT TOUCH WHAT ALREADY HAS A VECTOR, and that is the distinction to get right. Rebuilding '
-    + 'every vector in a space — the recovery path after changing embedder or model — is a separate and '
+    + 'IT DOES NOT REBUILD VECTORS THAT ARE CURRENT, and that is the distinction to get right: a record that holds a '
+    + 'vector made from its current text is left alone, and one whose text has changed is the stale case above. '
+    + 'Rebuilding every vector in a space — the recovery path after changing embedder or model — is a separate and '
     + 'more privileged operation; `help()` lists it if your token can reach it. This one touches only '
     + 'records with no vector at all and the stale ones above, is AWAITED, and the counts it returns are the '
     + 'answer rather than a receipt.\n\n'
-    + 'SUPPRESSION IS EXCLUDED IN THE QUERY, not filtered afterwards, so a suppressed record is reported '
-    + 'under `skippedSuppressed` rather than queued again on every call. A record suppressed at any tier — '
+    + 'SUPPRESSION IS EXCLUDED IN THE QUERY, not filtered afterwards, so a suppressed record whose lexical text is '
+    + 'current is reported under `skippedSuppressed` rather than queued again on every call. A suppressed record whose '
+    + 'text is stale is NOT skipped: it is queued, counted in `stale` and `enqueued` (and in `remaining` when past the '
+    + 'cap), never under `skippedSuppressed`. A record suppressed at any tier — '
     + 'record, type schema or space — stays suppressed; releasing it is a separate act, and this is what you '
     + 'run AFTER releasing it because nothing backfills on its own.\n\n'
     + 'BOUNDED, AND `truncated: true` MEANS CALL AGAIN. `limit` defaults to '
