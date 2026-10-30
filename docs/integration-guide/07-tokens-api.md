@@ -432,9 +432,11 @@ PATCH /api/tokens/:id
 { "name": "new label" }
 ```
 
-Three fields are editable: **`name`** (1–200 chars, same bound as create), **`rights`** (the per-space matrix
-— see [Create a Token](#create-a-token) for the shape and the capping rules), and **`mfa`**
-(`inherit` | `exempt` | `required`). Send any combination. The secret and the expiry are untouched; use
+The editable fields are **`name`** (1–200 chars, same bound as create), **`rights`** (the per-space matrix
+— see [Create a Token](#create-a-token) for the shape and the capping rules), **`mfa`**
+(`inherit` | `exempt` | `required`) and **`rateLimitPerMinute`**: a whole number, or `null` to clear it so the token
+inherits the instance value again, refused with `403` above the instance ceiling and `400` when malformed, as on
+create. Send any combination. The secret and the expiry are untouched; use
 regenerate to rotate the secret. Audited as `token.update`, with the second factor recorded on both sides of
 the diff.
 

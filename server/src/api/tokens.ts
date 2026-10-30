@@ -250,7 +250,7 @@ export const CreateTokenBody = z.object({
    * This token's own request quota, per minute. Absent = inherit the instance value.
    *
    * Deliberately NOT bounded here. The bounds and the instance ceiling live in
-   * `rate-limit/per-token.ts` because the MCP tool enforces the same rule, and a `z.number().max(…)` in this
+   * `rate-limit/per-token.ts`, which the create and the update route both ask, and a `z.number().max(…)` in this
    * schema would be a second copy of a number infra owns — the one that goes stale when the env changes.
    * See `rateLimitRefusal`.
    */
@@ -551,11 +551,12 @@ export const RenameTokenBody = z.object({
    * This token's own request quota, per minute. Absent = inherit the instance value.
    *
    * Deliberately NOT bounded here. The bounds and the instance ceiling live in
-   * `rate-limit/per-token.ts` because the MCP tool enforces the same rule, and a `z.number().max(…)` in this
+   * `rate-limit/per-token.ts`, which the create and the update route both ask, and a `z.number().max(…)` in this
    * schema would be a second copy of a number infra owns — the one that goes stale when the env changes.
    * See `rateLimitRefusal`.
    */
-  rateLimitPerMinute: z.number().int().optional(),
+  // `null` clears it, so the token inherits the instance value again: without it a quota set once could never be emptied (Q-473).
+  rateLimitPerMinute: z.number().int().nullable().optional(),
   // ── The rest of the record, accepted ONLY unchanged ──────────────────────────────────────────────
   //
   // These are declared so that echoing back a token you just read does not 400 on the first field the

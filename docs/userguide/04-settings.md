@@ -527,6 +527,12 @@ Two numbers, and the second is the one that answers questions:
 When a client goes over, its requests get **429 Too Many Requests** and a `Retry-After` telling it how long to
 wait. Other tokens are unaffected — the budget is per token, which is the entire point.
 
+#### Changing it later
+
+Open the token's edit dialog from the token list: **Requests per minute** shows the number set on this token, or
+nothing when it uses the instance's number. Type a new number and save to change it; empty the box and save to go
+back to the instance's number. The same refusals as on create apply.
+
 #### If the box refuses your number
 
 Whoever runs this instance can set a ceiling that admins cannot exceed. If they have, and you ask for more, the
