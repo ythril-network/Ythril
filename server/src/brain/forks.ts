@@ -794,9 +794,8 @@ export async function resolveFork(spaceId: string, raw: Readonly<Record<string, 
 
   // ── 3. After the commit, each step guarded: the embed work and the webhooks ─────────────────────────────────────────────────────────
   await settleRemovedForks(spaceId, kind, gone.map(g => g._id));
-  try { await enqueueEmbedJob(spaceId, kind, parentId, { priority: EMBED_PRIORITY.write }); } catch (err) {
-    log.warn(`fork resolve: the parent '${peerText(parentId)}' in '${peerText(spaceId)}' was written but not queued for embedding: ${peerText(err)}`);
-  }
+  // Never throws into the write it announces: a failed enqueue warns inside (`enqueueWriteEmbedJobs`), naming the repair.
+  await enqueueEmbedJob(spaceId, kind, parentId, { priority: EMBED_PRIORITY.write });
   await relink.settleRekeyedEmbeds(spaceId, relinked.rekeyed, (err) => {
     log.warn(`fork resolve: '${peerText(forkId)}' was resolved into '${peerText(parentId)}' in '${peerText(spaceId)}', but the embed jobs of `
       + `${relinked.rekeyed.length} re-keyed edge(s) were not retired: ${peerText(err)}`);
@@ -865,7 +864,7 @@ async function resolveOrphan(
     }, { landed: async () => (await coll.countDocuments(asFilter<{ _id: string }>({ _id: keptId }), { limit: 1 })) === 1 });
     await settleRemovedForks(spaceId, kind, [fork._id]);
   }
-  try { await enqueueEmbedJob(spaceId, kind, keptId, { priority: EMBED_PRIORITY.write }); } catch { /* the worker's sweep finds it */ }
+  await enqueueEmbedJob(spaceId, kind, keptId, { priority: EMBED_PRIORITY.write });
   if (actor) emitWebhookEvent({ event: `${kind}.updated`, spaceId, entry: { _id: keptId }, ...actor });
   const stored = await coll.findOne(asFilter<{ _id: string }>({ _id: keptId }), { projection: NEVER_RETURNED_PROJECTION });
   const resolution: ForkResolution = { ...base, forkId: fork._id, parentId: keptId, parent: stored ? withoutVector(stored) : null };
