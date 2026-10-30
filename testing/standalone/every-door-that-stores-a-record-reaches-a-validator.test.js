@@ -173,6 +173,9 @@ function doorsWithoutAValidator({ index, routes, exempt }) {
  * A row no door reaches, or whose function writes no governed collection, fails (`every exemption still excuses a write`).
  */
 const EXEMPT = {
+  'server/src/files/derived-fields.ts:writeDerivedFields':
+    'the one writer of a derived field. A door reaches it through `embedArrivedFiles`, which gives a file this instance suppresses its own '
+    + '`matchedText` after the arrival writer stored the row (Q-262): a local derived field of a row already held; no property is written',
   'server/src/brain/forks.ts:resolveOrphan':
     'Review keeps an orphaned fork: the stored row is unmarked (`forkOf` removed) or an edge re-keyed onto its own identity, its properties untouched',
   'server/src/sync/resolved-elsewhere.ts:writeResolvedElsewhere':
