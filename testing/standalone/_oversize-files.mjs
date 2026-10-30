@@ -436,7 +436,10 @@ export const FROZEN = {
   // 546 -> 533 (`Q-390`): the duplicate and contradiction scanners' configs and documents moved WHOLE to `types-scanners.ts`
   // (it measured 615 over 546 before the move: `DupeScanStateDoc.cursorPos` and the resolve vocabulary had pushed it over).
   // The ceiling follows the file down to what it now measures.
-  'server/src/config/types.ts': 533,
+  //
+  // 533 -> 525 (`Q-426`): the conflict documents (a file copy and a file's losing metadata) moved WHOLE to
+  // `types-conflicts.ts` (it measured 556 over 533 with the metadata conflict added). The ceiling follows the file down.
+  'server/src/config/types.ts': 525,
   'client/src/app/pages/settings/data.component.ts': 644,
   // RAISED 646 -> 647 by ONE line: the Q-6 narrowing swapped `resolveMemberSpaces` for `memberSpacesForRequest`,
   // and this file no longer needed the old import, so it gained an import line and lost none. Not growth in any
