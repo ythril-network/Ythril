@@ -557,6 +557,22 @@ describe('an equal-seq copy that says something different forks, for every forki
     }
   });
 
+  it('a later copy that wins over an earlier swap takes the stored-loser fork with it: a failed write of that fork is the later item\'s verdict, not the earlier one\'s (bundle-45 review, #8)', () => {
+    leaf();
+    for (const kind of P.FORKING_FAMILIES) {
+      const field = MAIN_FIELD[kind];
+      // Three bodies in tie order, found by sorting under the server's own rule: `lowest` beats `middle`, which beats the stored `highest`.
+      const [lowest, middle, highest] = ['one', 'two', 'three'].map(t => base(kind, { [field]: `body ${t}` })).sort((a, b) => (wins(kind, a, b) ? -1 : 1));
+      const p = plan(kind, [middle, lowest], { stored: new Map([['p', held(kind, highest)]]) });
+      const storedForkId = P.forkIdFor('p', 5, H.authoredContentHash(kind, highest).text);
+      const middleForkId = P.forkIdFor('p', 5, H.authoredContentHash(kind, middle).text);
+      assert.deepEqual(p.swaps.map(s => [s.index, s.doc, s.loserForkId]), [[1, lowest, storedForkId]], `${kind}: the later copy did not take the swap over`);
+      assert.deepEqual(p.forks.map(f => [f.doc._id, f.index]).sort(), [[middleForkId, 0], [storedForkId, 1]].sort(),
+        `${kind}: the stored-loser fork keeps the earlier item's index, so a failed write of it marks the wrong item rejected`);
+      assert.deepEqual(p.forkIds, [middleForkId, storedForkId], `${kind}: the items do not name their own forks`);
+    }
+  });
+
   it('two divergent copies of one id in one page decide as two pages would: the lower hash is written, the other is the fork, whichever came first (Q-324)', () => {
     leaf();
     for (const kind of P.FORKING_FAMILIES) {

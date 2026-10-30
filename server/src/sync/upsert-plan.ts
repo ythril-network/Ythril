@@ -725,6 +725,9 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     if (!known) makeFork(earlierIndex, id, earlierForkId, earlier, doc.seq);
     plan.verdicts[earlierIndex] = 'forked'; plan.forkIds[earlierIndex] = earlierForkId;
     if (swap) {
+      // The stored-loser fork now belongs to the item that took the swap over: a failed write of it is that item's `rejected` (`forkFailed` is keyed by fork id, and
+      // the verdict by the fork's index), not the earlier item's, which is `forked` under the fork of the copy it displaced.
+      for (const f of plan.forks) if (f.doc._id === swap.loserForkId && f.index === swap.index) f.index = i;
       swap.doc = doc; swap.index = i;
       holdVersion(doc);
       plan.verdicts[i] = 'forked'; plan.forkIds[i] = swap.loserForkId;
