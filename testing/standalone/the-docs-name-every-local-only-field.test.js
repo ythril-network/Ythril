@@ -3,10 +3,10 @@
  *
  * ## The rule
  *
- * `sync/local-only-fields.ts` is the one list, and four documents re-state it for a reader who will never open the module:
+ * `sync/local-only-fields.ts` is the one list, and the docs re-state it for a reader who will never open the module:
  * `docs/integration-guide/09-sync-api.md` (what the hash leaves out), `docs/integration-guide/12-admin-api.md` (what an
- * export and an import keep), `docs/sync-protocol.md` and `CLAUDE.md`. Each says "the local-only fields are ..." and lists
- * them. A field added to the module is then missing from four sentences nobody re-reads, and the reader of one of them
+ * export and an import keep), `docs/sync-protocol.md`, and a local `CLAUDE.md` where one still lists them. Each says "the
+ * local-only fields are ..." and lists them. A field added to the module is then missing from sentences nobody re-reads, and the reader of one of them
  * designs around a list that is one field short — the failure the plan's documentation lens named.
  *
  * The classes are the module's: the RESTORED half (this instance's own state about a record), the DERIVED half (what its
@@ -21,7 +21,8 @@
  *   restored fields by their literal names. The restored fields are used because the derived trio (`embedding`,
  *   `embeddingModel`, `matchedText`) is also the vocabulary of every API response page, and the record-tier names are
  *   spoken only where local state is being enumerated. The changelog is history and is not read.
- * - **The floor** is the four documents above; a derivation that finds fewer has broken.
+ * - **The floor** is the three tracked documents above; a derivation that finds fewer has broken. `CLAUDE.md` is checked
+ *   where it enumerates, and not counted on (it is untracked, and may name none).
  *
  * A field counts as named when its LITERAL name appears in the doc: prose such as "the retention stamps" is how the older
  * sentences drifted, and is exactly what a reader cannot grep.
@@ -56,8 +57,10 @@ import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { localRuleSheets } from '../_shared/local-rule-sheets.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 
-// The three tracked docs below, plus the local rule sheet where the checkout has one (`CLAUDE.md` is not tracked, Q-632).
-const DOC_FLOOR = 3 + localRuleSheets(REPO_ROOT).length;
+// The three tracked docs below. A local rule sheet is checked when it enumerates the fields and never counted on to: the
+// owner's sheet moved its rules to the flow graph and names none of them now (Q-653), so it is neither a doc of the floor
+// nor one a clean clone has.
+const DOC_FLOOR = 3;
 /** The classes the module exports today (restored, derived, write guard, the restored dates, the union): a floor on the derivation. */
 const CLASS_FLOOR = 5;
 
@@ -89,11 +92,11 @@ function lacking(restored, fields) {
 }
 
 describe('the docs that enumerate the local-only fields name every field of the module\'s classes', () => {
-  it('the enumerating docs are found, at least the four the plan names', () => {
+  it('the enumerating docs are found, at least the tracked three the plan names', () => {
     const { RESTORED_LOCAL_FIELDS } = needModule(loaded, ['RESTORED_LOCAL_FIELDS'], 'local-only fields');
     const found = enumeratingDocs(RESTORED_LOCAL_FIELDS).map(d => d.file);
     assert.ok(found.length >= DOC_FLOOR, `only ${found.length} found: ${found.join(', ')}`);
-    for (const must of [...localRuleSheets(REPO_ROOT), 'docs/sync-protocol.md', 'docs/integration-guide/09-sync-api.md', 'docs/integration-guide/12-admin-api.md']) {
+    for (const must of ['docs/sync-protocol.md', 'docs/integration-guide/09-sync-api.md', 'docs/integration-guide/12-admin-api.md']) {
       assert.ok(found.includes(must), `${must} no longer enumerates the record-tier fields in one paragraph: re-point this gate or restore the sentence`);
     }
   });
