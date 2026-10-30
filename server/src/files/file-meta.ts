@@ -307,6 +307,12 @@ export async function updateFileMeta(
     linkChronos?: string[];
     linkFacts?: string[];
     properties?: Record<string, string | number | boolean>;
+    /**
+     * The two record markers a metadata conflict's `keep-local` puts back (Q-426), and no door passes: `descriptionSource` (where a description came from)
+     * and `suppressEmbeddings` (the record's own opt-out). Given, BOTH are written as stated: a marker the object lacks is removed, because the kept
+     * metadata is applied as it was and not merged into what stands. Omitted, neither is touched (a `description` still drops its stale source).
+     */
+    markers?: { descriptionSource?: string; suppressEmbeddings?: boolean };
   },
   /** Dot-notation paths to remove, applied AFTER the merge — the only way to unset. See the block below. */
   deleteFieldsPaths?: string[],
@@ -392,6 +398,12 @@ export async function updateFileMeta(
   // A description given here is a CALLER's, never a derived one (the derived writer is `setDerivedDescriptionIfUnset`,
   // which sets the marker itself), so the stale provenance always goes with it.
   if (opts.description !== undefined) $unset['descriptionSource'] = '';
+  if (opts.markers !== undefined) {
+    for (const key of ['descriptionSource', 'suppressEmbeddings'] as const) {
+      const value = opts.markers[key];
+      if (value === undefined) $unset[key] = ''; else { $set[key] = value; delete $unset[key]; }
+    }
+  }
 
   /**
    * `deleteFields`, applied AFTER the merge — the same shape and order as the four brain writers.

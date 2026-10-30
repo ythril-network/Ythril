@@ -109,12 +109,23 @@ async function resolveMetadataConflict(doc: MetadataConflictDoc, spaceId: string
     const l = doc.losing;
     const deleteFields: string[] = [];
     if (l.description === undefined && current.description !== undefined) deleteFields.push('description');
-    // A key the kept properties lack is removed: the kept metadata is applied as it was, not merged into what stands. A key with a dot cannot be named by a path.
-    for (const k of Object.keys(current.properties ?? {})) if (l.properties?.[k] === undefined && !k.includes('.')) deleteFields.push(`properties.${k}`);
+    // A key the kept properties lack is removed: the kept metadata is applied as it was, not merged into what stands. A key with a dot cannot be named by a
+    // path, so it cannot be removed: the action says so, naming it, and closes nothing (a 200 would tell the user the kept metadata stands when it does not).
+    const unremovable: string[] = [];
+    for (const k of Object.keys(current.properties ?? {})) {
+      if (l.properties?.[k] !== undefined) continue;
+      if (k.includes('.')) unremovable.push(`properties.${k}`); else deleteFields.push(`properties.${k}`);
+    }
+    if (unremovable.length > 0) throw new RequestRefusal(`'${doc.originalPath}' holds ${unremovable.map(k => `'${k}'`).join(', ')}, which the kept metadata lacks and which cannot be removed (its name holds a dot), so the kept metadata cannot be applied as it was. Use keep-incoming to dismiss it.`);
     await updateFileMeta(spaceId, doc.originalPath, {
       ...(l.description !== undefined ? { description: l.description } : {}),
       tags: l.tags ?? [],
       ...(l.properties !== undefined ? { properties: l.properties } : {}),
+      // Every field the conflict's table shows is applied: the two markers beside the three the edit doors take.
+      markers: {
+        ...(l.descriptionSource !== undefined ? { descriptionSource: l.descriptionSource } : {}),
+        ...(l.suppressEmbeddings !== undefined ? { suppressEmbeddings: l.suppressEmbeddings } : {}),
+      },
     }, deleteFields);
   }
   await col<AnyConflictDoc>(spaceCollection(spaceId, 'conflicts')).deleteOne(asFilter<AnyConflictDoc>({ _id: doc._id }));
@@ -482,14 +493,15 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
 
     const spaces = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'write');
 
-    // A save is a write in the target space: files:write there, and a concrete target
-    const refusal = action === 'save-to-space' ? saveTargetRefusal(req.authToken?.rights, spaces, targetSpaceId) : null;
+    const found = await findWhereTokenMay<AnyConflictDoc>(req.authToken?.rights, 'dataQuality', 'write', 'conflicts', req.params['id'] as string);
+    // A save is a write in the target space: files:write there, and a concrete target. Not asked of a METADATA conflict, which a save cannot take at all
+    // (`not_a_file_copy` below, whichever target is named): the answer depends on the conflict's kind and never on a space the resolution does not touch.
+    const refusal = action === 'save-to-space' && found?.doc.kind !== 'metadata' ? saveTargetRefusal(req.authToken?.rights, spaces, targetSpaceId) : null;
     if (refusal) {
       res.status(refusal.status).json({ error: refusal.error });
       return;
     }
 
-    const found = await findWhereTokenMay<AnyConflictDoc>(req.authToken?.rights, 'dataQuality', 'write', 'conflicts', req.params['id'] as string);
     if (!found) {
       res.status(404).json({ error: 'Conflict not found' });
       return;

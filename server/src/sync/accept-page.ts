@@ -526,7 +526,7 @@ async function landFileSwaps(
   const { collection } = familyOf(key);
   const idOf = (s: FileSwap): string => metadataConflictIdFor(spaceId, s.doc._id, s.doc.seq, s.stored);
   const written = new Set(await recordMetadataConflicts(spaceId,
-    swaps.map(s => ({ fileId: s.doc._id, seq: s.doc.seq, row: s.stored })), { instanceId: deliveredBy ?? '', label: peerLabelFor(deliveredBy, peer) }));
+    swaps.map(s => ({ fileId: s.doc._id, seq: s.doc.seq, row: s.stored, by: s.doc as unknown as Record<string, unknown> })), { instanceId: deliveredBy ?? '', label: peerLabelFor(deliveredBy, peer) }));
   const guards = new Map(swaps.map(s => [s.doc._id, equalSeqSwapGuard(collection, s.doc._id, s.doc.seq, s.stored)]));
   const out = await writeArrivals(spaceId, collection, RECORD_TYPE_OF[collection], swaps.map(s => s.doc), { from: peer, deliveredBy, swapGuards: guards });
   const done = new Set([...out.inserted, ...out.updated]);
