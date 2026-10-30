@@ -84,10 +84,19 @@ describe('the two builders take no entity names', () => {
      */
     const RESOLVED_INTO_TEXT =
       /\[(\w+), (\w+)\] = await resolveEdgeEndpointNames\([^)]*\);\s*(?:const \w+ = |\w+ = |return )edgeEmbedText\(\1, [\w.]+, \2[,)]/;
-    for (const site of ['server/src/brain/write-plan/plan-edge.ts', 'server/src/brain/embed-record.ts']) {
-      assert.match(src(site), RESOLVED_INTO_TEXT,
-        `${site} no longer hands resolved endpoint names to edgeEmbedText, so an edge embeds raw ids`);
-    }
+    assert.match(src('server/src/brain/write-plan/plan-edge.ts'), RESOLVED_INTO_TEXT,
+      'server/src/brain/write-plan/plan-edge.ts no longer hands resolved endpoint names to edgeEmbedText, so an edge embeds raw ids');
+    /*
+     * The queue's derivation composes an edge's text in ONE function (`edgeTextOf`), which the one-document builder and the batched
+     * builder (`buildEmbedTexts`, bundle-49) both call: the resolved names go to it, and it hands them to `edgeEmbedText` as the endpoints.
+     */
+    const record = src('server/src/brain/embed-record.ts');
+    assert.match(record, /\[(\w+), (\w+)\] = await resolveEdgeEndpointNames\([^)]*\);\s*return edgeTextOf\(\w+, \1, \2\)/,
+      'embed-record.ts no longer hands resolved endpoint names to edgeTextOf, so an edge embeds raw ids');
+    assert.match(record, /function edgeTextOf\([^)]*\)[^{]*\{\s*return edgeEmbedText\(fromName, [\w.]+, toName[,)]/,
+      'edgeTextOf no longer hands the names it is given to edgeEmbedText as the endpoints');
+    assert.match(record, /nameOf\(edgeEndpointKind\(e\.fromKind\), e\.from\), nameOf\(edgeEndpointKind\(e\.toKind\), e\.to\)/,
+      'the batched builder no longer resolves both endpoints of each edge through the page\'s names');
   });
 });
 

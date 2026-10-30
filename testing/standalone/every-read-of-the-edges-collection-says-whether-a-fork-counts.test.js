@@ -95,6 +95,7 @@ const EXEMPT = {
     'spaces/lifecycle.ts:initSpace', 'spaces/record-count.ts:spaceRecordCount', 'spaces/schema-validate-door.ts:walkStored',
     'brain/embed-record.ts:embedStoredRecord', 'brain/suppression-sweep.ts:sweepSuppressedVectors', 'brain/ttl-sweep.ts:expiredPage',
     'brain/ttl-sweep.ts:isStored', 'brain/queue-embed-sweep.ts:countUnswept', 'brain/queue-embed-sweep.ts:queueEmbedSweep',
+    'brain/queue-embed-sweep.ts:queueStaleSweep',
     'brain/candidate-prune.ts:pruneCandidateCollection', 'brain/chrono-redaction.ts:backfillTypedExpiry',
   ]),
   // Q-624 slice I3: the readers whose subject IS the fork rows, or a row's fork status.
@@ -130,7 +131,7 @@ const EXEMPT = {
   ]),
   // ── it names a computed collection that is never edges, or reads rows that no fork can be
   ...reasoned('its collection name is computed from a record kind that is not `edge` (an edge cannot be the endpoint of an edge or a link), or it reads rows no fork can be', [
-    'brain/edge-endpoint-names.ts:resolveEndpointName', 'brain/edge-endpoint-names.ts:withEndpointNames', 'brain/link-adjacency.ts:docsFromCollection',
+    'brain/edge-endpoint-names.ts:resolveEndpointName', 'brain/edge-endpoint-names.ts:resolveEndpointNames', 'brain/edge-endpoint-names.ts:withEndpointNames', 'brain/link-adjacency.ts:docsFromCollection',
     'brain/links-conversion.ts:previewSpaceLinks', 'brain/links-conversion.ts:convertSpaceInWalk', 'auth/find-where-token-may.ts:findWhereTokenMay',
     'brain/dupe-scanner.ts:recordMatchedText', 'brain/dupe-scanner.ts:unchosenVersionsAmong',
   ]),

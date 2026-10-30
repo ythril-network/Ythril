@@ -258,20 +258,15 @@ thing. If you are choosing between them, read the next paragraph but one.
 **A personal view id is not a space and answers as a missing space (`404`) here and on `reindex`, on REST and on MCP,
 before any work is queued** — a view holds no records and no index; backfill or reindex each member by its own id.
 
-Queues an embedding job for every record in the space that **has no vector**, and for every record whose **stored text
-is not its current text** (`stale`). This is the way back from `suppressEmbeddings`: suppression leaves records
-unembedded, and nothing revisits them on its own, so recall stays blind to whatever was written while it was on.
+Queues an embedding job for every record in the space that **has no vector** or whose **stored text is stale**. This is
+the way back from `suppressEmbeddings`: suppression leaves records unembedded, and nothing revisits them on its own, so
+recall stays blind to whatever was written while it was on.
 
-It is also the repair for an embedding that never got queued — an enqueue failure is deliberately swallowed rather
-than failing the write, which leaves exactly this state. For a new record that is a record with no vector. For an
-**update** it is a record that keeps the vector and the lexical text of its previous content, which "has no vector"
-cannot see; `stale` is what finds it, by comparing each record's stored text with the text it builds today. A suppressed record whose
-lexical text is missing or old (one a peer sent before the receiver stored its own text for such arrivals) is queued too, and its job
-writes the text without calling the model.
-
-**Finding stale records reads every record of the space once per call** (the vectors are left out of the read), so a
-large space pays for a pass over its records each time, whatever `limit` is: `limit` bounds what is queued, never
-what is read.
+It is also the repair for an embedding that never got queued (an enqueue failure is swallowed rather than failing the
+write). An **updated** record keeps the vector and lexical text of its previous content, which "has no vector" cannot see:
+`stale` finds it by comparing each record's stored text with the text it builds today, and finds a suppressed record whose
+lexical text is missing or old (its job writes the text, no model call). **It reads every record of the space once per
+call**; `limit` bounds what is queued, never what is read.
 
 > **This is not `reindex`, and the two are easy to confuse because both re-embed.**
 >
@@ -306,8 +301,7 @@ all of it would be worse off than one who got an error.
 {
   "spaceId": "research",
   "enqueued": 1284,
-  "skippedSuppressed": 0,
-  "stale": 12,
+  "skippedSuppressed": 0, "stale": 12,
   "byKind": { "fact": 900, "entity": 384 },
   "remaining": 0,
   "truncated": false
@@ -329,9 +323,8 @@ all of it would be worse off than one who got an error.
 
 **It queues rather than embeds.** A large space would time out mid-way through inline embedding, having done
 partial work with no record of where it stopped. Queuing is idempotent per record, so repeating the call over the
-same space converges instead of duplicating work.
-
-**Nothing is truncated silently** — when more candidates remain than `limit` allowed, `remaining` says how many.
+same space converges instead of duplicating work. **Nothing is truncated silently** — when more candidates remain than
+`limit` allowed, `remaining` says how many.
 
 **`remaining` counts only work that can be done, and that distinction is load-bearing.** Suppression is applied
 in the query, so a suppressed record never reaches `remaining`; it is reported under `skippedSuppressed` instead.

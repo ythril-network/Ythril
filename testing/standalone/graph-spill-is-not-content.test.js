@@ -74,7 +74,10 @@ describe('the queue declines to embed a spill', () => {
       // its write IS the guarded batched writer.
       const direct = fn.indexOf('jobs(spaceId)');
       const delegated = fn.indexOf('runEmbedJobOps(');
-      assert.ok(direct > 0 || delegated > 0, `${name} writes no jobs any more — re-point this gate`);
+      // Or it hands the record to ANOTHER enqueue door, which this loop checks in its turn (`enqueueEmbedJob` is the write lane's
+      // batch of one: `enqueueWriteEmbedJobs`, so a single write fails as loudly as a batch).
+      const viaDoor = doors.some(other => other !== name && new RegExp(`\\b${other}\\(`).test(fn));
+      assert.ok(direct > 0 || delegated > 0 || viaDoor, `${name} writes no jobs any more — re-point this gate`);
       if (direct > 0 && (delegated < 0 || direct < delegated)) {
         assert.match(fn.slice(0, direct), /embeddable\(recordType, (recordId|id)\)/,
           `${name} must decline a spill before it writes anything`);

@@ -26,7 +26,7 @@ const code = new Map(SOURCES.map(f => [f, stripComments(readFileSync(f, 'utf8'))
 
 // To the `';` that ends the statement: the sentence itself holds semicolons.
 const DEFINITION = /export const EMBED_REPAIR_HINT\b[\s\S]*?'\s*;/;
-const SAYS_QUEUES = /\bre-?(?:embed|index)\b[^'"`\n]{0,40}\bqueues\b/i;
+const SAYS_QUEUES = /\bre-?(?:embed|index)\b[^'"`\n]*\bqueues\b/i;
 
 describe('the embed repair remedy has one spelling', () => {
   it('the constant exists once and is used by at least two sites', () => {

@@ -88,6 +88,10 @@ const EXEMPT = {
     + 'apply for both doors (bundle-46). A delete, not an arrival',
   // `api/sync/_shared.ts:ingestFileMeta` was exempt here until `Q-107` part 2: file metadata is now merged by the
   // writer itself (`fileMetaUpdate`, under its write guard), so its exemption went with it.
+  'server/src/files/derived-fields.ts:writeDerivedFields':
+    'the one writer of a derived field, reached from a door only through `embedArrivedFiles`: a file this instance suppresses gets its own '
+    + '`matchedText` of the row the writer just stored (Q-262) — a local derived field of a row already written by writeArrivals, '
+    + 'on the version read; no arriving document, no version, no position, nothing counted as landed',
   'server/src/brain/suppression-sweep.ts:dropFileVectors':
     'a file this instance suppresses on arrival (Q-230): the vectors of the rows DERIVED from it are removed — local '
     + 'derived fields of rows no peer sends; the arriving record itself is written by writeArrivals',

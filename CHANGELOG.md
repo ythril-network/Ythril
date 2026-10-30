@@ -26,16 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** the space hash takes a link over its relationship: one relationship held under two ids, or created on two instances, no longer reports a divergence. Against a peer on an older version, spaces with links disagree until it upgrades.
 - **Sync:** after an upgrade, a dangling end an older version already recorded as a link violation is not recorded or announced a second time, and keeps its original `detectedAt`.
 - **Sync:** the cache of Merkle leaves is bounded by the leaves it holds, not only by the number of spaces.
+- **Sync:** a record a peer sent that this instance keeps out of semantic search is stored with this instance's own lexical text of it, and text search and the duplicate scan find it.
 - **Conflicts:** the bulk bar offers only the actions every selected row accepts and asks the file-replacement confirm only for file copies.
 - **Config:** on Windows, saving `config.json`, the secrets file or the schema library no longer fails while another program has the file open for a moment.
 - **Brain:** a deleted fact, chrono entry, entity or link is removed together with its tombstone, by the delete doors, the TTL sweep and the link reconcile. A tombstone the store refuses now fails the delete and keeps the record.
 - **Brain:** merging entity A no longer moves the edges of a fact or chrono entry that holds A's id, and resolving a fork of a fact or chrono entry no longer moves an entity's edges: an edge end is matched by kind as well as id.
 - **Brain:** in a `strictLinkage` space an edge or link written while its entity is deleted or merged no longer survives naming it: a delete takes back what this instance wrote meanwhile, a merge moves it, and a save whose edge was taken back is refused `409` `endpoint_removed`.
 - **Brain:** a link created on its own to such an entity is refused `409` `link_target_removed`; a link written inside a record (fact, entry, file, inline) is dropped and `warnings` says which.
-- **Embeddings:** a record whose text changed while its embed job could not be queued no longer keeps the vector and lexical text of its previous content for ever: `POST /api/spaces/:id/reembed` (and `space_reembed`) also queues every record whose stored text differs from its current text, and reports them as `stale`. It now reads every record of the space once per call. The queue-failure warning says what is true for an update, and a failed enqueue of a single local write (file metadata among them) warns instead of passing silently (Q-261).
-- **Embeddings:** rewriting an existing fact, entity, chrono entry or edge by its id with new text re-embeds it; the job had read the new text as already embedded and kept the old vector (bundle-49). Until its job has run the record keeps the lexical text of its previous content, as an update does.
-- **Sync:** a record a peer sent that this instance keeps out of semantic search (its own mark, its type or its space) is stored with this instance's own lexical text of what arrived, so it is found by its words and by the duplicate scan, as a local write of it would be (Q-262).
-- **Upgrade:** run `POST /api/spaces/:id/reembed` once per space after upgrading. It queues the records that are already stale and the suppressed records a peer sent that were stored without lexical text; the call reads every record of the space once.
+- **Embeddings:** `POST /api/spaces/:id/reembed` and `space_reembed` also queue records whose stored text is not their current text (`stale` in the answer), such as an update whose embed job was never queued. The call now reads every record of the space once.
+- **Embeddings:** rewriting an existing fact, entity, chrono entry or edge by its id with new text now re-embeds it; the old vector was kept. Until the job has run, the record keeps its previous lexical text.
+- **Embeddings:** the warning for a failed enqueue says the repair covers updated records too, and a failed enqueue of a single local write, a file's metadata among them, now warns.
+- **Embeddings:** after upgrading, run `POST /api/spaces/:id/reembed` once per space: it queues records already stale and suppressed records a peer sent that have no lexical text.
 
 ## [6.1.0] — 2026-10-29
 
