@@ -96,7 +96,8 @@ export class NotAFileCopy extends RequestRefusal {
  * Resolve a METADATA conflict (Q-426): the metadata a peer's copy displaced at an equal version, kept here for this instance's user.
  *
  *  - `keep-local` applies what was displaced again, as an ordinary local edit of the file's metadata (`updateFileMeta`, the writer every edit goes through), so
- *    it takes a new seq and wins on every instance by seq, as any edit does. The conflict closes only once the edit is made.
+ *    it takes a new seq here, which other instances receive as any edit. Every field the table shows is put back (`markers` carries the two the edit doors do not take);
+ *    one that cannot be put back is a `400` naming it. The conflict closes only once the edit is made.
  *  - `keep-incoming` accepts the row that stands: the conflict closes and no row is touched.
  *
  * The file may be gone by now (deleted, or moved): `keep-local` then has nothing to apply to and says so, and `keep-incoming` still closes the record.
