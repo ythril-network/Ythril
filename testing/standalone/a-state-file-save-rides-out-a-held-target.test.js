@@ -21,10 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+import { trackedSources, REPO_ROOT as ROOT } from './_sources.mjs';
 let renameOverSync;
 let dir;
 const realRename = fs.renameSync;
@@ -72,8 +69,7 @@ describe('a state file save rides out a held target', () => {
   });
 
   it('every config module renames its saves through renameOverSync (3)', () => {
-    const files = execFileSync('git', ['ls-files', 'server/src/config/*.ts'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
-    assert.ok(files.length >= 5, `only ${files.length} config modules found: the listing is broken`);
+    const files = trackedSources(['server/src/config'], { floor: 5, specs: false }).map((f) => path.relative(ROOT, path.resolve(ROOT, f)).replace(/\\/g, '/'));
     const bare = [];
     const through = [];
     for (const f of files) {

@@ -52,7 +52,7 @@ const MOVE_TREE_MODULE = 'server/src/files/remove-tree.ts';
  * its reason, so a reason has to say what the file's renames are, and the entry is read again when the file's use of rename changes.
  */
 const EXEMPT_RENAMES = new Map([
-  ['server/src/config/loader.ts', 'the atomic replace of a config, secrets or schema-library file from its own `.tmp` sibling: one regular file in the config directory, never a tree and never under the data root'],
+  ['server/src/util/rename-over.ts', 'the atomic replace of a config, secrets or schema-library file from its own `.tmp` sibling, for `config/loader.ts`: one regular file in the config directory, never a tree and never under the data root; it retries what a holder causes itself, synchronously, because the config flush must not await between its generation check and its rename'],
   ['server/src/files/stored-bytes.ts', 'a stored FILE, one path and one inode under per-path locks: the finish of an atomic write (`<tmp>` onto its path), `moveStored`, and the steps of a no-clobber file move; a space\'s directory tree is `moveTree`\'s'],
 ]);
 
