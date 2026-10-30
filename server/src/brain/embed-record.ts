@@ -21,7 +21,8 @@ import { writeDerivedFields, type FileRowTier } from '../files/derived-fields.js
 import type { SpacePart } from '../db/space-collection.js';
 import { embed } from './embedding.js';
 import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText } from './embed-text.js';
-import { resolveEdgeEndpointNames } from './edge-endpoint-names.js';
+import { resolveEdgeEndpointNames, resolveEndpointNames } from './edge-endpoint-names.js';
+import { edgeEndpointKind } from './entity-refs.js';
 import { embeddingSuppressedFor, fileEmbeddingSuppressed } from './suppress-embeddings.js';
 import { isTransientEmbedError } from './embed-queue.js';
 import { getEmbeddingConfig } from '../config/loader.js';
@@ -88,7 +89,7 @@ export async function buildEmbedText(
     case 'edge': {
       const e = doc as unknown as EdgeDoc;
       const [fromName, toName] = await resolveEdgeEndpointNames(spaceId, e.from, e.to, e.fromKind, e.toKind);
-      return edgeEmbedText(fromName, e.label, toName, e.tags ?? [], e.type, e.description, e.properties);
+      return edgeTextOf(e, fromName, toName);
     }
     case 'chrono': {
       const c = doc as unknown as ChronoEntry;
@@ -105,6 +106,35 @@ export async function buildEmbedText(
       return fileEmbedText(f._id, f.tags ?? [], f.description, f.properties, f.excerpt);
     }
   }
+}
+
+/** An edge's text from its endpoints' names: the one composition, so the one-document and the batched builder cannot differ. */
+function edgeTextOf(e: EdgeDoc, fromName: string, toName: string): string {
+  return edgeEmbedText(fromName, e.label, toName, e.tags ?? [], e.type, e.description, e.properties);
+}
+
+/**
+ * `buildEmbedText` for a page of documents of one kind: the same string for each, in order (`null` where a document has no
+ * text).
+ *
+ * ## Why it is its own function
+ *
+ * `buildEmbedText` resolves an edge's two endpoint names with a read each, which is right for one record and a read per
+ * endpoint over a page. The repair sweep compares every record's `matchedText` with its text, and the arrival writer builds
+ * the text of the suppressed arrivals of a chunk, so both read names once per endpoint KIND (`resolveEndpointNames`). The
+ * answer is the same by construction: the name's normalisation is `endpointDisplayName` for both readers, and the text is
+ * composed by `edgeTextOf` for both. Every other kind has no read, so it is `buildEmbedText` itself.
+ */
+export async function buildEmbedTexts(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  docs: ReadonlyArray<Record<string, unknown>>,
+): Promise<Array<string | null>> {
+  if (recordType !== 'edge') return await Promise.all(docs.map(d => buildEmbedText(spaceId, recordType, d)));
+  const edges = docs as unknown as EdgeDoc[];
+  if (edges.length === 0) return [];
+  const nameOf = await resolveEndpointNames(spaceId, edges);
+  return edges.map(e => edgeTextOf(e, nameOf(edgeEndpointKind(e.fromKind), e.from), nameOf(edgeEndpointKind(e.toKind), e.to)));
 }
 
 /**

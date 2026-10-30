@@ -36,8 +36,9 @@ export const RESOLVED_ELSEWHERE = '_resolvedElsewhere' as const;
  * well, because no `Incoming*` schema declares one, but the writer does not rely on it — and CARRIES the
  * receiver's own values across the replace, so a peer's edit does not erase what only this instance knows.
  * What it carries is decided per document (`carriedFields`): an arrival this instance SUPPRESSES carries the
- * record-tier half only, because the derived half describes content it no longer embeds (`Q-230`), and a
- * RESTORE carries nothing from the copy it replaces. The admin export leaves out the derived half and a restore
+ * record-tier half and the write guard from the stored copy, never its derived half, which describes content it no longer
+ * embeds (`Q-230`) — it is stored with this instance's own `matchedText` of the arriving content instead (`Q-262`) —
+ * and a RESTORE carries nothing from the copy it replaces. The admin export leaves out the derived half and a restore
  * keeps the backup's record-tier half (`RESTORED_LOCAL_FIELDS` below) — never the replaced copy's (`Q-234`).
  *
  * ## The classes, each named by the constant that lists it
@@ -254,7 +255,9 @@ const KEPT_BY_SUPPRESSED: ReadonlySet<string> = new Set([...RESTORED_LOCAL_FIELD
 
 /**
  * What crosses a write from the STORED copy, per document (`Q-230`, `Q-234`): a restore takes nothing; an arrival this
- * instance suppresses, the record tier and the write guard; any other peer arrival, every local-only field. The write
+ * instance suppresses, the record tier and the write guard from the stored copy, never its vector, model or `matchedText`
+ * (the record is stored with this instance's own `matchedText` of what arrived, `Q-262`, written by the arrival writer, not
+ * carried); any other peer arrival, every local-only field. The write
  * guard crosses only while the record's `from` and `label` are the stored ones, which the arrival writer decides
  * (`replacementFor`): the set says what MAY cross, never that the stored marker still names its edge.
  *

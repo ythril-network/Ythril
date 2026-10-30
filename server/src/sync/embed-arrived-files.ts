@@ -13,6 +13,9 @@ import { spaceCollection } from '../db/space-collection.js';
 import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
+import { derivedFieldsForWrite } from '../brain/derived-text-on-write.js';
+import { writeDerivedFields } from '../files/derived-fields.js';
+import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { dropFileVectors } from '../brain/suppression-sweep.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -35,11 +38,13 @@ export function holdsBlob(row: { sha256?: unknown; sizeBytes?: unknown } | undef
  */
 export async function embedArrivedFiles(spaceId: string, ids: readonly string[], { restore = false }: { restore?: boolean } = {}): Promise<void> {
   if (ids.length === 0) return;
-  const rows = await readStoredById<{ sha256?: string; sizeBytes?: number; suppressEmbeddings?: boolean }>(
+  const rows = await readStoredById<FileRowRead>(
     // A flagged row is not queued. The arrival merge keeps the flag and merges `sha256` and `sizeBytes` back in, so
     // without this an arrival onto a deleted file's audit record reads as "the bytes are here" and queues an embed job
-    // for it — putting back the vector the flag's own write stripped.
-    spaceCollection(spaceId, 'files'), ids, { sha256: 1, sizeBytes: 1, suppressEmbeddings: 1 }, { filter: NOT_A_FLAGGED_ROW });
+    // for it — putting back the vector the flag's own write stripped. The text inputs ride along for the rows this
+    // instance suppresses: their text is written below, from this same read.
+    spaceCollection(spaceId, 'files'), ids, { sha256: 1, sizeBytes: 1, suppressEmbeddings: 1, seq: 1, tags: 1, description: 1, properties: 1, excerpt: 1 },
+    { filter: NOT_A_FLAGGED_ROW });
   const meta = getSpaceMeta(spaceId);
   const quiet: string[] = [];
   const wanted: Array<{ _id: string; suppressEmbeddings?: boolean }> = [];
@@ -50,4 +55,35 @@ export async function embedArrivedFiles(spaceId: string, ids: readonly string[],
   }
   await dropFileVectors(spaceId, quiet);
   await enqueueIngestedRecords(spaceId, 'file', wanted);
+  // Last, so a failed text write never holds back the queue above: a row left without its text is found by the repair (`stale`).
+  await storeSuppressedFileText(spaceId, quiet.map(id => ({ _id: id, ...rows.get(id)! })));
+}
+
+type FileRowRead = {
+  sha256?: string; sizeBytes?: number; suppressEmbeddings?: boolean; seq?: number;
+  tags?: string[]; description?: string; properties?: Record<string, unknown>; excerpt?: string;
+};
+
+/**
+ * A suppressed file's `matchedText`, this instance's own: built by its text builder from the row as merged (`Q-262`) and written
+ * through the one writer of a derived field, onto the version read. A file's text depends on fields the arrival does not
+ * carry (its excerpt is of the bytes THIS instance holds), so it cannot be built before the merge, unlike the other families'.
+ * With no vector beside it, it is the lexical channel's text and nothing compares it to one (`derivedFieldsForWrite`).
+ */
+async function storeSuppressedFileText(spaceId: string, rows: ReadonlyArray<{ _id: string } & FileRowRead>): Promise<void> {
+  if (rows.length === 0) return;
+  // Imported here, not at the top: `embed-record` reaches the inference host, which reaches the metrics registry, which reaches this
+  // module through the file tombstones. A static import is a runtime import cycle (`no-runtime-import-cycles`), and the one that
+  // evaluates the registry first reads its embed-phase source before it exists.
+  const { buildEmbedTexts } = await import('../brain/embed-record.js');
+  const texts = await buildEmbedTexts(spaceId, 'file', rows as unknown as Array<Record<string, unknown>>);
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    const text = texts[i];
+    if (text === null || text === undefined) continue;
+    const { set } = await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' });
+    await writeDerivedFields({
+      spaceId, collectionSuffix: 'files', tier: 'top-level', filter: atReadSeq(row._id, readSeqOf(row as Record<string, unknown>)), set,
+    });
+  }
 }

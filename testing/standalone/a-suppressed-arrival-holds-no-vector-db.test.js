@@ -14,7 +14,10 @@
  * So: when the receiver suppresses the arriving record (`record > schema > space` on THIS instance; a file has two
  * tiers), only the record-tier local fields (`RESTORED_LOCAL_FIELDS`) and the write guard (`WRITE_GUARD_FIELDS`, an
  * edge's `_functionalGuard`: suppression is not a change of subject) cross the replace — `embedding`,
- * `embeddingModel` and `matchedText` are dropped — and a file's chunk rows (`parentFileId`) lose their vectors too.
+ * `embeddingModel` and `matchedText` are never carried from the stored copy — and a file's chunk rows (`parentFileId`)
+ * lose their vectors too. What the arrival IS stored with is this instance's own `matchedText` of the arriving content
+ * (Q-262, `a-suppressed-arrival-is-found-by-its-text-on-the-receiver-db`), so here the stored copy's text must be gone,
+ * not that the field is absent.
  * The admin import is a restore and takes nothing from the replaced copy, the guard included.
  * A record the receiver does NOT suppress keeps every local-only field (the existing pin, held here per door).
  *
@@ -161,7 +164,7 @@ describe('a suppressed arrival holds no vector (Q-230)', { skip }, () => {
 
   for (const via of DOORS) {
     for (const tier of ['record', 'schema', 'space']) {
-      it(`${via}, ${tier} tier: the suppressed arrival holds no embedding, embeddingModel or matchedText; chunks hold no vector`, async () => {
+      it(`${via}, ${tier} tier: the suppressed arrival holds no embedding or embeddingModel and none of the stored matchedText; chunks hold no vector`, async () => {
         const wrong = [];
         for (const fam of embeddable()) {
           if (!doorReaches(via, fam)) continue;
@@ -173,7 +176,9 @@ describe('a suppressed arrival holds no vector (Q-230)', { skip }, () => {
           await deliver(via, fam, space, arriving(fam, space, id, 6, tier));
           const after = await door.coll(space, fam.collection).findOne({ _id: id });
           if (after?.seq !== 6) { wrong.push(`${fam.key}: fixture check — the arrival did not land (${JSON.stringify(after)})`); continue; }
-          const kept = DERIVED.filter(f => f in after);
+          // The vector and its model are the stored copy's and never carried; `matchedText` may be there, but only as this instance's own text of
+          // what arrived, never the stored copy's.
+          const kept = DERIVED.filter(f => f in after && (f !== 'matchedText' || after[f] === LOCAL_VALUES.matchedText));
           if (kept.length) wrong.push(`${fam.key}: kept ${kept.join(', ')} from the content it replaced`);
           // What a suppressed arrival DOES keep of the write guard: it is not derived from content, so only a restore drops it.
           if (heldBy(fam, GUARD_FIELD)) {
