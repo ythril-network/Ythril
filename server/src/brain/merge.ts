@@ -787,7 +787,7 @@ export async function executeMerge(
    * the absorbed id moves to the survivor. Never fails the merge, which has committed; the writer's own check still catches the edge it wrote.
    */
   try {
-    const late = await settleReferencesToRemovedEntity(spaceId, absorbed._id, { survivorId: survivor._id });
+    const late = await settleReferencesToRemovedEntity(spaceId, absorbed._id, { survivorId: survivor._id, maxRelinks: MERGE_MAX_RELINKS });
     written.deletedDuplicateEdgeIds.push(...late.collapsedEdgeIds);
   } catch (err) {
     log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but what was written to it meanwhile could not be moved: ${peerText(err)}`);

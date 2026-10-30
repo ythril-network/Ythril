@@ -48,7 +48,7 @@ import { edgeEndpointKind, missingRefs } from './entity-refs.js';
 import { edgeEndsAt, type EdgeEnds } from './edge-ends-of-record.js';
 import { EndpointRemoved, LINK_TARGET_REMOVED } from '../util/errors.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
-import type { EdgeDoc } from '../config/types.js';
+import type { EdgeDoc, LinkDoc } from '../config/types.js';
 import type { UpdateValidation } from './write-validation.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 
@@ -90,7 +90,7 @@ export async function settleReferencesToRemovedEntity(
   // Imported where it runs: `relink-references.ts` reaches `links.ts`, which reaches the commit, which calls this module's writer-side checks.
   const relink = await import('./relink-references.js');
   const settled = 'survivorId' in opts
-    ? await moveReferencesToSurvivor(relink, spaceId, entityId, opts.survivorId)
+    ? await moveReferencesToSurvivor(relink, spaceId, entityId, opts.survivorId, opts.maxRelinks)
     : await takeBackReferencesWrittenHere(relink, spaceId, entityId, opts.removalBegan, opts.actor);
   const counts = `${settled.removedEdges.length} edge(s) and ${settled.removedLinks.length} link(s) taken back, ${settled.relinked} edge(s) moved`;
   if (settled.removedEdges.length + settled.removedLinks.length + settled.relinked + settled.collapsedEdgeIds.length > 0) {
@@ -103,7 +103,9 @@ export async function settleReferencesToRemovedEntity(
  * How the removal went, which decides what is settled: a merge names the survivor the rest moves to; a delete names the record position it BEGAN at
  * (`removeRecords`' `began`), so what it takes back is bounded to what landed since.
  */
-export type SettleHow = { survivorId: string } | { removalBegan: number; actor?: WebhookActor };
+export type SettleHow =
+  | { survivorId: string; /** The bound the merge was held to (`MERGE_MAX_RELINKS`, passed by `executeMerge` so there is one definition). */ maxRelinks: number }
+  | { removalBegan: number; actor?: WebhookActor };
 
 /**
  * How far before the removal's start a row may have landed and still be taken back by a delete's settle, in record-position microseconds. A door reads
@@ -136,12 +138,23 @@ async function takeBackReferencesWrittenHere(
   return settled;
 }
 
-/** A merge: whatever still names the absorbed entity moves to the survivor, as the merge's own relink moved the rest, in one held transaction. */
-async function moveReferencesToSurvivor(relink: Relink, spaceId: string, absorbedId: string, survivorId: string): Promise<SettledReferences> {
+/**
+ * A merge: whatever still names the absorbed entity moves to the survivor, as the merge's own relink moved the rest, in one held transaction — and only up to
+ * `maxRelinks`, the bound the merge itself is refused at: a peer's burst that arrived during the merge is read whole inside one transaction otherwise. Past it
+ * nothing is moved and the settle throws, which `executeMerge` says (the merge has committed); what names the absorbed id is then the arrival writer's and the
+ * link-violation recorder's, as before the settle existed.
+ */
+async function moveReferencesToSurvivor(relink: Relink, spaceId: string, absorbedId: string, survivorId: string, maxRelinks: number): Promise<SettledReferences> {
   const settled = NOTHING_SETTLED();
-  // The cheap read first: the common case is that nothing arrived, and then no transaction is opened.
-  const hasEdges = await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(relink.edgesOfRecord(spaceId, absorbedId, 'entity'), { limit: 1 });
-  if (hasEdges === 0 && (await relink.linkRowsOfRecord(spaceId, absorbedId, 'entity')).length === 0) return settled;
+  // The cheap read first, counted to one past the bound: the common case is that nothing arrived (no transaction is opened), and a count past the bound need not be exact.
+  const [edgeCount, linkCount] = await Promise.all([
+    col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(relink.edgesOfRecord(spaceId, absorbedId, 'entity'), { limit: maxRelinks + 1 }),
+    col<LinkDoc>(spaceCollection(spaceId, 'links')).countDocuments(relink.linksOfRecord(spaceId, absorbedId, 'entity'), { limit: maxRelinks + 1 }),
+  ]);
+  if (edgeCount + linkCount === 0) return settled;
+  if (edgeCount + linkCount > maxRelinks) {
+    throw new Error(`more than ${maxRelinks} references name the merged-away entity '${peerText(absorbedId)}', more than a merge relinks: none was moved`);
+  }
   const now = new Date().toISOString();
   const edges = await inHeldTransaction(spaceId, 'entity.merge.settle', (session) => admitSpaceWrite(spaceId, undefined, async () => {
     const relinked = await relink.relinkEdgesOfRecord(spaceId, { absorbedId, survivorId, kind: 'entity' }, { now, session });
