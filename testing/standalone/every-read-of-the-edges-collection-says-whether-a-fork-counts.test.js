@@ -133,7 +133,7 @@ const EXEMPT = {
   ...reasoned('its collection name is computed from a record kind that is not `edge` (an edge cannot be the endpoint of an edge or a link), or it reads rows no fork can be', [
     'brain/edge-endpoint-names.ts:resolveEndpointName', 'brain/edge-endpoint-names.ts:resolveEndpointNames', 'brain/edge-endpoint-names.ts:withEndpointNames', 'brain/link-adjacency.ts:docsFromCollection',
     'brain/links-conversion.ts:previewSpaceLinks', 'brain/links-conversion.ts:convertSpaceInWalk', 'auth/find-where-token-may.ts:findWhereTokenMay',
-    'brain/dupe-scanner.ts:recordMatchedText', 'brain/dupe-scanner.ts:unchosenVersionsAmong',
+    'brain/dupe-scanner.ts:recordMatchedText', 'brain/dupe-scanner.ts:owesItsJob', 'brain/dupe-scanner.ts:unchosenVersionsAmong',
   ]),
   // ── the functional guard: a fork row is never stamped, so a marker read finds the subject's edge alone
   ...reasoned('it reads rows by the functional-guard marker, which a fork row is never stamped with (design section 6)', [
