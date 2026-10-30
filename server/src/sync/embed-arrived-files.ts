@@ -19,6 +19,7 @@ import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { dropFileVectors } from '../brain/suppression-sweep.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
+import { log, peerList, peerText } from '../util/log.js';
 
 /** Does this instance hold the file's bytes? Its row then carries the size or hash it derived from them. */
 export function holdsBlob(row: { sha256?: unknown; sizeBytes?: unknown } | undefined): boolean {
@@ -75,15 +76,22 @@ async function storeSuppressedFileText(spaceId: string, rows: ReadonlyArray<{ _i
   // Imported here, not at the top: `embed-record` reaches the inference host, which reaches the metrics registry, which reaches this
   // module through the file tombstones. A static import is a runtime import cycle (`no-runtime-import-cycles`), and the one that
   // evaluates the registry first reads its embed-phase source before it exists.
-  const { buildEmbedTexts } = await import('../brain/embed-record.js');
-  const texts = await buildEmbedTexts(spaceId, 'file', rows as unknown as Array<Record<string, unknown>>);
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!;
-    const text = texts[i];
-    if (text === null || text === undefined) continue;
-    const { set } = await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' });
-    await writeDerivedFields({
-      spaceId, collectionSuffix: 'files', tier: 'top-level', filter: atReadSeq(row._id, readSeqOf(row as Record<string, unknown>)), set,
-    });
+  try {
+    const { buildEmbedTexts } = await import('../brain/embed-record.js');
+    const texts = await buildEmbedTexts(spaceId, 'file', rows as unknown as Array<Record<string, unknown>>);
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!;
+      const text = texts[i];
+      if (text === null || text === undefined) continue;
+      const { set } = await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' });
+      await writeDerivedFields({
+        spaceId, collectionSuffix: 'files', tier: 'top-level', filter: atReadSeq(row._id, readSeqOf(row as Record<string, unknown>)), set,
+      });
+    }
+  } catch (err) {
+    // The tail of a write that has landed, for callers that must not fail after their merge: a retry is idempotent and the repair
+    // (`reembed`'s stale walk) finds a suppressed row without its text, so the failure is named here, once, and not raised into them.
+    log.warn(`The lexical text of ${rows.length} suppressed file(s) in space '${peerText(spaceId)}' was NOT stored (${peerText(err)}): `
+      + `${peerList(rows.map(r => r._id))}. The files themselves are written; POST /api/spaces/:id/reembed stores the text.`);
   }
 }
