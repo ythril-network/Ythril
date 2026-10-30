@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Brain:** no user-facing effect: the edge-list read moved from `brain/edges.ts` to `brain/list-edges.ts`, with its behaviour unchanged.
+- **Docs:** no user-facing effect: source comments and contributor docs state each project rule they lean on, or name where it is kept, instead of pointing at an untracked local file; the contribution guide says where the maintainers' working rules live.
 
 ### Fixed
 
