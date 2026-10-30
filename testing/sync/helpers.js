@@ -204,10 +204,13 @@ export function injectPeerToken(container, instanceId, token) {
  * so a CHAIN A-B-C is two mirrored networks sharing B): the container is where an instance id is read and a peer token injected,
  * and its name is the host the other instance reaches it by.
  *
- * @param {{ label: string, spaces: string[], a: [string, string], b: [string, string], type?: string, containers?: [string, string] }} opts  `[baseUrl, token]` each
+ * `direction` is what each instance's member record for the other says (`'both'` by default; `'pull'` makes each only PULL from the other, so a case can
+ * see the pull leg of an arrival without the push leg of the same cycle).
+ *
+ * @param {{ label: string, spaces: string[], a: [string, string], b: [string, string], type?: string, containers?: [string, string], direction?: 'both' | 'pull' | 'push' }} opts  `[baseUrl, token]` each
  * @returns {Promise<{ networkId: string, remove: () => Promise<void> }>}
  */
-export async function mirroredNetwork({ label, spaces, a, b, type = 'closed', containers = ['ythril-a', 'ythril-b'] }) {
+export async function mirroredNetwork({ label, spaces, a, b, type = 'closed', containers = ['ythril-a', 'ythril-b'], direction = 'both' }) {
   const [baseA, tokenA] = a, [baseB, tokenB] = b;
   const [hostA, hostB] = containers;
   const idA = getInstanceId(hostA), idB = getInstanceId(hostB);
@@ -217,7 +220,7 @@ export async function mirroredNetwork({ label, spaces, a, b, type = 'closed', co
   const net = must(await post(baseA, tokenA, '/api/networks', { label, type, spaces, votingDeadlineHours: 1 }), 'network on A');
   const networkId = net.body.id;
   const add = async (base, token, instanceId, memberLabel, url, peerToken) => {
-    const r = must(await post(base, token, `/api/networks/${networkId}/members`, { instanceId, label: memberLabel, url, token: peerToken, direction: 'both' }), `member ${memberLabel}`);
+    const r = must(await post(base, token, `/api/networks/${networkId}/members`, { instanceId, label: memberLabel, url, token: peerToken, direction }), `member ${memberLabel}`);
     if (r.status === 202) await post(base, token, `/api/networks/${networkId}/votes/${r.body.roundId}`, { vote: 'yes' });
   };
   await add(baseA, tokenA, idB, `${label} B`, `http://${hostB}:3200`, forA.body.plaintext);

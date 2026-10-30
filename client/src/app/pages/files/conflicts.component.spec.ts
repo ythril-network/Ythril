@@ -51,6 +51,39 @@ describe('ConflictsComponent', () => {
     expect((note as HTMLElement).textContent).toContain('conflicts.truncated');
   });
 
+  describe('a metadata conflict (Q-426)', () => {
+    const metadata = () => ({
+      id: 'm', spaceId: 's', kind: 'metadata' as const, originalPath: 'a/notes.md', peerInstanceId: 'p', peerInstanceLabel: 'Peer', detectedAt: '2026-10-30T00:00:00.000Z',
+      seq: 5, losing: { description: 'what I wrote', tags: ['t'] }, current: { description: 'what the peer wrote', tags: ['t'] },
+    });
+
+    it('lists the fields that differ between the displaced and the standing metadata, and no others', () => {
+      const fixture = create({ conflicts: [metadata() as never] });
+      const rows = (fixture.componentInstance as unknown as { diffRows(c: unknown): unknown[] }).diffRows(metadata());
+      expect(rows).toEqual([{ field: 'description', mine: 'what I wrote', theirs: 'what the peer wrote' }]);
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain('what I wrote');
+      expect(text).toContain('what the peer wrote');
+    });
+
+    it('offers keep-local and keep-incoming only, under the metadata words, and never the two a copy needs', () => {
+      const fixture = create({ conflicts: [metadata() as never, conflict('c') as never] });
+      // The conflict rows only: the metadata conflict's own diff is a table inside its row.
+      const rows = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('table:not(.meta-diff) > tbody > tr'));
+      expect(rows.length).toBe(2);
+      const rowSelects = rows.map(tr => Array.from(tr.querySelectorAll('select option')).map(o => (o as HTMLOptionElement).value));
+      expect(rowSelects[0]).toEqual(['keep-local', 'keep-incoming']);
+      expect(rowSelects[1]).toEqual(['keep-local', 'keep-incoming', 'keep-both', 'save-to-space']);
+      const labels = Array.from(rows[0]!.querySelectorAll('select option')).map(o => o.textContent?.trim());
+      expect(labels).toEqual(['conflicts.metadata.keepMine', 'conflicts.metadata.keepTheirs']);
+    });
+
+    it('shows no copy path for it', () => {
+      const fixture = create({ conflicts: [metadata() as never] });
+      expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('conflict.txt');
+    });
+  });
+
   it('shows NO truncation note when the list is complete (truncated falsy)', () => {
     const fixture = create({ conflicts: [conflict('a')] });
     expect(fixture.componentInstance.truncated()).toBe(false);

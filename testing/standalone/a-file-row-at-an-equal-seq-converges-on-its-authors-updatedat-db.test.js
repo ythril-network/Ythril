@@ -87,7 +87,7 @@ const EARLIER = '2026-09-01T00:00:00.000Z';
 const LATER = '2026-10-05T00:00:00.000Z';
 const SEQ = 5;
 
-let door, park, LOCAL_AUTHOR, FILE_HASH_PROJECTION;
+let door, park, LOCAL_AUTHOR, FILE_HASH_PROJECTION, fileContentHash, arrivingWinsTie;
 let n = 0;
 const files = () => door.coll(S, 'files');
 const freshId = (tag) => `conv/${tag}-${++n}.md`;
@@ -201,7 +201,8 @@ describe('an equal-seq file row converges on its author\'s updatedAt (real Mongo
   before(async () => {
     door = await openPullDoor({ suite: 'b89_e35_conv', spaces: [S] });
     LOCAL_AUTHOR = { instanceId: door.instanceId, instanceLabel: 'Receiver' };
-    ({ FILE_HASH_PROJECTION } = await import('../../server/dist/brain/merkle.js'));
+    ({ FILE_HASH_PROJECTION, fileContentHash } = await import('../../server/dist/brain/merkle.js'));
+    ({ arrivingWinsTie } = await import('../../server/dist/sync/upsert-plan.js'));
     park = parkWrites(Object.getPrototypeOf(door.mongo.col('probe')));
   });
   after(async () => {
@@ -226,6 +227,29 @@ describe('an equal-seq file row converges on its author\'s updatedAt (real Mongo
       await files().insertOne(row.stored);
       await pushAs(tokenOf(row.deliverer, row.arriving), [row.arriving]);
       const after = await read(row.stored._id);
+      /*
+       * A row whose AUTHORED CONTENT differs is no adoption question at all since Q-426: it is the equal-seq tie, which names one of the two copies the row on every
+       * instance (`arrivingWinsTie` over `fileContentHash`, asked of the server and never re-derived). When the arriving copy loses, nothing is written; when it
+       * wins, the row now says what it says, at the seq it had, and what it displaced is a conflict (`an-equal-seq-file-divergence-keeps-the-loser-as-a-conflict-db`).
+       * The rows that differ in nothing but the timestamp or the author keep Q-419's rule above, which is what this table is about.
+       */
+      if (!row.contentEqual) {
+        const wins = arrivingWinsTie(fileContentHash(row.arriving), fileContentHash(row.stored));
+        try {
+          if (wins) {
+            assert.equal(fileContentHash(after), fileContentHash(row.arriving), 'the winning copy is not the row');
+            assert.equal(after.seq, row.stored.seq, 'a swap stamps no seq');
+            assert.equal((await door.coll(S, 'conflicts').countDocuments({ originalPath: row.stored._id })), 1, 'the displaced metadata is not kept');
+          } else {
+            assert.deepStrictEqual(after, row.stored);
+            assert.equal((await door.coll(S, 'conflicts').countDocuments({ originalPath: row.stored._id })), 0, 'a conflict for metadata that was never displaced');
+          }
+        } catch (err) {
+          wrong.push(`${row.name}: the tie ${wins ? 'is won' : 'is lost'} by the arriving copy: ${err.message}; stored is ${JSON.stringify(after)}`);
+        }
+        await files().deleteOne({ _id: row.stored._id });
+        continue;
+      }
       const want = mustAdopt(row) ? { ...row.stored, updatedAt: row.arriving.updatedAt } : row.stored;
       try { assert.deepStrictEqual(after, want); } catch {
         wrong.push(`${row.name}: want updatedAt ${want.updatedAt} (${mustAdopt(row) ? 'adopt' : 'keep'}), stored is ${JSON.stringify(after)}`);

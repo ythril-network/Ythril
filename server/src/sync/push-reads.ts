@@ -76,6 +76,9 @@ export async function readPushStored(
       ...(row['author'] !== undefined ? { author: row['author'] as { instanceId?: string } } : {}),
       ...(typeof row['updatedAt'] === 'string' ? { updatedAt: row['updatedAt'] } : {}),
       contentHash: fileContentHash(row, CONVERGE_BLANKED),
+      // The tie of an equal-seq divergence (Q-426) compares the whole authored half, and a swap displaces this row and guards its write by it.
+      fullContentHash: fileContentHash(row),
+      row,
     } satisfies StoredCopy]));
   }
   if (!isForkingFamily(family)) return readStoredById<StoredCopy>(spaceCollection(spaceId, family), docs.map(d => d._id), { seq: 1 });

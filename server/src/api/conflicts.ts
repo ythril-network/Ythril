@@ -15,7 +15,10 @@ import { mkdirPrivate } from '../util/fs-modes.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { storeFailureAnswer } from '../brain/store-failure.js';
 import { toDocId } from '../util/paths.js';
-import type { ConflictDoc, LinkViolationDoc } from '../config/types.js';
+import type { ConflictDoc, LinkViolationDoc, MetadataConflictDoc, AnyConflictDoc } from '../config/types.js';
+import { getFileMeta, updateFileMeta } from '../files/file-meta.js';
+import { readStoredById } from '../db/read-by-id.js';
+import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { MAX_CONFLICT_IDS, countError } from '../util/request-bounds.js';
@@ -79,6 +82,63 @@ async function placeIncomingCopy(
 }
 
 /**
+ * A resolution a conflict of this kind does not take: a METADATA conflict (Q-426) has no copy of the file, so there is nothing to keep beside the file
+ * or to save to a space. Answered `400` with its `code`, on the single route and in a bulk item alike.
+ */
+export class NotAFileCopy extends RequestRefusal {
+  readonly code = 'not_a_file_copy';
+  constructor(action: string) {
+    super(`'${action}' is not a resolution of a metadata conflict: there is no copy of the file to place. Use keep-local or keep-incoming.`);
+  }
+}
+
+/**
+ * Resolve a METADATA conflict (Q-426): the metadata a peer's copy displaced at an equal version, kept here for this instance's user.
+ *
+ *  - `keep-local` applies what was displaced again, as an ordinary local edit of the file's metadata (`updateFileMeta`, the writer every edit goes through), so
+ *    it takes a new seq and wins on every instance by seq, as any edit does. The conflict closes only once the edit is made.
+ *  - `keep-incoming` accepts the row that stands: the conflict closes and no row is touched.
+ *
+ * The file may be gone by now (deleted, or moved): `keep-local` then has nothing to apply to and says so, and `keep-incoming` still closes the record.
+ */
+async function resolveMetadataConflict(doc: MetadataConflictDoc, spaceId: string, action: ResolveAction): Promise<Resolution> {
+  if (action !== 'keep-local' && action !== 'keep-incoming') throw new NotAFileCopy(action);
+  if (action === 'keep-local') {
+    const current = await getFileMeta(spaceId, doc.originalPath);
+    if (!current) throw new RequestRefusal(`'${doc.originalPath}' has no metadata record any more, so there is nothing to apply the kept metadata to. Use keep-incoming to dismiss it.`);
+    const l = doc.losing;
+    const deleteFields: string[] = [];
+    if (l.description === undefined && current.description !== undefined) deleteFields.push('description');
+    // A key the kept properties lack is removed: the kept metadata is applied as it was, not merged into what stands. A key with a dot cannot be named by a path.
+    for (const k of Object.keys(current.properties ?? {})) if (l.properties?.[k] === undefined && !k.includes('.')) deleteFields.push(`properties.${k}`);
+    await updateFileMeta(spaceId, doc.originalPath, {
+      ...(l.description !== undefined ? { description: l.description } : {}),
+      tags: l.tags ?? [],
+      ...(l.properties !== undefined ? { properties: l.properties } : {}),
+    }, deleteFields);
+  }
+  await col<AnyConflictDoc>(spaceCollection(spaceId, 'conflicts')).deleteOne(asFilter<AnyConflictDoc>({ _id: doc._id }));
+  return 'resolved';
+}
+
+/**
+ * What conflicts are listed and read as: each kind's own fields, and the `kind` both carry. A METADATA conflict also carries `current`, the authored metadata
+ * of the row that stands now (read once for the page, from the file rows by id), because what it asks of a reader is a choice between two versions and a reader
+ * cannot choose between one. A file that is gone has no `current`.
+ */
+async function conflictViews(spaceId: string, docs: readonly AnyConflictDoc[]): Promise<Array<Record<string, unknown>>> {
+  const ids = docs.filter((c): c is MetadataConflictDoc => c.kind === 'metadata').map(c => c.originalPath);
+  const rows = ids.length === 0 ? new Map<string, Record<string, unknown>>()
+    : await readStoredById<Record<string, unknown>>(spaceCollection(spaceId, 'files'), ids, { description: 1, descriptionSource: 1, tags: 1, properties: 1, suppressEmbeddings: 1 }, { filter: NOT_A_FLAGGED_ROW });
+  return docs.map((c) => {
+    const common = { id: c._id, spaceId: c.spaceId, originalPath: c.originalPath, peerInstanceId: c.peerInstanceId, peerInstanceLabel: c.peerInstanceLabel, detectedAt: c.detectedAt };
+    if (c.kind !== 'metadata') return { ...common, kind: 'copy', conflictPath: c.conflictPath };
+    const { _id: _omit, ...current } = rows.get(c.originalPath) ?? {};
+    return { ...common, kind: 'metadata', losing: c.losing, seq: c.seq, ...(rows.has(c.originalPath) ? { current } : {}) };
+  });
+}
+
+/**
  * Perform the file operations for a given resolve action, then delete the conflict record.
  *
  * Every path of the conflict (the copy's and the original's) and every destination goes through the sandbox's CHECKED resolve before it
@@ -87,12 +147,13 @@ async function placeIncomingCopy(
  * placement refuses an occupied destination.
  */
 async function executeResolve(
-  doc: ConflictDoc,
+  doc: AnyConflictDoc,
   spaceId: string,
   action: ResolveAction,
   rename?: string,
   targetSpaceId?: string,
 ): Promise<Resolution> {
+  if (doc.kind === 'metadata') return resolveMetadataConflict(doc, spaceId, action);
   const srcAbs = await resolveSafePathChecked(spaceId, doc.conflictPath);
   let outcome: Resolution = 'resolved';
   switch (action) {
@@ -187,7 +248,7 @@ function failedResolution(id: string, err: unknown, where: string): FailedResolu
   if (act) {
     return { id, error: act.body.error, code: act.body.code, status: act.status, ...(act.body.path !== undefined ? { path: act.body.path } : {}) };
   }
-  if (err instanceof RequestRefusal) return { id, error: err.message, status: 400 };
+  if (err instanceof RequestRefusal) return { id, error: err.message, status: 400, ...(err instanceof NotAFileCopy ? { code: err.code } : {}) };
   const store = storeFailureAnswer(err, where);
   if (store) return { id, error: store.body.error, status: store.status };
   // Whatever is left is a fault, said by what it is (`answerForCaught`): a file-system failure is `file_system_fault`, a socket failure
@@ -213,30 +274,27 @@ conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     const reachable = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'read');
     if (requested && !reachable.includes(requested)) { res.status(403).json({ error: `Token does not have access to space '${requested}'` }); return; }
     const spaces = requested ? [requested] : reachable;
-    const results: ConflictDoc[] = [];
+    const results: AnyConflictDoc[] = [];
     let truncated = false;
     for (const spaceId of spaces) {
-      const docs = await col<ConflictDoc>(spaceCollection(spaceId, 'conflicts'))
+      const docs = await col<AnyConflictDoc>(spaceCollection(spaceId, 'conflicts'))
         .find({})
         .sort({ detectedAt: -1 })
         .limit(PER_SPACE_CAP + 1)
-        .toArray() as ConflictDoc[];
+        .toArray() as AnyConflictDoc[];
       if (docs.length > PER_SPACE_CAP) { truncated = true; docs.length = PER_SPACE_CAP; }
       results.push(...docs);
       if (results.length >= MAX_TOTAL) { truncated = true; break; } // bound cross-space fact
     }
     results.sort((a, b) => b.detectedAt.localeCompare(a.detectedAt));
     if (results.length > MAX_TOTAL) { results.length = MAX_TOTAL; truncated = true; }
+    // The metadata conflicts' current rows are read once per space, for the page that is returned.
+    const bySpace = new Map<string, AnyConflictDoc[]>();
+    for (const c of results) (bySpace.get(c.spaceId) ?? bySpace.set(c.spaceId, []).get(c.spaceId)!).push(c);
+    const viewOf = new Map<string, Record<string, unknown>>();
+    for (const [spaceId, docs] of bySpace) for (const v of await conflictViews(spaceId, docs)) viewOf.set(String(v['id']), v);
     res.json({
-      conflicts: results.map(c => ({
-        id: c._id,
-        spaceId: c.spaceId,
-        originalPath: c.originalPath,
-        conflictPath: c.conflictPath,
-        peerInstanceId: c.peerInstanceId,
-        peerInstanceLabel: c.peerInstanceLabel,
-        detectedAt: c.detectedAt,
-      })),
+      conflicts: results.map(c => viewOf.get(c._id)!),
       returned: results.length,
       truncated,
     });
@@ -309,18 +367,9 @@ conflictsRouter.delete('/link-violations', globalRateLimit, requireAuth, denyRea
 // GET /api/conflicts/:id — get a single conflict record
 conflictsRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
   try {
-    const found = await findWhereTokenMay<ConflictDoc>(req.authToken?.rights, 'dataQuality', 'read', 'conflicts', req.params['id'] as string);
+    const found = await findWhereTokenMay<AnyConflictDoc>(req.authToken?.rights, 'dataQuality', 'read', 'conflicts', req.params['id'] as string);
     if (!found) { res.status(404).json({ error: 'Conflict not found' }); return; }
-    const { doc } = found;
-    res.json({
-      id: doc._id,
-      spaceId: doc.spaceId,
-      originalPath: doc.originalPath,
-      conflictPath: doc.conflictPath,
-      peerInstanceId: doc.peerInstanceId,
-      peerInstanceLabel: doc.peerInstanceLabel,
-      detectedAt: doc.detectedAt,
-    });
+    res.json((await conflictViews(found.spaceId, [found.doc]))[0]);
   } catch (err) {
     sendCaughtFailure(res, `GET /api/conflicts/:id`, err);
   }
@@ -366,7 +415,7 @@ conflictsRouter.post('/bulk-resolve', globalRateLimit, requireAuth, denyReadOnly
 
     for (const id of ids) {
       try {
-        const found = await findWhereTokenMay<ConflictDoc>(req.authToken?.rights, 'dataQuality', 'write', 'conflicts', id);
+        const found = await findWhereTokenMay<AnyConflictDoc>(req.authToken?.rights, 'dataQuality', 'write', 'conflicts', id);
         if (!found) {
           failed.push({ id, error: 'Conflict not found', status: 404 });
           continue;
@@ -440,7 +489,7 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
       return;
     }
 
-    const found = await findWhereTokenMay<ConflictDoc>(req.authToken?.rights, 'dataQuality', 'write', 'conflicts', req.params['id'] as string);
+    const found = await findWhereTokenMay<AnyConflictDoc>(req.authToken?.rights, 'dataQuality', 'write', 'conflicts', req.params['id'] as string);
     if (!found) {
       res.status(404).json({ error: 'Conflict not found' });
       return;
@@ -450,7 +499,7 @@ conflictsRouter.post('/:id/resolve', globalRateLimit, requireAuth, denyReadOnly,
     res.status(200).json(resolvedBody(outcome));
   } catch (err) {
     // A path outside the space (or through a link out of it) is the request's: 400, as the file doors answer it.
-    if (err instanceof RequestRefusal) { res.status(400).json({ error: err.message }); return; }
+    if (err instanceof RequestRefusal) { res.status(400).json({ error: err.message, ...(err instanceof NotAFileCopy ? { code: err.code } : {}) }); return; }
     sendCaughtFailure(res, `POST /api/conflicts/:id/resolve`, err);
   }
 });

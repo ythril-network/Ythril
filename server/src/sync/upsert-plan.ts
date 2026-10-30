@@ -37,7 +37,7 @@
 import { edgeIdFor } from '../brain/edge-id.js';
 import { derivedV4Id } from '../util/derived-id.js';
 import { linkIdFor } from '../brain/link-id.js';
-import { fileContentHash } from '../brain/merkle.js';
+import { fileContentHash, FILE_HASH_PROJECTION } from '../brain/merkle.js';
 import { authorRef } from '../config/author.js';
 import type { BrainCollection, RefKind } from '../config/types-knowledge.js';
 import type { ResolvedElsewhereEntry } from './resolved-elsewhere.js';
@@ -87,10 +87,18 @@ export function seqGuard(id: string, seq: number | undefined): Record<string, un
  * What it prevents: a swap that overwrites a version the planner never saw.
  */
 export function equalSeqSwapGuard(family: string, id: string, seq: number, stored: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  if (family === 'files') {
+    // A file's list of its own (Q-426): what the space hash sees of it (`FILE_HASH_PROJECTION`), derived there and never spelled here. A row this instance
+    // flagged deleted is its own audit record and is never swapped into.
+    return { _id: id, seq, ...Object.fromEntries(FILE_SWAP_GUARD_FIELDS.map(f => [f, stored[f] ?? null])), deletedAt: { $exists: false } };
+  }
   const fields = BODY_FIELDS_OF[family];
-  if (!fields) throw new Error(`equalSeqSwapGuard: '${family}' is not a family that forks`);
+  if (!fields) throw new Error(`equalSeqSwapGuard: '${family}' is neither a family that forks nor files`);
   return { _id: id, seq, ...Object.fromEntries(fields.map(f => [f, stored[f] ?? null])) };
 }
+
+/** The fields of a file row a swap's guard names beside its id and seq: the hashed projection, derived from it so a field added there is guarded here. */
+const FILE_SWAP_GUARD_FIELDS: readonly string[] = Object.keys(FILE_HASH_PROJECTION).filter(k => k !== '_id' && k !== 'seq');
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 // THE PAGE ACCEPT PLANNER (`Q-107` part 1 §2; every door since `Q-204`)
@@ -225,6 +233,11 @@ export interface StoredCopy {
   author?: { instanceId?: string };
   updatedAt?: string;
   contentHash?: string;
+  /**
+   * The hash of the same row with NOTHING blanked (`fileContentHash(row)`), read beside `contentHash`: what a file's equal-seq tie compares (Q-426). A
+   * file's `row` (above) is its authored half as stored: the loser's metadata when the arriving copy wins, and the swap guard's input.
+   */
+  fullContentHash?: string;
 }
 
 /**
@@ -274,9 +287,14 @@ export interface ArrivalPlanInput {
  * `underivedId` (Q-222): a link whose `_id` is not the one its endpoints derive (`linkIdFor`). Refused, never stored,
  * counted `rejected` on the wire and by a pull as refused. What it prevents: one relationship held under two ids on two
  * instances, which a peer's unique endpoint index then answers `duplicate` for ever.
+ *
+ * `divergenceKept` (Q-426): a FILE row arriving at the seq this instance holds, with other authored content, that LOSES the tie (`arrivingWinsTie` over
+ * `fileContentHash`): the stored row stands and nothing is written. Counted `skipped` on the wire and said in the log, because it is not "already
+ * current": the peer holds other metadata and converges on this copy by the same rule. The winning side's verdict is `converged`, and the metadata
+ * it displaced is kept as a conflict. What both prevent: a bare `skipped` for a divergence, which left two instances different for ever.
  */
 export type ArrivalVerdict = 'inserted' | 'updated' | 'upserted' | 'skipped' | 'tombstoned' | 'forked'
-  | 'forkRefused' | 'invalidFork' | 'unknownType' | 'duplicate' | 'rejected' | 'converged' | 'underivedId';
+  | 'forkRefused' | 'invalidFork' | 'unknownType' | 'duplicate' | 'rejected' | 'converged' | 'underivedId' | 'divergenceKept';
 
 export interface ArrivalPlan<T extends ArrivalDoc> {
   /** One verdict per input document, in input order — what sequential processing would have answered. */
@@ -307,6 +325,13 @@ export interface ArrivalPlan<T extends ArrivalDoc> {
    * counted as landed — so no embed job is queued for a row whose content did not change.
    */
   converges: Array<{ index: number; doc: T }>;
+  /**
+   * File rows that WIN an equal-seq tie against the stored row (Q-426): the arriving copy replaces the stored one at the SAME seq, under a guard that names
+   * the stored row it read (`stored`), whose authored content DIFFERS from the arriving copy's (the timestamp and the author's label are not compared, as in
+   * `convergesOnAuthorStamp`, which owns a pair that differs only there). What it displaces is metadata somebody wrote, and the door keeps it as a conflict.
+   * Never in `accepts` (that list is written under the ordinary seq guard) and never a fork: a file has no body schema and its id is its path.
+   */
+  fileSwaps: Array<{ index: number; doc: T; stored: Readonly<Record<string, unknown>> }>;
   /**
    * The documents (by index) admitted although their fork id could not be derived from their body: a legacy fact fork of 5.6.0 or 5.6.1 under its
    * stored parent, and a chrono fork whose bytes a redaction took. They are stored as ordinary arrivals and counted `unverifiable`.
@@ -589,8 +614,11 @@ export function heldTombstoneLeavesFork(held: HeldTombstone, author: string | un
  * - Every family that forks (`FORKING_FAMILIES`): no copy -> `inserted` (facts) or `upserted`; a higher seq -> `updated` or
  *   `upserted`; an equal seq with a different BODY (`divergesFrom`, the body hash) -> a FORK of the HIGHER-hash copy, the lower being the parent
  *   (`arrivingWinsTie`: an arriving copy that is the lower becomes a parent SWAP, `plan.swaps`, and the stored copy the fork); anything else -> `skipped`. The
- *   other families (links, file metadata) carry no body of their own to disagree about: no copy or a higher seq ->
- *   `upserted`, else `skipped`.
+ *   other families carry no body to fork: no copy or a higher seq -> `upserted`, else `skipped`. A link carries no content of its own to
+ *   disagree about. **A file row at an equal seq with other authored content follows the same tie** (Q-426), over its own hash
+ *   (`fileContentHash`): when the arriving copy is the lower it replaces the stored row at that seq (`fileSwaps`, verdict `converged`) and the
+ *   metadata it displaced is kept as a conflict; when it is the higher the stored row stands (`divergenceKept`). Q-419's convergence on the
+ *   author's own timestamp is asked first.
  * - A row that arrives carrying `forkOf` is judged by what it says it is first (`forkRowVerdict`): an id that does not derive from
  *   its body, a `forkOf` equal to its own id, one on a family that does not fork, or an edge whose `forkOf` presence differs from
  *   the stored copy's is `invalidFork` — its own verdict, never a silent `rejected`. A fork row of a record whose tombstone is held
@@ -616,7 +644,7 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
   const forking = (FORKING_FAMILIES as readonly string[]).includes(kind);
   const hashOf = input.hashOf ?? bodyHashesOf(kind);
   const plan: ArrivalPlan<T> = {
-    verdicts: [], forkIds: [], accepts: new Map(), forks: [], swaps: [], converges: [], unverifiable: [], marks: [], tombstoneCleanups: new Map(),
+    verdicts: [], forkIds: [], accepts: new Map(), forks: [], swaps: [], fileSwaps: [], converges: [], unverifiable: [], marks: [], tombstoneCleanups: new Map(),
   };
   /** The version of each id this page has accepted so far — what a later copy is compared against. */
   const overlay = new Map<string, T>();
@@ -706,6 +734,38 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     list.splice(list.findIndex(a => a.doc === earlier), 1);
     accept(i, doc, earlierVerdict, tomb, via);
     return true;
+  };
+
+  /**
+   * An arriving FILE copy WINS the tie at an equal seq with other authored content (Q-426). No fork is made: a file has no body schema and its id is its path.
+   *
+   *  - against the STORED row: a swap, with the row read beside its hash as the guard's input; what it displaces is kept as a conflict by the door.
+   *  - against a copy THIS PAGE accepted or swapped in: the earlier copy is the loser and is never stored, so there is nothing to keep (a page that
+   *    repeats an id at one version is a sender's bug, which the writer says); it is `divergenceKept` and the arriving copy takes its place in the write.
+   */
+  const winFileTie = (i: number, doc: T, earlier: T | undefined, cur: StoredCopy, tomb: number | undefined, via: string | undefined): void => {
+    const id = doc._id;
+    if (earlier === undefined) {
+      if (cur.row === undefined) throw new BodyNotRead(kind, id);
+      plan.fileSwaps.push({ index: i, doc, stored: cur.row });
+      holdVersion(doc);
+      plan.verdicts[i] = 'converged';
+      return;
+    }
+    const swap = plan.fileSwaps.find(s => s.doc === earlier);
+    if (swap) {
+      plan.verdicts[swap.index] = 'divergenceKept';
+      swap.doc = doc; swap.index = i;
+      holdVersion(doc);
+      plan.verdicts[i] = 'converged';
+      return;
+    }
+    const list = plan.accepts.get(id)!;
+    const at = list.findIndex(a => a.doc === earlier);
+    const earlierVerdict = plan.verdicts[list[at]!.index]!;
+    plan.verdicts[list[at]!.index] = 'divergenceKept';
+    list.splice(at, 1);
+    accept(i, doc, earlierVerdict, tomb, via);
   };
 
   const accept = (i: number, doc: T, verdict: ArrivalVerdict, tomb: number | undefined, via: string | undefined): void => {
@@ -839,6 +899,26 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
       plan.converges.push({ index: i, doc });
       plan.verdicts[i] = 'converged';
       return;
+    }
+    /*
+     * A file row at the seq we hold with OTHER authored content (Q-426): the same tie as every family that forks, over the file's own hash. A file has
+     * no body to fork and its id is its path, so the loser is not a row: the stored row either stands (`divergenceKept`, nothing written, said in the
+     * log) or is replaced at the same seq by the arriving copy (`fileSwaps`, written under a guard naming the stored row), and the metadata it
+     * displaced is kept as a conflict of this instance's own. Asked AFTER Q-419's narrower convergence, which owns the pair that differ only in the
+     * timestamp the author delivered.
+     */
+    if (kind === 'files' && typeof doc.seq === 'number' && cur !== undefined && cur.seq === doc.seq) {
+      // "Other content" is the AUTHORED content, with the timestamp and the author's label blanked as Q-419 blanks them: a pair that differs only there is a drift
+      // for that rule to converge on its author's delivery, and a tie that took it would let any relay choose the timestamp by choosing its hash.
+      const blanked = (d: object): string => fileContentHash(d as Record<string, unknown>, CONVERGE_BLANKED);
+      const heldBlanked = accepted !== undefined ? blanked(accepted) : cur.contentHash;
+      if (heldBlanked !== undefined && heldBlanked !== blanked(doc)) {
+        const heldHash = accepted !== undefined ? fileContentHash(accepted as Record<string, unknown>) : cur.fullContentHash;
+        if (heldHash === undefined) throw new BodyNotRead(kind, doc._id);
+        if (!arrivingWinsTie(fileContentHash(doc as Record<string, unknown>), heldHash)) { plan.verdicts[i] = 'divergenceKept'; return; }
+        winFileTie(i, doc, accepted, cur, tomb, via);
+        return;
+      }
     }
     plan.verdicts[i] = 'skipped';
     // The stored copy is already above a tombstone the page still sees: a write landed and its cleanup did not.

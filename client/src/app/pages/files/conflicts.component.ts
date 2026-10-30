@@ -44,6 +44,12 @@ const STATUS_KEYS: Partial<Record<ResolveAction, string>> = {
   'keep-both': 'conflicts.status.keepBoth',
 };
 
+/** What the polite status says of a resolved METADATA conflict (Q-426): the row only disappears, and what happened to the metadata is told here. */
+const METADATA_STATUS_KEYS: Partial<Record<ResolveAction, string>> = {
+  'keep-local': 'conflicts.metadata.status.keepMine',
+  'keep-incoming': 'conflicts.metadata.status.keepTheirs',
+};
+
 @Component({
   selector: 'app-conflicts',
   standalone: true,
@@ -127,7 +133,34 @@ const STATUS_KEYS: Partial<Record<ResolveAction, string>> = {
                 </td>
                 <td><span class="badge badge-blue mono">{{ c.spaceId }}</span></td>
                 <td class="mono" style="font-size:12px">{{ c.originalPath }}</td>
-                <td class="mono" style="font-size:12px; color:var(--text-muted)">{{ c.conflictPath }}</td>
+                <td class="mono" style="font-size:12px; color:var(--text-muted)">
+                  @if (c.kind === 'metadata') {
+                    <!-- A metadata conflict has no copy of the file: it is two versions of the file's description, tags and properties, and the choice is between them. -->
+                    <details>
+                      <summary>{{ 'conflicts.metadata.differs' | transloco }}</summary>
+                      <table class="meta-diff" style="margin-top:6px;">
+                        <thead>
+                          <tr>
+                            <th scope="col">{{ 'conflicts.metadata.field' | transloco }}</th>
+                            <th scope="col">{{ 'conflicts.metadata.mine' | transloco }}</th>
+                            <th scope="col">{{ 'conflicts.metadata.theirs' | transloco }}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (d of diffRows(c); track d.field) {
+                            <tr>
+                              <th scope="row">{{ 'conflicts.metadata.field.' + d.field | transloco }}</th>
+                              <td>{{ d.mine ?? ('conflicts.metadata.notSet' | transloco) }}</td>
+                              <td>{{ d.theirs ?? ('conflicts.metadata.notSet' | transloco) }}</td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </details>
+                  } @else {
+                    {{ c.conflictPath }}
+                  }
+                </td>
                 <td>
                   <span title="{{ c.peerInstanceId }}" class="mono" style="font-size:12px">
                     {{ peerName(c) }}
@@ -140,8 +173,8 @@ const STATUS_KEYS: Partial<Record<ResolveAction, string>> = {
                   <select [(ngModel)]="conflictActions[c.id]"
                           [attr.aria-label]="'conflicts.resolveActionAriaLabel' | transloco"
                           style="width:auto;">
-                    @for (a of rowActions; track a) {
-                      <option [value]="a">{{ actionLabelKeys[a] | transloco }}</option>
+                    @for (a of actionsFor(c); track a) {
+                      <option [value]="a">{{ actionLabelKey(c, a) | transloco }}</option>
                     }
                   </select>
                   @if (conflictActions[c.id] === 'save-to-space') {
@@ -209,6 +242,40 @@ export class ConflictsComponent implements OnInit {
   /** A bulk resolution names no target space, so it offers every action but the one that needs one. */
   protected readonly bulkActions = this.rowActions.filter(a => a !== 'save-to-space');
 
+  /**
+   * What a METADATA conflict (Q-426) can be resolved with: the two that mean something when there is no copy of the file. The server refuses the other two
+   * (`not_a_file_copy`), so the page never offers them for such a row.
+   */
+  private static readonly METADATA_ACTIONS: readonly ResolveAction[] = ['keep-local', 'keep-incoming'];
+  /** The words of a metadata conflict's two actions: what each does to the metadata, not to a file. */
+  private static readonly METADATA_ACTION_LABEL_KEYS: Partial<Record<ResolveAction, string>> = {
+    'keep-local': 'conflicts.metadata.keepMine',
+    'keep-incoming': 'conflicts.metadata.keepTheirs',
+  };
+  /** The fields a metadata conflict compares, in the order a reader looks for them. */
+  private static readonly METADATA_FIELDS = ['description', 'descriptionSource', 'tags', 'properties', 'suppressEmbeddings'] as const;
+
+  protected actionsFor(c: ConflictRecord): readonly ResolveAction[] {
+    return c.kind === 'metadata' ? ConflictsComponent.METADATA_ACTIONS : this.rowActions;
+  }
+
+  protected actionLabelKey(c: ConflictRecord, a: ResolveAction): string {
+    return (c.kind === 'metadata' ? ConflictsComponent.METADATA_ACTION_LABEL_KEYS[a] : undefined) ?? ACTION_LABEL_KEYS[a];
+  }
+
+  /** A metadata value as a reader sees it: text as it is, anything else as its JSON, nothing as `undefined` (the template says "not set"). */
+  private static shown(v: unknown): string | undefined {
+    if (v === undefined || v === null) return undefined;
+    return typeof v === 'string' ? v : JSON.stringify(v);
+  }
+
+  /** The fields of a metadata conflict whose value differs between the metadata that was displaced (`mine`) and the metadata that stands (`theirs`). */
+  protected diffRows(c: ConflictRecord): Array<{ field: string; mine: string | undefined; theirs: string | undefined }> {
+    return ConflictsComponent.METADATA_FIELDS
+      .map(field => ({ field, mine: ConflictsComponent.shown(c.losing?.[field]), theirs: ConflictsComponent.shown(c.current?.[field]) }))
+      .filter(r => r.mine !== r.theirs);
+  }
+
   ngOnInit(): void {
     this.load();
     this.spacesApi.listSpaces().subscribe({
@@ -271,7 +338,8 @@ export class ConflictsComponent implements OnInit {
         return;
       }
     }
-    if (action === 'keep-incoming' && !await this.askBeforeReplacing(this.transloco.translate('conflicts.confirm.keepIncoming', { path: c.originalPath }))) return;
+    // Keeping the incoming metadata replaces no file and nothing is lost by it that the row does not hold: no danger confirm.
+    if (action === 'keep-incoming' && c.kind !== 'metadata' && !await this.askBeforeReplacing(this.transloco.translate('conflicts.confirm.keepIncoming', { path: c.originalPath }))) return;
     this.resolving.set(c.id);
     this.filesApi.resolveConflict(c.id, action, opts).subscribe({
       next: (answer) => {
@@ -289,7 +357,7 @@ export class ConflictsComponent implements OnInit {
             space: target?.label || opts.targetSpaceId, path: c.conflictPath,
           }));
         } else {
-          const key = STATUS_KEYS[action];
+          const key = c.kind === 'metadata' ? METADATA_STATUS_KEYS[action] : STATUS_KEYS[action];
           if (key) this.announcement.say(this.transloco.translate(key, { path: c.originalPath, copy: c.conflictPath }));
         }
       },

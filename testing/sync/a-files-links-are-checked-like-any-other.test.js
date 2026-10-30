@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'node:crypto';
 import { INSTANCES, post, get, waitFor, createTestSpace } from './helpers.js';
+import { linkIdFor } from '../../server/dist/brain/link-id.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -45,7 +46,8 @@ after(async () => {
 /** One arriving link, shaped as `IncomingLinkDoc` requires. */
 function linkDoc({ from, fromKind, to, toKind }) {
   return {
-    _id: randomUUID(),
+    // A link's id IS its relationship (`linkIdFor`): the planner refuses any other id (Q-222), so a random one is refused whole.
+    _id: linkIdFor(from, fromKind, to, toKind),
     spaceId: SPACE,
     from,
     fromKind,
