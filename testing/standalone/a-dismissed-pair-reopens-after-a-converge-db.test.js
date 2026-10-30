@@ -102,11 +102,13 @@ describe('a dismissed pair reopens after a converge (real MongoDB)', { skip }, (
   it('a converge that the scanner reaches before the job leaves the dismissal waiting, and the job then reopens the pair', async () => {
     const { lo, hi } = await dismissedPair();
     const before = await candidates().findOne({});
+    // `lo` is whichever of the two seeds has the lower id, and ids are random: read its text rather than assume which seed it is.
+    const oldText = (await facts().findOne({ _id: lo })).matchedText;
 
     await fact.saveFact(SPACE, 'the office moved to Berlin last spring', [], [], undefined, undefined, undefined,
       undefined, undefined, undefined, lo);
     const stale = await facts().findOne({ _id: lo });
-    assert.equal(stale.matchedText, 'the office is in Paris', 'fixture: the converge must leave the old text until the job runs');
+    assert.equal(stale.matchedText, oldText, 'fixture: the converge must leave the old text until the job runs');
     assert.ok(stale.seq > before.aSeq || stale.seq > before.bSeq, 'fixture: the converge did not bump the seq');
 
     await scanner.handlePair(SPACE, 'fact', await asResult(lo), await asResult(hi));
@@ -124,10 +126,12 @@ describe('a dismissed pair reopens after a converge (real MongoDB)', { skip }, (
   it('a re-write that leaves the text the same is still a refresh: the pair stays dismissed', async () => {
     const { lo, hi } = await dismissedPair();
     const before = await candidates().findOne({});
-    // The same text again: a converge with an identical wording, the worker having settled the text.
-    await fact.saveFact(SPACE, 'the office is in Paris', [], [], undefined, undefined, undefined, undefined, undefined, undefined, lo);
+    // The same text again: a converge with an identical wording, the worker having settled the text. `lo` is whichever seed has the
+    // lower random id, so its own text is read rather than assumed.
+    const ownText = (await facts().findOne({ _id: lo })).fact;
+    await fact.saveFact(SPACE, ownText, [], [], undefined, undefined, undefined, undefined, undefined, undefined, lo);
     await drain();
-    assert.equal((await facts().findOne({ _id: lo })).matchedText, 'the office is in Paris');
+    assert.equal((await facts().findOne({ _id: lo })).matchedText, ownText);
     await scanner.handlePair(SPACE, 'fact', await asResult(lo), await asResult(hi));
     const after = await candidates().findOne({});
     assert.equal(after.status, 'dismissed', 'a re-write with the same text resurfaced a dismissed pair');
