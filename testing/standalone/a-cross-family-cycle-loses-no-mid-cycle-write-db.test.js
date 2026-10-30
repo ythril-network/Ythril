@@ -32,7 +32,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
-import { build } from './_push-door.mjs';
+import { build, derivedLinkBuilder } from './_push-door.mjs';
 import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
 import { clearPositionMarks, positioned } from './_b81b-positions.mjs';
 
@@ -42,17 +42,21 @@ const S = 'p2space';
 /** The record type each family's builder is keyed by (`_push-door.mjs` `build`). */
 const BUILDER = { facts: 'fact', entities: 'entity', chrono: 'chrono', filemeta: 'filemeta', edges: 'edge', links: 'link' };
 
-let door, FAMILIES;
+let door, FAMILIES, derivedLink;
 
 /** A file row's id is its path. */
 const idOf = (family, id) => (family.payloadKey === 'filemeta' ? `notes/${id}.md` : id);
-const peerRecord = (family, id, seq, extra = {}) => positioned(build[BUILDER[family.payloadKey]](S, idOf(family, id), seq, { author: PEER_AUTHOR }), extra);
+/** A link is named by a key and carries the id its endpoints derive, the only id a pulled link may carry (Q-222). */
+const peerRecord = (family, id, seq, extra = {}) => positioned(family.payloadKey === 'links'
+  ? derivedLink(S, id, seq, { author: PEER_AUTHOR })
+  : build[BUILDER[family.payloadKey]](S, idOf(family, id), seq, { author: PEER_AUTHOR }), extra);
 const has = (family, id) => door.coll(S, family.collection).findOne({ _id: id });
 
 describe('a cross-family pull cycle loses no mid-cycle write', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'b81tB_p2', spaces: [S], direction: 'pull' });
     ({ REPLICATED_FAMILIES: FAMILIES } = await import('../../server/dist/sync/replicated-families.js'));
+    derivedLink = await derivedLinkBuilder();
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => {

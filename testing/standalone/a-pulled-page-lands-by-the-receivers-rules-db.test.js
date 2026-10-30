@@ -74,7 +74,7 @@ const SUPPRESSING = 'muted';     // a type whose schema says suppressEmbeddings:
 const UNSUPPRESSING = 'loud';    // a type whose schema says suppressEmbeddings: false
 const BRIEF = 'brief';           // a type whose schema has its own retention window
 
-let mongo, engine, seqMod, families, recordTypeOf, typeField, peer, peerUrl, logMod, encodePositionCursor;
+let mongo, engine, seqMod, families, recordTypeOf, typeField, peer, peerUrl, logMod, encodePositionCursor, linkIdFor;
 /** The peer's head: above every seq a case serves, below every clock position. */
 const PEER_HEAD = 2 ** 52;
 const coll = (space, c) => mongo.col(`${space}_${c}`);
@@ -182,6 +182,8 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
     peerUrl = `http://${privateHostAddress()}:${peer.address().port}`;
     ({ REPLICATED_FAMILIES: families } = await import('../../server/dist/sync/replicated-families.js'));
     ({ encodePositionCursor } = await import('../../server/dist/util/position-keyset.js'));
+    // A pulled link carries the id its endpoints derive, or it is refused as `underivedId` (Q-222).
+    ({ linkIdFor } = await import('../../server/dist/brain/link-id.js'));
     const kinds = await import('../../server/dist/config/types-knowledge.js');
     recordTypeOf = Object.fromEntries(families.map(f => [f.collection,
       Object.entries(kinds.RECORD_COLLECTION).find(([, c]) => c === f.collection)?.[0] ?? null]));
@@ -232,12 +234,13 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
         const rt = recordTypeOf[fam.collection];
         if (rt === null) {
           // A link: a pair of ids, no text. Pulled, it must land and queue nothing.
+          const linkId = linkIdFor('x', 'fact', 'y', 'entity');
           served[S.open] ??= {};
           served[S.open][fam.payloadKey] = [[{
-            _id: 'link-1', spaceId: 'sender-space', seq: ++seq, author, from: 'x', fromKind: 'fact', to: 'y',
+            _id: linkId, spaceId: 'sender-space', seq: ++seq, author, from: 'x', fromKind: 'fact', to: 'y',
             toKind: 'entity', label: 'mentions', createdAt: iso(CREATED), updatedAt: iso(CREATED),
           }]];
-          expected.push({ space: S.open, coll: fam.collection, id: 'link-1', queued: false, why: 'a link has nothing to embed' });
+          expected.push({ space: S.open, coll: fam.collection, id: linkId, queued: false, why: 'a link has nothing to embed' });
           continue;
         }
         ROWS.forEach((row, i) => {
@@ -272,9 +275,10 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
     const want = [];
     for (const fam of writtenFamilies()) {
       const rt = recordTypeOf[fam.collection];
-      const id = `dup-${fam.collection}`;
+      // A link's two copies share their endpoints, as one id must since it derives from them (Q-222); they differ in seq.
+      const id = rt === null ? linkIdFor(`f-${fam.collection}`, 'fact', 't', 'entity') : `dup-${fam.collection}`;
       const make = (seq) => rt === null
-        ? { _id: id, spaceId: 's', seq, author, from: `f${seq}`, fromKind: 'fact', to: 't', toKind: 'entity', label: 'mentions',
+        ? { _id: id, spaceId: 's', seq, author, from: `f-${fam.collection}`, fromKind: 'fact', to: 't', toKind: 'entity', label: 'mentions',
           createdAt: iso(CREATED), updatedAt: iso(CREATED) }
         : fixture(rt, id, seq, rt === 'edge' ? { from: `from-${seq}` } : {});
       const hi = 900 + (n += 10);
