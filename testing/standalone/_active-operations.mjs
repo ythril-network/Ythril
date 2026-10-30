@@ -34,6 +34,8 @@ const WRITE_COMMANDS = new Set(['findAndModify', 'findandmodify', 'insert', 'upd
 export async function activeOperations(mongo, collName) {
   const ns = `${mongo.getDb().databaseName}.${collName}`;
   const r = await mongo.getMongo().db('admin').command({ currentOp: 1, active: true, ns });
+  // A reply without `inprog` is the server's answer, not an empty list: say what it was rather than throw a TypeError that names nothing.
+  if (!Array.isArray(r?.inprog)) throw new Error(`currentOp on ${ns} answered without an inprog list: ${JSON.stringify(r).slice(0, 500)}`);
   return r.inprog.filter(o => ['insert', 'update', 'remove'].includes(o.op)
     || (o.op === 'command' && WRITE_COMMANDS.has(Object.keys(o.command ?? {})[0])));
 }
