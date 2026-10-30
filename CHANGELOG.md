@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Sync:** two instances holding different copies of one record at the same version (fact, entity, edge, chrono entry) now both keep the lower-hash copy as the record and the other as a fork, and their space hashes agree. Nothing is deleted; an older pair converges at the next delivery.
 - **Sync:** a link a peer sends under an id other than the one its endpoints derive is refused, on push and on pull, and counted in `links.rejected`.
-- **Sync:** the space hash takes a link over its relationship: one relationship held under two ids on two instances no longer reports a divergence.
+- **Sync:** the space hash takes a link over its relationship: one relationship held under two ids on two instances no longer reports a divergence, and neither does the same relationship created independently on two instances (each with its own author and timestamps). While a peer still runs an older version, the space hashes of a space with links disagree until it upgrades.
 - **Sync:** after an upgrade, a dangling end an older version already recorded as a link violation is not recorded or announced a second time, and keeps its original `detectedAt`.
 - **Sync:** the cache of Merkle leaves is bounded by the leaves it holds, not only by the number of spaces.
 - **Config:** on Windows, saving `config.json`, the secrets file or the schema library no longer fails while another program has the file open for a moment.

@@ -216,12 +216,27 @@ export function fileContentHash(doc: Record<string, unknown>, blank: readonly st
  * different leaves for one record, so their roots differed for ever with nothing missing on either side — a permanent false
  * alarm, which teaches an operator to ignore the signal that means data is missing.
  *
- * For every link under its derived id (which is every link a current writer made) the leaf is byte-identical to what it was, so a
- * mixed-version network changes nothing for those and converges only the rows that were already divergent. A delete of one id of
- * two that name one relationship still shows: the identity is then held on one side only.
+ * A delete of one id of two that name one relationship still shows: the identity is then held on one side only.
+ *
+ * ## And what it leaves out: the link's author and its two stamps (the second half of Q-222)
+ *
+ * A link has no authored content beyond its endpoints, and its `author`, `createdAt` and `updatedAt` are who made THIS row and when. A
+ * relationship linked independently on two instances therefore gives each its own author and its own stamps at the one seq 1, and an
+ * equal-seq link is skipped on arrival (there is nothing to converge on: the two rows say the same thing), so each instance kept its own
+ * author and stamps, and with them in the leaf the roots differed for ever between two instances holding one relationship — the
+ * permanent false alarm, with nothing missing. They replicate (a delete's author proof reads them) and are left out of the hash for
+ * that reason alone: a field excluded from the hash is free not to agree, which is the rule's own allowance. The leaf is the
+ * relationship (its derived id, endpoints and kinds) and its `seq`, which is what says one instance holds a newer version.
+ *
+ * Its own list, never `DERIVED_FIELDS`: those are what the arrival writer strips, and a link's author must travel.
  */
+const LINK_LEAF_OMITTED_FIELDS: ReadonlySet<string> = new Set(['author', 'createdAt', 'updatedAt']);
+
 function byRelationship(link: Record<string, unknown>): Record<string, unknown> {
-  return { ...link, _id: linkIdFor(String(link['from']), link['fromKind'] as RefKind, String(link['to']), link['toKind'] as RefKind) };
+  return {
+    ...withoutTopLevel(link, LINK_LEAF_OMITTED_FIELDS),
+    _id: linkIdFor(String(link['from']), link['fromKind'] as RefKind, String(link['to']), link['toKind'] as RefKind),
+  };
 }
 
 /**
