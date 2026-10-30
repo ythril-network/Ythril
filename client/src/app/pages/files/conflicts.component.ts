@@ -96,9 +96,9 @@ const METADATA_STATUS_KEYS: Partial<Record<ResolveAction, string>> = {
           </label>
           <span style="flex:1"></span>
           @if (selectedIds().length > 0) {
-            <select [(ngModel)]="bulkAction" [attr.aria-label]="'conflicts.bulkActionAriaLabel' | transloco" style="width:auto;">
-              @for (a of bulkActions; track a) {
-                <option [value]="a">{{ actionLabelKeys[a] | transloco }}</option>
+            <select [ngModel]="chosenBulkAction()" (ngModelChange)="bulkAction = $event" [attr.aria-label]="'conflicts.bulkActionAriaLabel' | transloco" style="width:auto;">
+              @for (a of bulkActionsOffered(); track a) {
+                <option [value]="a">{{ bulkLabelKey(a) | transloco }}</option>
               }
             </select>
             <button class="btn btn-sm btn-primary" (click)="bulkResolve()"
@@ -240,7 +240,7 @@ export class ConflictsComponent implements OnInit {
   /** One conflict's actions, in the order the label table lists them. */
   protected readonly rowActions = Object.keys(ACTION_LABEL_KEYS) as ResolveAction[];
   /** A bulk resolution names no target space, so it offers every action but the one that needs one. */
-  protected readonly bulkActions = this.rowActions.filter(a => a !== 'save-to-space');
+  private readonly bulkActionsOfCopies = this.rowActions.filter(a => a !== 'save-to-space');
 
   /**
    * What a METADATA conflict (Q-426) can be resolved with: the two that mean something when there is no copy of the file. The server refuses the other two
@@ -252,11 +252,40 @@ export class ConflictsComponent implements OnInit {
     'keep-local': 'conflicts.metadata.keepMine',
     'keep-incoming': 'conflicts.metadata.keepTheirs',
   };
-  /** The fields a metadata conflict compares, in the order a reader looks for them. */
+  /** The fields a metadata conflict compares, in the order a reader looks for them: the server's `SHOWN_METADATA_KEYS`, which a gate holds this list equal to. */
   private static readonly METADATA_FIELDS = ['description', 'descriptionSource', 'tags', 'properties', 'suppressEmbeddings'] as const;
 
   protected actionsFor(c: ConflictRecord): readonly ResolveAction[] {
     return c.kind === 'metadata' ? ConflictsComponent.METADATA_ACTIONS : this.rowActions;
+  }
+
+  /** The selected conflicts, as records. */
+  private selectedConflicts(): ConflictRecord[] {
+    const ids = new Set(this.selectedIds());
+    return this.conflicts().filter(c => ids.has(c.id));
+  }
+
+  /**
+   * What the bulk bar offers: only what EVERY selected row accepts (the review of bundle-45, #3). A metadata conflict takes two of the four, and the server refuses
+   * the others for it (`not_a_file_copy`), so a selection holding one is offered those two, and a selection of file copies only keeps the three it always had.
+   */
+  protected bulkActionsOffered(): readonly ResolveAction[] {
+    const selected = this.selectedConflicts();
+    return selected.some(c => c.kind === 'metadata')
+      ? this.bulkActionsOfCopies.filter(a => ConflictsComponent.METADATA_ACTIONS.includes(a))
+      : this.bulkActionsOfCopies;
+  }
+
+  /** The action the select shows and the resolution runs: the one chosen when the selection still offers it, else the first offered (the one the page starts on). */
+  protected chosenBulkAction(): ResolveAction {
+    const offered = this.bulkActionsOffered();
+    return offered.includes(this.bulkAction) ? this.bulkAction : offered[0]!;
+  }
+
+  /** The words of a bulk action: the metadata words when every selected row is a metadata conflict, else the copy words. */
+  protected bulkLabelKey(a: ResolveAction): string {
+    const selected = this.selectedConflicts();
+    return (selected.length > 0 && selected.every(c => c.kind === 'metadata') ? ConflictsComponent.METADATA_ACTION_LABEL_KEYS[a] : undefined) ?? ACTION_LABEL_KEYS[a];
   }
 
   protected actionLabelKey(c: ConflictRecord, a: ResolveAction): string {
@@ -414,17 +443,21 @@ export class ConflictsComponent implements OnInit {
   async bulkResolve(): Promise<void> {
     const ids = this.selectedIds();
     if (ids.length === 0) return;
-    const label = this.transloco.translate(ACTION_LABEL_KEYS[this.bulkAction]);
+    const action = this.chosenBulkAction();
+    const label = this.transloco.translate(this.bulkLabelKey(action));
     const params = { action: label };
-    const ok = this.bulkAction === 'keep-incoming'
-      ? await this.askBeforeReplacing(this.plural.text('conflicts.confirm.bulkResolveIrreversible', ids.length, params))
+    // Keeping the incoming copy replaces a file, and only a file copy has one: the replacement confirm is asked over those rows and counts them, and a selection
+    // of metadata conflicts only is asked the ordinary way (keeping the standing metadata replaces no file).
+    const replaced = this.selectedConflicts().filter(c => c.kind !== 'metadata').length;
+    const ok = action === 'keep-incoming' && replaced > 0
+      ? await this.askBeforeReplacing(this.plural.text('conflicts.confirm.bulkResolveIrreversible', replaced, params))
       : await this.confirmDialog.confirm({
         title: this.transloco.translate('conflicts.confirm.bulkResolveTitle'),
         message: this.plural.text('conflicts.confirm.bulkResolve', ids.length, params),
       });
     if (!ok) return;
     this.bulkResolving.set(true);
-    this.filesApi.bulkResolveConflicts(ids, this.bulkAction).subscribe({
+    this.filesApi.bulkResolveConflicts(ids, action).subscribe({
       next: (r) => {
         // One line per failed record, written BEFORE the list drops the resolved ones: a failed item names its record by path
         // (the answer's own, else the conflict's), because an operator knows files and never a uuid.

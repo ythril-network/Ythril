@@ -21,7 +21,11 @@ function conflict(id: string) {
 }
 
 describe('ConflictsComponent', () => {
+  /** The confirmations the page asked, each as the options it was asked with. */
+  let confirms: Array<{ danger?: boolean; message?: string }> = [];
   function create(resp: { conflicts: ReturnType<typeof conflict>[]; truncated?: boolean }) {
+    confirms = [];
+    TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       // The note is a plural base said through `pluralText`, which says nothing for a key the harness only echoes.
       imports: [ConflictsComponent, getTranslocoModule({ translation: { en: {
@@ -29,10 +33,10 @@ describe('ConflictsComponent', () => {
       } } })],
       providers: [
         provideRouter([]),
-        { provide: FilesApi, useValue: { listConflicts: () => of(resp) } },
+        { provide: FilesApi, useValue: { listConflicts: () => of(resp), bulkResolveConflicts: () => of({ resolved: resp.conflicts.length, failed: [] }) } },
         { provide: SpacesApi, useValue: { listSpaces: () => of({ spaces: [] }) } },
         { provide: ToastService, useValue: { success: () => {}, error: () => {} } },
-        { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(true) } },
+        { provide: ConfirmDialogService, useValue: { confirm: (o: { danger?: boolean; message?: string }) => { confirms.push(o); return Promise.resolve(true); } } },
       ],
     });
     const fixture = TestBed.createComponent(ConflictsComponent);
@@ -76,6 +80,55 @@ describe('ConflictsComponent', () => {
       expect(rowSelects[1]).toEqual(['keep-local', 'keep-incoming', 'keep-both', 'save-to-space']);
       const labels = Array.from(rows[0]!.querySelectorAll('select option')).map(o => o.textContent?.trim());
       expect(labels).toEqual(['conflicts.metadata.keepMine', 'conflicts.metadata.keepTheirs']);
+    });
+
+    // The review of bundle-45, #3: the bulk bar offers what every selected row accepts, so "keep both" is never offered over a metadata row (each would be refused).
+    describe('in the bulk bar', () => {
+      const select = (fixture: ReturnType<typeof create>, ids: string[]) => {
+        fixture.componentInstance.selectedIds.set(ids);
+        fixture.detectChanges();
+        const el = (fixture.nativeElement as HTMLElement).querySelector('select[aria-label="conflicts.bulkActionAriaLabel"]') as HTMLSelectElement;
+        return Array.from(el.querySelectorAll('option')).map(o => [o.value, o.textContent?.trim()]);
+      };
+
+      it('offers only keep-local and keep-incoming, under the metadata words, when every selected row is a metadata conflict', () => {
+        const fixture = create({ conflicts: [metadata() as never, { ...metadata(), id: 'm2' } as never] });
+        expect(select(fixture, ['m', 'm2'])).toEqual([['keep-local', 'conflicts.metadata.keepMine'], ['keep-incoming', 'conflicts.metadata.keepTheirs']]);
+      });
+
+      it('offers only keep-local and keep-incoming, under the copy words, when a metadata conflict is selected beside a file copy', () => {
+        const fixture = create({ conflicts: [metadata() as never, conflict('c') as never] });
+        expect(select(fixture, ['m', 'c']).map(o => o[0])).toEqual(['keep-local', 'keep-incoming']);
+      });
+
+      it('asks the file-replacement confirm for keep-incoming only over file copies: a metadata conflict replaces no file', async () => {
+        const only = create({ conflicts: [metadata() as never, { ...metadata(), id: 'm2' } as never] });
+        only.componentInstance.selectedIds.set(['m', 'm2']);
+        only.componentInstance.bulkAction = 'keep-incoming';
+        await only.componentInstance.bulkResolve();
+        expect(confirms.map(c => c.danger === true), 'a metadata-only selection was asked as a replacement of files').toEqual([false]);
+
+        const mixed = create({ conflicts: [metadata() as never, conflict('c') as never] });
+        mixed.componentInstance.selectedIds.set(['m', 'c']);
+        mixed.componentInstance.bulkAction = 'keep-incoming';
+        await mixed.componentInstance.bulkResolve();
+        expect(confirms.map(c => c.danger === true), 'a selection holding a file copy was not asked as a replacement').toEqual([true]);
+      });
+
+      it('falls back to keep-local when the chosen action is not one every selected row accepts', async () => {
+        const fixture = create({ conflicts: [metadata() as never, conflict('c') as never] });
+        fixture.componentInstance.selectedIds.set(['m', 'c']);
+        fixture.componentInstance.bulkAction = 'keep-both';
+        fixture.detectChanges();
+        const el = (fixture.nativeElement as HTMLElement).querySelector('select[aria-label="conflicts.bulkActionAriaLabel"]') as HTMLSelectElement;
+        await fixture.whenStable();
+        expect(el.value).toBe('keep-local');
+      });
+
+      it('still offers keep-both when only file copies are selected', () => {
+        const fixture = create({ conflicts: [conflict('c') as never, conflict('d') as never] });
+        expect(select(fixture, ['c', 'd']).map(o => o[0])).toEqual(['keep-local', 'keep-incoming', 'keep-both']);
+      });
     });
 
     it('shows no copy path for it', () => {
