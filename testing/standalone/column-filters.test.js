@@ -217,7 +217,7 @@ describe('entity-NAME column filters (From / To / Entities)', () => {
     // the conveniences moved into their own module, and pinning the variable name made this fail for a
     // rename while the rule it states was untouched. What matters is that the binding is UNCONDITIONAL
     // on the list being non-empty.
-    const edges = read('server/src/brain/edges.ts');
+    const edges = read('server/src/brain/list-edges.ts');
     assert.match(edges, /if \(filter\.fromIds\) \w+\['from'\] = \{ \$in: filter\.fromIds \}/);
     assert.match(edges, /if \(filter\.toIds\) \w+\['to'\] = \{ \$in: filter\.toIds \}/);
 

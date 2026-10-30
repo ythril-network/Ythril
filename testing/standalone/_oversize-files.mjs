@@ -608,7 +608,9 @@ export const FROZEN = {
   // LOWERED 366 -> 253 with Q-360: `traverseGraph`, its result types (`TraverseNode`, `TraverseResult`) and the link-label
   // constants moved to `brain/traverse-graph.ts` — the walk is not edge CRUD, and the file measured 386 over its own 366
   // before the move. The ceiling follows the file down, to what it now measures.
-  'server/src/brain/edges.ts': 253,
+  // LOWERED 253 -> 227 with Q-652: `listEdges`, the edge-list read, moved to `brain/list-edges.ts` — a read by filter, page and
+  // sort shares nothing with the write paths here, and bundle-67 had left the file at 257 over this ceiling.
+  'server/src/brain/edges.ts': 227,
   /*
    * A BARREL of API response shapes, and the one entry here that is not a decomposition debt.
    *

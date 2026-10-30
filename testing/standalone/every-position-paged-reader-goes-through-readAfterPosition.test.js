@@ -92,7 +92,7 @@ const EXEMPT = [
     holds: (e) => (e.after.includes('$limit') ? null : `the stages after the $sort are [${e.after.join(', ')}], with no $limit`),
   },
   ...['listChrono', 'listEdges', 'listEntities', 'listFacts'].map((fn) => ({
-    file: `server/src/brain/${{ listChrono: 'chrono', listEdges: 'edges', listEntities: 'entities', listFacts: 'fact' }[fn]}.ts`, fn, kind: 'ordering', by: 'slot',
+    file: `server/src/brain/${{ listChrono: 'chrono', listEdges: 'list-edges', listEntities: 'entities', listFacts: 'fact' }[fn]}.ts`, fn, kind: 'ordering', by: 'slot',
     why: LISTING, holds: allOf(spreadsConstant('LANDING_ORDER'), endsInId, pagedBySkip),
   })),
   {
@@ -146,7 +146,7 @@ describe('the orderings are derived from the type-checked program, and the deriv
   });
 
   it('sees the spellings a regex would miss: LANDING_ORDER spread in a ternary, DEFAULT_QUERY_SORT through the default parameter, and its use in the query tool', () => {
-    const ternary = entries.find(e => e.kind === 'ordering' && e.file === 'server/src/brain/edges.ts' && e.function === 'listEdges');
+    const ternary = entries.find(e => e.kind === 'ordering' && e.file === 'server/src/brain/list-edges.ts' && e.function === 'listEdges');
     assert.ok(ternary, 'the `sort ? toMongoSort(sort) : { ...LANDING_ORDER }` ternary in listEdges is not found');
     const viaDefault = entries.filter(e => e.kind === 'ordering' && e.file === 'server/src/brain/query.ts' && e.function === 'queryBrain' && e.via.includes('DEFAULT_QUERY_SORT'));
     assert.ok(viaDefault.some(e => e.slot.startsWith('the default of parameter')), 'DEFAULT_QUERY_SORT as the default of queryBrain\'s `sort` parameter is not found');
