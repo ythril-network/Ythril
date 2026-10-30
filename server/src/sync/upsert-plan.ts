@@ -13,8 +13,10 @@
  *
  *   - **absent locally** → write it. This is the ordinary new-record path.
  *   - **incoming seq is HIGHER** → write it. The peer has a newer version.
- *   - **incoming seq is EQUAL** → do NOT write. Both sides already agree, and a re-sync must be a
- *     no-op. Loosening this to `>=` would make every cycle rewrite every document it has ever seen:
+ *   - **incoming seq is EQUAL** → do NOT write, unless the two copies say different things: then, for a family that
+ *     forks, the lower body hash is the parent and the other copy is the fork (`arrivingWinsTie`, Q-324), which
+ *     replaces the stored parent when it is the arriving one. Identical copies: both sides already agree, and a
+ *     re-sync must be a no-op. Loosening this to `>=` would make every cycle rewrite every document it has ever seen:
  *     the data would stay correct, so nothing would fail, while write volume grew with the size of
  *     the space rather than with what changed.
  *   - **incoming seq is LOWER** → do NOT write. A peer that is behind — restored from a backup, or
@@ -40,7 +42,7 @@ import { authorRef } from '../config/author.js';
 import type { BrainCollection, RefKind } from '../config/types-knowledge.js';
 import type { ResolvedElsewhereEntry } from './resolved-elsewhere.js';
 import { isNewerCopy, supersededVia, tombstoneGoverns, heldTombstoneRefuses } from './held-tombstone-rules.js';
-import { authoredContentHash, bodiesDiffer, BodyNotRead, BODY_FIELDS_OF, type AuthoredContent } from './authored-content.js';
+import { authoredContentHash, bodiesDiffer, tieHashes, BodyNotRead, BODY_FIELDS_OF, type AuthoredContent } from './authored-content.js';
 
 /** The minimum shape this module needs: everything sync replicates carries an id and a seq. */
 export interface Replicable {
@@ -73,6 +75,21 @@ export function retagToLocalSpace(docs: readonly unknown[], localSpaceId: string
 export function seqGuard(id: string, seq: number | undefined): Record<string, unknown> {
   if (typeof seq !== 'number') return { _id: id };
   return { _id: id, $or: [{ seq: { $lt: seq } }, { seq: { $exists: false } }] };
+}
+
+/**
+ * The write guard of a PARENT SWAP (Q-324): the filter under which an arriving copy that WINS the tie replaces the stored copy at the SAME seq.
+ * `seqGuard` cannot be it (it admits only a lower seq), and "the same seq" alone cannot be either: a racing push of a third body at that seq would be
+ * replaced unseen, and its text stored nowhere. So the guard names the stored copy the verdict rested on, by its id, its seq and every BODY field as it was
+ * read (an absent field by `null`, which matches absent and null alike). A local edit meanwhile stamps a higher seq and fails it, as does any other write
+ * to the body: the copy is kept, and the miss goes to the divergence path (`Q-232`), which plans again against what is stored now.
+ *
+ * What it prevents: a swap that overwrites a version the planner never saw.
+ */
+export function equalSeqSwapGuard(family: string, id: string, seq: number, stored: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const fields = BODY_FIELDS_OF[family];
+  if (!fields) throw new Error(`equalSeqSwapGuard: '${family}' is not a family that forks`);
+  return { _id: id, seq, ...Object.fromEntries(fields.map(f => [f, stored[f] ?? null])) };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -193,6 +210,12 @@ export interface StoredCopy {
    */
   bodyHash?: AuthoredContent;
   /**
+   * The stored row the hash was made of (the body projection: body fields and version metadata, no local-only field), read in the same pass as `bodyHash`.
+   * It is what a PARENT SWAP needs and nothing else does (Q-324): the fork the stored copy becomes is made of it, and the swap guard names it. Read with
+   * the hash, so the two describe one read and a copy that changed between them cannot be hashed as one thing and forked as another.
+   */
+  row?: Readonly<Record<string, unknown>>;
+  /**
    * A FILE row's own fields, read for the equal-seq convergence (`Q-419`): who authored it, the timestamp two copies
    * may disagree about, and the hash of everything else the wire carries.
    *
@@ -268,6 +291,13 @@ export interface ArrivalPlan<T extends ArrivalDoc> {
   accepts: Map<string, Array<{ index: number; doc: T }>>;
   /** New forks to write, ids already derived, seqs still to be allocated. */
   forks: Array<{ index: number; doc: T }>;
+  /**
+   * Parent swaps (Q-324): arriving copies that WIN the tie against a stored (or earlier in-page) copy at an equal seq with other content, so they take
+   * the parent slot. Each names the stored row it replaces (`stored`, the swap guard's input) and the id the loser became a fork under; that fork row is in
+   * `forks` (unless it is already stored) and is written FIRST, so a failed parent write leaves both texts stored and never one text stored nowhere.
+   * Never in `accepts`: that list is written before any fork, and a swap is written after it.
+   */
+  swaps: Array<{ index: number; doc: T; stored: Readonly<Record<string, unknown>>; loserForkId: string }>;
   /**
    * File rows that CONVERGE: the arriving copy is the author's own, at the same seq and the same authored content, and
    * only its timestamp differs (`convergesOnAuthorStamp`).
@@ -501,6 +531,17 @@ function uniqueKey(kind: PlannedFamily, d: ArrivalDoc): string | undefined {
 }
 
 /**
+ * At an EQUAL seq with DIFFERENT content, does the arriving copy take the parent slot? The lower hash wins: a total order every instance computes alike
+ * from the two copies alone, so two peers that each hold one copy end holding the same parent. What prevents: each peer keeping its own text as the
+ * parent for ever, the two parents differing and the space hash with them (Q-324, and the files' Q-426, which asks the same question of its own hash).
+ *
+ * The hash is each family's own definition of its body (`tieHashes` for the families that fork); the RULE is this one comparison.
+ */
+export function arrivingWinsTie(arrivingHash: string, storedHash: string): boolean {
+  return arrivingHash < storedHash;
+}
+
+/**
  * The seq of the tombstone that governs `doc`, or `undefined` when none does.
  *
  * A held tombstone from a different issuer than the record's author is someone else's statement about an id, so it
@@ -546,7 +587,8 @@ export function heldTombstoneLeavesFork(held: HeldTombstone, author: string | un
  * - Chrono, on PUSH only: a type outside this space's vocabulary is `unknownType`, before anything else is
  *   consulted (the one door difference — `ArrivalPlanInput.door` says why).
  * - Every family that forks (`FORKING_FAMILIES`): no copy -> `inserted` (facts) or `upserted`; a higher seq -> `updated` or
- *   `upserted`; an equal seq with a different BODY (`divergesFrom`, the body hash) -> a FORK; anything else -> `skipped`. The
+ *   `upserted`; an equal seq with a different BODY (`divergesFrom`, the body hash) -> a FORK of the HIGHER-hash copy, the lower being the parent
+ *   (`arrivingWinsTie`: an arriving copy that is the lower becomes a parent SWAP, `plan.swaps`, and the stored copy the fork); anything else -> `skipped`. The
  *   other families (links, file metadata) carry no body of their own to disagree about: no copy or a higher seq ->
  *   `upserted`, else `skipped`.
  * - A row that arrives carrying `forkOf` is judged by what it says it is first (`forkRowVerdict`): an id that does not derive from
@@ -574,7 +616,7 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
   const forking = (FORKING_FAMILIES as readonly string[]).includes(kind);
   const hashOf = input.hashOf ?? bodyHashesOf(kind);
   const plan: ArrivalPlan<T> = {
-    verdicts: [], forkIds: [], accepts: new Map(), forks: [], converges: [], unverifiable: [], marks: [], tombstoneCleanups: new Map(),
+    verdicts: [], forkIds: [], accepts: new Map(), forks: [], swaps: [], converges: [], unverifiable: [], marks: [], tombstoneCleanups: new Map(),
   };
   /** The version of each id this page has accepted so far — what a later copy is compared against. */
   const overlay = new Map<string, T>();
@@ -600,14 +642,9 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     return { seq: accepted.seq, ...(accepted.forkOf !== undefined ? { forkOf: accepted.forkOf } : {}), get bodyHash() { return hashOf(accepted); } };
   };
 
-  const accept = (i: number, doc: T, verdict: ArrivalVerdict, tomb: number | undefined, via: string | undefined): void => {
-    plan.verdicts[i] = verdict;
-    const prev = parentOf(doc._id);
+  /** `doc` is now the version of its id this page holds: what a later copy is compared against, and the owner of its unique-index key. */
+  const holdVersion = (doc: T): void => {
     overlay.set(doc._id, doc);
-    if (!plan.accepts.has(doc._id)) plan.accepts.set(doc._id, []);
-    plan.accepts.get(doc._id)!.push({ index: i, doc });
-    // A foreign fork arriving under its parent is a sibling as soon as it is stored, as it was one at a time.
-    if (forking && doc.forkOf && doc.forkOf !== prev) forksMade.set(doc.forkOf, (forksMade.get(doc.forkOf) ?? 0) + 1);
     const key = uniqueKey(kind, doc);
     if (key !== undefined) {
       const old = ownKey.get(doc._id);
@@ -615,6 +652,70 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
       keyOwner.set(key, doc._id);
       ownKey.set(doc._id, key);
     }
+  };
+  /** May this page make one more fork of `id` (`known`: it already exists, so no cap is consulted)? */
+  const forkFits = (id: string): boolean => forkDepth(id, parentOf) < MAX_FORK_DEPTH && siblingsOf(id) < MAX_FORKS_PER_RECORD;
+  /** Make `forkId` a fork of `id`, from `row`, written by the door at its own local version. */
+  const makeFork = (i: number, id: string, forkId: string, row: T, at: number): void => {
+    newForks.add(forkId);
+    forksMade.set(id, (forksMade.get(id) ?? 0) + 1);
+    plan.forks.push({ index: i, doc: { ...row, _id: forkId, forkOf: id, forkAt: at } });
+  };
+  /**
+   * The arriving copy WINS the tie at an equal seq (Q-324): it takes the parent slot and the copy it displaces becomes the fork, under the id the peer
+   * that holds the displaced body as its own arrival mints (`forkIdFor(id, seq, body)`), so both instances name one fork. Returns false when the fork the
+   * loser would become does not fit its caps: the arriving copy is then refused as any fork is, and the stored copy stays, so no text is lost.
+   *
+   *  - against the STORED copy: a swap. The loser fork is made of the row read with its hash, and is skipped when it is already stored (a divergence from
+   *    before this rule: both forks are there and only the parent differs, which a swap alone converges).
+   *  - against a copy THIS PAGE accepted: the earlier copy becomes the fork and the arriving one takes its place in the write, so a page holding two
+   *    divergent copies of one id decides as two pages would.
+   */
+  const winTie = (i: number, doc: T, cur: StoredCopy, earlier: T | undefined, tomb: number | undefined, via: string | undefined): boolean => {
+    const id = doc._id;
+    if (earlier === undefined) {
+      if (cur.row === undefined) throw new BodyNotRead(kind, id);
+      const loserForkId = forkIdFor(id, doc.seq, cur.bodyHash!.text);
+      const known = input.existingForks?.has(loserForkId) === true || newForks.has(loserForkId);
+      if (!known && !forkFits(id)) return false;
+      if (!known) makeFork(i, id, loserForkId, cur.row as unknown as T, doc.seq);
+      plan.swaps.push({ index: i, doc, stored: cur.row, loserForkId });
+      holdVersion(doc);
+      plan.verdicts[i] = 'forked'; plan.forkIds[i] = loserForkId;
+      // The stored copy is already above a tombstone the page still sees: a write landed and its cleanup did not.
+      const curSeq = cur.seq;
+      if (tomb !== undefined && curSeq !== undefined && curSeq > tomb && !plan.tombstoneCleanups.has(id)) plan.tombstoneCleanups.set(id, { below: curSeq, onLanding: false });
+      return true;
+    }
+    const earlierForkId = forkIdFor(id, doc.seq, hashOf(earlier).text);
+    const known = input.existingForks?.has(earlierForkId) === true || newForks.has(earlierForkId);
+    if (!known && !forkFits(id)) return false;
+    const swap = plan.swaps.find(s => s.doc === earlier);
+    const earlierIndex = swap?.index ?? plan.accepts.get(id)?.find(a => a.doc === earlier)?.index;
+    if (earlierIndex === undefined) throw new Error(`planArrivals: the earlier copy of '${id}' is neither accepted nor swapped in this page`);
+    const earlierVerdict = plan.verdicts[earlierIndex]!;
+    if (!known) makeFork(earlierIndex, id, earlierForkId, earlier, doc.seq);
+    plan.verdicts[earlierIndex] = 'forked'; plan.forkIds[earlierIndex] = earlierForkId;
+    if (swap) {
+      swap.doc = doc; swap.index = i;
+      holdVersion(doc);
+      plan.verdicts[i] = 'forked'; plan.forkIds[i] = swap.loserForkId;
+      return true;
+    }
+    const list = plan.accepts.get(id)!;
+    list.splice(list.findIndex(a => a.doc === earlier), 1);
+    accept(i, doc, earlierVerdict, tomb, via);
+    return true;
+  };
+
+  const accept = (i: number, doc: T, verdict: ArrivalVerdict, tomb: number | undefined, via: string | undefined): void => {
+    plan.verdicts[i] = verdict;
+    const prev = parentOf(doc._id);
+    if (!plan.accepts.has(doc._id)) plan.accepts.set(doc._id, []);
+    plan.accepts.get(doc._id)!.push({ index: i, doc });
+    // A foreign fork arriving under its parent is a sibling as soon as it is stored, as it was one at a time.
+    if (forking && doc.forkOf && doc.forkOf !== prev) forksMade.set(doc.forkOf, (forksMade.get(doc.forkOf) ?? 0) + 1);
+    holdVersion(doc);
     if (tomb !== undefined) {
       superseded.add(doc._id);
       plan.tombstoneCleanups.set(doc._id, { below: doc.seq, onLanding: true });
@@ -676,6 +777,19 @@ export function planArrivals<T extends ArrivalDoc>(docs: readonly T[], input: Ar
     const newer = isNewerCopy(doc.seq, curSeq);
 
     if (forking && cur !== undefined && !newer && divergesFrom(kind, doc, cur, hashOf)) {
+      /*
+       * THE TIE (Q-324). Two copies of one record at one version that say different things: the one with the lower body hash is the parent, on every
+       * instance, so two instances that each hold one end holding the same parent. When the arriving copy is the lower, it takes the parent slot and the
+       * copy it displaces is what forks — under the id the other instance derives for that body. A stored fork is no parent and never takes part (no fork
+       * of a fork is minted, below), and a loser that cannot fork for the caps leaves the stored copy standing and the arriving one refused.
+       */
+      if (cur.forkOf === undefined) {
+        const [arrivingHash, heldHash] = tieHashes(hashOf(doc), cur.bodyHash!);
+        if (arrivingWinsTie(arrivingHash, heldHash)) {
+          if (!winTie(i, doc, cur, accepted, tomb, via)) plan.verdicts[i] = 'forkRefused';
+          return;
+        }
+      }
       // The fork's id proves its body: a copy whose body a stored fork (or one this page made) already holds IS that fork, found by id, so a
       // re-delivery adds no row whatever cap the parent has reached since. A FACT fork a 5.6.2 or later instance stored is under the id its TEXT derives.
       const forkId = forkIdFor(doc._id, doc.seq, hashOf(doc).text);

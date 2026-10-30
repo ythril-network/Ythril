@@ -36,7 +36,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
-import { FORK_FIXTURE, forkingFamilies, forkIdOf, copyOf, arrivalDoors } from './_fork-kinds.mjs';
+import { FORK_FIXTURE, forkingFamilies, forkIdOf, copyOf, copyBeating, arrivalDoors } from './_fork-kinds.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -48,7 +48,10 @@ const THEIRS = 'what the peer wrote';
 
 let door, FAMILIES, DOORS;
 
-const subject = (family) => copyOf(family, S, ID, SEQ, 'what this instance wrote', { author: { ...PEER_AUTHOR } });
+// Re-anchored for Q-324: the stored subject is the copy the tie rule makes the PARENT against the arriving one (found by search, the order being the
+// server's), so the arriving copy is the fork it was before the rule; the copy that wins the tie is `an-equal-seq-divergence-keeps-the-lower-body-as-parent-db`.
+const SUBJECTS = {};
+const subject = (family) => SUBJECTS[family];
 const arriving = (family) => copyOf(family, S, ID, SEQ, THEIRS, { author: { ...PEER_AUTHOR } });
 const forkRows = (family) => door.coll(S, family).find({ forkOf: ID }).toArray();
 
@@ -79,6 +82,7 @@ describe('a copy whose body a stored fork holds is that fork (Q-624)', { skip },
     door = await openPullDoor({ suite: 'q624t2_matched', spaces: [S] });
     DOORS = arrivalDoors(door, TOKEN);
     FAMILIES = await forkingFamilies();
+    for (const family of FAMILIES) SUBJECTS[family] = await copyBeating(family, S, ID, SEQ, arriving(family), 'what this instance wrote', { author: { ...PEER_AUTHOR } });
   });
   after(async () => { await door?.close(); });
 

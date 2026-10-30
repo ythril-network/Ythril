@@ -36,7 +36,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
-import { FORK_FIXTURE, forkingFamilies, forkIdOf, copyOf, arrivalDoors } from './_fork-kinds.mjs';
+import { FORK_FIXTURE, forkingFamilies, forkIdOf, copyOf, copyBeating, arrivalDoors } from './_fork-kinds.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -51,7 +51,11 @@ let door, FAMILIES;
 const rows = (space, family, filter = {}) => door.coll(space, family).find(filter).sort({ _id: 1 }).toArray();
 const forksOf = (space, family) => rows(space, family, { forkOf: ID });
 const theirs = (family, space) => copyOf(family, space, ID, SEQ, 'what the peer wrote', { author: { ...PEER_AUTHOR } });
-const mine = (family, space) => copyOf(family, space, ID, SEQ, 'what this instance wrote', { author: { ...PEER_AUTHOR } });
+// Re-anchored for Q-324: the stored copy is the one the tie rule makes the PARENT against `theirs` (found by search, the order being the server's), so the
+// arriving copy is the fork it always was. The other order, where the arriving copy takes the parent slot, is
+// `an-equal-seq-divergence-keeps-the-lower-body-as-parent-db`.
+const MINE = {};
+const mine = (family, space) => ({ ...MINE[family], spaceId: space });
 
 /** One way to deliver `docs` (of one family) to every receiver, per door: `arrivalDoors`. */
 let DELIVER;
@@ -61,6 +65,7 @@ describe('every kind that forks forks on every door, and two receivers derive on
     door = await openPullDoor({ suite: 'q624t2_doors', spaces: SPACES });
     DELIVER = arrivalDoors(door, TOKEN);
     FAMILIES = await forkingFamilies();
+    for (const family of FAMILIES) MINE[family] = await copyBeating(family, SPACES[0], ID, SEQ, theirs(family, SPACES[0]), 'what this instance wrote', { author: { ...PEER_AUTHOR } });
   });
   after(async () => { await door?.close(); });
 
@@ -89,7 +94,7 @@ describe('every kind that forks forks on every door, and two receivers derive on
           if (forks[0].forkAt !== SEQ) failures.push(`${via}/${family}/${space}: the fork row says forkAt ${forks[0].forkAt}, the shared version is ${SEQ}`);
           if (forks[0]._id !== expected) failures.push(`${via}/${family}/${space}: fork id ${forks[0]._id}, section 3 derives ${expected}`);
           if (forks[0][field] !== 'what the peer wrote') failures.push(`${via}/${family}/${space}: the fork says ${JSON.stringify(forks[0][field])}`);
-          if (parent?.[field] !== 'what this instance wrote' || parent.forkOf !== undefined) {
+          if (parent?.[field] !== MINE[family][field] || parent.forkOf !== undefined) {
             failures.push(`${via}/${family}/${space}: the stored copy changed: ${JSON.stringify(parent)}`);
           }
         }

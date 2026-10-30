@@ -321,15 +321,23 @@ describe('planArrivals — the page accept, decided as sequential processing dec
     assert.equal(p.accepts.get('f').at(-1).doc.seq, 6);
   });
 
-  it('an equal seq: equal body is skipped, a different body forks, for every forking kind; a family that never forks is still skipped', () => {
+  it('an equal seq: equal body is skipped, a different body forks, for every forking kind; a family that never forks is still skipped', async () => {
     // Inverted for Q-624 (design rev 4 section 4, re-anchor table :298-303): it read "an entity never forks".
+    // Re-anchored for Q-324: within a page the LOWER-hash copy is the one that is written, and the other is the fork, whichever came first.
+    const H = await import('../../server/dist/sync/authored-content.js');
     for (const kind of P.FORKING_FAMILIES) {
       const field = MAIN_FIELD[kind];
       const x = base(kind), y = base(kind, { [field]: 'something else' });
       assert.deepEqual(plan(kind, [x, { ...x }]).verdicts, [kind === 'facts' ? 'inserted' : 'upserted', 'skipped'], `${kind}: an equal copy is not skipped`);
+      const first = kind === 'facts' ? 'inserted' : 'upserted';
+      const [yHash, xHash] = H.tieHashes(H.authoredContentHash(kind, y), H.authoredContentHash(kind, x));
+      const yWins = P.arrivingWinsTie(yHash, xHash);
       const split = plan(kind, [x, y]);
-      assert.deepEqual(split.verdicts, [kind === 'facts' ? 'inserted' : 'upserted', 'forked'], `${kind}: a different body at an equal seq does not fork`);
+      assert.deepEqual(split.verdicts, yWins ? ['forked', first] : [first, 'forked'], `${kind}: a different body at an equal seq does not fork`);
+      assert.equal(split.forks.length, 1, `${kind}: one of the two is the fork`);
       assert.equal(split.forks[0].doc.forkOf, 'p');
+      assert.equal(split.accepts.get('p').length, 1, `${kind}: one copy is written as the parent`);
+      assert.equal(split.accepts.get('p')[0].doc[field], (yWins ? y : x)[field], `${kind}: the written parent is not the lower-hash copy`);
     }
     // Links and file metadata carry no body of their own to disagree about (a link's body is its identity), so an equal seq is a skip.
     // Under the id its endpoints derive: any other id is refused before an equal seq is asked (`underivedId`, Q-222).
@@ -381,7 +389,11 @@ describe('planArrivals — the page accept, decided as sequential processing dec
     // Re-anchored for Q-624 (not in the design's re-anchor table, and it must be): a stored copy at an EQUAL seq now carries the hash of its body, because
     // `divergesFrom` throws `BodyNotRead` for one that does not (decision D8), so the fixture reads the body the way the door does.
     const H = await import('../../server/dist/sync/authored-content.js');
-    const stored = new Map([['f', { seq: 5, fact: 'root', bodyHash: H.authoredContentHash('facts', { _id: 'f', seq: 5, fact: 'root' }) }]]);
+    // Re-anchored for Q-324: the stored copy is the LOWEST-hash one here (its text found by search, never assumed), so every arriving variant loses the
+    // tie and forks, as before; the copy that wins the tie is the rule's own case (`an arriving copy that wins the tie`, below).
+    const lowest = (() => { for (let i = 0; ; i++) { const t = `root ${i}`; if ([...Array(4).keys()].every(k => H.authoredContentHash('facts', { _id: 'f', seq: 5, fact: `v${k}` }).hash > H.authoredContentHash('facts', { _id: 'f', seq: 5, fact: t }).hash)) return t; } })();
+    const rootDoc = { _id: 'f', seq: 5, fact: lowest };
+    const stored = new Map([['f', { seq: 5, fact: lowest, bodyHash: H.authoredContentHash('facts', rootDoc), row: rootDoc }]]);
     const variants = Array.from({ length: 4 }, (_, i) => doc('f', 5, { fact: `v${i}` }));
     const p = plan('facts', variants, { stored, siblings: new Map([['f', P.MAX_FORK_DEPTH - 2]]) });
     assert.deepEqual(p.verdicts, ['forked', 'forked', 'forkRefused', 'forkRefused']);
@@ -426,8 +438,19 @@ describe('an equal-seq copy that says something different forks, for every forki
     assert.ok(Array.isArray(P.FORKING_FAMILIES) && P.FORKING_FAMILIES.length >= 4, 'FORKING_FAMILIES is not exported by sync/upsert-plan.ts');
     return H;
   };
-  const held = (kind, d) => ({ seq: d.seq, ...(d.forkOf ? { forkOf: d.forkOf } : {}), bodyHash: H.authoredContentHash(kind, d) });
+  // `row` is the stored row the door reads with the hash (Q-324): what the fork a parent swap makes is made of.
+  const held = (kind, d) => ({ seq: d.seq, ...(d.forkOf ? { forkOf: d.forkOf } : {}), bodyHash: H.authoredContentHash(kind, d), row: d });
   const plan = (kind, docs, over = {}) => P.planArrivals(docs, { kind, door: 'push', stored: new Map(), tombstones: new Map(), deliveredBy: undefined, ...over });
+  /** Does `arriving` win the tie against `stored`, by the server's own rule. */
+  const wins = (kind, arriving, stored) => P.arrivingWinsTie(...H.tieHashes(H.authoredContentHash(kind, arriving), H.authoredContentHash(kind, stored)));
+  /** A body for `kind`'s main field that sorts BELOW every one of `others` under the tie rule: the stored copy that every variant then loses to, found by search, never assumed. */
+  const lowestAgainst = (kind, others) => {
+    for (let i = 0; i < 10000; i++) {
+      const candidate = base(kind, { [MAIN_FIELD[kind]]: `stored ${i}` });
+      if (others.every(o => wins(kind, candidate, o))) return candidate;
+    }
+    throw new Error(`${kind}: no stored body found that beats every variant`);
+  };
   const against = (kind, stored, arriving, over = {}) => plan(kind, [arriving], { stored: new Map([['p', held(kind, stored)]]), ...over });
   const FIRST = (kind) => (kind === 'facts' ? 'inserted' : 'upserted');
   /** A fork row of `kind` under the subject `p`, its id derived the way a sender derives it. */
@@ -450,9 +473,12 @@ describe('an equal-seq copy that says something different forks, for every forki
         assert.deepEqual(p.verdicts, ['forked'], `${kind}.${field}: a different value at an equal seq does not fork`);
         assert.equal(p.forks.length, 1);
         assert.equal(p.forks[0].doc.forkOf, 'p');
-        assert.equal(p.forks[0].doc.seq, 5, 'the planned fork carries the arriving seq of the copy, which the writer then stamps locally');
+        assert.equal(p.forks[0].doc.seq, 5, 'the planned fork carries the shared seq of the copy, which the writer then stamps locally');
         assert.equal(p.forks[0].doc.forkAt, 5, 'the fork records the shared version its id is derived from');
-        assert.equal(p.forks[0].doc._id, P.forkIdFor('p', 5, H.authoredContentHash(kind, arriving).text), `${kind}.${field}: the fork id is not derived from the body`);
+        // Q-324: the LOWER-hash copy is the parent. The fork is the arriving copy when it loses, and the stored copy when it wins (and the arriving copy swaps in).
+        const forked = wins(kind, arriving, base(kind)) ? base(kind) : arriving;
+        assert.equal(p.swaps.length, wins(kind, arriving, base(kind)) ? 1 : 0, `${kind}.${field}: the parent swap is not what the tie says`);
+        assert.equal(p.forks[0].doc._id, P.forkIdFor('p', 5, H.authoredContentHash(kind, forked).text), `${kind}.${field}: the fork id is not derived from the body of the copy that lost the tie`);
         assert.equal(p.forkIds[0], p.forks[0].doc._id);
       }
     }
@@ -495,9 +521,58 @@ describe('an equal-seq copy that says something different forks, for every forki
     leaf();
     for (const kind of P.FORKING_FAMILIES) {
       const variants = Array.from({ length: 4 }, (_, i) => base(kind, { [MAIN_FIELD[kind]]: `variant ${i}` }));
-      const p = plan(kind, variants, { stored: new Map([['p', held(kind, base(kind))]]), siblings: new Map([['p', P.MAX_FORKS_PER_RECORD - 2]]) });
+      // The stored copy is chosen to beat every variant under the tie rule (Q-324), so each variant is a plain fork and the cap is what is asked.
+      const p = plan(kind, variants, { stored: new Map([['p', held(kind, lowestAgainst(kind, variants))]]), siblings: new Map([['p', P.MAX_FORKS_PER_RECORD - 2]]) });
       assert.deepEqual(p.verdicts, ['forked', 'forked', 'forkRefused', 'forkRefused'], `${kind}: the cap is not applied`);
       assert.equal(p.forks.length, 2);
+    }
+  });
+
+  it('an arriving copy that wins the tie swaps in: the stored copy becomes the fork under the id its body derives, nothing is written but the swap and that fork (Q-324)', () => {
+    leaf();
+    for (const kind of P.FORKING_FAMILIES) {
+      const mainField = MAIN_FIELD[kind];
+      const arriving = base(kind, { [mainField]: 'the arriving body' });
+      // A stored body that LOSES to the arriving one, found by search: the lower hash is the arriving copy's.
+      let storedDoc;
+      for (let i = 0; !storedDoc; i++) { const c = base(kind, { [mainField]: `stored ${i}` }); if (wins(kind, arriving, c)) storedDoc = c; }
+      const p = against(kind, storedDoc, arriving);
+      const loserId = P.forkIdFor('p', 5, H.authoredContentHash(kind, storedDoc).text);
+      assert.deepEqual([p.verdicts, p.forkIds], [['forked'], [loserId]], `${kind}: the arriving copy won the tie, so what became a fork is the stored one`);
+      assert.deepEqual(p.swaps.map(s => [s.index, s.doc, s.loserForkId]), [[0, arriving, loserId]], `${kind}: the arriving copy is not the swap`);
+      assert.deepEqual([...p.accepts.keys()], [], `${kind}: a swap is written after its fork, so it is no accept`);
+      assert.deepEqual(p.forks.map(f => [f.doc._id, f.doc.forkOf, f.doc.forkAt, f.doc[mainField]]), [[loserId, 'p', 5, storedDoc[mainField]]], `${kind}: the fork is not made of the stored row`);
+      // A fork already stored under that id (a divergence from before the rule): only the parent changes.
+      const known = against(kind, storedDoc, arriving, { existingForks: new Set([loserId]), siblings: new Map([['p', P.MAX_FORKS_PER_RECORD]]) });
+      assert.deepEqual([known.verdicts, known.forks.length, known.swaps.length], [['forked'], 0, 1], `${kind}: a known loser fork must swap without minting another or consulting the cap`);
+      // The loser would exceed the cap: the arriving copy is refused and the stored one stays, so no text is lost.
+      const capped = against(kind, storedDoc, arriving, { siblings: new Map([['p', P.MAX_FORKS_PER_RECORD]]) });
+      assert.deepEqual([capped.verdicts, capped.forks.length, capped.swaps.length], [['forkRefused'], 0, 0], `${kind}: a swap whose loser fork exceeds the cap must not swap`);
+      // A stored copy handed over without its row is a door's defect, never a silent fork of the wrong side.
+      assert.throws(() => plan(kind, [arriving], { stored: new Map([['p', { seq: 5, bodyHash: H.authoredContentHash(kind, storedDoc) }]]) }), /body/i, `${kind}: a swap without the stored row must throw`);
+      // Equal and different copies of a STORED FORK take no part in the tie: no fork of a fork.
+      const guard = P.equalSeqSwapGuard(kind, 'p', 5, storedDoc);
+      assert.deepEqual([guard._id, guard.seq], ['p', 5]);
+      for (const f of H.BODY_FIELDS_OF[kind]) assert.ok(f in guard, `${kind}: the swap guard leaves the body field '${f}' unnamed`);
+    }
+  });
+
+  it('two divergent copies of one id in one page decide as two pages would: the lower hash is written, the other is the fork, whichever came first (Q-324)', () => {
+    leaf();
+    for (const kind of P.FORKING_FAMILIES) {
+      const field = MAIN_FIELD[kind];
+      // Both orders of the same two copies.
+      for (const order of [0, 1]) {
+        const first = base(kind, { [field]: 'first copy' }), second = base(kind, { [field]: 'second copy' });
+        const page = order === 0 ? [first, second] : [second, first];
+        const lower = wins(kind, second, first) ? second : first;
+        const higher = lower === first ? second : first;
+        const p = plan(kind, page);
+        assert.deepEqual(p.accepts.get('p').map(a => a.doc[field]), [lower[field]], `${kind}/${order}: the written parent is not the lower-hash copy`);
+        assert.deepEqual(p.forks.map(f => f.doc[field]), [higher[field]], `${kind}/${order}: the higher-hash copy is not the one fork: it would be stored nowhere`);
+        assert.equal(p.verdicts.filter(v => v === 'forked').length, 1, `${kind}/${order}: one of the two answers forked`);
+        assert.equal(p.swaps.length, 0, `${kind}/${order}: nothing stored is displaced`);
+      }
     }
   });
 

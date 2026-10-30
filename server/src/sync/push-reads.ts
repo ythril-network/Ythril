@@ -86,8 +86,10 @@ export async function readPushStored(
   for (const d of docs) (arriving.get(d._id) ?? arriving.set(d._id, new Set()).get(d._id)!).add(d.seq);
   const equal = [...base].filter(([id, row]) => typeof row.seq === 'number' && arriving.get(id)?.has(row.seq)).map(([id]) => id);
   if (equal.length === 0) return base;
-  const bodies = await readStoredById<Record<string, unknown>>(collection, equal, bodyProjectionOf(family));
-  for (const [id, row] of bodies) base.set(id, { ...base.get(id)!, bodyHash: authoredContentHash(family, row) });
+  // `deliveredBy` rides along for a swap's fork, which keeps who delivered the copy it is made of (`ArrivalOptions.deliveredByOf`); the hash ignores it.
+  const bodies = await readStoredById<Record<string, unknown>>(collection, equal, { ...bodyProjectionOf(family), deliveredBy: 1 });
+  // The row rides with its hash: a parent swap forks the stored copy and guards its write by it (Q-324), and both must be the copy that was hashed.
+  for (const [id, row] of bodies) base.set(id, { ...base.get(id)!, bodyHash: authoredContentHash(family, row), row });
   return base;
 }
 

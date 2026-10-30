@@ -128,3 +128,16 @@ export function bodiesDiffer(a: AuthoredContent, b: AuthoredContent): boolean {
   if ((a.carriesRedaction || b.carriesRedaction) && a.redacted && b.redacted) return bodiesDiffer(a.redacted, b.redacted);
   return a.normalised && b.normalised ? a.hash !== b.hash : a.rawHash !== b.rawHash;
 }
+
+/**
+ * The two hashes the tie rule orders a divergent pair by (`arrivingWinsTie`, `sync/upsert-plan.ts`): the SAME projection `bodiesDiffer` chose for the
+ * pair, so "do they differ" and "which one is the parent" are asked of one thing. A pair `bodiesDiffer` calls equal never reaches the tie, and a pair it
+ * calls different has two different hashes here. Returned in the argument order, `[a's, b's]`.
+ *
+ * What it prevents: ordering by `hash` while `bodiesDiffer` compared `rawHash` (one copy failing its schema) or the redaction-blanked bodies would let
+ * the two instances of a pair pick different parents, each reading a different projection of the same two copies.
+ */
+export function tieHashes(a: AuthoredContent, b: AuthoredContent): [string, string] {
+  if ((a.carriesRedaction || b.carriesRedaction) && a.redacted && b.redacted) return tieHashes(a.redacted, b.redacted);
+  return a.normalised && b.normalised ? [a.hash, b.hash] : [a.rawHash, b.rawHash];
+}

@@ -28,12 +28,12 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
-import { forkIdOf } from './_fork-kinds.mjs';
+import { forkIdOf, splitByTie } from './_fork-kinds.mjs';
 
 const skip = await mongoSkipReason();
 
 const S = 'pushfork';
-let door, CAP;
+let door, CAP, ROOT;
 const forks = () => door.coll(S, 'facts').countDocuments({ forkOf: 'f' });
 const variant = (i) => build.fact(S, 'f', 5, { fact: `variant ${i}` });
 
@@ -41,11 +41,20 @@ describe('a push forks once, within the fan-out cap, on both doors', { skip }, (
   before(async () => {
     door = await openPushDoor({ suite: 'pushfork', spaces: [{ id: S, label: 'Forks', folders: [], meta: {} }] });
     ({ MAX_FORK_DEPTH: CAP } = await import('../../server/dist/api/sync/_shared.js'));
+    // Re-anchored for Q-324: the stored root is a body that WINS the tie against every variant a case sends (found by search, the order being the server's),
+    // so each variant is a plain fork under the cap, as before the rule. A variant that wins is a swap, which is the subject of
+    // `an-equal-seq-divergence-keeps-the-lower-body-as-parent-db`.
+    for (let n = 0; ROOT === undefined; n++) {
+      const candidate = build.fact(S, 'f', 5, { fact: `root ${n}` });
+      let beatsAll = true;
+      for (let i = 0; i <= CAP + 6; i++) beatsAll &&= (await splitByTie('facts', variant(i), candidate)).parent === candidate;
+      if (beatsAll) ROOT = candidate.fact;
+    }
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => {
     await door.wipe(S);
-    await door.coll(S, 'facts').insertOne(build.fact(S, 'f', 5, { fact: 'root' }));
+    await door.coll(S, 'facts').insertOne(build.fact(S, 'f', 5, { fact: ROOT }));
   });
 
   it('the cap is ten, as the red-team test and the docs state', () => { assert.equal(CAP, 10); });
@@ -99,7 +108,7 @@ describe('a push forks once, within the fan-out cap, on both doors', { skip }, (
       const one = await door.push('/facts', variant(1), { spaceId: S });
       assert.equal(one.body.forkId, expected, `single: the fork was stored under ${one.body.forkId}, its body derives ${expected}`);
       await door.wipe(S);
-      await door.coll(S, 'facts').insertOne(build.fact(S, 'f', 5, { fact: 'root' }));
+      await door.coll(S, 'facts').insertOne(build.fact(S, 'f', 5, { fact: ROOT }));
       await door.push('/batch-upsert', { facts: [variant(1)] }, { spaceId: S });
       assert.deepEqual((await door.coll(S, 'facts').find({ forkOf: 'f' }).toArray()).map(d => d._id), [expected], 'batch: the fork id is not the one its body derives');
     });
