@@ -47,6 +47,15 @@ They are short, and they are there because the reasoning used to live only in co
 that are gitignored. If a change of yours contradicts one, that is not automatically wrong — but it needs its own
 record rather than arriving inside an unrelated commit.
 
+### Where the maintainers' working rules live
+
+The maintainers work tickets through a process graph, the `y-flows` space on their Ythril instance, whatever agent or person
+does the work. Its project layer holds the Ythril rules (nodes named `convention-ythril-*`, `pitfall-ythril-*` and the like),
+each attached to the step it applies to: whoever works a step fetches that phase and reads it whole, and its conventions,
+pitfalls and checks are the rules for that step. A comment that names such a node (for example "the y-flows convention
+`convention-find-every-instance`") states the rule beside it, so a reader without the graph still has it. No tracked file
+points at an agent's local, untracked rule sheet instead: `no-tracked-file-cites-the-local-rule-sheet` refuses one.
+
 ## Repository Layout
 
 ```text

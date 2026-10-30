@@ -8,7 +8,7 @@
  * `REPLICATED_FAMILIES` order — then facts, entities, edges, chrono, links, filemeta — so an edge to a chrono entry, or a
  * link to a file, created in the same interval was checked while its target was still to be pulled, and recorded as a
  * violation. Each record had a fresh uuid that nothing dedupes, so every later re-landing of the edge added another.
- * This is the copy that RECORDS rather than refuses (y-flows convention `convention-ythril-every-edge-writer-states-its-functional-guard`): an operator reads each of those as real damage. And
+ * This is the copy that RECORDS rather than refuses (the y-flows red flag `red-flag-architecture-copy-that-records`): an operator reads each of those as real damage. And
  * every landed edge cost two unawaited `findOne`s, every link one — about twenty thousand on a 50-page pull.
  *
  * So a door collects what landed (`add`) and checks once (`run`) when its transfer is whole: a pull after every

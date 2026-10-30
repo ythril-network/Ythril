@@ -148,7 +148,7 @@ describe('recall filter: both doors accept and refuse the same things', () => {
       // The agreement, stated separately so a failure says which half moved rather than only that one did.
       assert.equal(rest.accepted, mcp.accepted,
         `the two doors disagree about ${JSON.stringify(filter)}: REST ${rest.accepted ? 'accepted' : 'refused'}, `
-        + `MCP ${mcp.accepted ? 'accepted' : 'refused'} — this is the parity defect CLAUDE.md calls the half `
+        + `MCP ${mcp.accepted ? 'accepted' : 'refused'} — this is the door-parity defect (y-flows convention-ythril-both-doors-same-parameters), the half `
         + `that hides. REST said "${rest.detail}", MCP said "${mcp.detail}"`);
     });
   }
