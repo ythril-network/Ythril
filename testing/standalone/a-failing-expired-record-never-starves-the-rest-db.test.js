@@ -62,7 +62,8 @@ describe('a failing expired record never starves the rest', { skip }, () => {
       logMod.log[level] = (m, ...rest) => { lines.push(String(m)); return orig(m, ...rest); };
       restoreLog.push(() => { logMod.log[level] = orig; });
     }
-    faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['deleteOne']);
+    // A fact's delete is one `deleteMany` over its chunk's ids, inside the removal's transaction (`removeRecords`, Q-313): the refused write is that.
+    faults = failWrites(Object.getPrototypeOf(door.mongo.col('probe')), ['deleteMany']);
   });
   after(async () => {
     faults?.restore();
@@ -74,7 +75,7 @@ describe('a failing expired record never starves the rest', { skip }, () => {
     await door.coll(A, 'facts').insertMany(Array.from({ length: TOTAL }, (_, i) => factDoc(A, factId(i))));
     await door.coll(A, 'entities').insertMany([0, 1, 2].map((i) => ({ _id: `ent-${i}`, spaceId: A, name: `e${i}`, type: 'thing', seq: 1, _expireAt: PAST })));
     await door.coll(B, 'facts').insertMany([0, 1, 2].map((i) => factDoc(B, `b-fact-${i}`)));
-    faults.fail('deleteOne', `${A}_facts`, new Error('simulated: the delete was refused'), { times: HEAD });
+    faults.fail('deleteMany', `${A}_facts`, new Error('simulated: the delete was refused'), { times: HEAD });
 
     const deleted = await sweepExpired(new Date());
 
