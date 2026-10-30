@@ -142,7 +142,7 @@ describe('the embedding suppression section', () => {
   const withMeta = (meta: Record<string, unknown>) => {
     const h = setup(true, {
       updateSpace: vi.fn().mockReturnValue(of({ space: { id: 'proj', label: 'Project' } })),
-      reembedSpace: vi.fn().mockReturnValue(of({ spaceId: 'proj', enqueued: 12, skippedSuppressed: 0, byKind: { fact: 12 }, remaining: 0, truncated: false })),
+      reembedSpace: vi.fn().mockReturnValue(of({ spaceId: 'proj', enqueued: 12, skippedSuppressed: 0, byKind: { fact: 12 }, stale: 0, remaining: 0, truncated: false })),
     });
     h.state.settingsSpace.set({ id: 'other', label: 'Other', meta } as never);
     TestBed.tick();
