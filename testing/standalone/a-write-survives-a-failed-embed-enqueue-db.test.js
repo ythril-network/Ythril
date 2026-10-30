@@ -30,7 +30,7 @@ process.env['CONFIG_PATH'] = CONFIG_PATH;
 
 const SPACE = 'general';
 
-let mongo, fact, bulk, log;
+let mongo, fact, bulk, log, files;
 let original = null;
 let failJobs = false;
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
@@ -45,6 +45,7 @@ describe('a write survives a failed embed enqueue', { skip }, () => {
     (await import('../../server/dist/config/loader.js')).loadConfig();
     fact = await import('../../server/dist/brain/fact.js');
     bulk = await import('../../server/dist/brain/bulk.js');
+    files = await import('../../server/dist/files/file-meta.js');
     log = (await import('../../server/dist/util/log.js')).log;
     const proto = Object.getPrototypeOf(mongo.col('probe'));
     original = proto.bulkWrite;
@@ -62,7 +63,7 @@ describe('a write survives a failed embed enqueue', { skip }, () => {
 
   beforeEach(async () => {
     failJobs = false;
-    for (const c of ['facts', 'embed_jobs', 'links']) await coll(c).deleteMany({});
+    for (const c of ['facts', 'files', 'embed_jobs', 'links']) await coll(c).deleteMany({});
   });
 
   it('a single fact write lands and answers success, with a warning naming the count', async () => {
@@ -82,6 +83,41 @@ describe('a write survives a failed embed enqueue', { skip }, () => {
     assert.equal(await coll('embed_jobs').countDocuments({}), 0, 'the simulated failure did not apply — the test checks nothing');
     assert.ok(warned.some(m => /1 record\(s\)/.test(m) && /NOT queued/.test(m) && /reembed/.test(m)),
       `no warning said how many records were not queued and how to repair it: ${JSON.stringify(warned)}`);
+  });
+
+  it('the warning says what is true for an update as well as for a new record, and names the repair that covers both', async () => {
+    const warned = [];
+    const was = log.warn;
+    log.warn = (m) => { warned.push(String(m)); };
+    failJobs = true;
+    try {
+      await fact.saveFact(SPACE, 'stored although its job could not be queued, again');
+    } finally {
+      failJobs = false;
+      log.warn = was;
+    }
+    const text = warned.join('\n');
+    // The old sentence promised the repair queues "every record that has no vector", which is false for an update: it keeps the vector.
+    assert.doesNotMatch(text, /queues every record that has no vector/, 'the warning still promises a repair that skips an updated record');
+    assert.match(text, /an updated one keeps the vector and the lexical text of its previous content/, `the warning does not say what an update is left with: ${text}`);
+    assert.match(text, /POST \/api\/spaces\/:id\/reembed queues both/, `the warning does not name the repair that covers both: ${text}`);
+  });
+
+  it('a local file-metadata write whose job cannot be queued warns instead of passing silently', async () => {
+    const warned = [];
+    const was = log.warn;
+    log.warn = (m) => { warned.push(String(m)); };
+    failJobs = true;
+    try {
+      await files.upsertFileMeta(SPACE, 'docs/enqueue-fails.md', 12, { description: 'stored although its job could not be queued' });
+    } finally {
+      failJobs = false;
+      log.warn = was;
+    }
+    assert.ok(await coll('files').findOne({ _id: 'docs/enqueue-fails.md' }), 'the file row was not stored');
+    assert.equal(await coll('embed_jobs').countDocuments({}), 0, 'the simulated failure did not apply — the test checks nothing');
+    assert.ok(warned.some(m => /NOT queued/.test(m) && /reembed/.test(m)),
+      `a file write whose enqueue failed said nothing: ${JSON.stringify(warned)}`);
   });
 
   it('a batch lands every record and reports no item error for the queue', async () => {
