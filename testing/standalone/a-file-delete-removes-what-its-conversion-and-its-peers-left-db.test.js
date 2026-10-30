@@ -54,6 +54,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { fileWithEverything, ARRIVER } from './_file-with-everything.mjs';
+import { waitForReading } from '../_shared/wait-for.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -225,8 +226,11 @@ describe('deleting a file removes what its conversion and its peers left, and on
       }
       assert.equal((await acts.raw()).length, tombstonesBefore,
         'retiring a delivered sidecar wrote a tombstone: the path is instance-local, so a deletion would be announced to peers that never received it');
-      // Files no request named were removed: one audit entry for the space, with no token (as the stray drain's drop).
-      const audit = await door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation: 'file.peer_sidecar.retire' }).toArray();
+      // Files no request named were removed: one audit entry for the space, with no token (as the stray drain's drop). The entry is written
+      // without being awaited (`logInternalAudit`), so it is waited for; a second entry, had one been written, would be read with it.
+      const audit = await waitForReading(
+        () => door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation: 'file.peer_sidecar.retire' }).toArray(),
+        (rows) => rows.length > 0, 5000, 50, { what: 'the peer sidecar retirement audit entry' });
       assert.equal(audit.length, 1, `the retirement was audited ${audit.length} times (want once for the space): ${JSON.stringify(audit)}`);
       assert.equal(audit[0].tokenId ?? null, null, 'the retirement was audited as a token\'s act');
     });
