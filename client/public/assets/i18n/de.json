@@ -1624,7 +1624,7 @@
   "networks.refusal.space_name_in_use": "In diesem Netzwerk synchronisiert bereits ein anderer Space unter diesem Namen. Wählen Sie einen anderen Namen.",
   "networks.refusal.round_expired": "Die Abstimmung über diese Runde ist beendet. Die Stimme wurde nicht gezählt.",
   "networks.refusal.record_version_at_ceiling": "Die Version von Datensatz {{id}} hat die höchste Nummer erreicht, die die Synchronisierung akzeptiert. Diese Instanz kann ihn deshalb nicht mehr ändern oder löschen; die Instanz, die ihn geschrieben hat, kann es weiterhin.",
-  "networks.refusal.endpoint_removed": "Die Entität {{id}} an einem Ende dieser Beziehung wurde beim Speichern gelöscht oder zusammengeführt, deshalb wurde die Beziehung zurückgenommen. Lade den Graphen neu und versuche es erneut.",
+  "networks.refusal.endpoint_removed": "Die Entität {{id}} an einem Ende dieser Beziehung wurde beim Speichern gelöscht oder zusammengeführt, deshalb wurde die Beziehung zurückgenommen. Laden Sie den Graphen neu und versuchen Sie es erneut.",
   "networks.wizard.continue": "Weiter",
   "networks.wizard.back": "Zurück",
   "networks.wizard.step1.resultItem": "Ergebnis: Verwenden Sie den öffentlichen Hostnamen als myUrl/instanceUrl im Join-Flow.",
