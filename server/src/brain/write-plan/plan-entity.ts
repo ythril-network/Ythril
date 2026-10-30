@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { authorRef } from '../../config/author.js';
 import { type ContradictionWarning } from '../insert-contradictions.js';
 import { entityEmbedText } from '../embed-text.js';
+import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
 import { classifyEntityUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
@@ -69,7 +70,7 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
   input.onValidation?.(check);
 
   const now = new Date().toISOString();
-  // `matchedText` is stored either way: it is exactly what the queued job will embed.
+  // The text is exactly what the queued job will embed; what a write stores of it is `derivedFieldsForWrite`'s to say.
   const merged = mergeTagsAndProperties(existing, { tags, properties });
   const embedText = entityEmbedText(name, type, merged.tags, description ?? existing?.description, merged.properties);
 
@@ -83,12 +84,13 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
     wanted: opts?.waitForEmbedding === true || opts?.checkDuplicates === true || opts?.checkContradictions === true,
     text: () => embedText,
   });
-  const embeddingFields = { matchedText: embedText, ...vector };
+  // The vector and the text it was made from go in together or not at all (rule I, `derivedFieldsForWrite`).
+  const derived = await derivedFieldsForWrite({ text: () => embedText, vector, suppressed, onto: existing ? 'stored' : 'insert' });
 
   if (existing) {
-    const $set: Record<string, unknown> = { name, type, tags: merged.tags, properties: merged.properties, updatedAt: now, ...embeddingFields };
+    const $set: Record<string, unknown> = { name, type, tags: merged.tags, properties: merged.properties, updatedAt: now, ...derived.set };
     if (description !== undefined) $set['description'] = description;
-    const $unset: Record<string, unknown> = {};
+    const $unset: Record<string, unknown> = { ...derived.unset };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'entity', existing: existing as unknown as Record<string, unknown> }); // F10
     const result = convergeResult(existing, $set, $unset);
@@ -117,7 +119,7 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
   // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always.
   const doc: EntityDoc = {
     _id: uuidv4(), spaceId, name, type, tags, properties, author: authorRef(),
-    createdAt: now, updatedAt: now, seq: 0, ...embeddingFields,
+    createdAt: now, updatedAt: now, seq: 0, ...derived.set,
   };
   if (description !== undefined) doc.description = description;
   // `typed` is what makes the SCHEMA tier reachable for retention.

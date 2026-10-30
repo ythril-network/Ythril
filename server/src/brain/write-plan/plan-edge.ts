@@ -20,6 +20,7 @@
  */
 import { authorRef } from '../../config/author.js';
 import { edgeEmbedText } from '../embed-text.js';
+import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { getSpaceMeta, applyPropertyDefaults, validationRefuses, type ResolvedEdgeEnds } from '../../spaces/schema-validation.js';
 import { functionalSubjectKey } from '../functional-subject.js';
@@ -357,30 +358,31 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
 
   // Suppression wins over `waitForEmbedding`, on the record the write LEAVES (`Q-194`). An edge keys its schema
   // on `label`, not `type`, which `schemaKeyFor` already encodes.
-  // `matchedText` only on the inline path, where the text is built: the queued job writes its own.
-  let matchedText: string | undefined;
+  // The text only where it is asked for: the inline path, or a record the write leaves suppressed (which no job will
+  // write it for). Resolving the endpoint NAMES is a read; the queued job resolves them itself from the stored edge.
+  let built: Promise<string> | undefined;
+  const text = () => built ??= (async () => {
+    const [fromName, toName] = await resolveEdgeEndpointNames(spaceId, from, to, opts?.fromKind, opts?.toKind);
+    return edgeEmbedText(fromName, label, toName, effectiveTags, effectiveType, effectiveDesc, effectiveProps);
+  })();
   const { suppressed, vector } = await vectorBeforeWrite({
     spaceId, kind: 'edge', existing, schemaKey: { label }, stated: opts?.suppressEmbeddings,
     wanted: opts?.waitForEmbedding === true,
-    // Resolving the endpoint NAMES is a read, so it happens only on the inline path; the queued job resolves
-    // them itself from the stored edge.
-    text: async () => {
-      const [fromName, toName] = await resolveEdgeEndpointNames(spaceId, from, to, opts?.fromKind, opts?.toKind);
-      matchedText = edgeEmbedText(fromName, label, toName, effectiveTags, effectiveType, effectiveDesc, effectiveProps);
-      return matchedText;
-    },
+    text,
   });
-  const embeddingFields = vector ? { ...vector, matchedText: matchedText! } : {};
+  // The vector and the text it was made from go in together or not at all (rule I, `derivedFieldsForWrite`). An edge's
+  // insert asks for `stored` as well: with no vector its text is left to the job, which costs the two reads only once.
+  const derived = await derivedFieldsForWrite({ text, vector, suppressed, onto: 'stored' });
 
   if (existing) {
-    const $set: Record<string, unknown> = { updatedAt: now, ...embeddingFields };
+    const $set: Record<string, unknown> = { updatedAt: now, ...derived.set };
     if (weight !== undefined) $set['weight'] = weight;
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
     // When tags are provided, persist the merged result; otherwise leave existing tags unchanged.
     if (tags !== undefined) $set['tags'] = effectiveTags;
     if (properties !== undefined) $set['properties'] = effectiveProps;
-    const $unset: Record<string, unknown> = {};
+    const $unset: Record<string, unknown> = { ...derived.unset };
     // Correcting a kind back to `entity` must UNSET it: absent is the canonical form, and a stored `'entity'`
     // would make this edge unfindable by its own triplet lookup.
     for (const side of ['fromKind', 'toKind'] as const) {
@@ -429,7 +431,7 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
     author: authorRef(),
     createdAt: now, updatedAt: now, seq: 0,
     ...(functionalGuard !== undefined ? { [FUNCTIONAL_GUARD]: functionalGuard } : {}),
-    ...embeddingFields,
+    ...derived.set,
   };
   // `doc.label`, NOT `doc.type` — an edge has both, and the schema is keyed by label.
   stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'edge', type: doc.label });
