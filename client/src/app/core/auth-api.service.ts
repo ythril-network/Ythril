@@ -67,7 +67,7 @@ export class AuthApi {
    */
   updateToken(
     id: string,
-    patch: { name?: string; rights?: TokenRights; mfa?: 'inherit' | 'exempt' | 'required' },
+    patch: { name?: string; rights?: TokenRights; mfa?: 'inherit' | 'exempt' | 'required'; rateLimitPerMinute?: number | null },
     totpCode?: string,
   ): Observable<{ token: TokenRecord }> {
     // Granting an MFA exemption costs a live TOTP code on this request, even from a token that is itself
