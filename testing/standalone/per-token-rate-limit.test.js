@@ -236,6 +236,16 @@ describe('one rule, both write paths, and the read surface agrees', () => {
     assert.match(env, new RegExp(`name: '${ENV}'`), 'the quota env var must be in NUMERIC_SETTINGS');
   });
 
+  it('the PATCH body takes null to clear a quota, and refuses what is not a whole number (Q-473)', async () => {
+    // The setter could clear a quota and the rule allows it, but the PATCH body refused null, so a limit set once from Settings
+    // could never be emptied back to inheriting the instance value.
+    const { RenameTokenBody } = await import('../../server/dist/api/tokens.js');
+    for (const [value, accepted] of [[null, true], [250, true], [undefined, true], ['250', false], [2.5, false]]) {
+      const body = value === undefined ? {} : { rateLimitPerMinute: value };
+      assert.equal(RenameTokenBody.safeParse(body).success, accepted, `PATCH body ${JSON.stringify(body)}: accepted should be ${accepted}`);
+    }
+  });
+
   it('a cleared quota is expressible — null means inherit again', () => {
     const tokens = stripComments(readFileSync('server/src/auth/tokens.ts', 'utf8'));
     assert.match(bodyOf(tokens, 'setTokenRateLimit'), /if \(perMinute === null\) delete/,
