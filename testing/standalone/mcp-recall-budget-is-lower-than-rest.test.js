@@ -3,7 +3,7 @@
  *
  * ## Why a divergence needs its own gate
  *
- * `CLAUDE.md`'s first rule is that MCP and REST are one API with two doors, taking the same parameters — and
+ * The y-flows convention `convention-ythril-both-doors-same-parameters` is that MCP and REST are one API with two doors, taking the same parameters — and
  * that the half which hides is the parameters, not the capabilities. This change deliberately breaks symmetry
  * on one value, so it is exactly the shape that rule exists to catch. The defence is that the divergence is
  * *the narrowing itself*: both doors accept `maxBytes` with the same floor, ceiling and refusal, and only the
@@ -113,7 +113,7 @@ describe('every call site uses its own door\'s default', () => {
      *
      * So the claim inverted, and this is the positive half of it: not merely that nobody hard-codes a
      * number (`the-byte-budget-follows-the-door-not-the-module` asserts that), but that every site
-     * genuinely goes through the resolver. `CLAUDE.md` holds the divergence to three conditions and this is
+     * genuinely goes through the resolver. The y-flows convention `convention-ythril-sanctioned-door-divergences` holds the divergence to three conditions and this is
      * the second — *every MCP call site resolves through it rather than one remembering to*.
      */
     const calls = [...MCP.matchAll(/resolveBudget\(/g)];
@@ -162,7 +162,7 @@ describe('every call site uses its own door\'s default', () => {
 describe('both doors say so, in the surface a caller reads', () => {
   it('the MCP schema names its own default AND the other door\'s', () => {
     /*
-     * `help()` tells callers the tool schema IS the authoritative reference, and CLAUDE.md records what a
+     * `help()` tells callers the tool schema IS the authoritative reference, and the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` records what a
      * stale sentence there cost: The fleet integrator read "filter applied after vector search", believed it, and built a
      * skill that avoided filtered recall. A default that differs per door and is stated on neither is the same
      * failure waiting — a caller measures 25000, concludes it is the product's limit, and designs around it.

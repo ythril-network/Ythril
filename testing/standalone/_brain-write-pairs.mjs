@@ -7,7 +7,7 @@
  * handlers actually read?" Three gates ask it (`a-route-reads-what-its-tool-declares`, `a-route-judges-before-it-checks-the-body`,
  * `the-at-least-one-sentence-has-one-spelling`). Each would otherwise carry its own pair table and its own reader, and a
  * reader that misses a spelling makes its gate report clean about a key it never saw — the defect this repo names most
- * (`CLAUDE.md`, "A gate concludes about MORE than it checks").
+ * (y-flows convention `convention-a-test-derives-its-set`: a gate concludes about MORE than it checks).
  *
  * ## What it refuses to do quietly, which is the half a hand-written copy drops
  *

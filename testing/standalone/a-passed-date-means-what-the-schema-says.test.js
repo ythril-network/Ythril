@@ -112,7 +112,7 @@ describe('both doors take the same space-meta fields', () => {
    * Found by sweeping F-26 before it merged, in F-26's own code. The MCP tool built its `meta` payload from a
    * HARD-CODED array of five key names beside a schema that declared six: `whenDuePasses` was declared,
    * accepted by the dispatcher, and then silently dropped before the write. REST stored it; MCP did not, and
-   * said nothing — which `CLAUDE.md` names as worse than either door refusing, because the behaviour then
+   * said nothing — which the y-flows convention `convention-ythril-both-doors-same-parameters` names as worse than either door refusing, because the behaviour then
    * depends on which client the caller happened to pick.
    *
    * So the rule is asserted rather than the field: every meta key the REST body schema accepts is one the

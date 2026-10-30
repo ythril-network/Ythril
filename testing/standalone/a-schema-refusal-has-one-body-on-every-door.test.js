@@ -9,7 +9,7 @@
  * one dropped the message, so the same refusal read `Error: schema_violation` there and `Error: schema_violation: <the
  * sentence>` through `callTool`), a refused merge answered `{ error: <sentence>, violations }`, a bulk row carried a
  * string built from the bare reasons. Each was correct on the day it was written; together they made the answer depend
- * on which client the caller picked, which is the defect `CLAUDE.md` opens with.
+ * on which client the caller picked, which is the defect the y-flows convention `convention-ythril-both-doors-same-parameters` opens with.
  *
  * ## What is derived, never listed
  *

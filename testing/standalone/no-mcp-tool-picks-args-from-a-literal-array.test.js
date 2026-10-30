@@ -6,7 +6,7 @@
  * `schema_update` built its payload from `['typeSchemas', 'validationMode', 'strictLinkage',
  * 'usageNotes', 'suppressEmbeddings']` — five names, sitting next to an `inputSchema` that declared six.
  * `whenDuePasses` was therefore DECLARED on the tool, accepted by the dispatcher, and silently dropped
- * before the write. REST stored it; MCP did not; nothing said so. `CLAUDE.md` names that shape as worse
+ * before the write. REST stored it; MCP did not; nothing said so. The y-flows convention `convention-ythril-both-doors-same-parameters` names that shape as worse
  * than either door refusing, because the behaviour then depends on which client the caller picked.
  *
  * `save_space` had the same shape and was correct — six of seven, plus one translated name. Correct today

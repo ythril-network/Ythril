@@ -8,7 +8,7 @@
  * it. `traverseFromSeeds` — recall's expansion — needed the same three, which would have made six copies of
  * one rule in one file.
  *
- * `CLAUDE.md` names that exact shape as the defect this repo produces most, and the three copies had already
+ * The y-flows convention `convention-find-every-instance` names that exact shape as a defect, and the three copies had already
  * started to differ in the small: chrono and fact read `doc.entityIds` directly, files read
  * `(doc.entityIds ?? [])` because a filemeta record may have none. One of those is right for all three.
  *

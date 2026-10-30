@@ -326,7 +326,7 @@ export function listTokens(): (Omit<TokenRecord, 'hash'> & { rateLimitEffective:
      *
      * In `listTokens` and not in the REST response shaper, because the MCP `list_tokens` tool calls this
      * function directly. Deriving it at one door would give the two doors different answers to the same
-     * question, which is the parity defect `CLAUDE.md` calls the most expensive lesson in this codebase.
+     * question, which is the door-parity defect (y-flows convention `convention-ythril-both-doors-same-parameters`).
      */
     rateLimitEffective: resolveLimitFor(rest),
   }));

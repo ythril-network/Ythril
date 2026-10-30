@@ -7,7 +7,7 @@
  * `link`, never `file`. The `POST` door, twenty-eight lines below it in the same file, validated the incoming
  * array with `z.enum(KNOWLEDGE_TYPES)`: four members, no `link`.
  *
- * One rule, two doors, the weaker one winning silently. `CLAUDE.md` names that as the defect this repo
+ * One rule, two doors, the weaker one winning silently. The y-flows convention `convention-find-every-instance` names that as the defect this repo
  * produces most, and here is what it costs:
  *
  *   1. `pushTombstones` calls `listTombstones` with NO type filter, so a push page can carry a link

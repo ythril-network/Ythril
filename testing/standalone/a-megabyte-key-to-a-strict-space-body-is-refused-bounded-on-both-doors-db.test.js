@@ -16,7 +16,7 @@
  *  - **Bounded answer.** The refusal text is far shorter than the key (a fixed ceiling, not a multiple of the input), names the
  *    key's first characters (the caller must be able to find it), and says how much was cut: `…(+N chars)`.
  *  - **One text.** The MCP text is `Error (400): ` + the REST body's `error` — the same words from the same function, so
- *    the answer does not depend on which client the caller picked (`CLAUDE.md`, "check both when you change either").
+ *    the answer does not depend on which client the caller picked (y-flows convention `convention-ythril-both-doors-same-parameters`: check both when you change either).
  *  - **No whole key anywhere.** Neither the answer nor any log line carries the key whole.
  *  - **One log line, ending `…(+N chars)`.** The refusal is logged once per call, in a line that carries the key's front and
  *    ends with the count of what was cut — the shape the canary checks.

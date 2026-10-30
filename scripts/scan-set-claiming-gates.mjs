@@ -9,12 +9,12 @@
  * never will be. The defect is an array that COPIES a set the source defines: record types, collections,
  * schemas, routers, tool names. Nothing here can distinguish those without knowing what the array means.
  *
- * Wired as a gate it would be ~100 failures on a clean tree, and `CLAUDE.md` already says what happens next:
+ * Wired as a gate it would be ~100 failures on a clean tree, and what happens next is known:
  * noise is how a check gets deleted. So this prints suspicions for a person to read.
  *
  * ## What it is for
  *
- * `Q-5` found this class four times in one audit and `CLAUDE.md` gained a section for it. Turning that rule
+ * `Q-5` found this class four times in one audit and the rule became the y-flows convention `convention-a-test-derives-its-set`. Turning that rule
  * into a search rather than waiting to trip over the next instance is what found the two `Q-6` starts from —
  * and one of those had been wrong since long before the audit's scope began.
  *
@@ -36,7 +36,7 @@
  * into the real defect keeps a comment that no longer describes it — which the next reader sees.
  *
  * The reason is required and has to be a sentence, because *"checked, fine"* is what an exemption says when
- * nobody checked. `CLAUDE.md`: a reason that defers is not a reason.
+ * nobody checked. A reason that defers is not a reason.
  *
  * Run: node scripts/scan-set-claiming-gates.mjs
  */

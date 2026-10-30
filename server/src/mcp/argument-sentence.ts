@@ -1,7 +1,7 @@
 /**
  * The words a refused tool argument is said in: the one place they are spelled, for the MCP validator (`mcp/validate-args.ts`) and for a REST door
  * that validates the same parameters in code (Review's resolve, `brain/forks.ts`). What it prevents: one missing parameter answered in the
- * validator's words on one door and in ours on the other, so the behaviour depended on which client the caller picked (CLAUDE.md, "MCP and REST
+ * validator's words on one door and in ours on the other, so the behaviour depended on which client the caller picked (y-flows convention `convention-ythril-both-doors-same-parameters`, "MCP and REST
  * are ONE API with two doors"). Import-free, so any module may ask it.
  */
 

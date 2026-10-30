@@ -7,7 +7,7 @@
  *  - **(i) `schema_update` against `SpaceMetaBody`.** The tool's declared properties are the meta body's keys, plus the two
  *    top-level `UpdateSpaceBody` keys it also forwards (`typeSchemasMode`, `targetNetwork`), minus a reasoned `NOT_META` list
  *    (EMPTY today, and it may only be added to with a reason). P16 found that nothing compared them: a new meta key reached REST
- *    and not the tool, which is the parity defect `CLAUDE.md` names. It holds today (this half is a guard against the next key,
+ *    and not the tool, which is the door-parity defect (y-flows convention `convention-ythril-both-doors-same-parameters`). It holds today (this half is a guard against the next key,
  *    and is NOT red on the unchanged base; its comparison is shown to fail by a control).
  *  - **(ii) `update_space` against `UpdateSpaceBody`.** Every key of the body is declared by the tool, or settable by nobody
  *    (derived from `SPACE_FIELD_RIGHTS`' `'nobody'` rows, `completeLinkage`), or in `EXEMPT` with a reason. The existing gaps

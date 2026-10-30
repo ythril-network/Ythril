@@ -7,7 +7,7 @@
  * timers are ref'd. The arms that land late are not exotic - a config reload re-arms three schedulers, the network settings
  * act armed sync behind an import nobody awaited, the backup route re-arms backups - and CI's database job twice sat out its
  * 30-minute limit on one. The switch is `closeCronArming()` (`util/cron-arming.ts`), and it only works if EVERY function
- * that registers a cron task asks it first. Refusing in one scheduler and not the next is the weaker-copy defect CLAUDE.md
+ * that registers a cron task asks it first. Refusing in one scheduler and not the next is the weaker-copy defect the y-flows convention `convention-find-every-instance`
  * names, so the rule is asserted over every cron registration there is, not over a list of the four written today.
  *
  * ## What it holds, derived

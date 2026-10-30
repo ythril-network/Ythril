@@ -14,7 +14,7 @@
  * the dispatcher's own `additionalProperties: false` never runs for it, and the handler checks none of the
  * three. The same `memories` payload is a 400 naming `facts` on one door and a clean success that wrote nothing
  * on the other. Both are individually defensible; the gap is only visible from outside, which is the shape
- * `CLAUDE.md` names as this repo's most expensive.
+ * the y-flows convention `convention-ythril-both-doors-same-parameters` names as the door-parity defect.
  *
  * ## Corrected by bundle-128 (Q-320): which names are refused
  *

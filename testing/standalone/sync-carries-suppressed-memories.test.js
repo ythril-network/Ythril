@@ -122,7 +122,7 @@ describe('a memory with no vector survives the push door', () => {
      * MERGES rather than replaces, which is exactly where a foreign vector would be hardest to notice.
      *
      * The list is now read out of the module. Not corrected to six — DERIVED — because a corrected list is
-     * the same defect with a later expiry date, and `CLAUDE.md` says so in as many words about this very
+     * the same defect with a later expiry date, and the y-flows convention `convention-a-test-derives-its-set` says so in as many words about this very
      * family of schemas: "Never count them here — the file is the list."
      *
      * The link schema is included here and not excluded as it is in the suppression gate: having nothing to

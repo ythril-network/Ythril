@@ -1,6 +1,6 @@
 /**
  * A record that arrives by PUSH is offered to this instance's embedder by this instance's rules — on both push
- * doors, for every family that embeds (`Q-107` part 1, and the owner's ruling recorded in `CLAUDE.md`, *What a
+ * doors, for every family that embeds (`Q-107` part 1, and the owner's ruling recorded in the y-flows convention `convention-ythril-receiver-decides-after-the-write`, *What a
  * receiver does after the write*).
  *
  * ## The defect this file was written red for

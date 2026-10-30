@@ -1,6 +1,6 @@
 /**
  * Every `description` string a JSON Schema carries, at any depth — the text a caller reads while constructing
- * arguments (`CLAUDE.md`: a schema description is the authoritative reference).
+ * arguments (y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost`: a schema description is the authoritative reference).
  *
  * ## Why a module
  *

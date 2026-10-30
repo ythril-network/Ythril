@@ -41,7 +41,7 @@ export interface ToolContext {
    * context; and an agent wants a sync's outcome where a script wants the answer at once — facts about the READER,
    * which the handler cannot otherwise see.
    *
-   * **Not a licence to branch on the door.** `CLAUDE.md` sanctions three divergences between the surfaces and
+   * **Not a licence to branch on the door.** the y-flows convention `convention-ythril-sanctioned-door-divergences` sanctions only the listed divergences between the surfaces and
    * a fourth needs its own argument and its own gate; a handler that reads this for anything else has made
    * one door quietly weaker than the other, which is the defect this whole module exists to prevent.
    */

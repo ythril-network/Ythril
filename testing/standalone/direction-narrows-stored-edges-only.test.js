@@ -31,7 +31,7 @@
  *
  * The rule was right; the REASON was a mechanism, and a mechanism has to be revisited every time it gains
  * a case. The integrator's graph-augmented-recall page already gave the durable version — the ends are of
- * different kinds — and the source did not. That is the `CLAUDE.md` lesson about schema descriptions,
+ * different kinds — and the source did not. That is the lesson of the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` about schema descriptions,
  * arriving in a test docblock instead: write the guarantee, not the mechanism.
  *
  * So a link scan gaining a `direction` parameter is a REGRESSION again, and this gate should be believed

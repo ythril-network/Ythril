@@ -44,7 +44,7 @@ describe('filter key shape — what a caller may never filter on', () => {
    *
    * What stays is the shape that cannot be a field at all. Keeping the old cases and merely deleting the
    * ones that turned red would have left a gate whose title still said "allowlist" over a body checking
-   * something else — which is the failure `CLAUDE.md` gives its own section to.
+   * something else — which is the failure the y-flows convention `convention-a-test-derives-its-set` exists for.
    */
   it('accepts a field the old allowlist refused', () => {
     // The capability the removal was for. `description` is a real field on every record type, and it was

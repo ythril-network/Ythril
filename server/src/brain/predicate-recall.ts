@@ -9,7 +9,7 @@
  * THEN `$match`. So it scored only the nearest window and filtered after, and a matching record outside that
  * window was dropped. Measured on a 40k-record space: 39 of 40 single-record filters on an undeclared property
  * answered `count: 0`, `truncated: false`, while `filter` found the record. The schema description, `help()`
- * and CLAUDE.md all promised the opposite, and a canary integrator built on the promise.
+ * and the project's own rules all promised the opposite, and a canary integrator built on the promise.
  *
  * ## Two stages, and the first one is usually the whole answer
  *

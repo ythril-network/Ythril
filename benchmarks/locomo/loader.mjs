@@ -190,7 +190,7 @@ const REPAIR_KINDS = {
  *
  * Pure: it does not know which turns exist, so the same function serves the question set and the author-produced
  * observation layer, which carries five instances of the identical comma-concatenation defect. Writing the split
- * a second time over there is the failure `CLAUDE.md` names as the one this repo produces most — one rule, two
+ * a second time over there is the failure the y-flows convention `convention-find-every-instance` names — one rule, two
  * implementations, and the weaker one wins silently.
  *
  * Splitting on a separator class rather than on offsets is deliberate: `"D9:1 D4:4 D4:6"` and `"D8:6; D9:17"`

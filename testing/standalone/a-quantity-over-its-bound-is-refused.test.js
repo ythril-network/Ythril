@@ -8,7 +8,7 @@
  * that refuses everything passes the first half, and one that refuses nothing passes the second.
  *
  * Fixtures are literal numbers on purpose — a fixture that reads the bound from the code under test asserts that
- * the code equals itself (`CLAUDE.md`, *A test fixture is allowed to be literal*).
+ * the code equals itself (y-flows convention `convention-a-test-derives-its-set`: *a test fixture is allowed to be literal*).
  *
  * Run: node --test testing/standalone/a-quantity-over-its-bound-is-refused.test.js
  */

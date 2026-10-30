@@ -4,7 +4,7 @@
  *
  * ## The defect, which shipped and was invisible from inside
  *
- * `CLAUDE.md` sanctions exactly one default that differs between the doors: an answer is trimmed to 25 000
+ * The y-flows convention `convention-ythril-sanctioned-door-divergences` sanctions exactly one default that differs between the doors: an answer is trimmed to 25 000
  * characters on MCP and 50 000 on REST, because *an agent pays for every byte in its own context while a
  * REST caller does not*. That is a fact about who is reading, and it was implemented as a fact about which
  * FILE was running — `server/src/mcp/tools/*.ts` named `MCP_DEFAULT_MAX_CHARS` at each `resolveBudget` call

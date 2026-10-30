@@ -13,7 +13,7 @@ import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from 
  *
  * It was stated five times across three schemas, each spelling out the MECHANISM ("it is derived on read
  * from the due moment"). `F-26` made that mechanism conditional on the type, and five independent sentences
- * are five chances for one of them to go on describing the old behaviour — the exact failure `CLAUDE.md`
+ * are five chances for one of them to go on describing the old behaviour — the exact failure the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost`
  * records about `recall`'s `filter`, where a caller read a stale schema description, believed it, and built
  * around a capability they had been told they did not have.
  *

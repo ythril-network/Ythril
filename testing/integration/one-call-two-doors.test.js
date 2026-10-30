@@ -66,7 +66,7 @@ async function viaMcp(tool, args) {
 /**
  * An answer with the ONE field the doors may disagree on taken out: the byte budget a budgeted tool applied.
  *
- * CLAUDE.md's sanctioned divergence — MCP defaults lower than REST (`MCP_DEFAULT_MAX_CHARS` against
+ * The sanctioned divergence (y-flows convention `convention-ythril-sanctioned-door-divergences`) — MCP defaults lower than REST (`MCP_DEFAULT_MAX_CHARS` against
  * `DEFAULT_MAX_CHARS`), and both doors DISCLOSE the number they used as `budgetChars`. So that number is checked
  * against each door's own default in `bothDoors`, and everything else must still match exactly. Anything that is not
  * an object, or carries no `budgetChars`, comes back as it went in.

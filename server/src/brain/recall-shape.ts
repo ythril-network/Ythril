@@ -345,7 +345,7 @@ export interface RankedLike {
  * THE ranking comparator — effective rank descending, then `_id`.
  *
  * One implementation rather than the eleven hand-written comparators this replaced — seven in `recall.ts`, two
- * here, and one member-space merge on each door. Exactly the shape `CLAUDE.md` names as this codebase's
+ * here, and one member-space merge on each door. Exactly the shape the y-flows convention `convention-find-every-instance` names as this codebase's
  * most-produced defect: one rule, several copies, and the copy that forgets is the one that decides an answer.
  *
  * The two door-side merges are the ones a sweep would miss. They are the LAST sort before the response, and

@@ -141,8 +141,8 @@ function stripServerOwnedToken(body: unknown): unknown {
 
 /**
  * The rights matrix, as either door accepts it. ONE declaration, used by the mint route and the edit
- * route — it was written out twice, identically, and `CLAUDE.md` names one rule with two
- * implementations as the defect this repo produces most.
+ * route — it was written out twice, identically, and one rule with two
+ * implementations is the defect the y-flows convention `convention-find-every-instance` names.
  *
  * **`perSpace` IS CAPPED, and the cap is why this was extracted now.** The `spaces` array it replaces
  * carried `.max(1000)`. Removing that array in 4.0 (`D-5`) would have taken the size protection with it:

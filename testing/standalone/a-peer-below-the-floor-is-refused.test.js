@@ -21,7 +21,7 @@
  * value treated as permission. Read that way, every single peer the floor exists to refuse would pass.
  *
  * **2. ONE comparison, not one per caller.** There are two enforcement points, inbound and outbound, and
- * they are the two halves of one rule. `CLAUDE.md` names this as the defect class this repo produces
+ * they are the two halves of one rule. The y-flows convention `convention-find-every-instance` names this as the defect class this repo produces
  * most, so the comparison lives in one module and both sides call it.
  *
  * ## What this gate is NOT

@@ -1,5 +1,5 @@
 /**
- * Each rule bundle-113's diff pass merged into one module still has ONE implementation (CLAUDE.md "Reuse a module" and "One rule, two
+ * Each rule bundle-113's diff pass merged into one module still has ONE implementation (y-flows conventions `convention-reuse-or-build-for-reuse` and `convention-find-every-instance`: "Reuse a module" and "One rule, two
  * implementations"). Every case asks a RULE of `server/src` as a whole, read with its comments stripped and its functions parsed: the
  * subjects are DERIVED (the callers of the one function, the functions whose bodies hold the guard), never three files that once held a
  * copy, and a CALL is matched where it is made (`callsIn` of a function body), never a mention in prose or an import.

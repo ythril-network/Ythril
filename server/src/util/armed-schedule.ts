@@ -11,7 +11,7 @@
  *
  * The fix is one rule: *arm only when the expression differs from the one already armed.* Written four times it
  * would be four chances to get the clear-on-stop half wrong, which is the half that fails CLOSED — leave the
- * fact set after a stop and the next `start` returns early, so the scheduler never runs again. `CLAUDE.md`
+ * fact set after a stop and the next `start` returns early, so the scheduler never runs again. The y-flows convention `convention-find-every-instance`
  * names that shape as the defect this repo produces most, so the rule lives here and each scheduler holds one
  * of these instead of its own bookkeeping.
  *

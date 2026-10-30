@@ -10,7 +10,7 @@
  * The other three were written up in `todo/_WRITE-PATH-VALIDATION-TODOS.md` as an untitled prose section with
  * no id and no checkbox, which meant `todo:check` could not see it, the ordered queue never mentioned it, and
  * it never entered the work order at all. It surfaced again only when the fleet integrator reported a
- * consequence from outside on 2026-08-30 — the pattern `CLAUDE.md` names as the most expensive lesson in this
+ * consequence from outside on 2026-08-30 — the pattern the y-flows convention `convention-find-every-instance` names as the most expensive lesson in this
  * codebase.
  *
  * So the rule gets a gate this time. A ruling that holds for all four record types is not four chances to

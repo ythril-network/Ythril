@@ -179,7 +179,7 @@ describe('MCP tool schemas — high-value enrichments', () => {
      *
      * The dispatcher enforces this schema BEFORE the handler runs, so a `maximum` here REFUSES a page the
      * REST door serves: a 400 on one door and an answer on the other, which is the parity defect
-     * `CLAUDE.md` names as worse than either alone. And a silent clamp was the worse half of that — a
+     * the y-flows convention `convention-ythril-both-doors-same-parameters` names as worse than either alone. And a silent clamp was the worse half of that — a
      * caller asking for 200 got 100, with `truncated` making it read as a correct short page, while the
      * per-collection list routes `filter` replaces serve 200 or 500.
      *

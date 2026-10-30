@@ -4,7 +4,7 @@
  *
  * ## Why a divergence needs its own gate
  *
- * `CLAUDE.md` sanctions a difference between the doors only as a DEFAULT and only on three conditions, written for `maxChars`
+ * The y-flows convention `convention-ythril-sanctioned-door-divergences` sanctions a difference between the doors only as a DEFAULT and only on three conditions, written for `maxChars`
  * and held by `mcp-recall-budget-is-lower-than-rest`: the difference is deliberate and real, every MCP call site resolves it
  * through the one constant rather than one remembering to, and both doors disclose the number they used. Owner decision
  * 2026-10-28: an agent calling `network_sync` wants the outcome, so MCP's `wait` defaults to true; a REST caller, a script or the

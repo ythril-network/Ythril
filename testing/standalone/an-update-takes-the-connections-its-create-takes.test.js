@@ -127,7 +127,7 @@ describe('an update takes the connections its create takes', () => {
 /**
  * The MCP half of the same rule.
  *
- * `CLAUDE.md`: *"Every capability must exist on both surfaces, and take the same parameters… not
+ * The y-flows convention `convention-ythril-both-doors-same-parameters`: *"Every capability must exist on both surfaces, and take the same parameters… not
  * 'eventually', not 'the tool wraps the route later' — the same commit."* A tool file declaring the
  * connection schema once has it on its create and not on its update, which is the REST defect wearing
  * a different door.

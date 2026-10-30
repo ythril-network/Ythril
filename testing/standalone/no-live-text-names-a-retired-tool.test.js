@@ -6,7 +6,7 @@
  * 5.0 renames almost every public identifier, and **a rename is the one change that passes a compiler while
  * leaving a document wrong.** Nothing fails: the tool is exported under its new name, the build is green,
  * every test passes — and a schema description still tells a caller to call `find_entities_by_name` first.
- * `CLAUDE.md` puts it plainly: an MCP tool's description is what a caller reads *while constructing
+ * The y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` puts it plainly: an MCP tool's description is what a caller reads *while constructing
  * arguments*, so a stale sentence there is invisible, because nobody reports a capability they were told to
  * get somewhere else.
  *

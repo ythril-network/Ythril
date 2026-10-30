@@ -75,7 +75,7 @@ const EXEMPT = new Map([
   // The reason is now true of the WHOLE router, which it was not when it was written. It covered a
   // `/api/notify/trigger` that started sync cycles, and that route is removed in 5.0 — so what is left is
   // peer notifications, which are machine-to-machine. An exemption whose reason fits one route and is
-  // applied to every route on the router is the shape `CLAUDE.md` warns about; this one stopped being it.
+  // applied to every route on the router is the shape the y-flows convention `convention-a-test-derives-its-set` warns about; this one stopped being it.
   ['/api/notify', 'peer notifications — machine-to-machine, not a user action'],
   // First-run setup happens before any token exists, so there is nobody to attribute it to.
   ['/api/setup', 'first-run setup — runs before any identity exists'],

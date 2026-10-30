@@ -91,7 +91,7 @@ export const queryTool: ToolHandler = {
             /*
              * `minimum` and NO `maximum`, and the asymmetry is deliberate. The MCP dispatcher enforces this
              * schema BEFORE the handler runs, so a `maximum` here would REFUSE a page the REST door
-             * serves: a 400 on one door and an answer on the other, which `CLAUDE.md` names in those
+             * serves: a 400 on one door and an answer on the other, which the y-flows convention `convention-ythril-both-doors-same-parameters` names in those
              * words as worse than either alone.
              */
             limit: { type: 'number', minimum: 1, default: DEFAULT_QUERY_LIMIT, description: `Max documents in this page. Default ${DEFAULT_QUERY_LIMIT}, and NOT capped — it was silently clamped to 100 until 5.0, so a caller asking for 200 got 100 with \`truncated\` making it read as a correct short page. What bounds an answer instead: the byte budget (\`maxChars\`/\`maxBytes\`) trims it and hands you \`nextSkip\`, \`maxTimeMS\` bounds the query's duration, and through a personal view \`skip + limit\` past the merge ceiling is an explicit 400 naming the limit. Compare \`count\` against \`total\` to know whether more rows satisfy the filter — a full page is not evidence that it is the last one.` },

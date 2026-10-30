@@ -6,7 +6,7 @@
  * Two instances holding one file's row at one version with different authored content (a different description, other tags) each skipped the other's
  * copy, and the space hash differed for ever. The tie every family follows (`arrivingWinsTie`, over `fileContentHash`) makes one of the two the row on
  * both. The other is the loser, and a loser that is simply overwritten is a description somebody wrote and nobody decided to lose: it is kept here,
- * in Conflicts, on the instance whose row it was (`CLAUDE.md`, "My instance = my data": the peer never decides what this instance holds, and this
+ * in Conflicts, on the instance whose row it was (y-flows convention `convention-ythril-my-instance-is-my-data`: the peer never decides what this instance holds, and this
  * instance's user decides what becomes of its own copy).
  *
  * ## Why it is written BEFORE the row is replaced, and deleted when the replace does not happen

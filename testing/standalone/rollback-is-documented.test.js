@@ -67,7 +67,7 @@ function rollbackSection() {
  *
  * At module scope because BOTH suites below need it — the persistence count and the field map. Two
  * copies of one exemption is how they drift apart, and the half that still exempts is the half that
- * wins silently. `CLAUDE.md` names it as the defect this repo produces most.
+ * wins silently. The y-flows convention `convention-find-every-instance` names it as a defect.
  *
  * Named individually with a reason rather than pattern-matched: an exemption a future migration could
  * fall into by accident is the hole this whole gate exists to prevent.

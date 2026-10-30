@@ -121,7 +121,7 @@ describe('an update can change a record\'s links', () => {
   });
 
   it('MCP: the same call through the tool door does the same thing', async () => {
-    // One capability, two doors, same commit — `CLAUDE.md`'s first rule. A tool that declares the field
+    // One capability, two doors, same commit — y-flows convention `convention-ythril-both-doors-same-parameters`. A tool that declares the field
     // and does not apply it is the REST defect wearing a different door.
     const id = must('tool fact', await P('/api/save_fact',
       { space: SPACE, fact: `tool add ${RUN}` }, ), b => b?.data?._id);

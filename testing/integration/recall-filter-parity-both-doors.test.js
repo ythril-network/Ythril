@@ -3,7 +3,7 @@
  *
  * ## Why this test and not another capability check
  *
- * `mcp-rest-parity.test.js` gates the capability half — does the tool exist for the route. `CLAUDE.md` says
+ * `mcp-rest-parity.test.js` gates the capability half — does the tool exist for the route. The y-flows convention `convention-ythril-both-doors-same-parameters` says
  * the other half is the one that hides:
  *
  * > **Parameters count too, and this is the half that hides.** A capability present on both surfaces still

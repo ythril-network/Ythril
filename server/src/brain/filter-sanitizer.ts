@@ -7,8 +7,8 @@
  * surface), `recall` (meaning-ranked search, raw grammar), and `recall`'s older operator-object grammar via
  * {@link unsafeFilterKey}. Before this file the answer lived in two places — the operator refusals and the
  * regex guard inside `brain/query.ts`, the key-shape guard inside `brain/filter.ts` — and the two grammars
- * were therefore protected by different subsets of one rule. That is the split `CLAUDE.md` names as this
- * repo's commonest defect, on the exact pair its parity section was written from.
+ * were therefore protected by different subsets of one rule. That is the one-rule-two-implementations split (y-flows convention `convention-find-every-instance`),
+ * on the exact pair the door-parity rule was written from.
  *
  * Owner, 2026-09-17: *"add the sanitizer and make it a real module."*
  *

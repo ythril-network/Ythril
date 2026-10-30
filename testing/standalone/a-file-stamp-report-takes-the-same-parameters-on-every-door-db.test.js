@@ -1,6 +1,6 @@
 /**
  * `file_stamp_report` takes the same parameters on every door, accepts the same range of each, and refuses the same values
- * with the same status (`Q-433`, plan rev 4 items 25, 28; CLAUDE.md, "MCP and REST are ONE API with two doors").
+ * with the same status (`Q-433`, plan rev 4 items 25, 28; y-flows convention `convention-ythril-both-doors-same-parameters`: MCP and REST are ONE API with two doors).
  *
  * ## The contract
  *

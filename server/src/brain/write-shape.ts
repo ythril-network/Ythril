@@ -140,7 +140,7 @@ const SHAPE: Record<ShapedType, Record<string, Check>> = {
   },
   edge: {
     label: nonEmptyStr('label'),
-    // 0–1, which both MCP doors have always enforced and neither REST door did. `CLAUDE.md`'s parity rule
+    // 0–1, which both MCP doors have always enforced and neither REST door did. The parity rule (y-flows convention `convention-ythril-both-doors-same-parameters`)
     // settles which way that resolves without a judgement call: same parameters, same caps, same refusals.
     weight: unit('weight'),
     type: str('type'),

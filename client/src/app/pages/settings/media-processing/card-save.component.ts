@@ -10,7 +10,7 @@ import { MediaProcessingStateService, type ModelCardId } from './media-processin
  * It was five lines in the tab, ten times over, differing only in the card id. Adding the three document
  * cards took the file 27 lines past the freeze in `no-new-god-files.test.js`, which is that gate working:
  * the answer to a file that keeps growing is to stop putting things in it. Ten copies of one rule is also
- * the defect `CLAUDE.md` names as the one this repository produces most, arriving as markup.
+ * the defect the y-flows convention `convention-find-every-instance` names (one rule, several copies), arriving as markup.
  *
  * ## `display: contents`, deliberately
  *

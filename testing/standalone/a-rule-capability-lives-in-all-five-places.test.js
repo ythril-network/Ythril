@@ -1,5 +1,5 @@
 /**
- * Rules and the live check live in all five places a capability lives, and each says the same thing (F-46; CLAUDE.md "The five
+ * Rules and the live check live in all five places a capability lives, and each says the same thing (F-46; y-flows convention `convention-five-places-one-commit`, "The five
  * places a capability lives — all of them, same commit").
  *
  * ## The five, for this capability
@@ -19,7 +19,7 @@
  *
  * ## What the descriptions must say, and what they must not
  *
- * An MCP schema description is read WHILE arguments are being built, and a stale sentence in it is the failure CLAUDE.md names. For
+ * An MCP schema description is read WHILE arguments are being built, and a stale sentence in it is the failure the y-flows convention `convention-ythril-a-tool-description-promises-the-guarantee-and-its-cost` names. For
  * a rule that is the GUARANTEE and the LIMITS, in the caller's terms:
  *
  * - the limits that refuse a rule at save: the rule text (1000 characters), the message (300), the rules per type (50) and per

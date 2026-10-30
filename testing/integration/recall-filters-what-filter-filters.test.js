@@ -6,7 +6,7 @@
  * The two doors already shared the operator sanitizer. They did not share the KEYS: `recall` refused any
  * key not starting with `properties.`, `tags`, `type`, `name`, `status` or `label`, while `filter` accepted
  * any field at all. So a caller could predicate on `description` through one door and was refused through
- * the other — the exact split `CLAUDE.md` names as the defect this repo produces most, and the
+ * the other — the exact split the y-flows convention `convention-find-every-instance` names, and the
  * recall/query filter pair is the example it was written from.
  *
  * ## Why the restriction went rather than being copied to `filter`

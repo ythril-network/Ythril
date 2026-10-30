@@ -49,7 +49,7 @@
  *
  * A peer that ANSWERED and reported no version is older than the release that started reporting one, so
  * it is below the floor. Read the other way — absent means "unknown, so allow" — every peer this floor
- * exists to refuse walks straight through, which is the shape `CLAUDE.md` names as this repo's most
+ * exists to refuse walks straight through, which is the shape the y-flows convention `convention-find-every-instance` names as this repo's most
  * common defect and which has shipped three times as an empty allowlist read as "unrestricted".
  *
  * **But a peer we have never exchanged with reports nothing for a completely different reason, and the
@@ -186,7 +186,7 @@ export function peerFloorRefusal(
  *
  * **Lives here rather than in the engine, and not only to keep that file from growing.** The inbound
  * middleware and this are the two halves of one rule, and one rule with two implementations is the
- * defect `CLAUDE.md` says this repo produces most. Both now sit in the module that owns the floor.
+ * defect the y-flows convention `convention-find-every-instance` names. Both now sit in the module that owns the floor.
  *
  * **The version is re-read from config, not taken from the caller.** The engine holds a `member` it
  * captured before the gossip exchange, so by the time this runs that copy is a cycle stale — an

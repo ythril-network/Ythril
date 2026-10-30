@@ -19,7 +19,7 @@
  *
  * **The two defaults are both 60 000 ms.** So the number an operator read and the number the code used
  * agreed exactly until somebody changed one, which is why a gate, a field table and a canary report could
- * all coexist with it for a release. This is the shape `CLAUDE.md` calls a gate concluding about more than
+ * all coexist with it for a release. This is the shape the y-flows convention `convention-a-test-derives-its-set` calls a gate concluding about more than
  * it checks: the title claims the property, the body checks a proxy for it, and the proxy stayed true.
  *
  * ## So this gate asserts the RULE, at the point where the number is used

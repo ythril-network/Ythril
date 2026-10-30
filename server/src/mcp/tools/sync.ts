@@ -82,7 +82,7 @@ export const network_peersTool: ToolHandler = {
            *
            * Per-row is also this tool's existing idiom — `network`, `networkId` and `networkType` are
            * already repeated on every row — and it keeps ONE spelling of the fact across both doors,
-           * which is what `CLAUDE.md` asks for. REST puts it on each member for the same reason.
+           * which is what the y-flows convention `convention-ythril-both-doors-same-parameters` asks for. REST puts it on each member for the same reason.
            */
           text: peers.length === 0
             ? 'No peers configured.'

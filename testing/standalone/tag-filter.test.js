@@ -87,7 +87,7 @@ describe('every single-tag call site uses the shared helper', () => {
    * Five hand-written paths, each asserted to contain `tagContains`, was the right gate while five
    * routes each assembled their own list filter. They now go through `conveniencePredicate`, so the
    * matcher is reached once — and a list of five names would have gone green on a sixth route that
-   * never appeared in it, which is the failure mode `CLAUDE.md` calls *a gate concluding about more
+   * never appeared in it, which is the failure mode the y-flows convention `convention-a-test-derives-its-set` calls *a gate concluding about more
    * than it checks*.
    *
    * So the rule is stated forwards: ONE module answers "what is a tag match", and nothing anywhere in

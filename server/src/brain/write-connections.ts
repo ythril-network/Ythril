@@ -39,7 +39,7 @@
  * detaches every entity and leaves the fact links alone, and there is no add-only trap to fall into.
  *
  * This module does not implement that. It maps input to the shape `reconcileLinks` already takes — see the
- * `CLAUDE.md` rule on reusing a module rather than writing the rule a second time.
+ * y-flows convention `convention-reuse-or-build-for-reuse` on reusing a module rather than writing the rule a second time.
  */
 import { REF_KINDS, LINK_INPUT_FIELDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';

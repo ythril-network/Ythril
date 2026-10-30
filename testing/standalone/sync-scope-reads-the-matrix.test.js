@@ -114,7 +114,7 @@ describe('no sync route reconstructs the rule for itself', () => {
      * This named `docs.ts`, `manifest.ts` and `tombstones.ts` under a describe reading *"no sync route
      * reconstructs the rule for itself"*. There are eight files in that directory and `index.ts` is a fourth
      * caller of `spaceAllowed` — so the claim was about every route and the loop was about three of them,
-     * which is the shape `CLAUDE.md` now has a section for.
+     * which is the shape the y-flows convention `convention-a-test-derives-its-set` is about.
      *
      * Reading the directory instead means a NINTH router is covered on the day it is added, which is
      * precisely when a copy of this rule would be written: somebody adding a sync route copies the nearest

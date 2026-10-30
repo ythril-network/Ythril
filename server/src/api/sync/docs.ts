@@ -44,7 +44,7 @@ const SERVED_AS: Partial<Record<PayloadKey, <D extends object>(doc: D) => D>> = 
  *
  * The list routes were identical apart from two names — the collection suffix and the document type — and this is the sync CONTRACT: what a page is
  * and where the cursor comes from. A copy that drifts makes replication depend on which record family a peer happened to ask for, which is the defect
- * class `CLAUDE.md` names as this repo's most expensive.
+ * class the y-flows convention `convention-find-every-instance` is about.
  *
  * ## The rule, now that it is in one place to read
  *

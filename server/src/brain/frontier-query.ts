@@ -37,7 +37,7 @@ export interface TraverseNarrowing extends LinkInclusion {
  *
  * Extracted because it was written twice and the copies disagreed: the standalone path applied a label filter
  * and honoured direction, recall's did neither. Writing the rule once is the only fix that cannot drift again —
- * `CLAUDE.md` names this exact shape as the defect this repo produces most.
+ * the y-flows convention `convention-find-every-instance` names this exact shape as a defect.
  *
  * **A fork edge is not a neighbour** (Q-624): it carries its subject's endpoints, so following it would walk the same relationship twice. The clause
  * (`CHOSEN_VERSION_ROWS`) is inside this builder, so no traversal can drop it.

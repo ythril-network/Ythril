@@ -16,7 +16,7 @@
  * So this gate holds the three properties that make the new path no weaker than the old one:
  *
  *  1. **ONE validator.** The route calls `isValidEmbedOrigin`, the same function the config-file path uses. A
- *     second copy — in the route or in the client — is the defect `CLAUDE.md` names as this repo's most frequent,
+ *     second copy — in the route or in the client — is the defect the y-flows convention `convention-find-every-instance` names,
  *     and here the weaker copy would be deciding who may frame the admin UI.
  *  2. **A bad entry is REFUSED, not dropped.** The file path drops with a warning because nobody is waiting; a form
  *     must answer. Accepting-and-silently-dropping is the exact shape of the unscoped-token defect, where a caller

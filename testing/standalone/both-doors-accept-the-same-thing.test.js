@@ -1,7 +1,7 @@
 /**
  * Where the two doors differ, the difference is the NARROWING — not the vocabulary, and not an omission.
  *
- * `CLAUDE.md`'s first rule: MCP and REST are one API with two doors, taking the same parameters, defaults,
+ * The y-flows convention `convention-ythril-both-doors-same-parameters`: MCP and REST are one API with two doors, taking the same parameters, defaults,
  * caps, refusals and error text. The guideline audit found seven places where one door quietly accepted less
  * than the other, or described something neither door does. This gate holds each of them.
  *
@@ -26,7 +26,7 @@
  * ## And the shape that recurs: a refusal one door states and the other does not
  *
  * Same cap, two behaviours is worse than either alone, because it makes the answer depend on which client
- * the caller happened to pick. `CLAUDE.md` says so in as many words.
+ * the caller happened to pick. The same convention says so in as many words.
  *
  * Run: node --test testing/standalone/both-doors-accept-the-same-thing.test.js
  */

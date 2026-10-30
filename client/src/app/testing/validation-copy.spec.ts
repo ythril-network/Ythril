@@ -5,8 +5,8 @@
  *
  * - **The Warn label promised a log.** `spaces.settings.validation.warn` said "Warn - log violations only" in all
  *   three languages; the server RETURNS the violations on the write's answer (`warnings`), it logs none of them for
- *   the caller. A label that describes a behaviour the product does not have is the stale-sentence defect CLAUDE.md
- *   describes, in the one place an operator picks the mode.
+ *   the caller. A label that describes a behaviour the product does not have is the stale-sentence defect,
+ *   found in the one place an operator picks the mode.
  * - **Two key families said the same three modes** (`spaces.create.validation.*` in the create dialog,
  *   `spaces.settings.validation.*` in the Schema tab), so the two drifted. There is ONE family now; the spec derives
  *   the key each `<option value="warn|strict|off">` uses from the templates and requires one key per mode.

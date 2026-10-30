@@ -3,9 +3,9 @@
  *
  * ## Why this is derived and not a list
  *
- * `CLAUDE.md` states the rule and states why it is written the way it is: *"The rule is 'every `Incoming*`
- * schema in `api/sync/_shared.ts`', and it is written that way on purpose… Never count them here — the file
- * is the list."* It was learned the expensive way — a gate protecting that rule kept its own hand-written
+ * The y-flows convention `convention-a-test-derives-its-set` states the rule and why it is written the way it is: *every `Incoming*`
+ * schema in `api/sync/_shared.ts`, and it is written that way on purpose… Never count them here — the file
+ * is the list.* It was learned the expensive way — a gate protecting that rule kept its own hand-written
  * list of four, missed `LinkDoc`, and so every assertion ran over the old four and **reported clean about a
  * document nobody had checked.**
  *
@@ -58,7 +58,7 @@ export function incomingSchemas(shared) {
   // THE VACUITY GUARD, and it is the whole point of deriving rather than listing. A rename, a bundler
   // change or a wrong import path would hand every caller an empty array, and an empty array passes every
   // `for` loop written over it — the same silent pass this helper exists to end. Six is what the rule in
-  // `CLAUDE.md` describes today; the assertion is a floor rather than an equality so that ADDING a seventh
+  // `api/sync/_shared.ts` holds today; the assertion is a floor rather than an equality so that ADDING a seventh
   // schema does not fail a gate about something else, while losing one still does.
   assert.ok(found.length >= 6,
     `only ${found.length} Incoming*Doc schemas found in sync/incoming-schemas.js (${found.map(([n]) => n).join(', ') || 'none'}) — `

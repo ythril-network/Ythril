@@ -37,8 +37,8 @@ export type FilterExpression = Record<string, FilterOperator>;
  *
  * This list refused any other key. `filter` — the structured-read door — has never had the restriction and
  * accepts any field, so a caller could predicate on `description` through one door and was refused through
- * the other. That is the split `CLAUDE.md` names as this repo's commonest defect, and the recall/query
- * filter pair is the example it was written FROM.
+ * the other. That is the split where one door enforces a rule the other does not, and the recall/query
+ * filter pair is the example the door-parity rule (y-flows convention `convention-ythril-both-doors-same-parameters`) was written FROM.
  *
  * Owner, 2026-09-17: *"same for the recall with filter — should accept the same filtering … they need to
  * be the same."*
@@ -57,7 +57,7 @@ export type FilterExpression = Record<string, FilterOperator>;
  * `recall-filter.ts` held a byte-identical copy of both — the same six prefixes and the same three-clause
  * matching rule — while already importing `validateFilterExpression` from this file. Two implementations of
  * one rule is the defect this codebase produces most, and the recall/query filter pair is the example
- * `CLAUDE.md` was written from: a caller reaches one grammar or the other depending on which door they
+ * the door-parity rule was written from: a caller reaches one grammar or the other depending on which door they
  * happened to pick, and the weaker copy is invisible from both sides.
  *
  * The stake is not injection alone. A key outside this set is one the index cannot serve, so widening it in

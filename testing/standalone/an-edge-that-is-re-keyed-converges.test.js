@@ -44,7 +44,7 @@ const src = (p) => stripComments(readFileSync(p, 'utf8'));
 describe('the re-key is one implementation, not one per path', () => {
   it('there is a named helper, and both paths reach it', () => {
     /*
-     * Two callers changing an edge's identity two ways is precisely the shape `CLAUDE.md` calls the defect
+     * Two callers changing an edge's identity two ways is precisely the shape the y-flows convention `convention-find-every-instance` calls the defect
      * this repo produces most — and a re-key written twice would be two chances to get the tombstone wrong,
      * on the one collection where getting it wrong loses a record on a peer rather than locally.
      */

@@ -200,7 +200,7 @@ describe('the declared MCP/REST gap is real in both directions', () => {
  *
  * They compare which capabilities exist, so `resolve_fork` and its route could differ in every parameter and this file would stay green:
  * the five the resolve now takes (`kind`, `forkId`, `keep`, `ifMatchSeq`, `ifMatchParentSeq`, all required, design rev 4 section 10) and the `kind`
- * the list takes are exactly the "parameter added to one surface alone" `CLAUDE.md` names. The names are compared here, against the schema
+ * the list takes are exactly the "parameter added to one surface alone" the y-flows convention `convention-ythril-both-doors-same-parameters` names. The names are compared here, against the schema
  * `brain/forks.ts` exports for the door (`ForkListParams`, `ForkResolveParams`: the one validator both doors share), derived from the module
  * rather than from the route, and the bounds are `a-tool-and-its-route-agree-on-bounds`'s. The five names are the design's own words: a
  * fixture of the rule, not a derivation of it.

@@ -3,7 +3,7 @@
  *
  * ## Why one module
  *
- * A bound written into an MCP schema and forgotten in the REST validator is the parity defect `CLAUDE.md` names first:
+ * A bound written into an MCP schema and forgotten in the REST validator is the door-parity defect (y-flows convention `convention-ythril-both-doors-same-parameters`):
  * the same call refused on one door and served on the other. The sync door had been refusing a record with more than
  * 100 tags since it was written, while all four write doors took any number — so a record saved on one instance with
  * 101 tags could never be pushed to a peer, and nothing said why. Each number below is the ONE value every schema
