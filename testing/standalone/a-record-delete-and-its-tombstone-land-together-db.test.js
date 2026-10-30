@@ -185,6 +185,38 @@ describe('a record is removed together with its tombstone, on every path', { ski
     assert.deepEqual(await tombstonesOf(EXPIRED), []);
   });
 
+  it('a cascade that fails after the commit still announces the removal: the deleted event goes out and the call still fails', async () => {
+    const removal = await import('../../server/dist/brain/record-removal.js');
+    const bus = await import('../../server/dist/brain/brain-events.js');
+    const original = removal.AFTER_REMOVAL.fact;
+    removal.AFTER_REMOVAL.fact = async () => { throw new Error('the links-from removal failed'); };
+    const seen = [];
+    const off = bus.subscribeBrainChanges(SPACE, ev => seen.push(ev));
+    try {
+      await assert.rejects(() => removal.removeRecords(SPACE, 'fact', [FACT], {}), /the links-from removal failed/, 'a failed cascade did not fail the call');
+      await new Promise(r => setTimeout(r, 100));
+    } finally { off(); removal.AFTER_REMOVAL.fact = original; }
+    assert.equal(await coll('facts').findOne({ _id: FACT }), null, 'the fixture: the removal itself stood');
+    assert.deepEqual(seen.map(e => [e.event, e.entry?._id]), [['fact.deleted', FACT]], 'the removal stood and its deleted event was lost with the cascade');
+  });
+
+  it('removing ids that are not stored opens no transaction (a 404 delete, a TTL race): one read and nothing else', async () => {
+    const removal = await import('../../server/dist/brain/record-removal.js');
+    // A transaction is `ClientSession.withTransaction` (the driver also starts implicit sessions for plain reads, which are not what this asks about).
+    const probe = mongo.getMongo().startSession();
+    const proto = Object.getPrototypeOf(probe);
+    await probe.endSession();
+    const original = proto.withTransaction;
+    let sessions = 0;
+    proto.withTransaction = function counting(...args) { sessions++; return original.apply(this, args); };
+    try {
+      assert.equal((await removal.removeRecords(SPACE, 'fact', ['aaaaaaaa-0000-4000-8000-00000000dead'])).size, 0);
+      assert.equal(sessions, 0, 'a removal of an id that is not stored opened a held transaction to read nothing');
+      assert.equal((await removal.removeRecords(SPACE, 'fact', [FACT])).size, 1, 'control: a stored fact is removed');
+      assert.ok(sessions >= 1, 'control: the removal of a stored record runs in a transaction');
+    } finally { proto.withTransaction = original; }
+  });
+
   it('the TTL sweep, control: an expired fact is removed with one tombstone carrying its seq', async () => {
     await expire();
     await mods.ttl.sweepExpired(new Date());
