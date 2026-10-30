@@ -38,21 +38,4 @@ For setting up a workstation quickly see [workstation-mode-guide.md](workstation
 20. [Settings — Embedding](userguide/04a-media-and-embedding.md#settings--embedding)
 21. [Connecting an AI assistant (MCP)](userguide/06-connecting-an-ai-assistant.md#connecting-an-ai-assistant-mcp)
 
-## Which page documents which surface
-
-A capability is documented on the page of the surface an operator uses to reach it, which is not always the Brain page:
-
-| Surface | Page |
-|---|---|
-| Signing in, navigation, what a space is | [01-getting-started.md](userguide/01-getting-started.md) |
-| The Brain tabs: Query (a search parameter such as `skip` or a filter belongs under Query, Semantic Search), Graph, Review, Entities, Edges, Facts, Chrono | [02-brain.md](userguide/02-brain.md) |
-| Files, conflict resolution, the Schema Library | [03-files-and-schemas.md](userguide/03-files-and-schemas.md) |
-| Settings: Spaces, Tokens (token controls), MFA, Networks | [04-settings.md](userguide/04-settings.md) |
-| Settings: Media Processing and Embedding (a model or media control) | [04a-media-and-embedding.md](userguide/04a-media-and-embedding.md) |
-| Settings: Storage, Data (retention), Audit Log, Webhooks, About | [05-storage-data-and-audit.md](userguide/05-storage-data-and-audit.md) |
-| Connecting an AI assistant | [06-connecting-an-ai-assistant.md](userguide/06-connecting-an-ai-assistant.md) |
-
-A parameter that exists on both APIs and is absent from the page the operator opens is a capability nobody using the UI knows about, and a
-control described on a page that no longer matches the API is worse. Put a capability change on the page of its surface, not on the Brain page by habit.
-
 ---
