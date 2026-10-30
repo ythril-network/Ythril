@@ -87,7 +87,7 @@ const EARLIER = '2026-09-01T00:00:00.000Z';
 const LATER = '2026-10-05T00:00:00.000Z';
 const SEQ = 5;
 
-let door, park, LOCAL_AUTHOR, FILE_HASH_PROJECTION, fileContentHash, arrivingWinsTie;
+let door, park, LOCAL_AUTHOR, FILE_HASH_PROJECTION, fileContentHash, arrivingWinsTie, differsInWhatIsShown;
 let n = 0;
 const files = () => door.coll(S, 'files');
 const freshId = (tag) => `conv/${tag}-${++n}.md`;
@@ -203,6 +203,7 @@ describe('an equal-seq file row converges on its author\'s updatedAt (real Mongo
     LOCAL_AUTHOR = { instanceId: door.instanceId, instanceLabel: 'Receiver' };
     ({ FILE_HASH_PROJECTION, fileContentHash } = await import('../../server/dist/brain/merkle.js'));
     ({ arrivingWinsTie } = await import('../../server/dist/sync/upsert-plan.js'));
+    ({ differsInWhatIsShown } = await import('../../server/dist/sync/metadata-conflict.js'));
     park = parkWrites(Object.getPrototypeOf(door.mongo.col('probe')));
   });
   after(async () => {
@@ -239,7 +240,11 @@ describe('an equal-seq file row converges on its author\'s updatedAt (real Mongo
           if (wins) {
             assert.equal(fileContentHash(after), fileContentHash(row.arriving), 'the winning copy is not the row');
             assert.equal(after.seq, row.stored.seq, 'a swap stamps no seq');
-            assert.equal((await door.coll(S, 'conflicts').countDocuments({ originalPath: row.stored._id })), 1, 'the displaced metadata is not kept');
+            // Kept only when it differs in a field the Conflicts page shows and Keep mine can apply (`differsInWhatIsShown`, asked of the server): a copy
+            // that differs in nothing a user could choose between, such as the field that names the row, leaves no conflict to decide.
+            const kept = differsInWhatIsShown(row.stored, row.arriving) ? 1 : 0;
+            assert.equal((await door.coll(S, 'conflicts').countDocuments({ originalPath: row.stored._id })), kept,
+              kept ? 'the displaced metadata is not kept' : 'a conflict for a difference no user can see or apply');
           } else {
             assert.deepStrictEqual(after, row.stored);
             assert.equal((await door.coll(S, 'conflicts').countDocuments({ originalPath: row.stored._id })), 0, 'a conflict for metadata that was never displaced');

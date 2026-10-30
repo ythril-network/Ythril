@@ -28,6 +28,7 @@
 import { listenApp } from '../_shared/in-process-app.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { holdDocumentLock } from './_write-faults.mjs';
+import { splitByTie } from './_fork-kinds.mjs';
 
 /** The fact every door writes to or forks from, and the peer's divergent text that makes a push FORK it. */
 export const DOOR_FACT_ID = 'bbbbbbbb-0000-4000-8000-0000000000f3';
@@ -49,9 +50,12 @@ export const DIVERGENT = 'the same fact, as the peer tells it';
  */
 export const holdForkLock = async (mongo, plan, space, factId) => {
   // Q-624 (design rev 4 section 3): a fork's id derives from its whole BODY, `forkIdFor(forkOf, forkAt, authoredContentHash(family, body).text)`,
-  // no longer from the fact's text, so the id is asked of the module that owns the body text, for the very document the push sends.
+  // no longer from the fact's text, so the id is asked of the module that owns the body text.
+  // Q-324: the copy that forks is the one the tie rule ranks second, the seeded one (`build.fact(space, factId, 3)`) as often as the one
+  // the push sends, so which it is is asked of the server's own rule; locking the other's id stalls nothing.
   const { authoredContentHash } = await import('../../server/dist/sync/authored-content.js');
-  const body = authoredContentHash('facts', build.fact(space, factId, 3, { fact: DIVERGENT })).text;
+  const { fork } = await splitByTie('facts', build.fact(space, factId, 3, { fact: DIVERGENT }), build.fact(space, factId, 3));
+  const body = authoredContentHash('facts', fork).text;
   return holdDocumentLock(mongo, `${space}_facts`, { insert: { _id: plan.forkIdFor(factId, 3, body), spaceId: space, fact: 'lock', seq: 0 } });
 };
 

@@ -50,6 +50,15 @@ const TYPE_DAYS = 7;
 const TYPE_KEY = { fact: 'type', entity: 'type', edge: 'label', chrono: 'type' };
 const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', links: 'link', filemeta: 'filemeta' };
 
+// Imported once the door is open: the server's modules read the config the harness points them at.
+let linkIdFor;
+/** A family's document named by `key`; a link's `_id` derives from its endpoints, as an arriving link's must (Q-222). */
+function docOf(familyKey, space, key, seq) {
+  if (familyKey !== 'links') return build[KIND[familyKey]](space, key, seq);
+  const from = `from-${key}`, to = `to-${key}`;
+  return build.link(space, linkIdFor(from, 'fact', to, 'entity'), seq, { from, to });
+}
+
 /** One value per local-only field the store may hold — a fixture; the field SET is the module's. */
 const LOCAL_VALUES = {
   embedding: [0.25, 0.5, 0.75],
@@ -125,6 +134,7 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
       networks: [{ id: NET, label: 'Aliased network', type: 'closed', spaces: [ALIAS_LOCAL],
         spaceMap: { [ALIAS_REMOTE]: ALIAS_LOCAL }, members: [], votingDeadlineHours: 24 }],
     });
+    ({ linkIdFor } = await import('../../server/dist/brain/link-id.js'));
     const localOnly = await import('../../server/dist/sync/local-only-fields.js');
     LOCAL_ONLY = localOnly.LOCAL_ONLY_FIELDS;
     LANDED = localOnly.isLandingStamped;
@@ -143,11 +153,11 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
       for (const via of ['single', 'batch']) {
         if (via === 'single' && !fam.single) continue;
         it(`${via} ${fam.key}: a newer copy from a peer keeps every local-only field the stored copy had`, async () => {
-          const id = `${fam.key}-kept`;
-          const stored = build[KIND[fam.key]](S, id, 5);
+          const stored = docOf(fam.key, S, `${fam.key}-kept`, 5);
+          const id = stored._id;
           const local = localFor(stored);
           await door.coll(S, fam.coll).insertOne({ ...stored, ...local });
-          const incoming = build[KIND[fam.key]](S, id, 6);
+          const incoming = docOf(fam.key, S, `${fam.key}-kept`, 6);
           const r = via === 'single'
             ? await door.push(fam.single, incoming, { spaceId: S })
             : await door.push('/batch-upsert', { [fam.key]: [incoming] }, { spaceId: S });
@@ -193,7 +203,7 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
       for (const via of ['single', 'batch']) {
         if (via === 'single' && !fam.single) continue;
         it(`${via} ${key}: a document pushed under a spaceMap alias is stored under the LOCAL space id`, async () => {
-          const doc = build[KIND[key]](ALIAS_REMOTE, `${key}-aliased`, 9);
+          const doc = docOf(key, ALIAS_REMOTE, `${key}-aliased`, 9);
           const r = via === 'single'
             ? await door.push(fam.single, doc, { spaceId: ALIAS_REMOTE, networkId: NET })
             : await door.push('/batch-upsert', { [key]: [doc] }, { spaceId: ALIAS_REMOTE, networkId: NET });
