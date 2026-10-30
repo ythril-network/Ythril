@@ -56,7 +56,9 @@ describe('an edge or link racing an entity removal never survives it', { skip },
     errors = await import('../../server/dist/util/errors.js');
     validation = await import('../../server/dist/brain/write-validation.js');
     // Absent before Q-305: the merge cases then fail on their own line rather than the whole file failing to load.
-    gone = await import('../../server/dist/brain/gone-entity-references.js').catch(() => ({ settleReferencesToRemovedEntity: () => { throw new Error('brain/gone-entity-references.ts does not exist'); } }));
+    const goneModule = await import('../../server/dist/brain/gone-entity-references.js').catch(() => ({ settleReferencesToRemovedEntity: () => { throw new Error('brain/gone-entity-references.ts does not exist'); } }));
+    // A merge's settle is told the bound the merge was held to (`executeMerge` passes MERGE_MAX_RELINKS); a case that states its own bound overrides it.
+    gone = { ...goneModule, settleReferencesToRemovedEntity: (space, id, how) => goneModule.settleReferencesToRemovedEntity(space, id, 'survivorId' in how ? { maxRelinks: merge.MERGE_MAX_RELINKS, ...how } : how) };
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => { await door.wipe(S); await door.wipe(N); });
@@ -200,6 +202,18 @@ describe('an edge or link racing an entity removal never survives it', { skip },
       assert.equal(await door.coll(S, 'links').countDocuments({ to: 'ent-a' }), 0);
       assert.ok(await door.coll(S, 'links').findOne({ _id: linkIdFor('fact-f', 'fact', 'ent-s', 'entity') }), 'the link was not moved to the survivor');
       assert.ok(await tombstoneOf(S, oldId));
+    });
+
+    it('the settle is bounded as the merge is: more references than the bound arrived and none is moved (the merge answers it the same way)', async () => {
+      await seed(S, 'ent-s', 'ent-a', 'ent-x');
+      assert.equal((await merge.mergeEntities(S, 'ent-s', 'ent-a', [])).kind, 'merged');
+      await door.coll(S, 'edges').insertMany(['knows', 'likes', 'owns'].map(label => localEdge(S, 'ent-x', 'ent-a', label)));
+      await assert.rejects(() => gone.settleReferencesToRemovedEntity(S, 'ent-a', { survivorId: 'ent-s', maxRelinks: 2 }), /more than/,
+        'a settle of more references than the merge\'s bound moved them (a peer burst read whole inside one transaction)');
+      assert.equal((await edgesNaming(S, 'ent-a')).length, 3, 'a refused settle moved some');
+      const settled = await gone.settleReferencesToRemovedEntity(S, 'ent-a', { survivorId: 'ent-s', maxRelinks: 3 });
+      assert.equal(settled.relinked, 3, 'at the bound the settle moves everything');
+      assert.deepEqual(await edgesNaming(S, 'ent-a'), []);
     });
 
     it('settling an entity that is stored again (re-created) touches nothing', async () => {
