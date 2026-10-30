@@ -1915,6 +1915,7 @@
   "duplicates.loadError": "Duplikat-Kandidaten konnten nicht geladen werden.",
   "duplicates.dismissError": "Dieser Kandidat konnte nicht verworfen werden.",
   "duplicates.searchPlaceholder": "Duplikate durchsuchen…",
+  "contradictions.searchPlaceholder": "Widersprüche durchsuchen…",
   "duplicates.reRate": "Neu bewerten",
   "duplicates.reRateDone": "Paar zurück auf die Prüfliste verschoben.",
   "duplicates.reRateError": "Kandidat konnte nicht neu bewertet werden.",

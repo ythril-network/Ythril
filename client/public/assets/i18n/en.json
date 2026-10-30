@@ -1926,6 +1926,7 @@
   "duplicates.scanForbidden": "You do not have permission to run a scan (admin only).",
   "duplicates.dismissError": "Could not dismiss this candidate.",
   "duplicates.searchPlaceholder": "Search duplicates…",
+  "contradictions.searchPlaceholder": "Search contradictions…",
   "duplicates.reRate": "Re-rate",
   "duplicates.reRateDone": "Pair moved back to the review list.",
   "duplicates.reRateError": "Could not re-rate this candidate.",

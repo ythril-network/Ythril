@@ -92,8 +92,8 @@ import { scorePct, scoreVariant } from './review-score';
           <label class="dup-search">
             <ph-icon name="magnifying-glass" [size]="14"/>
             <input type="search" [ngModel]="query()" (ngModelChange)="queryChange.emit($event)"
-              [placeholder]="'duplicates.searchPlaceholder' | transloco"
-              [attr.aria-label]="'duplicates.searchPlaceholder' | transloco" />
+              [placeholder]="'contradictions.searchPlaceholder' | transloco"
+              [attr.aria-label]="'contradictions.searchPlaceholder' | transloco" />
           </label>
           <select [(ngModel)]="state().statusFilter" (change)="state().load(spaceId())"
             [attr.aria-label]="'duplicates.statusFilterAria' | transloco">

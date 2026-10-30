@@ -1915,6 +1915,7 @@
   "duplicates.loadError": "Nie udało się załadować kandydatów na duplikaty.",
   "duplicates.dismissError": "Nie udało się odrzucić tego kandydata.",
   "duplicates.searchPlaceholder": "Szukaj duplikatów…",
+  "contradictions.searchPlaceholder": "Szukaj sprzeczności…",
   "duplicates.reRate": "Oceń ponownie",
   "duplicates.reRateDone": "Para wróciła na listę do przeglądu.",
   "duplicates.reRateError": "Nie można ponownie ocenić tego kandydata.",
