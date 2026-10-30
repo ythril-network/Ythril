@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { authorRef } from '../../config/author.js';
 import { type ContradictionWarning } from '../insert-contradictions.js';
 import { chronoEmbedText } from '../embed-text.js';
+import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
 import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
@@ -88,7 +89,7 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   const status = fields.status ?? 'upcoming';
   const tags = fields.tags ?? [];
 
-  // `matchedText` is stored either way: a suppressed record stays findable lexically.
+  // A suppressed record stays findable lexically: `derivedFieldsForWrite` stores its text with no vector.
   const embedText = chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
   // Suppression wins over `waitForEmbedding`, on the record the write LEAVES (`Q-194`).
   const { suppressed, vector } = await vectorBeforeWrite({
@@ -96,7 +97,8 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
     wanted: opts?.waitForEmbedding === true,
     text: () => embedText,
   });
-  const embeddingFields = { matchedText: embedText, ...vector };
+  // The vector and the text it was made from go in together or not at all (rule I, `derivedFieldsForWrite`).
+  const derived = await derivedFieldsForWrite({ text: () => embedText, vector, suppressed, onto: existing ? 'stored' : 'insert' });
 
   // The structured judge compares the stored `status`, not the dates (see structured-claims.ts for why).
   const advisories = await neighbourAdvisories(spaceId, 'chrono', vector, opts, { properties: fields.properties, status });
@@ -105,14 +107,14 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   if (existing) {
     const $set: Record<string, unknown> = {
       title: fields.title, type: fields.type, startsAt: fields.startsAt, status,
-      tags: mergeTags(existing.tags, tags), updatedAt: now, ...embeddingFields,
+      tags: mergeTags(existing.tags, tags), updatedAt: now, ...derived.set,
     };
     if (fields.endsAt !== undefined) $set['endsAt'] = fields.endsAt;
     if (fields.description !== undefined) $set['description'] = fields.description;
     if (fields.confidence !== undefined) $set['confidence'] = fields.confidence;
     if (fields.properties !== undefined) $set['properties'] = mergeProperties(existing.properties, fields.properties);
     if (fields.recurrence !== undefined) $set['recurrence'] = fields.recurrence;
-    const $unset: Record<string, unknown> = {};
+    const $unset: Record<string, unknown> = { ...derived.unset };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'chrono', existing: existing as unknown as Record<string, unknown> });
     const result = convergeResult(existing, $set, $unset);
@@ -134,7 +136,7 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always.
   const doc: ChronoEntry = {
     _id: uuidv4(), spaceId, title: fields.title, type: fields.type, startsAt: fields.startsAt, status, tags,
-    author: authorRef(), createdAt: now, updatedAt: now, seq: 0, ...embeddingFields,
+    author: authorRef(), createdAt: now, updatedAt: now, seq: 0, ...derived.set,
   };
   if (fields.description !== undefined) doc.description = fields.description;
   if (fields.endsAt !== undefined) doc.endsAt = fields.endsAt;

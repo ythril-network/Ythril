@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { authorRef } from '../../config/author.js';
 import { type ContradictionWarning } from '../insert-contradictions.js';
 import { factEmbedText } from '../embed-text.js';
+import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
 import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
@@ -99,16 +100,16 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
    * links; that asymmetry with chrono is the `M-2` row's question, not this one's.
    */
   if (existing) {
+    // The vector and the text it was made from go in together or not at all: with no vector computed the previous pair
+    // stays, describing each other, while the queued job catches up (rule I, `derivedFieldsForWrite`).
+    const derived = await derivedFieldsForWrite({ text: () => embedText, vector, suppressed, onto: 'stored' });
     const $set: Record<string, unknown> = {
-      fact, tags: mergeTags(existing.tags, tags), matchedText: embedText, updatedAt: now,
+      fact, tags: mergeTags(existing.tags, tags), updatedAt: now, ...derived.set,
     };
-    // Only when a vector was computed: otherwise the previous one stays, describing the record as it was a
-    // moment ago, while the queued job catches up. `matchedText` is always current, so the two can be compared.
-    if (vector) Object.assign($set, vector);
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
     if (properties !== undefined) $set['properties'] = mergeProperties(existing.properties, properties);
-    const $unset: Record<string, unknown> = {};
+    const $unset: Record<string, unknown> = { ...derived.unset };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'fact', existing: existing as unknown as Record<string, unknown> });
     const result = convergeResult(existing, $set, $unset);
@@ -129,9 +130,9 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
 
   // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always.
   const doc: FactDoc = {
-    _id: uuidv4(), spaceId, fact, tags, matchedText: embedText, author: authorRef(),
+    _id: uuidv4(), spaceId, fact, tags, author: authorRef(),
     createdAt: now, updatedAt: now, seq: 0,
-    ...vector,
+    ...(await derivedFieldsForWrite({ text: () => embedText, vector, suppressed, onto: 'insert' })).set,
   };
   if (type !== undefined) doc.type = type;
   if (description !== undefined) doc.description = description;
