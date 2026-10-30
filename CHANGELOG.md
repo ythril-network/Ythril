@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Config:** on Windows, saving `config.json`, the secrets file or the schema library no longer fails while another program has the file open for a moment.
 - **Brain:** a deleted fact, chrono entry, entity or link is removed together with its tombstone, by the delete doors, the TTL sweep and the link reconcile. A tombstone the store refuses now fails the delete and keeps the record.
 - **Brain:** merging entity A no longer moves the edges of a fact or chrono entry that holds A's id, and resolving a fork of a fact or chrono entry no longer moves an entity's edges: an edge end is matched by kind as well as id.
 - **Brain:** in a `strictLinkage` space an edge or link written while its entity is deleted or merged no longer survives naming it: a delete takes back what this instance wrote meanwhile, a merge moves it, and a save whose edge was taken back is refused `409` `endpoint_removed`.
