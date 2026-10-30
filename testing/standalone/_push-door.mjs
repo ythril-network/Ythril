@@ -81,6 +81,23 @@ export const build = {
 };
 
 /**
+ * A builder of links named by a KEY whose `_id` derives from their endpoints (`linkIdFor`), the only id an arriving link may carry since
+ * Q-222 (a link with any other id is refused as `underivedId`). What it prevents: a fixture that names a link by a literal id, which the
+ * receiver refuses, so a test of storing or pulling links passes or fails on a record that never landed.
+ *
+ * Loaded after the door is open (the server's modules read the config the harness points them at); the builder it returns is synchronous.
+ *
+ * @returns {Promise<(space: string, key: string, seq: number, extra?: object) => object>}
+ */
+export async function derivedLinkBuilder() {
+  const { linkIdFor } = await import('../../server/dist/brain/link-id.js');
+  return (space, key, seq, extra = {}) => {
+    const from = `from-${key}`, to = `to-${key}`;
+    return build.link(space, linkIdFor(from, 'fact', to, 'entity'), seq, { from, to, ...extra });
+  };
+}
+
+/**
  * The batch-upsert body key, the collection, and the record type of each family the push door carries.
  * A fixture table, not a derivation — `familiesCarriedByBatch()` is the derivation it is checked against.
  */

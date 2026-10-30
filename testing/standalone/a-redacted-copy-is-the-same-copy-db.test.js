@@ -29,6 +29,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
+import { copyBeating } from './_fork-kinds.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -128,9 +129,11 @@ describe('a redacted copy is the same copy', { skip }, () => {
 
   it('a fork that landed past its content window is redacted on the next sweep, its title kept', async () => {
     await rdoor.reset();
-    await rdoor.coll(SR, 'chrono').insertOne(doc('c', 5, { title: 'mine' }));
+    const theirs = doc('c', 5, { title: 'theirs', createdAt: WRITTEN_THEN, updatedAt: WRITTEN_THEN });
+    // The stored copy is the one the tie rule keeps as the parent (Q-324), so the arriving one is the fork; which title wins is asked of the server.
+    await rdoor.coll(SR, 'chrono').insertOne(await copyBeating('chrono', SR, 'c', 5, theirs, 'mine', { author: { ...PEER_AUTHOR }, description: 'the detail' }));
     await rdoor.raiseVersionTo(SR, 5);
-    await batch([doc('c', 5, { title: 'theirs', createdAt: WRITTEN_THEN, updatedAt: WRITTEN_THEN })]);
+    await batch([theirs]);
     const fork = await rdoor.coll(SR, 'chrono').findOne({ forkOf: 'c' });
     assert.ok(fork, 'the divergent copy was not forked, so there is no fork to redact');
     assert.ok(fork._contentExpireAt instanceof Date && fork._contentExpireAt < new Date(),

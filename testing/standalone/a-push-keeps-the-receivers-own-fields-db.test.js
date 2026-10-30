@@ -35,7 +35,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { openPushDoor, build, FAMILIES } from './_push-door.mjs';
+import { openPushDoor, build, FAMILIES, derivedLinkBuilder } from './_push-door.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -50,14 +50,9 @@ const TYPE_DAYS = 7;
 const TYPE_KEY = { fact: 'type', entity: 'type', edge: 'label', chrono: 'type' };
 const KIND = { facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono', links: 'link', filemeta: 'filemeta' };
 
-// Imported once the door is open: the server's modules read the config the harness points them at.
-let linkIdFor;
+let derivedLink;
 /** A family's document named by `key`; a link's `_id` derives from its endpoints, as an arriving link's must (Q-222). */
-function docOf(familyKey, space, key, seq) {
-  if (familyKey !== 'links') return build[KIND[familyKey]](space, key, seq);
-  const from = `from-${key}`, to = `to-${key}`;
-  return build.link(space, linkIdFor(from, 'fact', to, 'entity'), seq, { from, to });
-}
+const docOf = (familyKey, space, key, seq) => (familyKey === 'links' ? derivedLink(space, key, seq) : build[KIND[familyKey]](space, key, seq));
 
 /** One value per local-only field the store may hold — a fixture; the field SET is the module's. */
 const LOCAL_VALUES = {
@@ -134,7 +129,7 @@ describe('a push keeps the receiver\'s own fields, space id and retention', { sk
       networks: [{ id: NET, label: 'Aliased network', type: 'closed', spaces: [ALIAS_LOCAL],
         spaceMap: { [ALIAS_REMOTE]: ALIAS_LOCAL }, members: [], votingDeadlineHours: 24 }],
     });
-    ({ linkIdFor } = await import('../../server/dist/brain/link-id.js'));
+    derivedLink = await derivedLinkBuilder();
     const localOnly = await import('../../server/dist/sync/local-only-fields.js');
     LOCAL_ONLY = localOnly.LOCAL_ONLY_FIELDS;
     LANDED = localOnly.isLandingStamped;
