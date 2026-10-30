@@ -11,6 +11,7 @@ import { resolveMasterSecret, isEnvelope, encryptEnvelope, decryptEnvelope } fro
 import { envIntOpt } from './env-num.js';
 import { migrateTokenRightsOnBoot } from '../auth/backfill-token-rights.js';
 import { keyedLock } from '../util/keyed-lock.js';
+import { renameOverSync } from '../util/rename-over.js';
 import { settledWithin } from '../util/time-bound.js';
 import { migrateProxiesToViews, holdsLegacyProxies } from './migrate-proxies-to-views.js';
 import { validateViews } from './view-shape.js';
@@ -216,7 +217,7 @@ export function migrateStateFilesAtRest(): void {
     }
     const tmp = p + '.enc.tmp';
     fs.writeFileSync(tmp, enc, { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(tmp, p);
+    renameOverSync(tmp, p);
     try { fs.chmodSync(p, 0o600); } catch { /* non-POSIX host */ }
     log.info(`Encrypted ${path.basename(p)} at rest`);
   }
@@ -671,7 +672,7 @@ export function saveConfig(config: Config): void {
   // Atomic write: write to temp file then rename
   const tmp = CONFIG_PATH + '.tmp';
   fs.writeFileSync(tmp, encodeStateFile(JSON.stringify(config, null, 2)), { encoding: 'utf8', mode: 0o600 });
-  fs.renameSync(tmp, CONFIG_PATH);
+  renameOverSync(tmp, CONFIG_PATH);
   // Ensure permissions after write
   fs.chmodSync(CONFIG_PATH, 0o600);
   if (gen > _flushedGeneration) _flushedGeneration = gen;
@@ -896,7 +897,7 @@ async function writeConfigAsync(): Promise<void> {
     try { fs.rmSync(tmp, { force: true }); } catch { /* already gone */ }
     return;
   }
-  fs.renameSync(tmp, CONFIG_PATH);
+  renameOverSync(tmp, CONFIG_PATH);
   try { fs.chmodSync(CONFIG_PATH, 0o600); } catch { /* non-POSIX host — ignore */ }
   if (gen > _flushedGeneration) _flushedGeneration = gen;
   recordConfigMtime(); // ours, not foreign — the watcher must not react to it
@@ -939,7 +940,7 @@ export function saveSecrets(secrets: SecretsFile): void {
   fs.mkdirSync(path.dirname(SECRETS_PATH), { recursive: true });
   const tmp = SECRETS_PATH + '.tmp';
   fs.writeFileSync(tmp, encodeStateFile(JSON.stringify(secrets, null, 2)), { encoding: 'utf8', mode: 0o600 });
-  fs.renameSync(tmp, SECRETS_PATH);
+  renameOverSync(tmp, SECRETS_PATH);
   fs.chmodSync(SECRETS_PATH, 0o600);
 }
 
@@ -989,7 +990,7 @@ export function saveSchemaLibrary(entries: ParsedLibraryEntry[]): void {
   fs.mkdirSync(path.dirname(SCHEMA_LIB_PATH), { recursive: true });
   const tmp = SCHEMA_LIB_PATH + '.tmp';
   fs.writeFileSync(tmp, encodeStateFile(JSON.stringify(entries, null, 2)), { encoding: 'utf8', mode: 0o600 });
-  fs.renameSync(tmp, SCHEMA_LIB_PATH);
+  renameOverSync(tmp, SCHEMA_LIB_PATH);
   try { fs.chmodSync(SCHEMA_LIB_PATH, 0o600); } catch { /* non-POSIX — ignore */ }
 }
 
@@ -1026,7 +1027,7 @@ export function saveSchemaCatalogs(catalogs: SchemaCatalog[]): void {
   fs.mkdirSync(path.dirname(SCHEMA_CATALOGS_PATH), { recursive: true });
   const tmp = SCHEMA_CATALOGS_PATH + '.tmp';
   fs.writeFileSync(tmp, encodeStateFile(JSON.stringify(catalogs, null, 2)), { encoding: 'utf8', mode: 0o600 });
-  fs.renameSync(tmp, SCHEMA_CATALOGS_PATH);
+  renameOverSync(tmp, SCHEMA_CATALOGS_PATH);
   try { fs.chmodSync(SCHEMA_CATALOGS_PATH, 0o600); } catch { /* non-POSIX — ignore */ }
 }
 
