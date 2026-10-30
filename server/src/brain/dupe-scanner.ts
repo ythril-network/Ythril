@@ -39,6 +39,7 @@ import {
   type RecallKnowledgeType,
 } from './recall.js';
 import { mergeEntities, mergeRefusal } from './merge.js';
+import { buildEmbedText } from './embed-record.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import type { DupeCandidateDoc, DupeScanType, DupeActionRule } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
@@ -98,6 +99,26 @@ async function recordMatchedText(spaceId: string, type: DupeScanType, id: string
   const doc = await col<{ _id: string; matchedText?: string }>(`${spaceId}_${COLLECTION_SUFFIX[type]}`)
     .findOne(asFilter<{ _id: string }>({ _id: id }), { projection: { matchedText: 1 } }) as { matchedText?: string } | null;
   return doc?.matchedText ?? '';
+}
+
+/**
+ * Is this record owed its embed job — does its stored `matchedText` differ from the text its builder gives now?
+ *
+ * ## What it prevents
+ *
+ * A write that changes a record's text (an update, a converge, an arrival) bumps its seq at once, but the stored text follows when the
+ * queued job has run (a vector is stored only beside the text it was made from). A fingerprint taken from the stored text in that window
+ * is the fingerprint of the OLD content, so a dismissed pair that took it as its new baseline could never be reopened by the job's
+ * text write, which bumps no seq. The same predicate is the repair sweep's "stale" (`queue-embed-sweep.ts`).
+ *
+ * A record that is gone, or has no text to build, owes nothing.
+ */
+async function owesItsJob(spaceId: string, type: DupeScanType, id: string): Promise<boolean> {
+  const doc = await col<{ _id: string }>(`${spaceId}_${COLLECTION_SUFFIX[type]}`)
+    .findOne(asFilter<{ _id: string }>({ _id: id }), { projection: { embedding: 0 } }) as Record<string, unknown> | null;
+  if (!doc) return false;
+  const text = await buildEmbedText(spaceId, type, doc);
+  return text !== null && doc['matchedText'] !== text;
 }
 
 /**
@@ -251,7 +272,7 @@ async function fireNotify(spaceId: string, type: DupeScanType, a: RecallResult, 
  * dismissed pair stays dismissed and notifications don't repeat; a changed pair
  * is re-evaluated (and re-opened).
  */
-async function handlePair(spaceId: string, type: DupeScanType, seed: RecallResult, match: RecallResult): Promise<void> {
+export async function handlePair(spaceId: string, type: DupeScanType, seed: RecallResult, match: RecallResult): Promise<void> {
   const [a, b] = seed._id < match._id ? [seed, match] : [match, seed];
   const aSeq = a.seq ?? 0;
   const bSeq = b.seq ?? 0;
@@ -266,6 +287,10 @@ async function handlePair(spaceId: string, type: DupeScanType, seed: RecallResul
       // routine re-embed. It re-opens only when the pair's CONTENT materially changed; a re-write that
       // leaves the embedded text identical keeps it dismissed. (Manual re-rate is the other way back.)
       if (existing.aSeq === aSeq && existing.bSeq === bSeq) return;                  // untouched — no read
+      // A record whose stored text is not its current text is owed its job: the hash below would be of the OLD content, and taking it as
+      // the new baseline would stop the job's text write (no seq bump) from ever reopening the pair. Stay dismissed, change nothing, and
+      // let the first scan after the job see the new text.
+      if (await owesItsJob(spaceId, type, a._id) || await owesItsJob(spaceId, type, b._id)) return;
       const currentHash = await pairContentHash(spaceId, type, a._id, b._id);
       if (decideDismissed(existing, aSeq, bSeq, currentHash) !== 'reopen') {
         // Content unchanged (or a legacy baseline): stay dismissed, but advance the baseline + seqs so
