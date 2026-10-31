@@ -170,6 +170,28 @@ describe('the reembed backfill converges (real MongoDB)', { skip }, () => {
     assert.equal(await c(QUIET, 'embed_jobs').countDocuments({}), 0);
   });
 
+  it('a suppressed record with stale text is queued and counted as stale, never also as skipped', async () => {
+    // One rule: a suppressed record owed its lexical text is queued (its job writes text, no model call), counted in `stale` and
+    // `enqueued`, and is in `remaining` when past the cap. It is not under `skippedSuppressed`, which is the records left alone.
+    await c(QUIET, 'facts').insertMany([fact(QUIET, 'owed'), await withText(QUIET, 'fact', fact(QUIET, 'settled'))]);
+    const res = await reembed.reembedSpace(QUIET);
+    assert.equal(res.stale, 1);
+    assert.equal(res.enqueued, 1);
+    assert.equal(res.skippedSuppressed, 1, 'only the settled suppressed record is left alone');
+    assert.equal(res.remaining, 0);
+    assert.deepEqual((await c(QUIET, 'embed_jobs').find({}).toArray()).map(j => j.recordId), ['owed']);
+  });
+
+  it('a suppressed stale record past the cap is in remaining and not in skipped', async () => {
+    await c(QUIET, 'facts').insertMany([fact(QUIET, 'owed-1'), fact(QUIET, 'owed-2')]);
+    const res = await reembed.reembedSpace(QUIET, { limit: 1 });
+    assert.equal(res.enqueued, 1);
+    assert.equal(res.stale, 1);
+    assert.equal(res.remaining, 1);
+    assert.equal(res.skippedSuppressed, 0);
+    assert.equal(res.truncated, true);
+  });
+
   it('a page of suppressed records at the front does not block the records behind it', async () => {
     await c(SPACE, 'facts').insertMany([
       await withText(SPACE, 'fact', fact(SPACE, 'a-1', { suppressEmbeddings: true })),
