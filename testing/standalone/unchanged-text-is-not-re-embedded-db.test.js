@@ -135,9 +135,19 @@ describe('the guard is a conjunction, in source', () => {
     const { readFileSync } = await import('node:fs');
     const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
     const src = strip(readFileSync('server/src/brain/embed-record.ts', 'utf8'));
-    assert.match(src, /vectorPresent && doc\['matchedText'\] === text && doc\['embeddingModel'\] === configuredModel/,
-      'any one of the three alone would make this a guess rather than an identity');
+    // The guard is the worker's classifier, `embedOwed` (Q-656: the backfill asks it too): each of the three conditions answers
+    // `embed` BEFORE `unchanged` can be returned, so `unchanged` is their conjunction.
+    const at = src.indexOf('export function embedOwed');
+    assert.ok(at >= 0, 'embed-record.ts declares no embedOwed: re-anchor this gate');
+    const owed = src.slice(at, src.indexOf('\n}\n', at));
+    const unchangedAt = owed.indexOf("outcome: 'unchanged'");
+    assert.ok(unchangedAt > 0, 'embedOwed never answers unchanged');
+    for (const condition of [/!i\.vectorPresent\)/, /textIsStale\(\{ matchedText: i\.matchedText \}, i\.text\)/, /i\.embeddingModel !== i\.configuredModel\(\)/]) {
+      const found = owed.match(condition);
+      assert.ok(found && found.index < unchangedAt,
+        `${condition} is not asked before unchanged: any one of the three alone would make this a guess rather than an identity`);
+    }
     // `matchedText` is written by the embed itself, so no new field and no migration of synced data.
-    assert.match(src, /matchedText: text/, 'the fingerprint must keep being written');
+    assert.match(src, /matchedText: toEmbed/, 'the fingerprint must keep being written');
   });
 });

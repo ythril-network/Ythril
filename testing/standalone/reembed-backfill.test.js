@@ -12,9 +12,9 @@
  *
  * What the rules are about has not changed, only where they look:
  *
- *  - **It filters on `$exists: false`, not on `null`.** The suppressed path `$unset`s the vector, so a released
- *    record has no key at all. A `null` filter would find nothing and report a clean sweep over a space that is
- *    entirely unindexed — a backfill that says "all done" having done nothing.
+ *  - **It asks "holds a vector" of `holds-vector.ts`, never with a `null` filter.** The suppressed path `$unset`s the
+ *    vector, so a released record has no key at all, and a `null` filter would find nothing and report a clean sweep over a
+ *    space that is entirely unindexed. `$exists: false`, the spelling this gate used to pin, missed a stored `null` (Q-656).
  *  - **It reuses the write path's suppression rule** rather than re-deriving it, and excludes in the QUERY.
  *  - **It skips a textless derived record** (`derivedHasText`), or it never converges — the behaviour is pinned in
  *    `reembed-converges-db.test.js`; here, only that the shared fragment is what does it.
@@ -61,9 +61,11 @@ describe('the backfill is two modules, and this gate reads both', () => {
 });
 
 describe('the candidate query', () => {
-  it('filters on $exists: false, never on null', () => {
-    // The trap. Suppression `$unset`s the field, so the key is ABSENT rather than null.
-    assert.match(BOTH, /embedding:\s*\{\s*\$exists:\s*false\s*\}/);
+  it('asks "holds a vector" of the one module, never by a null filter', () => {
+    // The trap. Suppression `$unset`s the field, so the key is ABSENT rather than null, and a failed write or an import can leave it
+    // `null` or `[]`. `$exists: false` missed the null (Q-656); the one answer, a non-empty array, is `holds-vector.ts`'s
+    // (`a-stored-vector-is-asked-for-in-one-module`).
+    assert.match(SWEEP, /from '\.\/holds-vector\.js'/, 'the walker spells "holds a vector" itself');
     assert.ok(!/embedding:\s*null/.test(BOTH), 'a null filter would match nothing and report a clean sweep');
   });
 

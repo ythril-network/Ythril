@@ -161,7 +161,9 @@ describe('an update whose embed job was lost is queued by the repair (Q-261)', {
     });
   }
 
-  it('control: a derived file row with no text is not queued, on any call', async () => {
+  it('control: a derived file row with no text is not queued, and one still holding a vector is queued once, until the worker clears it', async () => {
+    // Q-656 changed the second half: the worker unsets a textless row's derived fields, so the backfill owes it that job ONCE
+    // (it was counted nowhere, and its old vector stayed searchable); after the job it holds nothing and is owed nothing.
     await door.coll(SPACE, 'files').insertMany([
       { _id: 'docs/p.md', spaceId: SPACE, path: 'docs/p.md', tags: [], seq: 1 },
       { _id: 'docs/p.md#chunk9', spaceId: SPACE, parentFileId: 'docs/p.md', embedding: queryAxis(DIMS), embeddingModel: 'x', matchedText: 'path text from an old backfill' },
@@ -169,7 +171,14 @@ describe('an update whose embed job was lost is queued by the repair (Q-261)', {
     ]);
     const first = await reembed.reembedSpace(SPACE, { kinds: ['file'] });
     assert.equal(await jobsFor('docs/p.md#chunk8'), 0, `a textless derived row was queued: ${JSON.stringify(first)}`);
-    assert.equal(await jobsFor('docs/p.md#chunk9'), 0, `a textless derived row holding a vector was queued by the stale pass: ${JSON.stringify(first)}`);
+    assert.equal(await jobsFor('docs/p.md#chunk9'), 1, `a textless derived row holding a vector was not queued for its clearing: ${JSON.stringify(first)}`);
+    assert.equal(first.stale, 0, `a textless row has no text to be stale against: ${JSON.stringify(first)}`);
+    assert.equal(await embedRecord.embedStoredRecord(SPACE, 'file', 'docs/p.md#chunk9'), 'textless');
+    const cleared = await door.coll(SPACE, 'files').findOne({ _id: 'docs/p.md#chunk9' });
+    assert.deepEqual([cleared.embedding, cleared.embeddingModel, cleared.matchedText], [undefined, undefined, undefined]);
+    await door.coll(SPACE, 'embed_jobs').deleteMany({ recordId: 'docs/p.md#chunk9' });
+    await reembed.reembedSpace(SPACE, { kinds: ['file'] });
+    assert.equal(await jobsFor('docs/p.md#chunk9'), 0, 'the cleared textless row was queued again');
   });
 
   it('a suppressed record whose lexical text is missing is queued, and its job writes the text with no model call', async () => {

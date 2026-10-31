@@ -3,7 +3,7 @@
  *
  * ## Why this is a module
  *
- * A backfill (`reembed.ts`) queues every record with no vector; a reindex (`reindex.ts`) queues every record. Until
+ * A backfill (`reembed.ts`) queues every record the worker would settle; a reindex (`reindex.ts`) queues every record. Until
  * Q-99 part 2 the reindex did not queue at all: it ran five hand-written loops of its own, each with its own
  * projection and its own call to an embed-text builder, and the copy had drifted from the one the queue uses. An
  * edge's projection dropped its endpoint kinds, so a fact or file end embedded its raw id; a file's dropped
@@ -12,24 +12,36 @@
  *
  * ## What it holds so neither caller can drop it
  *
- *  - **Suppression, in the QUERY.** A suppressed record matches "has no vector" by construction, so a sweep that
- *    skipped them in a loop over `find(...).limit(n)` returned the same suppressed page on every call and never
- *    reached the records behind it. One rule serves both callers: skip a suppressed record unless it still holds a
- *    vector to remove. For a backfill that is every suppressed record; for a reindex it is the suppressed ones a
- *    toggle left a vector on, which the worker then removes.
+ *  - **The reindex's suppression, in the QUERY.** A suppressed record matches "has no vector" by construction, so a
+ *    sweep that skipped them in a loop over `find(...).limit(n)` returned the same suppressed page on every call and
+ *    never reached the records behind it. The reindex skips a suppressed record unless it still holds a vector to
+ *    remove, which the worker then removes.
+ *  - **The backfill's ONE walk** (`match: 'owed'`, {@link queueOwedSweep}): every candidate read once and put in exactly
+ *    one outcome by the worker's own classifier (`embedOwed`), so a record is counted once and a drained space owes
+ *    nothing on the next call. It replaced two walks (`vectorless`, `stale`) whose counts were summed and subtracted,
+ *    and which a record with `embedding: null` fell between (Q-656).
  *  - **Textless derived records.** A face chunk or a converted copy has no text, the worker leaves it vectorless,
  *    and a backfill that queued it would queue it again on every call for ever. `derivedHasText` lives beside the
- *    text builder so the two cannot disagree.
+ *    text builder so the two cannot disagree; a textless row is a candidate only while it still holds a derived field
+ *    for the worker to clear.
+ *  - **"Holds a vector"** is `holds-vector.ts`'s question, a non-empty array, in every filter and expression here.
  *  - **The bulk enqueue**, which throws, so a batch that never landed is never reported as queued.
  *
- * It decides WHICH records; it never embeds. The record's own ancestors (a chunk of a suppressed file) are the
- * worker's to read, one record at a time, because they are not expressible as a filter on the record.
+ * It decides WHICH records; it never embeds. A derived record's ancestors (a chunk of a suppressed file) are not
+ * expressible as a filter on the record: the backfill's walk reads them once per page (`fileEmbeddingSuppressedMany`),
+ * the worker's own question; the reindex leaves them to the worker, one record at a time.
  */
 
 import { col, asFilter } from '../db/mongo.js';
-import { COLLECTION, derivedHasText, buildEmbedTexts } from './embed-record.js';
+import { COLLECTION, derivedHasText, buildEmbedTexts, embedOwed, type EmbedOwed } from './embed-record.js';
 import { enqueueEmbedJobs, type EmbedPriority } from './embed-queue.js';
-import { embeddingSuppressedFor, recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
+import {
+  embeddingSuppressedFor, fileEmbeddingSuppressedMany, recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD,
+} from './suppress-embeddings.js';
+import { HOLDS_VECTOR, holdsVectorExpr } from './holds-vector.js';
+import { isSpillPath } from './spill-path.js';
+import { UNSET_DERIVED } from '../sync/local-only-fields.js';
+import { getEmbeddingConfig } from '../config/loader.js';
 import { TYPE_FIELD } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -99,8 +111,8 @@ export function suppressionExclusion(
   return { query };
 }
 
-/** The two walks that select by a Mongo filter; `stale` selects by comparing each record with its text, so it walks on its own. */
-type WalkMatch = 'vectorless' | 'all';
+/** The walk that selects by a Mongo filter; `owed` classifies each record it reads, so it walks on its own. */
+type WalkMatch = 'all';
 
 /** Where a walk has got to: the kind it is in and the last record id it queued there. */
 export interface SweepCursor {
@@ -112,14 +124,12 @@ export interface SweepOptions {
   /** The kinds to walk, in `EMBED_SWEEP_KINDS` order. Omitted means all of them. */
   kinds?: BrainEmbedRecordType[];
   /**
-   * `vectorless` — a backfill: records with no vector (the key ABSENT, never null: suppression `$unset`s it).
    * `all` — a reindex: every record, including derived records with text and any derived record still carrying
-   * a vector to remove.
-   * `stale` — a repair: the records whose stored `matchedText` differs from the text their builder gives today and that
-   * `vectorless` cannot see: one that holds a vector made from text it no longer has (an update whose job was lost), or a
-   * suppressed one whose lexical text is missing or old. See `queueStaleSweep`.
+   * a derived field to remove.
+   * `owed` — a backfill: the records the worker would settle (`embedOwed`), each counted in exactly one outcome. See
+   * {@link queueOwedSweep}.
    */
-  match: WalkMatch | 'stale';
+  match: WalkMatch | 'owed';
   /** Records to queue at most, over all kinds; the rest are counted in `remaining`. */
   limit?: number;
   priority: EmbedPriority;
@@ -134,20 +144,20 @@ export interface SweepResult {
   enqueued: number;
   skippedSuppressed: number;
   byKind: Record<string, number>;
-  /** Candidates left over after `limit`. Zero when the space is fully swept. */
+  /** Owed records left over after `limit`, each counted once. Zero when the space is fully swept. */
   remaining: number;
-  /** Of `enqueued`, the records queued because their stored text was not their current text (`match: 'stale'`). */
-  stale: number;
   /**
-   * Of the owed records (queued, or left over past `limit`), those that are suppressed and hold no vector: the `vectorless` walk also
-   * counts them under `skippedSuppressed`, so a caller that adds the two walks subtracts this from that count and each record is
-   * counted once. Only the `stale` walk sets it.
+   * Of `enqueued`, the records queued because their stored text was not their current text and they hold a vector or are suppressed
+   * (`match: 'owed'`). A vectorless record that is not suppressed is owed, and not `stale`.
    */
-  staleSuppressed: number;
+  stale: number;
 }
 
-/** The records of a kind a sweep considers at all, before suppression. */
-function candidates(kind: BrainEmbedRecordType, match: WalkMatch): Record<string, unknown> {
+/** The derived fields a textless derived row may still hold for the worker to clear (`UNSET_DERIVED`, the worker's own list). */
+const DERIVED_FIELDS = Object.keys(UNSET_DERIVED);
+
+/** The records of a kind a sweep considers at all, before suppression. One set for the reindex and the backfill. */
+function candidates(kind: BrainEmbedRecordType): Record<string, unknown> {
   const topLevel = { parentFileId: { $exists: false } };
   /*
    * NEVER a row a soft delete flagged. The flag strips the vector, so a flagged file is a vectorless candidate for
@@ -156,24 +166,20 @@ function candidates(kind: BrainEmbedRecordType, match: WalkMatch): Record<string
    * legitimate candidate — it is vacuous on one, which is correct: a flagged file's children go with it.
    */
   const live = notFlaggedIfFile(kind) ?? {};
-  if (match === 'vectorless') {
-    const vectorless = { embedding: { $exists: false } };
-    return kind === 'file' ? { ...vectorless, ...live, $or: [topLevel, derivedHasText] } : vectorless;
-  }
-  return kind === 'file'
-    ? { ...live, $or: [topLevel, derivedHasText, { parentFileId: { $exists: true }, embedding: { $exists: true } }] }
-    : {};
+  // A derived row is a candidate when it has text, or while it holds ANY derived field (a vector, its model, or a leftover
+  // `matchedText`), which the worker unsets from a textless row: present even as `null`, as the worker's `in` test reads it.
+  const holdsDerived = { parentFileId: { $exists: true }, $or: DERIVED_FIELDS.map(f => ({ [f]: { $exists: true } })) };
+  return kind === 'file' ? { ...live, $or: [topLevel, derivedHasText, holdsDerived] } : {};
 }
 
 /**
- * The filters a sweep walks one kind by: `base`, the records it considers at all, and `allowed`, the ones suppression
- * lets it queue. One rule for both callers: a suppressed record is skipped unless it still holds a vector to remove.
+ * The filters the reindex walks one kind by: `base`, the records it considers at all, and `allowed`, the ones suppression
+ * lets it queue: a suppressed record is skipped unless it still holds a vector to remove.
  */
-function kindFilters(spaceId: string, kind: BrainEmbedRecordType, match: WalkMatch) {
-  const base = candidates(kind, match);
+function kindFilters(spaceId: string, kind: BrainEmbedRecordType) {
+  const base = candidates(kind);
   const exclusion = suppressionExclusion(getSpaceMeta(spaceId), kind);
-  const holdsVector = { embedding: { $exists: true } };
-  const allowed = exclusion === 'all' ? holdsVector : { $or: [exclusion.query, holdsVector] };
+  const allowed = exclusion === 'all' ? { ...HOLDS_VECTOR } : { $or: [exclusion.query, { ...HOLDS_VECTOR }] };
   return { base, allowed };
 }
 
@@ -192,11 +198,11 @@ function kindsFrom(kinds: BrainEmbedRecordType[], after: SweepCursor | undefined
  */
 export async function countUnswept(
   spaceId: string,
-  { match, after }: { match: WalkMatch; after?: SweepCursor },
+  { after }: { match: WalkMatch; after?: SweepCursor },
 ): Promise<number> {
   let n = 0;
   for (const { kind, resumeHere } of kindsFrom(EMBED_SWEEP_KINDS, after)) {
-    const { base, allowed } = kindFilters(spaceId, kind, match);
+    const { base, allowed } = kindFilters(spaceId, kind);
     n += await col(spaceCollection(spaceId, COLLECTION[kind] as 'facts'))
       .countDocuments(asFilter({ $and: [base, allowed, resumeHere] }));
   }
@@ -205,14 +211,13 @@ export async function countUnswept(
 
 /** Queue the records of a space a sweep owes a job, kind by kind. See the module comment for what it guarantees. */
 export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Promise<SweepResult> {
-  if (opts.match === 'stale') return await queueStaleSweep(spaceId, opts);
-  const match = opts.match;
+  if (opts.match === 'owed') return await queueOwedSweep(spaceId, opts);
   const cap = opts.limit ?? Number.POSITIVE_INFINITY;
-  const result: SweepResult = { enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0, stale: 0, staleSuppressed: 0 };
+  const result: SweepResult = { enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0, stale: 0 };
 
   for (const { kind, resumeHere } of kindsFrom(opts.kinds ?? EMBED_SWEEP_KINDS, opts.after)) {
     const coll = col(spaceCollection(spaceId, COLLECTION[kind] as 'facts'));
-    const { base, allowed } = kindFilters(spaceId, kind, match);
+    const { base, allowed } = kindFilters(spaceId, kind);
 
     /*
      * BOTH COUNTS FROM ONE SNAPSHOT, and the subtraction is why that matters. Two live counts over a population
@@ -235,7 +240,7 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
       _id: 1,
       [RECORD_SUPPRESS_FIELD]: 1,
       ...(knowledgeType ? { [TYPE_FIELD[knowledgeType]]: 1 } : {}),
-      holdsVector: { $isArray: '$embedding' },
+      holdsVector: holdsVectorExpr,
     };
     const walk = coll.aggregate([
       { $match: asFilter({ $and: [base, allowed, resumeHere] }) },
@@ -274,63 +279,104 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
 }
 
 /**
- * The repair walk (`match: 'stale'`): queue every record whose stored `matchedText` is not the text its builder gives today and
- * that the `vectorless` walk cannot see.
+ * Whether the backfill owes a record a job, from the worker's verdict: every outcome in which the worker changes the record, except
+ * a model change (`model`) or a rebuild, which are a reindex's to queue. A record whose text cannot be built is owed too, on every
+ * call: its job fails where `list_embed_jobs` shows it, which is how an operator learns of it.
+ */
+function backfillOwes(verdict: EmbedOwed): boolean {
+  switch (verdict.outcome) {
+    case 'unbuildable': return true;
+    case 'textless': return verdict.reason === 'clear-derived';
+    case 'writeLexical': return true;
+    case 'embed': return verdict.reason === 'stale' || verdict.reason === 'vectorless';
+    case 'settled':
+    case 'unchanged': return false;
+  }
+}
+
+/**
+ * The backfill's walk (`match: 'owed'`): read every candidate once and put it in exactly ONE outcome, the worker's own
+ * (`embedOwed`, `embed-record.ts`).
+ *
+ * ## What each record is
+ *
+ * - **owed**: the worker would change it — no vector (absent, `null` or `[]`) and not suppressed; a vector beside text it no longer
+ *   has; suppressed with a stale text, or still holding a vector; a textless derived row still holding a derived field; a record
+ *   whose text cannot be built. Queued while `enqueued < limit`, else counted in `remaining`;
+ * - **skipped** (`skippedSuppressed`): suppressed, its text current and no vector: what the setting being on looks like;
+ * - **nothing**: settled (`unchanged`), a textless derived row with no derived field, a vector made by another model (a reindex's
+ *   job), a spill row (`isSpillPath`: a read's own output, never embedded), and an ORPHAN chunk with no vector (its ancestor missing
+ *   or flagged: it awaits the chunk sweep, and reporting it as skipped would read as "the setting is still on").
+ *
+ * So `enqueued + remaining + skippedSuppressed` is the counted set and no count is subtracted. `stale` counts the queued records
+ * that hold a vector or are suppressed and whose stored text is not their current text, a subset of `enqueued`. Because the walk asks
+ * the worker's own question, a space whose queue has drained owes nothing on the next call, except a record whose text can never be
+ * built. It replaced two walks (`vectorless` by a filter, `stale` by a comparison) whose summed counts a record with `embedding: null`
+ * fell between and a suppressed one was subtracted from (Q-656).
  *
  * ## Why a record owes a job exactly then
  *
  * A vector is stored only beside the text it was made from (`derived-text-on-write.ts`), and the worker settles every record whose
- * pair is off, whatever the cause: it re-embeds a stale vector, writes the text and drops the vector when the embedder is away, and
- * writes a suppressed record's text without calling the model. So the repair needs no field that says "owed" and no second writer to
- * keep it true: the state that says "owed" is the pair itself, written by the same write that changed the text, so neither a failed
- * enqueue nor a crash between that write and the enqueue can lose it. It covers a local write whose enqueue failed as well as an
- * arrival.
- *
- * ## What is owed, and what is left to the other walk
- *
- * `text !== null && matchedText !== text`, and the record either HOLDS a vector (made from text it no longer has) or is SUPPRESSED (its
- * lexical text is missing or old: an arrival stored before the receiver wrote its own, or one whose inline text write failed). A record
- * with no vector that is not suppressed is the `vectorless` walk's, so neither walk counts it twice. A derived row with no text (a face
- * chunk) has none to be stale against and is never queued, as `derivedHasText` says for the backfill.
+ * pair is off, whatever the cause. So the repair needs no field that says "owed" and no second writer to keep it true: the state that
+ * says "owed" is the pair itself, written by the same write that changed the text, so neither a failed enqueue nor a crash between
+ * that write and the enqueue can lose it.
  *
  * ## The cost, stated
  *
- * The predicate cannot be a Mongo filter, so the walk READS every candidate of the space once per call (the vector projected out, in
- * batches of `WALK_BATCH`, an edge page's endpoint names in one read per kind), and queues only the owed ones. `limit` caps what is
- * queued, never what is read; the owed records beyond the cap are counted into `remaining`, so nothing is capped silently.
+ * The verdict cannot be a Mongo filter, so the walk READS every candidate of the space once per call (the vector projected out, in
+ * batches of `WALK_BATCH`; per page, an edge page's endpoint names in one read per kind and a file page's ancestors in one walk,
+ * `fileEmbeddingSuppressedMany`), and queues only the owed ones. `limit` caps what is queued, never what is read; the owed records
+ * beyond the cap are counted into `remaining`, so nothing is capped silently.
  */
-async function queueStaleSweep(spaceId: string, opts: SweepOptions): Promise<SweepResult> {
+async function queueOwedSweep(spaceId: string, opts: SweepOptions): Promise<SweepResult> {
   const cap = opts.limit ?? Number.POSITIVE_INFINITY;
-  const result: SweepResult = { enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0, stale: 0, staleSuppressed: 0 };
+  const result: SweepResult = { enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0, stale: 0 };
+  const configuredModel = getEmbeddingConfig().model;
   for (const { kind, resumeHere } of kindsFrom(opts.kinds ?? EMBED_SWEEP_KINDS, opts.after)) {
     const coll = col(spaceCollection(spaceId, COLLECTION[kind] as 'facts'));
     const walk = coll.aggregate([
-      { $match: asFilter({ $and: [candidates(kind, 'all'), resumeHere] }) },
+      { $match: asFilter({ $and: [candidates(kind), resumeHere] }) },
       { $sort: { _id: 1 } },
-      // The vector is the bulk of a record and the walk needs only whether it is there.
-      { $addFields: { holdsVector: { $isArray: '$embedding' } } },
+      // The vector is the bulk of a record and the walk needs only whether it is there, and whether any derived field is.
+      { $addFields: {
+        holdsVector: holdsVectorExpr,
+        holdsDerived: { $or: DERIVED_FIELDS.map(f => ({ $ne: [{ $type: `$${f}` }, 'missing'] })) },
+      } },
       { $unset: 'embedding' },
     ], { batchSize: WALK_BATCH });
 
     const settle = async (page: Array<Record<string, unknown>>): Promise<void> => {
       if (page.length === 0) return;
       const texts = await buildEmbedTexts(spaceId, kind, page);
+      // A file row asks the file question (its two tiers, then its ancestors), the worker's own, for the page at once.
+      const fileSuppression = kind === 'file' ? await fileEmbeddingSuppressedMany(spaceId, page) : undefined;
       const owed: string[] = [];
+      let staleOwed = 0;
       page.forEach((doc, i) => {
-        const text = texts[i];
         const id = doc['_id'];
-        if (typeof id !== 'string' || text === null || text === undefined || doc['matchedText'] === text) return;
-        const suppressed = embeddingSuppressedFor(spaceId, kind, doc);
-        // Not owed: no vector and not suppressed — the `vectorless` walk queues it.
-        if (doc['holdsVector'] !== true && !suppressed) return;
-        // Owed and suppressed with no vector: the `vectorless` walk counted it as skipped too (see `staleSuppressed`).
-        if (doc['holdsVector'] !== true) result.staleSuppressed++;
-        if (result.enqueued + owed.length < cap) owed.push(id); else result.remaining++;
+        if (typeof id !== 'string' || (kind === 'file' && isSpillPath(id))) return;
+        const vectorPresent = doc['holdsVector'] === true;
+        const file = fileSuppression?.[i];
+        if (file === 'orphan' && !vectorPresent) return;
+        const verdict = embedOwed({
+          text: texts[i] ?? null,
+          suppressed: file !== undefined ? file !== null : embeddingSuppressedFor(spaceId, kind, doc),
+          vectorPresent,
+          holdsDerived: doc['holdsDerived'] === true,
+          matchedText: doc['matchedText'],
+          embeddingModel: doc['embeddingModel'],
+          configuredModel: () => configuredModel,
+        });
+        if (verdict.outcome === 'settled') { result.skippedSuppressed++; return; }
+        if (!backfillOwes(verdict)) return;
+        if (result.enqueued + owed.length >= cap) { result.remaining++; return; }
+        owed.push(id);
+        if ('reason' in verdict && verdict.reason === 'stale') staleOwed++;
       });
       if (owed.length === 0) return;
       const { queued } = await enqueueEmbedJobs(spaceId, kind, owed, { priority: opts.priority, rebuild: opts.rebuild });
       result.enqueued += queued;
-      result.stale += queued;
+      result.stale += Math.min(staleOwed, queued);
       result.byKind[kind] = (result.byKind[kind] ?? 0) + queued;
       if (opts.onBatch) await opts.onBatch({ kind, lastId: owed[owed.length - 1]! });
     };

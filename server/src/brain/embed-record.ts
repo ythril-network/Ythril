@@ -28,6 +28,9 @@ import { isTransientEmbedError } from './embed-queue.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
 import { UNSET_DERIVED, UNSET_VECTOR } from '../sync/local-only-fields.js';
+import { log, logSafe, peerList } from '../util/log.js';
+import { holdsVector } from './holds-vector.js';
+import { textIsStale } from './derived-text-on-write.js';
 import type {
   BrainEmbedRecordType, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc,
 } from '../config/types.js';
@@ -114,27 +117,150 @@ function edgeTextOf(e: EdgeDoc, fromName: string, toName: string): string {
 }
 
 /**
+ * The answer for a record whose text CANNOT be built: a field of its own has the wrong type (`tags: 'x'`, which a pull can store,
+ * since an arrival is not validated against the schema). Neither a string (so nothing stores it as text) nor `null` (a derived row
+ * with no text BY DESIGN, which is owed nothing): such a record is owed its job, whose failure is then visible in `list_embed_jobs`.
+ * Every caller tests `typeof text === 'string'` before using a text.
+ */
+export const UNBUILDABLE: unique symbol = Symbol('embed text cannot be built');
+
+/** What the guarded builders answer for one record: its text, `null` when it has none, or {@link UNBUILDABLE}. */
+export type EmbedText = string | null | typeof UNBUILDABLE;
+
+/**
+ * One record's text, or {@link UNBUILDABLE} when the record's own field has the wrong type. Only that is caught: the builders
+ * throw a `TypeError` on it (`tags.join is not a function`), while a store error (an edge's endpoint read) is not the record's and
+ * is rethrown, so an outage never reads as a page of broken records.
+ */
+async function textOrMarker(build: () => string | null | Promise<string | null>): Promise<EmbedText> {
+  try {
+    return await build();
+  } catch (err) {
+    if (err instanceof TypeError) return UNBUILDABLE;
+    throw err;
+  }
+}
+
+/**
+ * {@link buildEmbedText}, guarded the way {@link buildEmbedTexts} guards each record of a page: the one-record builder for a caller
+ * that must not fail on one broken record (the dupe scanner's hold on a dismissed pair).
+ */
+export function buildEmbedTextOrMarker(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  doc: Record<string, unknown>,
+): Promise<EmbedText> {
+  return textOrMarker(() => buildEmbedText(spaceId, recordType, doc));
+}
+
+/**
  * `buildEmbedText` for a page of documents of one kind: the same string for each, in order (`null` where a document has no
- * text).
+ * text, {@link UNBUILDABLE} where its own field has the wrong type).
  *
  * ## Why it is its own function
  *
  * `buildEmbedText` resolves an edge's two endpoint names with a read each, which is right for one record and a read per
- * endpoint over a page. The repair sweep compares every record's `matchedText` with its text, and the arrival writer builds
+ * endpoint over a page. The backfill's walk compares every record's `matchedText` with its text, and the arrival writer builds
  * the text of the suppressed arrivals of a chunk, so both read names once per endpoint KIND (`resolveEndpointNames`). The
- * answer is the same by construction: the name's normalisation is `endpointDisplayName` for both readers, and the text is
- * composed by `edgeTextOf` for both. Every other kind has no read, so it is `buildEmbedText` itself.
+ * answer is the same by construction: the name's normalisation is `endpointDisplayName` for both readers, an endpoint of a kind
+ * no collection holds is its raw id for both, and the text is composed by `edgeTextOf` for both. Every other kind has no read, so
+ * it is `buildEmbedText` itself.
+ *
+ * ## One broken record does not fail the page
+ *
+ * Both callers build a whole page at once, so a record whose text threw failed the arrival writer's page on every cycle and the
+ * backfill for the whole space on every call, after jobs had already been queued (Q-656). Each record is guarded on its own
+ * ({@link textOrMarker}) and the page's broken records are named in ONE warning.
  */
 export async function buildEmbedTexts(
   spaceId: string,
   recordType: BrainEmbedRecordType,
   docs: ReadonlyArray<Record<string, unknown>>,
-): Promise<Array<string | null>> {
-  if (recordType !== 'edge') return await Promise.all(docs.map(d => buildEmbedText(spaceId, recordType, d)));
-  const edges = docs as unknown as EdgeDoc[];
-  if (edges.length === 0) return [];
-  const nameOf = await resolveEndpointNames(spaceId, edges);
-  return edges.map(e => edgeTextOf(e, nameOf(edgeEndpointKind(e.fromKind), e.from), nameOf(edgeEndpointKind(e.toKind), e.to)));
+): Promise<EmbedText[]> {
+  let texts: EmbedText[];
+  if (recordType !== 'edge') {
+    texts = await Promise.all(docs.map(d => buildEmbedTextOrMarker(spaceId, recordType, d)));
+  } else {
+    const edges = docs as unknown as EdgeDoc[];
+    if (edges.length === 0) return [];
+    // Outside the per-record guard: a failed read is the store's, not a record's.
+    const nameOf = await resolveEndpointNames(spaceId, edges);
+    texts = await Promise.all(edges.map(e => textOrMarker(
+      () => edgeTextOf(e, nameOf(edgeEndpointKind(e.fromKind), e.from), nameOf(edgeEndpointKind(e.toKind), e.to)))));
+  }
+  const unbuildable = docs.filter((_, i) => texts[i] === UNBUILDABLE).map(d => d['_id']);
+  if (unbuildable.length > 0) {
+    log.warn(`${unbuildable.length} record(s) of ${recordType} in '${logSafe(spaceId)}' have text that cannot be built (a field of the `
+      + `wrong type): e.g. ${peerList(unbuildable, ', ', { count: UNBUILDABLE_NAMED })}. Their embed jobs fail and are listed by `
+      + 'list_embed_jobs; correct the record.');
+  }
+  return texts;
+}
+
+/** How many of a page's unbuildable records its warning names. */
+const UNBUILDABLE_NAMED = 5;
+
+/** Why a record is owed a job, in precedence order where two could apply (`stale` before a model change). */
+export type EmbedOwedReason = 'stale' | 'vectorless' | 'suppressed-vector' | 'clear-derived' | 'model' | 'rebuild';
+
+/**
+ * What the worker would do with a stored record, decided from the record alone:
+ *
+ * - `unbuildable`: its own field has the wrong type; the worker's job fails on it (and is visible in `list_embed_jobs`);
+ * - `textless`: a derived row with no text; with `reason: 'clear-derived'` it still holds a derived field the worker unsets;
+ * - `settled`: suppressed, its text current and no vector; the worker's write changes nothing;
+ * - `writeLexical`: suppressed, and its text is stale (`stale`) or it still holds a vector (`suppressed-vector`): the worker writes
+ *   the text and removes the vector, with no model call;
+ * - `unchanged`: a vector beside its current text, made by the configured model; the model call would reproduce it;
+ * - `embed`: the model is called, because the record holds no vector (`vectorless`), its vector is of text it no longer has
+ *   (`stale`), another model made it (`model`), or a reindex asks for it again (`rebuild`).
+ */
+export type EmbedOwed =
+  | { outcome: 'unbuildable' }
+  | { outcome: 'textless'; reason?: 'clear-derived' }
+  | { outcome: 'settled' }
+  | { outcome: 'writeLexical'; reason: 'stale' | 'suppressed-vector' }
+  | { outcome: 'unchanged' }
+  | { outcome: 'embed'; reason: 'stale' | 'vectorless' | 'model' | 'rebuild' };
+
+/** What {@link embedOwed} reads of a record. The vector itself is not needed, only whether it holds one (`holdsVector`). */
+export interface EmbedOwedInput {
+  text: EmbedText;
+  suppressed: boolean;
+  vectorPresent: boolean;
+  /** Whether the record holds any derived field (`UNSET_DERIVED`'s keys), present even as `null`. */
+  holdsDerived: boolean;
+  matchedText: unknown;
+  embeddingModel: unknown;
+  /** The configured model's name. Lazy: asked only when the answer depends on it (a vector beside its current text). */
+  configuredModel: () => string;
+  rebuild?: boolean;
+}
+
+/**
+ * The worker's classifier: what `embedStoredRecord` does with a record, as a value. The worker switches on it, and the backfill's
+ * walk (`queue-embed-sweep.ts`) counts from it, so a record the walk owes is exactly a record the worker settles and a drained
+ * space owes nothing on the next call by construction (Q-656). A second copy of this table in the walk is how `embedding: null`
+ * came to be queued by neither of the backfill's two walks.
+ *
+ * A vectorless record that is not suppressed is `vectorless`, never `stale`: `stale` names a record that holds a vector, or is
+ * suppressed, whose stored text is not its current text (the backfill's `stale` count). Whether the text is stale is
+ * `textIsStale`'s question, asked here and nowhere else in this module.
+ */
+export function embedOwed(i: EmbedOwedInput): EmbedOwed {
+  if (i.text === UNBUILDABLE) return { outcome: 'unbuildable' };
+  if (i.text === null) return i.holdsDerived ? { outcome: 'textless', reason: 'clear-derived' } : { outcome: 'textless' };
+  const stale = textIsStale({ matchedText: i.matchedText }, i.text);
+  if (i.suppressed) {
+    if (stale) return { outcome: 'writeLexical', reason: 'stale' };
+    if (i.vectorPresent) return { outcome: 'writeLexical', reason: 'suppressed-vector' };
+    return { outcome: 'settled' };
+  }
+  if (!i.vectorPresent) return { outcome: 'embed', reason: 'vectorless' };
+  if (stale) return { outcome: 'embed', reason: 'stale' };
+  if (i.embeddingModel !== i.configuredModel()) return { outcome: 'embed', reason: 'model' };
+  if (i.rebuild) return { outcome: 'embed', reason: 'rebuild' };
+  return { outcome: 'unchanged' };
 }
 
 /**
@@ -245,31 +371,18 @@ export async function embedStoredRecord(
   // Absent at a tier means NOT STATED and falls through — it is not `false`. Reading it as `false` would make
   // the space-wide switch do nothing for any type that had a schema at all, which is every type worth
   // suppressing.
+  // Throws on a record whose own field has the wrong type: the job fails where `list_embed_jobs` shows it, which is how an
+  // operator learns of the record (the backfill owes it on every call for that reason).
   const text = await buildEmbedText(spaceId, recordType, doc);
-
-  // A derived record with no text is owed nothing, and whatever vector it holds came from a backfill that embedded
-  // its path. Decided BEFORE suppression, whose branch writes `matchedText` and would give the record a text it does
-  // not have. `faceEmbedding` is a different index of a different model and is not touched.
-  if (text === null) {
-    if (Object.keys(UNSET_DERIVED).some(f => f in doc)) {
-      const outcome = await write({ unset: UNSET_DERIVED });
-      if (outcome === 'superseded') return 'superseded';
-      if (outcome === 'gone') return 'gone';
-    }
-    return 'textless';
-  }
 
   // `matchedText` is what the lexical channel searches, so it is rewritten on EVERY outcome, not only when a vector is
   // stored (`Q-94`). Left as it was, a suppressed record kept matching the text it held when suppression began — a
   // deleted property went on being found, and shown as the record's matched text.
-  // A FILE row asks the file question (its two tiers, then its ancestors); every other kind has no ancestors.
-  const suppressed = recordType === 'file'
+  // A FILE row asks the file question (its two tiers, then its ancestors); every other kind has no ancestors. A textless
+  // row is not asked: its answer does not depend on it, and the file question costs an ancestor read.
+  const suppressed = text === null ? false : recordType === 'file'
     ? await fileEmbeddingSuppressed(spaceId, doc)
     : embeddingSuppressedFor(spaceId, recordType, doc);
-  if (suppressed) {
-    const outcome = await write({ set: { matchedText: text }, unset: UNSET_VECTOR });
-    return outcome === 'written' ? 'excluded' : outcome === 'gone' ? 'gone' : 'superseded';
-  }
 
   // Every successful update enqueues an embed job, unconditionally and for good reasons — the enqueue is also
   // how the `suppressEmbeddings` toggle takes effect, and how a stale inline embed was eliminated. But most
@@ -278,19 +391,48 @@ export async function embedStoredRecord(
   //
   // **The fingerprint already exists.** Every embed writes `matchedText` — the exact text it embedded — beside the
   // vector. So an identical text, with a vector present and the SAME model configured, means the model call is a
-  // no-op by construction: a vector is a pure function of (text, model), and both are unchanged.
+  // no-op by construction (`unchanged`): a vector is a pure function of (text, model), and both are unchanged.
   //
   // This is not a heuristic and it does not trade quality: the record keeps a vector the system itself produced
-  // from this text with this model. Any of the three conditions failing falls through and re-embeds.
-  const configuredModel = getEmbeddingConfig().model;
-  const vectorPresent = Array.isArray(doc['embedding']) && (doc['embedding'] as unknown[]).length > 0;
-  if (!opts.rebuild && vectorPresent && doc['matchedText'] === text && doc['embeddingModel'] === configuredModel) {
-    return 'unchanged';
+  // from this text with this model. Any of the three conditions failing re-embeds. The table is `embedOwed`'s, which
+  // the backfill's walk asks too.
+  const owed = embedOwed({
+    text, suppressed, vectorPresent: holdsVector(doc), holdsDerived: Object.keys(UNSET_DERIVED).some(f => f in doc),
+    matchedText: doc['matchedText'], embeddingModel: doc['embeddingModel'], configuredModel: () => getEmbeddingConfig().model, rebuild: opts.rebuild,
+  });
+  switch (owed.outcome) {
+    case 'unbuildable':
+      // `buildEmbedText` throws instead of answering the marker; only the guarded builders give it.
+      throw new Error(`embedStoredRecord: the text of ${recordType} '${logSafe(recordId)}' cannot be built`);
+    case 'textless': {
+      // A derived record with no text is owed nothing, and whatever vector it holds came from a backfill that embedded
+      // its path. Decided BEFORE suppression, whose branch writes `matchedText` and would give the record a text it does
+      // not have. `faceEmbedding` is a different index of a different model and is not touched.
+      if (owed.reason === 'clear-derived') {
+        const outcome = await write({ unset: UNSET_DERIVED });
+        if (outcome === 'superseded') return 'superseded';
+        if (outcome === 'gone') return 'gone';
+      }
+      return 'textless';
+    }
+    case 'settled':
+    case 'writeLexical': {
+      // The text, and the vector UNSET: see the suppression comment above. Written for a settled record too, which changes
+      // nothing and keeps the job's answer `excluded`.
+      const outcome = await write({ set: { matchedText: text }, unset: UNSET_VECTOR });
+      return outcome === 'written' ? 'excluded' : outcome === 'gone' ? 'gone' : 'superseded';
+    }
+    case 'unchanged':
+      return 'unchanged';
+    case 'embed':
+      break;
   }
+  // `embedOwed` answers `embed` only for a record with a text.
+  const toEmbed = text as string;
 
   let result: Awaited<ReturnType<typeof embed>>;
   try {
-    result = await embed(text);
+    result = await embed(toEmbed);
   } catch (err) {
     // A rebuild that fails because the EMBEDDER is away changes nothing. The record's text did not change, so its
     // vector still describes it — under the old model, perhaps, but a model-change reindex keeps recall refused for
@@ -303,13 +445,13 @@ export async function embedStoredRecord(
     // is of text that is gone, and `matchedText` doubles as the "unchanged" fingerprint above — written beside a
     // stale vector, the next attempt would take the vector as current and never call the model again.
     // On the version read only: a newer copy's text is not this job's to write.
-    await write({ set: { matchedText: text }, unset: UNSET_VECTOR });
+    await write({ set: { matchedText: toEmbed }, unset: UNSET_VECTOR });
     throw err;
   }
 
   // `seq` is deliberately NOT advanced. An embedding is a DERIVED field — `merkle.ts` excludes it from
   // replication precisely because each peer computes its own — so bumping `seq` here would broadcast a
   // no-op change to every peer in every network the space belongs to, on every embedding, forever.
-  const outcome = await write({ set: { embedding: result.vector, embeddingModel: result.model, matchedText: text } });
+  const outcome = await write({ set: { embedding: result.vector, embeddingModel: result.model, matchedText: toEmbed } });
   return outcome === 'written' ? 'embedded' : outcome === 'gone' ? 'gone' : 'superseded';
 }

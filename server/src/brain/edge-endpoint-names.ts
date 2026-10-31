@@ -26,7 +26,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { collectionForRefKind, edgeEndpointKind, endpointNameField } from './entity-refs.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import { spaceCollection } from '../db/space-collection.js';
+import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { recordDisplayName, recordDisplayType } from './link-frontier.js';
 import { readRecordsById, type RecordsById } from './walk-reads.js';
@@ -94,6 +94,9 @@ export async function resolveEndpointNames(
   }
   const named = new Map<string, string>();
   for (const [kind, ids] of idsByKind) {
+    // A kind no collection holds (a pulled edge whose `fromKind` fails its schema) is read by nothing and named by its raw id, the
+    // answer `resolveEndpointName` gives it: its read finds no row there. Building the collection name threw for the whole page.
+    if ((collectionForRefKind(kind) as SpacePart | undefined) === undefined) continue;
     const field = endpointNameField(kind);
     const rows = await readRowsById<Record<string, unknown>>(spaceCollection(spaceId, collectionForRefKind(kind)), [...ids], { [field]: 1 });
     for (const row of rows) named.set(`${kind}\u0000${String(row['_id'])}`, endpointDisplayName(row[field], String(row['_id'])));
