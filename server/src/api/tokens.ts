@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { refusalOfParse } from '../util/log.js';
 import { requireAuth, requireAdminOrSpaceAdmin, requireAdminOrSpaceAdminMfa, isInstanceAdmin } from '../auth/middleware.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
-import { rateLimitRefusal } from '../rate-limit/per-token.js';
+import { rateLimitRefusalResponse } from '../rate-limit/per-token.js';
 import { createToken, initialRightsOf, listTokens, revokeToken, regenerateToken, renameToken, setTokenRights, setTokenMfa, setTokenRateLimit } from '../auth/tokens.js';
 import { isMfaEnabled, verifyMfaCode } from '../auth/totp.js';
 import { z } from 'zod';
@@ -402,9 +402,9 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
    * value is still a `400`. Never accepted-and-clamped: storing a smaller number than was asked for and
    * answering 201 is the defect this file's `.strict()` comment is about, one field over.
    */
-  const quotaRefusal = rateLimitRefusal(rateLimitPerMinute);
+  const quotaRefusal = rateLimitRefusalResponse(rateLimitPerMinute);
   if (quotaRefusal) {
-    res.status(quotaRefusal.includes('instance ceiling') ? 403 : 400).json({ error: quotaRefusal });
+    res.status(quotaRefusal.status).json({ error: quotaRefusal.error });
     return;
   }
   /*
@@ -632,9 +632,9 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
    * the token (a new name beside an over-ceiling quota used to rename it and answer 403) nor spend a one-time code.
    */
   if (rateLimitPerMinute !== undefined) {
-    const refusal = rateLimitRefusal(rateLimitPerMinute);
+    const refusal = rateLimitRefusalResponse(rateLimitPerMinute);
     if (refusal) {
-      res.status(refusal.includes('instance ceiling') ? 403 : 400).json({ error: refusal });
+      res.status(refusal.status).json({ error: refusal.error });
       return;
     }
   }

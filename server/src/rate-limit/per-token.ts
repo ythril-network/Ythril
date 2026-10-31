@@ -80,18 +80,31 @@ export const MAX_PER_MINUTE = 1_000_000;
  * is returned rather than thrown so each surface can attach it to its own status code.
  */
 export function rateLimitRefusal(requested: unknown): string | null {
+  return rateLimitRefusalResponse(requested)?.error ?? null;
+}
+
+/**
+ * {@link rateLimitRefusal} with the status a door answers it with: `403` when the instance ceiling refuses (the request is
+ * well-formed and the caller may not ask for that number, as a pinned media-config field answers), `400` when the value itself is
+ * malformed. The status belongs to the refusal's KIND, decided here: the create and the update route each matched the message text
+ * (`includes('instance ceiling')`), so rewording the message would have changed a status on one door and not the other (Q-656).
+ */
+export function rateLimitRefusalResponse(requested: unknown): { status: 400 | 403; error: string } | null {
   if (requested === undefined || requested === null) return null;   // absent = inherit, which is the default
   if (typeof requested !== 'number' || !Number.isInteger(requested)) {
-    return 'rateLimitPerMinute must be a whole number of requests per minute.';
+    return { status: 400, error: 'rateLimitPerMinute must be a whole number of requests per minute.' };
   }
   if (requested < MIN_PER_MINUTE || requested > MAX_PER_MINUTE) {
-    return `rateLimitPerMinute must be between ${MIN_PER_MINUTE} and ${MAX_PER_MINUTE}.`;
+    return { status: 400, error: `rateLimitPerMinute must be between ${MIN_PER_MINUTE} and ${MAX_PER_MINUTE}.` };
   }
   const ceiling = instanceCeiling();
   if (ceiling !== undefined && requested > ceiling) {
-    return `rateLimitPerMinute ${requested} exceeds the instance ceiling of ${ceiling} set by `
-      + 'YTHRIL_RATE_LIMIT_PER_MINUTE. Infra owns that number; lower the per-token value or have infra raise '
-      + 'the ceiling. The request was refused rather than silently reduced.';
+    return {
+      status: 403,
+      error: `rateLimitPerMinute ${requested} exceeds the instance ceiling of ${ceiling} set by `
+        + 'YTHRIL_RATE_LIMIT_PER_MINUTE. Infra owns that number; lower the per-token value or have infra raise '
+        + 'the ceiling. The request was refused rather than silently reduced.',
+    };
   }
   return null;
 }

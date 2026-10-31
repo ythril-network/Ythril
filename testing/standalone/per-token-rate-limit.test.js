@@ -137,6 +137,35 @@ describe('what an admin may set', () => {
   });
 });
 
+describe('a refused quota carries its status with it (Q-656)', () => {
+  /*
+   * The create and the update route each wrote `message.includes('instance ceiling') ? 403 : 400` over the refusal's TEXT: a reworded
+   * message would have turned a ceiling refusal into a 400 on one door and not the other. The status is decided where the refusal is,
+   * by its kind, and both doors send what that function says.
+   */
+  it('a malformed value is a 400 and a value over the ceiling is a 403, by kind and not by message text', async () => {
+    const { rateLimitRefusalResponse } = await import('../../server/dist/rate-limit/per-token.js');
+    assert.equal(rateLimitRefusalResponse(undefined), null);
+    assert.equal(rateLimitRefusalResponse(null), null);
+    assert.equal(rateLimitRefusalResponse(10), null);
+    assert.equal(rateLimitRefusalResponse(1.5)?.status, 400);
+    assert.equal(rateLimitRefusalResponse(0)?.status, 400);
+    assert.equal(rateLimitRefusalResponse(MAX_PER_MINUTE + 1)?.status, 400);
+    process.env[ENV] = '50';
+    const over = rateLimitRefusalResponse(500);
+    assert.equal(over?.status, 403);
+    assert.equal(over?.error, rateLimitRefusal(500), 'the string form and the response carry one message');
+    assert.equal(rateLimitRefusalResponse(50), null);
+  });
+
+  it('no door decides the status from the message text, and both ask the one function', () => {
+    const routes = stripComments(readFileSync('server/src/api/tokens.ts', 'utf8'));
+    assert.doesNotMatch(routes, /includes\(\s*['"]instance ceiling['"]\s*\)/, 'a door matches the refusal text to choose its status');
+    assert.equal(routes.match(/\brateLimitRefusalResponse\(/g)?.length, 2, 'the create and the update door each ask rateLimitRefusalResponse');
+    assert.doesNotMatch(routes, /\brateLimitRefusal\(/, 'a door asks the string form and decides the status itself');
+  });
+});
+
 describe('the metering cannot be forgotten on a new auth path', () => {
   const mw = stripComments(readFileSync('server/src/auth/middleware.ts', 'utf8'));
 
@@ -197,7 +226,7 @@ describe('one rule, both write paths, and the read surface agrees', () => {
   it('create and PATCH both use the SHARED refusal', () => {
     // Two copies of "what is an acceptable quota" is the defect the y-flows convention `convention-find-every-instance` names, and here the
     // weaker copy would be handing out quota nobody granted.
-    assert.equal([...routes.matchAll(/rateLimitRefusal\(/g)].length, 2,
+    assert.equal([...routes.matchAll(/rateLimitRefusalResponse\(/g)].length, 2,
       'both write paths must consult the shared refusal — no more, no fewer');
     assert.doesNotMatch(routes, /instanceCeiling\(\)/,
       'the route must not read the ceiling itself; that is a second copy of a rule infra owns');
@@ -269,7 +298,7 @@ describe('one rule, both write paths, and the read surface agrees', () => {
     const start = routes.indexOf("tokensRouter.patch('/:id'");
     assert.ok(start >= 0, 'the PATCH /:id route was not found');
     const patch = routes.slice(start, routes.indexOf('tokensRouter.', start + 1));
-    const refusedAt = patch.indexOf('rateLimitRefusal(');
+    const refusedAt = patch.indexOf('rateLimitRefusalResponse(');
     assert.ok(refusedAt >= 0, 'the PATCH route no longer checks the quota');
     for (const effect of ['exemptionNeedsLiveCode(', 'verifyMfaCode(', 'renameToken(', 'setTokenRights(', 'setTokenMfa(', 'setTokenRateLimit(']) {
       const at = patch.indexOf(effect);
