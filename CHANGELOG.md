@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Tokens:** `PATCH /api/tokens/:id` accepts `rateLimitPerMinute` on its own; it answered 400 unless `name`, `rights` or `mfa` came with it. The audit entry records the quota before and after.
+- **Tokens:** a `PATCH /api/tokens/:id` whose `rateLimitPerMinute` is refused changes nothing: it used to apply the new name, rights or second-factor exemption first, and spend the second-factor code. The audit entry of a token edit records the second factor and the quota.
 - **Sync:** two instances holding different copies of one record at the same version (fact, entity, edge, chrono entry) now both keep the lower-hash copy as the record and the other as a fork, and their space hashes agree. Nothing is deleted; an older pair converges at the next delivery.
 - **Sync:** two instances with different metadata for one file at the same version now agree on the lower-hash copy, and the one that lost keeps its copy in **Conflicts** (Keep mine or Keep theirs; `GET /api/conflicts` says `kind: "metadata"`).
 - **Sync:** **Keep mine** on a metadata conflict puts back every field its table shows, including the description's source and whether embeddings are suppressed, and answers `400` naming a field it cannot put back.
@@ -34,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Brain:** merging entity A no longer moves the edges of a fact or chrono entry that holds A's id, and resolving a fork of a fact or chrono entry no longer moves an entity's edges: an edge end is matched by kind as well as id.
 - **Brain:** in a `strictLinkage` space an edge or link written while its entity is deleted or merged no longer survives naming it: a delete takes back what this instance wrote meanwhile, a merge moves it, and a save whose edge was taken back is refused `409` `endpoint_removed`.
 - **Brain:** a link created on its own to such an entity is refused `409` `link_target_removed`; a link written inside a record (fact, entry, file, inline) is dropped and `warnings` says which.
+- **Brain:** merging two entities stores the survivor's searchable text with its new vector; when the embedding model cannot be reached the survivor keeps its previous pair and is queued, and a suppressed survivor loses its vector.
 - **Embeddings:** `POST /api/spaces/:id/reembed` and `space_reembed` also queue records whose stored text is not their current text (`stale` in the answer), such as an update whose embed job was never queued. The call now reads every record of the space once.
 - **Embeddings:** rewriting an existing fact, entity, chrono entry or edge by its id with new text now re-embeds it; the old vector was kept. Until the job has run, the record keeps its previous lexical text.
 - **Embeddings:** the warning for a failed enqueue says the repair covers updated records too, and a failed enqueue of a single local write, a file's metadata among them, now warns.
@@ -43,8 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Embeddings:** `reembed` now queues a record stored with `embedding: null` or `[]`, a suppressed record that still holds a vector, a chunk under a missing parent that still holds one, and a textless chunk still carrying derived fields; it no longer re-queues a chunk under a suppressed parent on every call.
 - **Embeddings:** one record with a field of the wrong type (`tags: "x"`) no longer fails a whole `reembed` call or a whole page a peer sent to a suppressed space; the rest is stored and a warning names the record. An edge whose endpoint kind this version does not know is embedded with the raw id, as a single write already did.
 - **Embeddings:** a suppressed file whose text is filled in no longer keeps a vector beside it.
-- **Brain:** merging two entities stores the survivor's searchable text with its new vector; when the embedding model cannot be reached the survivor keeps its previous pair and is queued, and a suppressed survivor loses its vector.
-- **Tokens:** a `PATCH /api/tokens/:id` whose `rateLimitPerMinute` is refused changes nothing: it used to apply the new name, rights or second-factor exemption first, and spend the second-factor code. The audit entry of a token edit records the second factor and the quota.
 - **Settings:** the Danger tab's **Backfill embeddings** says how many queued records had searchable text older than their content, stays usable while embeddings are suppressed (it then writes searchable text only), and its result is read out by screen readers.
 - **Docs:** a token's own request quota is set by an instance admin, or by a space admin for a token in their scope.
 - **Development:** `npm run test:up` builds the test image, so a local stack never tests an image older than the checkout; the unregistered-files check accepts a file a `.gitignore` rule names above a catch-all such as `*.txt`.
