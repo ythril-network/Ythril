@@ -84,7 +84,10 @@ export interface ReembedResult {
   spaceId: string;
   /** Records a job was queued for: those with no vector that are not suppressed, and the `stale` ones. */
   enqueued: number;
-  /** Candidates skipped because suppression still applies at some tier. */
+  /**
+   * Candidates left alone because suppression still applies at some tier. A suppressed record owed its lexical text is not here: it is
+   * queued (its job writes the text and calls no model) and counted in `stale`, or in `remaining` when past the cap.
+   */
   skippedSuppressed: number;
   /**
    * Of `enqueued`, the records queued because their stored text differs from their current text: a vector made from text the record
@@ -342,6 +345,8 @@ async function queueStaleRecords(
         if (typeof id !== 'string' || text === null || text === undefined || doc['matchedText'] === text) continue;
         // Not owed: no vector and not suppressed — the vectorless walk queues it.
         if (doc['holdsVector'] !== true && !stillSuppressed(spaceId, kind, doc)) continue;
+        // Owed and suppressed with no vector: the vectorless walk counted it as skipped too, so it is taken back from that count.
+        if (doc['holdsVector'] !== true) result.skippedSuppressed = Math.max(0, result.skippedSuppressed - 1);
         if (result.enqueued >= cap) { result.remaining++; continue; }
         await enqueueEmbedJob(spaceId, kind, id);
         result.enqueued++;
