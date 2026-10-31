@@ -299,41 +299,46 @@ export const space_reindexTool: ToolHandler = {
  */
 export const space_reembedTool: ToolHandler = {
   name: 'space_reembed',
-  description: 'Queue embeddings for records in a space that have NONE, and for records whose stored text is not their '
-    + 'current text — the way back from `suppressEmbeddings`, and the repair after an embedding run stopped partway '
-    + 'or an update\'s embedding job was lost.\n\n'
-    + 'STALE RECORDS ARE QUEUED TOO, and `stale` counts them: a record that keeps the vector and the lexical text of its '
-    + 'previous content because its job was never queued, and a suppressed record whose lexical text is missing or old '
-    + '(its job writes the text without calling the model). FINDING THEM READS EVERY RECORD OF THE SPACE ONCE PER CALL '
-    + '(`limit` bounds what is queued, never what is read), so a large space pays for a pass over its records each time. '
-    + 'Calling again re-reads from the start: what you queued stays stale until the worker has drained it, so '
-    + '`enqueued` and `remaining` do not move before then.\n\n'
+  description: 'Queue an embedding job for every record in a space that the embedding worker would change — the way back '
+    + 'from `suppressEmbeddings`, and the repair after an embedding run stopped partway or an update\'s embedding job '
+    + 'was lost.\n\n'
+    + 'OWED, AND COUNTED ONCE: a record with no vector (none stored, or a stored `null` or empty list) that is not '
+    + 'suppressed; a record that keeps the vector and the lexical text of its previous content because its job was never '
+    + 'queued; a suppressed record whose lexical text is missing or old (its job writes the text without calling the '
+    + 'model) or that still holds a vector (its job removes it); a derived record with no text that still holds a '
+    + 'vector or text (its job clears them); and a record whose text cannot be built because a field has the wrong type '
+    + '(owed on every call: its job fails and `list_embed_jobs` shows it, so correct the record). Each record lands in '
+    + 'exactly one count: `enqueued`, `remaining` or `skippedSuppressed`. FINDING THEM READS EVERY RECORD OF THE SPACE '
+    + 'ONCE PER CALL (`limit` bounds what is queued, never what is read), so a large space pays for a pass over its '
+    + 'records each time. Calling again re-reads from the start: what you queued stays owed until the worker has drained '
+    + 'it, so `enqueued` and `remaining` do not move before then.\n\n'
     // NAMING THE OTHER TOOL WOULD BE THE DEFECT HERE. Rebuilding every vector is instance-admin, this is
     // not, so a standard token sees this description and cannot see that tool — and a description that
     // sends a caller to something they will be refused is worse than one that describes the boundary.
     // `readonly-tool-descriptions-cannot-name-mutating-tools` is the same rule one rung down.
     + 'IT DOES NOT REBUILD VECTORS THAT ARE CURRENT, and that is the distinction to get right: a record that holds a '
-    + 'vector made from its current text is left alone, and one whose text has changed is the stale case above. '
-    + 'Rebuilding every vector in a space — the recovery path after changing embedder or model — is a separate and '
-    + 'more privileged operation; `help()` lists it if your token can reach it. This one touches only '
-    + 'records with no vector at all and the stale ones above, is AWAITED, and the counts it returns are the '
-    + 'answer rather than a receipt.\n\n'
-    + 'SUPPRESSION IS EXCLUDED IN THE QUERY, not filtered afterwards, so a suppressed record whose lexical text is '
-    + 'current is reported under `skippedSuppressed` rather than queued again on every call. A suppressed record whose '
-    + 'text is stale is NOT skipped: it is queued, counted in `stale` and `enqueued` (and in `remaining` when past the '
-    + 'cap), never under `skippedSuppressed`. A record suppressed at any tier — '
-    + 'record, type schema or space — stays suppressed; releasing it is a separate act, and this is what you '
-    + 'run AFTER releasing it because nothing backfills on its own.\n\n'
+    + 'vector made from its current text is left alone, even one made by an earlier model, and one whose text has '
+    + 'changed is owed as above. Rebuilding every vector in a space — the recovery path after changing embedder or '
+    + 'model — is a separate and more privileged operation; `help()` lists it if your token can reach it. This one '
+    + 'touches only the owed records above, is AWAITED, and the counts it returns are the answer rather than a '
+    + 'receipt.\n\n'
+    + 'SUPPRESSION IS NEVER UNDONE HERE: a suppressed record whose lexical text is current and that holds no vector '
+    + 'is reported under `skippedSuppressed` rather than queued again on every call. A suppressed record whose text is '
+    + 'stale, or that still holds a vector, is NOT skipped: it is queued (counted in `enqueued`, a stale one in `stale` '
+    + 'too, and in `remaining` alone when past the cap). A record suppressed at any tier — record, type schema or space, '
+    + 'and for a file its parent — stays suppressed; while it is, a run writes searchable text only. Releasing it is a '
+    + 'separate act, and this is what you run AFTER releasing it because nothing backfills on its own.\n\n'
     + 'BOUNDED, AND `truncated: true` MEANS CALL AGAIN. `limit` defaults to '
     + `${REEMBED_DEFAULT_LIMIT} and cannot exceed ${REEMBED_MAX_LIMIT}, so one call can never enqueue `
     + 'unbounded work. `remaining` is what is left after this page.\n\n'
     + 'QUEUED BEHIND LOCAL WRITES. The jobs wait in the background lane: a write somebody is waiting to search '
     + 'for is embedded first, while the backfill still gets a share of the worker. A derived record with no text '
-    + 'of its own (a face crop, a converted copy of a document) is never a candidate, so a second call after the '
-    + 'queue has drained reports `enqueued: 0`.\n\n'
-    + 'RESPONSE: `enqueued`, `skippedSuppressed`, `stale` (of `enqueued`, the records queued because their text '
-    + 'changed), `byKind`, `remaining`, `truncated`. A run that enqueues nothing and skips nothing means every '
-    + 'record already has a vector made from its current text — not that it failed.',
+    + 'of its own (a face crop, a converted copy of a document) is owed only while it still holds a vector or text to '
+    + 'clear, so a second call after the queue has drained reports `enqueued: 0` — except for records whose text '
+    + 'cannot be built, which are queued on every call until they are corrected.\n\n'
+    + 'RESPONSE: `enqueued`, `skippedSuppressed`, `stale` (of `enqueued`, the records that hold a vector or are '
+    + 'suppressed and whose text changed), `byKind`, `remaining`, `truncated`. A run that enqueues nothing and skips '
+    + 'nothing means every record already has a vector made from its current text — not that it failed.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
