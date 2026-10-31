@@ -69,6 +69,58 @@ describe('Token lifecycle', () => {
     await del(INSTANCES.a, tokenA, `/api/tokens/${id}`);
   });
 
+  it('PATCH carrying only rateLimitPerMinute is an edit, and the quota persists (Q-656)', async () => {
+    // The guard refused a body with no name, rights or mfa, so the quota could only be set beside another field.
+    const create = await post(INSTANCES.a, tokenA, '/api/tokens', { name: 'quota-alone' });
+    assert.equal(create.status, 201);
+    const id = create.body.token.id;
+    try {
+      const r = await patch(INSTANCES.a, tokenA, `/api/tokens/${id}`, { rateLimitPerMinute: 42 });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const list = await get(INSTANCES.a, tokenA, '/api/tokens');
+      assert.equal(list.body.tokens.find(t => t.id === id)?.rateLimitPerMinute, 42);
+    } finally {
+      await del(INSTANCES.a, tokenA, `/api/tokens/${id}`);
+    }
+  });
+
+  it('PATCH with a refused quota changes nothing, the name beside it included (Q-656)', async () => {
+    // The rename ran before the quota was checked, so a refused request still renamed the token. The test stack sets no instance
+    // ceiling, so the refusals here are the malformed ones (below the floor, above the cap), which answer 400 by the same function.
+    const create = await post(INSTANCES.a, tokenA, '/api/tokens', { name: 'quota-refused' });
+    assert.equal(create.status, 201);
+    const id = create.body.token.id;
+    try {
+      for (const bad of [0, 1_000_001]) {
+        const r = await patch(INSTANCES.a, tokenA, `/api/tokens/${id}`, { name: 'must-not-stick', rateLimitPerMinute: bad });
+        assert.equal(r.status, 400, `rateLimitPerMinute ${bad}: ${JSON.stringify(r.body)}`);
+        const list = await get(INSTANCES.a, tokenA, '/api/tokens');
+        assert.equal(list.body.tokens.find(t => t.id === id)?.name, 'quota-refused', `rateLimitPerMinute ${bad} was refused and the name changed anyway`);
+      }
+    } finally {
+      await del(INSTANCES.a, tokenA, `/api/tokens/${id}`);
+    }
+  });
+
+  it('PATCH granting an exemption with a refused quota answers the quota\'s status, not MFA (Q-656)', async () => {
+    // The quota is checked before the second factor is verified, so a refused body does not spend a one-time code. The stack's
+    // instance has no second factor switched on, so this holds on either order here; the order itself is pinned in
+    // testing/standalone/per-token-rate-limit.test.js. What this pins is the status the caller sees and that nothing is stored.
+    const create = await post(INSTANCES.a, tokenA, '/api/tokens', { name: 'quota-and-mfa' });
+    assert.equal(create.status, 201);
+    const id = create.body.token.id;
+    try {
+      const r = await patch(INSTANCES.a, tokenA, `/api/tokens/${id}`, { mfa: 'exempt', rateLimitPerMinute: 0 }, { 'X-TOTP-Code': '000000' });
+      assert.equal(r.status, 400, JSON.stringify(r.body));
+      assert.notEqual(r.body?.error, 'MFA_REQUIRED', 'the quota refusal came after the second factor was asked for');
+      const list = await get(INSTANCES.a, tokenA, '/api/tokens');
+      const stored = list.body.tokens.find(t => t.id === id);
+      assert.ok(stored?.mfa === undefined || stored.mfa === 'inherit', `the refused edit stored mfa ${stored?.mfa}`);
+    } finally {
+      await del(INSTANCES.a, tokenA, `/api/tokens/${id}`);
+    }
+  });
+
   it('PATCH a non-existent token returns 404', async () => {
     const r = await patch(INSTANCES.a, tokenA, '/api/tokens/nonexistent-id', { name: 'whatever' });
     assert.equal(r.status, 404);

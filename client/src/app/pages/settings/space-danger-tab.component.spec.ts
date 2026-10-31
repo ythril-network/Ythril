@@ -36,7 +36,7 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
  * runtime — did not exist as far as the compiler was concerned. Four assertions were reading a property the
  * type said was absent.
  */
-function setup<E extends Record<string, unknown>>(confirmResult: boolean, api: E = {} as E) {
+function setup<E extends Record<string, unknown>>(confirmResult: boolean, api: E = {} as E, words?: Record<string, string>) {
   const spacesApi = {
     renameSpace: vi.fn().mockReturnValue(of({ space: { id: 'renamed', label: 'S' } })),
     wipeSpace: vi.fn().mockReturnValue(of({})),
@@ -50,7 +50,7 @@ function setup<E extends Record<string, unknown>>(confirmResult: boolean, api: E
   };
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
-    imports: [SpaceDangerTabComponent, getTranslocoModule()],
+    imports: [SpaceDangerTabComponent, getTranslocoModule(words ? { translation: { en: words } } : {})],
     providers: [
       SpaceSettingsState,
       { provide: SpacesApi, useValue: spacesApi },
@@ -63,10 +63,11 @@ function setup<E extends Record<string, unknown>>(confirmResult: boolean, api: E
       { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(confirmResult) } },
     ],
   });
-  const c = TestBed.createComponent(SpaceDangerTabComponent).componentInstance;
+  const fixture = TestBed.createComponent(SpaceDangerTabComponent);
+  const c = fixture.componentInstance;
   const state = TestBed.inject(SpaceSettingsState);
   state.settingsSpace.set({ id: 'proj', label: 'Project' } as never);
-  return { c, state, spacesApi, networksApi };
+  return { c, fixture, state, spacesApi, networksApi };
 }
 
 describe('SpaceDangerTabComponent — irreversible ops are confirm-gated', () => {
@@ -177,6 +178,66 @@ describe('the embedding suppression section', () => {
     // A type that says nothing inherits; listing it would suggest an override that is not there.
     const h = withMeta({ typeSchemas: { fact: { note: { suppressEmbeddings: true }, plain: {} }, entity: { row: { suppressEmbeddings: false } } } });
     expect(h.c.declaredSuppression().map(r => r.key).sort()).toEqual(['entity.row', 'fact.note']);
+  });
+
+  /**
+   * The backfill's sentences as marker words, in every plural form a language file may give them (the counted sentences are read
+   * through the plural mechanism, so a spec that gave only the base key would see nothing of them): a case can then see WHICH
+   * line rendered, whatever the real English says. The result's lines are Done, Stale, More and Skipped.
+   */
+  const MARKERS: Record<string, string> = Object.fromEntries(
+    ['embeddingsBackfillDone', 'embeddingsBackfillStale', 'embeddingsBackfillMore', 'embeddingsBackfillSkipped']
+      .flatMap(k => ['', '.zero', '.one', '.two', '.few', '.many', '.other'].map(form => [`spaces.dangerZone.${k}${form}`, `LINE-${k}`])),
+  );
+  MARKERS['spaces.dangerZone.embeddingsBackfill'] = 'BACKFILL-BUTTON';
+
+  /** A press of the Backfill button that answers `stale`, rendered: the text of the tab after the result is shown. */
+  const pressed = async (stale: number) => {
+    const h = setup(true, {
+      updateSpace: vi.fn().mockReturnValue(of({ space: { id: 'proj', label: 'Project' } })),
+      reembedSpace: vi.fn().mockReturnValue(of({ spaceId: 'proj', enqueued: 3, skippedSuppressed: 0, byKind: { fact: 3 }, stale, remaining: 0, truncated: false })),
+    }, MARKERS);
+    // Seeded first: the effect that seeds the space clears a backfill result, so a first pass after the press would erase it.
+    TestBed.tick();
+    await h.c.backfill();
+    TestBed.tick();
+    return { h, text: (h.fixture.nativeElement as HTMLElement).textContent ?? '' };
+  };
+
+  it('says how many of the queued records had outdated searchable text, and says nothing of it when none had (Q-656)', async () => {
+    // The repair also queues records whose stored text is not their current text (`stale`); the message counted them under
+    // "Queued N" and never said so, so a press that only repaired stale records read as a backfill of missing vectors.
+    const withStale = (await pressed(2)).text;
+    expect(withStale, 'the result message is not rendered at all: this case asks nothing').toContain('LINE-embeddingsBackfillDone');
+    expect(withStale, 'the stale count is not said').toContain('LINE-embeddingsBackfillStale');
+    const none = (await pressed(0)).text;
+    expect(none, 'the result message is not rendered at all: this case asks nothing').toContain('LINE-embeddingsBackfillDone');
+    expect(none).not.toContain('LINE-embeddingsBackfillStale');
+  });
+
+  it('the Backfill button is enabled while the space suppresses embeddings: a backfill then writes the searchable text (Q-656)', async () => {
+    // A suppressed record owed its lexical text is queued and written without a model call, so pressing is not a no-op and the
+    // button no longer waits for the box to be unticked.
+    const { h } = await pressed(0);
+    h.c.suppress.set(true);
+    TestBed.tick();
+    h.fixture.detectChanges();
+    const buttons = Array.from((h.fixture.nativeElement as HTMLElement).querySelectorAll('button'));
+    const backfill = buttons.find(b => (b.textContent ?? '').includes('BACKFILL-BUTTON'));
+    expect(backfill, 'the Backfill button is not rendered').toBeTruthy();
+    expect(backfill!.disabled, 'the Backfill button stays disabled under suppression').toBe(false);
+  });
+
+  it('the backfill result is announced through the tab\'s live region, as its other actions are (Q-656)', async () => {
+    const say = vi.spyOn(LiveAnnouncement.prototype, 'say');
+    try {
+      await pressed(2);
+      const said = say.mock.calls.map(c => String(c[0])).join(' | ');
+      expect(said, 'a screen reader user is told nothing when the backfill ends').toContain('LINE-embeddingsBackfillDone');
+      expect(said, 'the announcement leaves out the stale count the screen shows').toContain('LINE-embeddingsBackfillStale');
+    } finally {
+      say.mockRestore();
+    }
   });
 
   it('keeps the backfill result, because the counts ARE the answer', () => {
