@@ -1200,6 +1200,7 @@
   "spaces.dangerZone.embeddingsBackfillBlocked": "Uzupełnianie jest niedostępne przy włączonym wstrzymaniu — każdy rekord zostałby pominięty. Najpierw wyłącz je i zapisz.",
   "spaces.dangerZone.embeddingsBackfillDone": "Zakolejkowano {{enqueued}} rekordów do osadzenia. Proces trwa w tle.",
   "spaces.dangerZone.embeddingsBackfillMore": "{{remaining}} kolejnych wciąż wymaga osadzenia — uruchom ponownie, aby kontynuować.",
+  "spaces.dangerZone.embeddingsBackfillStale": "{{stale}} z nich miało tekst do wyszukiwania starszy niż ich treść i zostaną osadzone ponownie.",
   "spaces.dangerZone.embeddingsBackfillSkipped": "Pominięto {{skipped}} rekordów, ponieważ typ lub rekord nadal je wstrzymuje.",
   "spaces.dangerZone.renameTitle": "Edytuj identyfikator przestrzeni",
   "spaces.dangerZone.renameDescription": "Zmienia wewnętrzny identyfikator używany przez tokeny, sieci, pliki i klientów MCP. Wszystkie odniesienia aktualizowane są atomowo.",

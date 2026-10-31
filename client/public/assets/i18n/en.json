@@ -1200,6 +1200,7 @@
   "spaces.dangerZone.embeddingsBackfillBlocked": "Backfill is unavailable while suppression is on — every record would be skipped. Turn it off and save first.",
   "spaces.dangerZone.embeddingsBackfillDone": "Queued {{enqueued}} record(s) for embedding. This continues in the background.",
   "spaces.dangerZone.embeddingsBackfillMore": "{{remaining}} more still need embedding — run it again to continue.",
+  "spaces.dangerZone.embeddingsBackfillStale": "{{stale}} of them had searchable text older than their content, and are embedded again.",
   "spaces.dangerZone.embeddingsBackfillSkipped": "{{skipped}} record(s) were skipped because a type or record still suppresses them.",
   "spaces.dangerZone.renameTitle": "Edit Space ID",
   "spaces.dangerZone.renameDescription": "Changes the internal identifier used by tokens, networks, files, and MCP clients. All references updated atomically.",

@@ -55,10 +55,11 @@ function setup<E extends Record<string, unknown>>(confirmResult: boolean, api: E
       { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(confirmResult) } },
     ],
   });
-  const c = TestBed.createComponent(SpaceDangerTabComponent).componentInstance;
+  const fixture = TestBed.createComponent(SpaceDangerTabComponent);
+  const c = fixture.componentInstance;
   const state = TestBed.inject(SpaceSettingsState);
   state.settingsSpace.set({ id: 'proj', label: 'Project' } as never);
-  return { c, state, spacesApi, networksApi };
+  return { c, fixture, state, spacesApi, networksApi };
 }
 
 describe('SpaceDangerTabComponent — irreversible ops are confirm-gated', () => {
@@ -164,6 +165,26 @@ describe('the embedding suppression section', () => {
     // A type that says nothing inherits; listing it would suggest an override that is not there.
     const h = withMeta({ typeSchemas: { fact: { note: { suppressEmbeddings: true }, plain: {} }, entity: { row: { suppressEmbeddings: false } } } });
     expect(h.c.declaredSuppression().map(r => r.key).sort()).toEqual(['entity.row', 'fact.note']);
+  });
+
+  it('says how many of the queued records had outdated searchable text, and says nothing of it when none had', async () => {
+    // The repair also queues records whose stored text is not their current text (`stale`); the message counted them under
+    // "Queued N" and never said so, so a press that only repaired stale records read as a backfill of missing vectors.
+    const rendered = async (stale: number) => {
+      const h = setup(true, {
+        updateSpace: vi.fn().mockReturnValue(of({ space: { id: 'proj', label: 'Project' } })),
+        reembedSpace: vi.fn().mockReturnValue(of({ spaceId: 'proj', enqueued: 3, skippedSuppressed: 0, byKind: { fact: 3 }, stale, remaining: 0, truncated: false })),
+      });
+      // Seeded first: the effect that seeds the space clears a backfill result, so a first pass after the press would erase it.
+      TestBed.tick();
+      await h.c.backfill();
+      TestBed.tick();
+      return (h.fixture.nativeElement as HTMLElement).textContent ?? '';
+    };
+    const withStale = await rendered(2);
+    expect(withStale, 'the result message is not rendered at all: this case asks nothing').toContain('spaces.dangerZone.embeddingsBackfillDone');
+    expect(withStale).toContain('spaces.dangerZone.embeddingsBackfillStale');
+    expect(await rendered(0)).not.toContain('spaces.dangerZone.embeddingsBackfillStale');
   });
 
   it('keeps the backfill result, because the counts ARE the answer', () => {
