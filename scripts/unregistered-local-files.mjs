@@ -20,6 +20,12 @@
  * - editor and operating-system noise: `.DS_Store` and `Thumbs.db` (`*.swp` and `*.swo` are catch-alls already). A stray
  *   one is clutter too, and its bare-name rule says no place.
  *
+ * `git check-ignore -v` names the LAST rule that matches, so a rule that names the path but is written above a catch-all in the
+ * same file is never the one it reports (Q-656: a rule for `testing/sync/configs/<name>/token.txt` above `*.txt`). A path whose reported rule is a
+ * catch-all is therefore asked again against only the non-catch-all rules of that rule file (`git ls-files -o -i --exclude=<rule>...`,
+ * negations kept, no temporary file), and is registered when one of them names it. A rule file in a subdirectory is not asked again:
+ * its patterns are relative to its own folder, and the question here puts them at the root.
+ *
  * The catch-all set is DERIVED from the rule files ({@link catchAllRules}), never listed, so a `*.foo` added to
  * `.gitignore` next year is covered the day it is written. The question each path is put is the shape of the rule that
  * hid it, which is also what {@link catchAllRules} reports, so the two cannot disagree.
@@ -102,6 +108,36 @@ function rulesFor(root, paths) {
   return rules;
 }
 
+/** The non-catch-all rules of a rule file, one per line as written, negations kept: the rules that can name a place. */
+function placeRules(text) {
+  const rules = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || isCatchAll(line)) continue;
+    rules.push(line);
+  }
+  return rules;
+}
+
+/** How many paths one `git ls-files` call is asked about: a command line has a length limit, and a stack dump can leave thousands. */
+const PATHS_PER_ASK = 100;
+
+/**
+ * Which of `paths` do the `rules` (and only they) ignore? `git ls-files -o -i --exclude=<rule>...` applies exactly the rules it is
+ * given, so the answer is never the last-match one `check-ignore -v` gives. A path given with a trailing slash is a directory git
+ * collapsed; it is named when the rules ignore the directory as a whole.
+ */
+function namedByRules(root, rules, paths) {
+  const named = new Set();
+  if (rules.length === 0) return named;
+  for (let i = 0; i < paths.length; i += PATHS_PER_ASK) {
+    const chunk = paths.slice(i, i + PATHS_PER_ASK);
+    const answer = git(root, ['--literal-pathspecs', 'ls-files', '-z', '-o', '-i', '--directory', ...rules.map(r => `--exclude=${r}`), '--', ...chunk]);
+    for (const p of answer.split('\0')) if (p) named.add(p);
+  }
+  return named;
+}
+
 /** Does the rule come from a file a clone would receive, or from this checkout's own exclude file? */
 const isRepositoryRuleFile = (source) => /(^|[\\/])\.gitignore$/.test(source) || /[\\/]info[\\/]exclude$/.test(source);
 
@@ -114,13 +150,25 @@ const isRepositoryRuleFile = (source) => /(^|[\\/])\.gitignore$/.test(source) ||
 export function unregisteredLocalFiles(root) {
   const entries = untrackedPaths(root);
   const rules = rulesFor(root, entries.filter(e => e.ignored).map(e => e.path));
+  /** Paths whose reported rule is a catch-all, by the rule file that holds it: asked again against that file's place rules. */
+  const askedAgain = new Map();
+  for (const { path, ignored } of entries) {
+    const rule = ignored ? rules.get(path) : undefined;
+    if (rule && isRepositoryRuleFile(rule.source) && isCatchAll(rule.pattern)) askedAgain.set(rule.source, [...(askedAgain.get(rule.source) ?? []), path]);
+  }
+  const named = new Set();
+  for (const [source, paths] of askedAgain) {
+    const file = resolve(root, source);
+    const atRoot = dirname(file) === resolve(root) || /[\\/]info[\\/]exclude$/.test(source);
+    if (atRoot && existsSync(file)) for (const p of namedByRules(root, placeRules(readFileSync(file, 'utf8')), paths)) named.add(p);
+  }
   const found = [];
   for (const { path, ignored } of entries) {
     if (!ignored) { found.push({ path, why: 'untracked' }); continue; }
     const rule = rules.get(path);
     if (!rule) { found.push({ path, why: 'ignored by a rule git did not name' }); continue; }
     if (!isRepositoryRuleFile(rule.source)) { found.push({ path, why: `hidden only by ${rule.source}, which no clone receives` }); continue; }
-    if (isCatchAll(rule.pattern)) {
+    if (isCatchAll(rule.pattern) && !named.has(path)) {
       found.push({ path, why: `only the catch-all rule ${rule.pattern} (${rule.source}:${rule.line}) hides it` });
     }
   }
