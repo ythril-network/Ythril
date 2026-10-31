@@ -39,7 +39,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { outsideWriteBound, withinWriteBound } from '../db/write-bound.js';
 import { readStoredById } from '../db/read-by-id.js';
-import { isWellFormedRef, collectionForRefKind, edgeEndpointKind } from '../brain/entity-refs.js';
+import { isWellFormedRef, collectionForStoredKind, edgeEndpointKind } from '../brain/entity-refs.js';
 import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import { log, peerText } from '../util/log.js';
@@ -167,7 +167,8 @@ async function missingTargets(
   const byKind = new Map<RefKind, Target[]>();
   for (const t of targets) {
     if (t.malformed) { missing.push({ ...t, reason: t.malformed }); continue; }
-    if (stillToCome.includes(collectionForRefKind(t.kind))) continue;
+    const part = collectionForStoredKind(t.kind);
+    if (part !== null && stillToCome.includes(part)) continue;
     // Pushed onto the kind's own list: copying it per target was quadratic, ~0.8 s at 20 000 (bundle-30 I13).
     const ofKind = byKind.get(t.kind);
     if (ofKind) ofKind.push(t); else byKind.set(t.kind, [t]);
@@ -175,8 +176,10 @@ async function missingTargets(
   for (const [kind, ofKind] of byKind) {
     // Per kind, because the collection is the kind's: only a FILE target can be a flagged row. A deleted file counted
     // as present is an edge or a link resolving onto an audit record, which strict linkage then never reports.
-    const present = await readStoredById(spaceCollection(spaceId, collectionForRefKind(kind)), ofKind.map(t => t.id), {},
-      { filter: notFlaggedIfFile(kind) });
+    // A kind no collection holds (a pulled edge whose `fromKind` fails its schema) names nothing that exists: every end of it is missing.
+    const part = collectionForStoredKind(kind);
+    const present = part === null ? new Map<string, unknown>()
+      : await readStoredById(spaceCollection(spaceId, part), ofKind.map(t => t.id), {}, { filter: notFlaggedIfFile(kind) });
     for (const t of ofKind) {
       if (!present.has(t.id)) missing.push({ ...t, reason: `${t.field} references non-existent ${kind} '${t.id}'` });
     }

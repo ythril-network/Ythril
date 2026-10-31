@@ -185,6 +185,23 @@ export function collectionForRefKind(kind: RefKind): SpacePart {
 }
 
 /**
+ * The collection a kind READ FROM A STORED RECORD resolves in, or `null` when no collection holds that kind.
+ *
+ * ## What it prevents (Q-656)
+ *
+ * A pulled or imported edge can carry a `fromKind` that fails its schema, and the TYPE of {@link collectionForRefKind} says
+ * `RefKind`, so it answers `undefined` for one and `spaceCollection(space, undefined)` throws, or builds `<space>_undefined`. Every
+ * caller that took its kind from a stored record asked the typed lookup and guarded (or forgot to guard) in its own words: the name
+ * list of a page of edges, the neighbour walk, the traverse bodies and the strict-linkage check of a whole batch each failed for one
+ * bad edge. The guard lives here, where no caller can drop it; each caller decides what "no collection" means for it (a name falls
+ * back to the raw id, a record or a body is not found, a linkage target is missing). Only a validated kind (the write door's own,
+ * checked against `REF_KINDS` before it is stored) may use the typed lookup. An own-property test, so `toString` is no kind.
+ */
+export function collectionForStoredKind(kind: string): SpacePart | null {
+  return Object.hasOwn(COLLECTION_FOR, kind) ? COLLECTION_FOR[kind as RefKind] : null;
+}
+
+/**
  * The published JSON schema for one edge endpoint's kind, for the MCP tools.
  *
  * Built here, from `REF_KINDS`, and shared by `save_edge` and `update_edge` — because the same four

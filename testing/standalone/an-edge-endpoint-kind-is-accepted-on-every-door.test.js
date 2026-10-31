@@ -196,7 +196,7 @@ describe('the sync ingest door checks each endpoint against its own kind', () =>
     assert.ok(body.length > 400, 'targetsOf/missingTargets in sync/linkage-check.ts are gone or renamed — re-anchor this gate');
     assert.match(body, /edgeEndpointKind\(/,
       'sync decides the kind of an endpoint for itself instead of reading what the edge declares');
-    assert.match(body, /collectionForRefKind\(/,
+    assert.match(body, /collectionForStoredKind\(/,
       'sync names the collection to search directly, so the collection is decided in two places');
     assert.doesNotMatch(body, /_entities/,
       'sync still looks an edge endpoint up in the entities collection regardless of its kind');
