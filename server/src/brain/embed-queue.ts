@@ -156,8 +156,11 @@ function pendingJobUpdate(spaceId: string, recordType: BrainEmbedRecordType, rec
  * `POST /api/spaces/:id/reembed`, which queues both (`stale`, `brain/reembed.ts`). A second spelling is how a warning ended up naming
  * a reindex, a different and heavier operation (`the-embed-repair-remedy-has-one-spelling`).
  */
+/** The repair's route: the one spelling of it, for this hint and for a message whose remedy is not the hint's sentence. */
+export const EMBED_REPAIR_ROUTE = 'POST /api/spaces/:id/reembed';
+
 export const EMBED_REPAIR_HINT = 'They are stored. A new record has no vector until a job runs; an updated one keeps the vector and '
-  + 'the lexical text of its previous content. POST /api/spaces/:id/reembed queues both.';
+  + 'the lexical text of its previous content. ' + EMBED_REPAIR_ROUTE + ' queues both.';
 
 export async function enqueueEmbedJob(
   spaceId: string,
