@@ -262,6 +262,26 @@ describe('one rule, both write paths, and the read surface agrees', () => {
     assert.match(snapshot, /after:[\s\S]*rateLimitPerMinute/, 'the audit snapshot\'s after side has no quota');
   });
 
+  it('a PATCH refuses a bad quota before it writes anything and before the MFA code is verified and spent (Q-656)', () => {
+    // The quota was checked after the rename, the rights and the mfa were written: a body with a new name and a quota over the
+    // ceiling renamed the token and then answered 403. It was also checked after `exemptionNeedsLiveCode`, which verifies the
+    // one-time code and spends it, so an `mfa: 'exempt'` edit with a quota the refusal rejects burned a code for nothing.
+    const start = routes.indexOf("tokensRouter.patch('/:id'");
+    assert.ok(start >= 0, 'the PATCH /:id route was not found');
+    const patch = routes.slice(start, routes.indexOf('tokensRouter.', start + 1));
+    const refusedAt = patch.indexOf('rateLimitRefusal(');
+    assert.ok(refusedAt >= 0, 'the PATCH route no longer checks the quota');
+    for (const effect of ['exemptionNeedsLiveCode(', 'verifyMfaCode(', 'renameToken(', 'setTokenRights(', 'setTokenMfa(', 'setTokenRateLimit(']) {
+      const at = patch.indexOf(effect);
+      if (at < 0) {
+        // The MFA verification may sit behind `exemptionNeedsLiveCode` and not be named in the route; every other name must be.
+        assert.equal(effect, 'verifyMfaCode(', `the PATCH route no longer calls ${effect}: re-derive the effects`);
+        continue;
+      }
+      assert.ok(refusedAt < at, `${effect} runs before the quota is checked`);
+    }
+  });
+
   it('a cleared quota is expressible — null means inherit again', () => {
     const tokens = stripComments(readFileSync('server/src/auth/tokens.ts', 'utf8'));
     assert.match(bodyOf(tokens, 'setTokenRateLimit'), /if \(perMinute === null\) delete/,
