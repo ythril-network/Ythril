@@ -252,6 +252,20 @@ describe('one rule, both write paths, and the read surface agrees', () => {
     assert.match(snapshot, /after:[\s\S]*rateLimitPerMinute/, 'the audit snapshot\'s after side has no quota');
   });
 
+  it('a PATCH refuses a bad quota before it writes anything, so a refused edit leaves the token as it was', () => {
+    // The quota was checked after the rename, the rights and the mfa were written: a body with a new name and a quota over the
+    // ceiling renamed the token and then answered 403.
+    const start = routes.indexOf("tokensRouter.patch('/:id'");
+    const patch = routes.slice(start, routes.indexOf('tokensRouter.', start + 1));
+    const refusedAt = patch.indexOf('rateLimitRefusal(');
+    assert.ok(refusedAt >= 0, 'the PATCH route no longer checks the quota');
+    for (const write of ['renameToken(', 'setTokenRights(', 'setTokenMfa(', 'setTokenRateLimit(']) {
+      const at = patch.indexOf(write);
+      assert.ok(at >= 0, `the PATCH route no longer calls ${write}: re-derive the writes`);
+      assert.ok(refusedAt < at, `${write} runs before the quota is checked`);
+    }
+  });
+
   it('a cleared quota is expressible — null means inherit again', () => {
     const tokens = stripComments(readFileSync('server/src/auth/tokens.ts', 'utf8'));
     assert.match(bodyOf(tokens, 'setTokenRateLimit'), /if \(perMinute === null\) delete/,
