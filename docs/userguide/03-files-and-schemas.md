@@ -251,7 +251,7 @@ Open **Conflicts** from the sidebar to see them. For each conflict choose what t
 
 The brain whose metadata was kept has no such row, and a pair that differs only in a stamp (when the file was created, or who wrote it) is settled the same way and leaves no row, because there is nothing to choose between. Neither option decides anything on another brain: Keep mine is an ordinary edit here that syncs like any other, and nothing reaches into another brain's copy. When you select several rows to resolve together, the list offers only the options every selected row accepts.
 
-Every conflict about a file's copy ends in one of these four. There is no dismiss: a conflict closes only by one of these, so an incoming copy is never left behind under its conflict name.
+Every conflict about a file's copy ends in one of the four options in the first table. A copy conflict has no dismiss: it closes only by one of those four, so an incoming copy is never left behind under its conflict name.
 
 **Keep both with a new name, and Move to space, never replace anything.** If a file, a folder or a file waiting for its content already
 has the name you chose (in the other space, for Move to space), the answer is that something already stands there: nothing is moved,
