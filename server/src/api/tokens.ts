@@ -661,6 +661,19 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
     }
   }
 
+  /*
+   * Same shared refusal as the create path, and the same status split: `403` when the instance ceiling is
+   * what refuses, `400` when the value itself is malformed. One function, two surfaces, one answer. Checked before
+   * anything is written: after the writes, a new name with a quota over the ceiling renamed the token and answered 403.
+   */
+  if (rateLimitPerMinute !== undefined) {
+    const refusal = rateLimitRefusal(rateLimitPerMinute);
+    if (refusal) {
+      res.status(refusal.includes('instance ceiling') ? 403 : 400).json({ error: refusal });
+      return;
+    }
+  }
+
   // `mfa` is in the snapshot on both sides because an exemption is the most security-relevant thing this
   // route can change, and a diff that omitted it would record the rename beside it and not the exemption.
   // `previous.mfa` is absent on every token that follows the instance switch, which reads as `inherit`. The quota is in
@@ -689,16 +702,7 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
     res.status(404).json({ error: 'Token not found' });
     return;
   }
-  /*
-   * Same shared refusal as the create path, and the same status split: `403` when the instance ceiling is
-   * what refuses, `400` when the value itself is malformed. One function, two surfaces, one answer.
-   */
   if (rateLimitPerMinute !== undefined) {
-    const refusal = rateLimitRefusal(rateLimitPerMinute);
-    if (refusal) {
-      res.status(refusal.includes('instance ceiling') ? 403 : 400).json({ error: refusal });
-      return;
-    }
     if (!setTokenRateLimit(id, rateLimitPerMinute)) {
       res.status(404).json({ error: 'Token not found' });
       return;
