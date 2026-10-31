@@ -18,6 +18,7 @@ import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, type SortSpec } from './list-sort.js';
 import { embed } from './embedding.js';
 import { factEmbedText } from './embed-text.js';
+import { derivedFieldsForWrite } from './derived-text-on-write.js';
 import { getConfig } from '../config/loader.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
 import { stampSkewOnCreate } from './stamp-skew.js';
@@ -162,6 +163,7 @@ export async function saveFact(
     // silent fallback to "stored, not searchable" would answer a different question than the one asked.
     embResult = await embed(embedText);
   }
+  const inlineVector = embResult && { embedding: embResult.vector, embeddingModel: embResult.model };
 
   // Opt-in insert-time duplicate / contradiction checks, using the freshly computed vector BEFORE insert
   // so it can never self-match. ONE neighbour search serves both flags — the second question is free once
@@ -190,23 +192,21 @@ export async function saveFact(
   if (existing) {
     const mergedTags = mergeTags(existing.tags, tags);
     const mergedProps = mergeProperties(existing.properties, properties);
+    // The vector and the text it was made from go in together or not at all: with no vector computed the previous
+    // pair stays, describing each other, while the queued job catches up (rule I, `derivedFieldsForWrite`).
+    const derived = await derivedFieldsForWrite({
+      text: () => embedText, vector: inlineVector, suppressed, onto: 'stored',
+    });
     const $set: Record<string, unknown> = {
       fact,
       tags: mergedTags,
-      matchedText: embedText,
       updatedAt: now,
+      ...derived.set,
     };
-    // Only when a vector was actually computed. When it was not, the PREVIOUS vector stays: it
-    // describes the record as it was a moment ago, which is a better answer than none while the
-    // queued job catches up. `matchedText` above is always current, so the two can be compared.
-    if (embResult) {
-      $set['embedding'] = embResult.vector;
-      $set['embeddingModel'] = embResult.model;
-    }
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
     if (properties !== undefined) $set['properties'] = mergedProps;
-    const $unset: Record<string, unknown> = {};
+    const $unset: Record<string, unknown> = { ...derived.unset };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'fact', existing: existing as unknown as Record<string, unknown> });
     const updateOp: Record<string, unknown> = { $set };
@@ -254,12 +254,11 @@ export async function saveFact(
     spaceId,
     fact,
     tags,
-    matchedText: embedText,
     author: authorRef(),
     createdAt: now,
     updatedAt: now,
     seq: 0, // allocated at the insert below (`withSeq`)
-    ...(embResult ? { embedding: embResult.vector, embeddingModel: embResult.model } : {}),
+    ...(await derivedFieldsForWrite({ text: () => embedText, vector: inlineVector, suppressed, onto: 'insert' })).set,
   };
   /*
    * The flag is STORED, not merely consulted.

@@ -15,6 +15,7 @@ import { applyPropertyDefaults } from '../spaces/schema-validation.js';
 import { conveniencePredicate, conveniencesFrom } from './list-conveniences.js';
 import { embed } from './embedding.js';
 import { edgeEmbedText } from './embed-text.js';
+import { derivedFieldsForWrite } from './derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
 import { stampSkewOnCreate } from './stamp-skew.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -207,7 +208,13 @@ export async function upsertEdge(
   // Embed the edge text (best-effort) — resolve entity names so the vector captures semantics
   // Queued by default — see the note in `upsertEntity`. Resolving the endpoint NAMES is a database read,
   // so it happens only on the inline path; the queued job resolves them itself from the stored edge.
-  let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = {};
+  // The text only where it is asked for: the inline path, or a record the write leaves suppressed (which no job will
+  // write it for) — see `derivedFieldsForWrite`.
+  let built: Promise<string> | undefined;
+  const edgeText = (): Promise<string> => built ??= (async () => {
+    const [fromName, toName] = await resolveEdgeEndpointNames(spaceId, from, to, opts?.fromKind, opts?.toKind);
+    return edgeEmbedText(fromName, label, toName, effectiveTags, effectiveType, effectiveDesc, effectiveProps);
+  })();
   // Suppression wins over `waitForEmbedding` — see `embeddingSuppressedFor`. An edge keys its schema on
   // `label`, not `type`, which `schemaKeyFor` already encodes; passing `type` here would look up a schema
   // that is never there and silently never suppress.
@@ -218,22 +225,21 @@ export async function upsertEdge(
   // The record tier is the one the write LEAVES: the stored flag unless this write states one (`Q-194`).
   const suppressed = embeddingSuppressedFor(spaceId, 'edge',
     { label, suppressEmbeddings: recordTierAfterWrite(opts?.suppressEmbeddings, existing) });
-  if (opts?.waitForEmbedding === true && !suppressed) {
-    const [fromName, toName] = await resolveEdgeEndpointNames(spaceId, from, to, opts?.fromKind, opts?.toKind);
-    const embedText = edgeEmbedText(fromName, label, toName, effectiveTags, effectiveType, effectiveDesc, effectiveProps);
-    const embResult = await embed(embedText);
-    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model, matchedText: embedText };
-  }
+  const inline = opts?.waitForEmbedding === true && !suppressed ? await embed(await edgeText()) : null;
+  // The vector and the text it was made from go in together or not at all (rule I, `derivedFieldsForWrite`). An edge's
+  // insert asks for `stored` as well: with no vector its text is left to the job, which costs the two reads only once.
+  const derived = await derivedFieldsForWrite({ text: edgeText, vector: inline && { embedding: inline.vector, embeddingModel: inline.model }, suppressed, onto: 'stored' });
+  const embeddingFields = derived.set as { embedding?: number[]; embeddingModel?: string; matchedText?: string };
 
   if (existing) {
-    const $set: Record<string, unknown> = { updatedAt: now, ...embeddingFields };
+    const $set: Record<string, unknown> = { updatedAt: now, ...derived.set };
     if (weight !== undefined) $set['weight'] = weight;
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
     // When tags are provided, persist the merged result; otherwise leave existing tags unchanged
     if (tags !== undefined) $set['tags'] = effectiveTags;
     if (properties !== undefined) $set['properties'] = effectiveProps;
-    const $unset: Record<string, unknown> = {};
+    const $unset: Record<string, unknown> = { ...derived.unset };
     // Correcting a kind back to `entity` must UNSET it, not store the string: absent is the canonical form,
     // and leaving `'entity'` behind would make this edge unfindable by its own triplet lookup.
     for (const side of ['fromKind', 'toKind'] as const) {

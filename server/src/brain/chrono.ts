@@ -13,6 +13,7 @@ import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { conveniencePredicate } from './list-conveniences.js';
 import { embed } from './embedding.js';
 import { chronoEmbedText } from './embed-text.js';
+import { derivedFieldsForWrite } from './derived-text-on-write.js';
 import { SimilarMatch, checkDuplicates } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
 import { findInsertContradictions, type ContradictionWarning } from './insert-contradictions.js';
@@ -191,7 +192,6 @@ export async function createChrono(
   // Embed kind + status + title + description + tags + properties (best-effort)
   // Queued by default — see the note in `upsertEntity`. `matchedText` is stored either way.
   const embedText = chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
-  let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = { matchedText: embedText };
   // Suppression wins over `waitForEmbedding` — see `embeddingSuppressedFor`. `matchedText` is stored either
   // way, which is the point: a suppressed record stays findable lexically and stops competing on meaning.
   //
@@ -200,10 +200,13 @@ export async function createChrono(
   // The record tier is the one the write LEAVES: the stored flag unless this write states one (`Q-194`).
   const suppressed = embeddingSuppressedFor(spaceId, 'chrono',
     { type: fields.type, suppressEmbeddings: recordTierAfterWrite(opts?.suppressEmbeddings, existing) });
-  if (opts?.waitForEmbedding === true && !suppressed) {
-    const embResult = await embed(embedText);
-    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model, matchedText: embedText };
-  }
+  const inline = opts?.waitForEmbedding === true && !suppressed ? await embed(embedText) : null;
+  // The vector and the text it was made from go in together or not at all (rule I, `derivedFieldsForWrite`): a converge
+  // with no vector computed leaves the stored pair standing until the queued job writes both.
+  const derived = await derivedFieldsForWrite({
+    text: () => embedText, vector: inline && { embedding: inline.vector, embeddingModel: inline.model }, suppressed, onto: existing ? 'stored' : 'insert',
+  });
+  const embeddingFields = derived.set as { embedding?: number[]; embeddingModel?: string; matchedText?: string };
 
   // Opt-in insert-time duplicate / contradiction checks, using the freshly computed vector BEFORE insert so
   // it can never self-match. ONE neighbour search serves both flags. A calendar is where the same thing most
@@ -231,14 +234,14 @@ export async function createChrono(
       status,
       tags: mergedTags,
       updatedAt: now,
-      ...embeddingFields,
+      ...derived.set,
     };
     if (fields.endsAt !== undefined) $set['endsAt'] = fields.endsAt;
     if (fields.description !== undefined) $set['description'] = fields.description;
     if (fields.confidence !== undefined) $set['confidence'] = fields.confidence;
     if (fields.properties !== undefined) $set['properties'] = mergedProps;
     if (fields.recurrence !== undefined) $set['recurrence'] = fields.recurrence;
-    const $unset: Record<string, unknown> = {};
+    const $unset: Record<string, unknown> = { ...derived.unset };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'chrono', existing: existing as unknown as Record<string, unknown> });
     const updateOp: Record<string, unknown> = { $set };

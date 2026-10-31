@@ -11,6 +11,7 @@ import { toMongoSort, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector } from './read-projection.js';
 import { embed } from './embedding.js';
 import { entityEmbedText } from './embed-text.js';
+import { derivedFieldsForWrite } from './derived-text-on-write.js';
 import { getConfig } from '../config/loader.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from './ttl.js';
 import { stampSkewOnCreate } from './stamp-skew.js';
@@ -187,19 +188,24 @@ export async function upsertEntity(
   const needsVectorNow = !suppressed
     && (opts?.waitForEmbedding === true
       || opts?.checkDuplicates === true || opts?.checkContradictions === true);
-  let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = { matchedText: embedText };
+  let inline: Awaited<ReturnType<typeof embed>> | null = null;
   if (needsVectorNow) {
     // Unguarded on purpose: the caller asked for a record searchable when this returns, so falling back
     // to "stored, not searchable" would answer a different question than the one asked.
-    const embResult = await embed(embedText);
-    embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model, matchedText: embedText };
+    inline = await embed(embedText);
   }
+  // The vector and the text it was made from go in together or not at all (rule I, `derivedFieldsForWrite`): a converge
+  // with no vector computed leaves the stored pair standing until the queued job writes both.
+  const derived = await derivedFieldsForWrite({
+    text: () => embedText, vector: inline && { embedding: inline.vector, embeddingModel: inline.model }, suppressed, onto: existing ? 'stored' : 'insert',
+  });
+  const embeddingFields = derived.set as { embedding?: number[]; embeddingModel?: string; matchedText?: string };
 
   if (existing) {
     const { tags: updatedTags, properties: mergedProps } = mergeTagsAndProperties(existing, { tags, properties });
-    const $set: Record<string, unknown> = { name, type, tags: updatedTags, properties: mergedProps, updatedAt: now, ...embeddingFields };
+    const $set: Record<string, unknown> = { name, type, tags: updatedTags, properties: mergedProps, updatedAt: now, ...derived.set };
     if (description !== undefined) $set['description'] = description;
-    const $unset: Record<string, unknown> = {};
+    const $unset: Record<string, unknown> = { ...derived.unset };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'entity', existing: existing as unknown as Record<string, unknown> }); // F10
     const updateOp: Record<string, unknown> = { $set };
