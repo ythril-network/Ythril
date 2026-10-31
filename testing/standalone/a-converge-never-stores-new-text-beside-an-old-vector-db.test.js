@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 
 const skip = await mongoSkipReason();
@@ -33,9 +34,14 @@ const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-converge-pair-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
+process.env['EMBEDDING_DIMENSIONS'] = '8';
 
 const SPACE = 'general';
 const SEEDED = Array.from({ length: 8 }, (_, i) => (i + 1) / 10);
+
+/** Every input the stub endpoint embedded: the inline-vector case asks WHICH text the writer embedded. */
+const seen = [];
+let server;
 
 let mongo, embedRecord, fact, entities, chrono, edges, loader;
 const coll = (name) => mongo.col(`${SPACE}_${name}`);
@@ -79,6 +85,18 @@ async function asEmbedded(kind, id) {
 
 describe('a converge never stores new text beside an old vector', { skip }, () => {
   before(async () => {
+    server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        const input = JSON.parse(body).input;
+        seen.push(input);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: [{ embedding: Array.from({ length: 8 }, (_, i) => ((input.length + i) % 10) / 10 + 0.05) }] }));
+      });
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    process.env['EMBEDDING_URL'] = `http://127.0.0.1:${server.address().port}`;
     mongo = await openTestMongo('convergepair');
     fs.writeFileSync(CONFIG_PATH, JSON.stringify({
       instanceId: 'converge-pair-test', instanceLabel: 'test', tokens: [], networks: [],
@@ -95,6 +113,7 @@ describe('a converge never stores new text beside an old vector', { skip }, () =
 
   after(async () => {
     await closeTestMongo();
+    await new Promise(r => server.close(r));
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
@@ -103,6 +122,51 @@ describe('a converge never stores new text beside an old vector', { skip }, () =
     assert.ok(kinds.length >= 4, `the floor of four kinds fell to ${kinds.length}`);
     assert.deepEqual(Object.keys(DOORS).sort(), [...kinds].sort(), 'a kind has no door in this test, or this test names one the code lost');
   });
+
+  /**
+   * A converge STORES THE MERGE (tags union, properties shallow-merge, description kept when the write names none), so the
+   * text it stores or embeds must be built from the merge too, not from the input fields. The seeds above carry no tags,
+   * description or properties, where input text and merged text are the same string and nothing is checked.
+   */
+  const MERGED = {
+    fact: {
+      seed: () => fact.saveFact(SPACE, 'fact merged first', [], ['a'], 'Paris office', { k: 'v' }),
+      converge: (id, opts) => fact.saveFact(SPACE, 'fact merged second', [], ['b'], undefined, { j: 'w' },
+        undefined, opts, undefined, undefined, id),
+    },
+    chrono: {
+      seed: () => chrono.createChrono(SPACE, {
+        title: 'chrono merged first', type: 'event', startsAt: '2026-09-01T00:00:00.000Z',
+        tags: ['a'], description: 'Paris office', properties: { k: 'v' },
+      }),
+      converge: (id, opts) => chrono.createChrono(SPACE, {
+        title: 'chrono merged second', type: 'event', startsAt: '2026-09-01T00:00:00.000Z',
+        tags: ['b'], properties: { j: 'w' }, id,
+      }, undefined, undefined, opts),
+    },
+  };
+
+  for (const kind of ['fact', 'chrono']) {
+    for (const [name, opts] of [['suppressed', { suppressEmbeddings: true }], ['embedded inline', { waitForEmbedding: true }]]) {
+      it(`${kind}: a converge that is ${name} stores the text of the MERGED record`, async () => {
+        const first = await MERGED[kind].seed();
+        await MERGED[kind].converge(first._id, opts);
+        const stored = await coll(embedRecord.COLLECTION[kind]).findOne({ _id: first._id });
+        assert.deepEqual(stored.tags, ['a', 'b'], 'the converge did not merge the tags: the test checks nothing');
+        assert.equal(stored.description, 'Paris office', 'the converge dropped the description it was not told to change');
+        const merged = await embedRecord.buildEmbedText(SPACE, kind, stored);
+        assert.match(merged, /Paris office/, 'the merged text does not hold the kept description: the test checks nothing');
+        assert.equal(stored.matchedText, merged,
+          `the converge stored ${JSON.stringify(stored.matchedText)} but the record it stored reads ${JSON.stringify(merged)}`);
+        if (opts.waitForEmbedding) {
+          assert.ok(Array.isArray(stored.embedding), 'the inline converge stored no vector');
+          assert.ok(seen.includes(merged), 'the vector was made from a text other than the merged record\'s');
+        } else {
+          assert.equal(stored.embedding, undefined);
+        }
+      });
+    }
+  }
 
   for (const kind of ['fact', 'entity', 'chrono', 'edge']) {
     it(`${kind}: the vector left by a converge sits beside its own text, and the job never answers unchanged`, async () => {
