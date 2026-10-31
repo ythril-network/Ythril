@@ -130,9 +130,9 @@ type ActNotice =
     <button class="btn btn-secondary" type="button" [disabled]="savingSuppress()" (click)="saveSuppress()">
       @if (savingSuppress()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.embeddingsSave' | transloco }}
     </button>
-    <!-- Disabled while suppression is on, because the server would skip every candidate and report zero. A
-         button that runs and does nothing is worse than one that says why it cannot. -->
-    <button class="btn btn-secondary" type="button" [disabled]="backfilling() || suppress()" (click)="backfill()">
+    <!-- Enabled under suppression too: a record whose embedding is off but whose searchable text is older than its content is still
+         queued, and the job writes that text without calling a model. The info line below says what a press does there. -->
+    <button class="btn btn-secondary" type="button" [disabled]="backfilling()" (click)="backfill()">
       @if (backfilling()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.dangerZone.embeddingsBackfill' | transloco }}
     </button>
   </div>
@@ -141,9 +141,9 @@ type ActNotice =
   }
   @if (backfillResult(); as r) {
     <div class="alert alert-success" style="margin-top:10px;font-size:12px;">
-      {{ backfillDoneText(r.enqueued) }}
-      @if (r.truncated) { <br/>{{ 'spaces.dangerZone.embeddingsBackfillMore' | transloco: { remaining: r.remaining } }} }
-      @if (r.skippedSuppressed > 0) { <br/>{{ backfillSkippedText(r.skippedSuppressed) }} }
+      @for (line of backfillLines(r); track $index) {
+        @if ($index > 0) { <br/> }{{ line }}
+      }
     </div>
   }
 </div>
@@ -272,12 +272,17 @@ export class SpaceDangerTabComponent {
   private transloco = inject(TranslocoService);
   private readonly plural = inject(PluralText);
 
-  /** The embeddings backfill's two counted sentences, each in the plural form the reader's language uses for its count. */
-  protected backfillDoneText(count: number): string {
-    return this.plural.text('spaces.dangerZone.embeddingsBackfillDone', count);
-  }
-  protected backfillSkippedText(count: number): string {
-    return this.plural.text('spaces.dangerZone.embeddingsBackfillSkipped', count);
+  /**
+   * The lines a backfill answer is said in, on screen and to a screen reader: what was queued, how many of those had searchable
+   * text older than their content, what is still owed past the cap, and what was left alone because its embedding is off and its
+   * text is current. The counted sentences are read in the plural form the reader's language uses for their count.
+   */
+  protected backfillLines(r: ReembedResult): string[] {
+    const lines = [this.plural.text('spaces.dangerZone.embeddingsBackfillDone', r.enqueued)];
+    if (r.stale > 0) lines.push(this.plural.text('spaces.dangerZone.embeddingsBackfillStale', r.stale));
+    if (r.truncated) lines.push(this.transloco.translate('spaces.dangerZone.embeddingsBackfillMore', { remaining: r.remaining }));
+    if (r.skippedSuppressed > 0) lines.push(this.plural.text('spaces.dangerZone.embeddingsBackfillSkipped', r.skippedSuppressed));
+    return lines;
   }
   private dates = inject(DateFormatService);
   protected readonly live = new LiveAnnouncement();
@@ -547,7 +552,10 @@ export class SpaceDangerTabComponent {
       // The counts ARE the result — `enqueued`, and `remaining` when the call was capped. Reporting only
       // "started" would leave an operator unable to tell a fully-swept space from one that needs three more
       // calls, which is the whole reason the endpoint returns numbers instead of `202`.
-      this.backfillResult.set(await firstValueFrom(this.spacesApi.reembedSpace(space.id)));
+      const result = await firstValueFrom(this.spacesApi.reembedSpace(space.id));
+      this.backfillResult.set(result);
+      // The same lines the screen shows, through the tab's live region like its other actions: the result appears with no focus move.
+      this.announce(this.backfillLines(result).join(' '), false);
     } catch (err) {
       this.toast.error(err instanceof Error ? err.message : String(err));
     } finally {

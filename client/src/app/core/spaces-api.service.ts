@@ -159,11 +159,13 @@ export class SpacesApi {
   }
 
   /**
-   * Queue embeddings for records in the space that have none — the way back from `suppressEmbeddings`.
+   * Queue the space's records that are owed embedding work — the way back from `suppressEmbeddings`: a record with no vector, one whose
+   * searchable text is not its current text (`stale`), and, where its embedding is off, one whose searchable text still has to be written.
    *
    * Unlike `rebuildSpaceIndexes` this is AWAITED for its counts rather than fire-and-forget: it only enqueues, so
-   * it returns in the time it takes to scan, and `enqueued` / `remaining` are the answer the operator wants. A
-   * record still suppressed at any tier is skipped by the server and reported under `skippedSuppressed`.
+   * it returns in the time it takes to scan, and `enqueued` / `remaining` are the answer the operator wants. `remaining` is the owed
+   * records past the cap, text-only writes included. `skippedSuppressed` is the records whose embedding is off (by the record, its type, the
+   * space, or the file it was derived from) and whose searchable text is current: nothing is owed for them.
    */
   reembedSpace(spaceId: string, body: { kinds?: string[]; limit?: number } = {}): Observable<ReembedResult> {
     return this.http.post<ReembedResult>(`/api/spaces/${spaceId}/reembed`, body);
