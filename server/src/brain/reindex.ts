@@ -342,7 +342,6 @@ export async function reindexStateFor(memberIds: string[]): Promise<{
     // "0 left" while every record waits to be queued.
     if (run && !run.sweepComplete) {
       remaining += await countUnswept(mid, {
-        match: 'all',
         ...(run.cursor ? { after: { kind: run.cursor.kind as BrainEmbedRecordType, lastId: run.cursor.lastId } } : {}),
       });
     }
