@@ -46,7 +46,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { listenOnLoopback } from '../_shared/local-server.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -55,14 +57,16 @@ const SPACE = 'general';
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-backfill-once-'));
 const CONFIG_PATH = path.join(tmpDir, 'config.json');
 process.env['CONFIG_PATH'] = CONFIG_PATH;
+const DIMS = 8;
+process.env['EMBEDDING_DIMENSIONS'] = String(DIMS);
 
-let mongo, reembed, embedRecord, MODEL;
+let mongo, reembed, embedRecord, worker, queue, MODEL, server, local;
+const vectorFor = (text) => Array.from({ length: DIMS }, (_, i) => ((String(text).length + i) % 10) / 10 + 0.05);
 const c = (part) => mongo.col(`${SPACE}_${part}`);
 const VEC = [0.1, 0.2, 0.3, 0.4];
 const NOW = '2026-01-01T00:00:00.000Z';
 const base = { spaceId: SPACE, tags: [], createdAt: NOW, updatedAt: NOW };
 
-const PART = { fact: 'facts', file: 'files', edge: 'edges' };
 const fact = (id, text, extra = {}) => ({ _id: id, ...base, fact: text, entityIds: [], ...extra });
 const file = (id, extra = {}) => ({ _id: id, ...base, path: id, sizeBytes: 1, ...extra });
 
@@ -98,16 +102,16 @@ async function seed(withUnbuildable) {
     file('par-sup.md#chunk1', { parentFileId: 'par-sup.md', chunkIndex: 1, content: 'sup chunk two', matchedText: 'sup chunk two', embedding: VEC, embeddingModel: MODEL }),
   ]);
   if (!withUnbuildable) {
-    // The same table without the two records that used to throw out of the walk, so a failure of the OTHER rules shows by itself and
-    // is not hidden behind the throw that every case with them present dies on.
+    // The same table without the record whose text cannot be built (it used to throw out of the walk), so a failure of the OTHER rules
+    // shows by itself and is not hidden behind the throw that every case with it present dies on. i2 stays: its unknown endpoint kind
+    // builds through the raw-id fallback, so it is an ordinary owed record, and the worker settles it.
     await c('facts').deleteOne({ _id: 'i1' });
-    await c('edges').deleteOne({ _id: 'i2' });
   }
 }
 
 /** The owed records of the seeded space: all of them with the unbuildable pair, and without it, what `seed` set last. */
 let OWED;
-const UNBUILDABLE_ALL = ['fact:i1', 'edge:i2'];
+const UNBUILDABLE_ALL = ['fact:i1'];
 const OWED_ALL = [
   'fact:b1', 'fact:c1', 'fact:d1', 'fact:e1', 'fact:h1', 'fact:i1', 'fact:k1', 'fact:n1', 'fact:o1',
   'edge:i2',
@@ -122,37 +126,19 @@ const STALE = ['fact:b1', 'fact:e1', 'fact:k1', 'file:par-sup.md'];
 /** A record whose text can never be built: owed on every call, its job fails where `list_embed_jobs` shows it. */
 const UNBUILDABLE = ['fact:i1'];
 
-/** Where the worker leaves a suppressed record: the suppression is the literal list of what the config and the seeds say. */
-const SUPPRESSED = new Set(['fact:a1', 'fact:a2', 'fact:b1', 'fact:h1', 'file:par-sup.md', 'file:par-sup.md#chunk0', 'file:par-sup.md#chunk1', 'file:orph1#chunk0', 'file:orph2#chunk0']);
-
 const jobIds = async () => (await c('embed_jobs').find({}).toArray()).map(j => `${j.recordType}:${j.recordId}`).sort();
 
 /**
- * Stand in for the worker, with what it does to each shape of record (design: the worker is the authority the backfill asks): a text that
- * cannot be built fails its job and changes nothing; a derived row with no text has its derived fields unset; a suppressed record (or an
- * orphan chunk, whose missing parent is the file question's "suppressed") gets its text and no vector, with no model call; any other record
- * gets a vector and the text it was made from. The job is deleted whichever it was.
+ * Drain the queue with the REAL worker (`runOneEmbedJob` -> `embedStoredRecord`) over a stub embedder endpoint, so what settles a record
+ * is the worker's own question and no second copy of it (a suppression list, a text rule) is written here: "a drained space owes nothing"
+ * is then a statement about the worker and the walk agreeing, which a hand-written drain could not show. Returns the keys that were
+ * queued; a job that failed (a text that cannot be built) is removed after the drain, so the next call starts from an empty queue.
  */
-async function stubDrain() {
-  const drained = [];
-  for (const job of await c('embed_jobs').find({}).toArray()) {
-    const key = `${job.recordType}:${job.recordId}`;
-    const coll = c(PART[job.recordType]);
-    const doc = await coll.findOne({ _id: job.recordId });
-    drained.push(key);
-    await c('embed_jobs').deleteOne({ _id: job._id });
-    if (!doc) continue;
-    let text;
-    try { text = await embedRecord.buildEmbedText(SPACE, job.recordType, doc); } catch { continue; }
-    if (typeof text !== 'string' && text !== null) continue;
-    if (text === null) {
-      await coll.updateOne({ _id: doc._id }, { $unset: { embedding: '', embeddingModel: '', matchedText: '' } });
-    } else if (SUPPRESSED.has(key)) {
-      await coll.updateOne({ _id: doc._id }, { $set: { matchedText: text }, $unset: { embedding: '', embeddingModel: '' } });
-    } else {
-      await coll.updateOne({ _id: doc._id }, { $set: { embedding: VEC, embeddingModel: MODEL, matchedText: text } });
-    }
-  }
+async function drainQueue() {
+  const drained = await jobIds();
+  queue.resetEmbedPendingHint();
+  for (let i = 0; i < 200 && await worker.runOneEmbedJob(); i++) { /* drain */ }
+  await c('embed_jobs').deleteMany({});
   return drained;
 }
 
@@ -163,17 +149,30 @@ const backfillSuite = (withUnbuildable) => describe(`the reembed backfill counts
       instanceId: 'backfill-once-test', instanceLabel: 'test', tokens: [], networks: [],
       spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: { typeSchemas: { fact: { secret: { suppressEmbeddings: true } } } } }],
     }, null, 2), { mode: 0o600 });
+    server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', ch => { body += ch; });
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: [{ embedding: vectorFor(JSON.parse(body).input) }] }));
+      });
+    });
+    local = await listenOnLoopback(server);
+    process.env['EMBEDDING_URL'] = local.url;
     mongo = await openTestMongo('backfillonce');
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
     MODEL = loader.getEmbeddingConfig().model;
     reembed = await import('../../server/dist/brain/reembed.js');
     embedRecord = await import('../../server/dist/brain/embed-record.js');
-    (await import('../../server/dist/brain/embed-queue.js')).resetEmbedPendingHint();
+    queue = await import('../../server/dist/brain/embed-queue.js');
+    worker = await import('../../server/dist/brain/embed-worker.js');
+    queue.resetEmbedPendingHint();
   });
 
   after(async () => {
     await closeTestMongo();
+    await local?.close();
   });
 
   beforeEach(() => seed(withUnbuildable));
@@ -199,10 +198,13 @@ const backfillSuite = (withUnbuildable) => describe(`the reembed backfill counts
     assert.deepEqual(everything(), seeded, 'a seeded record is in no outcome of the table, or in two');
   });
 
-  (withUnbuildable ? it : it.skip)('a call does not throw on a record whose own field has the wrong type or an edge whose endpoint kind is unknown', async () => {
-    // One throwing record failed the whole call after jobs had been queued, and again on every later call.
-    await assert.doesNotReject(reembed.reembedSpace(SPACE, { limit: 1000 }), 'the call failed on i1 (tags: "x") or i2 (fromKind "bogus")');
-  });
+  // Declared only where the unbuildable record is seeded, so no run lists a permanent skip.
+  if (withUnbuildable) {
+    it('a call does not throw on a record whose own field has the wrong type or an edge whose endpoint kind is unknown', async () => {
+      // One throwing record failed the whole call after jobs had been queued, and again on every later call.
+      await assert.doesNotReject(reembed.reembedSpace(SPACE, { limit: 1000 }), 'the call failed on i1 (tags: "x") or i2 (fromKind "bogus")');
+    });
+  }
 
   it('with room for all of them, exactly the owed records are queued, each once, and the skipped ones are counted', async () => {
     const res = await reembed.reembedSpace(SPACE, { limit: 1000 });
@@ -240,7 +242,7 @@ const backfillSuite = (withUnbuildable) => describe(`the reembed backfill counts
     const seen = [];
     for (let call = 0; call < 12; call++) {
       const res = await reembed.reembedSpace(SPACE, { limit: 5 });
-      const drained = await stubDrain();
+      const drained = await drainQueue();
       seen.push(...drained);
       assert.deepEqual(drained.filter(k => !OWED.includes(k)), [], `call ${call + 1} queued a record nothing owes`);
       if (!res.truncated) break;
@@ -253,10 +255,10 @@ const backfillSuite = (withUnbuildable) => describe(`the reembed backfill counts
   it('after the queue is drained, a second call queues only the record whose text can never be built', async () => {
     const first = await reembed.reembedSpace(SPACE, { limit: 1000 });
     assert.equal(first.enqueued, OWED.length, 'the first call had work');
-    await stubDrain();
+    await drainQueue();
     const second = await reembed.reembedSpace(SPACE, { limit: 1000 });
     const queued = await jobIds();
-    assert.deepEqual(queued.filter(k => !UNBUILDABLE.includes(k) && k !== 'edge:i2'), [], 'a settled record was queued again: the backfill does not converge');
+    assert.deepEqual(queued.filter(k => !UNBUILDABLE.includes(k)), [], 'a settled record was queued again: the backfill does not converge');
     if (withUnbuildable) assert.ok(queued.includes('fact:i1'), 'the record whose text cannot be built is not owed: its job would never fail where an operator can see it');
     assert.equal(second.remaining, 0);
     assert.equal(second.truncated, false);
