@@ -41,13 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Embeddings:** the warning for a failed enqueue says the repair covers updated records too, and a failed enqueue of a single local write, a file's metadata among them, now warns.
 - **Embeddings:** after upgrading, run `POST /api/spaces/:id/reembed` once per space: it queues records already stale and suppressed records a peer sent that have no lexical text.
 - **Embeddings:** the first `reembed` after upgrading is a partial reindex: it also re-embeds records written under an older text format, records with no stored text, and edges whose endpoint was renamed.
-- **Embeddings:** `reembed` counts each record once, in exactly one of `enqueued`, `remaining` and `skippedSuppressed`; `skippedSuppressed` could come out too low and `remaining` count a record twice. A drained space owes nothing on the next call, except a record whose text cannot be built, which is queued every time so its failed job stays listed.
-- **Embeddings:** `reembed` now queues a record stored with `embedding: null` or `[]`, a suppressed record that still holds a vector, a chunk under a missing parent that still holds one, and a textless chunk still carrying derived fields; it no longer re-queues a chunk under a suppressed parent on every call.
-- **Embeddings:** one record with a field of the wrong type (`tags: "x"`) no longer fails a whole `reembed` call or a whole page a peer sent to a suppressed space; the rest is stored and a warning names the record. An edge whose endpoint kind this version does not know is embedded with the raw id, as a single write already did.
+- **Embeddings:** `reembed` counts each record once, in exactly one of `enqueued`, `remaining` and `skippedSuppressed`. After a drained queue it owes nothing, except a record whose text cannot be built, queued each time.
+- **Embeddings:** `reembed` queues records stored with `embedding: null` or `[]`, and suppressed or orphaned records still holding a vector; it no longer re-queues a chunk of a suppressed file on every call.
+- **Embeddings:** a record with a wrong-typed field (`tags: "x"`) no longer fails a whole `reembed` call or an arriving page; a warning names it. An edge with an unknown endpoint kind is embedded with the raw id.
 - **Embeddings:** a suppressed file whose text is filled in no longer keeps a vector beside it.
 - **Settings:** the Danger tab's **Backfill embeddings** says how many queued records had searchable text older than their content, stays usable while embeddings are suppressed (it then writes searchable text only), and its result is read out by screen readers.
 - **Docs:** a token's own request quota is set by an instance admin, or by a space admin for a token in their scope.
-- **Development:** `npm run test:up` builds the test image, so a local stack never tests an image older than the checkout; the unregistered-files check accepts a file a `.gitignore` rule names above a catch-all such as `*.txt`.
+- **Development:** `npm run test:up` builds the test image from the checkout; the unregistered-files check accepts a file a `.gitignore` rule names above a catch-all such as `*.txt`.
 
 ## [6.1.0] — 2026-10-29
 
