@@ -30,6 +30,7 @@ import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } f
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { derivedFieldsForWrite } from './derived-text-on-write.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -486,6 +487,8 @@ export async function executeMerge(
 ): Promise<{ entity: EntityDoc; deletedDuplicateEdgeIds: string[] }> {
   /** Embed-queue work from re-keyed edges, drained once the transaction has committed. */
   const rekeyedEdgeJobs: { retire: string; enqueue: string }[] = [];
+  /** The survivor was not embedded inline (the embedder was down), so it is queued once the transaction has committed. */
+  let survivorOwesJob = false;
   const session = getMongo().startSession();
   const deletedDuplicateEdgeIds: string[] = [];
 
@@ -710,15 +713,18 @@ export async function executeMerge(
       // retired from meaning-ranked search was handed a vector.
       const suppressed = embeddingSuppressedFor(spaceId, 'entity',
         { type: survivor.type, suppressEmbeddings: recordTierAfterWrite(undefined, survivor) });
-      let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
+      // The vector and the text it was made from are written together (`derivedFieldsForWrite`): the merge stored a new vector
+      // beside the survivor's previous text. With the embedder down the survivor keeps its old pair and is queued after the commit.
+      const mergedText = entityEmbedText(survivor.name, survivor.type, mergedTags, survivor.description, mergedProperties);
+      let vector: { embedding: number[]; embeddingModel: string } | null = null;
       if (!suppressed) {
         try {
-          const embResult = await embed(entityEmbedText(
-            survivor.name, survivor.type, mergedTags, survivor.description, mergedProperties,
-          ));
-          embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
-        } catch { /* embedding unavailable — keep existing embedding */ }
+          const embResult = await embed(mergedText);
+          vector = { embedding: embResult.vector, embeddingModel: embResult.model };
+        } catch { survivorOwesJob = true; }
       }
+      const derived = await derivedFieldsForWrite({ text: () => mergedText, vector, suppressed, onto: 'stored' });
+      const embeddingFields = derived.set;
 
       /*
        * THE MERGE PATH RUNS THE VALIDATORS THE WRITE PATH RUNS. It did not, and nothing noticed.
@@ -771,7 +777,10 @@ export async function executeMerge(
       const seq = await withSeq(spaceId, async (s) => {
         await entityColl.updateOne(
           asFilter<EntityDoc>({ _id: survivor._id }),
-          asUpdate<EntityDoc>({ $set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq: s, ...embeddingFields } }),
+          asUpdate<EntityDoc>({
+            $set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq: s, ...embeddingFields },
+            ...(Object.keys(derived.unset).length > 0 ? { $unset: derived.unset } : {}),
+          }),
           { session },
         );
         return s;
@@ -806,6 +815,7 @@ export async function executeMerge(
     await retireEmbedJob(spaceId, 'edge', job.retire);
     await enqueueEmbedJob(spaceId, 'edge', job.enqueue);
   }
+  if (survivorOwesJob) await enqueueEmbedJob(spaceId, 'entity', survivor._id);
 
   // Centralised webhook emission: a merge is an update to the survivor, deletion of the
   // absorbed entity, and deletion of any duplicate edges collapsed in the process. All four
