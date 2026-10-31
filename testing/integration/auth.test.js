@@ -69,6 +69,35 @@ describe('Token lifecycle', () => {
     await del(INSTANCES.a, tokenA, `/api/tokens/${id}`);
   });
 
+  it('PATCH carrying only rateLimitPerMinute is an edit, and the quota persists', async () => {
+    // The guard refused a body with no name, rights or mfa, so the quota could only be set beside another field.
+    const create = await post(INSTANCES.a, tokenA, '/api/tokens', { name: 'quota-alone' });
+    assert.equal(create.status, 201);
+    const id = create.body.token.id;
+    try {
+      const r = await patch(INSTANCES.a, tokenA, `/api/tokens/${id}`, { rateLimitPerMinute: 42 });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const list = await get(INSTANCES.a, tokenA, '/api/tokens');
+      assert.equal(list.body.tokens.find(t => t.id === id)?.rateLimitPerMinute, 42);
+    } finally {
+      await del(INSTANCES.a, tokenA, `/api/tokens/${id}`);
+    }
+  });
+
+  it('PATCH with a refused quota changes nothing, the name beside it included', async () => {
+    // The rename ran before the quota was checked, so a refused request still renamed the token.
+    const create = await post(INSTANCES.a, tokenA, '/api/tokens', { name: 'quota-refused' });
+    const id = create.body.token.id;
+    try {
+      const r = await patch(INSTANCES.a, tokenA, `/api/tokens/${id}`, { name: 'must-not-stick', rateLimitPerMinute: 0 });
+      assert.equal(r.status, 400, JSON.stringify(r.body));
+      const list = await get(INSTANCES.a, tokenA, '/api/tokens');
+      assert.equal(list.body.tokens.find(t => t.id === id)?.name, 'quota-refused');
+    } finally {
+      await del(INSTANCES.a, tokenA, `/api/tokens/${id}`);
+    }
+  });
+
   it('PATCH a non-existent token returns 404', async () => {
     const r = await patch(INSTANCES.a, tokenA, '/api/tokens/nonexistent-id', { name: 'whatever' });
     assert.equal(r.status, 404);
