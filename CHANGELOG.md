@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Tokens:** `PATCH /api/tokens/:id` accepts `rateLimitPerMinute` on its own; it answered 400 unless `name`, `rights` or `mfa` came with it. The audit entry records the quota before and after.
+- **Tokens:** `PATCH /api/tokens/:id` accepts `rateLimitPerMinute` on its own; it answered 400 unless `name`, `rights` or `mfa` came with it. The audit entry records the quota before and after. A quota the route refuses now changes nothing; with a new name beside it, the token was renamed and the answer was `403`.
+- **Graph:** merging two entities stores the survivor's new lexical text with its new vector, so text search finds the words the absorbed entity brought; when the embedding model cannot be reached, the survivor is queued.
+- **Sync:** a file this instance keeps out of semantic search, filled in from metadata an older version left behind, loses its vector and its passages' at once.
+- **Sync:** a record a peer sent with a field of the wrong type no longer stops the pages of a space that keeps records out of semantic search, nor the `reembed` of its space; it is named in the log and not embedded.
 - **Sync:** a record a peer sent that this instance keeps out of semantic search is stored with this instance's own lexical text of it, and text search finds it.
 - **Embeddings:** `POST /api/spaces/:id/reembed` and `space_reembed` also queue records whose stored text is not their current text (`stale` in the answer), such as an update whose embed job was never queued. The call now reads every record of the space once.
 - **Embeddings:** rewriting an existing fact, entity, chrono entry or edge by its id with new text now re-embeds it; the old vector was kept. Until the job has run, the record keeps its previous lexical text.
