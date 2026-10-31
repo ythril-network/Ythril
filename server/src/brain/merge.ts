@@ -38,6 +38,8 @@ import { eventEntryOf } from './read-projection.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
 import { writeTombstone, stampTombstones } from './tombstones.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { derivedFieldsForWrite } from './derived-text-on-write.js';
+import { enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { SubjectEdges } from './functional-subject.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
@@ -763,23 +765,33 @@ export async function executeMerge(
    * asking with `{ type }` alone dropped the record tier.
    */
   const suppressed = embeddingSuppressedFor(spaceId, 'entity', survivor as unknown as Record<string, unknown>);
-  let embeddingFields: { embedding?: number[]; embeddingModel?: string } = {};
+  // The vector and the text it was made from are written together (`derivedFieldsForWrite`): the merge stored a new vector beside the
+  // survivor's PREVIOUS text. With the embedder down the survivor keeps its old pair and is queued after the commit; a suppressed
+  // survivor gets its searchable text and loses the vector it held.
+  const mergedText = entityEmbedText(survivor.name, survivor.type, mergedTags, survivor.description, mergedProperties);
+  let vector: { embedding: number[]; embeddingModel: string } | null = null;
+  /** The survivor was not embedded inline (the embedder was down), so it is queued once the transaction has committed. */
+  let survivorOwesJob = false;
   if (!suppressed) {
     try {
-      const embResult = await embed(entityEmbedText(survivor.name, survivor.type, mergedTags, survivor.description, mergedProperties));
-      embeddingFields = { embedding: embResult.vector, embeddingModel: embResult.model };
-    } catch { /* embedding unavailable — keep existing embedding */ }
+      const embResult = await embed(mergedText);
+      vector = { embedding: embResult.vector, embeddingModel: embResult.model };
+    } catch { survivorOwesJob = true; }
   }
+  const derived = await derivedFieldsForWrite({ text: () => mergedText, vector, suppressed, onto: 'stored' });
+  const embeddingFields = derived.set;
 
   const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
   const written = await inHeldTransaction(spaceId, 'entity.merge',
     (session) => admitSpaceWrite(spaceId, undefined, () => relinkAndAbsorb(spaceId, survivor, absorbed, {
-      now, session, set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, ...embeddingFields },
+      now, session, set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, ...embeddingFields }, unset: derived.unset,
     })),
     // A commit whose answer was lost may have landed: the survivor at the seq this transaction gave it IS the commit.
     { landed: async (w) => (await entityColl.countDocuments(asFilter<EntityDoc>(atReadSeq(survivor._id, w.seq)), { limit: 1 })) === 1 });
 
   Object.assign(survivor, { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq: written.seq, ...embeddingFields });
+  // What the write removed is gone from the answer and the webhook too, so neither names a vector the record no longer holds.
+  for (const key of Object.keys(derived.unset)) delete (survivor as unknown as Record<string, unknown>)[key];
 
   /*
    * An edge or link written to the absorbed entity while the merge ran touches no document the merge's transaction wrote, so it is no write conflict and
@@ -801,6 +813,14 @@ export async function executeMerge(
    * of re-embeds must not queue ahead of the writes people are waiting on. Never thrown: the merge is stored, and
    * reporting it failed would invite a retry of a merge whose absorbed entity no longer exists.
    */
+  // The survivor's own job, for the same reason and with the same rule: never thrown, the merge is stored.
+  if (survivorOwesJob) {
+    try {
+      await enqueueEmbedJob(spaceId, 'entity', survivor._id, { priority: EMBED_PRIORITY.write });
+    } catch (err) {
+      log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but the survivor's embed job was not queued: ${peerText(err)}`);
+    }
+  }
   await settleRekeyedEmbeds(spaceId, written.rekeyed, (err) => {
     log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but the embed jobs of `
       + `${written.rekeyed.length} re-keyed edge(s) were not retired: ${peerText(err)}`);
@@ -827,7 +847,7 @@ export async function executeMerge(
  */
 async function relinkAndAbsorb(
   spaceId: string, survivor: EntityDoc, absorbed: EntityDoc,
-  { now, session, set }: { now: string; session: ClientSession; set: Record<string, unknown> },
+  { now, session, set, unset }: { now: string; session: ClientSession; set: Record<string, unknown>; unset: Record<string, ''> },
 ): Promise<MergeWrite> {
   // A merge rewrites entities, edges, links and their tombstones. Its one caller runs it inside `admitSpaceWrite`, which asks the gate and counts
   // the whole merge, so an act standing for the space refuses it and an act registered mid-merge waits for it.
@@ -890,7 +910,7 @@ async function relinkAndAbsorb(
   // ── 4. Update the survivor, delete the absorbed entity + its tombstone ──
   const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
   const seq = await withLandingStamp(spaceId, [localRow(survivorVersion!.version)], async ([patch]) => {
-    await entityColl.updateOne(asFilter<EntityDoc>({ _id: survivor._id }), asUpdate<EntityDoc>({ $set: { ...set, ...patch! } }), { session });
+    await entityColl.updateOne(asFilter<EntityDoc>({ _id: survivor._id }), asUpdate<EntityDoc>({ $set: { ...set, ...patch! }, ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}) }), { session });
     return patch!.seq;
   }, 'entity.merge.survivor');
   await entityColl.deleteOne(asFilter<EntityDoc>({ _id: absorbed._id, spaceId }), { session });
