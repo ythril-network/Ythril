@@ -312,8 +312,13 @@ export const space_reindexTool: ToolHandler = {
  */
 export const space_reembedTool: ToolHandler = {
   name: 'space_reembed',
-  description: 'Queue embeddings for records in a space that have NONE — the way back from '
-    + '`suppressEmbeddings`, and the repair after an embedding run stopped partway.\n\n'
+  description: 'Queue embeddings for records in a space that have NONE, and for records whose stored text is not their '
+    + 'current text — the way back from `suppressEmbeddings`, and the repair after an embedding run stopped partway '
+    + 'or an update\'s embedding job was lost.\n\n'
+    + 'STALE RECORDS ARE QUEUED TOO, and `stale` counts them: a record that keeps the vector and the lexical text of its '
+    + 'previous content because its job was never queued, and a suppressed record whose lexical text is missing or old '
+    + '(its job writes the text without calling the model). FINDING THEM READS EVERY RECORD OF THE SPACE ONCE PER CALL '
+    + '(`limit` bounds what is queued, never what is read), so a large space pays for a pass over its records each time.\n\n'
     // NAMING THE OTHER TOOL WOULD BE THE DEFECT HERE. Rebuilding every vector is instance-admin, this is
     // not, so a standard token sees this description and cannot see that tool — and a description that
     // sends a caller to something they will be refused is worse than one that describes the boundary.
@@ -321,8 +326,8 @@ export const space_reembedTool: ToolHandler = {
     + 'IT DOES NOT TOUCH WHAT ALREADY HAS A VECTOR, and that is the distinction to get right. Rebuilding '
     + 'every vector in a space — the recovery path after changing embedder or model — is a separate and '
     + 'more privileged operation; `help()` lists it if your token can reach it. This one touches only '
-    + 'records with no vector at all, is AWAITED, and the counts it returns are the answer rather than a '
-    + 'receipt.\n\n'
+    + 'records with no vector at all and the stale ones above, is AWAITED, and the counts it returns are the '
+    + 'answer rather than a receipt.\n\n'
     + 'SUPPRESSION IS EXCLUDED IN THE QUERY, not filtered afterwards, so a suppressed record is reported '
     + 'under `skippedSuppressed` rather than queued again on every call. A record suppressed at any tier — '
     + 'record, type schema or space — stays suppressed; releasing it is a separate act, and this is what you '
@@ -330,8 +335,9 @@ export const space_reembedTool: ToolHandler = {
     + 'BOUNDED, AND `truncated: true` MEANS CALL AGAIN. `limit` defaults to '
     + `${REEMBED_DEFAULT_LIMIT} and cannot exceed ${REEMBED_MAX_LIMIT}, so one call can never enqueue `
     + 'unbounded work. `remaining` is what is left after this page.\n\n'
-    + 'RESPONSE: `enqueued`, `skippedSuppressed`, `byKind`, `remaining`, `truncated`. A run that enqueues '
-    + 'nothing and skips nothing means every record already has a vector — not that it failed.',
+    + 'RESPONSE: `enqueued`, `skippedSuppressed`, `stale` (of `enqueued`, the records queued because their text '
+    + 'changed), `byKind`, `remaining`, `truncated`. A run that enqueues nothing and skips nothing means every '
+    + 'record already has a vector made from its current text — not that it failed.',
   mutating: true,
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -363,7 +369,7 @@ export const space_reembedTool: ToolHandler = {
     const per = Object.entries(out.byKind).map(([k, n]) => `${k}: ${n}`).join(', ') || 'nothing';
     return {
       content: [{ type: 'text' as const, text:
-        `Queued ${out.enqueued} embedding job(s) in '${callSpace}' (${per}). `
+        `Queued ${out.enqueued} embedding job(s) in '${callSpace}' (${per}; ${out.stale} of them for a changed text). `
         + `${out.skippedSuppressed} record(s) skipped as suppressed. `
         + (out.truncated ? `${out.remaining} left — call again to continue.` : 'Nothing left to sweep.') }],
       structuredContent: out as unknown as Record<string, unknown>,

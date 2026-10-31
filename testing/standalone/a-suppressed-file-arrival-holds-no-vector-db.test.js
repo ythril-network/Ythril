@@ -153,4 +153,4 @@ describe('a suppressed file arrival holds no vector (Q-230, file tier)', { skip 
     const landed = await door.coll(OPEN, 'files').findOne({ _id: FILE });
     assert.deepEqual([landed?.seq, staleOf(landed)], [6, []]);
   });
-});
+});

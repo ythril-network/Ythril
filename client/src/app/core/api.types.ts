@@ -575,6 +575,8 @@ export interface ReembedResult {
   spaceId: string;
   enqueued: number;
   skippedSuppressed: number;
+  /** Of `enqueued`, the records queued because their stored text is not their current text (a vector made from older text). */
+  stale: number;
   byKind: Record<string, number>;
   remaining: number;
   truncated: boolean;

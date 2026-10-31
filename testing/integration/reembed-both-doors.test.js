@@ -110,7 +110,7 @@ describe('the backfill, on both doors', () => {
     assert.ok(!r.isError, JSON.stringify(r));
     const data = r.structuredContent;
     assert.ok(data, 'the tool must carry its counts in structuredContent, not only in prose');
-    for (const key of ['spaceId', 'enqueued', 'skippedSuppressed', 'byKind', 'remaining', 'truncated']) {
+    for (const key of ['spaceId', 'enqueued', 'skippedSuppressed', 'stale', 'byKind', 'remaining', 'truncated']) {
       assert.ok(key in data, `the tool's result is missing '${key}', which the REST route returns`);
     }
     assert.equal(data.spaceId, SPACE);

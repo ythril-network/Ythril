@@ -218,4 +218,4 @@ describe('an embed job never writes over a newer arrival', { skip }, () => {
     const counted = Object.entries(tally).filter(([k]) => k !== 'errors').reduce((n, [, v]) => n + v, 0);
     assert.equal(counted, 3, `three records were walked and each must be counted as done (reindexed, suppressed or superseded): ${done}`);
   });
-});
+});
