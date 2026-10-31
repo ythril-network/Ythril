@@ -41,7 +41,7 @@ const SPACE = 'general';
 const A = 'aaaaaaaa-0000-4000-8000-0000000c0a01';
 const B = 'aaaaaaaa-0000-4000-8000-0000000c0b02';
 
-let mongo, factMod, entMod, edgeMod, chronoMod, bulkMod;
+let mongo, factMod, entMod, edgeMod, chronoMod, bulkMod, buildEmbedText;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 const jobsFor = (id) => coll('embed_jobs').countDocuments({ recordId: id });
@@ -50,9 +50,11 @@ const COLLECTION = { fact: 'facts', entity: 'entities', edge: 'edges', chrono: '
 /**
  * Per writer: how to seed a record, and how to converge on it with CHANGED content through each door.
  *
- * `newText` is a string the converged record's stored embed text must contain — what tells "the new content
- * reached the embed input" apart from "something was stored". `null` for an edge, whose `matchedText` is
- * written by the inline path alone (the queued job resolves the endpoint names itself).
+ * `newText` is a string the embed text of the converged record, as the queued job will build it, must contain —
+ * what tells "the new content reached the embed input" apart from "something was stored". It is asked of the text
+ * BUILT from the stored record, not of the stored `matchedText`: a converge leaves the previous text beside a stored
+ * vector until the job writes both (`derivedFieldsForWrite`), so `matchedText` is the job's to settle. `null` for an
+ * edge, whose text the queued job builds from the endpoint names it resolves itself.
  */
 const WRITERS = {
   fact: {
@@ -107,6 +109,7 @@ describe('a converged record is re-embedded from its new content', { skip }, () 
     edgeMod = await import('../../server/dist/brain/edges.js');
     chronoMod = await import('../../server/dist/brain/chrono.js');
     bulkMod = await import('../../server/dist/brain/bulk.js');
+    ({ buildEmbedText } = await import('../../server/dist/brain/embed-record.js'));
   });
 
   after(async () => {
@@ -153,8 +156,8 @@ describe('a converged record is re-embedded from its new content', { skip }, () 
         assert.ok(doc, 'the converged record is gone');
         assert.ok(doc.tags.includes('new-tag'), 'the new content did not reach the stored record');
         if (w.newText) {
-          assert.match(doc.matchedText ?? '', new RegExp(w.newText),
-            'the stored embed text still describes the record before the converge');
+          assert.match(await buildEmbedText(SPACE, kind, doc) ?? '', new RegExp(w.newText),
+            'the embed text built from the stored record still describes the record before the converge');
         }
         assert.equal(await jobsFor(id), 1,
           `the ${kind} converged on new content through the ${door} door and NO embed job was queued, so its `
