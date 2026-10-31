@@ -89,13 +89,13 @@ describe('every embed-job enqueue names its lane', () => {
   it('no call of a write-lane door sits in a try: it warns inside and never throws into the write it announces', () => {
     // The write lane's doors catch a failed enqueue and warn (`enqueueWriteEmbedJobs`); a catch around one is dead code, and one that
     // says "the worker's sweep finds it" names a repair that is on demand only (`reembed`). The sweep door REJECTS on purpose, so it is not here.
+    // Read across lines: a `try {` on its own line above the enqueue is the same dead catch (bundle-211's merge survivor passed a
+    // one-line reading). Built fresh per file, so a global regex shared between files cannot skip a match.
     const wrapped = [];
     for (const s of SOURCES) {
-      for (const door of ['enqueueEmbedJob', 'enqueueWriteEmbedJobs']) {
-        for (const c of callsOf(s.code, s.file, door)) {
-          const line = s.code.split('\n')[c.line - 1] ?? '';
-          if (/\btry\s*\{\s*(await\s+)?(\w+\.)*enqueue\w*EmbedJobs?\(/.test(line)) wrapped.push(`${c.file}:${c.line} ${door}`);
-        }
+      const re = /\btry\s*\{\s*(?:await\s+)?(?:\w+\.)*(enqueueEmbedJob|enqueueWriteEmbedJobs)\(/g;
+      for (let m; (m = re.exec(s.code));) {
+        wrapped.push(`${s.file}:${s.code.slice(0, m.index).split('\n').length} ${m[1]}`);
       }
     }
     assert.deepEqual(wrapped, [], 'these enqueues are wrapped in a try whose catch can never run; drop the try');
