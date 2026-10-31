@@ -254,7 +254,10 @@ describe('one rule, both write paths, and the read surface agrees', () => {
     const patch = routes.slice(start, routes.indexOf('tokensRouter.', start + 1));
     const guard = patch.match(/if \(name === undefined && rights === undefined && mfa === undefined[^)]*\)/)?.[0] ?? '';
     assert.match(guard, /rateLimitPerMinute === undefined/, `the "nothing to change" guard ignores the quota: ${guard}`);
-    const snapshot = patch.slice(patch.indexOf('req.auditSnapshots'), patch.indexOf('req.auditSnapshots') + 900);
+    // Bounded by the statement: from the assignment to the `};` that closes it.
+    const at = patch.indexOf('req.auditSnapshots');
+    assert.ok(at >= 0, 'the PATCH route sets no audit snapshot');
+    const snapshot = patch.slice(at, patch.indexOf('};', at) + 2);
     assert.match(snapshot, /before:[^}]*rateLimitPerMinute/, 'the audit snapshot\'s before side has no quota');
     assert.match(snapshot, /after:[\s\S]*rateLimitPerMinute/, 'the audit snapshot\'s after side has no quota');
   });
