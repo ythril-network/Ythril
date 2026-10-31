@@ -30,6 +30,7 @@ import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
 import { UNSET_DERIVED, UNSET_VECTOR } from '../sync/local-only-fields.js';
 import { log, logSafe, peerList } from '../util/log.js';
 import { holdsVector } from './holds-vector.js';
+import { holdsDerived } from './holds-derived.js';
 import { textIsStale } from './derived-text-on-write.js';
 import type {
   BrainEmbedRecordType, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc,
@@ -397,7 +398,7 @@ export async function embedStoredRecord(
   // from this text with this model. Any of the three conditions failing re-embeds. The table is `embedOwed`'s, which
   // the backfill's walk asks too.
   const owed = embedOwed({
-    text, suppressed, vectorPresent: holdsVector(doc), holdsDerived: Object.keys(UNSET_DERIVED).some(f => f in doc),
+    text, suppressed, vectorPresent: holdsVector(doc), holdsDerived: holdsDerived(doc),
     matchedText: doc['matchedText'], embeddingModel: doc['embeddingModel'], configuredModel: () => getEmbeddingConfig().model, rebuild: opts.rebuild,
   });
   switch (owed.outcome) {

@@ -40,7 +40,7 @@ import {
 } from './suppress-embeddings.js';
 import { HOLDS_VECTOR, holdsVectorExpr } from './holds-vector.js';
 import { isSpillPath } from './spill-path.js';
-import { UNSET_DERIVED } from '../sync/local-only-fields.js';
+import { HOLDS_DERIVED, holdsDerivedExpr } from './holds-derived.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { TYPE_FIELD } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
@@ -153,9 +153,6 @@ export interface SweepResult {
   stale: number;
 }
 
-/** The derived fields a textless derived row may still hold for the worker to clear (`UNSET_DERIVED`, the worker's own list). */
-const DERIVED_FIELDS = Object.keys(UNSET_DERIVED);
-
 /** The records of a kind a sweep considers at all, before suppression. One set for the reindex and the backfill. */
 function candidates(kind: BrainEmbedRecordType): Record<string, unknown> {
   const topLevel = { parentFileId: { $exists: false } };
@@ -168,8 +165,8 @@ function candidates(kind: BrainEmbedRecordType): Record<string, unknown> {
   const live = notFlaggedIfFile(kind) ?? {};
   // A derived row is a candidate when it has text, or while it holds ANY derived field (a vector, its model, or a leftover
   // `matchedText`), which the worker unsets from a textless row: present even as `null`, as the worker's `in` test reads it.
-  const holdsDerived = { parentFileId: { $exists: true }, $or: DERIVED_FIELDS.map(f => ({ [f]: { $exists: true } })) };
-  return kind === 'file' ? { ...live, $or: [topLevel, derivedHasText, holdsDerived] } : {};
+  const holdsDerivedField = { parentFileId: { $exists: true }, ...HOLDS_DERIVED };
+  return kind === 'file' ? { ...live, $or: [topLevel, derivedHasText, holdsDerivedField] } : {};
 }
 
 /**
@@ -340,7 +337,7 @@ async function queueOwedSweep(spaceId: string, opts: SweepOptions): Promise<Swee
       // The vector is the bulk of a record and the walk needs only whether it is there, and whether any derived field is.
       { $addFields: {
         holdsVector: holdsVectorExpr,
-        holdsDerived: { $or: DERIVED_FIELDS.map(f => ({ $ne: [{ $type: `$${f}` }, 'missing'] })) },
+        holdsDerived: holdsDerivedExpr,
       } },
       { $unset: 'embedding' },
     ], { batchSize: WALK_BATCH });
