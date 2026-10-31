@@ -45,6 +45,11 @@ const PARENT_DERIVED = ['embedding', 'embeddingModel', 'matchedText'];
 const CHUNK_VECTOR = ['embedding', 'embeddingModel'];
 const VALUES = { embedding: [0.25, 0.5, 0.75], embeddingModel: 'receiver-model', matchedText: 'what this instance embedded from the PREVIOUS content' };
 const FILE = 'docs/a.md';
+/**
+ * What of the stored copy's derived fields a suppressed row still holds. `matchedText` may be there, but only as this instance's own
+ * text of what arrived (Q-262, `a-suppressed-arrival-is-found-by-its-text-on-the-receiver-db`), never the stored copy's.
+ */
+const staleOf = (row) => held(row, PARENT_DERIVED).filter(f => f !== 'matchedText' || row[f] === VALUES.matchedText);
 
 let door, recordArrivedFile;
 
@@ -91,13 +96,13 @@ describe('a suppressed file arrival holds no vector (Q-230, file tier)', { skip 
       'the SPACE suppresses it': { space: QUIET, extra: {}, storedFlag: false },
     };
     for (const [why, c] of Object.entries(cases)) {
-      it(`${via}: ${why}: the row holds no embedding, model or matchedText, and its chunk and passage rows no vector`, async () => {
+      it(`${via}: ${why}: the row holds no embedding or model and none of the stored matchedText, and its chunk and passage rows no vector`, async () => {
         await seed(c.space, { storedFlag: c.storedFlag });
         await DOORS[via](c.space, arrival(c.space, c.extra));
         const parent = await door.coll(c.space, 'files').findOne({ _id: FILE });
         assert.equal(parent?.seq, 6, `fixture check: the arrival did not land (${JSON.stringify(parent)})`);
-        assert.deepEqual(held(parent, PARENT_DERIVED), [],
-          `${via}: the file kept ${held(parent, PARENT_DERIVED)} from the content it replaced`);
+        assert.deepEqual(staleOf(parent), [],
+          `${via}: the file kept ${staleOf(parent)} from the content it replaced`);
         const derived = await door.coll(c.space, 'files').find({ parentFileId: FILE }).toArray();
         assert.equal(derived.length, 2, 'fixture check: the derived rows are gone');
         assert.deepEqual(derived.flatMap(r => held(r, CHUNK_VECTOR).map(f => `${r._id}.${f}`)), [],
@@ -146,6 +151,6 @@ describe('a suppressed file arrival holds no vector (Q-230, file tier)', { skip 
     // The retry (a re-sent page) lands, and the file itself is clean.
     await DOORS.batch(OPEN, arrival(OPEN, { suppressEmbeddings: true }));
     const landed = await door.coll(OPEN, 'files').findOne({ _id: FILE });
-    assert.deepEqual([landed?.seq, held(landed, PARENT_DERIVED)], [6, []]);
+    assert.deepEqual([landed?.seq, staleOf(landed)], [6, []]);
   });
-});
+});

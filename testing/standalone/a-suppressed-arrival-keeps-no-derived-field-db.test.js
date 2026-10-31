@@ -82,7 +82,10 @@ async function seeded(fam, row, via) {
 async function verdict(fam, row, doc, via) {
   const after = await door.coll(row.space, fam.coll).findOne({ _id: doc._id });
   if (!after || after.seq !== doc.seq) return `${via} ${fam.type} (${row.label}): fixture check — the arrival did not land (${JSON.stringify(after?.seq)})`;
-  const held = [...DERIVED].filter(f => after[f] !== undefined);
+  // The vector and its model are the stored copy's and never carried; `matchedText` may be there on a record this instance suppresses,
+  // but only as this instance's own text of what arrived (Q-262), never the stored copy's.
+  const held = [...DERIVED].filter(f => after[f] !== undefined
+    && !(f === 'matchedText' && row.suppressed && after[f] !== DERIVED_VALUES.matchedText));
   // A restore carries nothing of the copy it replaces (R2): the record is the backup's, queued to be re-embedded.
   if (via === 'import') {
     return held.length > 0 ? `import ${fam.type} (${row.label}): restored, and still holds ${held.join(', ')} of the replaced copy` : null;

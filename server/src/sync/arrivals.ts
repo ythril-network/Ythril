@@ -28,8 +28,11 @@
  *     stored copy across the replace, server-side, in the same update, so a peer's edit no longer erases this
  *     instance's retention stamps or its file sync bases (`RESTORED_LOCAL_FIELDS`), nor its vector while the
  *     receiver still embeds the record. A record the receiver SUPPRESSES (`embeddingSuppressedFor`, asked of the
- *     arriving document) keeps no derived field (`DERIVED_LOCAL_FIELDS`), as 5.6.1's whole replace left it: the
- *     queue skips it, so a carried vector would stay for good (`Q-218` R1). A RESTORE keeps what the export carried
+ *     arriving document) carries no derived field from the stored copy (`DERIVED_LOCAL_FIELDS`), as 5.6.1's whole replace left it: the
+ *     queue skips it, so a carried vector would stay for good (`Q-218` R1). It is stored with THIS instance's own
+ *     `matchedText` of the arriving content instead, built by this instance's text builder as a local suppressed write's is
+ *     (`Q-262`): the record stays findable by its words, and nothing queues it, so nothing would write the text later (a
+ *     peer's file metadata is merged, so its text is written after the merge, `sync/suppressed-file-text.ts`). A RESTORE keeps what the export carried
  *     as the record's own state (`RESTORED_LOCAL_FIELDS`, as Dates), drops what is derived from the export, and
  *     carries NOTHING from the copy it replaces (`Q-218` R2), its vector included: every restored record the space embeds is queued
  *     and re-embedded from the backup's text — `carriedFields` (`sync/local-only-fields.ts`).
@@ -87,9 +90,11 @@ import { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields } from './lo
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { planSeqUpserts, retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
 import { enqueueIngestedRecords } from '../brain/embed-queue.js';
-import { isDerived } from '../brain/embed-record.js';
+import { isDerived, buildEmbedTexts } from '../brain/embed-record.js';
+import { derivedFieldsForWrite } from '../brain/derived-text-on-write.js';
 import { ingestFileMeta, fileMetaForWire } from '../api/sync/_shared.js';
 import { fillFileMetaFromStray } from './fill-file-meta.js';
+import { storeSuppressedFileText } from './suppressed-file-text.js';
 
 type Doc = Record<string, unknown> & { _id: string; seq?: number };
 
@@ -351,10 +356,32 @@ function carriedForArrival(
  * worker writing a vector between a read and this write. (No `D-9` defaults beneath them: cut `C4`.) A field not
  * carried is absent from the result, as 5.6.1's whole-document replace left every one of them.
  */
-function replacementFor(doc: Doc, carried: readonly string[]): unknown[] {
-  if (carried.length === 0) return [{ $replaceWith: { $literal: doc } }];
+function replacementFor(doc: Doc, carried: readonly string[], own: Record<string, unknown> = {}): unknown[] {
+  // `own`: what THIS instance derived from the arriving content (a suppressed record's `matchedText`), laid over the
+  // document, so neither a carried field nor what arrived can override it (`Q-262`).
+  const body = { ...doc, ...own };
+  if (carried.length === 0) return [{ $replaceWith: { $literal: body } }];
   const fromStored = Object.fromEntries(carried.map(f => [f, `$${f}`]));
-  return [{ $replaceWith: { $mergeObjects: [fromStored, { $literal: doc }] } }];
+  return [{ $replaceWith: { $mergeObjects: [fromStored, { $literal: body }] } }];
+}
+
+/**
+ * The `matchedText` of the arrivals this instance suppresses, by id — through the one rule of what a write may store beside a
+ * vector (`derivedFieldsForWrite`: the text, and no vector). A peer's file metadata has none here: it is merged, and its text
+ * depends on the row as merged (`ingestFileMeta`).
+ */
+async function suppressedTexts(
+  spaceId: string, recordType: BrainEmbedRecordType | null, docs: readonly Doc[],
+): Promise<Map<string, Record<string, unknown>>> {
+  const out = new Map<string, Record<string, unknown>>();
+  if (recordType === null || docs.length === 0) return out;
+  const texts = await buildEmbedTexts(spaceId, recordType, docs);
+  for (let i = 0; i < docs.length; i++) {
+    const text = texts[i];
+    if (text === null || text === undefined) continue;
+    out.set(docs[i]!._id, (await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' })).set);
+  }
+  return out;
 }
 
 /** The derived rows (chunks, face records) a page carries, by the file each names in `parentFileId`. */
@@ -496,6 +523,12 @@ export async function writeArrivals(
   };
   /** What each document's replace carries from its stored copy — decided once per document. */
   const carry = (d: Doc): readonly string[] => carriedForArrival(spaceId, recordType, d, restore);
+  // What an arrival this instance suppresses is stored with: this instance's OWN text of what arrived (`Q-262`), built by its own
+  // builder as a local suppressed write's is, and never the stored copy's (`carriedFields`). Nothing queues a suppressed record, so
+  // nothing would write it later. A restore takes it too (the backup's row is whole); a peer's file metadata is merged, so its text
+  // is written after the merge (`ingestFileMeta`).
+  const ownText = fillOnly || merges || recordType === null ? new Map<string, Record<string, unknown>>()
+    : await suppressedTexts(spaceId, recordType, toWrite.filter(d => embeddingSuppressedFor(spaceId, recordType, d)));
   /** A restore of file rows: the derived ids the backup carries, per parent file (`Q-251`). */
   const backupDerived = restore && family === 'files' ? derivedIdsByParent(arriving) : undefined;
   for (const chunk of inChunks(toWrite, READ_CHUNK)) {
@@ -530,6 +563,7 @@ export async function writeArrivals(
             const r = await fillFileMetaFromStray(spaceId, d);
             if (r === 'merged') {
               out.updated.push(d._id);
+              await storeSuppressedFileText(spaceId, [d._id]);
               const s = plausibleSeq(d.seq);
               if (s !== undefined) noteSeqStored(spaceId, s);
             } else if (r === 'complete') out.complete.push(d._id);
@@ -546,13 +580,13 @@ export async function writeArrivals(
       } else {
         try {
           await coll.bulkWrite(asBulk<Doc>(chunk.map(d => ({
-            updateOne: { filter: filterFor(d, restore), update: replacementFor(d, carry(d)), upsert: true },
+            updateOne: { filter: filterFor(d, restore), update: replacementFor(d, carry(d), ownText.get(d._id)), upsert: true },
           }))), { ordered: false });
           landed.push(...chunk);
         } catch (err) {
           const failures = bulkWriteFailures(err);
           const writeOne = async (d: Doc): Promise<boolean> => {
-            await coll.updateOne(filterFor(d, restore), replacementFor(d, carry(d)), { upsert: true });
+            await coll.updateOne(filterFor(d, restore), replacementFor(d, carry(d), ownText.get(d._id)), { upsert: true });
             return true;
           };
           if (!failures || failures.some(f => chunk[f.index] === undefined)) {

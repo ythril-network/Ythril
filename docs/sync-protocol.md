@@ -473,7 +473,7 @@ There is no dedicated identity endpoint — a peer that needs the instance's ide
 
 **There is no single-document route for `links` or `filemeta`.** Both arrive only through `batch-upsert`, so a peer implementation that only wires the per-type `POST` endpoints replicates neither.
 
-**File metadata is merged, not replaced, and an older copy never overwrites a newer one.** The authored keys are set on the stored row (the receiver's own size and hash are not touched, nor its vector unless this instance suppresses the file, below), and the write carries the same seq condition as every other family's: a copy stored between the receiver's read and its write at a higher seq is kept. A file this instance suppresses embedding for (its own flag, or the space's) is stored with no vector, model or matched text, and its chunk and passage rows lose theirs.
+**File metadata is merged, not replaced, and an older copy never overwrites a newer one.** The authored keys are set on the stored row (the receiver's own size and hash are not touched, nor its vector unless this instance suppresses the file, below), and the write carries the same seq condition as every other family's: a copy stored between the receiver's read and its write at a higher seq is kept. A file this instance suppresses embedding for (its own flag, or the space's) is stored with no vector or model, with this instance's own matched text of the merged row (so it stays findable by its words), and its chunk and passage rows lose theirs.
 
 `POST /batch-upsert` is the primary push path used by the engine. The individual `POST /facts`, `/entities`, `/edges` endpoints remain for backwards compatibility and direct API usage.
 
