@@ -88,7 +88,8 @@ const NOTHING: ReadonlySet<string> = new Set();
 /**
  * What crosses a write from the STORED copy, per document: a restore takes nothing from the copy it replaces; an
  * arrival this instance SUPPRESSES, the record tier only (the derived half describes content it no longer embeds,
- * `Q-230`); any other peer arrival, every local-only field.
+ * `Q-230` — the record is stored with this instance's own `matchedText` of what arrived instead, `Q-262`, written by the
+ * arrival writer, never carried); any other peer arrival, every local-only field.
  *
  * Both of the arrival writer's write shapes ask it — the whole-document replace of the brain families
  * (`sync/arrivals.ts`) and the file-metadata merge (`ingestFileMeta`, which `$unset`s what is not carried) — so one of

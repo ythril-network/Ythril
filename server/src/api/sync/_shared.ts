@@ -17,6 +17,7 @@ import type { TokenRights } from '../../config/rights-shape.js';
 import { log, logSafe, peerText } from '../../util/log.js';
 import { embeddingSuppressedFor } from '../../brain/suppress-embeddings.js';
 import { dropFileVectors } from '../../brain/suppression-sweep.js';
+import { storeSuppressedFileText } from '../../sync/suppressed-file-text.js';
 import { carriedFields, DERIVED_LOCAL_FIELDS } from '../../sync/local-only-fields.js';
 import { seqGuard } from '../../sync/upsert-plan.js';
 import { seqRefusal, MAX_INGEST_SEQ, noteSeqStored } from '../../util/seq.js';
@@ -247,6 +248,8 @@ export const IncomingFileMetaDoc = z.object({
  * stay on the row and keep it in meaning-ranked search by the mechanism suppression switches off. A file has two tiers,
  * its own flag and the space, so the question is asked of the arriving flag OR the stored one (a peer that does not
  * carry the flag must not lift the receiver's), and then the derived fields are the ones `carriedFields` does not carry.
+ * It is then given this instance's own `matchedText` of the merged row (`storeSuppressedFileText`, `Q-262`), because nothing queues a
+ * suppressed record, so nothing else would ever write the text the lexical channel searches.
  * The file's chunk and passage rows are searched on their own vectors and lose theirs BEFORE the row is written, so an
  * arrival whose row write fails has cleared them already and its re-fetch repeats the drop.
  */
@@ -286,6 +289,8 @@ export async function ingestFileMeta(spaceId: string, incoming: z.infer<typeof I
   );
   // As the arrival writer's other families: a seq this process did not allocate, which the pull horizon must cover.
   if (typeof incoming.seq === 'number') noteSeqStored(spaceId, incoming.seq);
+  // A row this instance suppresses is stored with its OWN text of the merged row, as a local write stores it (`Q-262`).
+  if (suppressed) await storeSuppressedFileText(spaceId, [incoming._id]);
 
   const haveBytes = existing?.sha256 !== undefined || existing?.sizeBytes !== undefined;
   if (haveBytes) await enqueueIngestedRecord(spaceId, 'file', incoming);

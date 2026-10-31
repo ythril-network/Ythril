@@ -84,12 +84,17 @@ describe('an embed job never writes over a newer arrival', { skip }, () => {
     await door.coll(S, 'facts').insertOne(build.fact(S, 'f', 5, { fact: 'the old text' }));
   });
 
+  /**
+   * `text` is what the newer copy may hold as `matchedText`: nothing for a copy this instance embeds (the job writes it), and for a
+   * copy it suppresses its OWN text of the arriving content (Q-262), which is what tells the arrival writer's text from the job's stale
+   * write of the old words.
+   */
   const cases = {
-    'a suppressing arrival': { fact: 'the old text', suppressEmbeddings: true },
-    'an arrival with new text': { fact: 'the new text' },
+    'a suppressing arrival': { change: { fact: 'the arriving text', suppressEmbeddings: true }, text: 'the arriving text' },
+    'an arrival with new text': { change: { fact: 'the new text' }, text: undefined },
   };
 
-  for (const [name, change] of Object.entries(cases)) {
+  for (const [name, { change, text }] of Object.entries(cases)) {
     it(`${name} lands while the job embeds: the job's write does not touch the newer copy`, async () => {
       const { parked, release } = parkTheJobsVectorWrite();
       const job = embedStoredRecord(S, 'fact', 'f');
@@ -100,10 +105,12 @@ describe('an embed job never writes over a newer arrival', { skip }, () => {
       await job.catch(() => {});
       const after = await door.coll(S, 'facts').findOne({ _id: 'f' });
       assert.equal(after.seq, 6, 'fixture check: the newer copy did not land');
-      // The stored copy had no vector and the arrival carries none, so any of the three is the job's stale write.
-      assert.deepEqual(derived(after), [],
+      // The stored copy had no vector and the arrival carries none, so any of the three is the job's stale write — except the text a
+      // suppressed arrival is stored with, which is the receiver's own of what arrived.
+      assert.deepEqual(derived(after).filter(f => !(f === 'matchedText' && text !== undefined)), [],
         'the job read seq 5 and wrote its vector and text onto the seq-6 copy that arrived meanwhile: '
         + JSON.stringify({ ...after, embedding: Array.isArray(after.embedding) ? `[${after.embedding.length} numbers]` : after.embedding }));
+      assert.equal(after.matchedText, text, 'the newer copy holds the text of the version the job read, or none of the right one');
     });
 
     it(`${name}: the job reports the outcome superseded, not embedded`, async () => {
@@ -211,4 +218,4 @@ describe('an embed job never writes over a newer arrival', { skip }, () => {
     const counted = Object.entries(tally).filter(([k]) => k !== 'errors').reduce((n, [, v]) => n + v, 0);
     assert.equal(counted, 3, `three records were walked and each must be counted as done (reindexed, suppressed or superseded): ${done}`);
   });
-});
+});

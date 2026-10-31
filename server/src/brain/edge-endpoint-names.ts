@@ -29,6 +29,7 @@ import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import type { EdgeDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { recordDisplayName, recordDisplayType } from './link-frontier.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 import type { ChronoEntry, FactDoc, FileMetaDoc } from '../config/types.js';
@@ -56,9 +57,50 @@ export async function resolveEndpointName(spaceId: string, id: string, kind: Ref
   const field = endpointNameField(kind);
   const doc = await col<Record<string, unknown>>(`${spaceId}_${collectionForRefKind(kind)}`)
     .findOne(asFilter<Record<string, unknown>>({ _id: id }), { projection: { [field]: 1 } });
-  const value = doc?.[field];
+  return endpointDisplayName(doc?.[field], id);
+}
+
+/**
+ * The string that stands for an endpoint in an edge's embed text, given the stored value of its name field (or none).
+ *
+ * ## What it prevents
+ *
+ * Two readers resolve endpoint names for the same text: `resolveEndpointName` (one endpoint, one read) and
+ * `resolveEndpointNames` (a page, one read per kind). The normalisation is the part a second copy gets wrong, and it is
+ * not cosmetic: a name that differs by a trim or a cut makes a record's text differ from the one its vector was made from,
+ * and the repair sweep then reports it changed for ever. Trimmed, cut at `ENDPOINT_NAME_MAX`, and the raw id when there
+ * is nothing to show.
+ */
+export function endpointDisplayName(value: unknown, id: string): string {
   if (typeof value !== 'string' || !value.trim()) return id;
   return value.trim().slice(0, ENDPOINT_NAME_MAX);
+}
+
+/**
+ * Resolve the endpoints of a page of edges at once: one read per endpoint KIND, however many edges. Returns the answer
+ * `resolveEndpointName` would give, endpoint by endpoint, through `nameOf(kind, id)`.
+ *
+ * The read goes through `readStoredById`, which chunks its own ids; a file needs no read.
+ */
+export async function resolveEndpointNames(
+  spaceId: string,
+  edges: ReadonlyArray<{ from: string; to: string; fromKind?: RefKind; toKind?: RefKind }>,
+): Promise<(kind: RefKind, id: string) => string> {
+  const idsByKind = new Map<'entity' | 'fact' | 'chrono', Set<string>>();
+  for (const e of edges) {
+    for (const [id, kind] of [[e.from, edgeEndpointKind(e.fromKind)], [e.to, edgeEndpointKind(e.toKind)]] as const) {
+      if (kind === 'file') continue;
+      if (!idsByKind.has(kind)) idsByKind.set(kind, new Set());
+      idsByKind.get(kind)!.add(id);
+    }
+  }
+  const named = new Map<string, string>();
+  for (const [kind, ids] of idsByKind) {
+    const field = endpointNameField(kind);
+    const rows = await readStoredById<Record<string, unknown>>(spaceCollection(spaceId, collectionForRefKind(kind)), [...ids], { [field]: 1 });
+    for (const [id, row] of rows) named.set(`${kind}\u0000${id}`, endpointDisplayName(row[field], id));
+  }
+  return (kind, id) => (kind === 'file' ? id : named.get(`${kind}\u0000${id}`) ?? id);
 }
 
 /**

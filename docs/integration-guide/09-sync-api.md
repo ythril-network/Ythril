@@ -446,10 +446,12 @@ record this instance already holds keeps this instance's vector and retention st
 replaced the whole document, so the record stopped expiring here and was re-embedded even when its text had not
 changed. The vector, its model and the matched text are kept only while this instance still embeds the record: an
 update this instance suppresses — by the record's own `suppressEmbeddings`, its type's schema, or the space —
-lands with none of them, as before 5.6.2, because the embed queue skips a suppressed record and nothing would ever
-remove a vector carried onto it. A file's metadata is merged, so until 5.6.4 this held for the other families
-and not for files: a file this instance suppresses (its own flag, the stored one, or the space) now lands with none
-either, and its chunk and passage rows lose theirs.
+lands with no vector or model, as before 5.6.2, because the embed queue skips a suppressed record and nothing would ever
+remove a vector carried onto it. It is stored with this instance's own matched text of the content that arrived,
+built the way a local suppressed write's is, so it stays findable by its words: the stored copy's matched text is
+never carried, because it would keep removed text findable. A file's metadata is merged, so until 5.6.4 this held for the other families
+and not for files: a file this instance suppresses (its own flag, the stored one, or the space) now lands with no vector
+or model either (and this instance's own matched text of the merged row), and its chunk and passage rows lose theirs.
 
 **The receiver embeds what it accepts, on its own terms.** Every accepted document is queued for embedding
 against the receiving instance's own model, at the moment it is written, whether it arrived by push (batch or
