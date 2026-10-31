@@ -314,7 +314,7 @@ describe('every inline embed honours suppression', () => {
     // unguarded, and would break the cleanup of a suppression toggled ON after records already exist.
     const rec = stripComments(readFileSync('server/src/brain/embed-record.ts', 'utf8'));
     const body = bodyOf(rec, 'embedStoredRecord');
-    assert.match(body, /embeddingSuppressedFor\(/, 'the queue path must keep its own check');
+    assert.match(body, /recordSuppressedMany\(/, 'the queue path must keep its own check');
     // Re-anchored for bundle-30 `R12`: the removal is the one constant `UNSET_VECTOR` (its fields are pinned by
     // `suppress-embeddings-wiring`), not a hand-spelled `$unset` of `embedding`.
     // And again for bundle-89: the write is handed to the one writer of a derived field, so the constant is an
