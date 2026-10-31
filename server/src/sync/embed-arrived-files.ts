@@ -12,7 +12,7 @@
 import { spaceCollection } from '../db/space-collection.js';
 import { NOT_A_FLAGGED_ROW } from '../files/live-file-row.js';
 import { readStoredById } from '../db/read-by-id.js';
-import { enqueueIngestedRecords } from '../brain/embed-queue.js';
+import { enqueueIngestedRecords, EMBED_REPAIR_ROUTE } from '../brain/embed-queue.js';
 import { derivedFieldsForWrite } from '../brain/derived-text-on-write.js';
 import { writeDerivedFields } from '../files/derived-fields.js';
 import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
@@ -56,7 +56,8 @@ export async function embedArrivedFiles(spaceId: string, ids: readonly string[],
   }
   await dropFileVectors(spaceId, quiet);
   await enqueueIngestedRecords(spaceId, 'file', wanted);
-  // Last, so a failed text write never holds back the queue above: a row left without its text is found by the repair (`stale`).
+  // Last, so a failed text write never holds back the queue above: a row left without its text is owed by the backfill's walk (its
+  // text is stale), which queues it.
   await storeSuppressedFileText(spaceId, quiet.map(id => ({ _id: id, ...rows.get(id)! })));
 }
 
@@ -82,16 +83,20 @@ async function storeSuppressedFileText(spaceId: string, rows: ReadonlyArray<{ _i
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
       const text = texts[i];
-      if (text === null || text === undefined) continue;
-      const { set } = await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' });
+      // Only a string is a text: `null` is a row with none, and the builder's marker a row whose own field has the wrong type (named
+      // once by the builder, and owed by the backfill, whose job then fails where `list_embed_jobs` shows it).
+      if (typeof text !== 'string') continue;
+      // The `unset` too: a vector that landed after `dropFileVectors` above would otherwise stand beside the new text, the pair the
+      // rule exists to refuse, and once the text is current no repair walk would find the row.
+      const { set, unset } = await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' });
       await writeDerivedFields({
-        spaceId, collectionSuffix: 'files', tier: 'top-level', filter: atReadSeq(row._id, readSeqOf(row as Record<string, unknown>)), set,
+        spaceId, collectionSuffix: 'files', tier: 'top-level', filter: atReadSeq(row._id, readSeqOf(row as Record<string, unknown>)), set, unset,
       });
     }
   } catch (err) {
-    // The tail of a write that has landed, for callers that must not fail after their merge: a retry is idempotent and the repair
-    // (`reembed`'s stale walk) finds a suppressed row without its text, so the failure is named here, once, and not raised into them.
+    // The tail of a write that has landed, for callers that must not fail after their merge: a retry is idempotent and the backfill's
+    // walk owes a suppressed row without its text (stale), so the failure is named here, once, and not raised into them.
     log.warn(`The lexical text of ${rows.length} suppressed file(s) in space '${peerText(spaceId)}' was NOT stored (${peerText(err)}): `
-      + `${peerList(rows.map(r => r._id))}. The files themselves are written; POST /api/spaces/:id/reembed stores the text.`);
+      + `${peerList(rows.map(r => r._id))}. The files themselves are written; ${EMBED_REPAIR_ROUTE} stores the text.`);
   }
 }
