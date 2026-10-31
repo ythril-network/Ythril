@@ -316,7 +316,7 @@ all of it would be worse off than one who got an error.
 | `skippedSuppressed` | Suppressed records left alone: suppression **still applies**, their text is current and they hold no vector. A suppressed record with stale text, or one still holding a vector, is not one: it is queued. See the note below. |
 | `stale` | Of `enqueued`, the records whose stored text differs from their current text and that hold a vector (made from text the record no longer has) or are suppressed (their lexical text is missing or old). A record with no vector that is not suppressed is queued without counting here; a stale record past `limit` counts in `remaining` only. |
 | `byKind` | Where the gap was, per record kind. |
-| `remaining` | Records left after `limit` **that are owed a job**. Counted over the whole space, not over this page, each once: `enqueued + remaining + skippedSuppressed` counts every record exactly once. A suppressed record whose text is current and that holds no vector is never counted here, nor is a vector made by an earlier model (a [reindex](04d-brain-ops-api.md)'s job) or a chunk whose parent file is gone (the chunk sweep's). See the note below. |
+| `remaining` | Records left after `limit` **that are owed a job**. Counted over the whole space, not over this page, each once: `enqueued + remaining + skippedSuppressed` counts each owed or skipped record exactly once (a record already up to date is in none). A suppressed record whose text is current and that holds no vector is never counted here, nor is a vector made by an earlier model (a [reindex](04d-brain-ops-api.md)'s job) or a chunk whose parent file is gone (the chunk sweep's). See the note below. |
 | `truncated` | `true` when `remaining > 0` — call again to continue. |
 
 > **Turn suppression off first.** A record still suppressed at any tier (for a file, also its parent) is never given a vector, so that a
@@ -328,7 +328,7 @@ partial work with no record of where it stopped. Queuing is idempotent per recor
 same space converges instead of duplicating work. **Nothing is truncated silently** — when more candidates remain than
 `limit` allowed, `remaining` says how many.
 
-**`remaining` counts only work that is owed, and that distinction is load-bearing.** A suppressed record whose text is current never reaches `remaining`; it is reported under `skippedSuppressed`. A space whose suppression is still on, with every text current, answers `remaining: 0`, `truncated: false` — *there is no work*, which is not *there is work left*. A suppressed record whose text is stale is owed its text (no model call): it is queued, counted in `stale` and `enqueued`, in `remaining` when past `limit`, and never under `skippedSuppressed`.
+**`remaining` counts only work that is owed, and that distinction is load-bearing.** A suppressed record whose text is current and that holds no vector never reaches `remaining`; it is reported under `skippedSuppressed`. A space whose suppression is still on, with every text current and no vector held, answers `remaining: 0`, `truncated: false` — *there is no work*, which is not *there is work left*. A suppressed record whose text is stale is owed its text (no model call): it is queued, counted in `stale` and `enqueued`, in `remaining` when past `limit`, and never under `skippedSuppressed`.
 
 **The call reads the whole space each time, and there is no cursor.** A repeat call re-reads from the start, and what you queued stays stale until the worker has drained it, so `enqueued` and `remaining` do not move before then.
 
