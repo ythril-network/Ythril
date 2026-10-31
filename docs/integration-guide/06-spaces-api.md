@@ -273,7 +273,7 @@ once per call**; `limit` bounds what is queued, never what is read.
 >
 > | | this | [`POST /api/brain/spaces/:spaceId/reindex`](04d-brain-ops-api.md) |
 > |---|---|---|
-> | touches | only the records the worker would change: **no** vector, or a **stale** stored text | **every** record, rebuilt even when its text is unchanged |
+> | touches | only the records the worker would change, chiefly **no** vector or a **stale** stored text | **every** record, rebuilt even when its text is unchanged |
 > | for | the way back from `suppressEmbeddings` | recovery after changing embedder, model, dimensions or prefix scheme |
 > | returns | counts, awaited — the counts are the answer | `status: "started"`; progress is `reindexRun` on `space_meta` / `reindex-status` |
 > | bounded | `limit`, and `truncated` tells you to call again | runs to completion in the background, and survives a restart (a run its server could not resume at start is picked up by a watcher; see [Reindex](04d-brain-ops-api.md)) |
@@ -316,7 +316,7 @@ all of it would be worse off than one who got an error.
 | `skippedSuppressed` | Suppressed records left alone: suppression **still applies**, their text is current and they hold no vector. A suppressed record with stale text, or one still holding a vector, is not one: it is queued. See the note below. |
 | `stale` | Of `enqueued`, the records whose stored text differs from their current text and that hold a vector (made from text the record no longer has) or are suppressed (their lexical text is missing or old). A record with no vector that is not suppressed is queued without counting here; a stale record past `limit` counts in `remaining` only. |
 | `byKind` | Where the gap was, per record kind. |
-| `remaining` | Records left after `limit` **that are owed a job**. Counted over the whole space, not over this page, each once: `enqueued + remaining + skippedSuppressed` counts each owed or skipped record exactly once (a record already up to date is in none). A suppressed record whose text is current and that holds no vector is never counted here, nor is a vector made by an earlier model (a [reindex](04d-brain-ops-api.md)'s job) or a chunk whose parent file is gone (the chunk sweep's). See the note below. |
+| `remaining` | Records left after `limit` **that are owed a job**. Counted over the whole space, not over this page, each once: `enqueued + remaining + skippedSuppressed` counts each owed or skipped record exactly once (a record already up to date is in none). A suppressed record whose text is current and that holds no vector is never counted here, nor is a vector made by an earlier model (a [reindex](04d-brain-ops-api.md)'s job) or a chunk whose parent file is gone and that holds no vector (the chunk sweep's). See the note below. |
 | `truncated` | `true` when `remaining > 0` — call again to continue. |
 
 > **Turn suppression off first.** A record still suppressed at any tier (for a file, also its parent) is never given a vector, so that a

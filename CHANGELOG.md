@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Embeddings:** a record with a wrong-typed field (`tags: "x"`) no longer fails a whole `reembed` call or an arriving page; a warning names it. An edge with an unknown endpoint kind is embedded with the raw id.
 - **Embeddings:** a suppressed file whose text is filled in no longer keeps a vector beside it.
 - **Embeddings:** a reindex no longer queues a chunk of a suppressed file that holds no vector.
-- **Settings:** the Danger tab's **Backfill embeddings** says how many queued records had searchable text older than their content, stays usable while embeddings are suppressed (it then writes searchable text only), and its result is read out by screen readers.
+- **Settings:** the Danger tab's **Backfill missing embeddings** says how many queued records had searchable text older than their content, stays usable while embeddings are suppressed (it then writes searchable text only), and its result is read out by screen readers.
 - **Docs:** a token's own request quota is set by an instance admin, or by a space admin for a token in their scope.
 - **Development:** `npm run test:up` builds the test image from the checkout; the unregistered-files check accepts a file a `.gitignore` rule names above a catch-all such as `*.txt`.
 

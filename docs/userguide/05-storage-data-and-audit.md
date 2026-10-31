@@ -61,7 +61,7 @@ puts the instance in maintenance by itself, from the moment you confirm until th
 That half cannot be switched off with the toggle (the page says what is holding it), and a restart that resumes the restore
 resumes maintenance with it.
 
-Toggle the **Maintenance mode** button to enable or disable it. A banner appears across the top of the UI on all pages while maintenance is active.
+Under **Maintenance Mode**, press **Activate** to turn it on and **Deactivate** to turn it off. A banner appears across the top of the UI on all pages while maintenance is active.
 
 ### Backups
 
