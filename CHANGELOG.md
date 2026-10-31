@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Tokens:** `PATCH /api/tokens/:id` accepts `rateLimitPerMinute` on its own; it answered 400 unless `name`, `rights` or `mfa` came with it. The audit entry records the quota before and after. A quota the route refuses now changes nothing; with a new name beside it, the token was renamed and the answer was `403`.
+- **Tokens:** `PATCH /api/tokens/:id` accepts `rateLimitPerMinute` on its own; it answered 400 unless `name`, `rights` or `mfa` came with it. The audit entry records the quota and the second factor before and after; both were dropped from it. A quota the route refuses now changes nothing; with a new name beside it, the token was renamed and the answer was `403`.
+- **Settings:** **Backfill missing embeddings** says how many of the records it queued had searchable text older than their content.
 - **Graph:** merging two entities stores the survivor's new lexical text with its new vector, so text search finds the words the absorbed entity brought; when the embedding model cannot be reached, the survivor is queued.
 - **Sync:** a file this instance keeps out of semantic search, filled in from metadata an older version left behind, loses its vector and its passages' at once.
 - **Sync:** a record a peer sent with a field of the wrong type no longer stops the pages of a space that keeps records out of semantic search, nor the `reembed` of its space; it is named in the log and not embedded.
