@@ -124,6 +124,7 @@ import { refusalText } from '../../core/refusal-text';
   @if (backfillResult(); as r) {
     <div class="alert alert-success" style="margin-top:10px;font-size:12px;">
       {{ 'spaces.dangerZone.embeddingsBackfillDone' | transloco: { enqueued: r.enqueued } }}
+      @if (r.stale > 0) { <br/>{{ 'spaces.dangerZone.embeddingsBackfillStale' | transloco: { stale: r.stale } }} }
       @if (r.truncated) { <br/>{{ 'spaces.dangerZone.embeddingsBackfillMore' | transloco: { remaining: r.remaining } }} }
       @if (r.skippedSuppressed > 0) { <br/>{{ 'spaces.dangerZone.embeddingsBackfillSkipped' | transloco: { skipped: r.skippedSuppressed } }} }
     </div>
