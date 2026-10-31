@@ -16,8 +16,8 @@
  *
  * - the detector flags each planted copy of a spelling (the gate cannot pass because its pattern is broken), and leaves alone
  *   what is not the vector: `faceEmbedding`, a bare `embedding` variable (a face descriptor), a `$exists` on another field;
- * - no file in `server/src` outside `brain/holds-vector.ts` writes `embedding: { $exists`, `$isArray: '$embedding'`, or
- *   `Array.isArray(<x>.embedding` / `Array.isArray(<x>['embedding']`.
+ * - no file in `server/src` outside `brain/holds-vector.ts` writes `embedding: { $exists`, `embedding: { $type: 'array' }`, `$isArray: '$embedding'`,
+ *   `$size: '$embedding'`, or `Array.isArray(<x>.embedding` / `Array.isArray(<x>['embedding']`.
  *
  * Run: node --test testing/standalone/a-stored-vector-is-asked-for-in-one-module.test.js
  */
@@ -33,6 +33,8 @@ const HOME = 'server/src/brain/holds-vector.ts';
 const SPELLINGS = [
   ['a query on the field', /\bembedding['"]?\s*:\s*\{\s*\$exists/],
   ['an aggregation on the field', /\$isArray\s*:\s*['"]\$embedding['"]/],
+  ['a query on the field by type', /\bembedding['"]?\s*:\s*\{\s*\$type\s*:\s*['"]array['"]/],
+  ['an aggregation on the field length', /\$size\s*:\s*['"]\$embedding['"]/],
   ['a JS array test on the field', /Array\.isArray\(\s*[\w$]+(?:\??\.embedding\b|\[\s*['"]embedding['"]\s*\])/],
 ];
 
@@ -43,12 +45,16 @@ describe('a stored vector is asked for in one module', () => {
     assert.deepEqual(spellingsIn("const f = { embedding: { $exists: true } };"), ['a query on the field']);
     assert.deepEqual(spellingsIn("const f = { 'embedding': {$exists: false} };"), ['a query on the field']);
     assert.deepEqual(spellingsIn("{ $addFields: { holdsVector: { $isArray: '$embedding' } } }"), ['an aggregation on the field']);
+    assert.deepEqual(spellingsIn("{ $match: { embedding: { $type: 'array' } } }"), ['a query on the field by type']);
+    assert.deepEqual(spellingsIn("{ $project: { dims: { $size: '$embedding' } } }"), ['an aggregation on the field length']);
     assert.deepEqual(spellingsIn("const v = Array.isArray(doc['embedding']) && doc['embedding'].length > 0;"), ['a JS array test on the field']);
     assert.deepEqual(spellingsIn('const v = Array.isArray(row.embedding);'), ['a JS array test on the field']);
     assert.deepEqual(spellingsIn('const v = Array.isArray(row?.embedding);'), ['a JS array test on the field']);
     // Not the vector: a face descriptor, a bare variable, another field, a comment that names the spelling.
     assert.deepEqual(spellingsIn('if (!Array.isArray(embedding)) return false;'), []);
     assert.deepEqual(spellingsIn('const f = { faceEmbedding: { $exists: true } };'), []);
+    assert.deepEqual(spellingsIn("const f = { faceEmbedding: { $type: 'array' } };"), []);
+    assert.deepEqual(spellingsIn("const f = { dims: { $size: '$faceEmbedding' } };"), []);
     assert.deepEqual(spellingsIn('const f = { parentFileId: { $exists: true } };'), []);
     assert.deepEqual(spellingsIn("// was { embedding: { $exists: true } }\nconst f = 1;"), []);
   });

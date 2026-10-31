@@ -28,6 +28,9 @@ export const holdsVectorExpr: Readonly<Record<string, unknown>> = Object.freeze(
   $and: [{ $isArray: '$embedding' }, { $gt: [{ $size: '$embedding' }, 0] }],
 });
 
+/** The vector's length, as an aggregation expression. Asked only after {@link HOLDS_VECTOR} matched, so `$size` always sees an array. */
+export const vectorLengthExpr: Readonly<Record<string, unknown>> = Object.freeze({ $size: '$embedding' });
+
 /** Whether a document read from the store holds a vector. */
 export function holdsVector(doc: Readonly<Record<string, unknown>>): boolean {
   const v = doc['embedding'];

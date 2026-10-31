@@ -52,6 +52,7 @@ import { getEmbeddingConfig } from '../config/loader.js';
 import { atlasScoreFromParts, norm } from './vector-score.js';
 import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
+import { HOLDS_VECTOR, vectorLengthExpr } from './holds-vector.js';
 import { envInt } from '../config/env-num.js';
 import { recallFreshWritesFoundTotal, recallFreshScanCappedTotal } from '../metrics/registry.js';
 
@@ -139,7 +140,7 @@ export async function matchFreshWrites(
       // The window and the vector guard are the SCAN's, and a caller's predicate narrows them — ANDed, never
       // spread in, or a filter naming `updatedAt` replaced the window and one naming `embedding` let a
       // vectorless record reach `$size` and fail the whole scan (Q-102).
-      { $match: { $and: [{ updatedAt: { $gte: cutoff } }, { embedding: { $type: 'array' } }] } },
+      { $match: { $and: [{ updatedAt: { $gte: cutoff } }, HOLDS_VECTOR] } },
       // Counted BEFORE the caller's predicate: whether the cap cut the window off is a fact about the window,
       // and counting after the filter reported it only when every capped record happened to match.
       { $facet: { inWindow: [{ $count: 'n' }], rows: [...(predicate ? [{ $match: predicate }] : []), {
@@ -167,7 +168,7 @@ export async function matchFreshWrites(
           },
           // `$zip` truncates to the shorter input, so a document embedded by a different model would score
           // against a prefix of itself and land anywhere. Carry the length and drop those below.
-          dims: { $size: '$embedding' },
+          dims: vectorLengthExpr,
         },
       }] } },
     ]).toArray();
