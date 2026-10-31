@@ -120,8 +120,11 @@ describe('a space that cannot be initialised stops nothing', { skip }, () => {
       Object.assign(cfg, extra);
       fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify(cfg, null, 2), { mode: 0o600 });
     };
+    // A reload waits for each new space's vector indexes in turn (INDEX_READY_TIMEOUT_MS each), which alone took 108 s and over 120 s
+    // under a full preflight's load. The budget bounds a hang, not the speed.
+    const RELOAD_BUDGET = { timeout: 300_000 };
 
-    it('initialises the spaces behind the failing one, re-arms the schedulers, says the failure once, and still fails', { timeout: 120_000 }, async () => {
+    it('initialises the spaces behind the failing one, re-arms the schedulers, says the failure once, and still fails', RELOAD_BUDGET, async () => {
       await rewriteConfigWith([RELOAD_BAD, RELOAD_OK], { dupeScanner: { enabled: true, schedule: '0 4 * * *' } });
       const { lines, result: res } = await logLinesDuring(() => post());
       const body = await res.json().catch(() => ({}));
@@ -135,7 +138,7 @@ describe('a space that cannot be initialised stops nothing', { skip }, () => {
       assert.doesNotMatch(String(body.error), /createCollection|simulated/, 'the answer carries the driver\'s words');
     });
 
-    it('initialises a space that failed at an earlier reload, though the file no longer lists it as new', { timeout: 120_000 }, async () => {
+    it('initialises a space that failed at an earlier reload, though the file no longer lists it as new', RELOAD_BUDGET, async () => {
       failing = false;
       const res = await post();
       assert.equal(res.status, 200, JSON.stringify(await res.json().catch(() => null)));
