@@ -258,21 +258,22 @@ thing. If you are choosing between them, read the next paragraph but one.
 **A personal view id is not a space and answers as a missing space (`404`) here and on `reindex`, on REST and on MCP,
 before any work is queued** — a view holds no records and no index; backfill or reindex each member by its own id.
 
-Queues an embedding job for every record in the space that **has no vector** or whose **stored text is stale**. This is
-the way back from `suppressEmbeddings`: suppression leaves records unembedded, and nothing revisits them on its own, so
-recall stays blind to whatever was written while it was on.
+Queues an embedding job for every record in the space that the embedding worker would change: one that **has no vector** (none
+stored, or a stored `null` or `[]`), or whose **stored text is stale**. This is the way back from `suppressEmbeddings`: suppression
+leaves records unembedded, and nothing revisits them on its own, so recall stays blind to whatever was written while it was on.
 
 It is also the repair for an embedding that never got queued (an enqueue failure is swallowed rather than failing the
 write). An **updated** record keeps the vector and lexical text of its previous content, which "has no vector" cannot see:
-`stale` finds it by comparing each record's stored text with the text it builds today, and finds a suppressed record whose
-lexical text is missing or old (its job writes the text, no model call). **It reads every record of the space once per
-call**; `limit` bounds what is queued, never what is read.
+it is found by comparing each record's stored text with the text it builds today. A suppressed record is owed a job when its
+lexical text is missing or old (the job writes the text, no model call) or it still holds a vector (the job removes it); a derived
+record with no text of its own, while it still holds a vector or a text (the job clears them). **It reads every record of the space
+once per call**; `limit` bounds what is queued, never what is read.
 
 > **This is not `reindex`, and the two are easy to confuse because both re-embed.**
 >
 > | | this | [`POST /api/brain/spaces/:spaceId/reindex`](04d-brain-ops-api.md) |
 > |---|---|---|
-> | touches | only records with **no** vector, or whose stored text is **stale** | **every** record, rebuilt even when its text is unchanged |
+> | touches | only the records the worker would change: **no** vector, or a **stale** stored text | **every** record, rebuilt even when its text is unchanged |
 > | for | the way back from `suppressEmbeddings` | recovery after changing embedder, model, dimensions or prefix scheme |
 > | returns | counts, awaited — the counts are the answer | `status: "started"`; progress is `reindexRun` on `space_meta` / `reindex-status` |
 > | bounded | `limit`, and `truncated` tells you to call again | runs to completion in the background, and survives a restart (a run its server could not resume at start is picked up by a watcher; see [Reindex](04d-brain-ops-api.md)) |
@@ -280,8 +281,9 @@ call**; `limit` bounds what is queued, never what is read.
 > Both QUEUE their records for the embedding worker, and both yield to local writes: the worker takes a write
 > somebody is waiting to search for ahead of a backfill, and a backfill ahead of a reindex, while giving each lower
 > lane at least one claim in eight so none waits for ever. A record a peer sent waits with the backfill. A derived
-> record with no text of its own (a face crop, a converted copy of a document) is never a backfill candidate, so a
-> second call after the queue has drained reports `enqueued: 0`.
+> record with no text of its own (a face crop, a converted copy of a document) is a candidate only while it still holds a vector or a
+> text to clear, so a second call after the queue has drained reports `enqueued: 0` — except for a record whose text **cannot be
+> built** (a field of the wrong type, which a sync can store): owed on every call, its job fails in `list_embed_jobs` until corrected.
 >
 > Reaching for `reindex` when you wanted this one re-embeds the whole space to fix a handful of records.
 
@@ -311,15 +313,15 @@ all of it would be worse off than one who got an error.
 | Field | Meaning |
 |-------|---------|
 | `enqueued` | Records a job was queued for. Embedding happens in the background afterwards. |
-| `skippedSuppressed` | Candidates left alone because suppression **still applies**. A suppressed record with stale text is not one: it is queued and counted in `stale`. See the note below. |
-| `stale` | Of `enqueued`, the records queued because their stored text differs from their current text: a vector made from text the record no longer has, or a suppressed record whose lexical text is missing or old. |
+| `skippedSuppressed` | Suppressed records left alone: suppression **still applies**, their text is current and they hold no vector. A suppressed record with stale text, or one still holding a vector, is not one: it is queued. See the note below. |
+| `stale` | Of `enqueued`, the records whose stored text differs from their current text and that hold a vector (made from text the record no longer has) or are suppressed (their lexical text is missing or old). A record with no vector that is not suppressed is queued without counting here; a stale record past `limit` counts in `remaining` only. |
 | `byKind` | Where the gap was, per record kind. |
-| `remaining` | Candidates left after `limit` **that are owed a job**. Counted over the whole space, not over this page. A suppressed record whose text is current is never counted here, one with stale text is (its job writes the text, no model call). See the note below. |
+| `remaining` | Records left after `limit` **that are owed a job**. Counted over the whole space, not over this page, each once: `enqueued + remaining + skippedSuppressed` counts every record exactly once. A suppressed record whose text is current and that holds no vector is never counted here, nor is a vector made by an earlier model (a [reindex](04d-brain-ops-api.md)'s job) or a chunk whose parent file is gone (the chunk sweep's). See the note below. |
 | `truncated` | `true` when `remaining > 0` — call again to continue. |
 
-> **Turn suppression off first.** A record that is still suppressed at any tier is skipped, so that a backfill
-> cannot re-index what an operator asked to keep out of recall. Running this while suppression is on is not an
-> error: every candidate comes back under `skippedSuppressed`, which tells you the setting is still on.
+> **Turn suppression off first.** A record still suppressed at any tier (for a file, also its parent) is never given a vector, so that a
+> backfill cannot re-index what an operator asked to keep out of recall. Running this while suppression is on is not an error: it
+> writes searchable text only, and what it leaves alone comes back under `skippedSuppressed`, which tells you the setting is still on.
 
 **It queues rather than embeds.** A large space would time out mid-way through inline embedding, having done
 partial work with no record of where it stopped. Queuing is idempotent per record, so repeating the call over the

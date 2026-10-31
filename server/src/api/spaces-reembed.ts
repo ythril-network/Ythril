@@ -35,8 +35,9 @@ export const ReembedBody = z.object({
 
 /** Mounted from `api/spaces.ts` so the route path stays `/api/spaces/:id/reembed`. */
 export function registerReembedRoute(spacesRouter: Router): void {
-  // POST /api/spaces/:id/reembed — queue embeddings for records that have none, and for records whose stored text is not
-  // their current text (`stale`, which reads every record of the space once per call).
+  // POST /api/spaces/:id/reembed — queue an embed job for every record the worker would change (no vector, a stale text, a
+  // suppressed record's text or leftover vector, a textless row's leftover fields), each counted once, in one walk that reads
+  // every candidate of the space once per call.
   //
   // The way back from `suppressEmbeddings`. Kept thin on purpose: the sweep, the suppression check and the
   // bounding all live in `brain/reembed.ts`, because `api/spaces.ts` is already a frozen god-file and a route

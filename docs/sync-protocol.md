@@ -230,7 +230,7 @@ A pulled page is accepted by **the same page accept as a push** (`Q-204`): one d
 
 **A failed write is a record-write failure, not an unreachable peer.** A write the store cannot do for a reason that is not one document's (the collection unavailable, a dropped connection) stops that family's transfer, holds its position below the page, logs the space and family, and fetches the page again next cycle. It does not count toward `PEER UNREACHABLE`.
 
-**Records pulled before this release** were stored without an embed job and stay without a vector until queued: `POST /api/spaces/:id/reembed` queues every record of a space that has none.
+**Records pulled before this release** were stored without an embed job and stay without a vector until queued: `POST /api/spaces/:id/reembed` queues every record of a space the embedding worker would change, including every one with no vector (none stored, or a stored `null` or `[]`).
 
 ### A removed file key crosses the wire
 

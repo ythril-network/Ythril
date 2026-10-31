@@ -591,7 +591,8 @@ sections of its images, audio and video are stored with their text and no vector
 file or a peer sent it.
 
 > Turning suppression off does not go back and embed what was written while it was on. Use **Backfill
-> embeddings** on the space's Danger tab, which embeds only what has no vector, or re-save an individual record.
+> embeddings** on the space's Danger tab, which embeds only what has no vector or whose text changed since its vector
+> was made, or re-save an individual record.
 > **Reindex** works too, but it rebuilds every vector in the space to fill that gap.
 >
 > The per-record setting is API-only today — there is no checkbox for it in the UI. Upgrading a script
