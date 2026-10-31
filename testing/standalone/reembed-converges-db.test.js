@@ -209,6 +209,18 @@ describe('the reembed backfill converges (real MongoDB)', { skip }, () => {
     assert.deepEqual([...queued].sort(), ['z-1', 'z-2'], 'every embeddable record was reached, and no suppressed one');
   });
 
+  it('a record whose fields have the wrong type is passed over, and the call still answers for the rest of the space', async () => {
+    // The stale walk builds every record's text; one `tags: 'x'` threw out of it, so the repair failed for the whole space on every call.
+    await c(SPACE, 'facts').insertMany([
+      { ...(await withText(SPACE, 'fact', fact(SPACE, 'w-0'))), embedding: VEC, tags: 'x' },
+      { ...fact(SPACE, 'w-1'), embedding: VEC, matchedText: 'an older text' },
+    ]);
+    const res = await reembed.reembedSpace(SPACE, { kinds: ['fact'] });
+    assert.equal(res.stale, 1, 'the stale record behind the malformed one was not queued');
+    const ids = (await c(SPACE, 'embed_jobs').find({}).toArray()).map(j => j.recordId);
+    assert.deepEqual(ids, ['w-1']);
+  });
+
   it('a queue that refuses the jobs fails the call; it never reports records as queued that were not', async () => {
     // The single enqueue a local write uses swallows its failure and warns; the repair went through it, so a broken queue answered
     // `enqueued: N` with nothing queued, one warning per record.

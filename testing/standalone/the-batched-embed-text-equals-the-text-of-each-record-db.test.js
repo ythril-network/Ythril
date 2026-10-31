@@ -121,6 +121,18 @@ describe('the batched embed text equals the text of each record', { skip }, () =
     }
   });
 
+  for (const kind of ['fact', 'entity', 'edge', 'chrono', 'file']) {
+    it(`${kind}: a document whose fields have the wrong type has no text, and the rest of the page keeps its own`, async () => {
+      // A pull stores a record that fails its schema, so a page can hold `tags: 'x'`. The builder threw on it, and the arrival writer
+      // (a suppressed space's page) and the repair's stale walk both build a whole page at once: one such record failed the page on
+      // every cycle, and every reembed call of the space.
+      const good = DOCS[kind][0];
+      const bad = { ...good, _id: `${good._id}-wrongtype`, tags: 'x' };
+      const texts = await embedRecord.buildEmbedTexts(SPACE, kind, [bad, good]);
+      assert.deepEqual(texts, [null, await embedRecord.buildEmbedText(SPACE, kind, good)]);
+    });
+  }
+
   it('an empty page is an empty answer, and a page of one edge is the one-document answer', async () => {
     assert.deepEqual(await embedRecord.buildEmbedTexts(SPACE, 'edge', []), []);
     const [one] = await embedRecord.buildEmbedTexts(SPACE, 'edge', [EDGES[1]]);
