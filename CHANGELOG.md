@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tokens:** `PATCH /api/tokens/:id` accepts `rateLimitPerMinute` on its own; it answered 400 unless `name`, `rights` or `mfa` came with it. The audit entry records the quota before and after.
+
 ## [5.6.10] — 2026-10-09
 
 A security patch: a token that may only read networks no longer receives the credential hashes of open join votes.
