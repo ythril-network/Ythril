@@ -47,4 +47,11 @@ describe('the embed repair remedy has one spelling', () => {
     }
     assert.deepEqual(wrong, [], 'a warning spells the repair itself instead of using EMBED_REPAIR_HINT');
   });
+
+  it('the repair is named by one constant: no other string spells its route', () => {
+    // SAYS_QUEUES catches a remedy that says "queues"; a warning that said "POST /api/spaces/:id/reembed stores the text" passed it.
+    const ROUTE = /POST \/api\/spaces\/:id\/reembed/g;
+    const spellers = [...code].flatMap(([file, src]) => (src.match(ROUTE) ?? []).map(() => file));
+    assert.deepEqual(spellers, ['server/src/brain/embed-queue.ts'], `the repair route is spelled in more than one string: ${spellers}`);
+  });
 });
