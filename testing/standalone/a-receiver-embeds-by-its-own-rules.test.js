@@ -266,8 +266,9 @@ describe('a file is queued by whichever path stored it, and by one only', () => 
      * Seen red by mutation, restored by hand: the writer's file exclusion dropped (`|| restore` removed).
      */
     const shared = src('server/src/api/sync/_shared.ts');
-    assert.match(bodyOf(shared, 'ingestFileMeta'), /if \(haveBytes\) await enqueueIngestedRecord\(spaceId, 'file', incoming\);/,
-      'ingestFileMeta no longer decides when a merged file is queued');
+    // "Held bytes" is pinned by behaviour, not by its spelling: `a-peers-file-metadata-is-queued-only-where-its-bytes-are-db`.
+    assert.match(bodyOf(shared, 'ingestFileMeta'), /await enqueueIngestedRecord\(spaceId, 'file', incoming\);/,
+      'ingestFileMeta no longer queues a merged file');
     const writer = bodyOf(src('server/src/sync/arrivals.ts'), 'writeArrivals');
     assert.match(writer, /const queues = recordType !== null && \(family !== 'files' \|\| restore\);/,
       'the arrival writer queues a peer\'s file metadata itself, beside ingestFileMeta — or no longer queues a restored file');
