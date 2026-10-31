@@ -55,6 +55,11 @@ describe('a space that cannot be initialised stops nothing', { skip }, () => {
   const statusOf = (space) => loader.getConfig().spaces.find(s => s.id === space)?.indexStatus;
   /** `initSpace` says what it did in `Created collection …`; what these cases ask is whether the space's collections exist after. */
   const said = (lines, space, re) => lines.filter(l => re.test(l) && l.includes(`'${space}'`));
+  /** The boot case's background index confirmation writes `indexStatus` into the config, and so the file, when it settles. */
+  const indexConfirmationSettled = async () => {
+    const until = Date.now() + 30_000;
+    while (Date.now() < until && loader?.getConfig().spaces.some(s => s.indexStatus === 'building')) await new Promise(r => setTimeout(r, 200));
+  };
 
   before(async () => {
     door = await openPushDoor({ suite: 'initisolation', spaces: [
@@ -75,6 +80,10 @@ describe('a space that cannot be initialised stops nothing', { skip }, () => {
     adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
     const { createApp } = await import('../../server/dist/app.js');
     server = createApp().listen(0, '127.0.0.1');
+    // createApp starts the config watcher, which polls the file every 2 s and reloads on a foreign mtime. Each case below writes the
+    // file and then posts the reload, so under load the watcher saw the same write and ran a second reload beside the post's, and the
+    // failing space was said twice. These cases drive the reload door only.
+    fs.unwatchFile(process.env['CONFIG_PATH']);
     await new Promise(r => server.once('listening', r));
     base = `http://127.0.0.1:${server.address().port}`;
   });
@@ -83,8 +92,7 @@ describe('a space that cannot be initialised stops nothing', { skip }, () => {
     (await import('../../server/dist/brain/dupe-scanner.js')).stopDupeScanner();
     await new Promise(r => server?.close(r));
     // The index confirmation boot starts runs on after the walk: let it settle before the connection goes.
-    const until = Date.now() + 30_000;
-    while (Date.now() < until && loader?.getConfig().spaces.some(s => s.indexStatus === 'building')) await new Promise(r => setTimeout(r, 200));
+    await indexConfirmationSettled();
     await door?.close();
   });
 
@@ -103,7 +111,10 @@ describe('a space that cannot be initialised stops nothing', { skip }, () => {
 
   describe('a reload', () => {
     const post = () => fetch(`${base}/api/admin/reload-config`, { method: 'POST', headers: { authorization: `Bearer ${adminKey}` } });
-    const rewriteConfigWith = (spaces, extra = {}) => {
+    // Settled first: a confirmation landing between this write and the reload's read wrote the in-memory config over the edit, and
+    // the reload found no space added.
+    const rewriteConfigWith = async (spaces, extra = {}) => {
+      await indexConfirmationSettled();
       const cfg = JSON.parse(JSON.stringify(loader.getConfig()));
       for (const s of spaces) cfg.spaces.push({ id: s, label: s, folders: [] });
       Object.assign(cfg, extra);
@@ -111,7 +122,7 @@ describe('a space that cannot be initialised stops nothing', { skip }, () => {
     };
 
     it('initialises the spaces behind the failing one, re-arms the schedulers, says the failure once, and still fails', { timeout: 120_000 }, async () => {
-      rewriteConfigWith([RELOAD_BAD, RELOAD_OK], { dupeScanner: { enabled: true, schedule: '0 4 * * *' } });
+      await rewriteConfigWith([RELOAD_BAD, RELOAD_OK], { dupeScanner: { enabled: true, schedule: '0 4 * * *' } });
       const { lines, result: res } = await logLinesDuring(() => post());
       const body = await res.json().catch(() => ({}));
       assert.ok((await collectionsOf(RELOAD_OK)).includes(`${RELOAD_OK}_facts`), 'the space behind the failing one was not initialised by the reload');
