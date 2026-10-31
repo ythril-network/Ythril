@@ -61,7 +61,7 @@ Consequences worth knowing when reading the log:
   through its REST route, and the same `entryId` (the record the call acted on), so filtering by record finds
   both (Q-50).
 
-Allowlisted today: space and schema updates, network settings and space additions, token renames and rights,
+Allowlisted today: space and schema updates, network settings and space additions, token renames, rights, second factor and request quota,
 media levels, backup settings, and the brain record edits (fact, entity, edge, chrono, file metadata, and the
 name an entity merge makes unrecoverable). Token creation and webhook operations are excluded by design, since
 the interesting value in those payloads is the secret itself.

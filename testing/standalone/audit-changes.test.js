@@ -113,7 +113,9 @@ describe('audit changes — every allowlist is actually reachable', () => {
     // route's own snapshot, not against each other: an allowlisted field the route never snapshots is silent
     // forever, and a snapshotted field the allowlist omits is an edit that leaves no audit trace — and the
     // second is worse here, because the field is the token's permissions.
-    assert.deepEqual(AUDIT_CHANGE_FIELDS['token.update'], ['name', 'rights']);
+    // `mfa` and `rateLimitPerMinute` joined when the allowlist was found dropping them (`a token edit records every field its
+    // route snapshots`, below, derives the other direction).
+    assert.deepEqual(AUDIT_CHANGE_FIELDS['token.update'], ['name', 'rights', 'mfa', 'rateLimitPerMinute']);
     // Substring, not a regex: the snapshot spans two lines and a pattern that assumed one was the reason
     // this assertion first failed against code that was actually correct.
     const tokenSrc = read('server/src/api/tokens.ts');
