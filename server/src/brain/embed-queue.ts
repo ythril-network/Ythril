@@ -277,16 +277,23 @@ export async function enqueueEmbedJobs(
 }
 
 /**
+ * The repair's route: the one spelling of it, for the hint below and for a warning whose remedy is not the hint's sentence (the
+ * suppressed file text's, `sync/embed-arrived-files.ts`). A second string spelling the route is refused by
+ * `the-embed-repair-remedy-has-one-spelling`.
+ */
+export const EMBED_REPAIR_ROUTE = 'POST /api/spaces/:id/reembed';
+
+/**
  * What an operator is told to do about records whose embed job was not queued: the ONE spelling of the remedy, for every warning that
  * names it (the write lane's here, the arrival writer's in `sync/arrivals.ts`).
  *
  * It says what is true for both cases. A NEW record has no vector until a job runs; an UPDATED one keeps the vector and the lexical
  * text of its previous content, so "queues every record that has no vector" was false for it, and the repair it names is
- * `POST /api/spaces/:id/reembed`, which queues both (`stale`, `brain/reembed.ts`). A second spelling is how a warning ended up naming
- * a reindex, a different and heavier operation (`the-embed-repair-remedy-has-one-spelling`).
+ * {@link EMBED_REPAIR_ROUTE}, which queues both (the backfill's one walk, `brain/reembed.ts`). A second spelling is how a warning
+ * ended up naming a reindex, a different and heavier operation (`the-embed-repair-remedy-has-one-spelling`).
  */
 export const EMBED_REPAIR_HINT = 'They are stored. A new record has no vector until a job runs; an updated one keeps the vector and '
-  + 'the lexical text of its previous content. POST /api/spaces/:id/reembed queues both.';
+  + 'the lexical text of its previous content. ' + EMBED_REPAIR_ROUTE + ' queues both.';
 
 /**
  * Queue the records a WRITE just stored — `enqueueEmbedJob`'s semantics for a batch, which the write commit uses.

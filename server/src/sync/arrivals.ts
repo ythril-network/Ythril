@@ -401,7 +401,10 @@ async function suppressedTexts(
   const texts = await buildEmbedTexts(spaceId, recordType, docs);
   for (let i = 0; i < docs.length; i++) {
     const text = texts[i];
-    if (text === null || text === undefined) continue;
+    // Only a string is a text: the builder's marker for a wrong-typed field stores nothing, and the backfill owes that record.
+    if (typeof text !== 'string') continue;
+    // `.set` alone, the one named exemption (`a-derived-write-applies-both-halves`): the replace keeps only the fields it names, and a
+    // suppressed arrival carries no vector field from the stored copy (`carriedFields`), so there is nothing for an `unset` to remove.
     out.set(docs[i]!._id, (await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' })).set);
   }
   return out;
