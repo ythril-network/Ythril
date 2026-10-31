@@ -130,7 +130,12 @@ export async function saveFact(
   properties = withDefaults;
 
   // No entity names: a fact embeds its own content. See `factEmbedText` for the measurement.
-  const embedText = factEmbedText(fact, tags, description, properties);
+  // The text is the record the write STORES: on a converge the merge (tags union, properties shallow-merge, description
+  // kept when the write names none), exactly what the `$set` below writes, so a text stored or embedded here is the text
+  // the queued job would build (as `upsertEntity` does).
+  const embedText = existing
+    ? factEmbedText(fact, mergeTags(existing.tags, tags), description ?? existing.description, mergePropertiesOrKeep(existing.properties, properties))
+    : factEmbedText(fact, tags, description, properties);
 
   // ── Embed now, or hand it to the queue?
   //
