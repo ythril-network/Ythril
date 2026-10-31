@@ -458,7 +458,9 @@ against the receiving instance's own model, at the moment it is written, whether
 single route) or by pull. A file is queued only once its bytes are here. Nothing has to ask for this and there is
 no flag for it. Until 5.6.2 a pulled record and a new entity pushed through `POST /api/sync/entities` were never
 queued; on an instance upgraded from 5.6.1 or earlier, run `POST /api/spaces/:id/reembed` once per synced space
-to queue the records it pulled before.
+to queue the records it pulled before. It also queues a record whose text changed while its job could not be queued (an updated record keeps the vector
+and the lexical text of its previous content, which "has no vector" cannot see), and a record this instance suppresses that a peer sent before the receiver
+stored its own lexical text for such arrivals.
 
 **Send the suppression mark, and it will be honoured.** `suppressEmbeddings` replicates, on all four
 types. Its pre-3.1 spelling `excludeFromVectorSearch` replicated too until 4.0 removed it; an ingest
