@@ -686,7 +686,7 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
       // admin must show the space-admin floor it now holds.
       rights: rights ? withInstanceAdminGrants(rights as never) : previous.rights,
       mfa: mfa ?? previous.mfa ?? 'inherit',
-      rateLimitPerMinute: rateLimitPerMinute === undefined ? (previous.rateLimitPerMinute ?? 'inherit') : (rateLimitPerMinute ?? 'inherit'),
+      rateLimitPerMinute: rateLimitPerMinute ?? previous.rateLimitPerMinute ?? 'inherit',
     },
   };
 
