@@ -236,6 +236,8 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
     const projection: Record<string, unknown> = {
       _id: 1,
       [RECORD_SUPPRESS_FIELD]: 1,
+      // A file row's ancestors are the file question's input.
+      ...(kind === 'file' ? { parentFileId: 1 } : {}),
       ...(knowledgeType ? { [TYPE_FIELD[knowledgeType]]: 1 } : {}),
       holdsVector: holdsVectorExpr,
     };
@@ -257,17 +259,33 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
       batch = [];
       if (opts.onBatch) await opts.onBatch({ kind, lastId });
     };
+    // One page at a time, so a file page asks the file question (its two tiers, then its ancestors), the worker's own, once.
+    const settlePage = async (page: Array<Record<string, unknown>>): Promise<void> => {
+      if (page.length === 0) return;
+      const fileSuppression = kind === 'file' ? await fileEmbeddingSuppressedMany(spaceId, page) : undefined;
+      for (const [i, doc] of page.entries()) {
+        walked++;
+        const id = doc['_id'];
+        if (typeof id !== 'string') continue;
+        if (doc['holdsVector'] !== true) {
+          // Belt and braces: the query already applied the tiers it can express, and THE resolver the worker asks is consulted
+          // per record, so a tier the query cannot express (a file's ancestors) still keeps a suppressed record out, unless it
+          // holds a vector the worker must remove. An orphan chunk (its ancestor missing or flagged) awaits the chunk sweep:
+          // not queued, and not "the setting is on" either.
+          const file = fileSuppression?.[i];
+          if (file === 'orphan') continue;
+          if (file !== undefined ? file !== null : embeddingSuppressedFor(spaceId, kind, doc)) { result.skippedSuppressed++; continue; }
+        }
+        batch.push(id);
+        if (batch.length >= WALK_BATCH) await flush();
+      }
+    };
+    let page: Array<Record<string, unknown>> = [];
     for await (const doc of walk as AsyncIterable<Record<string, unknown>>) {
-      walked++;
-      const id = doc['_id'];
-      if (typeof id !== 'string') continue;
-      // Belt and braces: the query already applied the tiers it can express, and THE resolver — the one the worker
-      // asks — is consulted per document, so a tier the query cannot express still keeps a suppressed record out,
-      // unless it holds a vector the worker must remove. A derived record's ancestors are the worker's to read.
-      if (doc['holdsVector'] !== true && embeddingSuppressedFor(spaceId, kind, doc)) { result.skippedSuppressed++; continue; }
-      batch.push(id);
-      if (batch.length >= WALK_BATCH) await flush();
+      page.push(doc);
+      if (page.length >= WALK_BATCH) { await settlePage(page); page = []; }
     }
+    await settlePage(page);
     await flush();
     // A resumed walk counted the whole kind but walked only past the cursor, so it has no remainder to report.
     if (!opts.after && total > walked) result.remaining += total - walked;
