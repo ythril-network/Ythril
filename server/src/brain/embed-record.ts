@@ -25,6 +25,7 @@ import { isTransientEmbedError } from './embed-queue.js';
 import { atReadSeq, readSeqOf } from './write-precondition.js';
 import { UNSET_DERIVED, UNSET_VECTOR } from '../sync/local-only-fields.js';
 import { getEmbeddingConfig } from '../config/loader.js';
+import { log, logSafe } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type {
   BrainEmbedRecordType, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc,
@@ -154,11 +155,31 @@ export async function buildEmbedTexts(
   recordType: BrainEmbedRecordType,
   docs: ReadonlyArray<Record<string, unknown>>,
 ): Promise<Array<string | null>> {
-  if (recordType !== 'edge') return await Promise.all(docs.map(d => buildEmbedText(spaceId, recordType, d)));
-  const edges = docs as unknown as EdgeDoc[];
-  if (edges.length === 0) return [];
-  const nameOf = await resolveEndpointNames(spaceId, edges);
-  return edges.map(e => edgeTextOf(e, nameOf(edgeEndpointKind(e.fromKind), e.from), nameOf(edgeEndpointKind(e.toKind), e.to)));
+  const unbuildable: string[] = [];
+  /**
+   * A document whose text cannot be built answers `null` and the rest of the page keeps its own. A pull stores a record that
+   * fails its schema, so a page can hold `tags: 'x'`; the builders threw on it, and both callers build a whole page at once — the
+   * arrival writer failed the page on every cycle, the repair failed for the whole space on every call.
+   */
+  const orNull = async (doc: Record<string, unknown>, build: () => string | null | Promise<string | null>): Promise<string | null> => {
+    try { return await build(); } catch { unbuildable.push(String(doc['_id'])); return null; }
+  };
+  let texts: Array<string | null>;
+  if (recordType !== 'edge') {
+    texts = await Promise.all(docs.map(d => orNull(d, () => buildEmbedText(spaceId, recordType, d))));
+  } else {
+    const edges = docs as unknown as EdgeDoc[];
+    if (edges.length === 0) return [];
+    const nameOf = await resolveEndpointNames(spaceId, edges);
+    texts = await Promise.all(edges.map(e => orNull(e as unknown as Record<string, unknown>,
+      () => edgeTextOf(e, nameOf(edgeEndpointKind(e.fromKind), e.from), nameOf(edgeEndpointKind(e.toKind), e.to)))));
+  }
+  if (unbuildable.length > 0) {
+    log.warn(`embed text: ${unbuildable.length} ${recordType} record(s) in '${logSafe(spaceId)}' have a field of the wrong type, so `
+      + `no text is built for them and they are not embedded (${unbuildable.slice(0, 5).map(id => `'${logSafe(id)}'`).join(', ')}`
+      + `${unbuildable.length > 5 ? ', …' : ''}). Correct the record to have it embedded.`);
+  }
+  return texts;
 }
 
 /**
