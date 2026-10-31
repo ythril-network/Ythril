@@ -111,9 +111,6 @@ export function suppressionExclusion(
   return { query };
 }
 
-/** The walk that selects by a Mongo filter; `owed` classifies each record it reads, so it walks on its own. */
-type WalkMatch = 'all';
-
 /** Where a walk has got to: the kind it is in and the last record id it queued there. */
 export interface SweepCursor {
   kind: BrainEmbedRecordType;
@@ -129,7 +126,7 @@ export interface SweepOptions {
    * `owed` — a backfill: the records the worker would settle (`embedOwed`), each counted in exactly one outcome. See
    * {@link queueOwedSweep}.
    */
-  match: WalkMatch | 'owed';
+  match: 'all' | 'owed';
   /** Records to queue at most, over all kinds; the rest are counted in `remaining`. */
   limit?: number;
   priority: EmbedPriority;
@@ -195,7 +192,7 @@ function kindsFrom(kinds: BrainEmbedRecordType[], after: SweepCursor | undefined
  */
 export async function countUnswept(
   spaceId: string,
-  { after }: { match: WalkMatch; after?: SweepCursor },
+  { after }: { after?: SweepCursor },
 ): Promise<number> {
   let n = 0;
   for (const { kind, resumeHere } of kindsFrom(EMBED_SWEEP_KINDS, after)) {
