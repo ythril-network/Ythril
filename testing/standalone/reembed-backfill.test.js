@@ -76,7 +76,9 @@ describe('it does not fight the suppression setting', () => {
 describe('it enqueues rather than embedding inline', () => {
   it('calls the queue, not the embedder', () => {
     // A million-record space would time out mid-way, having done partial work with no record of where.
-    assert.match(CODE, /enqueueEmbedJob\(spaceId, kind, id\)/);
+    // The throwing enqueue, not the swallowing one a write uses: the answer counts what was queued.
+    assert.match(CODE, /(?<![A-Za-z])queueEmbedJob\(spaceId, kind, id\)/);
+    assert.doesNotMatch(CODE, /enqueueEmbedJob\(/, 'the repair would report records queued that a broken queue refused');
     assert.ok(!/embedStoredRecord/.test(CODE), 'embedding inline would time out on a large space');
   });
 });

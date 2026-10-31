@@ -24,7 +24,7 @@
  *
  * A space can hold a million records and the model is the slow part. Embedding inline would time out the request
  * somewhere in the middle, having done partial work with no record of where it stopped. Enqueuing is idempotent
- * per record (`enqueueEmbedJob` upserts by job id), so a repeated call over the same space converges instead of
+ * per record (`queueEmbedJob` upserts by job id), so a repeated call over the same space converges instead of
  * duplicating.
  *
  * ## A backfill must not fight the setting
@@ -64,7 +64,7 @@
 
 import { col, asFilter } from '../db/mongo.js';
 import { COLLECTION, derivedHasText, buildEmbedTexts } from './embed-record.js';
-import { enqueueEmbedJob } from './embed-queue.js';
+import { queueEmbedJob } from './embed-queue.js';
 import {
   embeddingSuppressed, schemaKeyFor, recordSuppression, recordNotSuppressedFilter,
 } from './suppress-embeddings.js';
@@ -275,7 +275,7 @@ export async function reembedSpace(
       // per document. The query is derived from `meta`, so a shape the exclusion cannot express — a future
       // fourth tier, say — would otherwise re-index exactly what an operator asked to keep out of recall.
       if (stillSuppressed(spaceId, kind, doc)) { result.skippedSuppressed++; continue; }
-      await enqueueEmbedJob(spaceId, kind, id);
+      await queueEmbedJob(spaceId, kind, id);
       result.enqueued++;
       result.byKind[kind] = (result.byKind[kind] ?? 0) + 1;
     }
@@ -348,7 +348,7 @@ async function queueStaleRecords(
         // Owed and suppressed with no vector: the vectorless walk counted it as skipped too, so it is taken back from that count.
         if (doc['holdsVector'] !== true) result.skippedSuppressed = Math.max(0, result.skippedSuppressed - 1);
         if (result.enqueued >= cap) { result.remaining++; continue; }
-        await enqueueEmbedJob(spaceId, kind, id);
+        await queueEmbedJob(spaceId, kind, id);
         result.enqueued++;
         result.stale++;
         result.byKind[kind] = (result.byKind[kind] ?? 0) + 1;

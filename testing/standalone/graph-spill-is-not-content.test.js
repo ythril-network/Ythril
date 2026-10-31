@@ -48,14 +48,17 @@ describe('the spill directory is recognised at the root and nowhere else', () =>
 describe('the queue declines to embed a spill', () => {
   const queue = read('server/src/brain/embed-queue.ts');
 
-  it('the guard is in enqueueEmbedJob, before any write', () => {
+  it('the guard is in queueEmbedJob, before any write, and enqueueEmbedJob goes through it', () => {
     // At the enqueue rather than the call site: `upsertFileMeta` enqueues unconditionally and that is right,
     // because every other file in the store is content.
     // The rule has one spelling, `isSpillJob`, shared with the batched enqueue an arrival takes (5.6.2), so the
-    // gate holds both halves: the enqueue returns on it before any write, and it is the spill rule.
-    const fn = queue.slice(queue.indexOf('export async function enqueueEmbedJob'));
-    assert.match(fn.slice(0, 600), /if \(isSpillJob\(recordType, recordId\)\) return;/,
+    // gate holds both halves: the enqueue returns on it before any write, and it is the spill rule. The single
+    // enqueue a write uses wraps the throwing one the repair uses, so the guard is in the one both reach.
+    const fn = queue.slice(queue.indexOf('export async function queueEmbedJob'));
+    assert.match(fn.slice(0, 900), /if \(isSpillJob\(recordType, recordId\)\) return;/,
       'a spill must never reach the embedding queue');
+    const wrapper = queue.slice(queue.indexOf('export async function enqueueEmbedJob'), queue.indexOf('export async function queueEmbedJob'));
+    assert.match(wrapper, /await queueEmbedJob\(spaceId, recordType, recordId\)/, 'the single enqueue no longer goes through the guarded one');
     const rule = queue.slice(queue.indexOf('function isSpillJob('));
     assert.match(rule.slice(0, 300), /return recordType === 'file' && isSpillPath\(recordId\);/,
       'isSpillJob must be the spill rule: a file whose path is in the spill tree');

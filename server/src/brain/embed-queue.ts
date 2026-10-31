@@ -164,6 +164,25 @@ export async function enqueueEmbedJob(
   recordType: BrainEmbedRecordType,
   recordId: string,
 ): Promise<void> {
+  try {
+    await queueEmbedJob(spaceId, recordType, recordId);
+  } catch (err) {
+    // Never throws into the write it announces, and never silent either: a record stored and never queued is absent from every
+    // meaning-ranked search here (or, updated, keeps the vector of its previous content), so the failure is named once, with the repair.
+    log.warn(`embed queue: 1 ${recordType} record written to '${logSafe(spaceId)}' was NOT queued for embedding `
+      + `(${logSafe(err instanceof Error ? err.message : String(err))}). ${EMBED_REPAIR_HINT}`);
+  }
+}
+
+/**
+ * The same job, and THROWS when the queue refuses it: for the repair (`brain/reembed.ts`), whose answer counts what it queued. Through
+ * `enqueueEmbedJob` a broken queue answered `enqueued: N` with nothing queued, and warned once per record of the space.
+ */
+export async function queueEmbedJob(
+  spaceId: string,
+  recordType: BrainEmbedRecordType,
+  recordId: string,
+): Promise<void> {
   // A spill is a read's own OUTPUT, written so a caller can download a graph that did not fit inline. Embedding
   // it would spend model time turning recall results into recall-searchable content — so the next recall could
   // match the JSON dump of an earlier one. It is also deleted within a day, which is shorter than the queue's
@@ -173,19 +192,12 @@ export async function enqueueEmbedJob(
   // unconditionally is correct: every other file in the store IS content.
   if (isSpillJob(recordType, recordId)) return;
 
-  try {
-    await jobs(spaceId).updateOne(
-      asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }),
-      asUpdate<BrainEmbedJobDoc>(pendingJobUpdate(spaceId, recordType, recordId, new Date().toISOString())),
-      { upsert: true },
-    );
-    _signal.markSpaceMayHaveWork(spaceId);
-  } catch (err) {
-    // Never throws into the write it announces, and never silent either: a record stored and never queued is absent from every
-    // meaning-ranked search here (or, updated, keeps the vector of its previous content), so the failure is named once, with the repair.
-    log.warn(`embed queue: 1 ${recordType} record written to '${logSafe(spaceId)}' was NOT queued for embedding `
-      + `(${logSafe(err instanceof Error ? err.message : String(err))}). ${EMBED_REPAIR_HINT}`);
-  }
+  await jobs(spaceId).updateOne(
+    asFilter<BrainEmbedJobDoc>({ _id: embedJobId(recordType, recordId) }),
+    asUpdate<BrainEmbedJobDoc>(pendingJobUpdate(spaceId, recordType, recordId, new Date().toISOString())),
+    { upsert: true },
+  );
+  _signal.markSpaceMayHaveWork(spaceId);
 }
 
 /** Claim one job across the given spaces, oldest first. Returns null when nothing is claimable. */
