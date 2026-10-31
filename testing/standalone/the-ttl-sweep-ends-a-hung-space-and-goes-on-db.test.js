@@ -10,7 +10,7 @@
  *
  * ## What is held
  *
- *  - space 1's facts stall (a view whose read sleeps 3 s, `withStalledReads`), the housekeeping bound is 1 s: the sweep ends in
+ *  - space 1's facts stall (a view whose read sleeps far longer than the bound, `withStalledReads`), the housekeeping bound is 1 s: the sweep ends in
  *    about one bound, says space 1 once under its own step with the bound in the line, and still sweeps space 2;
  *  - a timeout ends the SPACE, not just the collection: a space with two stalled collections costs one bound and says one line
  *    (the second collection is never read);
@@ -37,7 +37,10 @@ import { setWriteBoundForTest, withStalledReads } from './_write-faults.mjs';
 const skip = await mongoSkipReason();
 const PAST = new Date('2020-01-01T00:00:00Z');
 const BOUND_MS = 1000;
-const STALL_MS = 3000;
+// Far above the bound: "the sweep ended at the bound, not at the stall" is told apart by STALL_MS - 500, and the sweep's own work on
+// the healthy spaces counts into the same clock. At 3000 the margin was 1.5 s and four -db files running at once used it up
+// (2820 ms, bundle-211); a stall the sweep never waits out costs nothing, so a long one costs the run no time.
+const STALL_MS = 8000;
 /** What `withStalledReads` costs one source document, ms (`_write-faults.mjs`). */
 const STALL_STEP_MS = 200;
 
