@@ -82,7 +82,7 @@ describe('suppression removes a stale vector', () => {
     // Re-anchored for bundle-30 `R12`: the removal is one constant (`UNSET_VECTOR`, `sync/local-only-fields.ts`)
     // rather than four hand-spelled `$unset`s, so the branch must use it and the constant must name both fields —
     // the second half read from the built module, so a constant that dropped the model fails here.
-    const branch = CODE.slice(CODE.indexOf('embeddingSuppressedFor(spaceId, recordType, doc)'));
+    const branch = CODE.slice(CODE.indexOf('recordSuppressedMany(spaceId, recordType, [doc])'));
     const end = branch.indexOf("'excluded'");
     assert.ok(end > 0, "the suppressed branch no longer ends in 'excluded' — re-anchor");
     const unset = branch.slice(0, end);
