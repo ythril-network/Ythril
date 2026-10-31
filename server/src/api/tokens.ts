@@ -619,8 +619,9 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
   // Checked after the above so a body that only echoes the record gets the "nothing to change" answer
   // rather than a bare unknown-key refusal. It was a `.refine()` until the echo fields existed; a schema
   // cannot see the stored record, so it could not tell an echo from an edit.
-  if (name === undefined && rights === undefined && mfa === undefined) {
-    res.status(400).json({ error: 'Provide `name`, `rights`, `mfa`, or any combination' });
+  // The quota counts as an edit on its own (Q-473): a body carrying only `rateLimitPerMinute` was refused here.
+  if (name === undefined && rights === undefined && mfa === undefined && rateLimitPerMinute === undefined) {
+    res.status(400).json({ error: 'Provide `name`, `rights`, `mfa`, `rateLimitPerMinute`, or any combination' });
     return;
   }
 
@@ -662,15 +663,17 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
 
   // `mfa` is in the snapshot on both sides because an exemption is the most security-relevant thing this
   // route can change, and a diff that omitted it would record the rename beside it and not the exemption.
-  // `previous.mfa` is absent on every token that follows the instance switch, which reads as `inherit`.
+  // `previous.mfa` is absent on every token that follows the instance switch, which reads as `inherit`. The quota is in
+  // it too (absent = inherits), so a quota change is not recorded as no change.
   req.auditSnapshots = {
-    before: { name: previous.name, rights: previous.rights, mfa: previous.mfa ?? 'inherit' },
+    before: { name: previous.name, rights: previous.rights, mfa: previous.mfa ?? 'inherit', rateLimitPerMinute: previous.rateLimitPerMinute ?? 'inherit' },
     after: {
       name: name?.trim() ?? previous.name,
       // What `setTokenRights` STORES, grant applied, not what was sent: an audit entry for a token made instance
       // admin must show the space-admin floor it now holds.
       rights: rights ? withInstanceAdminGrants(rights as never) : previous.rights,
       mfa: mfa ?? previous.mfa ?? 'inherit',
+      rateLimitPerMinute: rateLimitPerMinute === undefined ? (previous.rateLimitPerMinute ?? 'inherit') : (rateLimitPerMinute ?? 'inherit'),
     },
   };
 

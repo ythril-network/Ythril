@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Tokens:** `PATCH /api/tokens/:id` accepts `rateLimitPerMinute` on its own; it answered 400 unless `name`, `rights` or `mfa` came with it. The audit entry records the quota before and after.
 - **Sync:** two instances holding different copies of one record at the same version (fact, entity, edge, chrono entry) now both keep the lower-hash copy as the record and the other as a fork, and their space hashes agree. Nothing is deleted; an older pair converges at the next delivery.
 - **Sync:** two instances with different metadata for one file at the same version now agree on the lower-hash copy, and the one that lost keeps its copy in **Conflicts** (Keep mine or Keep theirs; `GET /api/conflicts` says `kind: "metadata"`).
 - **Sync:** **Keep mine** on a metadata conflict puts back every field its table shows, including the description's source and whether embeddings are suppressed, and answers `400` naming a field it cannot put back.
