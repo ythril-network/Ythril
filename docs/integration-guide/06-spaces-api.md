@@ -251,18 +251,27 @@ procedure. The tool arrived at 5.0: the capability had existed on REST since 4.4
 parity check because the capability map paired this route with `space_reindex`, which does the opposite
 thing. If you are choosing between them, read the next paragraph but one.
 
-Queues an embedding job for every record in the space that **has no vector**. This is the way back from
-`suppressEmbeddings`: suppression leaves records unembedded, and nothing revisits them on its own, so recall stays
-blind to whatever was written while it was on.
+Queues an embedding job for every record in the space that **has no vector**, and for every record whose **stored text
+is not its current text** (`stale`). This is the way back from `suppressEmbeddings`: suppression leaves records
+unembedded, and nothing revisits them on its own, so recall stays blind to whatever was written while it was on.
 
-It is also the repair for an embedding that never got queued — an enqueue failure is deliberately swallowed rather
-than failing the write, which leaves exactly this state.
+It is also the repair for an embedding that never got queued — an enqueue failure is deliberately swallowed (with a
+warning in the server log) rather than failing the write, which leaves exactly this state. For a new record that is a
+record with no vector. For an **update** it is a record that keeps the vector and the lexical text of its previous
+content, which "has no vector" cannot see; `stale` is what finds it, by comparing each record's stored text with the
+text it builds today. A suppressed record whose lexical text is missing or old (one a peer sent before the receiver
+stored its own text for such arrivals) is queued too, and its job writes the text without calling the model.
+
+**Finding stale records reads every record of the space once per call** (the vectors are left out of the read), so a
+large space pays for a pass over its records each time, whatever `limit` is: `limit` bounds what is queued, never
+what is read. Calling again re-reads from the start, so what you queued stays stale until the worker has drained it:
+`enqueued` and `remaining` do not move before then.
 
 > **This is not `reindex`, and the two are easy to confuse because both re-embed.**
 >
 > | | this | [`POST /api/brain/spaces/:spaceId/reindex`](04d-brain-ops-api.md) |
 > |---|---|---|
-> | touches | only records with **no** vector | **every** record |
+> | touches | only records with **no** vector, or whose stored text is **stale** | **every** record, rebuilt even when its text is unchanged |
 > | for | the way back from `suppressEmbeddings` | recovery after changing embedder or model |
 > | returns | counts, awaited — the counts are the answer | `status: "started"`, fire-and-forget |
 > | bounded | `limit`, and `truncated` tells you to call again | runs to completion in the background |
@@ -286,6 +295,7 @@ all of it would be worse off than one who got an error.
   "spaceId": "research",
   "enqueued": 1284,
   "skippedSuppressed": 0,
+  "stale": 12,
   "byKind": { "fact": 900, "entity": 384 },
   "remaining": 0,
   "truncated": false
@@ -295,7 +305,8 @@ all of it would be worse off than one who got an error.
 | Field | Meaning |
 |-------|---------|
 | `enqueued` | Records a job was queued for. Embedding happens in the background afterwards. |
-| `skippedSuppressed` | Candidates skipped because suppression **still applies**. See the note below. |
+| `skippedSuppressed` | Candidates left alone because suppression **still applies**. See the note below. A suppressed record whose lexical text is stale is not here: it is queued and counted in `stale` (or in `remaining` when past `limit`). |
+| `stale` | Of `enqueued`, the records queued because their stored text differs from their current text: a vector made from text the record no longer has, or a suppressed record whose lexical text is missing or old. |
 | `byKind` | Where the gap was, per record kind. |
 | `remaining` | Candidates left after `limit` **that can actually be embedded**. Counted over the whole space, not over this page. Suppressed records are never counted here — see the note below. |
 | `truncated` | `true` when `remaining > 0` — call again to continue. |
