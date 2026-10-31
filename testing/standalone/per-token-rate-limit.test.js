@@ -246,6 +246,19 @@ describe('one rule, both write paths, and the read surface agrees', () => {
     }
   });
 
+  it('a PATCH carrying only the quota is an edit, and the audit entry records the quota before and after (Q-473)', () => {
+    // A body with nothing but rateLimitPerMinute was refused 400 "Provide name, rights, mfa", so the one-field call an integrator
+    // writes failed; and the audit snapshot left the quota out, so a quota change was recorded as no change at all.
+    const start = routes.indexOf("tokensRouter.patch('/:id'");
+    assert.ok(start >= 0, 'the PATCH /:id route was not found');
+    const patch = routes.slice(start, routes.indexOf('tokensRouter.', start + 1));
+    const guard = patch.match(/if \(name === undefined && rights === undefined && mfa === undefined[^)]*\)/)?.[0] ?? '';
+    assert.match(guard, /rateLimitPerMinute === undefined/, `the "nothing to change" guard ignores the quota: ${guard}`);
+    const snapshot = patch.slice(patch.indexOf('req.auditSnapshots'), patch.indexOf('req.auditSnapshots') + 900);
+    assert.match(snapshot, /before:[^}]*rateLimitPerMinute/, 'the audit snapshot\'s before side has no quota');
+    assert.match(snapshot, /after:[\s\S]*rateLimitPerMinute/, 'the audit snapshot\'s after side has no quota');
+  });
+
   it('a cleared quota is expressible — null means inherit again', () => {
     const tokens = stripComments(readFileSync('server/src/auth/tokens.ts', 'utf8'));
     assert.match(bodyOf(tokens, 'setTokenRateLimit'), /if \(perMinute === null\) delete/,
