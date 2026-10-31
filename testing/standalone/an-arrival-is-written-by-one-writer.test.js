@@ -81,7 +81,7 @@ const EXEMPT = {
     + 'sets: it fills a row this instance made, or applies the seq accept at the write, and never creates a row',
   'server/src/sync/fill-file-meta.ts:fillReceiverMadeRow':
     'the fill half of fillFileMetaFromStray, above',
-  'server/src/sync/suppressed-file-text.ts:storeSuppressedFileText':
+  'server/src/sync/suppressed-file-text.ts:writeSuppressedFileText':
     'a peer\'s file metadata is merged, so the receiver\'s own derived `matchedText` of a file it suppresses (Q-262) is written '
     + 'AFTER the merge, from the row as merged, onto the version read: a $set of that one derived field, no part of the arriving document',
   'server/src/files/file-meta.ts:recordArrivedFile':
