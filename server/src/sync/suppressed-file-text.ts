@@ -27,6 +27,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { derivedFieldsForWrite } from '../brain/derived-text-on-write.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { atReadSeq, readSeqOf } from '../brain/write-precondition.js';
+import { log, peerList, peerText } from '../util/log.js';
 import type { FileMetaDoc } from '../config/types.js';
 
 type FileRowRead = {
@@ -37,9 +38,22 @@ type FileRowRead = {
 /**
  * Store the text of each of these file rows that this instance suppresses, onto the version read (`atReadSeq`): a newer copy
  * that lands meanwhile is not written over with the text of the one read.
+ *
+ * **It never throws.** It is the tail of a write that has already landed, for callers that must not fail after their merge: a retry
+ * is idempotent, and the repair (`reembed`'s stale walk) finds a suppressed row without its text, so a failure is named here, once,
+ * with the files and the repair, and not raised into them (where it would be taken for the failure of the write it follows).
  */
 export async function storeSuppressedFileText(spaceId: string, ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return;
+  try {
+    await writeSuppressedFileText(spaceId, ids);
+  } catch (err) {
+    log.warn(`The lexical text of ${ids.length} file(s) this instance suppresses in space '${peerText(spaceId)}' was NOT stored (${peerText(err)}): `
+      + `${peerList(ids)}. The files themselves are written; POST /api/spaces/:id/reembed stores the text.`);
+  }
+}
+
+async function writeSuppressedFileText(spaceId: string, ids: readonly string[]): Promise<void> {
   const rows = await readStoredById<FileRowRead>(
     spaceCollection(spaceId, 'files'), ids,
     { seq: 1, suppressEmbeddings: 1, tags: 1, description: 1, properties: 1, excerpt: 1 },
