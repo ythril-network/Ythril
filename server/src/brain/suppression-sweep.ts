@@ -57,6 +57,7 @@ import { READ_CHUNK, readStoredById } from '../db/read-by-id.js';
 import { inChunks } from '../util/chunks.js';
 import { UNSET_VECTOR } from '../sync/local-only-fields.js';
 import { retireEmbedJobs } from './embed-queue.js';
+import { HOLDS_VECTOR } from './holds-vector.js';
 import { rowsDerivedFrom } from '../files/derived-rows.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
@@ -109,7 +110,7 @@ export function suppressedWithVectorFilter(meta: SpaceMeta, kind: KnowledgeType)
     or.push({ [field]: { $nin: stated }, ...recordNotSuppressedFilter() });
   }
 
-  return { embedding: { $exists: true }, $or: or };
+  return { ...HOLDS_VECTOR, $or: or };
 }
 
 /**
@@ -194,7 +195,7 @@ async function sweepFiles(spaceId: string, meta: SpaceMeta): Promise<string[]> {
   return ids;
 }
 
-const WITH_VECTOR = { embedding: { $exists: true } };
+const WITH_VECTOR = { ...HOLDS_VECTOR };
 
 /**
  * These files, and every row derived from them down to `MAX_ANCESTRY`, hold no vector afterwards; returns the ids
