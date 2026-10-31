@@ -24,6 +24,11 @@
 ## In CI the image is built once, by the `prepare` job, and every stack job loads it and starts its services with
 ## `--no-build --pull never`; `ythril-a` below is the only service that carries a build, for a local `up`.
 ##
+## `npm run test:up` passes `--build`. Without it `docker compose up` builds only when no image carries the tag, so a stack started
+## after a branch switch, a pull or an edit ran the `ythril-test:latest` of whatever was built last, and the suites tested code that
+## was not in the working tree (Q-656). The build is a cached no-op when nothing changed.
+## `a-local-test-stack-is-built-from-the-checkout` fails a script that starts this stack with neither `--build` nor `--no-build`.
+##
 
 # The healthcheck of every test Mongo — ONE definition, because the four said the same thing and each was wrong the same way.
 #

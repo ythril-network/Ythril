@@ -23,7 +23,7 @@
     "docker:build": "docker compose build && docker builder prune --keep-storage 3g --force",
     "docker:build:test": "docker compose -p ythril-test -f testing/docker-compose.test.yml build && docker builder prune --keep-storage 3g --force",
     "docker:down": "docker compose down -v && node -e \"const fs=require('fs'),p=require('path'),d=p.join('config');try{fs.readdirSync(d).forEach(f=>fs.unlinkSync(p.join(d,f)))}catch{};console.log('Full uninstall complete — volumes + config/ removed')\"",
-    "test:up": "docker compose -p ythril-test -f testing/docker-compose.test.yml down -v --remove-orphans && node testing/_init/reset-test-configs.mjs && docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300 && node testing/sync/setup.js",
+    "test:up": "docker compose -p ythril-test -f testing/docker-compose.test.yml down -v --remove-orphans && node testing/_init/reset-test-configs.mjs && docker compose -p ythril-test -f testing/docker-compose.test.yml up --build -d --wait --wait-timeout 300 && node testing/sync/setup.js",
     "test:up:rebuild": "docker compose -p ythril-test -f testing/docker-compose.test.yml down -v --remove-orphans && node testing/_init/reset-test-configs.mjs && docker compose -p ythril-test -f testing/docker-compose.test.yml up --build -d --wait --wait-timeout 300 && npm run test:prune && node testing/sync/setup.js",
     "test:prune": "docker image prune -f && docker builder prune --keep-storage 5g --force",
     "docker:reclaim": "node scripts/docker-reclaim.mjs",
