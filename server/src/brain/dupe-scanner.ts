@@ -39,7 +39,8 @@ import {
   type RecallKnowledgeType,
 } from './recall.js';
 import { mergeEntities, mergeRefusal } from './merge.js';
-import { buildEmbedText } from './embed-record.js';
+import { buildEmbedTextOrMarker } from './embed-record.js';
+import { textIsStale } from './derived-text-on-write.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import type { DupeCandidateDoc, DupeScanType, DupeActionRule } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
@@ -109,16 +110,16 @@ async function recordMatchedText(spaceId: string, type: DupeScanType, id: string
  * A write that changes a record's text (an update, a converge, an arrival) bumps its seq at once, but the stored text follows when the
  * queued job has run (a vector is stored only beside the text it was made from). A fingerprint taken from the stored text in that window
  * is the fingerprint of the OLD content, so a dismissed pair that took it as its new baseline could never be reopened by the job's
- * text write, which bumps no seq. The same predicate is the repair sweep's "stale" (`queue-embed-sweep.ts`).
+ * text write, which bumps no seq. The same predicate (`textIsStale`) is the one the worker's classifier, and so the backfill, asks.
  *
- * A record that is gone, or has no text to build, owes nothing.
+ * A record that is gone, has no text to build, or whose text cannot be built (a field of the wrong type), owes nothing here.
  */
 async function owesItsJob(spaceId: string, type: DupeScanType, id: string): Promise<boolean> {
   const doc = await col<{ _id: string }>(`${spaceId}_${COLLECTION_SUFFIX[type]}`)
     .findOne(asFilter<{ _id: string }>({ _id: id }), { projection: { embedding: 0 } }) as Record<string, unknown> | null;
   if (!doc) return false;
-  const text = await buildEmbedText(spaceId, type, doc);
-  return text !== null && doc['matchedText'] !== text;
+  // Guarded: a record whose own field has the wrong type answers the marker, owes nothing here, and does not throw the scan.
+  return textIsStale(doc, await buildEmbedTextOrMarker(spaceId, type, doc));
 }
 
 /**

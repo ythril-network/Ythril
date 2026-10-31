@@ -95,7 +95,7 @@ const EXEMPT = {
     'spaces/lifecycle.ts:initSpace', 'spaces/record-count.ts:spaceRecordCount', 'spaces/schema-validate-door.ts:walkStored',
     'brain/embed-record.ts:embedStoredRecord', 'brain/suppression-sweep.ts:sweepSuppressedVectors', 'brain/ttl-sweep.ts:expiredPage',
     'brain/ttl-sweep.ts:isStored', 'brain/queue-embed-sweep.ts:countUnswept', 'brain/queue-embed-sweep.ts:queueEmbedSweep',
-    'brain/queue-embed-sweep.ts:queueStaleSweep',
+    'brain/queue-embed-sweep.ts:queueOwedSweep',
     'brain/candidate-prune.ts:pruneCandidateCollection', 'brain/chrono-redaction.ts:backfillTypedExpiry',
   ]),
   // Q-624 slice I3: the readers whose subject IS the fork rows, or a row's fork status.

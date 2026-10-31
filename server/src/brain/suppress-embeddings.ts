@@ -219,15 +219,36 @@ export function embeddingSuppressedFor(
  * The walk is `files/ancestry.ts`'s, the one the move plan and the leaked-rows repair read their chains by, and it stops
  * at the first ancestor that carries the flag, so a record whose parent is suppressed costs one read.
  */
-async function ancestorSuppressed(spaceId: string, file: Record<string, unknown>): Promise<boolean> {
-  const parentId = file['parentFileId'];
-  if (typeof parentId !== 'string') return false;
-  const chain = (await walkUpFileChains(spaceId, new Map([['self', parentId]]), {
+async function ancestorsSuppressed(
+  spaceId: string,
+  files: ReadonlyArray<Record<string, unknown>>,
+): Promise<FileSuppression[]> {
+  const starts = new Map<string, string>();
+  files.forEach((file, i) => {
+    const parentId = file['parentFileId'];
+    if (typeof parentId === 'string') starts.set(String(i), parentId);
+  });
+  if (starts.size === 0) return files.map(() => null);
+  const chains = await walkUpFileChains(spaceId, starts, {
     fields: { [RECORD_SUPPRESS_FIELD]: 1 },
     stopWhen: ancestor => recordSuppression({ ...ancestor }) === true,
-  })).get('self')!;
-  return chain.result.end === 'gone' || chain.result.end === 'stopped';
+  });
+  return files.map((_, i) => {
+    const end = chains.get(String(i))?.result.end;
+    return end === 'stopped' ? 'suppressed' : end === 'gone' ? 'orphan' : null;
+  });
 }
+
+/**
+ * A file row's answer to the file question, saying WHY when it is suppressed:
+ *
+ * - `suppressed`: its own two tiers say so, or an ancestor carries the flag;
+ * - `orphan`: a derived row whose ancestor is missing, or flagged (a deleted file reads as missing). Suppressed too (fail closed),
+ *   but a row awaiting the chunk sweep rather than one an operator retired, which the backfill must not report as "the setting is
+ *   still on" (`skippedSuppressed`);
+ * - `null`: not suppressed.
+ */
+export type FileSuppression = 'suppressed' | 'orphan' | null;
 
 /**
  * Would this FILE row hold a vector? The one answer for every writer of a vector onto a file row: the embed queue
@@ -249,8 +270,25 @@ async function ancestorSuppressed(spaceId: string, file: Record<string, unknown>
  * @param file the file row, or the fields a decision reads: its own `suppressEmbeddings` and its `parentFileId`.
  */
 export async function fileEmbeddingSuppressed(spaceId: string, file: Record<string, unknown>): Promise<boolean> {
-  if (embeddingSuppressedFor(spaceId, 'file', file)) return true;
-  return typeof file['parentFileId'] === 'string' && await ancestorSuppressed(spaceId, file);
+  return (await fileEmbeddingSuppressedMany(spaceId, [file]))[0] !== null;
+}
+
+/**
+ * {@link fileEmbeddingSuppressed} for a page of file rows, in order, with the ancestors of every derived row read in ONE walk
+ * (one read per level for the page, `walkUpFileChains`), so the backfill's walk asks the worker's own question without a read
+ * per row. The worker asks it through {@link fileEmbeddingSuppressed}, so the two ask one spelling.
+ */
+export async function fileEmbeddingSuppressedMany(
+  spaceId: string,
+  files: ReadonlyArray<Record<string, unknown>>,
+): Promise<FileSuppression[]> {
+  const meta = getSpaceMeta(spaceId);
+  const own = files.map(file => embeddingSuppressedFor(spaceId, 'file', file, meta));
+  // Only the rows their own tiers leave open are walked: a row suppressed by its own tiers needs no ancestor read.
+  const open = files.filter((_, i) => !own[i]);
+  const byAncestor = await ancestorsSuppressed(spaceId, open);
+  let next = 0;
+  return own.map(suppressed => (suppressed ? 'suppressed' : byAncestor[next++] ?? null));
 }
 
 /**

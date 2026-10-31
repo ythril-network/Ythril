@@ -11,8 +11,8 @@
  * The embed job reads the pair as its "nothing to do" test (`embedStoredRecord`: vector present, `matchedText` equal to
  * the text it builds, same model -> `unchanged`). A converge that put the NEW text in `matchedText` and left the OLD
  * vector standing therefore made the job answer `unchanged` for ever: the vector described text the record no longer had,
- * although the enqueue had succeeded. The same pair is what the repair sweep (`queue-embed-sweep.ts`, `match: 'stale'`)
- * compares, so a writer that broke the rule also hid its record from the repair.
+ * although the enqueue had succeeded. The same pair is what the backfill's walk (`queue-embed-sweep.ts`, through the worker's
+ * classifier `embedOwed`) compares, so a writer that broke the rule also hid its record from the repair.
  *
  * ## The one question
  *
@@ -73,4 +73,17 @@ export async function derivedFieldsForWrite(input: DerivedWriteInput): Promise<D
   }
   if (onto === 'insert') return { set: { matchedText: await input.text() }, unset: {} };
   return { set: {}, unset: {} };
+}
+
+/**
+ * Is the stored record's text stale: is there a current text, and is the stored `matchedText` not it?
+ *
+ * The other half of the rule above: a writer that leaves the stored pair standing leaves a record whose text is stale until its
+ * job runs. The worker's classifier (`embedOwed`, which the backfill's walk asks too) and the dupe scanner's hold on a dismissed
+ * pair ask it; written twice, the two drifted on a text the batch could not build. Only a STRING is a current text: `null` (a
+ * derived row with no text), `undefined` and the builder's `UNBUILDABLE` marker owe nothing on this question
+ * (`a-stale-text-is-asked-in-one-place`).
+ */
+export function textIsStale(stored: Readonly<Record<string, unknown>>, currentText: unknown): currentText is string {
+  return typeof currentText === 'string' && stored['matchedText'] !== currentText;
 }
