@@ -25,7 +25,7 @@ import { isTransientEmbedError } from './embed-queue.js';
 import { atReadSeq, readSeqOf } from './write-precondition.js';
 import { UNSET_DERIVED, UNSET_VECTOR } from '../sync/local-only-fields.js';
 import { getEmbeddingConfig } from '../config/loader.js';
-import { log, logSafe } from '../util/log.js';
+import { log, logSafe, peerList } from '../util/log.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type {
   BrainEmbedRecordType, FactDoc, EntityDoc, EdgeDoc, ChronoEntry, FileMetaDoc,
@@ -176,8 +176,7 @@ export async function buildEmbedTexts(
   }
   if (unbuildable.length > 0) {
     log.warn(`embed text: ${unbuildable.length} ${recordType} record(s) in '${logSafe(spaceId)}' have a field of the wrong type, so `
-      + `no text is built for them and they are not embedded (${unbuildable.slice(0, 5).map(id => `'${logSafe(id)}'`).join(', ')}`
-      + `${unbuildable.length > 5 ? ', …' : ''}). Correct the record to have it embedded.`);
+      + `no text is built for them and they are not embedded (${peerList(unbuildable)}). Correct the record to have it embedded.`);
   }
   return texts;
 }
