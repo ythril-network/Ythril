@@ -89,7 +89,7 @@ import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
 import { RESTORED_LOCAL_FIELDS, DERIVED_LOCAL_FIELDS, carriedFields } from './local-only-fields.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { planSeqUpserts, retagToLocalSpace, isNewerCopy, seqGuard, divergesFrom } from './upsert-plan.js';
-import { enqueueIngestedRecords } from '../brain/embed-queue.js';
+import { enqueueIngestedRecords, EMBED_REPAIR_HINT } from '../brain/embed-queue.js';
 import { isDerived, buildEmbedTexts } from '../brain/embed-record.js';
 import { derivedFieldsForWrite } from '../brain/derived-text-on-write.js';
 import { ingestFileMeta, fileMetaForWire } from '../api/sync/_shared.js';
@@ -638,7 +638,7 @@ export async function writeArrivals(
           await enqueueIngestedRecords(spaceId, recordType!, landed);
         } catch (err) {
           log.warn(`${logSafe(where)}: ${landed.length} landed record(s) were not queued for embedding in space `
-            + `'${logSafe(spaceId)}': ${message(err)}`);
+            + `'${logSafe(spaceId)}': ${message(err)}. ${EMBED_REPAIR_HINT}`);
         }
       }
       // Over the file rows THIS chunk landed, so a write that failed deletes nothing; it never throws.

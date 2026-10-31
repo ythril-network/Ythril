@@ -13,6 +13,13 @@
  * will find it". **There was no such sweep** — the comment described a repair mechanism that had never been
  * built, which is exactly the kind of reassurance that stops anyone looking. This is that sweep, on demand.
  *
+ * ## An UPDATE whose job was lost is the same gap, and "has no vector" does not see it
+ *
+ * A record whose text changed while its job could not be queued keeps the vector and the lexical text of its previous content,
+ * so it is not vectorless. The repair therefore also queues every record whose stored `matchedText` differs from the text its
+ * builder gives today (`stale`): the pair a write stores (`derived-text-on-write.ts`) is the record of what is owed, so nothing
+ * else has to remember it.
+ *
  * ## It ENQUEUES, and does not embed
  *
  * A space can hold a million records and the model is the slow part. Embedding inline would time out the request
@@ -56,7 +63,7 @@
  */
 
 import { col, asFilter } from '../db/mongo.js';
-import { COLLECTION, derivedHasText } from './embed-record.js';
+import { COLLECTION, derivedHasText, buildEmbedTexts } from './embed-record.js';
 import { enqueueEmbedJob } from './embed-queue.js';
 import {
   embeddingSuppressed, schemaKeyFor, recordSuppression, recordNotSuppressedFilter,
@@ -75,10 +82,15 @@ export const REEMBED_MAX_LIMIT = 50_000;
 
 export interface ReembedResult {
   spaceId: string;
-  /** Records with no vector that are not suppressed — the ones a job was queued for. */
+  /** Records a job was queued for: those with no vector that are not suppressed, and the `stale` ones. */
   enqueued: number;
   /** Candidates skipped because suppression still applies at some tier. */
   skippedSuppressed: number;
+  /**
+   * Of `enqueued`, the records queued because their stored text differs from their current text: a vector made from text the record
+   * no longer has (an update whose job was lost), or a suppressed record whose lexical text is missing or old.
+   */
+  stale: number;
   /** Per-kind breakdown of what was enqueued, so an operator can see WHERE the gap was. */
   byKind: Record<string, number>;
   /** Candidates left over after `limit`. Zero when the space is fully swept. */
@@ -181,7 +193,7 @@ export async function reembedSpace(
 ): Promise<ReembedResult> {
   const cap = Math.min(Math.max(1, Math.floor(limit)), REEMBED_MAX_LIMIT);
   const result: ReembedResult = {
-    spaceId, enqueued: 0, skippedSuppressed: 0, byKind: {}, remaining: 0, truncated: false,
+    spaceId, enqueued: 0, skippedSuppressed: 0, stale: 0, byKind: {}, remaining: 0, truncated: false,
   };
 
   for (const kind of kinds) {
@@ -267,6 +279,82 @@ export async function reembedSpace(
     if (total > docs.length) result.remaining += total - docs.length;
   }
 
+  // The records whose stored text is not their current text, under what is left of the one cap: the two walks select disjoint records,
+  // so the cap is shared, never spent twice.
+  await queueStaleRecords(spaceId, kinds, cap, result);
+
   result.truncated = result.remaining > 0;
   return result;
+}
+
+/** The records of a kind the stale walk compares with their text: live rows, and for files the top-level ones and derived ones with text. */
+function staleCandidates(kind: BrainEmbedRecordType): Record<string, unknown> {
+  return kind === 'file' ? { $or: [{ parentFileId: { $exists: false } }, derivedHasText] } : {};
+}
+
+/** Records read per page of the stale walk. */
+const STALE_WALK_BATCH = 500;
+
+/**
+ * The repair walk: queue every record whose stored `matchedText` is not the text its builder gives today and that the vectorless walk
+ * above cannot see.
+ *
+ * ## Why a record owes a job exactly then
+ *
+ * A vector is stored only beside the text it was made from (`derived-text-on-write.ts`), and the worker settles every record whose
+ * pair is off, whatever the cause: it re-embeds a stale vector, writes the text and drops the vector when the embedder is away, and
+ * writes a suppressed record's text without calling the model. So the repair needs no field that says "owed" and no second writer to
+ * keep it true: the state that says "owed" is the pair itself, written by the same write that changed the text, so neither a failed
+ * enqueue nor a crash between that write and the enqueue can lose it.
+ *
+ * ## What is owed, and what is left to the other walk
+ *
+ * `text !== null && matchedText !== text`, and the record either HOLDS a vector (made from text it no longer has) or is SUPPRESSED (its
+ * lexical text is missing or old: an arrival stored before the receiver wrote its own, or one whose inline text write failed). A record
+ * with no vector that is not suppressed is the vectorless walk's, so neither walk counts it twice. A derived row with no text (a face
+ * chunk) has none to be stale against and is never queued, as `derivedHasText` says for the backfill.
+ *
+ * ## The cost, stated
+ *
+ * The predicate cannot be a Mongo filter, so the walk READS every candidate of the space once per call (the vector projected out, in
+ * pages of `STALE_WALK_BATCH`, an edge page's endpoint names in one read per kind), and queues only the owed ones. `limit` caps what
+ * is queued, never what is read; the owed records beyond the cap are counted into `remaining`, so nothing is capped silently.
+ */
+async function queueStaleRecords(
+  spaceId: string, kinds: readonly BrainEmbedRecordType[], cap: number, result: ReembedResult,
+): Promise<void> {
+  for (const kind of kinds) {
+    const walk = col(`${spaceId}_${COLLECTION[kind]}`).aggregate([
+      { $match: asFilter(staleCandidates(kind)) },
+      { $sort: { _id: 1 } },
+      // The vector is the bulk of a record and the walk needs only whether it is there.
+      { $addFields: { holdsVector: { $isArray: '$embedding' } } },
+      { $unset: 'embedding' },
+    ], { batchSize: STALE_WALK_BATCH });
+
+    const settle = async (page: Array<Record<string, unknown>>): Promise<void> => {
+      if (page.length === 0) return;
+      const texts = await buildEmbedTexts(spaceId, kind, page);
+      for (let i = 0; i < page.length; i++) {
+        const doc = page[i]!;
+        const text = texts[i];
+        const id = doc['_id'];
+        if (typeof id !== 'string' || text === null || text === undefined || doc['matchedText'] === text) continue;
+        // Not owed: no vector and not suppressed — the vectorless walk queues it.
+        if (doc['holdsVector'] !== true && !stillSuppressed(spaceId, kind, doc)) continue;
+        if (result.enqueued >= cap) { result.remaining++; continue; }
+        await enqueueEmbedJob(spaceId, kind, id);
+        result.enqueued++;
+        result.stale++;
+        result.byKind[kind] = (result.byKind[kind] ?? 0) + 1;
+      }
+    };
+
+    let page: Array<Record<string, unknown>> = [];
+    for await (const doc of walk as AsyncIterable<Record<string, unknown>>) {
+      page.push(doc);
+      if (page.length >= STALE_WALK_BATCH) { await settle(page); page = []; }
+    }
+    await settle(page);
+  }
 }

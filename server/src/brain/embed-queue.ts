@@ -108,8 +108,9 @@ export async function ensureEmbedJobIndexes(spaceId: string): Promise<void> {
  * exhausted its attempts on the OLD content must not inherit that verdict. This is what makes rewriting
  * a record the operator's escape hatch from a permanently failed job.
  *
- * Never throws into the caller's write path. An enqueue that fails leaves a record whose vector is missing,
- * and failing the write instead would trade a delayed search hit for lost data.
+ * Never throws into the caller's write path, and warns when it fails (`EMBED_REPAIR_HINT`). An enqueue that fails leaves a
+ * record whose vector is missing (or, for an update, made from text it no longer has), and failing the write instead
+ * would trade a delayed search hit for lost data.
  *
  * **This used to claim "the periodic backfill sweep will find it". There was no such sweep** — the comment
  * described a repair mechanism that had never been built, which is worse than saying nothing: it is exactly the
@@ -117,7 +118,8 @@ export async function ensureEmbedJobIndexes(spaceId: string): Promise<void> {
  * recall forever, with no error, no metric and nothing to grep for.
  *
  * The repair now exists and is `POST /api/spaces/:id/reembed` (`brain/reembed.ts`), which queues a job for every
- * record with no vector. It is **on demand, not periodic** — say that precisely, because "it will be picked up"
+ * record with no vector and for every record whose stored text is not its current text (an update whose job was
+ * lost). It is **on demand, not periodic** — say that precisely, because "it will be picked up"
  * and "an operator can pick it up" are different promises, and only one of them is true here.
  */
 /**
@@ -145,6 +147,18 @@ function pendingJobUpdate(spaceId: string, recordType: BrainEmbedRecordType, rec
   };
 }
 
+/**
+ * What an operator is told to do about records whose embed job was not queued: the ONE spelling of the remedy, for every warning that
+ * names it (the single write's and the arrival batch's here, the arrival writer's in `sync/arrivals.ts`).
+ *
+ * It says what is true for both cases. A NEW record has no vector until a job runs; an UPDATED one keeps the vector and the lexical
+ * text of its previous content, so "queues every record that has no vector" was false for it, and the repair it names is
+ * `POST /api/spaces/:id/reembed`, which queues both (`stale`, `brain/reembed.ts`). A second spelling is how a warning ended up naming
+ * a reindex, a different and heavier operation (`the-embed-repair-remedy-has-one-spelling`).
+ */
+export const EMBED_REPAIR_HINT = 'They are stored. A new record has no vector until a job runs; an updated one keeps the vector and '
+  + 'the lexical text of its previous content. POST /api/spaces/:id/reembed queues both.';
+
 export async function enqueueEmbedJob(
   spaceId: string,
   recordType: BrainEmbedRecordType,
@@ -166,8 +180,11 @@ export async function enqueueEmbedJob(
       { upsert: true },
     );
     _signal.markSpaceMayHaveWork(spaceId);
-  } catch {
-    /* see the note above — a queue failure must never fail the write it was announcing */
+  } catch (err) {
+    // Never throws into the write it announces, and never silent either: a record stored and never queued is absent from every
+    // meaning-ranked search here (or, updated, keeps the vector of its previous content), so the failure is named once, with the repair.
+    log.warn(`embed queue: 1 ${recordType} record written to '${logSafe(spaceId)}' was NOT queued for embedding `
+      + `(${logSafe(err instanceof Error ? err.message : String(err))}). ${EMBED_REPAIR_HINT}`);
   }
 }
 
@@ -705,8 +722,7 @@ export async function enqueueIngestedRecords(
     }))), { ordered: false });
     _signal.markSpaceMayHaveWork(spaceId);
   } catch (err) {
-    log.warn(`Embed enqueue failed for ${wanted.length} arriving ${recordType} record(s) in space '${logSafe(spaceId)}': `
-      + `${logSafe(err instanceof Error ? err.message : String(err))}. They are stored without a vector; `
-      + `POST /api/spaces/${logSafe(spaceId)}/reembed queues them again.`);
+    log.warn(`embed queue: ${wanted.length} arriving ${recordType} record(s) in space '${logSafe(spaceId)}' were NOT queued for embedding `
+      + `(${logSafe(err instanceof Error ? err.message : String(err))}). ${EMBED_REPAIR_HINT}`);
   }
 }
