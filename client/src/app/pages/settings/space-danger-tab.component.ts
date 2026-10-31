@@ -137,7 +137,7 @@ type ActNotice =
     </button>
   </div>
   @if (suppress()) {
-    <div class="dz-hint" style="margin-top:6px;">{{ 'spaces.dangerZone.embeddingsBackfillBlocked' | transloco }}</div>
+    <div class="dz-hint" style="margin-top:6px;">{{ 'spaces.dangerZone.embeddingsBackfillSuppressedInfo' | transloco }}</div>
   }
   @if (backfillResult(); as r) {
     <div class="alert alert-success" style="margin-top:10px;font-size:12px;">
@@ -280,7 +280,7 @@ export class SpaceDangerTabComponent {
   protected backfillLines(r: ReembedResult): string[] {
     const lines = [this.plural.text('spaces.dangerZone.embeddingsBackfillDone', r.enqueued)];
     if (r.stale > 0) lines.push(this.plural.text('spaces.dangerZone.embeddingsBackfillStale', r.stale));
-    if (r.truncated) lines.push(this.transloco.translate('spaces.dangerZone.embeddingsBackfillMore', { remaining: r.remaining }));
+    if (r.truncated) lines.push(this.plural.text('spaces.dangerZone.embeddingsBackfillMore', r.remaining));
     if (r.skippedSuppressed > 0) lines.push(this.plural.text('spaces.dangerZone.embeddingsBackfillSkipped', r.skippedSuppressed));
     return lines;
   }
