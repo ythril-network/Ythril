@@ -7,19 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.11] — 2026-10-31
+
+A patch: a record's vector is stored only beside the text it was made from, so a lost embed job can be repaired and a suppressed record a peer sent is found by text search.
+
+| What changed | What to do |
+|---|---|
+| `reembed` also queues records whose stored text is stale, and answers `stale` | Run `POST /api/spaces/:id/reembed` (or `space_reembed`) once per space after upgrading |
+| The first `reembed` after upgrading re-embeds records with an older text format, no stored text, or a renamed edge endpoint | Expect a partial reindex on that first call |
+| A `reembed` whose jobs the queue refuses answers `500` | Retry it; it no longer reports records it did not queue |
+
+Changed documents: integration guide `04f-write-semantics`, `06-spaces-api`, `07-tokens-api`, `09-sync-api`, `13-audit-log-api`, `16-mcp`; `docs/sync-protocol.md`; user guide `04-settings`.
+
 ### Fixed
 
-- **Tokens:** `PATCH /api/tokens/:id` accepts `rateLimitPerMinute` on its own; it answered 400 unless `name`, `rights` or `mfa` came with it. The audit entry records the quota and the second factor before and after; both were dropped from it. A quota the route refuses now changes nothing; with a new name beside it, the token was renamed and the answer was `403`.
+- **Tokens:** `PATCH /api/tokens/:id` accepts `rateLimitPerMinute` on its own; it answered 400 unless another field came with it. A refused quota now changes nothing, and the audit entry records the quota and the second factor.
 - **Settings:** **Backfill missing embeddings** says how many of the records it queued had searchable text older than their content.
 - **Graph:** merging two entities stores the survivor's new lexical text with its new vector, so text search finds the words the absorbed entity brought; when the embedding model cannot be reached, the survivor is queued.
 - **Sync:** a file this instance keeps out of semantic search, filled in from metadata an older version left behind, loses its vector and its passages' at once.
 - **Sync:** a record a peer sent with a field of the wrong type no longer stops the pages of a space that keeps records out of semantic search, nor the `reembed` of its space; it is named in the log and not embedded.
 - **Sync:** a record a peer sent that this instance keeps out of semantic search is stored with this instance's own lexical text of it, and text search finds it.
-- **Embeddings:** `POST /api/spaces/:id/reembed` and `space_reembed` also queue records whose stored text is not their current text (`stale` in the answer), such as an update whose embed job was never queued. The call now reads every record of the space once.
+- **Embeddings:** `reembed` also queues records whose stored text is not their current text (`stale` in the answer), such as an update whose embed job was never queued. It reads every record of the space once.
 - **Embeddings:** rewriting an existing fact, entity, chrono entry or edge by its id with new text now re-embeds it; the old vector was kept. Until the job has run, the record keeps its previous lexical text.
-- **Embeddings:** the warning for a failed enqueue says the repair covers updated records too, and a failed enqueue of a single local write, a file's metadata among them, now warns. A `reembed` call whose jobs the queue refuses fails with `500`; it answered with records counted as queued.
-- **Embeddings:** after upgrading, run `POST /api/spaces/:id/reembed` once per space: it queues records already stale and suppressed records a peer sent that have no lexical text.
-- **Embeddings:** the first `reembed` after upgrading is a partial reindex: it also re-embeds records written under an older text format, records with no stored text, and edges whose endpoint was renamed.
+- **Embeddings:** a failed enqueue of a single local write, a file's metadata among them, now warns, and the warning says the repair covers updated records too.
 
 ## [5.6.10] — 2026-10-09
 
