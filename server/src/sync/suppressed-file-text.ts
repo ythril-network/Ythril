@@ -28,6 +28,7 @@ import { derivedFieldsForWrite } from '../brain/derived-text-on-write.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { atReadSeq, readSeqOf } from '../brain/write-precondition.js';
 import { log, peerList, peerText } from '../util/log.js';
+import { EMBED_REPAIR_ROUTE } from '../brain/embed-queue.js';
 import type { FileMetaDoc } from '../config/types.js';
 
 type FileRowRead = {
@@ -49,7 +50,7 @@ export async function storeSuppressedFileText(spaceId: string, ids: readonly str
     await writeSuppressedFileText(spaceId, ids);
   } catch (err) {
     log.warn(`The lexical text of ${ids.length} file(s) this instance suppresses in space '${peerText(spaceId)}' was NOT stored (${peerText(err)}): `
-      + `${peerList(ids)}. The files themselves are written; POST /api/spaces/:id/reembed stores the text.`);
+      + `${peerList(ids)}. The files themselves are written; ${EMBED_REPAIR_ROUTE} stores the text.`);
   }
 }
 
