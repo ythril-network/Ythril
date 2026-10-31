@@ -91,7 +91,8 @@ export interface ReembedResult {
   skippedSuppressed: number;
   /**
    * Of `enqueued`, the records queued because their stored text differs from their current text: a vector made from text the record
-   * no longer has (an update whose job was lost), or a suppressed record whose lexical text is missing or old.
+   * no longer has (an update whose job was lost, an edge whose endpoint was renamed), or a suppressed record whose lexical text is
+   * missing or old.
    */
   stale: number;
   /** Per-kind breakdown of what was enqueued, so an operator can see WHERE the gap was. */
