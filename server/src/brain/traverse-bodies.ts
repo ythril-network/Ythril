@@ -23,7 +23,7 @@
 import { readRowsById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
-import { collectionForRefKind } from './entity-refs.js';
+import { collectionForStoredKind } from './entity-refs.js';
 import { applyProjection, type NormalisedProjection } from './projection.js';
 import { RECALL_RECORD_DIAGNOSTICS } from './recall-shape.js';
 import type { TraverseResult, TraverseNode } from './traverse-graph.js';
@@ -100,9 +100,12 @@ export async function withTraverseBodies(
   const edgeDocs = new Map<string, Doc>();
   await Promise.all(memberIds.flatMap((space) => [
     ...[...byKind].map(async ([kind, ids]) => {
+      // A node of a kind no collection holds has no stored body: the lean node is the truth.
+      const part = collectionForStoredKind(kind);
+      if (part === null) return;
       // A flagged file's body is not attached to a node: it would carry the path, description and tags the audit
       // record keeps into a walk's answer. Per kind, since the collection is the kind's.
-      const docs = await readRowsById<IdDoc>(spaceCollection(space, collectionForRefKind(kind)), ids, 'all',
+      const docs = await readRowsById<IdDoc>(spaceCollection(space, part), ids, 'all',
         { filter: notFlaggedIfFile(kind) });
       for (const d of docs) if (!nodeDocs.has(d._id)) nodeDocs.set(d._id, d);
     }),

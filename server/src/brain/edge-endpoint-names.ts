@@ -24,9 +24,9 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
-import { collectionForRefKind, edgeEndpointKind, endpointNameField } from './entity-refs.js';
+import { collectionForStoredKind, edgeEndpointKind, endpointNameField } from './entity-refs.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import { spaceCollection, type SpacePart } from '../db/space-collection.js';
+import { spaceCollection } from '../db/space-collection.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { recordDisplayName, recordDisplayType } from './link-frontier.js';
 import { readRecordsById, type RecordsById } from './walk-reads.js';
@@ -52,8 +52,10 @@ export const ENDPOINT_NAME_MAX = 200;
  */
 export async function resolveEndpointName(spaceId: string, id: string, kind: RefKind): Promise<string> {
   if (kind === 'file') return id;
+  const part = collectionForStoredKind(kind);
+  if (part === null) return id;
   const field = endpointNameField(kind);
-  const doc = await col<Record<string, unknown>>(`${spaceId}_${collectionForRefKind(kind)}`)
+  const doc = await col<Record<string, unknown>>(spaceCollection(spaceId, part))
     .findOne(asFilter<Record<string, unknown>>({ _id: id }), { projection: { [field]: 1 } });
   return endpointDisplayName(doc?.[field], id);
 }
@@ -96,9 +98,10 @@ export async function resolveEndpointNames(
   for (const [kind, ids] of idsByKind) {
     // A kind no collection holds (a pulled edge whose `fromKind` fails its schema) is read by nothing and named by its raw id, the
     // answer `resolveEndpointName` gives it: its read finds no row there. Building the collection name threw for the whole page.
-    if ((collectionForRefKind(kind) as SpacePart | undefined) === undefined) continue;
+    const part = collectionForStoredKind(kind);
+    if (part === null) continue;
     const field = endpointNameField(kind);
-    const rows = await readRowsById<Record<string, unknown>>(spaceCollection(spaceId, collectionForRefKind(kind)), [...ids], { [field]: 1 });
+    const rows = await readRowsById<Record<string, unknown>>(spaceCollection(spaceId, part), [...ids], { [field]: 1 });
     for (const row of rows) named.set(`${kind}\u0000${String(row['_id'])}`, endpointDisplayName(row[field], String(row['_id'])));
   }
   return (kind, id) => (kind === 'file' ? id : named.get(`${kind}\u0000${id}`) ?? id);
@@ -172,9 +175,12 @@ export async function withEndpointNames<T extends EdgeEndpoints>(
   const nameMap = new Map<string, string>();
   for (const [kind, ids] of byKind) {
     if (ids.size === 0) continue;
+    const part = collectionForStoredKind(kind);
+    // A kind no collection holds names its ends by their raw ids, the answer the other two resolvers give it.
+    if (part === null) { for (const id of ids) nameMap.set(id, id); continue; }
     const field = endpointNameField(kind);
     const docs = await readAcrossMembers(async mid =>
-      await readRowsById<Record<string, unknown>>(spaceCollection(mid, collectionForRefKind(kind)), [...ids], { [field]: 1 }));
+      await readRowsById<Record<string, unknown>>(spaceCollection(mid, part), [...ids], { [field]: 1 }));
     for (const d of docs) {
       const value = d[field];
       if (typeof value === 'string' && value.trim()) nameMap.set(String(d['_id']), value.trim());
@@ -259,10 +265,13 @@ export async function endpointRecordsByKind(
   }
 
   for (const [kind, ids] of byKind) {
+    // A kind no collection holds resolves to no record: not found, like an id that is not there.
+    const part = collectionForStoredKind(kind);
+    if (part === null) continue;
     for (const mid of memberIds) {
       // The walk's own node resolver: a flagged file is not a node, so an edge pointing at a deleted file reaches
       // nothing rather than emitting it. Per kind, since the collection is the kind's.
-      const docs = await byId<{ _id: string }>(spaceCollection(mid, collectionForRefKind(kind)), [...ids],
+      const docs = await byId<{ _id: string }>(spaceCollection(mid, part), [...ids],
         { spaceId: mid, ...notFlaggedIfFile(kind) });
       for (const d of docs) out.set(String(d['_id']), { doc: d as unknown as EndpointDoc, kind });
     }
