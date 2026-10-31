@@ -208,4 +208,22 @@ describe('the reembed backfill converges (real MongoDB)', { skip }, () => {
     }
     assert.deepEqual([...queued].sort(), ['z-1', 'z-2'], 'every embeddable record was reached, and no suppressed one');
   });
+
+  it('a queue that refuses the jobs fails the call; it never reports records as queued that were not', async () => {
+    // The single enqueue a local write uses swallows its failure and warns; the repair went through it, so a broken queue answered
+    // `enqueued: N` with nothing queued, one warning per record.
+    await c(SPACE, 'facts').insertMany([fact(SPACE, 'q-1'), fact(SPACE, 'q-2')]);
+    const proto = Object.getPrototypeOf(c(SPACE, 'embed_jobs'));
+    const real = proto.updateOne;
+    proto.updateOne = function refusingJobs(...args) {
+      if (String(this.collectionName).endsWith('_embed_jobs')) return Promise.reject(new Error('simulated queue failure'));
+      return real.apply(this, args);
+    };
+    try {
+      await assert.rejects(reembed.reembedSpace(SPACE, { kinds: ['fact'] }), /simulated queue failure/,
+        'reembed answered as if the records were queued');
+    } finally {
+      proto.updateOne = real;
+    }
+  });
 });
