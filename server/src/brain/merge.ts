@@ -813,14 +813,8 @@ export async function executeMerge(
    * of re-embeds must not queue ahead of the writes people are waiting on. Never thrown: the merge is stored, and
    * reporting it failed would invite a retry of a merge whose absorbed entity no longer exists.
    */
-  // The survivor's own job, for the same reason and with the same rule: never thrown, the merge is stored.
-  if (survivorOwesJob) {
-    try {
-      await enqueueEmbedJob(spaceId, 'entity', survivor._id, { priority: EMBED_PRIORITY.write });
-    } catch (err) {
-      log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but the survivor's embed job was not queued: ${peerText(err)}`);
-    }
-  }
+  // The survivor's own job. The write lane never throws into the write it announces (it warns inside), so the stored merge is not reported failed.
+  if (survivorOwesJob) await enqueueEmbedJob(spaceId, 'entity', survivor._id, { priority: EMBED_PRIORITY.write });
   await settleRekeyedEmbeds(spaceId, written.rekeyed, (err) => {
     log.warn(`merge: '${peerText(absorbed._id)}' was merged into '${peerText(survivor._id)}' in '${peerText(spaceId)}', but the embed jobs of `
       + `${written.rekeyed.length} re-keyed edge(s) were not retired: ${peerText(err)}`);
