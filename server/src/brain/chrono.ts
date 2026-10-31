@@ -191,7 +191,11 @@ export async function createChrono(
 
   // Embed kind + status + title + description + tags + properties (best-effort)
   // Queued by default — see the note in `upsertEntity`. `matchedText` is stored either way.
-  const embedText = chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
+  // The text is the record the write STORES: on a converge the merge (see `saveFact`), exactly what the `$set` below writes.
+  const embedText = existing
+    ? chronoEmbedText(fields.title, fields.type, status, fields.description ?? existing.description,
+      mergeTags(existing.tags, tags), mergePropertiesOrKeep(existing.properties, fields.properties))
+    : chronoEmbedText(fields.title, fields.type, status, fields.description, tags, fields.properties);
   // Suppression wins over `waitForEmbedding` — see `embeddingSuppressedFor`. `matchedText` is stored either
   // way, which is the point: a suppressed record stays findable lexically and stops competing on meaning.
   //
