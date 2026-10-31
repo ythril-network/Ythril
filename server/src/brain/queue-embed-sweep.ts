@@ -18,8 +18,7 @@
  *    remove, which the worker then removes.
  *  - **The backfill's ONE walk** (`match: 'owed'`, {@link queueOwedSweep}): every candidate read once and put in exactly
  *    one outcome by the worker's own classifier (`embedOwed`), so a record is counted once and a drained space owes
- *    nothing on the next call. It replaced two walks (`vectorless`, `stale`) whose counts were summed and subtracted,
- *    and which a record with `embedding: null` fell between (Q-656).
+ *    nothing on the next call (Q-656).
  *  - **Textless derived records.** A face chunk or a converted copy has no text, the worker leaves it vectorless,
  *    and a backfill that queued it would queue it again on every call for ever. `derivedHasText` lives beside the
  *    text builder so the two cannot disagree; a textless row is a candidate only while it still holds a derived field
@@ -28,15 +27,15 @@
  *  - **The bulk enqueue**, which throws, so a batch that never landed is never reported as queued.
  *
  * It decides WHICH records; it never embeds. A derived record's ancestors (a chunk of a suppressed file) are not
- * expressible as a filter on the record: the backfill's walk reads them once per page (`fileEmbeddingSuppressedMany`),
- * the worker's own question; the reindex leaves them to the worker, one record at a time.
+ * expressible as a filter on the record: both walks ask the worker's own suppression question once per page
+ * (`recordSuppressedMany`).
  */
 
 import { col, asFilter } from '../db/mongo.js';
 import { COLLECTION, derivedHasText, buildEmbedTexts, embedOwed, type EmbedOwed } from './embed-record.js';
 import { enqueueEmbedJobs, type EmbedPriority } from './embed-queue.js';
 import {
-  embeddingSuppressedFor, fileEmbeddingSuppressedMany, recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD,
+  recordSuppressedMany, recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD,
 } from './suppress-embeddings.js';
 import { HOLDS_VECTOR, holdsVectorExpr } from './holds-vector.js';
 import { isSpillPath } from './spill-path.js';
@@ -256,10 +255,10 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
       batch = [];
       if (opts.onBatch) await opts.onBatch({ kind, lastId });
     };
-    // One page at a time, so a file page asks the file question (its two tiers, then its ancestors), the worker's own, once.
+    // One page at a time, so the suppression question (a file's two tiers, then its ancestors) is asked once per page.
     const settlePage = async (page: Array<Record<string, unknown>>): Promise<void> => {
       if (page.length === 0) return;
-      const fileSuppression = kind === 'file' ? await fileEmbeddingSuppressedMany(spaceId, page) : undefined;
+      const suppression = await recordSuppressedMany(spaceId, kind, page);
       for (const [i, doc] of page.entries()) {
         walked++;
         const id = doc['_id'];
@@ -269,9 +268,9 @@ export async function queueEmbedSweep(spaceId: string, opts: SweepOptions): Prom
           // per record, so a tier the query cannot express (a file's ancestors) still keeps a suppressed record out, unless it
           // holds a vector the worker must remove. An orphan chunk (its ancestor missing or flagged) awaits the chunk sweep:
           // not queued, and not "the setting is on" either.
-          const file = fileSuppression?.[i];
-          if (file === 'orphan') continue;
-          if (file !== undefined ? file !== null : embeddingSuppressedFor(spaceId, kind, doc)) { result.skippedSuppressed++; continue; }
+          const why = suppression[i];
+          if (why === 'orphan') continue;
+          if (why !== null) { result.skippedSuppressed++; continue; }
         }
         batch.push(id);
         if (batch.length >= WALK_BATCH) await flush();
@@ -337,7 +336,7 @@ function backfillOwes(verdict: EmbedOwed): boolean {
  *
  * The verdict cannot be a Mongo filter, so the walk READS every candidate of the space once per call (the vector projected out, in
  * batches of `WALK_BATCH`; per page, an edge page's endpoint names in one read per kind and a file page's ancestors in one walk,
- * `fileEmbeddingSuppressedMany`), and queues only the owed ones. `limit` caps what is queued, never what is read; the owed records
+ * `recordSuppressedMany`), and queues only the owed ones. `limit` caps what is queued, never what is read; the owed records
  * beyond the cap are counted into `remaining`, so nothing is capped silently.
  */
 async function queueOwedSweep(spaceId: string, opts: SweepOptions): Promise<SweepResult> {
@@ -360,19 +359,19 @@ async function queueOwedSweep(spaceId: string, opts: SweepOptions): Promise<Swee
     const settle = async (page: Array<Record<string, unknown>>): Promise<void> => {
       if (page.length === 0) return;
       const texts = await buildEmbedTexts(spaceId, kind, page);
-      // A file row asks the file question (its two tiers, then its ancestors), the worker's own, for the page at once.
-      const fileSuppression = kind === 'file' ? await fileEmbeddingSuppressedMany(spaceId, page) : undefined;
+      // The worker's own suppression question, for the page at once.
+      const suppression = await recordSuppressedMany(spaceId, kind, page);
       const owed: string[] = [];
       let staleOwed = 0;
       page.forEach((doc, i) => {
         const id = doc['_id'];
         if (typeof id !== 'string' || (kind === 'file' && isSpillPath(id))) return;
         const vectorPresent = doc['holdsVector'] === true;
-        const file = fileSuppression?.[i];
-        if (file === 'orphan' && !vectorPresent) return;
+        const why = suppression[i];
+        if (why === 'orphan' && !vectorPresent) return;
         const verdict = embedOwed({
           text: texts[i] ?? null,
-          suppressed: file !== undefined ? file !== null : embeddingSuppressedFor(spaceId, kind, doc),
+          suppressed: why !== null,
           vectorPresent,
           holdsDerived: doc['holdsDerived'] === true,
           matchedText: doc['matchedText'],

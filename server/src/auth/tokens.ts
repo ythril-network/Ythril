@@ -209,7 +209,7 @@ export async function createToken(opts: {
   /**
    * This token's own request quota per minute. Absent = inherit the instance value.
    *
-   * Validated by the CALLER against `rateLimitRefusal`, which owns the bounds and the instance ceiling.
+   * Validated by the CALLER against `rateLimitRefusalResponse`, which owns the bounds and the instance ceiling.
    * Not re-checked here for the same reason `rights` is not re-capped here: the check needs the env and the
    * caller's context, and a second copy of a rule infra owns is how the two answers drift.
    */
@@ -386,7 +386,7 @@ export function setTokenMfa(id: string, mfa: 'inherit' | 'exempt' | 'required'):
  * `setTokenMfa` uses for `inherit`. Writing the resolved number instead would freeze today's instance default
  * onto the token and stop it following a later change, which is a quota nobody set and nobody can see they set.
  *
- * The value is validated by the CALLER against `rateLimitRefusal`, which owns the bounds and the instance
+ * The value is validated by the CALLER against `rateLimitRefusalResponse`, which owns the bounds and the instance
  * ceiling. Re-checking here would be a second copy of a rule infra owns.
  */
 export function setTokenRateLimit(id: string, perMinute: number | null): boolean {

@@ -252,7 +252,7 @@ export const CreateTokenBody = z.object({
    * Deliberately NOT bounded here. The bounds and the instance ceiling live in
    * `rate-limit/per-token.ts`, which the create and the update route both ask, and a `z.number().max(…)` in this
    * schema would be a second copy of a number infra owns — the one that goes stale when the env changes.
-   * See `rateLimitRefusal`.
+   * See `rateLimitRefusalResponse`.
    */
   rateLimitPerMinute: z.number().int().optional(),
   /**
@@ -553,7 +553,7 @@ export const RenameTokenBody = z.object({
    * Deliberately NOT bounded here. The bounds and the instance ceiling live in
    * `rate-limit/per-token.ts`, which the create and the update route both ask, and a `z.number().max(…)` in this
    * schema would be a second copy of a number infra owns — the one that goes stale when the env changes.
-   * See `rateLimitRefusal`.
+   * See `rateLimitRefusalResponse`.
    */
   // `null` clears it, so the token inherits the instance value again: without it a quota set once could never be emptied (Q-473).
   rateLimitPerMinute: z.number().int().nullable().optional(),

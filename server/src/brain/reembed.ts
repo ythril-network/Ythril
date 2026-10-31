@@ -24,9 +24,8 @@
  * ## Each record is counted once
  *
  * The walk puts every record in exactly one outcome: owed (queued while the cap lasts, else `remaining`), `skippedSuppressed`, or
- * nothing, so `enqueued + remaining + skippedSuppressed` is the counted set and no count is ever subtracted. It replaced two walks
- * (`vectorless`, `stale`) whose counts were summed and subtracted, which a record with `embedding: null` fell between, and which
- * re-queued an orphan chunk or a chunk of a suppressed file on every call (Q-656).
+ * nothing, so `enqueued + remaining + skippedSuppressed` is the counted set and no count is ever subtracted; an orphan chunk or a chunk of a suppressed file is asked the file question the
+ * worker asks, so it is not queued again on every call (Q-656).
  *
  * ## It ENQUEUES, and does not embed
  *
