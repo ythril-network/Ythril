@@ -74,3 +74,15 @@ export async function derivedFieldsForWrite(input: DerivedWriteInput): Promise<D
   if (onto === 'insert') return { set: { matchedText: await input.text() }, unset: {} };
   return { set: {}, unset: {} };
 }
+
+/**
+ * Does the stored record still owe its embed job: is there a current text, and is the stored `matchedText` not it?
+ *
+ * The other half of the rule above: a writer that leaves the stored pair standing leaves a record whose text is stale
+ * until its job runs. The repair sweep (`reembed.ts`, its stale pass) queues on this answer and the dupe scanner holds a
+ * dismissed pair open on it; written twice, the two drifted on whether `undefined` (a text the batch could not build)
+ * counts. A record with no text to build owes nothing.
+ */
+export function textIsStale(stored: Record<string, unknown>, currentText: string | null | undefined): currentText is string {
+  return typeof currentText === 'string' && stored['matchedText'] !== currentText;
+}
