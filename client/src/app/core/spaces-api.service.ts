@@ -99,7 +99,8 @@ export class SpacesApi {
   }
 
   /**
-   * Queue embeddings for records in the space that have none — the way back from `suppressEmbeddings`.
+   * Queue embeddings for records in the space that have none, or whose stored text is stale (`stale`) — the way back
+   * from `suppressEmbeddings`, and the repair for an update whose embed job was lost.
    *
    * Unlike `rebuildSpaceIndexes` this is AWAITED for its counts rather than fire-and-forget: it only enqueues, so
    * it returns in the time it takes to scan, and `enqueued` / `remaining` are the answer the operator wants. A

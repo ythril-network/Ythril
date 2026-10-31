@@ -1197,7 +1197,7 @@
   "spaces.dangerZone.embeddingsSave": "Zapisz ustawienie osadzania",
   "spaces.dangerZone.embeddingsSaved": "Ustawienie osadzania zapisane.",
   "spaces.dangerZone.embeddingsBackfill": "Uzupełnij brakujące embeddingi",
-  "spaces.dangerZone.embeddingsBackfillBlocked": "Uzupełnianie jest niedostępne przy włączonym wstrzymaniu — każdy rekord zostałby pominięty. Najpierw wyłącz je i zapisz.",
+  "spaces.dangerZone.embeddingsBackfillBlocked": "Uzupełnianie jest niedostępne przy włączonym wstrzymaniu — żaden rekord nie dostałby wektora. Najpierw wyłącz je i zapisz.",
   "spaces.dangerZone.embeddingsBackfillDone": "Zakolejkowano {{enqueued}} rekordów do osadzenia. Proces trwa w tle.",
   "spaces.dangerZone.embeddingsBackfillMore": "{{remaining}} kolejnych wciąż wymaga osadzenia — uruchom ponownie, aby kontynuować.",
   "spaces.dangerZone.embeddingsBackfillStale": "{{stale}} z nich miało tekst do wyszukiwania starszy niż ich treść i zostaną osadzone ponownie.",
