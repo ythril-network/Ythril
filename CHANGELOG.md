@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.2.0] — 2026-10-31
+
+**A minor release: a token's request quota can be changed after it is created, two instances holding different copies of one record converge, and `reembed` repairs records whose vector no longer matches their text.**
+
+| Changes on upgrade | Action |
+|---|---|
+| Records whose embed job was lost, and records stored with an empty vector, are not found until `reembed` has run | After upgrading, run `POST /api/spaces/:id/reembed` once per space |
+| The space hash takes a link over its relationship; spaces with links disagree with a peer on an older version | Upgrade every instance of a network |
+
 ### Added
 
 - **Tokens:** an existing token's **Requests per minute** can be changed in Settings > Tokens, or emptied to inherit the instance value again; `PATCH /api/tokens/:id` takes `rateLimitPerMinute: null` to clear it. A value over the instance ceiling is refused with the same message as on create.
