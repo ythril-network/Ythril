@@ -39,6 +39,7 @@ import {
 } from './recall.js';
 import { computeMergePlan, applyResolutions, executeMerge, MergeSchemaViolation } from './merge.js';
 import { buildEmbedText } from './embed-record.js';
+import { textIsStale } from './derived-text-on-write.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import type { DupeCandidateDoc, DupeScanType, DupeActionRule } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
@@ -98,7 +99,7 @@ async function owesItsJob(spaceId: string, type: DupeScanType, id: string): Prom
     .findOne(asFilter<{ _id: string }>({ _id: id }), { projection: { embedding: 0 } }) as Record<string, unknown> | null;
   if (!doc) return false;
   const text = await buildEmbedText(spaceId, type, doc);
-  return text !== null && doc['matchedText'] !== text;
+  return textIsStale(doc, text);
 }
 
 /**

@@ -65,6 +65,7 @@
 import { col, asFilter } from '../db/mongo.js';
 import { COLLECTION, derivedHasText, buildEmbedTexts } from './embed-record.js';
 import { queueEmbedJob } from './embed-queue.js';
+import { textIsStale } from './derived-text-on-write.js';
 import {
   embeddingSuppressed, schemaKeyFor, recordSuppression, recordNotSuppressedFilter,
 } from './suppress-embeddings.js';
@@ -343,7 +344,7 @@ async function queueStaleRecords(
         const doc = page[i]!;
         const text = texts[i];
         const id = doc['_id'];
-        if (typeof id !== 'string' || text === null || text === undefined || doc['matchedText'] === text) continue;
+        if (typeof id !== 'string' || !textIsStale(doc, text)) continue;
         // Not owed: no vector and not suppressed — the vectorless walk queues it.
         if (doc['holdsVector'] !== true && !stillSuppressed(spaceId, kind, doc)) continue;
         // Owed and suppressed with no vector: the vectorless walk counted it as skipped too, so it is taken back from that count.
