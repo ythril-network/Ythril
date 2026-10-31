@@ -63,14 +63,19 @@ async function writeSuppressedFileText(spaceId: string, ids: readonly string[]):
   // Imported here, not at the top: `embed-record` reaches the inference host, which reaches the metrics registry, which
   // reaches this module through the file tombstones, and a static import is a runtime import cycle.
   const { buildEmbedTexts } = await import('../brain/embed-record.js');
+  const { dropFileVectors } = await import('../brain/suppression-sweep.js');
+  // Its passages are searched on their own vectors. The stray-filemeta fill sets the flag and removes none of them itself.
+  await dropFileVectors(spaceId, quiet.map(r => r._id));
   const texts = await buildEmbedTexts(spaceId, 'file', quiet as unknown as Array<Record<string, unknown>>);
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   for (let i = 0; i < quiet.length; i++) {
     const row = quiet[i]!;
     const text = texts[i];
     if (text === null || text === undefined) continue;
-    const { set } = await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' });
+    // The `$unset` too: the text with the vector still beside it is the pair the rule exists to refuse, and once the text is
+    // current no repair walk would find the row.
+    const { set, unset } = await derivedFieldsForWrite({ text: () => text, vector: null, suppressed: true, onto: 'stored' });
     await files.updateOne(asFilter<FileMetaDoc>(atReadSeq(row._id, readSeqOf(row as unknown as Record<string, unknown>)) as never),
-      asUpdate<FileMetaDoc>({ $set: set } as never));
+      asUpdate<FileMetaDoc>({ $set: set, ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}) } as never));
   }
 }
