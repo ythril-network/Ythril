@@ -165,9 +165,13 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
     assert.equal(d?.deletedAt, STAMPED_AT, 'the fill brought a deleted file back');
   });
 
-  it('a fill that retires a file from search queues the job that removes its vector', async () => {
-    assert.equal((await stored(SPACE, 'retire.md'))?.suppressEmbeddings, true);
-    assert.ok(await embedJob(SPACE, 'retire.md'), 'the vector of a retired file is never removed');
+  it('a fill that retires a file from search removes its vector and stores its own text', async () => {
+    // The vector goes in the fill itself (`storeSuppressedFileText`), not by the job the fill queues: with that enqueue failed,
+    // the row kept its vector beside a current text, and no repair walk finds such a row.
+    const row = await stored(SPACE, 'retire.md');
+    assert.equal(row?.suppressEmbeddings, true);
+    assert.equal(row.embedding, undefined, 'the vector of a retired file is never removed');
+    assert.equal(typeof row.matchedText, 'string', 'the retired file has no text for the lexical channel');
   });
 
   it('pin: a row a peer wrote keeps the normal seq accept, so a field the publisher removed is not restored', async () => {
