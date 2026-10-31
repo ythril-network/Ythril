@@ -55,6 +55,8 @@ const B = 'aaaaaaaa-0000-4000-8000-0000000c1942';
 let server, local, mongo, factMod, entMod, edgeMod, chronoMod, bulkMod, mergeMod;
 /** How many times the embedder was asked — the inline path's own witness, independent of what got stored. */
 let embedCalls = 0;
+/** The stub embedder answers 500 while set: an embedder outage during a write. */
+let embedderDown = false;
 
 const coll = (n) => mongo.col(`${SPACE}_${n}`);
 const jobsFor = (id) => coll('embed_jobs').countDocuments({ recordId: id });
@@ -175,6 +177,7 @@ describe('a record stored as suppressed stays suppressed when rewritten without 
       req.on('data', c => { body += c; });
       req.on('end', () => {
         embedCalls++;
+        if (embedderDown) { res.writeHead(500); res.end('{"error":"down"}'); return; }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: [{ embedding: Array.from({ length: DIMS }, (_, i) => (i === 0 ? 1 : 0)) }] }));
       });
@@ -262,6 +265,56 @@ describe('a record stored as suppressed stays suppressed when rewritten without 
     const absorbed = await coll('entities').findOne({ _id: X });
     await mergeMod.executeMerge(SPACE, survivor, absorbed, {});
     await assertStillSuppressed('entities', S, 'executeMerge');
+  });
+
+  /** A merge whose survivor holds a pair: two entities, the absorbed one carrying tags the survivor's text gains. */
+  async function seedMergePair(suffix, survivorExtra = {}) {
+    const S = `aaaaaaaa-0000-4000-8000-00000000${suffix}1`;
+    const X = `aaaaaaaa-0000-4000-8000-00000000${suffix}2`;
+    await coll('entities').insertMany([
+      { _id: S, spaceId: SPACE, name: 'Survivor', type: 'concept', tags: [], seq: 1, embedding: [1, 0, 0, 0], embeddingModel: 'old', matchedText: 'Survivor concept', ...survivorExtra },
+      { _id: X, spaceId: SPACE, name: 'Absorbed', type: 'concept', tags: ['gained'], seq: 1 },
+    ]);
+    return { S, survivor: await coll('entities').findOne({ _id: S }), absorbed: await coll('entities').findOne({ _id: X }) };
+  }
+
+  it('executeMerge stores the survivor\'s vector beside the text it was made from (Q-656)', async () => {
+    // The merge embedded the merged survivor and stored the vector beside the survivor's PREVIOUS text, so a word the absorbed
+    // record brought was not found by text search, and the repair's stale walk was the only thing that would ever fix it.
+    const { S, survivor, absorbed } = await seedMergePair('m1');
+    await mergeMod.executeMerge(SPACE, survivor, absorbed, {});
+    const doc = await coll('entities').findOne({ _id: S });
+    const { buildEmbedText } = await import('../../server/dist/brain/embed-record.js');
+    assert.ok(Array.isArray(doc.embedding) && doc.embeddingModel !== 'old', 'the merge made no new vector: this case asks nothing');
+    assert.equal(doc.matchedText, await buildEmbedText(SPACE, 'entity', doc), 'the new vector sits beside the survivor\'s old text');
+  });
+
+  it('executeMerge with the embedder down keeps the survivor\'s pair and queues its job (Q-656)', async () => {
+    const { S, survivor, absorbed } = await seedMergePair('m2');
+    embedderDown = true;
+    try {
+      await mergeMod.executeMerge(SPACE, survivor, absorbed, {});
+    } finally {
+      embedderDown = false;
+    }
+    const doc = await coll('entities').findOne({ _id: S });
+    assert.equal(doc.embeddingModel, 'old', 'the merge dropped or replaced the survivor\'s vector with no embedder');
+    assert.equal(doc.matchedText, 'Survivor concept', 'the old vector no longer sits beside the text it was made from');
+    assert.equal(await jobsFor(S), 1, 'nothing will ever embed the merged survivor: no job was queued');
+  });
+
+  it('executeMerge of a suppressed survivor that held a vector leaves it no vector, its own text, and no vector in the response (Q-656)', async () => {
+    // The merge wrote the survivor's content and left the vector the flag forbids beside it, and answered (and sent the webhook)
+    // with the stored document, vector included.
+    const { S, survivor, absorbed } = await seedMergePair('m3', { suppressEmbeddings: true });
+    const result = await mergeMod.executeMerge(SPACE, survivor, absorbed, {});
+    const doc = await coll('entities').findOne({ _id: S });
+    const { buildEmbedText } = await import('../../server/dist/brain/embed-record.js');
+    assert.equal(doc.embedding, undefined, 'a suppressed survivor keeps its vector after the merge');
+    assert.equal(doc.embeddingModel, undefined, 'a suppressed survivor keeps its vector\'s model after the merge');
+    assert.equal(doc.matchedText, await buildEmbedText(SPACE, 'entity', doc), 'a suppressed survivor has no searchable text of its merged content');
+    assert.equal('embedding' in result.entity, false, 'the merge response carries a vector the store no longer holds');
+    assert.equal('embeddingModel' in result.entity, false, 'the merge response carries the model of a vector the store no longer holds');
   });
 
   /** The seed is what the case says it is: stored suppressed, no vector, no job. */

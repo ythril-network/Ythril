@@ -121,6 +121,23 @@ describe('the batched embed text equals the text of each record', { skip }, () =
     }
   });
 
+  for (const kind of ['fact', 'entity', 'edge', 'chrono', 'file']) {
+    it(`${kind}: a document whose fields have the wrong type has a non-string marker, and the rest of the page keeps its own text (Q-656)`, async () => {
+      // A pull stores a record that fails its schema, so a page can hold `tags: 'x'`. The builder threw on it, and the arrival writer
+      // (a suppressed space's page) and the repair's walk both build a whole page at once: one such record failed the page on every
+      // cycle, and every reembed call of the space. The marker is neither a string (so nothing stores it as text) nor `null`
+      // (a derived row with no text by design): a record whose text could not be built is owed its job, whose failure is then visible.
+      const good = DOCS[kind][0];
+      const bad = { ...good, _id: `${good._id}-wrongtype`, tags: 'x' };
+      const texts = await embedRecord.buildEmbedTexts(SPACE, kind, [bad, good]);
+      assert.equal(texts.length, 2, 'one answer per document, in order');
+      assert.notEqual(typeof texts[0], 'string', 'the wrong-typed document was given a text');
+      assert.notEqual(texts[0], null, 'a document whose text could not be built is not a textless one');
+      assert.notEqual(texts[0], undefined, 'a document whose text could not be built has an answer');
+      assert.equal(texts[1], await embedRecord.buildEmbedText(SPACE, kind, good), 'the good document lost its text to the bad one');
+    });
+  }
+
   it('an empty page is an empty answer, and a page of one edge is the one-document answer', async () => {
     assert.deepEqual(await embedRecord.buildEmbedTexts(SPACE, 'edge', []), []);
     const [one] = await embedRecord.buildEmbedTexts(SPACE, 'edge', [EDGES[1]]);
