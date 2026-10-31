@@ -50,7 +50,7 @@ export interface AuditChange {
  *
  * **Add a field only after checking it cannot carry a credential**, including indirectly — a webhook URL
  * can embed one in userinfo or a query string, which is why webhook routes are absent rather than
- * partially listed. Deliberately omitted for now: everything token.*, webhook.*, and any model/provider
+ * partially listed. Deliberately omitted for now: token.create and token.regenerate (the secret is the value), webhook.*, and any model/provider
  * config that sits next to an API key.
  */
 export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = {
@@ -61,13 +61,15 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // Its snapshot is built through `unknownWriteFieldsMode` (`spaces/meta-update.ts`), so the value here is always `warn` or `refuse`.
   'space.update': ['label', 'purpose', 'validationMode', 'strictLinkage', 'dupeRulesOnInsert', 'dupeMergeSurvivor', 'stampSkew.warnMinutes', 'unknownWriteFields'],
   'space.rename': ['id'],
-  // Token metadata ONLY, and only what this route can actually change: `PATCH /api/tokens/:id` renames.
+  // Token metadata ONLY, and only what this route can actually change: `PATCH /api/tokens/:id` edits the name, rights, second-factor exemption and request quota.
   // Never `hash` or `prefix`; `token.create` and `token.regenerate` are absent entirely, because the
   // interesting value there IS the secret.
   // `rights` joined `name` when PATCH gained the ability to edit the matrix. Without it a rights change —
   // the single most security-relevant edit this route can make — would be applied and leave no trace in the
   // audit log, while a rename beside it did.
-  'token.update': ['name', 'rights'],
+  // `mfa` and `rateLimitPerMinute` too: the route snapshots both on both sides, and dropped here an exemption or a quota change
+  // was an audit row with no change in it.
+  'token.update': ['name', 'rights', 'mfa', 'rateLimitPerMinute'],
   // Media levels and extraction mode: the settings that decide what gets processed and what leaves the
   // instance. The provider blocks in the same payload carry API keys and are NOT listed.
   'config.media.update': ['levels.images', 'levels.audio', 'levels.video', 'levels.text', 'documentProcessing.mode'],

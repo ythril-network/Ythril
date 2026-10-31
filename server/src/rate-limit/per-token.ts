@@ -23,7 +23,7 @@
  *
  * `record > instance > default`, the same shape as `ttlDays` and `suppressEmbeddings`:
  *
- *   1. the token's own `rateLimitPerMinute`, set by an instance admin;
+ *   1. the token's own `rateLimitPerMinute`, set by an instance admin, or a space admin for a token in scope;
  *   2. `YTHRIL_RATE_LIMIT_PER_MINUTE`, set by infra;
  *   3. `DEFAULT_PER_MINUTE`, which is the number the global limiter has always used — so an instance that sets
  *      nothing behaves exactly as it does today.
