@@ -566,7 +566,7 @@ export const RenameTokenBody = z.object({
   ...Object.fromEntries(ECHOABLE_FIELDS.map(f => [f, z.unknown()])),
 }).strict();
 
-// PATCH /api/tokens/:id — rename a token's label (only) — admin + MFA
+// PATCH /api/tokens/:id — edit a token's name, rights, second-factor exemption or rate-limit quota — admin + MFA
 tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
   const parsed = RenameTokenBody.safeParse(stripServerOwnedToken(req.body));
   if (!parsed.success) {
@@ -623,6 +623,20 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
   if (name === undefined && rights === undefined && mfa === undefined && rateLimitPerMinute === undefined) {
     res.status(400).json({ error: 'Provide `name`, `rights`, `mfa`, `rateLimitPerMinute`, or any combination' });
     return;
+  }
+
+  /*
+   * Same shared refusal as the create path, and the same status split: `403` when the instance ceiling is
+   * what refuses, `400` when the value itself is malformed. One function, two surfaces, one answer. Checked before
+   * anything is written AND before the second-factor code below is verified: a refused quota must neither rename
+   * the token (a new name beside an over-ceiling quota used to rename it and answer 403) nor spend a one-time code.
+   */
+  if (rateLimitPerMinute !== undefined) {
+    const refusal = rateLimitRefusal(rateLimitPerMinute);
+    if (refusal) {
+      res.status(refusal.includes('instance ceiling') ? 403 : 400).json({ error: refusal });
+      return;
+    }
   }
 
   // The same live-code rule create has. `requireAdminMfa` is satisfied by an admin token that is itself
@@ -689,16 +703,7 @@ tokensRouter.patch('/:id', requireAdminOrSpaceAdminMfa, (req, res) => {
     res.status(404).json({ error: 'Token not found' });
     return;
   }
-  /*
-   * Same shared refusal as the create path, and the same status split: `403` when the instance ceiling is
-   * what refuses, `400` when the value itself is malformed. One function, two surfaces, one answer.
-   */
   if (rateLimitPerMinute !== undefined) {
-    const refusal = rateLimitRefusal(rateLimitPerMinute);
-    if (refusal) {
-      res.status(refusal.includes('instance ceiling') ? 403 : 400).json({ error: refusal });
-      return;
-    }
     if (!setTokenRateLimit(id, rateLimitPerMinute)) {
       res.status(404).json({ error: 'Token not found' });
       return;

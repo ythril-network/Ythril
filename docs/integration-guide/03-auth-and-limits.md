@@ -273,7 +273,7 @@ and `filter`'s `limit` (documented "not capped" — what is **read** is bounded 
 
 Added in 3.3.0. The number a token gets is resolved in this order:
 
-1. the token's own `rateLimitPerMinute`, set by an instance admin;
+1. the token's own `rateLimitPerMinute`, set by an instance admin, or by a space admin for a token in scope;
 2. `YTHRIL_RATE_LIMIT_PER_MINUTE`, set by whoever runs the instance;
 3. **300 / min**, which is what the global limiter has always allowed.
 
