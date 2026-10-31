@@ -30,13 +30,15 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, balancedFrom } from './_structural-window.mjs';
 
-let resolveLimitFor, rateLimitRefusal, instanceCeiling, DEFAULT_PER_MINUTE, MAX_PER_MINUTE;
+let resolveLimitFor, rateLimitRefusalResponse, instanceCeiling, DEFAULT_PER_MINUTE, MAX_PER_MINUTE;
 
+/** The refusal sentence a door would send, or `null` when the value is acceptable. */
+const refusalText = (requested) => rateLimitRefusalResponse(requested)?.error ?? null;
 const ENV = 'YTHRIL_RATE_LIMIT_PER_MINUTE';
 const original = process.env[ENV];
 
 before(async () => {
-  ({ resolveLimitFor, rateLimitRefusal, instanceCeiling, DEFAULT_PER_MINUTE, MAX_PER_MINUTE } =
+  ({ resolveLimitFor, rateLimitRefusalResponse, instanceCeiling, DEFAULT_PER_MINUTE, MAX_PER_MINUTE } =
     await import('../../server/dist/rate-limit/per-token.js'));
 });
 
@@ -94,21 +96,21 @@ describe('which number applies', () => {
 
 describe('what an admin may set', () => {
   it('absent is always fine — it is the default state', () => {
-    assert.equal(rateLimitRefusal(undefined), null);
-    assert.equal(rateLimitRefusal(null), null);
+    assert.equal(refusalText(undefined), null);
+    assert.equal(refusalText(null), null);
   });
 
   it('a sane number with no ceiling set is accepted', () => {
-    assert.equal(rateLimitRefusal(1), null);
-    assert.equal(rateLimitRefusal(10_000), null);
+    assert.equal(refusalText(1), null);
+    assert.equal(refusalText(10_000), null);
   });
 
   it('a non-integer or out-of-range value is refused, and says which', () => {
     for (const bad of [1.5, '100', {}, true]) {
-      assert.match(String(rateLimitRefusal(bad)), /whole number/, `${JSON.stringify(bad)} was accepted`);
+      assert.match(String(refusalText(bad)), /whole number/, `${JSON.stringify(bad)} was accepted`);
     }
-    assert.match(String(rateLimitRefusal(0)), /between/);
-    assert.match(String(rateLimitRefusal(MAX_PER_MINUTE + 1)), /between/);
+    assert.match(String(refusalText(0)), /between/);
+    assert.match(String(refusalText(MAX_PER_MINUTE + 1)), /between/);
   });
 
   it('THE POINT: above the infra ceiling is REFUSED, not clamped', () => {
@@ -119,7 +121,7 @@ describe('what an admin may set', () => {
      * `.strict()` comment in `api/tokens.ts` exists for, one field over.
      */
     process.env[ENV] = '50';
-    const refusal = rateLimitRefusal(500);
+    const refusal = refusalText(500);
     assert.ok(refusal, 'a value above the ceiling must be refused');
     assert.match(refusal, /exceeds the instance ceiling of 50/, 'the refusal must NAME the ceiling');
     assert.match(refusal, new RegExp(ENV), 'and name the env var, so the reader knows who owns it');
@@ -128,12 +130,12 @@ describe('what an admin may set', () => {
 
   it('at the ceiling exactly is fine — the bound is inclusive', () => {
     process.env[ENV] = '50';
-    assert.equal(rateLimitRefusal(50), null);
+    assert.equal(refusalText(50), null);
   });
 
   it('and with no ceiling set, a large value is not refused for that reason', () => {
     // Infra not having an opinion is not the same as infra saying no.
-    assert.equal(rateLimitRefusal(100_000), null);
+    assert.equal(refusalText(100_000), null);
   });
 });
 
@@ -154,7 +156,6 @@ describe('a refused quota carries its status with it (Q-656)', () => {
     process.env[ENV] = '50';
     const over = rateLimitRefusalResponse(500);
     assert.equal(over?.status, 403);
-    assert.equal(over?.error, rateLimitRefusal(500), 'the string form and the response carry one message');
     assert.equal(rateLimitRefusalResponse(50), null);
   });
 
@@ -162,7 +163,7 @@ describe('a refused quota carries its status with it (Q-656)', () => {
     const routes = stripComments(readFileSync('server/src/api/tokens.ts', 'utf8'));
     assert.doesNotMatch(routes, /includes\(\s*['"]instance ceiling['"]\s*\)/, 'a door matches the refusal text to choose its status');
     assert.equal(routes.match(/\brateLimitRefusalResponse\(/g)?.length, 2, 'the create and the update door each ask rateLimitRefusalResponse');
-    assert.doesNotMatch(routes, /\brateLimitRefusal\(/, 'a door asks the string form and decides the status itself');
+    assert.doesNotMatch(stripComments(readFileSync('server/src/rate-limit/per-token.ts', 'utf8')), /\bfunction rateLimitRefusal\(/, 'a string-only form of the refusal is back: a door that asks it decides the status itself');
   });
 });
 

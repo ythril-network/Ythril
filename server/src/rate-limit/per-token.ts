@@ -73,20 +73,13 @@ export const MIN_PER_MINUTE = 1;
 export const MAX_PER_MINUTE = 1_000_000;
 
 /**
- * Why a requested per-token limit is unacceptable, or `null` when it is fine.
+ * Why a requested per-token limit is unacceptable, with the status a door answers it with, or `null` when it is fine.
  *
  * One function so the create and the update route cannot disagree (no MCP tool writes a token) — the y-flows convention `convention-find-every-instance` names one
- * rule with two implementations, and here the weaker one would be handing out quota nobody granted. The message
- * is returned rather than thrown so each surface can attach it to its own status code.
- */
-export function rateLimitRefusal(requested: unknown): string | null {
-  return rateLimitRefusalResponse(requested)?.error ?? null;
-}
-
-/**
- * {@link rateLimitRefusal} with the status a door answers it with: `403` when the instance ceiling refuses (the request is
- * well-formed and the caller may not ask for that number, as a pinned media-config field answers), `400` when the value itself is
- * malformed. The status belongs to the refusal's KIND, decided here: the create and the update route each matched the message text
+ * rule with two implementations, and here the weaker one would be handing out quota nobody granted. The refusal
+ * is returned rather than thrown so each surface sends it in its own envelope. The status is `403` when the instance ceiling refuses
+ * (the request is well-formed and the caller may not ask for that number, as a pinned media-config field answers), `400` when the
+ * value itself is malformed. The status belongs to the refusal's KIND, decided here: the create and the update route each matched the message text
  * (`includes('instance ceiling')`), so rewording the message would have changed a status on one door and not the other (Q-656).
  */
 export function rateLimitRefusalResponse(requested: unknown): { status: 400 | 403; error: string } | null {

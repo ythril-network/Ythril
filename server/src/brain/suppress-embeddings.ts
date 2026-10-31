@@ -292,6 +292,26 @@ export async function fileEmbeddingSuppressedMany(
 }
 
 /**
+ * The suppression question of ANY record kind, for a page of stored documents of one kind, in order: the worker's, the reindex
+ * walk's and the backfill walk's one answer.
+ *
+ * A FILE row asks the file question (its two tiers, then its ancestors, read for the page in one walk) and may be `orphan`; every
+ * other kind has no ancestors, so `embeddingSuppressedFor` answers and the result is `suppressed` or `null`. The kind split is written
+ * here and nowhere else (`suppression-is-asked-through-one-module` holds the callers to it): three sites each wrote
+ * `kind === 'file' ? fileQuestion : recordQuestion`, and a fourth that forgot the file half would re-queue a chunk of a suppressed
+ * file on every call for ever.
+ */
+export async function recordSuppressedMany(
+  spaceId: string,
+  kind: BrainEmbedRecordType,
+  docs: ReadonlyArray<Record<string, unknown>>,
+): Promise<FileSuppression[]> {
+  if (kind === 'file') return fileEmbeddingSuppressedMany(spaceId, docs);
+  const meta = getSpaceMeta(spaceId);
+  return docs.map(doc => (embeddingSuppressedFor(spaceId, kind, doc, meta) ? 'suppressed' : null));
+}
+
+/**
  * {@link fileEmbeddingSuppressed} for the file a JOB was claimed for, which is all a producer is given: its id.
  *
  * The row is read HERE, so a producer cannot decide from a copy it kept across the job. **A row that is not there

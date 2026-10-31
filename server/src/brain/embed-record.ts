@@ -23,7 +23,7 @@ import { embed } from './embedding.js';
 import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText } from './embed-text.js';
 import { resolveEdgeEndpointNames, resolveEndpointNames } from './edge-endpoint-names.js';
 import { edgeEndpointKind } from './entity-refs.js';
-import { embeddingSuppressedFor, fileEmbeddingSuppressed } from './suppress-embeddings.js';
+import { recordSuppressedMany } from './suppress-embeddings.js';
 import { isTransientEmbedError } from './embed-queue.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
@@ -218,11 +218,11 @@ export type EmbedOwedReason = 'stale' | 'vectorless' | 'suppressed-vector' | 'cl
  */
 export type EmbedOwed =
   | { outcome: 'unbuildable' }
-  | { outcome: 'textless'; reason?: 'clear-derived' }
+  | { outcome: 'textless'; reason?: Extract<EmbedOwedReason, 'clear-derived'> }
   | { outcome: 'settled' }
-  | { outcome: 'writeLexical'; reason: 'stale' | 'suppressed-vector' }
+  | { outcome: 'writeLexical'; reason: Extract<EmbedOwedReason, 'stale' | 'suppressed-vector'> }
   | { outcome: 'unchanged' }
-  | { outcome: 'embed'; reason: 'stale' | 'vectorless' | 'model' | 'rebuild' };
+  | { outcome: 'embed'; reason: Extract<EmbedOwedReason, 'stale' | 'vectorless' | 'model' | 'rebuild'> };
 
 /** What {@link embedOwed} reads of a record. The vector itself is not needed, only whether it holds one (`holdsVector`). */
 export interface EmbedOwedInput {
@@ -241,8 +241,8 @@ export interface EmbedOwedInput {
 /**
  * The worker's classifier: what `embedStoredRecord` does with a record, as a value. The worker switches on it, and the backfill's
  * walk (`queue-embed-sweep.ts`) counts from it, so a record the walk owes is exactly a record the worker settles and a drained
- * space owes nothing on the next call by construction (Q-656). A second copy of this table in the walk is how `embedding: null`
- * came to be queued by neither of the backfill's two walks.
+ * space owes nothing on the next call by construction (Q-656). A second copy of this table in the walk would let the two
+ * disagree about which record is owed.
  *
  * A vectorless record that is not suppressed is `vectorless`, never `stale`: `stale` names a record that holds a vector, or is
  * suppressed, whose stored text is not its current text (the backfill's `stale` count). Whether the text is stale is
@@ -379,11 +379,9 @@ export async function embedStoredRecord(
   // `matchedText` is what the lexical channel searches, so it is rewritten on EVERY outcome, not only when a vector is
   // stored (`Q-94`). Left as it was, a suppressed record kept matching the text it held when suppression began — a
   // deleted property went on being found, and shown as the record's matched text.
-  // A FILE row asks the file question (its two tiers, then its ancestors); every other kind has no ancestors. A textless
-  // row is not asked: its answer does not depend on it, and the file question costs an ancestor read.
-  const suppressed = text === null ? false : recordType === 'file'
-    ? await fileEmbeddingSuppressed(spaceId, doc)
-    : embeddingSuppressedFor(spaceId, recordType, doc);
+  // The suppression question is `recordSuppressedMany`'s, the one the walks ask too. A textless row is not asked: its answer
+  // does not depend on it, and the file question costs an ancestor read.
+  const suppressed = text === null ? false : (await recordSuppressedMany(spaceId, recordType, [doc]))[0] !== null;
 
   // Every successful update enqueues an embed job, unconditionally and for good reasons — the enqueue is also
   // how the `suppressEmbeddings` toggle takes effect, and how a stale inline embed was eliminated. But most

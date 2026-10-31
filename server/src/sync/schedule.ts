@@ -58,7 +58,7 @@ export function resolveSyncCron(schedule: string): string | null {
 /**
  * Why this schedule cannot be saved, or `null` when it can.
  *
- * Same shape as `rateLimitRefusal`: one function both routes call, returning the sentence a caller is shown.
+ * Same shape as `rateLimitRefusalResponse`: one function both routes call, returning the sentence a caller is shown.
  * An empty or absent value is ALLOWED — clearing the field is how an operator turns scheduling off, and
  * refusing it would take away the only way back to manual sync.
  *

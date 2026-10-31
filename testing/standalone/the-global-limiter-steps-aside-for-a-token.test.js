@@ -3,7 +3,7 @@
  *
  * ## The defect
  *
- * `rateLimitPerMinute` is a real per-token field: validated once for both doors by `rateLimitRefusal`, with
+ * `rateLimitPerMinute` is a real per-token field: validated once for both doors by `rateLimitRefusalResponse`, with
  * `YTHRIL_RATE_LIMIT_PER_MINUTE` as an instance ceiling, and enforced by `tokenRateLimit` — which IS mounted,
  * inside `requireAuth`, where the token record finally exists to read the number off.
  *
