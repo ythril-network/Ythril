@@ -386,3 +386,25 @@ describe('audit changes — file meta and entity merge (the two held back from s
       'the before-snapshot must come from the ABSORBED entity');
   });
 });
+
+describe('audit changes — a token edit records every field its route snapshots', () => {
+  before(async () => {
+    ({ auditChanges, AUDIT_CHANGE_FIELDS } = await import('../../server/dist/audit/audit-changes.js'));
+  });
+
+  it('each key of the PATCH /api/tokens/:id snapshot is recorded when it changes', () => {
+    // The route snapshotted the second factor and the quota on both sides and said so; the allowlist kept `name` and `rights`,
+    // so a quota or an exemption change was stored as an audit row with no change at all. Derived from the route, so a field
+    // the snapshot gains is held to the same rule.
+    const src = readFileSync('server/src/api/tokens.ts', 'utf8');
+    const route = src.slice(src.indexOf("tokensRouter.patch('/:id'"));
+    const snapshot = route.match(/req\.auditSnapshots = \{\s*before: \{([^}]*)\}/);
+    assert.ok(snapshot, 'the token PATCH route no longer builds a before snapshot: re-derive');
+    const keys = [...snapshot[1].matchAll(/(\w+):/g)].map(m => m[1]);
+    assert.ok(keys.length >= 3, `only ${keys.length} snapshot key(s) found: ${keys}`);
+    const before = Object.fromEntries(keys.map(k => [k, 'was']));
+    const after = Object.fromEntries(keys.map(k => [k, 'now']));
+    const recorded = auditChanges('token.update', before, after).map(c => c.field).sort();
+    assert.deepEqual(recorded, [...keys].sort(), 'a snapshotted field is dropped by AUDIT_CHANGE_FIELDS[\'token.update\']');
+  });
+});
