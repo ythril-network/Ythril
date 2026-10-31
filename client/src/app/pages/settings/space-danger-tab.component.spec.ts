@@ -240,6 +240,22 @@ describe('the embedding suppression section', () => {
     }
   });
 
+  it('says the records still owed in the plural form of their count, read from the real English (Q-656)', () => {
+    // The "N more records" line has a noun after the count, so it is read through the plural mechanism like the other counted
+    // lines: a count of 1 is "1 more record ... owes", not "1 more records ... owe". The words are the shipped English, not markers.
+    const en = JSON.parse(readFileSync(resolve(__dirname, '../../../../public/assets/i18n/en.json'), 'utf8')) as Record<string, string>;
+    const more = Object.fromEntries(Object.entries(en).filter(([k]) => k.startsWith('spaces.dangerZone.embeddingsBackfillMore')));
+    expect(Object.keys(more).length, 'the English file has no plural forms of the line').toBeGreaterThan(0);
+    const h = setup(true, {}, more);
+    const lineFor = (remaining: number): string => {
+      const lines = (h.c as unknown as { backfillLines(r: unknown): string[] }).backfillLines(
+        { spaceId: 'proj', enqueued: 5, skippedSuppressed: 0, byKind: { fact: 5 }, stale: 0, remaining, truncated: true });
+      return lines.find(l => l.includes('still ')) ?? '';
+    };
+    expect(lineFor(1)).toMatch(/^1 more record still owes work/);
+    expect(lineFor(2)).toMatch(/^2 more records still owe work/);
+  });
+
   it('keeps the backfill result, because the counts ARE the answer', () => {
     const h = withMeta({});
     return h.c.backfill().then(() => {
