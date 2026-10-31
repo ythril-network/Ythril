@@ -124,6 +124,28 @@ describe('unregistered-local-files', () => {
     }
   });
 
+  it('a path rule written ABOVE a catch-all registers its place, and a stray beside it is still reported (Q-656)', () => {
+    // `git check-ignore -v` names the LAST rule that matches, so with `cfg/*/token.txt` above `*.txt` every such file was reported as
+    // hidden "only by the catch-all": the repository's own testing/sync/configs/*/token.txt files, which a specific rule names.
+    const ordered = makeScratchRepo({ prefix: 'unregistered-local-files-order-' });
+    try {
+      write(ordered, '.gitignore', ['# the place rule first, the catch-all after it', 'cfg/*/token.txt', '*.txt', ''].join('\n'));
+      write(ordered, 'tracked.md');
+      ordered.git('add', '.gitignore', 'tracked.md');
+      ordered.git('commit', '-q', '-m', 'seed');
+      write(ordered, 'cfg/a/token.txt');
+      const registered = runScript(['--root', ordered.dir]);
+      assert.equal(registered.status, 0, `cfg/a/token.txt is named by a rule of its own and was reported:\n${registered.out}`);
+      write(ordered, 'stray.txt');
+      const strayed = runScript(['--root', ordered.dir]);
+      assert.equal(strayed.status, 1, strayed.out);
+      assert.match(strayed.out, /stray\.txt/);
+      assert.doesNotMatch(strayed.out, /token\.txt/, 'the registered file is reported beside the stray');
+    } finally {
+      ordered.cleanup();
+    }
+  });
+
   it('reads the real .gitignore and derives its catch-all rules, with a floor', () => {
     const r = runScript(['--root', REPO_ROOT, '--catch-all']);
     assert.equal(r.status, 0, r.out);
