@@ -17,7 +17,7 @@
  * - the answer bodies: `SpaceActFailureAnswer.body` and `queuedActBody`'s return type (`spaces/space-act-failure.ts`), every `body`
  *   literal of `deletionAnswer` (`spaces/space-deletion.ts`), every `.json({...})` of the admin wipe route (`app.ts`) -> the client's
  *   `SpaceActBody`;
- * - `ActEntryView` (`spaces/space-act-runner.ts`) -> the client's `ActEntryView` (a space's `actPending`);
+ * - `ActEntryView` (`spaces/space-act-contract.ts`) -> the client's `ActEntryView` (a space's `actPending`);
  * - `networkAnswer`'s `owedSpaceActs` entries and the keys it adds to the view (`networks/network-acts.ts`) -> the client's
  *   `OwedSpaceAct` (with `ActEntryView`) and `Network`;
  * - `Space` must declare `actPending`.
@@ -119,8 +119,8 @@ const wipeKeys = (() => {
   return union(...literalsAfter(route, /\.json\(\s*\{/g).map(l => literalKeys(l, route)));
 })();
 
-const runnerSrc = readRepoSource('server/src/spaces/space-act-runner.ts');
-const entryKeys = interfaceKeys(runnerSrc, 'ActEntryView');
+const contractSrc = readRepoSource('server/src/spaces/space-act-contract.ts');
+const entryKeys = interfaceKeys(contractSrc, 'ActEntryView');
 
 const networkActsSrc = readRepoSource('server/src/networks/network-acts.ts');
 const networkAnswerText = functionText(networkActsSrc, 'networkAnswer');
