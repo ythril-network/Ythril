@@ -438,20 +438,26 @@ async function* elementsOf(file: string, key: string, fam: FamilyIndex): AsyncGe
   scanner.end();
 }
 
+/** The most document bytes one page holds by default: a page of large documents closes before its count does (bundle-40 P1). */
+export const PAGE_MAX_BYTES = 32 * 1024 * 1024;
+
 /**
- * The documents of `family` that land, parsed, in body order, `pageSize` (default 500) at a time: only the winning copy of a repeated id
- * ({@link indexExportBody}). Nothing for a family the body does not hold.
+ * The documents of `family` that land, parsed, in body order, a page at a time: a page closes at `pageSize` documents (default 500) or once its
+ * documents' bytes reach `pageBytes` (default {@link PAGE_MAX_BYTES}), whichever comes first, so 500 documents of 10 MB are never one page on
+ * the heap. Only the winning copy of a repeated id ({@link indexExportBody}). Nothing for a family the body does not hold.
  */
 export async function* readFamilyPages(
-  file: string, index: ExportBodyIndex, family: string, { pageSize = 500 }: { pageSize?: number } = {},
+  file: string, index: ExportBodyIndex, family: string, { pageSize = 500, pageBytes = PAGE_MAX_BYTES }: { pageSize?: number; pageBytes?: number } = {},
 ): AsyncGenerator<unknown[]> {
   const fam = index.families.get(family);
   if (!fam || fam.count === 0) return;
   let page: unknown[] = [];
-  for await (const [i, bytes] of elementsOf(file, family, fam)) {
+  let bytes = 0;
+  for await (const [i, raw] of elementsOf(file, family, fam)) {
     if (fam.keep !== null && fam.keep[i] !== 1) continue;
-    page.push(JSON.parse(bytes.toString('utf8')));
-    if (page.length >= pageSize) { yield page; page = []; }
+    page.push(JSON.parse(raw.toString('utf8')));
+    bytes += raw.length;
+    if (page.length >= pageSize || bytes >= pageBytes) { yield page; page = []; bytes = 0; }
   }
   if (page.length > 0) yield page;
 }
