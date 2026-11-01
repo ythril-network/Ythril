@@ -877,7 +877,9 @@ export async function resumeSpaceActs(now: number = Date.now()): Promise<void> {
   await eachSpace('Resume of space acts', [...bySpace.keys()], async (spaceId) => {
     for (const id of bySpace.get(spaceId) ?? []) {
       const r = await runSpaceAct(id, { via: 'resume' });
-      if (!r.ok && !r.interrupted && !r.refused) throw r.cause ?? new Error(r.error);
+      // An act that failed for good (its input is gone) has ended: its entry left, its failure is said by the completion, and the walk
+      // must not report it as a space's failure "retried next cycle" (CI run 41329371938 said so of an import whose spool was gone).
+      if (!r.ok && !r.interrupted && !r.refused && readEntry(id)) throw r.cause ?? new Error(r.error);
     }
   }, { limit: bySpace.size });
 }
