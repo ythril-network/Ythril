@@ -90,7 +90,8 @@ export const HELP_DOCS = [
       // A personal view is a token's own read lens over spaces it reaches (Q-531); it is not a space, so it is its own part.
       'integration-guide/06d-personal-views.md',
       'integration-guide/07-tokens-api.md', 'integration-guide/08-networks-api.md', 'integration-guide/08a-invite-api.md',
-      'integration-guide/09-sync-api.md', 'integration-guide/10-mfa-and-conflicts.md',
+      'integration-guide/09-sync-api.md', 'integration-guide/09a-sync-file-metadata.md',
+      'integration-guide/10-mfa-and-conflicts.md',
       'integration-guide/11-setup-api.md', 'integration-guide/12-admin-api.md',
       // Backups, restore, maintenance and migrate came out of 12 when that page reached its ceiling (Q-564): a seam of its own.
       'integration-guide/12a-data-management-api.md',

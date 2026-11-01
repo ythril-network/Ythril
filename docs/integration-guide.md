@@ -24,7 +24,7 @@ stands on its own.
 8. [Networks API](integration-guide/08-networks-api.md)
    [Invite API](integration-guide/08a-invite-api.md)
 9. [Notify & Sync APIs](integration-guide/09-sync-api.md)
-   Sync API
+   Sync API · [File Metadata Replication](integration-guide/09a-sync-file-metadata.md)
 10. [MFA & Conflicts APIs](integration-guide/10-mfa-and-conflicts.md)
    Conflicts API
 11. [Setup API](integration-guide/11-setup-api.md) — first-run setup, health and readiness probes, and the
