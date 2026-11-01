@@ -22,6 +22,7 @@
  */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { untilAuditWritesLanded } from './_audit-rows.mjs';
 
 /** One act entry as the design's §2.6 spells it; `over` replaces fields. */
 export function actEntry(over = {}) {
@@ -147,8 +148,13 @@ export async function metricSample(name, labels = {}) {
   return total;
 }
 
-/** Audit rows of one `operation`, polled until `atLeast` exist (the audit write is queued, not awaited), bounded by turns. */
+/**
+ * Audit rows of one `operation`, read once every audit insert already on the wire has landed, then polled until `atLeast` exist (an
+ * insert not yet started), bounded by turns. The wait comes first: `atLeast` alone is met by a row an earlier test of the file left,
+ * and the read then misses the row of the act under test (CI run 41329371938).
+ */
 export async function auditRowsOf(mongo, operation, { atLeast = 1, maxTurns = 3000 } = {}) {
+  await untilAuditWritesLanded();
   let rows = [];
   for (let i = 0; i < maxTurns; i++) {
     rows = await mongo.col('audit_log').find({ operation }).toArray();
