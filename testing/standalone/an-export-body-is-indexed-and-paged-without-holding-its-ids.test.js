@@ -100,6 +100,21 @@ describe('an export body is indexed and paged without holding its ids (the expor
     assert.equal(docs.length, 3 + 200, 'a document was lost or yielded twice');
   });
 
+  it('a page of large documents closes on its bytes before its count: 400 documents of 100 KB are more than one page', async () => {
+    // bundle-40 P1: pages were bounded by count only, so 500 documents of 10 MB were one page of 5 GB on the heap. The reader's default page
+    // (500 documents, about 32 MiB) is what the import asks for; 400 documents of 100 KB are under the count and about 40 MB.
+    await load();
+    const PAD = 100 * 1024;
+    const facts = Array.from({ length: 400 }, (_, i) => ({ ...doc(`large-${i}`, i + 1), fact: 'x'.repeat(PAD) }));
+    const file = spoolOf('large.json', body(facts));
+    const index = await mod.indexExportBody(file);
+    const pages = [];
+    for await (const page of mod.readFamilyPages(file, index, 'facts')) pages.push(page.reduce((n, d) => n + JSON.stringify(d).length, 0));
+    assert.ok(pages.length > 1, `400 documents of 100 KB (${(fs.statSync(file).size / 2 ** 20).toFixed(1)} MiB) came as ${pages.length} page: a page is bounded by its count only`);
+    assert.ok(pages.every(b => b <= 32 * 2 ** 20 + 2 * PAD), `a page held more than about 32 MiB of documents: ${JSON.stringify(pages)}`);
+    assert.equal(pages.reduce((n, b) => n + b, 0), facts.reduce((n, d) => n + JSON.stringify(d).length, 0), 'a document was lost or yielded twice');
+  });
+
   it('an id that is a prototype key is an id like any other', async () => {
     const facts = [doc('__proto__', 1, 'proto'), doc('constructor', 2, 'ctor'), doc('toString', 3, 'ts'), doc('hasOwnProperty', 4, 'hop'), doc('__proto__', 9, 'proto high')];
     const { docs } = await landed(spoolOf('proto.json', body(facts)), 'facts');
