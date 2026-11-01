@@ -38,7 +38,7 @@
  * timeout for something already bounded. That asymmetry is real and is preserved here rather than
  * flattened into one code path that pretends the two are the same shape.
  *
- * ## Why every answer carries `ok` as well as `status`
+ * ## Why every answer carries `ok` as well as `status`, and what `ok` says (bundle-39 D2, Q-331)
  *
  * `ok` is the one-bit summary and `status` is the detail. It is not redundancy: the UI's "Sync now" button
  * reads `r.ok` to colour a banner, and `POST /api/networks/:id/sync` used to answer `{ ok: true }` and
@@ -46,6 +46,14 @@
  * "failed" — caught by reading the consumer, not by any test, because the client types the field it wants
  * and an absent one is merely `undefined`. Any integrator reading `ok` on either door is in the same
  * position.
+ *
+ * `ok` used to mean "the cycle ran", so a cycle in which EVERY member failed answered `200 { ok: true }`, MCP answered `isError` from an error
+ * count each of its three branches wrote by hand, and the generic door answered 422. It is now read from the ONE verdict
+ * (`syncVerdict`, `sync/cycle-outcome.ts`) that the history row and the metric also use: `ok` is true only when every member synced, the
+ * answer carries `outcome` and each member's own outcome (`members[]`, our sentence as its reason), and the HTTP status follows the table — 200
+ * (the cycle ran and the body says what it came to), 502 `sync_failed` (no member succeeded), 503 `sync_store_failed` (this instance's
+ * database failed), 503 `shutting_down`. A trigger that was only accepted (`wait: false`) says `ok: true`, `status: 'triggered'`: it has no
+ * outcome yet. Owner, 2026-11-01: "how can they differ? its different doors to the same house?? the answer should be truthful".
  *
  * ## The failure that has to survive refactoring
  *
@@ -59,6 +67,8 @@ import type { Response } from 'express';
 import { log, peerText } from '../util/log.js';
 import { sendCaughtFailure } from '../api/send-failure.js';
 import { withinTimeBound, isTimeBoundEnded } from '../util/time-bound.js';
+import { isShuttingDown } from '../lifecycle.js';
+import { MEMBER_OUTCOMES, syncVerdict, type MemberResult, type SyncVerdict } from './cycle-outcome.js';
 
 /** What a synchronous trigger says when its cycle failed for a reason that is not the store's: the reason is in the server log, never in the body. */
 const SYNC_FAILED_TEXT = 'The sync cycle failed; the reason is in the server log.';
@@ -89,21 +99,83 @@ export function resolveSyncWait(raw: unknown, transport: 'mcp' | 'rest'): boolea
 /**
  * What a sync act came to, before any door renders it. `status`/`body` are the REST answer; `failure` is a throw the cycle ended
  * in (REST answers it through the one sender, MCP rethrows it to its own failure handling); `detail` is the cycle's own result for
- * a door that reports more than the body does (the peer cycle's `notFound`).
+ * a door that reports more than the body does (the peer cycle's `notFound`, each member's outcome, the verdict they came to).
  */
 export interface SyncAnswer {
   status: number;
-  body: Record<string, unknown> & { status: 'triggered' | 'completed' | 'timeout' | 'error'; wait: boolean };
+  body: Record<string, unknown> & { status: 'triggered' | 'completed' | 'timeout' | 'error' | 'shutting_down'; wait: boolean };
   failure?: { err: unknown; where: string };
-  detail?: { notFound?: boolean; networksSynced?: number; errors: number; refused?: number; synced?: number };
+  detail?: { notFound?: boolean; networksSynced?: number; errors: number; refused?: number; synced?: number; members: MemberResult[]; verdict: SyncVerdict };
+}
+
+/**
+ * The fields every waited answer carries about the cycle, from the ONE verdict (`syncVerdict`, bundle-39 D2): `ok` is true only when every
+ * member synced, `outcome` is the cycle's word, `code` the refusal code a 502 / 503 carries, `members` each member's own outcome with OUR
+ * sentence as its reason (never the driver's or the peer's text). The dedicated REST doors, the generic one and MCP all spread this, so the
+ * same cycle reads the same on each (owner, 2026-11-01: "how can they differ? its different doors to the same house??").
+ */
+export function verdictFields(verdict: SyncVerdict, members: MemberResult[]): { ok: boolean; outcome: SyncVerdict['outcome']; code?: string; members: MemberResult[] } {
+  return { ok: verdict.ok, outcome: verdict.outcome, ...(verdict.code ? { code: verdict.code } : {}), members };
+}
+
+/**
+ * Is a waited answer an error, on the door that renders it as one (MCP's `isError`)? The one rule: the answer says `ok: false` — a
+ * timeout, a shutdown, or a cycle in which not every member synced. A trigger that was only accepted (`wait: false`) says `ok: true`.
+ */
+export function syncAnswerIsError(answer: Pick<SyncAnswer, 'body'>): boolean {
+  return answer.body['ok'] === false;
+}
+
+/**
+ * The status a code is answered with, read off the verdict table itself so the status of `sync_failed`, `sync_store_failed` and
+ * `shutting_down` is written once, in `syncVerdict`.
+ */
+const CODE_STATUS: ReadonlyMap<string, number> = new Map(
+  MEMBER_OUTCOMES.map(outcome => syncVerdict([{ outcome }])).flatMap(v => (v.code ? [[v.code, v.status] as [string, number]] : [])),
+);
+
+/** The `code` a waited sync answer carries when it came to nothing or was stopped, from the verdict table (`sync_failed`, `sync_store_failed`, `shutting_down`). */
+export const SYNC_ANSWER_CODES: readonly string[] = [...CODE_STATUS.keys()];
+
+/**
+ * The HTTP status a sync tool result is answered with on a door that has only the result (the generic `POST /api/network_sync`), or undefined
+ * when the result is not a sync answer: the same status the dedicated doors give the same cycle — 504 for a wait that ran out, the code's own
+ * status when the verdict has one (502 / 503), and 200 for a cycle that ran and whose body says what it came to (partial, refused).
+ * `isError` is set on every one of those but the last, so without this the generic door answered all of them 422.
+ */
+export function syncAnswerStatus(result: { structuredContent?: Record<string, unknown> }): number | undefined {
+  const structured = result.structuredContent;
+  if (!structured) return undefined;
+  if (structured['status'] === 'timeout' && typeof structured['wait'] === 'boolean') return 504;
+  if (typeof structured['outcome'] !== 'string' || !Array.isArray(structured['members'])) return undefined;
+  const code = structured['code'];
+  return (typeof code === 'string' ? CODE_STATUS.get(code) : undefined) ?? 200;
+}
+
+/** What a trigger says once shutdown began: no cycle is started, and it is no sync result, so no member is named. */
+const SHUTTING_DOWN_TEXT = 'This instance is shutting down, so no sync cycle was started; retry after it restarts.';
+
+/**
+ * The answer of a trigger that arrives once shutdown began (503 `shutting_down`), or null to go on. Checked by `networkSyncOutcome` and
+ * `peerSyncOutcome` before they start anything, so no door can start a cycle that would join the one being stopped or begin another under a
+ * closing database; a door that does work BEFORE the cycle (queuing a change note) asks it first.
+ */
+export function syncShutdownRefusal(subject: Record<string, unknown>, wait: boolean): SyncAnswer | null {
+  if (!isShuttingDown()) return null;
+  const verdict = syncVerdict([{ outcome: 'interrupted' }]);
+  return {
+    status: verdict.status,
+    body: { status: 'shutting_down', ...subject, wait, error: SHUTTING_DOWN_TEXT, ...verdictFields(verdict, []) },
+  };
 }
 
 /**
  * Run a cycle for ONE NETWORK and say what came of it.
  *
  * `wait` false answers `triggered` immediately and logs any later failure. `wait` true races the cycle
- * against `timeoutMs` and answers `completed`, `timeout` (504, still running) or `error` (500). Every answer names the `wait` it
- * used, and a waited one the `timeoutMs` that bounded it.
+ * against `timeoutMs` and answers `completed` (with the cycle's one verdict: 200, or 502 `sync_failed` / 503 `sync_store_failed` /
+ * 503 `shutting_down` when nothing synced, this instance's store failed, or shutdown stopped it), `timeout` (504, still running) or `error` (500).
+ * Every answer names the `wait` it used, and a waited one the `timeoutMs` that bounded it. Once shutdown began no cycle is started (503).
  */
 export async function networkSyncOutcome(
   networkId: string, opts: { wait: boolean; timeoutMs: number; noteId?: string },
@@ -112,6 +184,8 @@ export async function networkSyncOutcome(
   // F-42: every answer names the change note this sync carries, whatever became of the cycle — the note is queued
   // either way and travels with the next cycle that reaches each member.
   const note = opts.noteId ? { noteId: opts.noteId } : {};
+  const closing = syncShutdownRefusal({ networkId, ...note }, opts.wait);
+  if (closing) return closing;
 
   if (!opts.wait) {
     void runSyncForNetwork(networkId)
@@ -121,10 +195,11 @@ export async function networkSyncOutcome(
 
   try {
     const r = await withinTimeBound(runSyncForNetwork(networkId), opts.timeoutMs, `the sync cycle of network ${networkId}`);
+    const verdict = syncVerdict(r.members);
     return {
-      status: 200,
-      body: { ok: true, status: 'completed', networkId, wait: true, timeoutMs: opts.timeoutMs, synced: r.synced, errors: r.errors, ...note },
-      detail: { synced: r.synced, errors: r.errors },
+      status: verdict.status,
+      body: { status: 'completed', networkId, wait: true, timeoutMs: opts.timeoutMs, synced: r.synced, errors: r.errors, ...verdictFields(verdict, r.members), ...note },
+      detail: { synced: r.synced, errors: r.errors, members: r.members, verdict },
     };
   } catch (err) {
     if (isTimeBoundEnded(err)) {
@@ -151,6 +226,8 @@ export async function networkSyncOutcome(
  */
 export async function peerSyncOutcome(peerId: string, opts: { wait: boolean }): Promise<SyncAnswer> {
   const { runSyncForPeer } = await import('./engine.js');
+  const closing = syncShutdownRefusal({ peerId }, opts.wait);
+  if (closing) return closing;
 
   if (!opts.wait) {
     void runSyncForPeer(peerId).catch(err => log.error(`Triggered sync for peer ${peerText(peerId)} failed: ${peerText(err)}`));
@@ -158,10 +235,11 @@ export async function peerSyncOutcome(peerId: string, opts: { wait: boolean }): 
   }
   try {
     const r = await runSyncForPeer(peerId);
+    const verdict = syncVerdict(r.members);
     return {
-      status: 200,
-      body: { ok: true, status: 'completed', peerId, wait: true, networksSynced: r.networksSynced, errors: r.errors, refused: r.refused },
-      detail: { ...r },
+      status: verdict.status,
+      body: { status: 'completed', peerId, wait: true, networksSynced: r.networksSynced, errors: r.errors, refused: r.refused, notFound: r.notFound, ...verdictFields(verdict, r.members) },
+      detail: { ...r, verdict },
     };
   } catch (err) {
     return {

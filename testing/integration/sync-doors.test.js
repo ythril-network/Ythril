@@ -152,16 +152,23 @@ describe('the sync doors say what they sync', () => {
        * refuses the id first, so the only remaining failures are a genuine throw and the timeout race,
        * neither of which a test can force without making itself flaky.
        *
-       * So the case asserts the CONTRACT instead: `ok` is the one-bit summary of the HTTP outcome, in
-       * whichever branch the cycle lands. A hard-coded `ok: true` on the 504 and 500 branches — the defect
-       * this describe block exists for — breaks it.
+       * So the case asserts the CONTRACT instead: `ok` is the one-bit summary of what the cycle came to, in
+       * whichever branch it lands. A hard-coded `ok: true` on the 504 and 500 branches — the defect
+       * this describe block exists for — breaks it, and so does `ok` meaning "the cycle ran" (bundle-39 D2,
+       * Q-331): a completed cycle is `ok` only when its `outcome` is `success` (a partial cycle answers 200
+       * with `ok: false`), and a 502 / 503 / 504 / 500 is never `ok`.
        */
       const r = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/sync?wait=true&timeoutMs=1000`, {});
       assert.equal(typeof r.body.ok, 'boolean', `\`ok\` is missing from the waited answer: ${JSON.stringify(r.body)}`);
-      assert.equal(r.body.ok, r.status === 200,
-        `\`ok\` says ${r.body.ok} and the status is ${r.status}: ${JSON.stringify(r.body)}`);
-      assert.ok(['completed', 'timeout', 'error'].includes(r.body.status),
+      assert.ok(['completed', 'timeout', 'error', 'shutting_down'].includes(r.body.status),
         `unexpected waited status: ${JSON.stringify(r.body)}`);
+      if (r.body.status === 'completed') {
+        assert.equal(typeof r.body.outcome, 'string', `a completed answer names no outcome: ${JSON.stringify(r.body)}`);
+        assert.ok(Array.isArray(r.body.members), `a completed answer names no members: ${JSON.stringify(r.body)}`);
+        assert.equal(r.body.ok, r.body.outcome === 'success',
+          `\`ok\` says ${r.body.ok} and the outcome is ${r.body.outcome}: ${JSON.stringify(r.body)}`);
+        assert.ok([200, 502, 503].includes(r.status), `a completed cycle answered ${r.status}: ${JSON.stringify(r.body)}`);
+      } else assert.equal(r.body.ok, false, `a ${r.body.status} answer says ok: ${JSON.stringify(r.body)}`);
     });
   });
 

@@ -12,7 +12,7 @@ import { getConfig } from '../../config/loader.js';
 import { syncHistoryAct } from '../../networks/vote-acts.js';
 import { sendAct } from './_shared.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
-import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs, resolveSyncWait } from '../../sync/trigger.js';
+import { triggerNetworkSync, triggerPeerSync, syncTimeoutMs, resolveSyncWait, sendSyncAnswer, syncShutdownRefusal } from '../../sync/trigger.js';
 import { attachSyncNote, changeNotesAct } from '../../sync/change-notes.js';
 import {
   networkAnswer, readNetworkAct, createNetworkAct, updateNetworkAct, leaveNetworkAct, addNetworkSpaceAct, 
@@ -82,6 +82,9 @@ crudRouter.post('/:id/sync', globalRateLimit, requireAdmin, async (req, res) => 
   if (!net) { res.status(404).json({ error: 'Network not found' }); return; }
   // The door resolves its own default (`resolveSyncWait`): false here, where MCP's `network_sync` waits unless told not to.
   const wait = resolveSyncWait(req.query['wait'], 'rest');
+  // Once shutdown began no cycle starts (503 `shutting_down`): asked before the note is queued, so a sync that will not run queues nothing.
+  const closing = syncShutdownRefusal({ networkId: net.id }, wait);
+  if (closing) { sendSyncAnswer(res, closing); return; }
   // F-42: an optional `{ note, spaces }` body rides this sync to the members below. Queued BEFORE the cycle starts,
   // so this cycle carries it; a note that cannot travel is refused and the sync does not run, rather than running
   // without the note the caller asked for.

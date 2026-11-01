@@ -216,16 +216,24 @@ describe('classifyMemberTurn gives a member ONE outcome, by one precedence (v6 S
 });
 
 describe('no door keeps its own copy of the verdict', () => {
-  const src = (rel) => stripComments(fs.readFileSync(new URL(`../../server/src/${rel}`, import.meta.url), 'utf8'));
+  /**
+   * The lines of a server source (comments out) that match `re`, as `file:line: text`, so a failure names the line to look at and not the
+   * whole file. Block comments are replaced by their newlines, so the line numbers are the file's own.
+   */
+  const offenders = (rel, re) => {
+    const raw = fs.readFileSync(new URL(`../../server/src/${rel}`, import.meta.url), 'utf8');
+    const code = stripComments(raw.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, '')));
+    return code.split('\n').flatMap((line, i) => (re.test(line) ? [`server/src/${rel}:${i + 1}: ${line.trim()}`] : []));
+  };
 
   it('the MCP network_sync tool decides isError from the verdict, not from an error count written in each branch', () => {
-    const s = src('mcp/tools/sync.ts');
-    assert.doesNotMatch(s, /errors\s*>\s*0/, 'mcp/tools/sync.ts still decides a waited answer by `errors > 0` (once per branch: network, peer, all networks) instead of by the verdict');
-    assert.doesNotMatch(s, /totalErrors\s*>\s*0/, 'the all-networks branch still decides `isError` by `totalErrors > 0`');
+    assert.deepEqual(offenders('mcp/tools/sync.ts', /errors\s*>\s*0/), [],
+      'mcp/tools/sync.ts still decides a waited answer by `errors > 0` (once per branch: network, peer, all networks) instead of by the verdict');
+    assert.deepEqual(offenders('mcp/tools/sync.ts', /totalErrors\s*>\s*0/), [], 'the all-networks branch still decides `isError` by `totalErrors > 0`');
   });
 
   it('the REST trigger does not answer `ok: true` for every cycle that ran', () => {
-    const s = src('sync/trigger.ts');
-    assert.doesNotMatch(s, /ok:\s*true,\s*status:\s*'completed'/, 'sync/trigger.ts still answers `ok: true, status: \'completed\'` whatever the members came to');
+    assert.deepEqual(offenders('sync/trigger.ts', /ok:\s*true,\s*status:\s*'completed'/), [],
+      'sync/trigger.ts still answers `ok: true, status: \'completed\'` whatever the members came to');
   });
 });

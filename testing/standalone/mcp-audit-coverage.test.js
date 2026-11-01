@@ -299,8 +299,9 @@ describe('MCP audit coverage', () => {
     // MCP answers 200 at the transport layer even when a tool refuses, so a status read from the HTTP response would log every
     // rejected write as successful. The status is the outcome's, which the dispatch takes from `isError` for a returned result.
     const dispatch = readFileSync(ROUTER, 'utf8');
-    // A failed act after a passed vote is the one error result answered 500 (bundle-106, design v5 section 2.2 v4 (3)); still from the RESULT.
-    assert.match(dispatch, /const status = result\?\.isError \? (?:\(isSpaceActFailure\(result\) \? 500 : 422\)|422) : 200;/,
+    // A failed act after a passed vote is the one error result answered 500 (bundle-106, design v5 section 2.2 v4 (3)); a waited sync answer is
+    // answered by its verdict's status (bundle-39 D2: 200 / 502 / 503 / 504, `syncAnswerStatus`); still from the RESULT.
+    assert.match(dispatch, /const status = result\?\.isError \? (?:\(isSpaceActFailure\(result\) \? 500 : (?:syncAnswerStatus\(result\) \?\? )?422\)|422) : 200;/,
       'the audit status must be taken from the RESULT, not from the transport');
     const src = auditSource();
     const call = balancedFrom(src, src.indexOf('recordToolCall(caller, name, status,'), 'the recordToolCall call');

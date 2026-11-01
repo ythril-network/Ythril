@@ -128,12 +128,14 @@ describe('the sync tools say what their answers do not cover', () => {
       'the old claim must not come back — it was false and this gate used to require it');
   });
 
-  it('sync_now: an unreachable peer IS an error, on both surfaces', () => {
-    const handler = src('server/src/mcp/tools/sync.ts');
-    assert.match(handler, /isError: result\.errors > 0/, 'the peer path no longer reports errors');
-    assert.match(handler, /isError: totalErrors > 0/, 'the all-networks path no longer reports errors');
-    assert.match(SYNCNOW, /COUNTED as an error/,
-      'a caller told an unreachable peer is invisible here will not check isError');
+  it('sync_now: a cycle in which not every member synced IS an error, on both surfaces, by the one verdict', () => {
+    // The two source pins this replaced (`isError: result.errors > 0`, `isError: totalErrors > 0`) held how a handler spelled a count, three
+    // times over; what each mix of member outcomes comes to is held by `sync-verdict-is-one-table` (the truth table) and by
+    // `every-sync-door-gives-the-same-verdict-db` (every door, one verdict). What is held HERE is the half a reader sees: the description.
+    assert.match(SYNCNOW, /`isError` is set whenever `ok` is false/,
+      'a caller told an unreachable or refused member is invisible here will not check isError');
+    assert.match(SYNCNOW, /ONE VERDICT/, 'the description does not say the verdict is the one the REST doors give');
+    assert.match(SYNCNOW, /sync_failed/, 'the description does not name the code a cycle in which nothing synced carries');
     assert.match(SYNCNOW, /consecutiveFailures/,
       'and name where a peer failing over TIME surfaces, which is the part a single call cannot show');
   });
