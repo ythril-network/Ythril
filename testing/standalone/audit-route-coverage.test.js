@@ -19,22 +19,22 @@
  * correct. Same trap as every other bug in this class: coverage that exercises only the cases
  * that cannot fail.
  *
- * This test derives the route list from the ROUTER SOURCE rather than restating it, so the
- * shadow table can no longer drift silently: add a mutating route, and this fails until it is
- * either audited or explicitly declared exempt.
+ * This test derives the route list from the MOUNT GRAPH (`mountedRoutes()` in `_routes.mjs`, which reads every file of `server/src`
+ * and resolves each router's prefix, and reads the `app` itself) rather than restating it, so the shadow table can no longer drift
+ * silently: add a mutating route, and this fails until it is either audited or explicitly declared exempt.
+ *
+ * It used to scan `server/src/api` for `xxxRouter.verb(...)` alone, which is the same blind spot `_routes.mjs` documents: the
+ * routes declared straight on the express app (wiping, importing and exporting a space, rotating the signing key) and the routes
+ * in `mcp/` (the OAuth consent) were never in the set, so this gate reported clean about the five most destructive doors and a
+ * door that approves a client's access. The `/mcp` prefix exemption below hid the consent route the same way: `startsWith('/mcp')`
+ * matches `/mcp-oauth/consent`.
  *
  * Run: node --test testing/standalone/audit-route-coverage.test.js
  */
 
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const API_DIR = path.join(__dirname, '..', '..', 'server', 'src', 'api');
-const APP_TS = path.join(__dirname, '..', '..', 'server', 'src', 'app.ts');
+import { mountedRoutes } from './_routes.mjs';
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -58,10 +58,9 @@ const EXEMPT = new Map([
    * recorder with a status taken from the result. So this is not an unaudited route wearing an exemption —
    * it is a route whose coverage is proved somewhere the coverage actually lives.
    */
-  // Keyed `/api/sample` because `samplePath` above substitutes every `:param` with `sample`, so the
-  // mounted `/api/:tool` reaches this comparison spelled that way. It is the only single-segment `/api`
-  // parameter route there is, and `no-tool-name-shadows-a-mounted-router.test.js` keeps it that way.
-  ['/api/sample', 'the generic tool door (`POST /api/:tool`) — audited by `callTool` from '
+  // Matched by its declared path, exactly (see EXACT): it is the only single-segment `/api` parameter route there is, and
+  // `no-tool-name-shadows-a-mounted-router.test.js` keeps it that way.
+  ['/api/:tool', 'the generic tool door (`POST /api/:tool`) — audited by `callTool` from '
     + '`mcpAuditOperation`, one entry per tool call on both doors. Proved by mcp-audit-coverage.test.js, '
     + 'not by a rule here.'],
   // Personal views (Q-531). The shared acts (`spaces/view-acts.ts`) write the audit row for REST and MCP alike, so a row cannot leave one door with
@@ -114,105 +113,77 @@ const EXEMPT = new Map([
    * deleted. An exemption is a claim about a route that exists.
    */
   ['/api/metrics', 'Prometheus scrape endpoint'],
-  ['/mcp', 'MCP has its own tool-level audit path'],
+  // The MCP transport's two doors, as EXACT paths and not the `/mcp` prefix this row used to be: `startsWith('/mcp')` also matched
+  // `/mcp-oauth/consent`, the route that approves a client's access to the instance, and exempted it with a reason that was
+  // never true of it. The consent has its own rule (`mcp.oauth.consent`).
+  ['/mcp', 'the MCP transport door (`POST /mcp`) — every tool call is audited by `callTool`, one entry per call, proved by mcp-audit-coverage.test.js'],
+  ['/mcp/messages', 'the MCP SSE message door (`POST /mcp/messages`) — the same tool dispatch, audited by `callTool`'],
   // Read-only diagnostic: lists a provider endpoint's models to report reachability. POST only because it
   // takes a target in the body; it mutates no config or state (the media-config PATCH beside it IS audited).
   ['/api/admin/media-config/test-connection', 'read-only connectivity probe — lists models, mutates nothing'],
 ]);
 
-let resolveOperation;
-/** @type {{method: string, routerPath: string, fullPath: string, file: string}[]} */
-let routes = [];
+/** Exemptions that name one route exactly; every other key is a prefix that holds from a segment boundary (`/api/sync` and `/api/sync/x`, never `/api/syncfoo`). */
+const EXACT = new Set(['/api/:tool', '/mcp', '/mcp/messages']);
 
-/** Every .ts file under the api dir, recursively — routes live in `api/` AND `api/brain/` (A17.3). */
-function apiFiles(dir = API_DIR, out = []) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) apiFiles(p, out);
-    else if (e.name.endsWith('.ts')) out.push(p);
+/** The reason a route is exempt, or null. */
+function exemptionOf(routePath) {
+  for (const [key, reason] of EXEMPT) {
+    if (EXACT.has(key) ? routePath === key : routePath === key || routePath.startsWith(`${key}/`)) return reason;
   }
-  return out;
+  return null;
 }
 
-/** Map `xxxRouter` -> its mount prefix, read from app.ts (`app.use('/api/xxx', xxxRouter)`). */
-function readMounts() {
-  const src = fs.readFileSync(APP_TS, 'utf8');
-  const mounts = new Map();
-  const re = /app\.use\(\s*'([^']+)'\s*,\s*([A-Za-z_]\w*)/g;
-  let m;
-  while ((m = re.exec(src)) !== null) mounts.set(m[2], m[1]);
-
-  // Sub-routers mounted on a parent router serve the parent's prefix — e.g. api/brain/index.ts does
-  // `brainRouter.use(memoriesRouter)`, so memoriesRouter's routes are under /api/brain. Without this
-  // the whole brain surface would silently vanish from the audit check.
-  const links = [];
-  for (const f of apiFiles()) {
-    const s = fs.readFileSync(f, 'utf8');
-    const childRe = /(\w+Router)\s*\.\s*use\(\s*(\w+Router)\s*\)/g;
-    let c;
-    while ((c = childRe.exec(s)) !== null) links.push([c[1], c[2]]);
-  }
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const [parent, child] of links) {
-      if (mounts.has(parent) && !mounts.has(child)) { mounts.set(child, mounts.get(parent)); changed = true; }
-    }
-  }
-  return mounts;
-}
+/**
+ * The audited NON-MUTATING acts: a GET that hands data out, or that is itself the thing an auditor asks about, is audited though it
+ * changes nothing. An export of a whole space is the data leaving the instance, and the export of the audit log is the read someone
+ * covering their tracks does first. Each needs a rule that is NOT flagged `read` (a `read` rule is dropped when `audit.logReads` is off,
+ * and an export must be written whichever way the operator set it), under the operation named here.
+ */
+const AUDITED_NON_MUTATING = [
+  ['GET', '/api/admin/audit-log/export', 'audit.export'],
+  ['GET', '/api/admin/spaces/:spaceId/export', 'space.export'],
+];
 
 /** Substitute `:param` segments with a concrete sample so the rule regexes can be tested. */
 function concretise(p) {
   return p.replace(/:([A-Za-z_]\w*)/g, 'sample');
 }
 
+let resolveOperation;
+/** @type {{method: string, path: string, file: string}[]} */
+let routes = [];
+
 describe('Audit coverage — every mutating route must resolve to an operation', () => {
   before(async () => {
     ({ resolveOperation } = await import('../../server/dist/audit/middleware.js'));
-
-    const mounts = readMounts();
-    for (const filePath of apiFiles()) {
-      const src = fs.readFileSync(filePath, 'utf8');
-      // e.g.  memoriesRouter.post('/spaces/:spaceId/facts', ...)   (also multi-line)
-      const re = /(\w+Router)\s*\.\s*(get|post|put|patch|delete)\s*\(\s*'([^']+)'/g;
-      let m;
-      while ((m = re.exec(src)) !== null) {
-        const [, routerName, method, routerPath] = m;
-        const prefix = mounts.get(routerName);
-        if (!prefix) continue; // router not mounted in app.ts (e.g. built dynamically)
-        const joined = (prefix + (routerPath === '/' ? '' : routerPath)).replace(/\/+/g, '/');
-        routes.push({
-          method: method.toUpperCase(),
-          routerPath,
-          fullPath: concretise(joined),
-          file: path.relative(API_DIR, filePath).replace(/\\/g, '/'),
-        });
-      }
-    }
+    routes = mountedRoutes().map(r => ({ method: r.method, path: r.path, file: r.file }));
   });
 
-  it('discovers a plausible number of routes (the parser itself must not silently break)', () => {
-    // If the regex stops matching (a refactor to a different registration style), every
-    // assertion below would vacuously pass. Guard the guard.
-    assert.ok(routes.length > 50, `expected to discover many routes, found ${routes.length}`);
-    assert.ok(
-      routes.some(r => r.fullPath === '/api/brain/spaces/sample/facts' && r.method === 'POST'),
-      'sanity: POST /api/brain/spaces/:spaceId/facts should have been discovered',
-    );
+  it('discovers a plausible number of routes, the ones declared on the app and in mcp/ among them', () => {
+    // `mountedRoutes` throws below its own floor; the cases below are what a scan that stopped seeing a whole KIND of registration
+    // would lose, which a count cannot tell: the app's own routes and the OAuth router are exactly what the old scan never read.
+    assert.ok(routes.length > 150, `expected to discover many routes, found ${routes.length}`);
+    for (const [method, path] of [
+      ['POST', '/api/brain/spaces/:spaceId/facts'], ['POST', '/api/admin/spaces/:spaceId/wipe'], ['POST', '/api/admin/spaces/:spaceId/import'],
+      ['GET', '/api/admin/spaces/:spaceId/export'], ['POST', '/api/admin/rotate-signing-key'], ['POST', '/mcp-oauth/consent'], ['POST', '/mcp'],
+    ]) {
+      assert.ok(routes.some(r => r.method === method && r.path === path), `sanity: ${method} ${path} should have been discovered`);
+    }
   });
 
   it('every mutating route is audited (or explicitly exempt)', () => {
     const unaudited = [];
     for (const r of routes) {
       if (!MUTATING.has(r.method)) continue;
-      if ([...EXEMPT.keys()].some(prefix => r.fullPath.startsWith(prefix))) continue;
+      if (exemptionOf(r.path)) continue;
 
       // A rule flagged `read: true` is a deliberate classification (search endpoints are
       // POSTs but do not mutate), so it counts as covered. What must never happen is a
       // mutating route with NO rule at all — that is the silent drift.
-      const hit = resolveOperation(r.method, r.fullPath);
+      const hit = resolveOperation(r.method, concretise(r.path));
       if (!hit) {
-        unaudited.push(`${r.method} ${r.fullPath}  (${r.file})`);
+        unaudited.push(`${r.method} ${r.path}  (${r.file.replace('server/src/', '')})`);
       }
     }
 
@@ -245,11 +216,43 @@ describe('Audit coverage — every mutating route must resolve to an operation',
       // what pinning is for.
       ['POST', '/api/mfa/setup', 'MFA enable / secret rotation'],
       ['DELETE', '/api/mfa', 'MFA disable'],
+      // The routes declared on the app and in mcp/ that the scan did not read until it came from the mount graph: restoring a space from
+      // a body, rotating the key every peer verifies this instance's signatures with, and approving a client's access to the instance.
+      ['POST', '/api/admin/spaces/sample/import', 'a space import'],
+      ['POST', '/api/admin/rotate-signing-key', 'rotating the signing key'],
+      ['POST', '/mcp-oauth/consent', 'a client\'s consent to access'],
     ];
     for (const [method, p, what] of mustAudit) {
       const hit = resolveOperation(method, p);
       assert.ok(hit && !hit.read, `${what} (${method} ${p}) must produce an audit entry`);
     }
+  });
+
+  it('the import, the key rotation and the consent are recorded under operations of their own', () => {
+    assert.equal(resolveOperation('POST', '/api/admin/spaces/my-space/import')?.operation, 'space.import');
+    assert.equal(resolveOperation('POST', '/api/admin/spaces/my-space/import')?.spaceId, 'my-space');
+    assert.equal(resolveOperation('POST', '/api/admin/rotate-signing-key')?.operation, 'signing.rotate');
+    assert.equal(resolveOperation('POST', '/mcp-oauth/consent')?.operation, 'mcp.oauth.consent');
+  });
+
+  it('a GET that hands data out is audited under its own operation, whichever way the operator set logReads', () => {
+    // The set is an explicit list of audited non-mutating acts, each of which must be a route that is mounted (an entry for a route that
+    // is gone is a licence), and each must have a rule that is NOT `read: true` — a read rule is dropped when `audit.logReads` is off.
+    for (const [method, path, operation] of AUDITED_NON_MUTATING) {
+      assert.ok(routes.some(r => r.method === method && r.path === path), `${method} ${path} is no longer a mounted route: delete its row`);
+      const hit = resolveOperation(method, concretise(path));
+      assert.ok(hit, `${method} ${path} is an audited non-mutating act and has no rule in ROUTE_RULES`);
+      assert.equal(hit.operation, operation, `${method} ${path} is recorded under ${hit.operation}, not ${operation}`);
+      assert.equal(hit.read, false, `${method} ${path} is flagged read: it is dropped when logReads is off, and an export must not be`);
+    }
+  });
+
+  it('every GET route that exports is in that list (a new export cannot arrive unaudited)', () => {
+    const listed = new Set(AUDITED_NON_MUTATING.map(([m, p]) => `${m} ${p}`));
+    const exports = routes.filter(r => r.method === 'GET' && /(^|\/)export$/.test(r.path)).map(r => `${r.method} ${r.path}`);
+    assert.ok(exports.length >= 2, `only ${exports.length} export routes discovered: ${exports.join(', ')}`);
+    assert.deepEqual(exports.filter(e => !listed.has(e)), [],
+      'a GET route named export hands data out and is neither in AUDITED_NON_MUTATING nor audited');
   });
 
   it('turning the second factor off is distinguishable in the log', () => {

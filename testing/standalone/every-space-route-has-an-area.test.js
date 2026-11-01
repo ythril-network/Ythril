@@ -17,115 +17,62 @@
  *
  * A hand-written list of routes is the same artefact as the inventory, so comparing them would prove
  * nothing — both would be edited in the same commit by the same person making the same assumption. The
- * surface is read out of the router files instead.
+ * surface is read out of the mount graph instead (`mountedRoutes()`, which also reads the routes declared on the express app: the first
+ * version of this gate scanned `server/src/api` for router calls and never saw wiping, exporting or importing a space).
  *
  * Run: node --test testing/standalone/every-space-route-has-an-area.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { mountedRoutes } from './_routes.mjs';
 import { SPACE_AREAS } from '../../server/dist/config/rights-shape.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = process.cwd();
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
-const withoutComments = (text) =>
-  text.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
 
 const INVENTORY = 'server/src/auth/space-rights.ts';
 
 /**
- * Routers whose every route is space-scoped, and the prefix each is mounted at.
+ * The mounts of the routers whose every route is space-scoped.
  *
- * Discovered files, fixed mounts: the mount lives in `app.ts` and is the one thing a router file cannot
- * tell us. The `duplicates`/`contradictions`/`conflicts` trio is here because those routes scope by
- * ITERATING the token's spaces rather than by taking one in the path — the reason `scope` exists on a
- * `RouteRight` at all.
+ * The routes themselves are DERIVED (`mountedRoutes()`: every file of `server/src`, each router's resolved prefix, and the express
+ * `app`), so a route that is registered anywhere is in front of this gate. What a route file cannot say is whether its router is
+ * wholly about spaces, and that is the one thing kept here, as the prefix each such router is mounted at:
+ *
+ * - the brain, the files, the duplicate / contradiction / conflict queues (which scope by ITERATING the token's spaces rather than
+ *   by taking one in the path — the reason `scope` exists on a `RouteRight` at all), the spaces router (some routes address the
+ *   COLLECTION, `GET /api/spaces`, and are exempted with reasons, not left unasked), the networks router (a network carries spaces),
+ *   the personal views and webhooks routers (each names spaces and is owner- or instance-scoped, exempted with a reason);
+ * - the tool door, `POST /api/:tool`, whose space is a BODY parameter (see `TOOL_DOOR`).
+ *
+ * A route outside these mounts is space-scoped too when it NAMES a space in its path (`:spaceId`): that is how the instance-admin
+ * doors on the app itself (`/api/admin/spaces/:spaceId/wipe`, `/export`, `/import`) were in no gate's view — this file scanned
+ * `server/src/api` for router calls only, and `app.ts` registers them on `app`. The derivation is the surface, not a second list of it.
  */
-const SPACE_ROUTERS = [
-  /*
-   * THE TOOL DOOR, added 2026-09-17 — `POST /api/:tool`, the one route that serves every tool.
-   *
-   * It is space-scoped without a `:spaceId` in the path: the space is a BODY parameter, which is the shape
-   * `B-9` moves everything to. Leaving the file out would be the spaces-router mistake below arriving again
-   * for the same reason — "it does not look like the others" is not "it does not need an area", and the
-   * destructive capabilities are behind this path.
-   *
-   * It resolves to a `NOT_AREA_SCOPED` row rather than an area: forty-five capabilities cannot share one
-   * rung, so each is priced in `TOOL_RIGHTS` and enforced per call by `callTool`. The row says so.
-   */
-  { glob: 'server/src/api/tools.ts', mount: '/api' },
-  { glob: 'server/src/api/brain', mount: '/api/brain' },
-  /*
-   * A PATTERN, for the same reason `spaces*.ts` is one: G-4 moved the upload route to `files-upload.ts`, and
-   * a gate naming one file would have stopped asking the completeness question of the routes that left. That
-   * is how nine space-scoped routes on the spaces router sat unclassified, recorded below.
-   */
-  { glob: 'server/src/api/files*.ts', mount: '/api/files' },
-  { glob: 'server/src/api/duplicates.ts', mount: '/api/duplicates' },
-  { glob: 'server/src/api/contradictions.ts', mount: '/api/contradictions' },
-  { glob: 'server/src/api/conflicts.ts', mount: '/api/conflicts' },
-  /*
-   * THE SPACES ROUTER, added 2026-08-29 after it was found ungoverned in production logs.
-   *
-   * It was left out because it is "not wholly space-scoped" — some of its routes address the COLLECTION
-   * (`GET /api/spaces`, `POST /api/spaces`, `POST /api/spaces/reorder`) rather than one space. That reason was
-   * true and the conclusion did not follow: a router with a few collection routes needs those three EXEMPTED,
-   * not the other eleven left unasked. Excluding the file meant the completeness question was never put to it,
-   * and nine space-scoped routes sat unclassified — `DELETE /api/spaces/:id` among them, warning on every call
-   * that its area was unenforced while this gate reported the surface clean.
-   *
-   * The glob is a pattern rather than the one filename because `spaces-activity.ts` and `spaces-reembed.ts`
-   * register routes onto the SAME router from other files. Two of the nine were theirs, and a sweep of
-   * `spaces.ts` alone cannot see them — which is the same blind spot one level down.
-   */
-  { glob: 'server/src/api/spaces*.ts', mount: '/api/spaces' },
-  /*
-   * THE NETWORKS ROUTER, added with the Networks column (`F-34`). A network carries spaces, so its membership acts
-   * are space-scoped by ITERATING them, and the rest act on the network as a whole and are exempted with reasons.
-   * Left out, the new rows would have looked like rows for routes that do not exist.
-   */
-  { glob: 'server/src/api/networks', mount: '/api/networks' },
-  /*
-   * THE VIEWS ROUTERS, added with personal views (Q-531). A view lists spaces as its members, so its doors are a question this
-   * gate must put: the plan's answer is that each is owner-scoped (or instance-admin) and exempted with a reason, not rated in a
-   * space's area. ONE file mounts TWO routers at two prefixes, so each is scanned by its router's name and given its own mount;
-   * a file-wide scan would file the admin routes under `/api/views`.
-   */
-  { glob: 'server/src/api/views.ts', mount: '/api/views', router: 'viewsRouter' },
-  { glob: 'server/src/api/views.ts', mount: '/api/admin/views', router: 'adminViewsRouter' },
-  /*
-   * THE WEBHOOKS ROUTER, added by Q-589. A subscription names spaces and sends their events out, so the router's reach is
-   * a question this gate must put. Owner ruling 2026-10-27: instance-admin, exempted with a reason as the admin views
-   * routes are, not rated in a space's area.
-   */
-  { glob: 'server/src/api/webhooks.ts', mount: '/api/admin/webhooks' },
+const SPACE_MOUNTS = [
+  '/api/brain', '/api/files', '/api/duplicates', '/api/contradictions', '/api/conflicts', '/api/spaces', '/api/networks',
+  '/api/views', '/api/admin/views', '/api/admin/webhooks',
 ];
 
-function filesUnder(p) {
-  // One router at a time, so the floor is 1 — a floor above what the scan can ever return fails on correct
-  // code, which is how a guard gets deleted instead of corrected.
-  return trackedSources(p, { floor: 1 }).filter(l => !l.endsWith('_shared.ts'));
-}
+/**
+ * THE TOOL DOOR — `POST /api/:tool`, the one route that serves every tool. It is space-scoped without a `:spaceId` in the path (the space
+ * is a body parameter) and resolves to a `NOT_AREA_SCOPED` row rather than an area: forty-five capabilities cannot share one rung, so each
+ * is priced in `TOOL_RIGHTS` and enforced per call by `callTool`.
+ */
+const TOOL_DOOR = '/api/:tool';
 
-/** Every `router.VERB('path')` in the given routers, as `METHOD mount+path`. */
+const underMount = (p) => SPACE_MOUNTS.some(m => p === m || p.startsWith(`${m}/`));
+const namesASpace = (p) => /\/:(spaceId|space)(\/|$)/.test(p);
+
+let discovered;
+/** Every space-scoped route, as `METHOD path`, derived from the mount graph. */
 function discoveredRoutes() {
-  const out = new Set();
-  for (const { glob, mount, router } of SPACE_ROUTERS) {
-    // A named router is scanned alone (its file holds another router mounted elsewhere); otherwise every route in the file.
-    const verb = new RegExp(`${router ? `\\b${router}` : ''}\\.(get|post|patch|put|delete)\\(\\s*'(\\/[^']*)'`, 'g');
-    for (const f of filesUnder(glob)) {
-      const code = withoutComments(read(f));
-      // The path must START with '/'. Without that, `res.set('If-Match', …)` and any other
-      // `.get('Header-Name')` read as a route and the gate demands they be classified.
-      for (const m of code.matchAll(verb)) {
-        const path = m[2] === '/' ? '' : m[2];
-        out.add(`${m[1].toUpperCase()} ${mount}${path}`);
-      }
-    }
-  }
-  return out;
+  discovered ??= new Set(mountedRoutes()
+    .filter(r => underMount(r.path) || namesASpace(r.path) || r.path === TOOL_DOOR)
+    .map(r => `${r.method} ${r.path}`));
+  return discovered;
 }
 
 /** Everything the inventory claims, as the same `METHOD route` key. */
@@ -171,8 +118,12 @@ describe('every space-scoped route is classified', () => {
   it('discovers a real route surface', () => {
     // A gate that enumerates nothing passes vacuously, and would keep passing if a router moved.
     const found = discoveredRoutes();
-    assert.ok(found.size >= 30, `expected the space routers to yield many routes, found ${found.size}`);
-    assert.ok([...found].some(r => r.includes(':spaceId')), 'no :spaceId route found — re-point SPACE_ROUTERS');
+    assert.ok(found.size >= 100, `expected the space routers to yield many routes, found ${found.size}`);
+    assert.ok([...found].some(r => r.includes(':spaceId')), 'no :spaceId route found — re-point SPACE_MOUNTS');
+    // A whole KIND of registration a scan can stop seeing, which a count cannot tell: the routes declared on the app, by their space param.
+    for (const r of ['POST /api/admin/spaces/:spaceId/wipe', 'GET /api/admin/spaces/:spaceId/export', 'POST /api/admin/spaces/:spaceId/import']) {
+      assert.ok(found.has(r), `${r} is a route that names a space and was not derived`);
+    }
   });
 
   it('the inventory is not empty and every rights area has a route classified into it', () => {
