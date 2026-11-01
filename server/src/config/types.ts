@@ -1,4 +1,5 @@
 import type { TokenRights } from './rights-shape.js';
+import type { BodyLimitsConfig } from './body-limits.js';
 import type { ModelSlot, ModelSlotsConfig } from './model-slots.js';
 import type { AssistModelExtras } from './assist-backend.js';
 import type { MachineMadeSource } from '../files/machine-made-sources.js';
@@ -1073,7 +1074,7 @@ export interface AuditConfig {
 // change lands in the same place because that is where the code already is.
 
 
-export interface Config {
+export interface Config extends BodyLimitsConfig {
   instanceId: string;
   instanceLabel: string;
   publicUrl?: string;         // optional canonical public URL for this brain instance
@@ -1106,10 +1107,7 @@ export interface Config {
    * hard-removed regardless of this setting.
    */
   softDeleteFileMeta?: boolean;
-  maxUploadBodyBytes?: number;
-  /** Max total size (bytes) a chunked upload may declare via Content-Range.
-   *  Default 10 GiB. The storage quota (if configured) applies on top. */
-  maxChunkedUploadBytes?: number;
+  // `maxUploadBodyBytes`, `maxChunkedUploadBytes` and the import's two limits: `BodyLimitsConfig` (`body-limits.ts`).
   /** Max input size (bytes) accepted by the document conversion pipeline
    *  (pdf/docx/epub/html/md/txt → markdown chunks). Default 100 MiB; HTML is
    *  additionally capped at 25 MiB because jsdom parses it in-process. */

@@ -7,8 +7,7 @@ import { EdgeIdentityBuilding } from './util/errors.js';
 import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
-import { importDocuments, importPayloadError } from './api/admin-import.js';
-import { SERVER_VERSION } from './util/server-version.js';
+import { spaceTransferRouter, markImportBody, skipsGlobalParsers, IMPORT_PATH } from './api/admin-space-transfer.js';
 import path from 'path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
@@ -61,7 +60,6 @@ import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
 import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, reconcilePendingSpaceOp, removeSpaceFromConfig, WIPE_COLLECTION_TYPES, wipeTypesOf } from './spaces/lifecycle.js';
-import { col } from './db/mongo.js';
 import { log, peerText, runWithRequestId } from './util/log.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
@@ -74,15 +72,7 @@ import {
   configReloadFailedTotal,
   configReloadPending,
 } from './metrics/registry.js';
-import { spaceCollection } from './db/space-collection.js';
-import { NOT_CARRIED_BY_BACKUP } from './sync/local-only-fields.js';
-import { REPLICATED_FAMILIES } from './sync/replicated-families.js';
-import { answeredUnknownSpace, sendLostSpace } from './api/write-target-answer.js';
-
-// Server version — one reader, in `util/server-version.ts`. This file and `api/about.ts` each resolved
-// their own path to the same manifest; a third reader (the embed-job revive) is what made the duplication
-// worth removing rather than copying again.
-const _serverVersion: string = SERVER_VERSION;
+import { answeredUnknownSpace } from './api/write-target-answer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Path to the compiled Angular SPA — configurable via env for Docker flexibility */
@@ -146,8 +136,11 @@ export function createApp() {
   }));
 
   // ── Request body parsers ─────────────────────────────────────────────────
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  // The admin import reads its own body (`api/admin-space-transfer.ts`): marked here, by Express's own match of its path, so neither parser
+  // buffers it; its route, below every middleware, spools it once the caller is let in.
+  app.post(IMPORT_PATH, markImportBody);
+  app.use(express.json({ limit: '10mb', type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/json')) }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb', type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/x-www-form-urlencoded')) }));
 
   // ── Security headers ─────────────────────────────────────────────────────
   app.use((_req, res, next) => {
@@ -420,101 +413,9 @@ export function createApp() {
     }
   });
 
-  // ── Admin: space export ───────────────────────────────────────────────────
-  // Returns a full JSON snapshot of the space: every REPLICATED family (facts, entities, edges, chrono, links and
-  // file metadata, from `REPLICATED_FAMILIES`), binary file content excluded. What this instance DERIVES with its
-  // own model is left out (`DERIVED_LOCAL_FIELDS`: the vector, its model, `matchedText`), and so is this instance's write
-  // guard on an edge (`WRITE_GUARD_FIELDS`, `Q-439`: a lock on a subject here, never a backup's to carry); the record-tier local
-  // fields stay — the retention stamps and file sync bases — because a restore keeps them (`Q-205`, `Q-206`). An
-  // import queues every restored record for embedding, so nothing has to be reindexed by hand afterwards.
-  app.get('/api/admin/spaces/:spaceId/export', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
-    const spaceId = req.params['spaceId'] as string;
-    const cfg = getConfig();
-    const space = cfg.spaces.find(s => s.id === spaceId);
-    if (!space) {
-      sendLostSpace(req, res, spaceId);
-      return;
-    }
-
-    // Stream the export instead of buffering it (P7).
-    //
-    // This used to `.toArray()` all five collections in parallel and then `res.json()` the
-    // result — so the whole space sat on the heap TWICE (the documents, plus their serialised
-    // JSON string) at once. A 100k-fact space OOM'd the backup endpoint, exactly when losing
-    // data hurts most. We now walk each collection's cursor and write documents out one at a
-    // time, respecting backpressure so the response buffer cannot grow unbounded either.
-    //
-    // One JSON object, the envelope then one array per replicated family keyed by collection name — the
-    // shape the import reads. (NDJSON would be cleaner but would break the import contract.)
-    const projection = Object.fromEntries([...NOT_CARRIED_BY_BACKUP].map(f => [f, 0]));
-
-    // Backpressure-aware write: pause the cursor walk when the socket buffer is full.
-    const write = (chunk: string): Promise<void> =>
-      res.write(chunk) ? Promise.resolve() : new Promise<void>(resolve => res.once('drain', resolve));
-
-    /** Stream one collection as a JSON array value: `[doc, doc, …]`. */
-    const streamArray = async (collName: string): Promise<void> => {
-      await write('[');
-      const cursor = col(collName).find({}, { projection });
-      let first = true;
-      for await (const doc of cursor) {
-        await write((first ? '' : ',') + JSON.stringify(doc));
-        first = false;
-      }
-      await write(']');
-    };
-
-    try {
-      res.status(200);
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      // Envelope fields first — JSON.stringify each value so escaping is correct.
-      await write(
-        '{' +
-        `"exportedAt":${JSON.stringify(new Date().toISOString())},` +
-        `"spaceId":${JSON.stringify(spaceId)},` +
-        `"spaceName":${JSON.stringify(space.label)},` +
-        `"version":${JSON.stringify(_serverVersion)}`,
-      );
-      // Every replicated family, by collection name — the keys the import reads (`importPayloadError`).
-      for (const f of REPLICATED_FAMILIES) { await write(`,${JSON.stringify(f.collection)}:`); await streamArray(spaceCollection(spaceId, f.collection)); }
-      await write('}');
-      res.end();
-    } catch (err) {
-      const msg = peerText(err instanceof Error ? err.message : String(err));
-      if (!res.headersSent) {
-        sendCaughtFailure(res, 'GET /api/admin/spaces/:spaceId/export', err);
-      } else {
-        // We have already sent `200` and a partial body, so we cannot change the status.
-        // Destroy the socket so the client sees a TRUNCATED/aborted response rather than a
-        // syntactically-valid JSON that is silently missing documents.
-        log.error(`Space export for '${peerText(spaceId)}' failed mid-stream: ${msg}`);
-        res.destroy(err instanceof Error ? err : new Error(msg));
-      }
-    }
-  });
-
-  // ── Admin: space import ───────────────────────────────────────────────────
-  // Restores an export payload into the target space through the arrival writer (`api/admin-import.ts`):
-  // existing documents with the same _id are replaced; new ones are inserted. Returns, per family, the counts
-  // and every document it did not store, by id and reason.
-  app.post('/api/admin/spaces/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
-    const spaceId = req.params['spaceId'] as string;
-    if (answeredUnknownSpace(req, res, spaceId)) return;
-
-    /*
-     * The body of this route lives in `api/admin-import.ts` now.
-     *
-     * It was inline here and did `replaceOne` on arbitrary documents: no validation, no embed job, so a
-     * restored backup was stored and invisible to meaning-ranked search. Moving it out is what let it be
-     * exercised against a real database without an HTTP server — what is left here is argument handling and
-     * a status code.
-     */
-    const payload = (req.body ?? {}) as Record<string, unknown>;
-    const shapeError = importPayloadError(payload);
-    if (shapeError) { res.status(400).json({ error: shapeError }); return; }
-
-    res.json(await importDocuments(spaceId, payload));
-  });
+  // ── Admin: space export and import ────────────────────────────────────────
+  // Both live in `api/admin-space-transfer.ts`: the export writes a backup of one space, the import restores one of any size as an act.
+  app.use(spaceTransferRouter);
 
   // ── Admin: config reload ───────────────────────────────────────────────────────────────
   // Reload config.json from disk without a container restart.  Useful when the

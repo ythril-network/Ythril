@@ -27,7 +27,7 @@ import { recordSuppressedMany } from './suppress-embeddings.js';
 import { isTransientEmbedError } from './embed-queue.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
-import { UNSET_DERIVED, UNSET_VECTOR } from '../sync/local-only-fields.js';
+import { UNSET_DERIVED, UNSET_VECTOR, isDerivedFileRow } from '../sync/local-only-fields.js';
 import { log, logSafe, peerList } from '../util/log.js';
 import { holdsVector } from './holds-vector.js';
 import { holdsDerived } from './holds-derived.js';
@@ -49,7 +49,8 @@ export const COLLECTION: Record<BrainEmbedRecordType, SpacePart> = {
 
 /** A file record a conversion or a media job DERIVED from another file, rather than one somebody stored. */
 export function isDerived(doc: Record<string, unknown>): boolean {
-  return typeof doc['parentFileId'] === 'string';
+  // The one rule, beside the backup's row rule that asks it (`backupRow`, `sync/local-only-fields.ts`).
+  return isDerivedFileRow(doc);
 }
 
 /** A derived record's text, or `null` when it has none: a face chunk, a converted or extracted copy. */

@@ -1,3 +1,5 @@
+import { SPILL_PATH_RE, spillIdFromPath } from '../brain/spill-path.js';
+
 /**
  * The name of the write guard an edge carries on this instance (`Q-439`): spelled ONCE, so no writer, projection or filter
  * can drift from the field the unique index is declared over by a typo that stores a second, unindexed field and guards
@@ -44,7 +46,8 @@ export const RESOLVED_ELSEWHERE = '_resolvedElsewhere' as const;
  * ## The classes, each named by the constant that lists it
  *
  * Read the classes from this module's exports, never from a count written elsewhere: {@link LOCAL_ONLY_FIELDS} is the whole set;
- * {@link RESTORED_LOCAL_FIELDS} is the record tier a restore keeps from its own backup (`writtenHere` among it); {@link WRITE_GUARD_FIELDS}
+ * {@link RESTORED_LOCAL_FIELDS} is the record tier a database's raw restore keeps (`writtenHere` among it; an import
+ * stamps that one afresh), of which {@link RESTORED_INSTANCE_FIELDS} is the half bound to the instance that wrote the backup; {@link WRITE_GUARD_FIELDS}
  * is the edge's functional guard; {@link POSITION_FIELDS} is the landing position (`pos`, `posAtSeq`); {@link TOMBSTONE_LOCAL_FIELDS} is
  * what a stored tombstone keeps for itself (`storedVia`, `issuedHere` and the position); {@link DECISION_OWED_FIELDS} is the decision a
  * fork row still owes here; and `ORDER_ONLY_FIELDS` (`brain/recall-shape.ts`) is `pos` as a field a read may order by and no answer returns.
@@ -127,6 +130,23 @@ export const WRITE_GUARD_FIELDS: ReadonlySet<string> = new Set([FUNCTIONAL_GUARD
 export const RESTORED_LOCAL_FIELDS: ReadonlySet<string> = new Set(['_expireAt', '_contentExpireAt', 'syncBase', 'deliveredBy', WRITTEN_HERE, RESOLVED_ELSEWHERE]);
 
 /**
+ * The restored fields that are bound to the INSTANCE that wrote the backup, and to the space it was written from: `syncBase` (keyed by that
+ * instance's peers: what IT last agreed with each) and `_resolvedElsewhere` (a decision IT still owes). An import keeps them only from its own
+ * backup of the same space (`RestoreOrigin` 'own': the envelope names this instance and the target space); from any other they are dropped,
+ * so this instance never skips a conflict it did not agree to or owes a decision that is another's (bundle-40 R2, Q-227).
+ *
+ * Not in it, on purpose: `deliveredBy` (a stamp naming anyone but the current upstream deliverer is inert, and dropping it would make an
+ * upstream's deletions decline for ever) and the retention stamps (the record's own tier, D-13). `writtenHere` is stamped afresh by every
+ * import's landing whatever the origin.
+ *
+ * The origin is a convenience, not an authority: an administrator can write any envelope, and the impact is limited to these two fields.
+ */
+export const RESTORED_INSTANCE_FIELDS: ReadonlySet<string> = new Set(['syncBase', RESOLVED_ELSEWHERE]);
+
+/** Whose backup an import restores: this instance's own of the same space, or anyone else's (another instance, another space, no envelope). */
+export type RestoreOrigin = 'own' | 'foreign';
+
+/**
  * The decision-owed class of local-only field: A DECISION OWED HERE (Q-624, design rev 4 §9a). `_resolvedElsewhere` on a fork row says that another
  * instance resolved its own copy of this unchosen version behind a tombstone this instance's deletion authority declined, so the fork stays
  * here, listed in Review as resolved elsewhere, until THIS instance's user decides it (owner, 2026-10-25: my instance, my data).
@@ -201,6 +221,10 @@ export const NOT_CARRIED_BY_BACKUP: ReadonlySet<string> = new Set([...DERIVED_LO
 for (const f of RESTORED_LOCAL_FIELDS) {
   // A restored field that is not local-only would be a field the hash covers and the restore treats as local.
   if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`RESTORED_LOCAL_FIELDS names '${f}', which is not a local-only field`);
+}
+for (const f of RESTORED_INSTANCE_FIELDS) {
+  // An instance-bound field a restore does not keep at all would be dropped from an own backup too.
+  if (!RESTORED_LOCAL_FIELDS.has(f)) throw new Error(`RESTORED_INSTANCE_FIELDS names '${f}', which a restore does not keep`);
 }
 for (const f of POSITION_FIELDS) {
   if (!LOCAL_ONLY_FIELDS.has(f)) throw new Error(`POSITION_FIELDS names '${f}', which is not a local-only field`);
@@ -374,3 +398,37 @@ export function rekeyedRow<T extends object, P extends object>(old: T, patch: P,
   for (const f of LANDING_STAMPED) if (!(f in patch)) delete out[f];
   return out;
 }
+
+/** A file row a conversion or a media job DERIVED from another file (a chunk, a face row), rather than one somebody stored. */
+export function isDerivedFileRow(doc: Readonly<Record<string, unknown>>): boolean {
+  return typeof doc['parentFileId'] === 'string';
+}
+
+/**
+ * A legacy read spill's path in any spelling: `_tmp/graph-<uuid>.json` or `_tmp/results-<uuid>.json` at the space's root, with either
+ * separator and any leading separators - `spillIdFromPath`'s rule (`brain/spill-path.ts`) as one regular expression, so a MongoDB filter
+ * can ask it. Built from `SPILL_PATH_RE`, not written again.
+ */
+const SPILL_ANY_SPELLING = (() => {
+  const src = SPILL_PATH_RE.source;
+  const head = String.raw`^_tmp\/`;
+  if (!src.startsWith(head)) throw new Error('SPILL_PATH_RE no longer starts with ^_tmp/: re-derive SPILL_ANY_SPELLING');
+  return new RegExp(String.raw`^[\\/]*_tmp[\\/]` + src.slice(head.length), 'i');
+})();
+
+/**
+ * Which rows of a space's files collection a BACKUP holds - one rule for the export, which queries with `filter`, and the import, which
+ * drops by `predicate` (true: the row belongs in a backup). Left out: a row derived from another file (`isDerivedFileRow`: a conversion chunk,
+ * a face row), re-derived from the blob by whoever holds it; and a legacy read spill (`spillIdFromPath`), which no instance keeps any more. A
+ * flagged (soft-deleted) row IS held (`Q-257`).
+ *
+ * ## What it prevents (Q-226)
+ *
+ * The export streamed every row and the import dropped what it derives or what is a spill, so the two disagreed about what a backup is: a
+ * chunk and a face descriptor travelled for nothing, and a large space's export was mostly them. `the filter and the predicate agree` is a
+ * test over each row kind.
+ */
+export const backupRow: { readonly filter: Readonly<Record<string, unknown>>; readonly predicate: (doc: Readonly<Record<string, unknown>>) => boolean } = {
+  filter: { parentFileId: { $not: { $type: 'string' } }, _id: { $not: SPILL_ANY_SPELLING } },
+  predicate: (doc) => !isDerivedFileRow(doc) && !(typeof doc['_id'] === 'string' && spillIdFromPath(doc['_id']) !== null),
+};

@@ -95,7 +95,10 @@ import { inOneCommandChunks, operationBytes } from '../db/one-command.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
-import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, NOT_CARRIED_BY_BACKUP, WRITE_GUARD_FIELDS, WRITTEN_HERE, carriedFields, stampOfArrival } from './local-only-fields.js';
+import {
+  RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, RESTORED_INSTANCE_FIELDS, NOT_CARRIED_BY_BACKUP, WRITE_GUARD_FIELDS, WRITTEN_HERE, carriedFields, stampOfArrival,
+  backupRow, isDerivedFileRow, type RestoreOrigin,
+} from './local-only-fields.js';
 import { retentionStampOf } from '../brain/retention-stamp.js';
 import { retagToLocalSpace, seqGuard, divergesFrom, forkRowVerdict, isForkingFamily, CONVERGE_BLANKED } from './upsert-plan.js';
 import { isNewerCopy } from './held-tombstone-rules.js';
@@ -106,14 +109,14 @@ import { isWrittenHere } from './written-here.js';
 import { enqueueIngestedRecords, EMBED_REPAIR_HINT } from '../brain/embed-queue.js';
 import type { RetentionSpace } from '../brain/chrono-retention.js';
 import { retentionSpace, retentionStamps } from '../brain/ttl.js';
-import { isDerived, buildEmbedTexts } from '../brain/embed-record.js';
+import { buildEmbedTexts } from '../brain/embed-record.js';
 import { derivedFieldsForWrite } from '../brain/derived-text-on-write.js';
 import { embeddingSuppressedFor } from '../brain/suppress-embeddings.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import { fileMetaForWire } from '../api/sync/_shared.js';
 import { fillFileMetaFromStray } from './fill-file-meta.js';
 import { fileMetaUpdate, embedArrivedFiles, authoredKeysRestoreRemoves } from './file-meta-write.js';
-import { isLegacyReadSpill, isInstanceLocalFile } from './file-conflict.js';
+import { isInstanceLocalFile } from './file-conflict.js';
 import { decideArrivals, supersedeFileTombstones } from '../files/tombstones.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -134,6 +137,12 @@ export interface ArrivalOptions {
    * peer.
    */
   restore?: boolean;
+  /**
+   * A restore's origin (bundle-40 R2): 'own' (the export envelope names this instance and this space) keeps the backup's instance-bound
+   * fields (`RESTORED_INSTANCE_FIELDS`: `syncBase`, `_resolvedElsewhere`); 'foreign' drops them. Default 'own', the import door decides it.
+   * Ignored for anything but a restore.
+   */
+  restoreOrigin?: RestoreOrigin;
   /** Queue the embeddings later, through the returned `enqueue` — for a fork written inside a seq hold. */
   deferEnqueue?: boolean;
   /** Who sent it, for the log lines only. */
@@ -311,8 +320,11 @@ export function warnArrivalsNotStored(
 }
 
 /** A copy of what arrived with what never crosses removed, and a restore's stamps turned back into Dates. */
-function prepared(raw: Doc, family: BrainCollection, restore: boolean): Doc {
+function prepared(raw: Doc, family: BrainCollection, restore: boolean, origin: RestoreOrigin): Doc {
   let doc: Doc = { ...raw };
+  // Another instance's (or another space's) agreements and owed decisions are not this one's: gone before the record tier is read, so every reader
+  // below (the file merge included, `file-meta-write.ts`) sees only what this restore keeps (`RESTORED_INSTANCE_FIELDS`, Q-227).
+  if (restore && origin !== 'own') for (const f of RESTORED_INSTANCE_FIELDS) delete doc[f];
   // The derived half and this instance's write guard: never a peer's and never a backup's (`NOT_CARRIED_BY_BACKUP`); a restored
   // edge arrives unmarked (`Q-439`).
   for (const f of NOT_CARRIED_BY_BACKUP) delete doc[f];
@@ -486,10 +498,11 @@ export async function writeArrivals(
     // (`isInstanceLocalFile`, the one predicate every door asks: a legacy read spill `Q-92`, a conflict copy, a schema
     // snapshot, and what lies under a derived tree — each receiver converts by its own configuration).
     // A peer's row at such a path is ignored, never stored. A restore is this instance's OWN export, so its rows are not
-    // judged by it: only the legacy spill, which no instance keeps any more, is left out of one.
-    if (family === 'files' && (isDerived(doc) || (restore ? isLegacyReadSpill(doc._id) : isInstanceLocalFile(doc._id)))) {
+    // judged by it: it keeps what a backup holds (`backupRow`, the rule the export queries with), which leaves out only the
+    // derived rows and the legacy spill, which no instance keeps any more (Q-226).
+    if (family === 'files' && (restore ? !backupRow.predicate(doc) : (isDerivedFileRow(doc) || isInstanceLocalFile(doc._id)))) {
       // A peer's offer of an instance-local path is counted through the one arrival recorder (not a chunk, not a restore's spill).
-      if (!restore && !isDerived(doc)) countFileArrival('metadata', 'ignored_instance_local');
+      if (!restore && !isDerivedFileRow(doc)) countFileArrival('metadata', 'ignored_instance_local');
       out.derived.push(doc._id);
       continue;
     }
@@ -505,7 +518,7 @@ export async function writeArrivals(
       out.collapsed.push(doc._id);
       if (!isNewerCopy(doc.seq, prev.seq)) continue;
     }
-    page.set(doc._id, prepared(doc, family, restore));
+    page.set(doc._id, prepared(doc, family, restore, opts.restoreOrigin ?? 'own'));
   }
   let toWrite = [...page.values()];
   retagToLocalSpace(toWrite, spaceId);

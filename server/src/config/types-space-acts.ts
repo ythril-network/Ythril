@@ -20,10 +20,10 @@
 import type { BrainCollection } from './types-knowledge.js';
 
 /** The lane an act's body runs in: one body at a time per lane (`spaces/space-act-runner.ts`, "Lanes"). */
-export type SpaceActLane = 'space-op' | 'wipe' | 'restore';
+export type SpaceActLane = 'space-op' | 'wipe' | 'restore' | 'import';
 
 /** The fields of a request that make two requests the same act, besides its kind and space. */
-export type SpaceActKeyField = 'types' | 'networkId' | 'newId';
+export type SpaceActKeyField = 'types' | 'networkId' | 'newId' | 'spoolId';
 
 /** What every kind of act declares about itself. */
 export interface SpaceActKindSpec {
@@ -84,6 +84,16 @@ export const SPACE_ACT_KINDS = {
     lane: 'restore', writeRefusalCode: 'space_being_migrated',
     writeRefusalWhy: () => 'the instance is being copied to another database; retry once the migration completes',
     instanceWide: true, keyFields: [], forgetsMarks: null, wholeSet: true,
+  },
+  /*
+   * An admin import of an export into one space (bundle-40 R1): its body lands the body it spooled (`spoolId`), so two imports are never one
+   * act. Its own lane keeps one import at a time instance-wide; it forgets what the space RECEIVED, as a restore does, so the next sync
+   * re-reads every member from the start and the network's deletions and newer versions since the backup come back (D-69).
+   */
+  import: {
+    lane: 'import', writeRefusalCode: 'space_being_imported',
+    writeRefusalWhy: () => 'an import is restoring it; retry once the import completes',
+    instanceWide: false, keyFields: ['spoolId'], forgetsMarks: 'forgetReceived', wholeSet: false,
   },
 } as const satisfies Record<string, SpaceActKindSpec>;
 
@@ -162,6 +172,8 @@ export interface SpaceActEntry {
   setId?: string;
   /** A restore's backup, by id under the backups root; never a path, which is resolved again (and checked) when the body runs. */
   backupId?: string;
+  /** An import's spooled body, by id under the import spool; never a path, which is resolved again (and checked) when the body runs. */
+  spoolId?: string;
 }
 
 /** Where one member of an act set stands: its entry still stands, its act completed, or the set was abandoned before it did. */

@@ -123,8 +123,10 @@ describe('an import is a space act: it holds its space, resumes from its spool a
     assert.deepEqual(await idsOf(door, SPACE), [], 'an import with no spool landed rows');
     const rows = (await auditRowsOf(door.mongo, 'space.act_completed')).filter(r => String(r.path).startsWith('internal:space-act:import:'));
     assert.ok(rows.some(r => String(r.path).includes(actId)), `no completion row names the import act ${actId}: ${JSON.stringify(rows.map(r => r.path))}`);
-    // It was failed, not completed: the row says so by its status.
-    assert.ok(rows.every(r => typeof r.status === 'number' && r.status >= 400), `the completion row of an import with no spool reads as a success: ${JSON.stringify(rows.map(r => [r.path, r.status]))}`);
+    // It was failed, not completed: the row says so by its status. Only THIS act's rows: the audit log of the file's database also holds the
+    // successful completion of the resumed import the test before this one ran.
+    const own = rows.filter(r => String(r.path).includes(actId));
+    assert.ok(own.every(r => typeof r.status === 'number' && r.status >= 400), `the completion row of an import with no spool reads as a success: ${JSON.stringify(own.map(r => [r.path, r.status]))}`);
   });
 
   it('a spool no act names is swept at boot, and the spool a standing act names is kept', T, async () => {
