@@ -4,8 +4,8 @@
  *
  * ## The defect
  *
- * The check ran fire-and-forget right after each PAGE landed, and a pull lands its families one page at a time in
- * `REPLICATED_FAMILIES` order (then facts, entities, edges, chrono, links, filemeta; targets first since bundle-30 I13). So an edge to a chrono entry created
+ * <!-- replicated-family-order --> The check ran fire-and-forget right after each PAGE landed, and a pull lands its families one page at a time in
+ * `REPLICATED_FAMILIES` order, targets first (facts, entities, chrono, file metadata, then edges, then links; bundle-30 I13). So an edge to a chrono entry created
  * in the same interval was checked while its target was still to be pulled, and recorded as a violation with a fresh
  * uuid nothing dedupes — the copy that RECORDS rather than refuses, which an operator reads as real damage.
  *

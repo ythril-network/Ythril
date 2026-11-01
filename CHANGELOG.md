@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+| Changes on upgrade | Action |
+|---|---|
+| REST `ok` of a waited sync is true only when every member synced (it was true whenever the cycle ran) | Read `outcome` and `members` |
+| A waited sync in which no member synced answers `502` `sync_failed` (`503` `sync_store_failed` when this instance's database failed) on every door, the generic `POST /api/network_sync` included (it answered `422`) | Handle the status |
+| Sync history and `ythril_sync_cycles_total` write `refused` for a cycle that met only too-old peers (history wrote `failed`); a version from before this one reads `refused` in history as an unknown word after a rollback | None |
+| The metric `ythril_sync_items_pulled_total` / `_pushed_total` gains `type="filemeta"`, and `type="files"` counts files moved on every series (a held or refused file metadata row was counted under `files`) | Update dashboards that read `files` |
+| A member's failure counter resets whenever the peer answered, and no longer moves for this instance's own database failure | None |
+| A push request may carry `incomplete`; sync triggers answer `503` `shutting_down` while the server shuts down | An older receiver ignores the field; retry a trigger after the restart |
+
+### Added
+
+- **Sync:** a waited sync names each member's outcome (`members`) and the cycle's one verdict (`outcome`, the word history and the metric carry), on every door.
+- **Sync:** the network view shows a member's `consecutiveLocalFaults`, with a **Local store failing (N)** badge and a degraded chip at 3.
+- **Metrics:** `ythril_sync_member_outcomes_total{outcome}` counts each member's outcome on both sync doors.
+
+### Changed
+
+- **Sync history:** a row shows the translated status word, every family's count (chrono, links and file metadata included) and the number of files moved as a plural; the failing badge's title says the peer did not answer.
+
+### Fixed
+
+- **Sync:** a database failure on this instance while it lands a pulled page or a pulled tombstone page is no longer counted against the peer, on the scheduled cycle or a triggered one, and the cycle is not reported as success.
+- **Sync:** a manual sync reports a transfer that stopped early, as the scheduled cycle does.
+- **Sync:** file-metadata transfers are counted in the history and the metrics.
+- **Sync:** a push no longer lets an up-to-date receiver record an edge or a link as missing its target when the target's family stopped early in the same cycle (the push names the families still to come in `incomplete`).
+- **Sync:** pre-6.0 peers are no longer counted as failing every cycle.
+- **Shutdown:** a running sync cycle stops at its next page, and is waited for (5 s at most) before the database closes.
+- **Docs:** every sentence that states the order the replicated families travel in is marked and held to the family list by a test.
+
 ## [6.3.0] — 2026-11-01
 
 **A minor release: a space export of any size restores, as an act on its space that catches up with its network on the next sync, and exports, imports, key rotations and the server's own deletions are audited.**

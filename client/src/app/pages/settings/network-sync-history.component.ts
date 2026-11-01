@@ -1,7 +1,9 @@
 import { Component, inject, input, signal } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { SyncHistoryRecord } from '../../core/api.types';
+import { SyncCounts, SyncHistoryRecord } from '../../core/api.types';
+import { ActiveLanguage } from '../../core/active-language';
+import { formatCount } from '../../core/plural-text';
 import { NetworksApi } from '../../core/networks-api.service';
 import { httpErrorReason } from '../../core/http-error';
 import { PluralPipe } from '../../core/plural.pipe';
@@ -18,7 +20,14 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
  * of the whole network list after every load that existed only to show this panel's rows.
  *
  * A load that failed says so with a retry. Showing "no sync history yet" instead would claim the sync never ran.
+ *
+ * A row's status is the server's word, shown in the reader's language (`sync.status.<word>`; a word this client does not know is shown as it came,
+ * never as a missing key), and its counts are every family the server counts: the records are the sum of every count key but `files`, each read
+ * `?? 0` (a row written before chrono, links and file metadata were counted lacks them), and `files` is the number of files moved, shown apart as a
+ * plural (`Q-220`, `Q-265`, bundle-39).
  */
+const KNOWN_STATUS = ['success', 'partial', 'failed', 'refused'];
+
 @Component({
   selector: 'app-network-sync-history',
   standalone: true,
@@ -52,11 +61,16 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
     .status-success { background: var(--status-success-bg); color: var(--status-success-fg); }
     .status-partial { background: var(--status-warning-bg); color: var(--status-warning-fg); }
     .status-failed  { background: var(--status-error-bg);   color: var(--status-error-fg); }
+    /* Only too-old peers: nothing failed and nothing synced, so it is neither the warning nor the error colour. */
+    .status-refused { background: var(--bg-muted, var(--border-muted)); color: var(--text-muted); }
+    .title-button { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 0; font: inherit; color: inherit; }
   `],
   template: `
     <div style="margin-bottom:16px;">
-      <div class="section-title" style="cursor:pointer; display:inline-flex; align-items:center; gap:4px;" (click)="toggle()">
-        {{ 'networks.network.syncHistory.title' | transloco }} <ph-icon [name]="open() ? 'caret-up' : 'caret-down'" [size]="12" />
+      <div class="section-title">
+        <button type="button" class="title-button" [attr.aria-expanded]="open()" (click)="toggle()">
+          {{ 'networks.network.syncHistory.title' | transloco }} <ph-icon [name]="open() ? 'caret-up' : 'caret-down'" [size]="12" />
+        </button>
       </div>
       @if (open()) {
         @if (loading()) {
@@ -70,12 +84,12 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
           @for (rec of records(); track rec._id) {
             <div class="history-row">
               <span style="color:var(--text-muted);"><app-instant [value]="rec.completedAt" variant="datetime"/></span>
-              <span class="status-badge" [ngClass]="'status-' + rec.status">{{ rec.status }}</span>
+              <span class="status-badge" [ngClass]="'status-' + rec.status">@if (isKnownStatus(rec.status)) { {{ 'sync.status.' + rec.status | transloco }} } @else { {{ rec.status }} }</span>
               <span>
-                ↓ {{ rec.pulled.facts + rec.pulled.entities + rec.pulled.edges }}
-                + {{ rec.pulled.files }} files &nbsp;
-                ↑ {{ rec.pushed.facts + rec.pushed.entities + rec.pushed.edges }}
-                + {{ rec.pushed.files }} files
+                ↓ {{ moved(rec.pulled) }}
+                + {{ rec.pulled.files | plural:'networks.network.syncHistory.files' }} &nbsp;
+                ↑ {{ moved(rec.pushed) }}
+                + {{ rec.pushed.files | plural:'networks.network.syncHistory.files' }}
               </span>
               @if (rec.errors?.length) {
                 <button class="btn-ghost btn btn-sm" style="font-size:11px;"
@@ -99,6 +113,7 @@ import { ErrorStateComponent } from '../../shared/error-state.component';
 })
 export class NetworkSyncHistoryComponent {
   private readonly networksApi = inject(NetworksApi);
+  private readonly language = inject(ActiveLanguage);
 
   readonly networkId = input.required<string>();
 
@@ -109,6 +124,15 @@ export class NetworkSyncHistoryComponent {
   readonly records = signal<SyncHistoryRecord[]>([]);
   /** The one record whose errors are shown, or '' for none. */
   readonly expandedError = signal('');
+
+  protected isKnownStatus(status: string): boolean { return KNOWN_STATUS.includes(status); }
+
+  /** The records a cycle moved: every count key but `files` (files moved, shown apart), each `?? 0`, as the reader's language writes the number. */
+  protected moved(counts: SyncCounts): string {
+    let sum = 0;
+    for (const [key, n] of Object.entries(counts)) if (key !== 'files' && typeof n === 'number' && Number.isFinite(n)) sum += n;
+    return formatCount(this.language.language() || 'en', sum);
+  }
 
   toggle(): void {
     this.open.update(o => !o);

@@ -295,7 +295,7 @@ Every outbound call has its own bounded timeout (10 s for small requests, 60 s f
 
 ### Consistently unreachable peers
 
-Each failed sync attempt increments `consecutiveFailures` on the member record. After **10 consecutive failures** a prominent warning is written to the log:
+Each cycle in which the **peer did not answer** increments `consecutiveFailures` on the member record, and a cycle in which it answered resets it to 0. A failure of this instance's own database while it landed what the peer sent does not count against the peer (it is `consecutiveLocalFaults`, shown as its own badge), and neither does a peer that is too old to sync with. After **10 consecutive failures** a prominent warning is written to the log:
 
 ```text
 PEER UNREACHABLE: 'laptop' in network 'Personal Devices' has failed 10 consecutive
