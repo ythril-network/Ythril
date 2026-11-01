@@ -2985,6 +2985,7 @@
   "brain.overview.usageResetDone.other": "Cleared {{count}} usage buckets.",
   "brain.overview.usageResetFailed": "Usage reset failed. Check the server logs.",
   "spaces.dangerZone.act.repeatHint.rename": "A rename is retried automatically; no button here joins it.",
+  "spaces.dangerZone.act.repeatHint.import": "An import is retried automatically from the body it received; no button here joins it.",
   "spaces.dangerZone.act.repeatHint.restore": "This covers the whole instance and is retried automatically. Follow it, or abandon it, on the Database page.",
   "spaces.dangerZone.act.repeatHint.migrate": "This covers the whole instance and is retried automatically. Follow it on the Database page.",
   "spaces.dangerZone.act.repeatHint.other": "It is retried automatically; this tab shows when it ends.",
