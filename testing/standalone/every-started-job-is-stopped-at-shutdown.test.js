@@ -16,8 +16,10 @@
  * The jobs are every registration `_scheduled-jobs.mjs` finds (`intervalJob(` and cron `schedule(`), the one derivation of "what this
  * process runs on a timer". For each, by where it lives:
  *
- * 1. **A job registered in the shutdown handler's own file** (the file that defines `const shutdown = async`, found by that text,
- *    exactly one) is held by a handle, and the handler calls `<handle>.stop()` before the drain.
+ * 1. **A job registered in the shutdown handler's own file** (the file that defines `export async function runShutdown`, found by that text,
+ *    exactly one: `shutdown.ts`, which `index.ts` starts; the sequence was a closure in `index.ts` before bundle-39 D5, and the one job it
+ *    registered itself, the chunk cleanup, now lives in `files/chunk-cleanup-job.ts` with a `stop…` of its own) is held by a handle, and the
+ *    handler calls `<handle>.stop()` before the drain.
  * 2. **A job that is stopped in a `finally` of the function that created it** (the embed worker's heartbeat, which lives for one job)
  *    needs no stop at shutdown: the function ends and stops it.
  * 3. **Every other job lives as long as its module**, and then the module exports a `stop…` function that
@@ -51,6 +53,7 @@ import assert from 'node:assert/strict';
 import { moduleIndex, walkFrom } from './_call-graph.mjs';
 import { scheduledJobs } from './_scheduled-jobs.mjs';
 import { balancedFrom } from './_structural-window.mjs';
+import { SHUTDOWN_ANCHOR, shutdownSequenceOf } from './_shutdown-sequence.mjs';
 
 /**
  * Modules whose job has no stop, each with why it needs none. Held: the module must export no `stop…`, and its `check` must hold.
@@ -83,14 +86,12 @@ const FLOORS = { filesWithJobs: 12, stoppedByModule: 10, stopCalls: 10 };
 const index = moduleIndex('server/src');
 const { jobs } = scheduledJobs(index);
 
-/** The handler: the text of the arrow function bound to `const shutdown = async`, and where its drain starts. */
+/** The handler: the body of `runShutdown` (`shutdown.ts`, bundle-39 D5; it was `const shutdown = async` in `index.ts`), and where its drain starts. */
 function shutdownHandler() {
-  const hosts = [...index.sources].filter(([, src]) => /\bconst\s+shutdown\s*=\s*async\b/.test(src));
-  assert.equal(hosts.length, 1, `exactly one file defines the shutdown handler (\`const shutdown = async\`), found ${hosts.map(([f]) => f).join(', ') || 'none'}`);
+  const hosts = [...index.sources].filter(([, src]) => SHUTDOWN_ANCHOR.test(src));
+  assert.equal(hosts.length, 1, `exactly one file defines the shutdown handler (\`export async function runShutdown\`), found ${hosts.map(([f]) => f).join(', ') || 'none'}`);
   const [file, src] = hosts[0];
-  const at = src.search(/\bconst\s+shutdown\s*=\s*async\b/);
-  const arrow = src.indexOf('=>', at);
-  const body = balancedFrom(src, src.indexOf('{', arrow), 'the shutdown handler body');
+  const body = shutdownSequenceOf(src);
   const drainAt = body.indexOf('server.close(');
   assert.ok(drainAt > -1, 'the handler no longer calls `server.close(`: re-anchor where the drain begins');
   return { file, body, drainAt };
@@ -206,7 +207,7 @@ describe('every scheduled job is stopped by the shutdown handler', () => {
   it('no job is left running while the process drains', () => {
     assert.deepEqual(result.findings, [],
       `a job that is not stopped at shutdown can start a tick over a closing connection:\n  ${result.findings.join('\n  ')}\n`
-      + 'Export a `stop…` that stops the job and call it in `index.ts`\'s shutdown handler before the `server.close(`, or, where a job truly needs none, add a '
+      + 'Export a `stop…` that stops the job and call it in `shutdown.ts`\'s `runShutdown` before the `server.close(`, or, where a job truly needs none, add a '
       + 'NO_STOP row here with the reason.');
   });
 

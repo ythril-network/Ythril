@@ -34,6 +34,7 @@ import { mergePeerRoster, revokeRemoved, pairIntroduced } from '../networks/memb
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
 import { settleRounds } from '../networks/round-conclusion.js';
 import { createCoalescingRunner } from './coalescing-runner.js';
+import { DetachedWork } from '../util/detached-work.js';
 import { warnOnce } from '../util/warn-once.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
 import { syncCyclesTotal, syncDurationSeconds } from '../metrics/registry.js';
@@ -108,13 +109,12 @@ export async function runSyncForNetwork(networkId: string): Promise<NetworkCycle
   return _syncRunner.run(networkId, () => inCycle(() => _runSyncForNetworkImpl(networkId)));
 }
 
-let cyclesInFlight = 0;
-/** Sync cycles running now, network and single-peer alike: the quiescence a test or a shutdown waits for. */
-export function syncCyclesInFlight(): number { return cyclesInFlight; }
-async function inCycle<T>(run: () => Promise<T>): Promise<T> {
-  cyclesInFlight++;
-  try { return await run(); } finally { cyclesInFlight--; }
-}
+// Every cycle, network and single-peer alike, is counted here the moment it starts: the quiescence a test waits for, and what a shutdown
+// waits for (bounded) before it closes the database (`runShutdown`, bundle-39 D5).
+const cycles = new DetachedWork('sync cycle');
+export function syncCyclesInFlight(): number { return cycles.size; }
+export function syncCyclesSettled(ms: number): ReturnType<DetachedWork['settledWithin']> { return cycles.settledWithin(ms); }
+const inCycle = <T>(run: () => Promise<T>): Promise<T> => cycles.track(run());
 
 async function _runSyncForNetworkImpl(networkId: string): Promise<NetworkCycleResult> {
   const cfg = getConfig();
@@ -172,7 +172,8 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<NetworkCycleRe
   cycle.countItems();
 
   // Persist sync history
-  recordSyncResult({
+  // Awaited: a shutdown waits for the cycle and then closes the database, and a row still being written then is lost (`Q-228`).
+  await recordSyncResult({
     networkId,
     triggeredAt,
     completedAt: new Date().toISOString(),

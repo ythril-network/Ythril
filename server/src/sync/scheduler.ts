@@ -23,6 +23,7 @@ import { armedSchedules } from '../util/armed-schedule.js';
 import { cronArmingRefused } from '../util/cron-arming.js';
 import { resolveSyncCron } from './schedule.js';
 import { runSyncForNetwork } from './engine.js';
+import { isShuttingDown } from '../lifecycle.js';
 
 const _scheduledTasks = new Map<string, ScheduledTask>();
 /** Keyed by network id — see `util/armed-schedule.ts` for why re-arming an unchanged expression is not free. */
@@ -107,6 +108,9 @@ export async function runScheduledSync(networkId: string): Promise<void> {
     log.info(`Sync schedule for network ${peerText(networkId)} stopped: the network is no longer configured`);
     return;
   }
+  // A tick that fired as shutdown began (the stop below does not reach one already dispatched) starts no cycle: the wait for cycles has ended or is
+  // about to, and a cycle begun after it would run against a store that closes (bundle-39 D5).
+  if (isShuttingDown()) return;
   await runSyncForNetwork(networkId).catch(err =>
     log.error(`Scheduled sync failed for network ${peerText(networkId)}: ${peerText(err)}`),
   );

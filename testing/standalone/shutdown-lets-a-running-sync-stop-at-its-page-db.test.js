@@ -164,7 +164,10 @@ function assertRefusedForShutdown(label, r) {
 async function cycleInFlight(start) {
   need();
   const park = parkWrites(proto);
-  const gate = park.arm(`${S}_facts`);
+  // Only the write that LANDS the page, by the records it carries (`sf-…`, whatever method lands them). Another write to the facts collection comes
+  // first (the one-time re-read of a member's tombstones backfills `deliveredBy` with an `updateMany`), and parking that one would hold the cycle
+  // before it asked for any page.
+  const gate = park.arm(`${S}_facts`, { when: (_method, args) => /"sf-\d+"/.test(JSON.stringify(args)) });
   let held = false;
   gate.reached.then(() => { held = true; });
   const answered = start();
@@ -209,6 +212,8 @@ describe('shutdown lets a running sync stop at its page', { skip }, () => {
     lifecycle.resetLifecycleForTests();
     await reopen();
     await door.reset({ direction: 'pull' });
+    // The previous case's next cycle wrote a history row of its own: the rows a case reads are its own interrupted cycle's.
+    await door.mongo.col('_sync_history').deleteMany({ networkId: door.NET });
     clearPositionMarks(door);
     door.member().consecutiveFailures = 4;
     await door.seedPeerRecords(S, 'facts', Array.from({ length: FACT_COUNT }, (_, i) =>

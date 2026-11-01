@@ -577,7 +577,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
    * One SCHEDULED cycle of the network, as a cron tick runs it (`runSyncForNetwork`), and what it wrote: its answer, the history row's status and
    * errors, and what the cycle metric gained per status (`{ failed: 1 }`). The twin of `sync()`, which is the manual door and writes neither.
    *
-   * The history row is waited for (it is written after the answer, unawaited) and read by the cycle's own start time, so a row an earlier cycle
+   * The history row is read by the cycle's own start time (the cycle awaits its row since bundle-39, the wait stays as a bound), so a row an earlier cycle
    * left never stands in for this one's.
    */
   async function cycle() {

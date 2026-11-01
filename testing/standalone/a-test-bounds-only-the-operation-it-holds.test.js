@@ -57,8 +57,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
  */
 const OPERATION_BOUND_FLOOR_MS = 1000;
 
-/** The answer/wait axis: a figure whose name says it is how long a caller WAITS, ANSWERS or REPORTS — it ends no operation. */
-const ANSWER_OR_WAIT = /ANSWER|WAIT|DRAIN|SLOW/i;
+/**
+ * The answer/wait axis: a figure whose name says it is how long a caller WAITS, ANSWERS or REPORTS — it ends no operation. A GRACE is a wait too
+ * (`SHUTDOWN_READY_GRACE_MS`: how long the shutdown keeps serving before it drains; a test sets it to 0 so the sequence it runs does not idle).
+ */
+const ANSWER_OR_WAIT = /ANSWER|WAIT|DRAIN|SLOW|GRACE/i;
 
 /**
  * Sub-floor operation bounds on a real store, each holding ONE operation and saying why nothing else meets it.

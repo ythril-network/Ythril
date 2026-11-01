@@ -99,7 +99,7 @@ describe('releaseClaimedJob — against a real MongoDB', { skip }, () => {
   describe('the shutdown path is wired to it', () => {
     // The suite above proves the function works. These prove something calls it — otherwise the whole finding
     // is still live and the tests pass.
-    const shutdown = readFileSync('server/src/index.ts', 'utf8');
+    const shutdown = readFileSync('server/src/shutdown.ts', 'utf8');
 
     it('stops the media worker, so it cannot claim while draining', () => {
       assert.match(shutdown, /stopMediaEmbeddingWorker\(\);/,

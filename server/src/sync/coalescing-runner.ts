@@ -29,6 +29,8 @@
  * See `testing/standalone/coalescing-runner.test.js` for the two tests that were impossible before.
  */
 
+import { isShuttingDown } from '../lifecycle.js';
+
 /** Optional hooks, used by the sync engine for its debug logging. */
 export interface CoalescingRunnerHooks {
   /** A trigger arrived while a job was in flight and a rerun was queued. */
@@ -71,7 +73,9 @@ export function createCoalescingRunner<T>(hooks: CoalescingRunnerHooks = {}): Co
     } finally {
       // Release FIRST, so the rerun below sees a free key rather than joining the job that is ending.
       running.delete(key);
-      if (rerunRequested.delete(key)) {
+      // No rerun once shutdown has begun: it would start work after the wait for work in flight has ended, against a store about to close
+      // (bundle-39 D5). What it was asked for is picked up by the first cycle after the next start.
+      if (rerunRequested.delete(key) && !isShuttingDown()) {
         hooks.onRerun?.(key);
         void run(key, job);
       }

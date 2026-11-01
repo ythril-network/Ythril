@@ -27,6 +27,7 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import net from 'node:net';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { readShutdownSequence } from './_shutdown-sequence.mjs';
 
 /** The drain used by `index.ts`, reproduced here so the test exercises the shape, not the file. */
 function drain(server, drainMs) {
@@ -94,21 +95,41 @@ describe('shutdown drains in-flight work', () => {
   });
 });
 
-describe('the shutdown handler in index.ts', () => {
-  const src = readFileSync('server/src/index.ts', 'utf8');
+describe('the shutdown sequence (shutdown.ts, started from index.ts)', () => {
+  const { src, body: sequence } = readShutdownSequence();
+
+  it('index.ts starts it from both signals, and holds no copy of it', () => {
+    const index = readFileSync('server/src/index.ts', 'utf8');
+    for (const signal of ['SIGTERM', 'SIGINT']) {
+      assert.match(index, new RegExp(String.raw`process\.on\('${signal}',\s*\(\)\s*=>\s*void runShutdown\(\s*\{\s*signal:\s*'${signal}'\s*,\s*server\s*\}`), `${signal} does not start runShutdown`);
+    }
+    assert.doesNotMatch(index, /closeMongo\(|server\.close\(/, 'index.ts closes the server or the database itself: the sequence is a second copy');
+  });
 
   it('awaits the close before closing Mongo', () => {
-    const body = src.slice(src.indexOf('const shutdown ='), src.indexOf('process.on(\'SIGTERM\''));
+    const body = sequence;
     const closeAt = body.indexOf('server.close(');
     const mongoAt = body.indexOf('closeMongo(');
     assert.ok(closeAt > 0 && mongoAt > 0);
     assert.ok(closeAt < mongoAt, 'the server must be closed before the database connection is dropped');
-    assert.match(body, /await new Promise/,
+    assert.match(body, /await Promise\.all\(\[\s*new Promise/,
       'the close must be awaited — an unawaited server.close() lets exit race the requests');
   });
 
+  it('waits for the sync cycles in flight ALONGSIDE the drain, bounded, before the config flush and the database close (bundle-39 D5, Q-228)', () => {
+    const drain = sequence.indexOf('await Promise.all([');
+    const wait = sequence.indexOf('waitForSyncCycles(', drain);
+    const flush = sequence.indexOf('await flushConfig()');
+    const mongo = sequence.indexOf('closeMongo(');
+    assert.ok(drain > 0 && wait > drain, 'the wait for sync cycles is not in the same Promise.all as the HTTP drain: the two would add up inside the stop grace');
+    assert.ok(wait < flush && flush < mongo, 'the cycle wait must come before flushConfig and closeMongo, or a page lands on a closing client');
+    assert.match(sequence.slice(wait, wait + 80), /Math\.min\(\s*CYCLE_WAIT_MS\s*,\s*httpDrainMs\s*\)/, 'the wait is not bounded by the drain budget it shares');
+    assert.match(src, /const CYCLE_WAIT_MS\s*=\s*5_000\b/, 'the cycle wait is not the 5 s the docs state (02-hosting.md, SHUTDOWN_DRAIN_MS)');
+    assert.ok(sequence.indexOf('beginShutdown()') < drain, 'shutdown must begin (which ends a cycle at its next page) before the wait starts');
+  });
+
   it('is re-entrant-safe, so a second signal cannot race the first', () => {
-    assert.match(src, /if \(shuttingDown\) return;/);
+    assert.match(sequence, /if \(isShuttingDown\(\)\) return;/);
   });
 
   it('bounds the drain rather than waiting forever', () => {
@@ -116,7 +137,7 @@ describe('the shutdown handler in index.ts', () => {
   });
 
   it('stops the reindex watcher before the drain, so a tick cannot start a sweep over the closing database (bundle-53 G15)', () => {
-    const body = src.slice(src.indexOf('const shutdown ='), src.indexOf("process.on('SIGTERM'"));
+    const body = sequence;
     const stopAt = body.indexOf('stopReindexWatcher(');
     const closeAt = body.indexOf('server.close(');
     assert.ok(stopAt > 0, 'the shutdown handler never stops the reindex watcher: its 5 s tick keeps resuming runs while the process drains');
@@ -172,8 +193,7 @@ describe('readiness reports not-ready as soon as shutdown begins', () => {
   });
 
   it('shutdown marks not-ready before it closes the server', () => {
-    const src = readFileSync('server/src/index.ts', 'utf8');
-    const body = src.slice(src.indexOf('const shutdown ='), src.indexOf("process.on('SIGTERM'"));
+    const { body } = readShutdownSequence();
     const markAt = body.indexOf('beginShutdown()');
     const closeAt = body.indexOf('server.close(');
     assert.ok(markAt > 0 && closeAt > 0);

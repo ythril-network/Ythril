@@ -10,7 +10,7 @@
  *   `job` of `ythril_interval_tick_skipped_total` and the head of its failure line), every 60 seconds;
  * - its run reaches `runRoundExpiryTick`, the synchronous tick body;
  * - started from `bootstrap.ts`'s `startConfiguredInstanceServices` (so a first-run setup starts it too) and stopped by the
- *   shutdown handler in `index.ts` before the drain;
+ *   shutdown sequence (`shutdown.ts`) before the drain;
  * - it walks the networks through `eachNetwork` in `util/housekeeping-walk.ts` — not a hand-written `for` with a `try`, which is
  *   the shape every copy of the space walk had before `eachSpace`;
  * - a conclusion it makes is audited as `network.round.expired`, through `logInternalAudit`, one entry per round (the record a
@@ -25,6 +25,7 @@ import { moduleIndex, walkFrom } from './_call-graph.mjs';
 import { scheduledJobs } from './_scheduled-jobs.mjs';
 import { argumentsOf, balancedFrom } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { SHUTDOWN_FILE, shutdownSequenceOf } from './_shutdown-sequence.mjs';
 
 const FILE = 'server/src/networks/round-expiry.ts';
 const LABEL = 'Vote round expiry';
@@ -72,10 +73,7 @@ describe('it is started and stopped', () => {
   });
 
   it('stopRoundExpiry is called in the shutdown handler before the drain begins', () => {
-    const src = code('server/src/index.ts');
-    const at = src.search(/\bconst\s+shutdown\s*=\s*async\b/);
-    assert.ok(at > -1, 'the shutdown handler is gone — re-anchor this gate');
-    const body = balancedFrom(src, src.indexOf('{', src.indexOf('=>', at)), 'the shutdown handler');
+    const body = shutdownSequenceOf(code(SHUTDOWN_FILE));
     const stop = body.search(/\bstopRoundExpiry\s*\(/);
     const drain = body.indexOf('server.close(');
     assert.ok(drain > -1, 'the handler no longer calls server.close( — re-anchor where the drain begins');

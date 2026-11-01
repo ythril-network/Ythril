@@ -196,10 +196,14 @@ describe('the cleanup is walked, and its hourly timer is an interval job', () =>
     assert.match(body, /isMissingPath\(/, '"not there" is decided by the one predicate for it');
   });
 
-  it('index.ts schedules the stale-chunk cleanup through intervalJob, hourly, and has no bare setInterval', () => {
-    const src = read('server/src/index.ts');
-    assert.ok(!/\bsetInterval\s*\(/.test(src), 'no bare setInterval in index.ts');
+  it('the stale-chunk cleanup is scheduled through intervalJob, hourly, with no bare setInterval, and index.ts starts it', () => {
+    // The job moved out of `index.ts` with the shutdown sequence (bundle-39 D5): its stop is exported beside it, where the sequence can call it.
+    const src = read('server/src/files/chunk-cleanup-job.ts');
+    assert.ok(!/\bsetInterval\s*\(/.test(src), 'no bare setInterval in the job module');
+    assert.ok(!/\bsetInterval\s*\(/.test(read('server/src/index.ts')), 'no bare setInterval in index.ts');
     assert.match(src, /intervalJob\(\s*['"`]Stale chunk cleanup['"`]\s*,\s*60\s*\*\s*60\s*\*\s*1000\s*,/, 'the hourly job is named and scheduled');
     assert.match(src, /cleanupStaleChunks\(\)/, 'and it runs the cleanup');
+    assert.match(read('server/src/index.ts'), /\bstartChunkCleanup\(\)/, 'index.ts never starts the job');
+    assert.match(read('server/src/shutdown.ts'), /\bstopChunkCleanup\(\)/, 'the shutdown sequence never stops the job');
   });
 });

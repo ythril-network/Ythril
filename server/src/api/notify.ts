@@ -15,7 +15,8 @@ import { notifyRateLimit } from '../rate-limit/middleware.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { peerBoundTo } from '../auth/peer-bound.js';
-import { log, refusalOfParse } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
+import { isShuttingDown } from '../lifecycle.js';
 import { NOTIFY_DATA_MAX_BYTES, NOTIFY_RING_MAX_BYTES } from '../util/request-bounds.js';
 
 export const notifyRouter = Router();
@@ -168,10 +169,14 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
   // a deadline that expires unseen is a vote nobody got to cast.
   if ((SYNC_TRIGGER_EVENTS as readonly string[]).includes(event)) {
     import('../sync/engine.js').then(({ runSyncForNetwork }) => {
+      // Checked AFTER the import, where the decision is made: a notice that arrived before shutdown began but whose import settled after it
+      // would otherwise start a cycle the wait for cycles has already stopped waiting for (bundle-39 D5). Said once, at debug: a refused wake
+      // is not a fault, the next start syncs anyway.
+      if (isShuttingDown()) { log.debug(`Triggered sync (${peerText(event)}) for network ${peerText(networkId)} not started: shutting down`); return; }
       runSyncForNetwork(networkId).catch(err =>
-        log.error(`Triggered sync (${event}) for network ${networkId} failed: ${err}`),
+        log.error(`Triggered sync (${peerText(event)}) for network ${peerText(networkId)} failed: ${peerText(err)}`),
       );
-    }).catch(err => log.error(`Failed to import sync engine (${event}): ${err}`));
+    }).catch(err => log.error(`Failed to import sync engine (${peerText(event)}): ${peerText(err)}`));
   }
 
   // N-7: when a member departs, auto-adopt its children as direct children of this instance
