@@ -778,6 +778,8 @@ Generates a new Ed25519 governance vote-signing keypair and a continuity proof s
 
 **Response** `200`: `{ "ok": true, "signingPublicKey": "-----BEGIN PUBLIC KEY-----…" }`
 
+The rotation is audited as `signing.rotate` ([Audit Log](13-audit-log-api.md)): the entry names the token that asked and records the new key's fingerprint (the SHA-256 of its PEM, as hex) in `changes`, never a key.
+
 ### Force-Pin a Member's Signing Key (break-glass)
 
 ```http
