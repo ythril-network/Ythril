@@ -69,6 +69,7 @@ import { PageStoppedError } from '../sync/page-stopped.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
+import { resetStampHealLatch } from '../brain/retention-stamp-heal.js';
 import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
 import { EdgeIdentityBuilding } from '../util/errors.js';
 
@@ -161,7 +162,12 @@ const familyFailed = (err: unknown): string =>
  */
 export async function importDocuments(spaceId: string, payload: Record<string, unknown>): Promise<ImportResult> {
   try { return await importInto(spaceId, payload); }
-  finally { restartLeakedRowScans([spaceId]); }
+  finally {
+    restartLeakedRowScans([spaceId]);
+    // An import is the one door left that can store a retention stamp that is not a Date (an older body, a hand-made one): the sweep's heal asks this space's
+    // collections again (`brain/retention-stamp-heal.ts`).
+    resetStampHealLatch(spaceId);
+  }
 }
 
 async function importInto(spaceId: string, payload: Record<string, unknown>): Promise<ImportResult> {
