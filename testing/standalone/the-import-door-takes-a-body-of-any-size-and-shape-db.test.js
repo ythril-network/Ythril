@@ -16,6 +16,9 @@
  *  6. **A repeated id across a page boundary keeps the highest seq, and of equal seqs the earliest** (PIN at the door: the base lands a family in
  *     one call, so it already does; the red form is `an-export-body-is-indexed-and-paged-without-holding-its-ids.test.js`).
  *  7. **The export envelope names the instance that wrote it** (`instanceId`).
+ *  8. **A disk without room answers 507, a client that goes away mid-body, and a gzip or br body that does not inflate (400), each leave no
+ *     spool and no act** (bundle-40 pre-ship T5). The disk is filled through the door's free-space reader (`setImportFreeSpaceForTest`), never
+ *     for real. The client and the inflate rows are PINs: they hold on 505b5790c; the 507 row is red there only for want of the seam.
  *
  * ## What is red on the base, and what is a PIN
  *
@@ -31,6 +34,7 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openImportDoor, exportText, paddedFacts, fact, encoded, idsOf } from './_import-door.mjs';
 import { untilRunnerIdle } from './_space-act-harness.mjs';
@@ -190,6 +194,55 @@ describe('the import door takes a body of any size and shape (real MongoDB, real
     assert.deepEqual([dup?.seq, dup?.description], [9, 'middle, seq 9'], 'a repeated id did not keep its highest seq');
     assert.equal(tie?.description, 'first', 'of two copies at an equal seq the earlier did not stand');
     assert.equal(await door.coll(SPACE, 'facts').countDocuments({}), 1102, 'a repeated id was stored twice, or a document was lost');
+  });
+
+  describe('a full disk, a client that goes away and a body that does not inflate leave no spool and no act', () => {
+    /** Until `cond()` holds, bounded by turns (a 15 ms timer each): throws naming `what` when it never does. */
+    const until = async (cond, what) => {
+      // waits-differently: the server's side of a closed socket is observed by its effect on disk, which no event of this process announces.
+      for (let i = 0; i < 400; i++) { if (cond()) return; await new Promise(r => setTimeout(r, 15)); }
+      throw new Error(`never: ${what}`);
+    };
+
+    it('a disk without room for the body answers 507 and makes no spool', T, async () => {
+      const transfer = await import('../../server/dist/api/admin-space-transfer.js');
+      transfer.setImportFreeSpaceForTest(() => 1024);
+      try {
+        const res = await door.post(SPACE, exportText({ facts: paddedFacts(10, 1000, { idPrefix: 'full' }) }));
+        assert.equal(res.status, 507, `a body larger than the free disk was answered ${res.status}: ${res.text.slice(0, 160)}`);
+      } finally { transfer.setImportFreeSpaceForTest(null); }
+      assert.deepEqual(door.spoolFiles(), [], 'a body refused for want of disk left a spool');
+      assert.deepEqual(door.importActs(), [], 'a body refused for want of disk registered an act');
+      assert.deepEqual(await idsOf(door, SPACE), []);
+    });
+
+    it('PIN: a client that goes away mid-body leaves no spool and no act', T, async () => {
+      const body = Buffer.from(exportText({ facts: paddedFacts(OVER_10_MB_COUNT, PAD, { idPrefix: 'gone' }) }));
+      const req = http.request(`${door.base}/api/admin/spaces/${SPACE}/import`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': body.length, Authorization: `Bearer ${door.adminKey}` },
+      });
+      req.on('error', () => { /* the test cut it */ });
+      req.write(body.subarray(0, 2 * MB));
+      await until(() => door.spoolFiles().length === 1, 'the door began a spool for the body being sent');
+      req.destroy();
+      await until(() => door.spoolFiles().length === 0, 'the spool of a body whose client went away was removed');
+      await settled();
+      assert.deepEqual(door.importActs(), [], 'a body whose client went away registered an act');
+      assert.deepEqual(await idsOf(door, SPACE), []);
+    });
+
+    for (const encoding of ['gzip', 'br']) {
+      it(`PIN: a ${encoding} body that does not inflate answers 400 and leaves no spool`, T, async () => {
+        const good = encoded(exportText({ facts: [fact('broken-1', 1), fact('broken-2', 2)] }), encoding);
+        const broken = Buffer.concat([good.subarray(0, 6), Buffer.from('this is not what the encoding promised'.repeat(20))]);
+        const res = await door.post(SPACE, broken, { encoding });
+        assert.equal(res.status, 400, `a ${encoding} body that does not inflate was answered ${res.status}: ${res.text.slice(0, 160)}`);
+        await settled();
+        assert.deepEqual(door.spoolFiles(), [], `a ${encoding} body that does not inflate left a spool`);
+        assert.deepEqual(door.importActs(), []);
+        assert.deepEqual(await idsOf(door, SPACE), []);
+      });
+    }
   });
 
   it('the export envelope carries the instance that wrote it (instanceId)', T, async () => {
