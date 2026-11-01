@@ -35,8 +35,8 @@ import { outermostFunctionAt } from './_source-helpers.mjs';
 function callersOf(file, raw, name) {
   const blanked = blankComments(raw);
   const out = [];
-  for (const m of blanked.matchAll(new RegExp(`(?<![.\\w$])${name}\\s*\\(`, 'g'))) {
-    if (/function\s+$/.test(blanked.slice(Math.max(0, m.index - 12), m.index))) continue;
+  // A definition (`function name(`) is not a call: the lookbehind is the bound, so no window of characters behind the match is read.
+  for (const m of blanked.matchAll(new RegExp(`(?<![.\\w$])(?<!\\bfunction\\s+)${name}\\s*\\(`, 'g'))) {
     out.push(outermostFunctionAt(file, raw, m.index)?.name ?? null);
   }
   return out;

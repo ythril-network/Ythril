@@ -77,7 +77,7 @@ import { writeArrivals, arrivalId, arrivalRefusal, NAMED_IN_SUMMARY, type Arriva
 import { PageStoppedError } from '../sync/page-stopped.js';
 import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { readPageTombstones } from '../sync/push-reads.js';
-import { heldFileTombstones } from '../files/tombstones.js';
+import { deletedHereSince } from '../files/tombstones.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 import { resetStampHealLatch } from '../brain/retention-stamp-heal.js';
 import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
@@ -243,9 +243,7 @@ async function heldDeletions(
   if (winners.size === 0) return { ownSince, held };
   const versionOf = (id: string): number => { const s = winners.get(id)?.['seq']; return typeof s === 'number' ? s : 0; };
   if (family === 'files') {
-    for (const [path, list] of await heldFileTombstones(spaceId, [...winners.keys()])) {
-      if (list.some(t => t.issuedHere === true && typeof t.rowSeq === 'number' && t.rowSeq >= versionOf(path))) ownSince.add(path);
-    }
+    for (const path of await deletedHereSince(spaceId, [...winners.keys()].map(id => ({ path: id, seq: versionOf(id) })))) ownSince.add(path);
     return { ownSince, held };
   }
   const tombType = TOMBSTONE_TYPE_OF[family];

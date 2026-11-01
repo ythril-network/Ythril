@@ -937,6 +937,22 @@ async function readHeldFor(spaceId: string, paths: readonly string[]): Promise<H
   return { held, unlooked, ...(cause !== undefined ? { cause } : {}) };
 }
 
+/**
+ * The paths of `rows` THIS instance deleted at or after the version each row carries: a tombstone held for the path (published, or pending
+ * with its act already done, as an arrival reads them) that was issued here (`issuedHere`) for a row version at or above the row's. A
+ * restore leaves such a row out, because the deletion happened after its backup (bundle-40 R5a, D-69). Only the bit and two versions are
+ * compared; a tombstone with no recorded version covers nothing, and a pending one whose path could not be looked at is not counted.
+ */
+export async function deletedHereSince(spaceId: string, rows: ReadonlyArray<{ path: string; seq: number }>): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (rows.length === 0) return out;
+  const { held } = await readHeldFor(spaceId, rows.map(r => r.path));
+  for (const r of rows) {
+    if ((held.get(r.path) ?? []).some(t => t.issuedHere === true && typeof t.rowSeq === 'number' && t.rowSeq >= r.seq)) out.add(r.path);
+  }
+  return out;
+}
+
 /** Which of `ids` are published tombstones already held here: an id held is never applied a second time. */
 export async function heldFileTombstoneIds(spaceId: string, ids: readonly string[]): Promise<Set<string>> {
   const rows = await readTombstonesById<object>(spaceId, ids, { _id: 1 }, PUBLISHED);
