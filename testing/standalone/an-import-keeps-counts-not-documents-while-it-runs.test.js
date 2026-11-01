@@ -25,8 +25,7 @@ let recording, importer;
 describe('an import keeps counts, not documents, while it runs', () => {
   before(async () => {
     recording = await import('../../server/dist/sync/arrival-recording.js');
-    // The importer core: `api/admin-import.js` on the base, `sync/space-import.js` after A2.
-    importer = await import('../../server/dist/sync/space-import.js').catch(() => import('../../server/dist/api/admin-import.js'));
+    importer = await import('../../server/dist/sync/space-import.js');
   });
 
   it('the accumulator records a tally, and the tally stays bounded over many documents that break the schema', () => {
