@@ -10,13 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Changes on upgrade | Action |
 |---|---|
 | Records an earlier import stored with an expiry that is not a date are repaired by the sweep; those whose repaired expiry is past are deleted over the first cycles, on every instance of a network | Check the retention windows of restored spaces before upgrading |
+| A space import may answer `202` (queued) instead of `200`; its result is then in the audit log | A client that imports reads `202` as accepted |
+| A space import whose body is not `application/json` answers `415` | Send the export as `application/json` |
+| A space import from another instance's or another space's export no longer keeps file sync agreements, so a file that differs from a peer becomes a conflict copy at the next sync | None |
 
 ### Changed
 
+- **Import:** the export names the instance that wrote it (`instanceId`); an import answers `deletedOnRestore` and `due` per family, `202` when it is still running, `415` for a body that is not JSON, and refuses writes to its space with `space_being_imported` while it runs.
 - **Audit:** an entry the server writes for its own work can carry an `entryId`, a token label, an address, a status and `changes`; every list of changes an act hands over is cut to the fields its operation allows, on REST and MCP.
 
 ### Fixed
 
+- **Import:** a space export of any size restores, compressed with gzip, deflate or br or not, bounded by `importBodyMaxBytes` and `importMaxDocuments`; a malformed body is refused whole before anything is written, and an import resumes after a crash.
+- **Import:** a restore leaves out what this instance deleted after the export was taken, and the next sync brings the network's newer versions and deletions back.
+- **Import:** an export from another instance or another space no longer brings its file sync agreements or its owed fork decisions.
+- **Export:** a space export leaves out file chunks, face records and legacy read spills, which the import never restored.
 - **Audit:** exporting a space (`space.export`), importing one (`space.import`), rotating the signing key (`signing.rotate`) and approving a client in the MCP OAuth consent (`mcp.oauth.consent`) each write an audit entry; none was written before.
 - **Audit:** an export the client cuts off is audited once, with `complete: false`, whichever way `audit.logReads` is set; the export of the audit log too.
 - **Audit:** an entity the duplicate scanner merges on its own is audited (`duplicate.automerge`), and each TTL sweep cycle audits what it deleted per space and kind (`ttl.expire`); the sweep's log line names each space and its count.

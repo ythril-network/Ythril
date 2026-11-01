@@ -554,7 +554,7 @@ comes entirely from pointing each instance at distinct storage:
 |---|---|---|
 | **Database** | `MONGO_URI` (database name in the path) | All knowledge collections. Spaces are stored as collections named `<spaceId>_facts`, `<spaceId>_entities`, etc. — there is **no** per-instance prefix, so two instances on the same database that both have a space called `default` read and write the *same* `default_facts`. |
 | **Config directory** | `CONFIG_PATH` | `config.json`, `secrets.json`, `schema-library.json`, `schema-catalogs.json` all live in this directory. Sharing it means each instance's config writes overwrite the other's tokens, spaces, and networks. |
-| **Data root** | `DATA_ROOT` | File **bytes** live on the filesystem under `<DATA_ROOT>/files/<spaceId>/` (plus upload chunks and media/face-model files) — **not** in MongoDB. Sharing this directory collides the file stores the same way a shared database collides collections. |
+| **Data root** | `DATA_ROOT` | File **bytes** live on the filesystem under `<DATA_ROOT>/files/<spaceId>/` (plus upload chunks, media/face-model files and `import-spool/`, where an admin import keeps the body it restores until its act completes) — **not** in MongoDB. Sharing this directory collides the file stores the same way a shared database collides collections. A space import needs free disk under the data root for its whole inflated body (up to `importBodyMaxBytes`, 1 GiB by default). |
 
 Plus a distinct published **port** per instance.
 
@@ -720,6 +720,9 @@ server {
     client_max_body_size 512M;
 }
 ```
+
+`client_max_body_size` is the outer cap on every request body, the admin import's included: a space export larger than
+it cannot be imported through the proxy, whatever `importBodyMaxBytes` says ([Admin API](12-admin-api.md#import-space)).
 
 #### Caddy
 

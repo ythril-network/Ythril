@@ -61,6 +61,11 @@ empty database.
   since pruned comes back here and is not pushed again. File bytes and their records going out of step is a separate
   defect of its own.
 - Records erased after the backup come back, while the kept audit log still records the erasure.
+- **A space import differs here on purpose (D-69, bundle-40).** The admin import of one space's export is a space act of its
+  own kind (`import`) that also forgets only what the space received, but it does NOT bring back what this instance deleted
+  after the export was taken: a record whose tombstone was issued here at or above its version is left out
+  (`deletedOnRestore`). It restores the space as it was when exported, as seen from the network now - like an instance back
+  from being offline since the export - where the instance restore puts the whole database back as it was.
 
 ## The reversal to prevent
 
