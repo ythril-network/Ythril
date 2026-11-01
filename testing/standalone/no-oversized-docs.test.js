@@ -108,8 +108,8 @@ describe('no shipped document is oversized', () => {
     const over = oversized(trackedDocs());
     assert.deepEqual(over.map((d) => `${d.path} (${d.lines})`), [],
       `These documents are over ${LIMIT} lines:\n  ${over.map((d) => `${d.path} — ${d.lines}`).join('\n  ')}\n\n`
-      + 'Split by topic rather than trimming prose. The tooling from Q-7 is in `todo/_scripts/`: it moves\n'
-      + 'sections by LINE RANGE, asserts the first line of every range, checks a conserved total, and compares\n'
+      + 'Split by topic rather than trimming prose. The Q-7 tooling no longer ships with the repo; a split script\n'
+      + 'moves sections by LINE RANGE, asserts the first line of every range, checks a conserved total, and compares\n'
       + 'the multiset of prose lines before and after. A hand-split of this guide once lost twenty lines\n'
       + 'mid-word and shipped the remains for thirteen releases.\n\n'
       + 'Splitting also means: add the new parts to HELP_DOCS, link them from the index, and re-point every\n'
