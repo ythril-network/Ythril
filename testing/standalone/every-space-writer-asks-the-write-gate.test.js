@@ -4,7 +4,7 @@
  * ## What the rule prevents
  *
  * The write gate (`assertSpaceTakesWrites`) was asked by the file door alone, and the first PR-A design closed three RIGHTS doors in front of
- * it — a list of guards, not the set of writers. The admin import (`api/admin-import.ts` → `writeArrivals`), an instance-admin token's
+ * it — a list of guards, not the set of writers. The admin import (`sync/space-import.ts` → `writeArrivals`), an instance-admin token's
  * sync push and a `save_bulk` stage admitted just before the registration all reached the store through no guard, and the wipe then
  * deleted what they wrote. The rule is about the WRITERS: a function that issues a store write on a space collection a wipe covers
  * (or a file-system write under the space's tree) asks the gate before its first write, or is called only from functions that do.

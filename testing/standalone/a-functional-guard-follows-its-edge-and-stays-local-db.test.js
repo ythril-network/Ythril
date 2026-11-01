@@ -217,7 +217,7 @@ describe('the functional guard marker follows its edge and stays on this instanc
     ({ edgeIdFor } = await import('../../server/dist/brain/edge-id.js'));
     ({ getConfig } = await import('../../server/dist/config/loader.js'));
     ({ initSpace } = await import('../../server/dist/spaces/lifecycle.js'));
-    ({ importDocuments } = await import('../../server/dist/api/admin-import.js'));
+    ({ importDocuments } = await import('../../server/dist/sync/space-import.js'));
     merge = await import('../../server/dist/brain/merge.js');
     signals = await import('../../server/dist/util/housekeeping-signals.js');
     bus = await import('../../server/dist/brain/brain-events.js');

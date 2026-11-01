@@ -85,7 +85,7 @@ describe('a restore drops what this instance deleted after the backup and forget
       suite: 'deletedrestore', spaces: [{ id: SPACE, label: 'Restore', folders: [] }, { id: OTHER, label: 'Other', folders: [] }],
       networks: [{ ...netFixture('n-restore', { spaces: [SPACE, OTHER] }), members: [member('peer-a', SPACE)] }],
     });
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     ({ REPLICATED_FAMILIES: families } = await import('../../server/dist/sync/replicated-families.js'));
     const kinds = await import('../../server/dist/config/types-knowledge.js');
     recordTypeOf = Object.fromEntries(families.map(f => [f.collection,

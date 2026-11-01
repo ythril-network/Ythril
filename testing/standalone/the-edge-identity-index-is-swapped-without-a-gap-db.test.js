@@ -257,7 +257,7 @@ describe('the edge identity index is swapped without a gap (Q-624)', { skip }, (
   });
 
   it('an import of a fork edge into a space on the full index is held, the families before it stay, and it lands after the swap (design 5.4, the import door)', async () => {
-    const { importDocuments } = await import('../../server/dist/api/admin-import.js');
+    const { importDocuments } = await import('../../server/dist/sync/space-import.js');
     const m = await import('../../server/dist/spaces/edge-identity-index.js');
     await door.reset();
     await to56State();

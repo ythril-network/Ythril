@@ -43,7 +43,7 @@ const SITE_FLOOR = 8;
 
 /** Spreads that copy something that is not a record to a new id, each with its reason. */
 const NOT_A_RECORD = [
-  ['server/src/api/admin-import.ts', 'result.refused =', 'an answer row of the import summary'],
+  ['server/src/sync/space-import.ts', 'result.refused =', 'an answer row of the import summary'],
   ['server/src/api/sync/docs.ts', 'asFilter<T>({ ...extraFilter', 'a filter, not a copy'],
   ['server/src/brain/traverse-bodies.ts', 'return { ...body, _id: n._id', 'an answer node'],
   ['server/src/brain/traverse-bodies.ts', 'return { ...body, _id: e._id', 'an answer edge'],

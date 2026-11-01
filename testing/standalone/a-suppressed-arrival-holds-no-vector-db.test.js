@@ -146,7 +146,7 @@ describe('a suppressed arrival holds no vector (Q-230)', { skip }, () => {
     });
     // After the door: it sets CONFIG_PATH, and these modules read the config they are loaded under.
     ({ TYPE_FIELD } = await import('../../server/dist/brain/ttl.js'));
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     const { REPLICATED_FAMILIES, RECORD_TYPE_OF } = await import('../../server/dist/sync/replicated-families.js');
     families = REPLICATED_FAMILIES.map(f => ({ key: f.payloadKey, collection: f.collection, recordType: RECORD_TYPE_OF[f.collection] }));
     const localOnly = await import('../../server/dist/sync/local-only-fields.js');

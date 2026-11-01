@@ -53,7 +53,7 @@ const goneFrom = (row) => AUTHORED.filter(k => row?.[k] === undefined);
 describe('a restore says how many authored keys it removed', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'restoreremoved', spaces: [S] });
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
   });
   after(async () => { await door?.close(); });
   beforeEach(async () => { await door.reset(); });

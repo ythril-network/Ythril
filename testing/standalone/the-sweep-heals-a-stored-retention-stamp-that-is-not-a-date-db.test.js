@@ -109,7 +109,7 @@ describe('the TTL sweep heals a stored retention stamp that is not a Date (Q-223
     ({ door } = acts);
     ttl = await import('../../server/dist/brain/ttl-sweep.js');
     loader = await import('../../server/dist/config/loader.js');
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     ({ TTL_COLLECTIONS: ttlCollections } = await import('../../server/dist/brain/ttl.js'));
   });
   after(async () => { await acts?.close(); });

@@ -78,7 +78,7 @@ describe('a restore and an import restart the leaked-rows scan (real MongoDB)', 
     acts = await openFileActDoors({ suite: SUITE, space: S });
     knownKeys = Object.keys(await spaceEntry(S));
     dumpMod = await import('../../server/dist/db/dump.js');
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     ({ dataRouter } = await import('../../server/dist/api/data.js'));
   });
   after(async () => { await acts?.close(); });

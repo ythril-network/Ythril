@@ -18,7 +18,7 @@
  * ## What is derived
  *
  *  - **The doors**: every route mounted from `server/src/api/sync/*.ts`, every route whose handler reaches
- *    `api/admin-import.ts`, and every function of the pull engine `sync/engine.ts`. Rooted through the call graph
+ *    `sync/space-import.ts`, and every function of the pull engine `sync/engine.ts`. Rooted through the call graph
  *    with `closures: true`, because a page is written inside a `.map(async …)` as often as not.
  *  - **The sites**: every write a door reaches, through `_record-writes.mjs` — aliases and helpers resolved back to
  *    the collection they open, a computed collection name held to the rule, the sequence counter excluded by what
@@ -62,7 +62,7 @@ const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
 const ARRIVALS = 'server/src/sync/arrivals.ts';
 const WRITER = `${ARRIVALS}:writeArrivals`;
 const ENGINE = 'server/src/sync/engine.ts';
-const IMPORTER = 'server/src/api/admin-import.ts';
+const IMPORTER = 'server/src/sync/space-import.ts';
 const SYNC_ROUTES_DIR = 'server/src/api/sync/';
 
 /**

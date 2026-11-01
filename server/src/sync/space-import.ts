@@ -1,6 +1,9 @@
 /**
  * The admin import: restore what an export wrote, say what was wrong with it, and queue it for embedding.
  *
+ * The importer core, not a door: the import door (`api/admin-space-transfer.ts`) and the import act (`spaces/import-act.ts`) both call it, so it
+ * lives beside the arrival writer and not under `api/` (bundle-40 A2; `no-module-outside-the-api-imports-from-it.test.js`).
+ *
  * ## What it did before, and why none of it was a decision
  *
  * The handler lived inline in `app.ts` and did `replaceOne(…, { upsert: true })` on arbitrary documents. Zero
@@ -71,12 +74,12 @@ import type { BrainCollection } from '../config/types.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { boundedRows } from '../brain/write-validation.js';
-import { watchArrivals, recordedOf, sayRecorded, type RecordedFamilies } from '../sync/arrival-recording.js';
-import { isNewerCopy } from '../sync/held-tombstone-rules.js';
-import { writeArrivals, arrivalId, arrivalRefusal, NAMED_IN_SUMMARY, type ArrivalOutcome } from '../sync/arrivals.js';
-import { PageStoppedError } from '../sync/page-stopped.js';
-import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from '../sync/replicated-families.js';
-import { readPageTombstones } from '../sync/push-reads.js';
+import { watchArrivals, recordedOf, sayRecorded, type RecordedFamilies } from './arrival-recording.js';
+import { isNewerCopy } from './held-tombstone-rules.js';
+import { writeArrivals, arrivalId, arrivalRefusal, NAMED_IN_SUMMARY, type ArrivalOutcome } from './arrivals.js';
+import { PageStoppedError } from './page-stopped.js';
+import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from './replicated-families.js';
+import { readPageTombstones } from './push-reads.js';
 import { deletedHereSince } from '../files/tombstones.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
 import { resetStampHealLatch } from '../brain/retention-stamp-heal.js';
@@ -84,8 +87,8 @@ import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
 import { EdgeIdentityBuilding } from '../util/errors.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { readFamilyPages, type ExportBodyIndex } from '../sync/export-stream.js';
-import type { RestoreOrigin } from '../sync/local-only-fields.js';
+import { readFamilyPages, type ExportBodyIndex } from './export-stream.js';
+import type { RestoreOrigin } from './local-only-fields.js';
 
 /**
  * What an import may carry: every REPLICATED family, by collection name — the same list the export streams, so

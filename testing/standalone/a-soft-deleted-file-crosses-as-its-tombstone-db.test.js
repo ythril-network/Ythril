@@ -107,7 +107,7 @@ describe('with softDeleteFileMeta, a deletion travels as its tombstone and the f
     // KEPT here to be relayed. A leaf applies a tombstone and keeps nothing (`a-peer-file-tombstone-is-kept-only-to-be-served-onward-db`).
     door = await openPullDoor({ suite: 'softdel', spaces: [S, R], files: true, lateral: true });
     files = await import('../../server/dist/files/files.js');
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     merkleMod = await import('../../server/dist/brain/merkle.js');
     const { fileStoreRouter } = await import('../../server/dist/api/files.js');
     const layer = fileStoreRouter.stack.find(l => l.route?.path === '/:spaceId' && l.route.methods.delete);

@@ -28,7 +28,7 @@ import { isMissingPath } from '../files/stored-bytes.js';
 import { log, peerText } from '../util/log.js';
 import { indexExportBody, type ExportBodyIndex } from '../sync/export-stream.js';
 import { arrivalRefusal } from '../sync/arrivals.js';
-import { importSpool, restoreOriginOf, type ImportResult } from '../api/admin-import.js';
+import { importSpool, restoreOriginOf, type ImportResult } from '../sync/space-import.js';
 import { defineSpaceActBody, defineSpaceActBootSweep, registerOwnSpaceAct, spaceActsOfKind, type SpaceActBodyOutcome } from './space-act-runner.js';
 
 const KIND = 'import' as const;

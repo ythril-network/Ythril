@@ -99,7 +99,7 @@ describe('an import drops a retention stamp that is not a Date (Q-268)', { skip 
       id: S, label: 'Import stamp shapes', folders: [], recordTtlDays: WINDOW_DAYS,
       meta: { typeSchemas: { chrono: { event: { retention: { days: WINDOW_DAYS, contentDays: CONTENT_DAYS } } } } },
     }] });
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     const { REPLICATED_FAMILIES, RECORD_TYPE_OF } = await import('../../server/dist/sync/replicated-families.js');
     families = REPLICATED_FAMILIES.map(f => ({ collection: f.collection, recordType: RECORD_TYPE_OF[f.collection] }));
   });

@@ -149,7 +149,7 @@ describe('a key removed from a file\'s metadata is removed everywhere it was rec
   before(async () => {
     door = await openPullDoor({ suite: 'rmkey', spaces: [S, C], files: true });
     shared = await import('../../server/dist/api/sync/_shared.js');
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     merkleMod = await import('../../server/dist/brain/merkle.js');
     ME = { instanceId: door.instanceId, instanceLabel: 'Receiver' };
   });

@@ -68,7 +68,7 @@ describe('the stamp heal asks a clean collection once, until an import resets it
     acts = await openFileActDoors({ suite: 'stamp-heal-latch', space: S, monitorCommands: true });
     ({ door } = acts);
     ttl = await import('../../server/dist/brain/ttl-sweep.js');
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     ({ TTL_COLLECTIONS: ttlCollections } = await import('../../server/dist/brain/ttl.js'));
     client = door.mongo.getMongo();
     dbName = door.mongo.getDb().databaseName;

@@ -194,7 +194,7 @@ describe('an arriving record that breaks the schema, as push, pull and import re
 
   describe('admin import: `schemaViolations` is `[{ _id, violations }]`, in every mode', () => {
     let importDocuments;
-    before(async () => { ({ importDocuments } = await import('../../server/dist/api/admin-import.js')); });
+    before(async () => { ({ importDocuments } = await import('../../server/dist/sync/space-import.js')); });
 
     for (const mode of MODES) {
       it(`${mode}: a violating document is stored; ${mode === 'off' ? 'off records nothing' : 'reported by names, never values'}; a conforming one leaves the key absent`, async () => {
