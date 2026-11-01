@@ -665,7 +665,7 @@ export function createApp() {
         return;
       }
       // The audit entry (`signing.rotate`) says which key replaced the old one by its fingerprint, never the key.
-      req.auditChangesExplicit = [{ field: 'publicKeyFingerprint', to: publicKeyFingerprint(result.publicKeyPem) }];
+      req.auditChangesExplicit = [{ field: 'fingerprint', to: publicKeyFingerprint(result.publicKeyPem) }];
       res.json({ ok: true, signingPublicKey: result.publicKeyPem });
     } catch (err) {
       sendCaughtFailure(res, 'POST /api/admin/rotate-signing-key', err, { error: peerText(err instanceof Error ? err.message : String(err)) });

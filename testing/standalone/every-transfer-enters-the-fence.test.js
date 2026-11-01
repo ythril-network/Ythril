@@ -64,6 +64,7 @@ const EXEMPT_FUNCTIONS = new Map([
   ['server/src/files/derived-rows.ts:deleteRowsDerivedFrom', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/brain/entities.ts:unlabelFacesWhere', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/files/derived-fields.ts:stripFlaggedRowsOnce', { why: UPDATES_EXISTING_ONLY }],
+  ['server/src/brain/retention-stamp-heal.ts:healStoredStamps', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/files/derived-fields.ts:upsertDerivedFileRow', { why: FENCED_BY_THE_RUNS_CLAIM, via: ['writeUnderClaim'] }],
   ['server/src/files/derived-fields.ts:replaceDerivedFileRows', { why: FENCED_BY_THE_RUNS_CLAIM, via: ['writeUnderClaim'] }],
   ['server/src/files/derived-fields.ts:writeDerivedFields', { why: UPDATES_EXISTING_ONLY }],
