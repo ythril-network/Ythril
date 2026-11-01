@@ -19,7 +19,7 @@
  *
  * ## How it is driven
  *
- * The real application (`createApp`) behind a `node:http` server of the test's own, so the request object the application handled can be read
+ * The real application (`appRouter`, the in-process helper) behind a `node:http` server of the test's own, so the request object the application handled can be read
  * after it answered (`req.authToken`); the harness Mongo; the audit rows read once no insert is pending (`_audit-rows.mjs`).
  *
  * Run: a Mongo the harness accepts, then
@@ -34,12 +34,13 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { auditRowsOf } from './_audit-rows.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { appRouter } from '../_shared/in-process-app.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'auditedacts';
 const REDIRECT = 'http://127.0.0.1:9/callback';
 
-let door, loader, server, base, admin;
+let door, loader, server, base, admin, app;
 /** The requests the application handled, by path, once each answered. */
 const handled = [];
 
@@ -55,18 +56,18 @@ describe('a consent, a key rotation and a reload are audited with their actor (r
     loader = await import('../../server/dist/config/loader.js');
     const tokens = await import('../../server/dist/auth/tokens.js');
     admin = await tokens.createToken({ name: 'audited-admin', admin: true });
-    const { createApp } = await import('../../server/dist/app.js');
-    const app = createApp();
+    // The in-process helper's application, behind a server of this file's own that keeps each request it handled.
+    app = await appRouter();
     server = await listenOnLoopback(http.createServer((req, res) => {
       res.on('finish', () => handled.push(req));
-      app(req, res);
+      app.router(req, res);
     }));
     base = server.url;
   });
   after(async () => {
     delete process.env['PUBLIC_BASE_URL'];
     await server?.close();
-    try { const { closeScheduling } = await import('../../server/dist/schedulers.js'); await closeScheduling({ withinMs: 5000 }); } catch { /* never armed */ }
+    await app?.close();
     await door?.close();
   });
 

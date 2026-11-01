@@ -292,7 +292,7 @@ export function sayRecordedTally(o: { spaceId: string; source: RecordingSource; 
   }
   try {
     schemaViolationsRecordedTotal.inc({ source: o.source }, records);
-    said(`${o.spaceId} ${o.peer}`, () => {
+    said(`${o.spaceId}\u0000${o.peer}`, () => {
       const per = peerList([...o.tally.families].filter(([, n]) => n > 0).map(([family, n]) => `${n} ${family}`), ', ');
       log.warn(`${peerText(o.source)} from ${peerText(o.peer)}: ${per} record(s) stored in space '${peerText(o.spaceId)}' carry something its schema does not accept `
         + `that the copy each replaced did not: ${peerList(top.map(t => `${t.name} (${t.count})`), ', ')}. Stored as sent; the key and field names are all this line says`);
