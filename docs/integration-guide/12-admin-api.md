@@ -143,7 +143,8 @@ Restores an export into a space. Requires admin token + TOTP when MFA is enabled
 **A body of any size.** The import does not go through the server's 10 MB JSON parser: the caller is authenticated before
 a byte of the body is read, the body is inflated by its `Content-Encoding` and written to disk under the data root
 (`import-spool/`, through the master secret's encryption when one is configured), then read whole once to validate it,
-and only then restored, a page of 500 documents at a time. Its bounds are two config keys, read live:
+and only then restored a page at a time, a page closing at **500** documents or about **32 MiB** of them, whichever comes
+first. Its bounds are two config keys, read live:
 
 | key | default | answered when exceeded |
 |---|---|---|

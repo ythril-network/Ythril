@@ -168,8 +168,10 @@ file bytes) — and the import puts them back. What to expect from a restore:
   replaces the restored copy, and a deletion a peer still holds is applied again. A record the export does not hold is
   left as it is, not removed. A whole [restore](#restore) differs: it brings back records deleted after its backup too.
 - **Any size, one at a time.** The export can be as large as the instance allows (`importBodyMaxBytes`, 1 GiB by
-  default), compressed or not. While an import runs, the space takes no other writes, and a second import waits until
-  the first has finished. A very large one may answer that it is still running; its result is then in the audit log.
+  default, and `importMaxDocuments` records, 5 000 000 by default), compressed or not. While an import runs, the space
+  takes no other writes, and a second import sent meanwhile, into any space, is refused (`409`, `space_being_imported`):
+  send it again once the first has finished. A very large one may answer that it is still running; its result is then
+  in the audit log.
 - **Sync agreements travel only with this instance's own export of this space.** An export from another instance or
   another space leaves out which file versions this instance had agreed with each peer; a file that differs from a
   peer then shows as a conflict copy instead of being replaced, and nothing is lost.
