@@ -58,6 +58,7 @@ import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkC
 import { ConnectionsNotWritten, connectionsNotWrittenAnswer } from '../brain/connections-not-written.js';
 import { mergeRefusal } from '../brain/merge.js';
 import { TOOLS_BY_NAME, type ToolResult } from './tools/index.js';
+import { syncAnswerStatus } from '../sync/trigger.js';
 import type { ToolCallerRecord } from './tools/types.js';
 import { validatorFor } from './validate-args.js';
 import { withUnknownFieldRows } from './schema-warnings.js';
@@ -595,7 +596,9 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     // every rejected write would be logged as a success. 422: the call was well-formed and it was refused.
     // A failed act after a passed vote is a FAILURE the act's tool answers with `spaceActFailureAnswer`'s body (design v5 section 2.2
     // v4 (3)): 500, as the REST route answers it - not the 422 of a call that was refused.
-    const status = result?.isError ? (isSpaceActFailure(result) ? 500 : 422) : 200;
+    // A waited sync is `isError` whenever not every member synced, yet answered as the dedicated REST doors answer it (bundle-39 D2): 200 for a cycle that ran,
+    // the code's own 502 / 503 when nothing synced or it was stopped, 504 for a wait that ran out. The same cycle, the same status, whichever door asked.
+    const status = result?.isError ? (isSpaceActFailure(result) ? 500 : syncAnswerStatus(result) ?? 422) : 200;
     // A read through a view says which members it read (the answer is narrowed to what the caller reads now, never silently).
     return withUnknownFieldRows({ result: result && !result.isError ? announceViewMembers(result, viewSpacesRead) : result, status, callSpace }, rows);
   } catch (err) {

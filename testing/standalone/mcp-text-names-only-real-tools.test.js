@@ -80,8 +80,12 @@ before(async () => {
   assert.ok(FORK_REFUSAL_CODES?.length >= 2, 'the fork refusal codes were not read');
   // And the `code` a create or a rename answers while a deleted space's search-index drop still runs (`space_still_being_removed`), from its constant.
   const { SPACE_STILL_BEING_REMOVED } = await import('../../server/dist/spaces/search-index-drops-in-flight.js');
+  // And the `code` a waited sync answer carries when nothing synced or the instance is stopping (`sync_failed`, `sync_store_failed`, `shutting_down`:
+  // `network_sync` names them), from the verdict table's own list (bundle-39 D2).
+  const { SYNC_ANSWER_CODES } = await import('../../server/dist/sync/trigger.js');
+  assert.ok(SYNC_ANSWER_CODES.length >= 3, `only ${SYNC_ANSWER_CODES.length} sync answer codes were read`);
   ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
-    ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED];
+    ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 

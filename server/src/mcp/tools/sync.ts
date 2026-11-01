@@ -4,7 +4,19 @@ import { getConfig } from '../../config/loader.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../../sync/peer-floor.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { attachSyncNote } from '../../sync/change-notes.js';
-import { networkSyncOutcome, peerSyncOutcome, resolveSyncWait, syncTimeoutMs } from '../../sync/trigger.js';
+import { networkSyncOutcome, peerSyncOutcome, resolveSyncWait, syncAnswerIsError, syncShutdownRefusal, syncTimeoutMs, verdictFields, type SyncAnswer } from '../../sync/trigger.js';
+import { syncVerdict, type MemberResult } from '../../sync/cycle-outcome.js';
+
+/** The members that did not simply sync, one line each — what a reader of the text half needs to know which member to look at. */
+function memberLines(members: readonly MemberResult[]): string {
+  const rows = members.filter(m => m.outcome !== 'success').map(m => `\n- ${m.label}: ${m.outcome} (${m.reason})`);
+  return rows.join('');
+}
+
+/** A refused trigger (shutdown began) as a tool answer: the sentence, and the structured half REST answers with, so both halves say it. */
+function refusedResult(answer: SyncAnswer): ToolResult {
+  return { content: [{ type: 'text' as const, text: String(answer.body['error'] ?? 'The sync was not started.') }], structuredContent: { ...answer.body }, isError: true };
+}
 
 export const network_peersTool: ToolHandler = {
   name: 'network_peers',
@@ -149,13 +161,21 @@ export const network_syncTool: ToolHandler = {
         + '- `timeoutMs` — how long to wait for a NETWORK\'s cycle (default 30000, held to 1000-120000 and not refused '
         + 'outside it). A full cycle applies it per network. Ignored for `peerId`, whose cycle is bounded by that peer\'s own '
         + 'request timeouts; ignored with `wait: false`.\n\n'
-        + 'RESPONSE: what the cycle did — per network when you omit `peerId`, with a total. A peer that is '
-        + 'unreachable is COUNTED as an error and the call comes back with `isError` set, so a clean reply is '
-        + 'real evidence the peers answered. It also raises `consecutiveFailures` on that peer, which is where '
-        + 'you see a peer that has been failing for a while rather than just now.\n\n'
-        + 'THAT IS ALSO A CORRECTION: this said an unreachable peer does NOT make the call return an error, '
-        + 'and that the call succeeding was not evidence any peer answered. Both were wrong — `isError` is '
-        + 'set from the error count.',
+        + 'RESPONSE: what the cycle did — per network when you omit `peerId`, with a total, and ONE VERDICT the REST '
+        + 'doors give too: `outcome` (success | partial | refused | failed | interrupted), `ok` (true only when every '
+        + 'member synced), `code` (`sync_failed` when no member succeeded, `sync_store_failed` when this instance\'s own '
+        + 'database failed, `shutting_down` when the instance is stopping) and `members`, one row per member: '
+        + '`{ networkId, instanceId, label, outcome, reason }`. A member\'s `outcome` is success | catching-up (a '
+        + 'transfer hit the cycle\'s page bound and continues next cycle) | records-refused | peer-too-old | '
+        + 'local-fault (THIS instance failed, not the peer) | interrupted | failed (the peer did not answer); `reason` is '
+        + 'a sentence of ours, never the peer\'s or the database\'s text, which stay in the server log. '
+        + '`isError` is set whenever `ok` is false, so a clean reply is real evidence every peer answered and its data moved. A peer that '
+        + 'did not answer raises `consecutiveFailures`, which is where you see one that has been failing for a while '
+        + 'rather than just now; a local fault does not. A `wait: false` reply is `ok: true, status: "triggered"` — the '
+        + 'request was accepted and there is no outcome yet. An unknown `outcome` or member `outcome` word is not success.\n\n'
+        + 'THIS TOO IS A CORRECTION, the second: `isError` was set from an error count, so a cycle in which '
+        + 'every member was refused, or stopped for a local reason, read as a clean one on one door and an error on '
+        + 'another. It is now read from the verdict, on every door.',
   mutating: true,
   admin: true,
   inputSchema: (_s: ToolSchemas) => ({
@@ -198,6 +218,10 @@ export const network_syncTool: ToolHandler = {
       return fail(400, 'A change note belongs to one network: send `networkId` with `note`.');
     }
 
+    // Once shutdown began no cycle is started and no change note is queued for one: 503 `shutting_down`, as the REST doors answer.
+    const closing = syncShutdownRefusal(networkId ? { networkId } : peerId ? { peerId } : {}, wait);
+    if (closing) return refusedResult(closing);
+
     if (networkId) {
       // The same door as `POST /api/networks/:id/sync`, and the note goes through the same parser and refusal.
       const net = syncCfg.networks.find(n => n.id === networkId);
@@ -211,6 +235,7 @@ export const network_syncTool: ToolHandler = {
       if (answer.failure) throw answer.failure.err;
       const queued = noteId ? ` Change note ${noteId} queued for the members below.` : '';
       const status = answer.body.status;
+      if (status === 'shutting_down') return refusedResult(answer);
       const synced = answer.detail?.synced ?? 0;
       const errors = answer.detail?.errors ?? 0;
       return {
@@ -218,10 +243,10 @@ export const network_syncTool: ToolHandler = {
           ? `${net.label}: sync cycle started (wait: false) — not waited for; see network_sync_history for what it did.`
           : status === 'timeout'
             ? `${net.label}: the cycle is still running after ${timeoutMs} ms (it was not stopped); see network_sync_history for what it did.`
-            : `${net.label}: ${synced} ok, ${errors} error(s).`) + queued }],
-        // The body REST answers, whole: `wait` and (for a waited network) `timeoutMs` say what applied; `synced`/`errors` are there when the cycle finished.
+            : `${net.label}: ${synced} ok, ${errors} error(s) — ${answer.body['outcome']}.${memberLines(answer.detail?.members ?? [])}`) + queued }],
+        // The body REST answers, whole: `wait` and (for a waited network) `timeoutMs` say what applied; `outcome`, `ok`, `code` and `members` are there when the cycle finished.
         structuredContent: { ...answer.body },
-        isError: status === 'timeout' || errors > 0,
+        isError: syncAnswerIsError(answer),
       };
     }
 
@@ -237,6 +262,7 @@ export const network_syncTool: ToolHandler = {
       }
       const answer = await peerSyncOutcome(peerId, { wait });
       if (answer.failure) throw answer.failure.err;
+      if (answer.body.status === 'shutting_down') return refusedResult(answer);
       if (answer.body.status === 'triggered') {
         return {
           content: [{ type: 'text' as const, text: `Sync cycle for peer '${peerId}' started (wait: false) — not waited for.` }],
@@ -249,44 +275,56 @@ export const network_syncTool: ToolHandler = {
           type: 'text' as const,
           text: result.notFound
             ? `Peer '${peerId}' not found in any network.`
-            : `Sync complete: ${result.networksSynced} network(s) synced, ${result.errors} error(s)${(result.refused ?? 0) > 0 ? `, ${result.refused} member(s) too old to exchange with (pre-6.0)` : ''}.`,
+            : `Sync complete: ${result.networksSynced} network(s) synced, ${result.errors} error(s)${(result.refused ?? 0) > 0 ? `, ${result.refused} member(s) too old to exchange with (pre-6.0)` : ''} — ${result.verdict.outcome}.${memberLines(result.members)}`,
         }],
         // `notFound` is carried EXPLICITLY rather than inferred from a sentence. It is the one
         // outcome a caller must branch on — a named peer that does not exist is not a sync that
-        // did nothing — and it was readable only by matching English. `wait` says which kind of answer this is.
-        structuredContent: { ...result, wait },
-        isError: result.errors > 0,
+        // did nothing — and it was readable only by matching English. The body is the one REST answers (`wait` says
+        // which kind of answer this is; `outcome`, `ok`, `code` and `members` are the cycle's verdict).
+        structuredContent: { ...answer.body },
+        isError: syncAnswerIsError(answer),
       };
     } else {
       // Sync all networks: the same act per network, the wait and the bound applied to each.
+      // One answer per network, none lost to the first that failed: every member of every network is collected, and the verdict is
+      // read over all of them, by the same function the doors of one network use.
       let totalSynced = 0; let totalErrors = 0; let stillRunning = 0;
       const lines: string[] = [];
+      const members: MemberResult[] = [];
       for (const net of syncCfg.networks) {
         const answer = await networkSyncOutcome(net.id, { wait, timeoutMs });
         if (answer.failure) throw answer.failure.err;
         const status = answer.body.status;
+        if (status === 'shutting_down') return refusedResult(answer);
         if (status === 'triggered') lines.push(`${net.label}: cycle started`);
         else if (status === 'timeout') { stillRunning++; lines.push(`${net.label}: still running after ${timeoutMs} ms`); }
         else {
           const r = answer.detail!;
           totalSynced += r.synced ?? 0;
           totalErrors += r.errors;
-          lines.push(`${net.label}: ${r.synced} ok, ${r.errors} error(s)`);
+          members.push(...r.members);
+          lines.push(`${net.label}: ${r.synced} ok, ${r.errors} error(s) — ${r.verdict.outcome}`);
         }
       }
+      const verdict = syncVerdict(members);
+      // A network still running has no outcome yet, so the answer names none: it is not ok, and says which kind of answer it is.
+      const answered = stillRunning === 0;
+      const ok = !wait || (answered && verdict.ok);
       const total = !wait ? `\n\nStarted ${lines.length} cycle(s) (wait: false) — not waited for.`
-        : `\n\nTotal: ${totalSynced} synced, ${totalErrors} error(s)${stillRunning ? `, ${stillRunning} still running` : ''}.`;
+        : `\n\nTotal: ${totalSynced} synced, ${totalErrors} error(s)${stillRunning ? `, ${stillRunning} still running` : ` — ${verdict.outcome}`}.${memberLines(members)}`;
       return {
         content: [{
           type: 'text' as const,
           text: lines.length === 0 ? 'No networks configured.' : lines.join('\n') + total,
         }],
         structuredContent: {
-          synced: totalSynced, errors: totalErrors, networks: lines, wait,
+          status: !wait ? 'triggered' : answered ? 'completed' : 'timeout',
+          ...(wait && answered ? verdictFields(verdict, members) : { ok, members }),
+          synced: totalSynced, errors: totalErrors, refused: members.filter(m => m.outcome === 'peer-too-old').length, networks: lines, wait,
           ...(wait ? { timeoutMs } : {}),
           ...(stillRunning ? { timedOut: stillRunning } : {}),
         },
-        isError: totalErrors > 0 || stillRunning > 0,
+        isError: !ok,
       };
     }
   },
