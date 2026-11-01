@@ -19,7 +19,9 @@
  * ## The act's own writes
  *
  * A body that writes its own space (a wipe forgetting its file tombstones, unlabelling faces) passes `except: <its entry id>` — the check
- * still runs, so any OTHER act standing for the space still refuses it. Never a writer that skips the check.
+ * still runs, so any OTHER act standing for the space still refuses it. Never a writer that skips the check. A body the runner runs is in its
+ * act's scope (`space-act-scope.ts`): with no `except` given, the gate takes the act in scope, so an import's pages pass through every writer
+ * they reach without each call naming it.
  *
  * The media worker treats the refusal as an abandonment (`isAbandonment` in `files/media/lease.ts`), exactly as it treats a moved file's
  * lost claim: nothing is failed, retried or recorded against a job whose space is going away.
@@ -30,6 +32,7 @@ import type { BrainCollection } from '../config/types-knowledge.js';
 import { SPACE_ACT_KINDS, type SpaceWriteClosedCode } from '../config/types-space-acts.js';
 import { spaceActStands, type SpaceActStanding } from './space-act-runner.js';
 import { enterSpaceWrite } from '../sync/space-transfer-fence.js';
+import { spaceActInScope } from './space-act-scope.js';
 
 /** Why a space takes no writes: the act standing for it, one code per kind (`SPACE_ACT_KINDS`). */
 export type { SpaceWriteClosedCode };
@@ -69,7 +72,7 @@ function refusalFor(cfg: Config, spaceId: string, stands: SpaceActStanding | nul
 export function spaceWriteRefusal(spaceId: string, family?: BrainCollection, opts: { except?: string } = {}): string | null {
   if (!isConfigLoaded()) return null;   // pre-setup: no space lifecycle exists to race
   const cfg = getConfig();
-  return refusalFor(cfg, spaceId, spaceActStands(cfg, spaceId, { types: family ? [family] : undefined, except: opts.except }))?.why ?? null;
+  return refusalFor(cfg, spaceId, spaceActStands(cfg, spaceId, { types: family ? [family] : undefined, except: opts.except ?? spaceActInScope() }))?.why ?? null;
 }
 
 /** What a write touches: one family, several (a tombstone write names the families of the records it buries), or none for every family. */
@@ -85,7 +88,7 @@ export function assertSpaceTakesWrites(spaceId: string, family?: WriteFamilies, 
   if (!isConfigLoaded()) return;
   const cfg = getConfig();
   const types = family === undefined ? undefined : typeof family === 'string' ? [family] : [...family];
-  const r = refusalFor(cfg, spaceId, spaceActStands(cfg, spaceId, { types, except: opts.except }));
+  const r = refusalFor(cfg, spaceId, spaceActStands(cfg, spaceId, { types, except: opts.except ?? spaceActInScope() }));
   if (r) throw new SpaceNotWritableError(spaceId, r.why, r.code);
 }
 

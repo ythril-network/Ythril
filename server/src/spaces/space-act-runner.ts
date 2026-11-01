@@ -65,7 +65,8 @@ import { backoffDelayMs } from '../util/backoff.js';
 import { withinTimeBound, withinFsBound, isTimeBoundEnded } from '../util/time-bound.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
 import { log, peerText } from '../util/log.js';
-import { logInternalAudit } from '../audit/audit.js';
+import { logInternalAudit, logAuditEntry, internalAuditInput } from '../audit/audit.js';
+import { withinSpaceActScope } from './space-act-scope.js';
 import { auditRoundEffect, ROUND_SPACE_ACT_OPERATION, SPACE_ACT_COMPLETED_OPERATION } from '../networks/round-audit.js';
 import type * as Registry from '../metrics/registry.js';
 import {
@@ -124,6 +125,16 @@ export function defineSpaceActSetHooks(kind: SpaceActKind, h: SpaceActSetHooks):
 
 const bodies = new Map<SpaceActKind, SpaceActBody>();
 
+const bootSweeps = new Map<SpaceActKind, (standing: readonly SpaceActEntry[]) => void>();
+
+/**
+ * A kind's module hands over what the start sweeps for it (an import removes the spools no standing import names), as it hands over its body:
+ * run by {@link resumeSpaceActs} with the kind's standing entries, before anything is resumed.
+ */
+export function defineSpaceActBootSweep(kind: SpaceActKind, sweep: (standing: readonly SpaceActEntry[]) => void): void {
+  bootSweeps.set(kind, sweep);
+}
+
 /** `lifecycle.ts` and `rename.ts` hand their bodies over when they load: the runner runs them and never imports them. */
 export function defineSpaceActBody(kind: SpaceActKind, body: SpaceActBody): void {
   bodies.set(kind, body);
@@ -146,13 +157,14 @@ export function canonicalWipeTypes(types: readonly string[] | undefined): BrainC
 }
 
 /** What identifies an act: its kind, its space, and the request fields its kind is keyed by. */
-type SpaceActShape = Pick<SpaceActEntry, 'kind' | 'localId' | 'types' | 'networkId' | 'newId'>;
+type SpaceActShape = Pick<SpaceActEntry, 'kind' | 'localId' | 'types' | 'networkId' | 'newId' | 'spoolId'>;
 
 /** How each key field is written into a key; an absent field has a spelling of its own, so "all" and "solo" are keys too. */
 const KEY_PART: { readonly [F in SpaceActKeyField]: (e: SpaceActShape) => string } = {
   types: (e) => (e.types ? e.types.join(',') : 'all'),
   networkId: (e) => e.networkId ?? 'solo',
   newId: (e) => e.newId ?? '',
+  spoolId: (e) => e.spoolId ?? '',
 };
 
 /**
@@ -172,6 +184,7 @@ function shapeOf(req: SpaceActRequest): SpaceActShape {
     types: keyed.includes('types') ? canonicalWipeTypes(req.types) : undefined,
     networkId: keyed.includes('networkId') ? req.networkId : undefined,
     newId: keyed.includes('newId') ? req.newId : undefined,
+    spoolId: keyed.includes('spoolId') ? req.spoolId : undefined,
   };
 }
 
@@ -243,6 +256,11 @@ export function spaceActJoinedBy(cfg: Pick<Config, 'pendingSpaceActs'>, req: Spa
   return (cfg.pendingSpaceActs ?? []).find(e => keyOf(e) === key);
 }
 
+/** The entries of `kind` standing now, every space, in registration order: a door that lets one act of its kind run at a time asks it. */
+export function spaceActsOfKind(cfg: Pick<Config, 'pendingSpaceActs'>, kind: SpaceActKind): readonly SpaceActEntry[] {
+  return (cfg.pendingSpaceActs ?? []).filter(e => e.kind === kind);
+}
+
 /** The entries standing for space `localId`, every kind, in registration order. */
 export function spaceActsOfSpace(cfg: Pick<Config, 'pendingSpaceActs'>, localId: string): readonly SpaceActEntry[] {
   return (cfg.pendingSpaceActs ?? []).filter(e => e.localId === localId);
@@ -254,32 +272,8 @@ export function spaceActsOfNetwork(cfg: Pick<Config, 'pendingSpaceActs'>, networ
   return (cfg.pendingSpaceActs ?? []).filter(e => e.rounds.some(r => r.networkId === networkId) || e.networkId === networkId);
 }
 
-/** What an operator reads of one act entry: what it is, since when, how often it has failed, when it is retried, and where it stands. */
-export interface ActEntryView {
-  kind: string; since: string; attempts: number; nextRetryAt?: string; state: string;
-  /** Our sentence for the last failure (never a driver's text), so an operator can see why an act is owed. */
-  lastError?: string;
-  /** Another attempt meets the same input: only an abandon ends it. */
-  needsAbandon?: true;
-  /** A restore's backup. */
-  backupId?: string;
-}
-
-/**
- * An act entry as the operator's surfaces show it — the space's `actPending` and the network's `owedSpaceActs` both start from this, and add
- * what only they know (the network's list adds the entry id, the space and its rounds). The one place that renames the entry's own fields
- * (`registeredAt` is `since`, `retryAt` is `nextRetryAt`, and an absent retry is an absent key), so the two answers cannot describe one
- * debt in two vocabularies.
- */
-export function actEntryView(e: SpaceActEntry): ActEntryView {
-  return {
-    kind: e.kind, since: e.registeredAt, attempts: e.attempts,
-    ...(e.retryAt ? { nextRetryAt: e.retryAt } : {}), state: e.state,
-    ...(e.lastError ? { lastError: e.lastError } : {}),
-    ...(e.needsAbandon ? { needsAbandon: true as const } : {}),
-    ...(e.backupId ? { backupId: e.backupId } : {}),
-  };
-}
+// What an operator reads of one act entry lives in the contract (`actEntryView`), re-exported here for its importers.
+export { actEntryView, type ActEntryView } from './space-act-contract.js';
 
 // ── register ────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -316,6 +310,7 @@ export function registerSpaceAct(cfg: Config, req: SpaceActRequest, now: number)
     registeredAt: new Date(now).toISOString(), state: 'registered', attempts: 0,
     ...(req.setId ? { setId: req.setId } : {}),
     ...(req.backupId ? { backupId: req.backupId } : {}),
+    ...(shape.spoolId ? { spoolId: shape.spoolId } : {}),
   };
   list.push(entry);
   abortTransfersOf(req.localId);
@@ -649,8 +644,9 @@ async function runBody(id: string, via: string): Promise<SpaceRoundSettled> {
   try {
     const body = bodies.get(entry.kind);
     if (!body) throw new Error(`no body is defined for a space ${entry.kind}: its module was not loaded`);
-    const outcome = await withinHousekeepingBound(() => body(contextFor(entry)), { opMs: spaceActKnob('SPACE_ACT_OP_MS') });
-    if (!outcome.refusal) await hooks.beforeComplete?.(readEntry(id) ?? entry);
+    // In the act's scope (`space-act-scope.ts`): every write gate the body reaches lets this act's own writes pass, and every other act refuse.
+    const outcome = await withinHousekeepingBound(() => withinSpaceActScope(id, () => body(contextFor(entry))), { opMs: spaceActKnob('SPACE_ACT_OP_MS') });
+    if (!outcome.refusal && !outcome.failedFinally) await hooks.beforeComplete?.(readEntry(id) ?? entry);
     return complete(id, entry, outcome, via);
   } catch (err) {
     return failed(id, entry, err, via);
@@ -668,7 +664,8 @@ async function runBody(id: string, via: string): Promise<SpaceRoundSettled> {
  * alone, so no exchange can be admitted between the last delete and the forget and write a pre-wipe mark back.
  */
 function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome, via: string): SpaceRoundSettled {
-  const refused = outcome.refusal !== undefined;
+  // An input that is gone ends the act as a refusal does (the entry leaves, no post-step runs, nothing is retried), and is said as a failure.
+  const refused = outcome.refusal !== undefined || outcome.failedFinally !== undefined;
   const spaceGone = entry.kind === 'delete' && !getConfig().spaces.some(s => s.id === entry.localId);
   // One body for the whole set: its completion is every member's, in this one write.
   const wholeSet = runsWholeSet(entry);
@@ -716,6 +713,15 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
       }
     }
   });
+  afterCompletion(entry, outcome);
+  if (outcome.failedFinally) {
+    const { message, status } = outcome.failedFinally;
+    counters?.spaceActsTotal.inc({ kind: entry.kind, via, outcome: 'failed' });
+    log.error(peerText(message));
+    // Its own completion row, with a failing status: nobody else is told, and a row that read as a success would be the lie.
+    if (!waiters.has(id)) void logAuditEntry({ ...internalAuditInput(completionRow(entry, id)), status });
+    return result(entry, id, { ok: false, error: message, cause: new SpaceActInputFailure(message), rounds: covered });
+  }
   if (refused) {
     return result(entry, id, { ok: false, refused: true, error: outcome.refusal!.message, cause: outcome.refusal, rounds: covered });
   }
@@ -729,9 +735,7 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
   } else if (!waiters.has(id) && covered.length === 0) {
     // Nobody is told of this completion — the door answered `queued`, or the act was resumed — so it is said in the audit log.
     // The kind is in the path, so a restore's per-space rows read apart from a wipe's or a deletion's.
-    logInternalAudit({
-      method: 'DELETE', path: `internal:space-act:${entry.kind}:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId,
-    });
+    logInternalAudit(completionRow(entry, id));
   } else if (!waiters.has(id)) {
     // A passed round's act nobody is waiting for — a relay, gossip, the tick, or a door that already answered (X17, VR7): one entry
     // per round it carried out. The request a door is still waiting on is that door's route's own entry.
@@ -743,6 +747,18 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
     ...(outcome.removedHere !== undefined ? { removedHere: outcome.removedHere } : {}),
     ...(outcome.renamed ? { renamed: outcome.renamed } : {}),
   });
+}
+
+/** The completion row of an act with no round that nobody is told of: the kind is in the path, so a restore's rows read apart from a wipe's. */
+const completionRow = (entry: SpaceActEntry, id: string) => ({
+  method: 'DELETE', path: `internal:space-act:${entry.kind}:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId,
+});
+
+/** Run the body's after-completion step once the completion write removed the entry; a throw is said and changes nothing. */
+function afterCompletion(entry: SpaceActEntry, outcome: SpaceActBodyOutcome): void {
+  if (!outcome.afterCompletion) return;
+  try { outcome.afterCompletion(); }
+  catch (err) { log.error(`the ${entry.kind} of '${peerText(entry.localId)}' completed and its follow-up failed: ${peerText(err)}`); }
 }
 
 /** The audit operation of an act with no round that completed after its door answered (or with no door at all). Declared beside the
@@ -851,6 +867,11 @@ export const spaceActDueAt = (e: Pick<SpaceActEntry, 'state' | 'retryAt' | 'need
  * for its `retryAt` (the tick takes it then).
  */
 export async function resumeSpaceActs(now: number = Date.now()): Promise<void> {
+  // What a kind left on disk that no standing act names (an import's spool) goes first, whatever is due: a start is when nothing runs.
+  for (const [kind, sweep] of bootSweeps) {
+    try { sweep(standingEntries().filter(e => e.kind === kind)); }
+    catch (err) { log.error(`the start's sweep of what ${kind} acts left could not run: ${peerText(err)}`); }
+  }
   const entries = standingEntries().filter(e => spaceActDueAt(e, now));
   if (entries.length === 0) return;
   const bySpace = new Map<string, string[]>();

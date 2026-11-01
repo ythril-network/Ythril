@@ -26,6 +26,8 @@ export interface SpaceActRequest {
   setId?: string;
   /** A restore's backup id; never part of its key (a second restore while one stands is refused by its door). */
   backupId?: string;
+  /** An import's spooled body, by id: its key, so two imports are never one act. */
+  spoolId?: string;
 }
 
 /**
@@ -143,6 +145,13 @@ export interface SpaceActBodyOutcome {
   refusal?: Error;
   /** What a member of an act set reports about its space (a restore's index results); kept on the set's record for its report. */
   report?: Record<string, unknown>;
+  /**
+   * The act's input is gone (an import whose spooled body is missing on resume): nothing was done and nothing can be, so the entry is removed
+   * like a completion's and the completion row says it FAILED (`status`), not that it completed. Our sentence, shown to the operator.
+   */
+  failedFinally?: { message: string; status: number };
+  /** Run once after the completion write removed the entry (an import removes its spool), never before; a throw is said and changes nothing. */
+  afterCompletion?: () => void | Promise<void>;
 }
 
 /** What a kind that runs as an act set does once, when the last member of a set ends: after the write that ends it, never inside it. */
@@ -169,4 +178,31 @@ export class SpaceActsClosedError extends Error {
 export function spaceActClosedAnswer(err: unknown): { status: 503; body: { error: string } } | null {
   const closed = err instanceof SpaceActsClosedError || (err instanceof Error && err.name === 'SpaceActsClosedError');
   return closed ? { status: 503, body: { error: 'shutting down' } } : null;
+}
+
+/** What an operator reads of one act entry: what it is, since when, how often it has failed, when it is retried, and where it stands. */
+export interface ActEntryView {
+  kind: string; since: string; attempts: number; nextRetryAt?: string; state: string;
+  /** Our sentence for the last failure (never a driver's text), so an operator can see why an act is owed. */
+  lastError?: string;
+  /** Another attempt meets the same input: only an abandon ends it. */
+  needsAbandon?: true;
+  /** A restore's backup. */
+  backupId?: string;
+}
+
+/**
+ * An act entry as the operator's surfaces show it — the space's `actPending` and the network's `owedSpaceActs` both start from this, and add
+ * what only they know (the network's list adds the entry id, the space and its rounds). The one place that renames the entry's own fields
+ * (`registeredAt` is `since`, `retryAt` is `nextRetryAt`, and an absent retry is an absent key), so the two answers cannot describe one
+ * debt in two vocabularies.
+ */
+export function actEntryView(e: SpaceActEntry): ActEntryView {
+  return {
+    kind: e.kind, since: e.registeredAt, attempts: e.attempts,
+    ...(e.retryAt ? { nextRetryAt: e.retryAt } : {}), state: e.state,
+    ...(e.lastError ? { lastError: e.lastError } : {}),
+    ...(e.needsAbandon ? { needsAbandon: true as const } : {}),
+    ...(e.backupId ? { backupId: e.backupId } : {}),
+  };
 }
