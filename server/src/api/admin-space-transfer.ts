@@ -95,10 +95,13 @@ spaceTransferRouter.get('/:spaceId/export', globalRateLimit, requireAdminMfaScop
   const write = (chunk: string): Promise<void> =>
     res.write(chunk) ? Promise.resolve() : new Promise<void>(resolve => res.once('drain', resolve));
 
-  /** Stream one collection as a JSON array value; the files collection holds only the rows a backup holds (`backupRow`). */
-  const streamArray = async (collName: string, files: boolean, count: { to: number }): Promise<void> => {
+  /** One family's cursor, not yet sent; the files collection holds only the rows a backup holds (`backupRow`). */
+  const cursorOf = (collection: (typeof REPLICATED_FAMILIES)[number]['collection']) =>
+    col(spaceCollection(spaceId, collection)).find(collection === 'files' ? { ...backupRow.filter } : {}, { projection });
+
+  /** Stream one family's cursor as a JSON array value. */
+  const streamArray = async (cursor: ReturnType<typeof cursorOf>, files: boolean, count: { to: number }): Promise<void> => {
     await write('[');
-    const cursor = col(collName).find(files ? { ...backupRow.filter } : {}, { projection });
     let first = true;
     for await (const doc of cursor) {
       if (files && !backupRow.predicate(doc as Record<string, unknown>)) continue;
@@ -110,6 +113,11 @@ spaceTransferRouter.get('/:spaceId/export', globalRateLimit, requireAdminMfaScop
   };
 
   try {
+    // The store is asked BEFORE the 200 is committed: the first family's first batch is read while the status can still change, so a store
+    // that fails answers 503 like every door (`sendCaughtFailure`). Asked after the envelope, the failure could only destroy a response whose
+    // status line and envelope still sat in the compressor and the corked socket: the client got no answer at all (bundle-40 CI, Q-267).
+    const cursors = REPLICATED_FAMILIES.map(f => cursorOf(f.collection));
+    await cursors[0]?.hasNext();
     res.status(200);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     // Envelope fields first — JSON.stringify each value so escaping is correct.
@@ -123,7 +131,7 @@ spaceTransferRouter.get('/:spaceId/export', globalRateLimit, requireAdminMfaScop
     );
     for (const [i, f] of REPLICATED_FAMILIES.entries()) {
       await write(`,${JSON.stringify(f.collection)}:`);
-      await streamArray(spaceCollection(spaceId, f.collection), f.collection === 'files', written[i]!);
+      await streamArray(cursors[i]!, f.collection === 'files', written[i]!);
     }
     await write('}');
     res.end();
