@@ -61,7 +61,7 @@ const show = (v) => (v instanceof Date ? `Date(${v.toISOString()})` : JSON.strin
 describe('a restore keeps the backup\'s stamps, never the replaced copy\'s (Q-234)', { skip }, () => {
   before(async () => {
     door = await openPushDoor({ suite: 'restore-stamps', spaces: [{ id: S, label: 'Restore', folders: [], meta: {}, recordTtlDays: WINDOW_DAYS }] });
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     const { REPLICATED_FAMILIES, RECORD_TYPE_OF } = await import('../../server/dist/sync/replicated-families.js');
     families = REPLICATED_FAMILIES.map(f => ({ collection: f.collection, recordType: RECORD_TYPE_OF[f.collection] }));
     ({ RESTORED_LOCAL_FIELDS: RESTORED } = await import('../../server/dist/sync/local-only-fields.js'));

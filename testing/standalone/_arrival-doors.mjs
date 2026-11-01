@@ -49,7 +49,7 @@ export function arrivalHarness({ peerPrefix }) {
     async open(o) {
       h.door = await openPullDoor(o);
       h.engine = await import('../../server/dist/sync/engine.js');
-      h.importMod = await import('../../server/dist/api/admin-import.js');
+      h.importMod = await import('../../server/dist/sync/space-import.js');
       ({ log: h.log } = await import('../../server/dist/util/log.js'));
       return h.door;
     },

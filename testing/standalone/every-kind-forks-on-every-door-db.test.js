@@ -154,7 +154,7 @@ describe('every kind that forks forks on every door, and two receivers derive on
   }
 
   it('import: a fork row of every kind is restored as a fork row, and one whose id does not derive is refused', async () => {
-    const { importDocuments } = await import('../../server/dist/api/admin-import.js');
+    const { importDocuments } = await import('../../server/dist/sync/space-import.js');
     const failures = [];
     for (const family of FAMILIES) {
       await door.reset();

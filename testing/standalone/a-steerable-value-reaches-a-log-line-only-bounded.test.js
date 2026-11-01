@@ -77,7 +77,7 @@ const LOG_MODULE = 'server/src/util/log.ts';
 const BOUNDING = ['peerText', 'peerList', 'logSafe'];
 const ENGINE = 'server/src/sync/engine.ts';
 const FILE_SYNC = 'server/src/sync/file-sync.ts';
-const IMPORTER = 'server/src/api/admin-import.ts';
+const IMPORTER = 'server/src/sync/space-import.ts';
 const CALL_TOOL = 'server/src/mcp/call-tool.ts:callTool';
 /** The served-path prefixes whose routes are doors. Everything under each is derived from the mounted routes. */
 const AREAS = { sync: '/api/sync/', networks: '/api/networks/', invite: '/api/invite/', brain: '/api/brain/' };

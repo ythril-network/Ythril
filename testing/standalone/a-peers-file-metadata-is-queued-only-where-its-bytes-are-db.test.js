@@ -84,7 +84,7 @@ async function deliver(via, doc) {
 describe('a peer\'s file metadata is queued only where its bytes are (Q-263)', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'file-meta-queue', spaces: [SPACE], meta: {} });
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
   });
   after(async () => { await door?.close(); });
 

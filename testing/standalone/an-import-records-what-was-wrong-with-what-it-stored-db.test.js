@@ -83,7 +83,7 @@ describe('the admin import records rather than refuses', { skip }, () => {
     mongo = await openTestMongo('adminimport');
     loader = await import('../../server/dist/config/loader.js');
     withSchema();
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
   });
 
   after(async () => {
@@ -185,7 +185,7 @@ describe('the import writes through the one arrival writer', () => {
      * once and inherited none of that; it is a RESTORE now (`restore: true`), which the writer must be told.
      * Seen red by mutation, restored by hand: the call's `{ restore: true }` removed; an `updateOne` added.
      */
-    const src = stripComments(readFileSync('server/src/api/admin-import.ts', 'utf8'));
+    const src = stripComments(readFileSync('server/src/sync/space-import.ts', 'utf8'));
     assert.match(src, /await writeArrivals\([^;]*\{\s*restore:\s*true\s*[,}]/,
       'the import does not write through the arrival writer as a restore');
     assert.doesNotMatch(src, /\.(?:replaceOne|insertOne|insertMany|updateOne|updateMany|bulkWrite)\(/,

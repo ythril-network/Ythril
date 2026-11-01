@@ -6,7 +6,7 @@
  * A record a peer sent (a push, a pulled page) or an admin restored (an import) is stored whatever it carries: the sender validated it
  * against ITS schema, so a refusal would discard data the sender believes it delivered, and a backup taken before a schema change must
  * still restore. What a receiver CAN do is say what it holds that its own schema would not have let a local write add. That was done at six
- * call sites of one helper (`violationsAgainstLocalSchema`: five in `api/sync/docs.ts`, one in `api/admin-import.ts`), each with its own
+ * call sites of one helper (`violationsAgainstLocalSchema`: five in `api/sync/docs.ts`, one in `sync/space-import.ts`), each with its own
  * rule: the single routes reported a document the plan SKIPPED, the batch route recounted what the page accept had already counted, a
  * pulled page recorded nothing at all, an `off` space was reported on as if it judged, and a copy that replaced a record carrying the same
  * break reported it again every time the peer re-sent it. Now there is one place that decides all of it.

@@ -117,7 +117,7 @@ describe('the admin import restores what the export wrote', { skip }, () => {
     const loader = await import('../../server/dist/config/loader.js');
     loader.loadConfig();
     mongo = await openTestMongo('importrestore');
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     seqMod = await import('../../server/dist/util/seq.js');
     ({ REPLICATED_FAMILIES: families } = await import('../../server/dist/sync/replicated-families.js'));
     const kinds = await import('../../server/dist/config/types-knowledge.js');

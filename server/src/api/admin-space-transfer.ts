@@ -51,7 +51,7 @@ import { settledWithin } from '../util/time-bound.js';
 import { runSpaceAct, releaseSpaceActWaiter, spaceActAnswerMs, spaceActClosedAnswer } from '../spaces/space-act-runner.js';
 import { SPACE_ACT_KINDS } from '../config/types-space-acts.js';
 import { ensureSpoolRoot, importStanding, indexSpool, registerImport, removeSpool, spoolPathOf, takeImportResult } from '../spaces/import-act.js';
-import type { ImportResult } from './admin-import.js';
+import type { ImportResult } from '../sync/space-import.js';
 
 /** The import route's full path, for the parser marker `app.ts` mounts before the global parsers (the router serves it under its mount). */
 export const IMPORT_PATH = '/api/admin/spaces/:spaceId/import';

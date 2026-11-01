@@ -95,7 +95,7 @@ describe('a suppressed arrival is found by its text on the receiver (Q-262)', { 
       },
     });
     ({ TYPE_FIELD } = await import('../../server/dist/brain/ttl.js'));
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     ({ buildEmbedText } = await import('../../server/dist/brain/embed-record.js'));
     ({ EMBED_SWEEP_KINDS } = await import('../../server/dist/brain/queue-embed-sweep.js'));
     const { REPLICATED_FAMILIES, RECORD_TYPE_OF } = await import('../../server/dist/sync/replicated-families.js');

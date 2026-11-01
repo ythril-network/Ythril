@@ -657,7 +657,7 @@ export function createApp() {
      * reaches here: without this branch sixteen REST record routes answered `500` for a documented `409` while the MCP door and the
      * routes that catch answered it right (Q-560). The same function `sendCaughtFailure` and `callTool` ask.
      */
-    // A restore page of fork edges into a space still rebuilding its edge identity index (`api/admin-import.ts`): the same `503 edge_identity_building` the push doors answer.
+    // A restore page of fork edges into a space still rebuilding its edge identity index (`sync/space-import.ts`): the same `503 edge_identity_building` the push doors answer.
     if (err instanceof EdgeIdentityBuilding) {
       sendEdgeIdentityBuilding(res, err);
       return;

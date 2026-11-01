@@ -24,7 +24,7 @@
  * meaning-ranked search, with no error anywhere.
  *
  * So the check is structural: **no raw write into a record collection** in any of the three files that store
- * what arrived — the push router, the pull engine (`sync/engine.ts`) and the importer (`api/admin-import.ts`).
+ * what arrived — the push router, the pull engine (`sync/engine.ts`) and the importer (`sync/space-import.ts`).
  * The write and the enqueue happen together in `writeArrivals` (`sync/arrivals.ts`, `Q-107` part 1), which is
  * the only thing that may write one, and that is what makes forgetting impossible rather than merely unlikely.
  * That the doors REACH no other writer is `an-arrival-is-written-by-one-writer.test.js`; this file holds the
@@ -68,7 +68,7 @@ const PULL = 'server/src/sync/pull-family.ts';
  * raw record write may survive in them either (`DOOR_FILES`).
  */
 const ACCEPT = 'server/src/sync/accept-page.ts';
-const INGEST_FILES = [ACCEPT, 'server/src/api/admin-import.ts'];
+const INGEST_FILES = [ACCEPT, 'server/src/sync/space-import.ts'];
 const DOOR_FILES = [DOCS, ENGINE, PULL, ...INGEST_FILES];
 const QUEUE_FILE = 'server/src/brain/embed-queue.ts';
 

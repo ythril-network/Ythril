@@ -158,7 +158,7 @@ describe('a megabyte from a peer makes a bounded line and a bounded answer', { s
   });
 
   it('an import of a megabyte seq and a megabyte _id: the result and the lines are bounded', async () => {
-    const { importDocuments } = await import('../../server/dist/api/admin-import.js');
+    const { importDocuments } = await import('../../server/dist/sync/space-import.js');
     const payload = { facts: [build.fact(S, 'flood-import', BIG_SEQ), build.fact(S, BIG_ID, MAX_INGEST_SEQ + 1)] };
     const { lines, result } = await boundedLinesDuring(() => importDocuments(S, payload));
     assert.equal(result.results.facts.errors, 2, `fixture check: the import did not refuse both: ${JSON.stringify(result.results.facts).slice(0, 300)}`);

@@ -48,7 +48,7 @@ describe('a received seq is checked in one place', () => {
     // The tombstone rule moved out of the route into the one apply both tombstone doors share (bundle-46).
     assert.match(of('server/src/sync/tombstone-apply.ts'), /seqRefusal\(t\.seq, \{ optional: false \}\)/,
       'the tombstone apply no longer judges a tombstone seq by the shared rule');
-    assert.match(of('server/src/api/admin-import.ts'), /arrivalRefusal\(doc, /,
+    assert.match(of('server/src/sync/space-import.ts'), /arrivalRefusal\(doc, /,
       'the import\'s schema report no longer skips what the writer will refuse, by the writer\'s rule');
   });
 });

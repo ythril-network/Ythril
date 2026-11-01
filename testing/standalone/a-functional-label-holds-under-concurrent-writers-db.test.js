@@ -582,7 +582,7 @@ describe('a functional label holds under concurrent local writers', { skip }, ()
 
     it('an import of a functional duplicate is stored, and nothing is stamped', async () => {
       await seedInlineEdgeSpace(env, STRICT);
-      const { importDocuments } = await import('../../server/dist/api/admin-import.js');
+      const { importDocuments } = await import('../../server/dist/sync/space-import.js');
       await env.door.coll(STRICT, 'edges').insertOne(build.edge(STRICT, edgeIdFor(SUBJECT, TO_A, LABELS.functional), 3, { from: SUBJECT, to: TO_A, label: LABELS.functional }));
       const exported = build.edge(STRICT, edgeIdFor(SUBJECT, TO_B, LABELS.functional), 7, { from: SUBJECT, to: TO_B, label: LABELS.functional, [GUARD]: 'exported-marker' });
       await importDocuments(STRICT, { edges: [exported] });

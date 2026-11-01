@@ -1,5 +1,5 @@
 /**
- * What a restore's answer says about the records it stored that break the space's schema (b23 pre-ship T2, `api/admin-import.ts`).
+ * What a restore's answer says about the records it stored that break the space's schema (b23 pre-ship T2, `sync/space-import.ts`).
  *
  * The report is bounded and says so: it NAMES the first `IMPORT_VIOLATIONS_NAMED` documents (by id, field and reason, no value),
  * `schemaViolationsTotal` says how many there were in all, and `schemaViolationsTruncated` is present only when the list stopped short.
@@ -55,7 +55,7 @@ describe('an import names its violations bounded and judges a repeated id once',
     mongo = await openTestMongo('importreport');
     withSchema();
     (await import('../../server/dist/config/loader.js')).loadConfig();
-    importMod = await import('../../server/dist/api/admin-import.js');
+    importMod = await import('../../server/dist/sync/space-import.js');
     NAMED = importMod.IMPORT_VIOLATIONS_NAMED;
   });
   after(async () => {
