@@ -86,7 +86,7 @@ const EXEMPT = {
     'api/brain/search.ts:GET /api/brain/spaces/:spaceId/stats', 'api/spaces.ts:GET /api/spaces',
   ]),
   ...reasoned('a fork is an ordinary replicated row: sync paging, positions, merkle, export, import, removal and wipe carry it with the rest', [
-    'api/sync/warm.ts:POST /api/sync/warm', 'app.ts:GET /api/admin/spaces/:spaceId/export', 'app.ts:createApp', 'api/sync/docs.ts:oneById',
+    'api/sync/warm.ts:POST /api/sync/warm', 'api/admin-space-transfer.ts:GET /api/admin/spaces/:spaceId/export', 'api/admin-import.ts:dueOf', 'api/sync/docs.ts:oneById',
     'sync/push-reads.ts:readPushStored', 'sync/arrivals.ts:writeArrivals', 'sync/arrival-recording.ts:watchArrivals',
     'sync/tombstone-apply.ts:applyPeerTombstones', 'sync/engine.ts:runSyncForMember', 'util/position-keyset.ts:readAfterPosition',
     'sync/record-position-stream.ts:positionFloor', 'sync/positions-owed.ts:carryRows', 'sync/positions-rollback.ts:rollBackPositions',

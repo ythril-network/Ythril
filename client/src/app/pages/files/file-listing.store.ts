@@ -49,6 +49,7 @@ export const FILE_REFUSALS_THAT_STATE_A_FACT: ReadonlySet<string> = new Set([
   // Q-567: the write was refused because an act stands over this space (the sentence says which and to try again when it has
   // finished). The act ends by itself, so the toast states the fact and expires like any other.
   'space_being_deleted', 'space_being_wiped', 'space_being_renamed', 'space_being_restored', 'space_being_migrated',
+  'space_being_imported',
 ]);
 
 /** How long to wait before looking again when the answer names no `Retry-After`, and the bounds on one that does. */
