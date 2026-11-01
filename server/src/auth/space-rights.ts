@@ -566,6 +566,12 @@ export const NOT_AREA_SCOPED: readonly { route: string; why: string }[] = [
   { route: '/api/admin/webhooks/:id', why: 'instance-admin: reads, changes or deletes one subscription, under the same instance-admin MFA guard as its creation' },
   { route: '/api/admin/webhooks/:id/test', why: 'instance-admin: sends a test ping to one subscription\'s endpoint; carries no space data' },
   { route: '/api/admin/webhooks/:id/deliveries', why: 'instance-admin: lists one subscription\'s delivery attempts and their outcomes' },
+  // The instance-admin doors on a whole space (declared on the app, bundle-40): each names a space in its path and acts on all of it, behind the
+  // instance admin's second factor (`requireAdminMfaScoped`). A space-admin token is not enough for any of them, so no area rung rates them, and a
+  // ROUTE_RIGHTS row would sit above a rung nothing below instance-admin can reach.
+  { route: '/api/admin/spaces/:spaceId/wipe', why: 'instance-admin with the second factor: empties every record family and the files of one space (`space.wipe`). It acts on the whole space, not on one area of it, so no area rung expresses it' },
+  { route: '/api/admin/spaces/:spaceId/export', why: 'instance-admin with the second factor: hands out every record family of one space as one body (`space.export`, audited whichever way logReads is set). It reads the whole space, not one area, so no area rung expresses it' },
+  { route: '/api/admin/spaces/:spaceId/import', why: 'instance-admin with the second factor: restores a space from an export body (`space.import`, audited with its counts). It writes every record family and the files of one space, not one area, so no area rung expresses it' },
   {
     route: '/api/brain/spills/:id',
     why: 'A read spill (Q-92) is found by its id and names no space, so a path scope would resolve to none '

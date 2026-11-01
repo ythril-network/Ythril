@@ -14,7 +14,7 @@ import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { getConfig } from '../config/loader.js';
 import { log, currentRequestId, peerText } from '../util/log.js';
 import type { AuditLogEntry } from './entry.js';
-import type { AuditChange } from './audit-changes.js';
+import { explicitChanges, type AuditChange } from './audit-changes.js';
 import type { Collection, Filter, Sort } from 'mongodb';
 import { LruMap } from '../util/lru-map.js';
 
@@ -195,19 +195,36 @@ export interface InternalAuditInput {
   startedAt?: number;
   /** The token the work was done for, when there is one (a creator grant names the token it widened). */
   tokenId?: string | null;
+  /** The label of the token (or watcher) the work was done for, when there is one. */
+  tokenLabel?: string | null;
+  /** The record the work acted on, when it names one (an automerge names its survivor). */
+  entryId?: string | null;
+  /**
+   * What the work changed, one allowlisted field at a time (`audit-changes.ts`): handed through {@link explicitChanges}, so a field the operation's
+   * allowlist does not name is dropped here whoever wrote the list, and an operation with no allowlist records none.
+   */
+  changes?: AuditChange[];
+  /** The address the work was asked from, for work a request or a watcher started. Absent means the server's own (`internal`). */
+  ip?: string;
+  /** The status the work ended with. Absent means 200. */
+  status?: number;
 }
 
 /** The entry input of work the server did on its own; {@link logInternalAudit} writes it, {@link auditEntryOf} builds its record. */
 export function internalAuditInput(input: InternalAuditInput): AuditEntryInput {
+  const changes = input.changes ? explicitChanges(input.operation, input.changes) : [];
   return {
-    ip: 'internal',
+    ip: input.ip ?? 'internal',
     method: input.method,
     path: input.path,
     spaceId: input.spaceId,
     operation: input.operation,
-    status: 200,
+    status: input.status ?? 200,
     durationMs: input.startedAt === undefined ? 0 : Date.now() - input.startedAt,
     tokenId: input.tokenId ?? null,
+    tokenLabel: input.tokenLabel ?? null,
+    entryId: input.entryId ?? null,
+    ...(changes.length > 0 ? { changes } : {}),
   };
 }
 

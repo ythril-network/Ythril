@@ -32,6 +32,8 @@ import { configuredSpaces } from '../spaces/space-lookup.js';
 import { needsReindex } from '../spaces/_shared.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { log, outsideRequest } from '../util/log.js';
+import { logInternalAudit } from '../audit/audit.js';
+import { DUPLICATE_AUTOMERGE_OPERATION } from '../audit/middleware.js';
 import {
   findSimilar,
   DEFAULT_DUPE_THRESHOLD,
@@ -194,6 +196,17 @@ async function upsertCandidate(
 }
 
 /**
+ * The audit row of a merge the scanner landed: the survivor is the entry, the absorbed entity's id is its change (`to: null`: it no longer exists,
+ * and every peer deletes it too). Written only for a merge that landed, so a refused or conflicting pair leaves none.
+ */
+function auditAutoMerge(spaceId: string, survivorId: string, absorbedId: string, startedAt: number): void {
+  logInternalAudit({
+    method: 'SWEEP', path: 'internal:dupe-scanner', spaceId, operation: DUPLICATE_AUTOMERGE_OPERATION, entryId: survivorId, startedAt,
+    changes: [{ field: 'absorbed', from: absorbedId, to: null }],
+  });
+}
+
+/**
  * Attempt a lossless entity merge. Returns true only if it actually merged.
  *
  * Through `mergeEntities`, the sequence every merge door runs, with no resolutions: a plan with a property conflict
@@ -207,9 +220,11 @@ async function tryAutoMerge(spaceId: string, seed: RecallResult, match: RecallRe
   const survivorId = pref === 'newer' ? newerId : olderId;
   const absorbedId = pref === 'newer' ? olderId : newerId;
 
+  const startedAt = Date.now();
   try {
     const outcome = await mergeEntities(spaceId, survivorId, absorbedId, [], { tokenLabel: 'dupe-scanner' });
     if (outcome.kind !== 'merged') return false;   // gone, or a property value conflict — not lossless
+    auditAutoMerge(spaceId, survivorId, absorbedId, startedAt);
     log.info(`Auto-merged entity ${absorbedId} → ${survivorId} in '${spaceId}' (score ${(match.score ?? 0).toFixed(3)})`);
     return true;
   } catch (err) {

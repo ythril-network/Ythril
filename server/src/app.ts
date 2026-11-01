@@ -55,7 +55,7 @@ import { globalRateLimit, ipFloodBackstop } from './rate-limit/middleware.js';
 import { configExists, reloadConfig, getConfig, loadSecrets, saveConfig, startConfigWatcher, runConfigReload } from './config/loader.js';
 import { reloadSpaceDiff } from './config/reload-space-diff.js';
 import { restoreViewsMissingAfterReload, snapshotViews } from './config/views.js';
-import { logAuditEntry } from './audit/audit.js';
+import { logInternalAudit } from './audit/audit.js';
 import { CONFIG_RELOAD_OPERATIONS } from './audit/middleware.js';
 import { requireAdminMfa, requireAdminMfaScoped } from './auth/middleware.js';
 import { clearTokenCache } from './auth/tokens.js';
@@ -535,9 +535,12 @@ export function createApp() {
     const beforeViews = snapshotViews();
     const reservedBefore = [...(getConfig().retiredSpaceIds ?? [])];
     reloadConfig();
-    const audit = (operation: string, spaceId: string, status: number) => logAuditEntry({
+    // The shared writer, so the entry has its measured duration like every other (the hand-written closure said `durationMs: 0`): from the start of the
+    // reload to the moment the row is written, with the address and label of whoever asked and the status the act really had.
+    const startedAt = Date.now();
+    const audit = (operation: string, spaceId: string, status: number) => logInternalAudit({
       tokenId: actor.tokenId ?? null, tokenLabel: actor.tokenLabel ?? null, ip: actor.ip,
-      method: actor.method, path: actor.path, spaceId, operation, status, durationMs: 0,
+      method: actor.method, path: actor.path, spaceId, operation, status, startedAt,
     });
     let added: string[];
     /*
@@ -655,12 +658,14 @@ export function createApp() {
       return;
     }
     try {
-      const { rotateInstanceKeypair } = await import('./util/signing.js');
+      const { rotateInstanceKeypair, publicKeyFingerprint } = await import('./util/signing.js');
       const result = rotateInstanceKeypair();
       if (!result) {
         res.status(409).json({ error: 'Instance not initialised' });
         return;
       }
+      // The audit entry (`signing.rotate`) says which key replaced the old one by its fingerprint, never the key.
+      req.auditChangesExplicit = [{ field: 'publicKeyFingerprint', to: publicKeyFingerprint(result.publicKeyPem) }];
       res.json({ ok: true, signingPublicKey: result.publicKeyPem });
     } catch (err) {
       sendCaughtFailure(res, 'POST /api/admin/rotate-signing-key', err, { error: peerText(err instanceof Error ? err.message : String(err)) });

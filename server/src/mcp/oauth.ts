@@ -319,6 +319,9 @@ async function handleConsent(req: Request, res: Response): Promise<void> {
     renderConsentError(res, 400, 'Unknown or unregistered client.');
     return;
   }
+  // The audit entry (`mcp.oauth.consent`, written by the audit middleware when the response ends) names the registered client the approval was
+  // for: the id of a client that is not registered is whatever the caller sent, so it is set only from here on.
+  req.auditEntryId = clientId;
   if (!codeChallenge) {
     renderConsentError(res, 400, 'Missing PKCE code challenge.');
     return;
@@ -335,6 +338,11 @@ async function handleConsent(req: Request, res: Response): Promise<void> {
     renderConsentError(res, 401, 'That token is invalid or expired. Paste a valid Ythril access token.');
     return;
   }
+  // The approver is the token that was pasted: this route is authenticated by the body's token and not by the bearer header, so the audit
+  // middleware (which reads `req.authToken`) is told who approved, and writes the entry with the token's id, the client's address and the
+  // status the answer carried. Without it the entry would name nobody. The hash stays out of what is attached.
+  const { hash: _hash, ...approver } = record;
+  req.authToken = approver;
 
   const now = Date.now();
   pruneExpiredCodes(now);

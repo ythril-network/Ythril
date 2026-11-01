@@ -56,6 +56,12 @@ import { findSpace } from '../spaces/space-lookup.js';
 import { stripFlaggedRowsOnce } from '../files/derived-fields.js';
 import { leakedRowsDeadline, publishLeakedRowScansOwed, repairLeakedRows } from '../files/leaked-rows-repair.js';
 import { retirePeerSidecars } from '../sync/peer-sidecar-retirement.js';
+import { logInternalAudit } from '../audit/audit.js';
+import { TTL_EXPIRE_OPERATION } from '../audit/middleware.js';
+import { healStoredStamps, resetStampHealLatch } from './retention-stamp-heal.js';
+
+/** What an import tells the heal of stored retention stamps (`brain/retention-stamp-heal.ts`): look again at this space's collections. */
+export { resetStampHealLatch };
 
 /** How often the sweep runs, ms. Cited by the docs (`doc-cited-constants`). */
 export const SWEEP_INTERVAL_MS = 5 * 60_000; // 5 min
@@ -74,6 +80,7 @@ const FINISH_MOVES_STEP = declareStep('TTL sweep: finishing interrupted file mov
 const INDEX_STEP = declareStep('TTL sweep: indexes');
 const STRIP_STEP = declareStep('TTL sweep: stripping rows flagged before the strip');
 const REPAIR_STEP = declareStep('TTL sweep: repairing rows a deleted file left');
+const HEAL_STEP = declareStep('TTL sweep: healing retention stamps that are not dates');
 /** The step a collection's READ failure is said under. */
 /**
  * The audit records of deleted files are their OWN unit, not a second pass of the `files` one.
@@ -279,22 +286,47 @@ export async function sweepCollection(spaceId: string, c: TtlCollection, now: Da
   return { deleted, failed: failed.length, capped: attempted.size >= ATTEMPT_CAP && deleted < SWEEP_BATCH && failed.length > 0 };
 }
 
+/** What one cycle deleted, per space and per collection (`files` holds the audit records of deleted files that left their retention too). */
+export type ExpiryCounts = ReadonlyMap<string, Readonly<Partial<Record<TtlCollection, number>>>>;
+
+/**
+ * The audit rows of what a cycle deleted: ONE `ttl.expire` row per space that lost records, none for a space that lost nothing, with a change per
+ * collection (`field` is the collection, `to` how many it lost). Every deletion is every peer's (a tombstone is issued) and no request asked for it,
+ * so the act writes its own row, on the path from the cycle to its deleters: a row some other step of the cycle writes is not this deletion's.
+ */
+function auditExpiry(counts: ExpiryCounts, startedAt: number): void {
+  for (const [spaceId, perCollection] of counts) {
+    logInternalAudit({
+      method: 'SWEEP', path: 'internal:ttl-sweep', spaceId, operation: TTL_EXPIRE_OPERATION, startedAt,
+      changes: TTL_COLLECTIONS.flatMap(c => (perCollection[c] ? [{ field: c, to: perCollection[c]! }] : [])),
+    });
+  }
+}
+
 /**
  * The retention walk alone: every concrete space, every TTL collection, through {@link sweepCollection}. Returns what it deleted
- * and what the walk concluded (`storeDown`, `stalled`, who failed), for the one test that asks whether a frozen store costs one
- * bound. `sweepExpired` is the cycle; this is its first step.
+ * (in all, and per space and collection) and what the walk concluded (`storeDown`, `stalled`, who failed), for the one test that asks whether a
+ * frozen store costs one bound. `sweepExpired` is the cycle; this is its first step. It writes the cycle's `ttl.expire` rows (see {@link auditExpiry}).
  */
-export async function sweepExpiredRecords(now: Date): Promise<{ deleted: number; walk: WalkResult<void> }> {
+export async function sweepExpiredRecords(now: Date): Promise<{ deleted: number; bySpace: ExpiryCounts; walk: WalkResult<void> }> {
+  const startedAt = Date.now();
   let deleted = 0;
+  const bySpace = new Map<string, Partial<Record<TtlCollection, number>>>();
+  const tally = (spaceId: string, c: TtlCollection): void => {
+    deleted++;
+    const counts = bySpace.get(spaceId) ?? {};
+    counts[c] = (counts[c] ?? 0) + 1;
+    bySpace.set(spaceId, counts);
+  };
   // Counted at the deleter, so a collection that ends in a propagated failure still counts what it deleted before it.
   const counting = async (spaceId: string, c: TtlCollection, id: string): Promise<boolean> => {
     const ok = await removeExpired(spaceId, c, id);
-    if (ok) deleted++;
+    if (ok) tally(spaceId, c);
     return ok;
   };
   const countingPurge = async (spaceId: string, c: TtlCollection, id: string): Promise<boolean> => {
     const ok = await purgeFlagged(spaceId, c, id);
-    if (ok) deleted++;
+    if (ok) tally(spaceId, c);
     return ok;
   };
   const walk = await eachSpace(STEP, configuredSpaces(), async (space, ctx) => {
@@ -310,7 +342,8 @@ export async function sweepExpiredRecords(now: Date): Promise<{ deleted: number;
       await sweepCollection(space.id, c, now, { remove: counting });
     });
   });
-  return { deleted, walk };
+  auditExpiry(bySpace, startedAt);
+  return { deleted, bySpace, walk };
 }
 
 /**
@@ -330,8 +363,12 @@ export async function sweepExpired(now: Date = new Date()): Promise<number> {
 
 async function sweepExpiredSteps(now: Date): Promise<number> {
   let strippedRows = 0;
-  const { deleted: total } = await sweepExpiredRecords(now);
-  if (total > 0) log.info(`TTL sweep deleted ${total} expired record(s)`);
+  const { deleted: total, bySpace } = await sweepExpiredRecords(now);
+  // The line says WHERE: each space that lost records and how many, so an instance with many spaces can tell which one the sweep is emptying.
+  if (total > 0) {
+    const perSpace = [...bySpace].map(([id, counts]) => `${id}: ${Object.values(counts).reduce((n, k) => n + (k ?? 0), 0)}`);
+    log.info(`TTL sweep deleted ${total} expired record(s): ${peerList(perSpace)}`);
+  }
 
   // File tombstones still pending after their act should have finished: its drop failed, its write landed after it
   // was reported failed, or a restart came between. Settled from the disk (bundle-30 I15, `files/tombstones.ts`):
@@ -369,6 +406,21 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   });
   if (strippedRows > 0) {
     log.info(`Stripped what the bytes made from ${strippedRows} file record(s) flagged deleted before this release.`);
+  }
+
+  // Retention stamps an import before the heal existed stored as something that is not a Date (Q-223): a stamp the sweep's range query cannot see, so the
+  // record never expires. After the expiry pass, so a stamp healed to a past instant is deleted by the NEXT cycle through the normal delete. A space
+  // that fails is passed over, and each collection is its own unit; a collection with nothing to heal is not asked again until an import
+  // (`resetStampHealLatch`). The `_contentExpireAt` of chrono is healed in its own pass (`brain/chrono-redaction.ts`).
+  const healed = new Map<string, number>();
+  await eachSpace(HEAL_STEP, configuredSpaces(), async space => {
+    await eachUnit(TTL_COLLECTIONS, async (c) => {
+      const n = await healStoredStamps(space.id, c, '_expireAt');
+      if (n > 0) healed.set(space.id, (healed.get(space.id) ?? 0) + n);
+    });
+  });
+  if (healed.size > 0) {
+    log.info(`TTL sweep: healed ${[...healed.values()].reduce((a, b) => a + b, 0)} retention stamp(s) that were not dates: ${peerList([...healed].map(([id, n]) => `${id}: ${n}`))}`);
   }
 
   // Rows that hang off a file this instance deleted (Q-465, `files/leaked-rows-repair.ts`): a cursor scan, a bounded number of pages per

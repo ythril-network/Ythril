@@ -123,6 +123,24 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // an entry saying only "an admin hit the maintenance route" cannot distinguish starting an outage
   // from ending one.
   'data.maintenance.toggle': ['active'],
+  // A resolve of a fork records what it kept and what it discarded: `keep: 'parent'` throws the fork's content away for good and this entry is the
+  // only place it survives (`brain/forks.ts`, `forkResolveAuditEntry`). Handed over whole by the act, named here so the one door every explicit list goes
+  // through (`explicitChanges`) keeps it.
+  'fork.resolve': ['kind', 'keep', 'parentId', 'forkId', 'resolvedElsewhere', 'kept', 'discarded'],
+  // How many records of each kind an export handed out, and `complete: false` when the client went away before the body ended (the counts are
+  // then what had been written). Counts only: nothing of what the export held.
+  'space.export': ['facts', 'entities', 'edges', 'chrono', 'files', 'links', 'complete'],
+  // The same for the export of the audit log, which has no counts to give: it records only whether the client took all of it.
+  'audit.export': ['complete'],
+  // What a space import landed, in totals: records stored new, records replaced, records refused, records the restore left out because this
+  // instance deleted them after the backup, and records that were already past their expiry when they landed (the next sweep takes them).
+  'space.import': ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due'],
+  // The new signing key's fingerprint and never the key itself: a peer that pinned the old one compares fingerprints.
+  'signing.rotate': ['publicKeyFingerprint'],
+  // What a TTL sweep took from a space: one change per record collection, `to` the number deleted this cycle (`field` is the collection's name).
+  'ttl.expire': ['facts', 'entities', 'edges', 'chrono', 'files'],
+  // The entity the duplicate scanner absorbed into the entry's survivor: its id, `to: null` (it no longer exists). The id alone, never its name.
+  'duplicate.automerge': ['absorbed'],
 };
 
 /** Scalars only — anything else is dropped rather than stringified. */
@@ -227,6 +245,40 @@ export function auditChanges(operation: string, before: unknown, after: unknown)
       field,
       ...(from === undefined ? {} : { from }),
       ...(to === undefined ? {} : { to }),
+    });
+  }
+  return out;
+}
+
+/**
+ * The changes an act handed over ITSELF (a route's `req.auditChangesExplicit`, a tool's explicit list, a server act's `changes`), cut to what the
+ * operation's allowlist names: the other door to the same store, so it holds the same line `auditChanges` does.
+ *
+ * ## What it prevents
+ *
+ * An act that builds its own list is not diffing snapshots, so nothing read an allowlist for it, and a free-form list went into a retained,
+ * admin-queryable store as given. A field the operation does not name is dropped (its value is nowhere in what this returns), an operation with no
+ * allowlist records nothing, a value that is not a scalar is dropped, and a list field is kept only when it is one of the primitive lists
+ * `auditChanges` records. A change with nothing left to say is omitted.
+ */
+export function explicitChanges(operation: string, changes: readonly AuditChange[]): AuditChange[] {
+  const fields = AUDIT_CHANGE_FIELDS[operation];
+  if (!fields) return [];
+  const out: AuditChange[] = [];
+  for (const change of changes) {
+    if (!fields.includes(change.field)) continue;
+    const from = scalarOrDrop(change.from);
+    const to = scalarOrDrop(change.to);
+    const isList = LIST_FIELDS.has(change.field.split('.').pop() ?? change.field);
+    const added = isList ? primitiveListOrDrop(change.added) : undefined;
+    const removed = isList ? primitiveListOrDrop(change.removed) : undefined;
+    if (from === undefined && to === undefined && !added?.length && !removed?.length) continue;
+    out.push({
+      field: change.field,
+      ...(from === undefined ? {} : { from }),
+      ...(to === undefined ? {} : { to }),
+      ...(added?.length ? { added } : {}),
+      ...(removed?.length ? { removed } : {}),
     });
   }
   return out;

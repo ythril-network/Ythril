@@ -9,7 +9,7 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { logAuditEntry } from './audit.js';
-import { auditChanges } from './audit-changes.js';
+import { auditChanges, explicitChanges, type AuditChange } from './audit-changes.js';
 import { getConfig } from '../config/loader.js';
 import { classifyOperation, recordSpaceCall } from '../metrics/space-activity.js';
 import { currentRequestId } from '../util/log.js';
@@ -21,6 +21,15 @@ import type {} from '../auth/middleware.js';
 
 // ── Operation mapping ──────────────────────────────────────────────────────
 
+/**
+ * The doors on the app that hand a whole space out, put one back, or change the key every peer verifies this instance with, and the door that
+ * approves a client's access (bundle-40, Q-207, Q-306). Declared before the rule table, which names them; each has its row in the guide's table.
+ */
+export const SPACE_EXPORT_OPERATION = 'space.export';
+export const SPACE_IMPORT_OPERATION = 'space.import';
+export const SIGNING_ROTATE_OPERATION = 'signing.rotate';
+export const MCP_OAUTH_CONSENT_OPERATION = 'mcp.oauth.consent';
+
 export interface RouteRule {
   method: string;
   pattern: RegExp;
@@ -31,6 +40,11 @@ export interface RouteRule {
   entryGroup?: number;
   /** If true, this is a read operation (only logged when logReads is on) */
   read?: boolean;
+  /**
+   * If true, the entry is written when the client goes away before the response ends, as well as when it finishes: the act is the data
+   * leaving the instance, and a copy cut off half way is the one an auditor most wants on record. Written once either way.
+   */
+  writtenWhenCutOff?: boolean;
 }
 
 export const ROUTE_RULES: RouteRule[] = [
@@ -168,7 +182,19 @@ export const ROUTE_RULES: RouteRule[] = [
   // entry per list call would bury the record. Taking a COPY of the entire who-did-what history is not that kind
   // of read: it is the act itself, and an instance that only logs it when an operator happens to have opted into
   // logging reads would not record the one read that matters most.
-  { method: 'GET',    pattern: /^\/api\/admin\/audit-log\/export$/,                 operation: 'audit.export' },
+  { method: 'GET',    pattern: /^\/api\/admin\/audit-log\/export$/,                 operation: 'audit.export', writtenWhenCutOff: true },
+
+  // ── Space transfer and the signing key (declared on the app) ─────────────────────────────────────────
+  // The export is NOT `read: true`, for the reason the audit-log export above is not: a copy of a whole space leaving the instance is the act itself,
+  // and an instance that logs it only when an operator opted into logging reads would miss the one read that matters. Counts arrive through
+  // `req.auditChangesExplicit`; a response the client cuts off is written too, with `complete: false`.
+  { method: 'GET',    pattern: /^\/api\/admin\/spaces\/([^/]+)\/export$/,             operation: SPACE_EXPORT_OPERATION, spaceGroup: 1, writtenWhenCutOff: true },
+  // A restore writes every record family of the space from a body, so it is audited with its counts like the wipe beside it.
+  { method: 'POST',   pattern: /^\/api\/admin\/spaces\/([^/]+)\/import$/,             operation: SPACE_IMPORT_OPERATION, spaceGroup: 1 },
+  // Every peer verifies this instance's signatures against its published key, so replacing it changes what the network trusts of this instance.
+  { method: 'POST',   pattern: /^\/api\/admin\/rotate-signing-key$/,                   operation: SIGNING_ROTATE_OPERATION },
+  // A client's approval to act with a token's rights: the entry names the approving token, the client (as its entry) and the status the approval ended with.
+  { method: 'POST',   pattern: /^\/mcp-oauth\/consent$/,                              operation: MCP_OAUTH_CONSENT_OPERATION },
 
   // ── Webhook operations ───────────────────────────────────────────────────
   // These rules used to point at `/api/notify/webhooks`, but the router is mounted at
@@ -335,7 +361,7 @@ const RULES_BY_METHOD: ReadonlyMap<string, readonly RouteRule[]> = (() => {
   return map;
 })();
 
-export function resolveOperation(method: string, path: string): { operation: string; spaceId: string | null; entryId: string | null; read: boolean } | null {
+export function resolveOperation(method: string, path: string): { operation: string; spaceId: string | null; entryId: string | null; read: boolean; writtenWhenCutOff: boolean } | null {
   const rules = RULES_BY_METHOD.get(method);
   if (!rules) return null;
   for (const rule of rules) {
@@ -346,6 +372,7 @@ export function resolveOperation(method: string, path: string): { operation: str
       spaceId: rule.spaceGroup ? (m[rule.spaceGroup] ?? null) : null,
       entryId: rule.entryGroup ? (m[rule.entryGroup] ?? null) : null,
       read: rule.read ?? false,
+      writtenWhenCutOff: rule.writtenWhenCutOff ?? false,
     };
   }
   return null;
@@ -383,7 +410,24 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
    */
   const requestId = currentRequestId() ?? null;
 
-  res.on('finish', () => {
+  /*
+   * ONE entry per request, from whichever of the two events comes first.
+   *
+   * A response that ends emits `finish` and then `close`; one the client abandons emits `close` alone. The entry is written on `finish`, and for the
+   * acts a rule flags `writtenWhenCutOff` (an export: the data left the instance, whole or in part) on a `close` that never saw one too, so a
+   * copy that was cut off is on record. `settled` is what keeps the pair from writing twice, and from writing for a cut-off request whose act
+   * did not hand anything out.
+   */
+  let settled = false;
+  const settle = (finished: boolean): void => {
+    if (settled) return;
+    settled = true;
+    record(finished);
+  };
+  res.on('finish', () => settle(true));
+  res.on('close', () => settle(res.writableFinished));
+
+  const record = (finished: boolean): void => {
     // Use originalUrl (strip query string) — req.path inside the 'finish'
     // callback reflects the router-relative path (e.g. "/general/facts"
     // instead of "/api/brain/general/facts") because Express strips the
@@ -407,6 +451,8 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
 
     const matched = resolveOperation(req.method, fullPath);
     if (!matched) return; // not an operation we track
+    // A request the client abandoned is an entry only where the act handed data out.
+    if (!finished && !matched.writtenWhenCutOff) return;
 
     const durationMsForActivity = Number(process.hrtime.bigint() - start) / 1e6;
 
@@ -493,16 +539,21 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       durationMs: Math.round(durationMs),
       // Only for a request that actually succeeded: a rejected PATCH changed nothing, and recording its
       // intended values would make the log claim an edit that never happened.
-      ...(res.statusCode < 400 && req.auditChangesExplicit
-        ? { changes: req.auditChangesExplicit }
+      ...(res.statusCode < 400 && (req.auditChangesExplicit || !finished)
+        // A list the act handed over itself goes through the operation's allowlist like a diff does (`explicitChanges`); a response cut off
+        // says so, whatever counts the act had reached.
+        ? { changes: explicitChanges(matched.operation, [...(req.auditChangesExplicit ?? []), ...(finished ? [] : [CUT_OFF])]) }
         : res.statusCode < 400 && req.auditSnapshots
           ? { changes: auditChanges(matched.operation, req.auditSnapshots.before, req.auditSnapshots.after) }
           : {}),
     });
-  });
+  };
 
   next();
 }
+
+/** What an entry says of a response the client went away from before its end (the operation's allowlist names `complete`). */
+const CUT_OFF: AuditChange = { field: 'complete', to: false };
 
 /**
  * The one operation no ROUTE RULE produces.
@@ -589,6 +640,19 @@ export const FILE_MOVE_FINISH_OPERATION = 'file.move.finish';
  * the other work no request named.
  */
 export const LEAKED_ROWS_REPAIR_OPERATION = 'file.leaked_rows.repair';
+
+/**
+ * The records a TTL sweep cycle deleted from one space once their expiry had passed (`brain/ttl-sweep.ts`, bundle-40): one entry per space per
+ * cycle that deleted any, with no token, and one change per record collection naming how many it took. Every deletion is every peer's (a tombstone
+ * is issued), and no request asked for it, so it is audited as the other work no request named.
+ */
+export const TTL_EXPIRE_OPERATION = 'ttl.expire';
+
+/**
+ * An entity the duplicate scanner absorbed into another on its own, under a space's `automerge` rule (`brain/dupe-scanner.ts`, bundle-40): one entry
+ * per merge that landed, the survivor as the entry and the absorbed entity's id in its changes. A merge a request asked for is `entity.merge`.
+ */
+export const DUPLICATE_AUTOMERGE_OPERATION = 'duplicate.automerge';
 
 /**
  * What a personal view's own lifecycle does (Q-531), written by the shared view acts for REST and MCP alike (`spaces/view-acts.ts`), outside the

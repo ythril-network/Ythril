@@ -243,6 +243,14 @@ export function keyRotationMessage(params: { instanceId: string; newPublicKey: s
 }
 
 /**
+ * The fingerprint of a public key: the SHA-256 of its PEM text, as hex. What an audit entry says of a key (`signing.rotate`): enough to tell
+ * which key a peer pinned, and nothing a signature could be forged from.
+ */
+export function publicKeyFingerprint(publicKeyPem: string): string {
+  return crypto.createHash('sha256').update(publicKeyPem).digest('hex');
+}
+
+/**
  * Rotate this instance's signing keypair, producing a continuity proof signed by
  * the OLD key so peers who pinned the old key can safely adopt the new one. The
  * new private key replaces the old in secrets.json; the new public key and the
