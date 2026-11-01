@@ -32,7 +32,7 @@
 import { getConfig } from '../config/loader.js';
 import { currentRequestId } from '../util/log.js';
 import { logAuditEntry } from '../audit/audit.js';
-import { auditChanges, type AuditChange } from '../audit/audit-changes.js';
+import { auditChanges, explicitChanges, type AuditChange } from '../audit/audit-changes.js';
 import { mcpAuditOperation, mcpActOperation, isMcpReadOperation } from './audit-map.js';
 import type { ToolCaller } from './call-tool.js';
 
@@ -139,6 +139,6 @@ function recordToolCall(caller: ToolCaller, toolName: string, status: number, du
     // Q-50: the same `changes` the REST twin's entry carries, and on the same condition — only a call that
     // succeeded, because a refused edit changed nothing and its intended values would claim one.
     ...(status < 400 && snapshots
-      ? { changes: 'explicit' in snapshots ? snapshots.explicit : auditChanges(operation, snapshots.before, snapshots.after) } : {}),
+      ? { changes: 'explicit' in snapshots ? explicitChanges(operation, snapshots.explicit) : auditChanges(operation, snapshots.before, snapshots.after) } : {}),
   });
 }
