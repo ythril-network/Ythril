@@ -72,6 +72,7 @@ const WRITERS = {
   'server/src/sync/delivered-by-backfill.ts:stampCollection': { marker: 'none-by-design', why: 'stamps who delivered a row; from, label and the marker are untouched' },
   'server/src/brain/candidate-prune.ts:pruneCandidateCollection': { marker: 'none-by-design', why: 'prunes candidate rows; the collection name is computed and is not edges' },
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': { marker: 'none-by-design', why: 'chrono entries; the collection name is computed' },
+  'server/src/brain/retention-stamp-heal.ts:healStoredStamps': { marker: 'none-by-design', why: 'the sweep\'s heal sets or unsets a retention stamp on a row that exists; it writes neither from nor label, so the marker is neither stamped nor unset' },
   'server/src/db/drop-link-arrays.ts:dropLinkArrays': { marker: 'none-by-design', why: 'boot migration of the retired link arrays' },
   'server/src/db/rekey-memory-kind-to-fact.ts:rekeyMemoryKindToFact': { marker: 'none-by-design', why: 'boot migration of the memory kind' },
   'server/src/db/restore.ts:backupLoader': { marker: 'none-by-design', why: 'a dump restored verbatim into a collection emptied for it: every marker comes back with the from and label it was written with, and a restore act builds the guard index before it loads, so a duplicate marker in the backup fails the act' },

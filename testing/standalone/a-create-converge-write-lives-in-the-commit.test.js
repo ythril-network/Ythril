@@ -96,6 +96,7 @@ const EXEMPT = {
   'server/src/files/rekey-rows.ts:rekeyRows': 're-key of the rows of a file move (file rows, derived rows, jobs): delete + insert in the caller transaction, never a create or a converge',
   'server/src/brain/chrono-redaction.ts:redactLapsedChronoContent': 'redaction: a retention schedule clears content',
   'server/src/brain/chrono-redaction.ts:backfillTypedExpiry': 'retention: stamps a computed expiry on stored entries',
+  'server/src/brain/retention-stamp-heal.ts:healStoredStamps': 'retention: rewrites a stored expiry that is not a Date, guarded on the value read; a local-only field, no record body',
   // The embed worker's four writes moved into the one writer of a derived field (bundle-89, Q-418), which is what asks
   // whether the file a row belongs to is still live — a flag stamps no seq, so the job's own precondition cannot see a
   // delete. It writes what the bytes made onto a record somebody else already created; it creates nothing.

@@ -82,7 +82,7 @@ const EXEMPT = {
     'brain/edge-rekey.ts:rekeyEdges', 'brain/relink-references.ts:relinkEdgesOfRecord',
   ]),
   ...reasoned('retention applies to a fork as to any record: the sweep selects fork rows by their own stamp and writes no authored field (R14)', [
-    'brain/chrono-redaction.ts:redactLapsedChronoContent', 'brain/chrono-redaction.ts:backfillTypedExpiry',
+    'brain/chrono-redaction.ts:redactLapsedChronoContent', 'brain/chrono-redaction.ts:backfillTypedExpiry', 'brain/retention-stamp-heal.ts:healStoredStamps',
   ]),
   ...reasoned('it writes derived local fields (a vector, `matchedText`, a retention stamp), never body', [
     'brain/suppression-sweep.ts:sweepSuppressedVectors', 'files/derived-fields.ts:writeDerivedFields',

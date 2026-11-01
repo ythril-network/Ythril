@@ -268,6 +268,12 @@ const GRANDFATHERED = new Map([
  * A new entry here needs a reason a reader can check, not a number somebody raised.
  */
 const NOT_A_WINDOW = new Map([
+  // `\D{0,24}?` — an adjacency claim: a space's count stands within a few characters of its name in the sweep's one summary line. That distance IS the rule.
+  ['testing/standalone/a-ttl-expiry-is-audited-per-space-db.test.js', 1],
+
+  // `(?:\w+\W+){0,6}` — "a plain edit" and "never re-slides" in ONE phrase of one paragraph: six words apart is what a sentence says it in.
+  ['testing/standalone/the-retention-docs-say-a-plain-edit-never-re-slides-an-expiry.test.js', 1],
+
   // `[0-9a-f]{0,2}` inside a failure MESSAGE — the regex it suggests somebody ADD. Nothing is asserted with it.
   ['testing/red-team-tests/ssrf-ipv6.test.js', 1],
 

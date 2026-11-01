@@ -27,6 +27,7 @@
  */
 
 import { AUDIT_SCHEMA_SUMMARY } from './audit-schema-summary.js';
+import { BRAIN_COLLECTIONS } from '../config/types-knowledge.js';
 
 /**
  * A single recorded field change.
@@ -129,16 +130,16 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   'fork.resolve': ['kind', 'keep', 'parentId', 'forkId', 'resolvedElsewhere', 'kept', 'discarded'],
   // How many records of each kind an export handed out, and `complete: false` when the client went away before the body ended (the counts are
   // then what had been written). Counts only: nothing of what the export held.
-  'space.export': ['facts', 'entities', 'edges', 'chrono', 'files', 'links', 'complete'],
+  'space.export': [...BRAIN_COLLECTIONS, 'complete'],
   // The same for the export of the audit log, which has no counts to give: it records only whether the client took all of it.
   'audit.export': ['complete'],
   // What a space import landed, in totals: records stored new, records replaced, records refused, records the restore left out because this
   // instance deleted them after the backup, and records that were already past their expiry when they landed (the next sweep takes them).
   'space.import': ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due'],
   // The new signing key's fingerprint and never the key itself: a peer that pinned the old one compares fingerprints.
-  'signing.rotate': ['publicKeyFingerprint'],
+  'signing.rotate': ['fingerprint'],
   // What a TTL sweep took from a space: one change per record collection, `to` the number deleted this cycle (`field` is the collection's name).
-  'ttl.expire': ['facts', 'entities', 'edges', 'chrono', 'files'],
+  'ttl.expire': BRAIN_COLLECTIONS.filter(c => c !== 'links'),
   // The entity the duplicate scanner absorbed into the entry's survivor: its id, `to: null` (it no longer exists). The id alone, never its name.
   'duplicate.automerge': ['absorbed'],
 };

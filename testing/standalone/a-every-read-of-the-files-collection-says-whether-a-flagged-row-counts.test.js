@@ -74,6 +74,7 @@ const EXEMPT = {
   'server/src/files/media/job-queue.ts:fileCollection': 'hands the collection to one caller, which reads a single `sizeBytes` for a stalled-job WARN line and surfaces no row to anybody',
   'server/src/auth/find-where-token-may.ts:findWhereTokenMay': 'a by-id lookup of review-state rows across the spaces a token reaches; every caller passes a conflicts or candidates collection, never files',
   // ── it must SEE the flagged row, because the flag is what it decides on
+  'server/src/brain/retention-stamp-heal.ts:healStoredStamps': 'the sweep\'s heal of an expiry stored as anything but a Date: it reads the rows whose stamp is not a Date, flagged ones included, because a flagged row\'s own stamp is repaired the same way and no result, count or link target is surfaced from it',
   'server/src/brain/ttl-sweep.ts:flaggedPage': 'the page of the purge unit: it selects rows BY the flag, because the audit records of deleted files are exactly what it reaps once the space\'s file window has passed since the deletion',
   'server/src/brain/ttl-sweep.ts:stillFlagged': 'the purge unit\'s reading of "the deleter matched nothing": it asks whether the row is STILL flagged, so a re-upload that revived the path between the page and the delete is the correct outcome rather than a reported failure',
   'server/src/files/derived-fields.ts:stripFlaggedRowsOnce': 'the one-off repair of rows flagged before the flag write stripped them: it selects flagged rows that still hold what the bytes made, which is the work it exists to do',

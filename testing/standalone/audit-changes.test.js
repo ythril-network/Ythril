@@ -89,7 +89,12 @@ describe('audit changes — every allowlist is actually reachable', () => {
     // matches no operation is silent forever — the entry is written, `changes` never appears, and
     // nothing anywhere reports the mismatch.
     const middleware = read('server/src/audit/middleware.ts');
-    const known = new Set([...middleware.matchAll(/operation:\s*'([^']+)'/g)].map(m => m[1]));
+    // A rule's literal, or an operation the module declares as a constant (`export const TTL_EXPIRE_OPERATION = 'ttl.expire'`): an act that
+    // writes its own entry (a sweep, a scanner) has no rule, and a rule may name its constant.
+    const known = new Set([
+      ...middleware.matchAll(/operation:\s*'([^']+)'/g),
+      ...middleware.matchAll(/export const [A-Z_]+_OPERATION\s*=\s*'([^']+)'/g),
+    ].map(m => m[1]));
     assert.ok(known.size > 50, `expected the middleware operation table, parsed ${known.size}`);
     for (const key of Object.keys(AUDIT_CHANGE_FIELDS)) {
       assert.ok(known.has(key), `"${key}" is not an operation name in middleware.ts — it can never match`);

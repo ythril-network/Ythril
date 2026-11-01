@@ -93,7 +93,7 @@ const EXEMPT = {
     'sync/delivered-by-backfill.ts:stampCollection', 'util/version-stamp.ts:heldTermsOf', 'util/version-stamp.ts:highestVersionBelowCap',
     'brain/merkle.ts:collectionLeaves', 'brain/record-removal.ts:removeChunk', 'brain/record-removal.ts:removeRecords', 'spaces/lifecycle.ts:wipeSpaceUnqueued',
     'spaces/lifecycle.ts:initSpace', 'spaces/record-count.ts:spaceRecordCount', 'spaces/schema-validate-door.ts:walkStored',
-    'brain/embed-record.ts:embedStoredRecord', 'brain/suppression-sweep.ts:sweepSuppressedVectors', 'brain/ttl-sweep.ts:expiredPage',
+    'brain/embed-record.ts:embedStoredRecord', 'brain/suppression-sweep.ts:sweepSuppressedVectors', 'brain/ttl-sweep.ts:expiredPage', 'brain/retention-stamp-heal.ts:healStoredStamps',
     'brain/ttl-sweep.ts:isStored', 'brain/queue-embed-sweep.ts:countUnswept', 'brain/queue-embed-sweep.ts:queueEmbedSweep',
     'brain/queue-embed-sweep.ts:queueOwedSweep',
     'brain/candidate-prune.ts:pruneCandidateCollection', 'brain/chrono-redaction.ts:backfillTypedExpiry',
