@@ -40,6 +40,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { ADMIN_TOKEN, build } from './_push-door.mjs';
 import { openImportDoor, exportText, fact, idsOf, paddedFacts } from './_import-door.mjs';
 import { clearActEntries, deferred, resetRunnerForTest, untilRunnerIdle, auditRowsOf } from './_space-act-harness.mjs';
+import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'importact';
@@ -128,9 +129,12 @@ describe('an import is a space act: it holds its space, resumes from its spool a
     const actId = door.importActs()[0].id;
     await restart();
     const later = Date.now() + DAY;
-    await runner.resumeSpaceActs(later);
+    const { lines } = await logLinesDuring(() => runner.resumeSpaceActs(later));
     await untilRunnerIdle(runner, door.loader, { now: later });
     assert.deepEqual(door.importActs(), [], 'an import act whose spool is gone stays on disk: it can never complete and nothing abandons it');
+    // The act ended: the resume's walk does not report it as a failure "retried next cycle" (CI run 41329371938 said so).
+    const retried = lines.filter(l => l.includes('Resume of space acts failed'));
+    assert.deepEqual(retried, [], `the resume reported an act that ended as a failure it retries: ${JSON.stringify(retried)}`);
     assert.deepEqual(await idsOf(door, SPACE), [], 'an import with no spool landed rows');
     const rows = (await auditRowsOf(door.mongo, 'space.act_completed')).filter(r => String(r.path).startsWith('internal:space-act:import:'));
     assert.ok(rows.some(r => String(r.path).includes(actId)), `no completion row names the import act ${actId}: ${JSON.stringify(rows.map(r => r.path))}`);
