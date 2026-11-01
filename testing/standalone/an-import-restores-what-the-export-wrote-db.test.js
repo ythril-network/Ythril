@@ -140,14 +140,19 @@ describe('the admin import restores what the export wrote', { skip }, () => {
 
   beforeEach(async () => { await wipe(SPACE); await wipe(KEEP); });
 
-  it('the derivation finds every replicated family, and the import accepts each one', () => {
+  it('the derivation finds every replicated family, and the import accepts each one', async () => {
     assert.ok(families.length >= 6, `only ${families.length} replicated families — the registry moved`);
-    assert.equal(importMod.importPayloadError(Object.fromEntries(importKeys().map(k => [k, 'x']))) !== null, true,
-      'the import shape check accepts none of the family keys');
+    // The door's reader (`indexExportBody`) is the shape check: a family key whose value is not an array refuses the body, naming the key, so
+    // every family is one it reads as a family; an empty array of each is a body it takes.
+    const { indexExportBody, ExportBodyMalformed } = await import('../../server/dist/sync/export-stream.js');
+    const body = path.join(tmpDir, 'shape.json');
     for (const k of importKeys()) {
-      assert.match(importMod.importPayloadError({ [k]: 'not an array' }) ?? '', new RegExp(k),
-        `the import does not accept family '${k}' as a key`);
+      fs.writeFileSync(body, JSON.stringify({ [k]: 'not an array' }));
+      await assert.rejects(indexExportBody(body), (err) => err instanceof ExportBodyMalformed && new RegExp(`'${k}'`).test(err.message),
+        `the import does not read family '${k}' as a family`);
     }
+    fs.writeFileSync(body, JSON.stringify(Object.fromEntries(importKeys().map(k => [k, []]))));
+    assert.deepEqual([...(await indexExportBody(body)).families.keys()].sort(), importKeys().sort(), 'the reader does not take an empty array of every family');
     assert.ok(wireKeys.size >= 8 && wireKeys.has('path'), `the file wire keys did not derive: ${[...wireKeys]}`);
     assert.ok(DERIVED_EMBED.every(f => localOnly.has(f)), 'the derived embed fields are no longer local-only');
   });

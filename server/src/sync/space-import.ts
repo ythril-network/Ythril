@@ -437,10 +437,3 @@ export async function importSpool(spaceId: string, file: string, index: ExportBo
   finally { afterImport(spaceId); }
 }
 
-/** The array-shape check of an object payload (`importDocuments`), kept beside the importer that defines the shape; the door's body is checked whole by `indexExportBody`. */
-export function importPayloadError(payload: Record<string, unknown>): string | null {
-  for (const t of IMPORT_TYPES) {
-    if (payload[t] !== undefined && !Array.isArray(payload[t])) return `'${t}' must be an array`;
-  }
-  return null;
-}
