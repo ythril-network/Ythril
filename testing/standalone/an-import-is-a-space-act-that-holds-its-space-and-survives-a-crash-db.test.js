@@ -101,6 +101,7 @@ describe('an import is a space act: it holds its space, resumes from its spool a
     assert.deepEqual(landed.map(r => r._id), IDS, 'fixture check: the first run did not land the rows before it crashed');
     // The rows are removed, so only a re-run from the spooled body can bring them back.
     await door.coll(SPACE, 'facts').deleteMany({});
+    const actId = door.importActs()[0].id;
     await restart();
     const later = Date.now() + DAY;
     await runner.resumeSpaceActs(later);
@@ -108,6 +109,11 @@ describe('an import is a space act: it holds its space, resumes from its spool a
     assert.deepEqual(door.importActs(), [], 'the resume did not complete the crashed import');
     assert.deepEqual(await rowsOf(), landed, 'the resumed import did not land the same rows from its spool');
     assert.deepEqual(door.spoolFiles(), [], 'a completed import left its spool on disk');
+    // Nobody waited for this import, so its completion row is the only place its result is told: it carries the import's totals.
+    const own = (await auditRowsOf(door.mongo, 'space.act_completed')).filter(r => String(r.path).includes(actId));
+    assert.equal(own.length, 1, `want one completion row for the resumed import ${actId}: ${JSON.stringify(own.map(r => r.path))}`);
+    const inserted = (own[0].changes ?? []).find(c => c.field === 'inserted');
+    assert.equal(inserted?.to, IDS.length, `the resumed import's completion row does not say how many records it stored: ${JSON.stringify(own[0].changes)}`);
   });
 
   it('a resumed act whose spool is missing completes as failed with its audit row, lands nothing and removes itself', T, async () => {
