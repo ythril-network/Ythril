@@ -69,7 +69,7 @@ describe('the conversion marker is local and never voted', () => {
   });
 
   it('is NOT on SpaceMeta, because meta is what a network votes on', () => {
-    const body = interfaceBody(code('server/src/config/types-knowledge.ts'), 'SpaceMeta');
+    const body = interfaceBody(code('schema/src/vocabulary.ts'), 'SpaceMeta');
     assert.ok(!body.includes(MARKER),
       `${MARKER} is on SpaceMeta. Every meta key is handed to \`proposedMetaFields\` and carried by a`
       + '\n  `meta_change` round, so the first instance to run the conversion script would arm the marker on'

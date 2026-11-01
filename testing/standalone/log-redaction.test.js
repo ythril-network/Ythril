@@ -27,6 +27,13 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_SRC = path.join(__dirname, '..', '..', 'server', 'src', 'util', 'log.ts');
+/**
+ * Where the redaction itself is written: `@ythril/schema`'s text module, which `log.ts` imports and applies in `fmt`. The two are read
+ * as one source here, because the invariants below are about the redaction the logger applies, wherever its patterns are declared.
+ */
+const TEXT_SRC = path.join(__dirname, '..', '..', 'schema', 'src', 'text.ts');
+const readLogSources = () => `${readFileSync(LOG_SRC, 'utf8')}
+${readFileSync(TEXT_SRC, 'utf8')}`;
 
 // ── 1. Source-level structural invariants ─────────────────────────────────────
 
@@ -34,7 +41,7 @@ describe('log.ts — structural invariants (SEC-14)', () => {
   let src;
 
   before(() => {
-    src = readFileSync(LOG_SRC, 'utf8');
+    src = readLogSources();
   });
 
   it('log.ts file can be read from the expected path', () => {
@@ -226,7 +233,7 @@ describe('Redaction regex precision — must not be over-narrowed', () => {
   let src;
 
   before(() => {
-    src = readFileSync(LOG_SRC, 'utf8');
+    src = readLogSources();
   });
 
   it('character class includes uppercase letters A-Z', () => {

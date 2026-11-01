@@ -43,14 +43,21 @@ import { stripComments } from './_strip-comments.mjs';
 
 const ROOT = process.cwd();
 
-/** The two files allowed to name the kinds: one per side of the wire. */
+/**
+ * The files allowed to name the kinds: the tuple in `@ythril/schema` (the space-schema vocabulary the server imports), the server's leaf
+ * that hands it on and keys the collection maps by it, and the client's mirror on the other side of the wire.
+ */
 const DECLARATIONS = [
+  'schema/src/vocabulary.ts',
   'server/src/config/types-knowledge.ts',
   'client/src/app/core/api.types.ts',
 ];
 
+/** A declaration file that holds no tuple of its own: it re-exports the package's, so it is the same one definition. */
+const HANDS_ON = new Set(['server/src/config/types-knowledge.ts']);
+
 function sourceFiles() {
-  return trackedSources(['server/src', 'client/src'])
+  return trackedSources(['server/src', 'schema/src', 'client/src'])
     .filter(f => f.endsWith('.ts') && !f.endsWith('.spec.ts') && !f.endsWith('.d.ts'));
 }
 
@@ -255,6 +262,11 @@ describe('the knowledge types are named in one place per side', () => {
     // re-enumerate. The point of the list is one definition, not two blessed files.
     for (const f of DECLARATIONS) {
       const clean = stripComments(readFileSync(f, 'utf8'));
+      if (HANDS_ON.has(f)) {
+        assert.match(clean, /export\s*\{[^}]*\bKNOWLEDGE_TYPES\b[^}]*\}\s*from\s*'@ythril\/schema'/,
+          `${f} is exempt because it hands on the package's tuple — so it has to re-export \`KNOWLEDGE_TYPES\` from @ythril/schema.`);
+        continue;
+      }
       assert.match(
         clean,
         /KNOWLEDGE_TYPES\s*=/,

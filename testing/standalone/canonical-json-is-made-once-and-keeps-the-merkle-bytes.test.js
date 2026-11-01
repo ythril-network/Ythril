@@ -1,5 +1,6 @@
 /**
- * The canonical JSON text of a value — keys sorted at every level — is made in one module, `util/canonical-json.ts`, and it
+ * The canonical JSON text of a value — keys sorted at every level — is made in one module, `canonical-json.ts` of `@ythril/schema`
+ * (the schema validator compares a library type by it; the server's `util/canonical-json.ts` re-exports it beside the hash), and it
  * is byte for byte the text the space hash has always been computed over (bundle-23 wave 0, extraction 3).
  *
  * ## The defect it prevents
@@ -40,7 +41,8 @@ import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom } from './_structural-window.mjs';
 import { CORPUS, FILE_DOC } from './_canonical-json-corpus.mjs';
 
-const MODULE = 'server/src/util/canonical-json.ts';
+/** Where the text is made: the schema package, which the server's `util/canonical-json.ts` re-exports beside `canonicalJsonHash`. */
+const MODULE = 'schema/src/canonical-json.ts';
 
 /** `docLeaf` per corpus entry and `fileContentHash(FILE_DOC)`, from the dist built at the second wave-0 commit (0b7d818c). */
 const PINNED = {
@@ -137,7 +139,7 @@ describe('the canonical JSON text keeps the bytes the space hash was computed ov
     const sample = { a: 1, b: { a: 2, c: 3 } };
     assert.equal(canonicalJson(sample, { omitKeys: new Set(['a']) }), canonicalJson(sample),
       'canonicalJson still drops the keys it is asked to omit, at every level: nothing needs it and a nested key is content');
-    assert.ok(!/omitKeys/.test(readFileSync('server/src/util/canonical-json.ts', 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')),
+    assert.ok(!/omitKeys/.test([MODULE, 'server/src/util/canonical-json.ts'].map(f => readFileSync(f, 'utf8')).join('\n').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')),
       'util/canonical-json.ts still has an omitKeys option');
     for (const [name, , doc] of CORPUS) {
       const text = JSON.stringify(oldMerkleCanonicalize(doc, new Set()));
@@ -192,7 +194,8 @@ describe('no other server source writes a canonical text by hand', () => {
     assert.equal(sortedKeyListsIn('const names = files.map(f => f.name).sort(); Object.keys(o).length;').length, 0);
   });
 
-  const sources = readTrackedSources('server/src', { untracked: true })
+  // The server's sources and the schema package's, which the server imports: a hand-written canonical text in either is a second answer.
+  const sources = readTrackedSources(['server/src', 'schema/src'], { untracked: true })
     .map(({ file, text }) => ({ file, code: stripComments(text) }));
 
   it('reads a tree worth reading, and the askers still ask (the floors)', () => {

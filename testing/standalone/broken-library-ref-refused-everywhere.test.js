@@ -27,7 +27,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 const ROOT = process.cwd();
@@ -57,6 +57,13 @@ function routes() {
  * the check and taking a route's word for it: `effectiveChecker` below only accepts a delegate whose own source
  * calls the checker, so "I call a function" is not an escape hatch — the function has to do the work.
  */
+/**
+ * The schema package's source, read whole: `spaces/body-schemas.ts` re-exports the ref checks and their 422 wording from
+ * `@ythril/schema`, so a module that hands them on is read with the package it hands them on from.
+ */
+const SCHEMA_PACKAGE = readdirSync(join(ROOT, 'schema/src')).filter(f => f.endsWith('.ts'))
+  .map(f => readFileSync(join(ROOT, 'schema/src', f), 'utf8')).join('\n');
+
 function resolveImports(text, fromDir) {
   const byName = new Map();
   const re = /import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+'(\.\.?\/[^']+)\.js'/g;
@@ -65,6 +72,7 @@ function resolveImports(text, fromDir) {
     const file = join(fromDir, `${m[2]}.ts`);
     let body;
     try { body = readFileSync(file, 'utf8'); } catch { continue; }
+    if (/from\s+'@ythril\/schema'/.test(body)) body += `\n${SCHEMA_PACKAGE}`;
     for (const raw of m[1].split(',')) {
       const name = raw.trim().split(/\s+as\s+/).pop().trim();
       if (name) byName.set(name, { text: body, dir: dirname(file) });

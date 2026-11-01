@@ -33,18 +33,22 @@
  * (`resolveMetaRefs`) and the peer-bound inlining (`inlineResolvableRefs`) answer other questions and stay where they
  * are.
  */
-import { z } from 'zod';
+import { useSchemaLibrary, libraryDefinitionOf } from '@ythril/schema';
 import { getSchemaLibrary } from '../config/loader.js';
 import type { SpaceMeta, TypeSchema } from '../config/types.js';
-import { canonicalJson } from '../util/canonical-json.js';
-import { libraryEntryNameOf } from './library-ref-name.js';
+
+/*
+ * The take-back runs inside the schema body, which is `@ythril/schema`'s and never reads an instance: the library a `$ref` names is
+ * handed to it. This is where the instance hands over its own — read at the moment of each parse, so a library edit reaches the next
+ * write. `body-schemas.ts` imports this module for that, so no parse can run before the library is installed.
+ */
+useSchemaLibrary(getSchemaLibrary);
+
+/** The take-back of a round-tripped `{ $ref, ...definition }` is the body's preprocess, defined with it in `@ythril/schema`. */
+export { takeBackLibraryDefinition } from '@ythril/schema';
 
 /** The library entry's definition for a `library:<name>` reference, or undefined when there is none. */
-function definitionOf(ref: string): Record<string, unknown> | undefined {
-  const name = libraryEntryNameOf(ref);
-  if (name === undefined) return undefined;
-  return getSchemaLibrary().find(e => e.name === name)?.schema as Record<string, unknown> | undefined;
-}
+const definitionOf = libraryDefinitionOf;
 
 /**
  * The meta with each library type shown as `{ $ref, ...definition }` — the default answer on both doors.
@@ -68,41 +72,4 @@ export function withLibraryDefinitions(meta: SpaceMeta): SpaceMeta {
     typeSchemas[kt] = out;
   }
   return changed ? { ...meta, typeSchemas: typeSchemas as SpaceMeta['typeSchemas'] } : meta;
-}
-
-/**
- * `TypeSchemaZ`'s preprocess: a type carrying `$ref` beside other keys is taken back to `{ $ref }` when those keys are
- * the entry's definition (or the unresolved mark), and refused, naming them, when they are not.
- *
- * Anything that is not an object with a string `$ref` and more keys passes through untouched, for the union to judge.
- */
-export function takeBackLibraryDefinition(
-  value: unknown,
-  ctx: { addIssue(issue: { code: 'custom'; message: string; input?: unknown }): void },
-): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  // `_unresolvedRef` is left out of the comparison below: it is a mark the server writes, never the caller's.
-  const { $ref, _unresolvedRef: _mark, ...rest } = value as Record<string, unknown>;
-  if (typeof $ref !== 'string') return value;
-  if (Object.keys(rest).length === 0) return { $ref };
-
-  const def = definitionOf($ref);
-  // Compared as canonical JSON (`util/canonical-json.ts`): two definitions that differ only in key order are equal.
-  if (def && canonicalJson(rest) === canonicalJson(def)) return { $ref };
-
-  const fields = def
-    ? [...new Set([...Object.keys(rest), ...Object.keys(def)])].filter(k => canonicalJson(rest[k]) !== canonicalJson(def[k]))
-    : Object.keys(rest);
-  const entry = libraryEntryNameOf($ref) ?? $ref;
-  ctx.addIssue({
-    code: 'custom',
-    input: value,
-    message: `${fields.map(f => `\`${f}\``).join(', ')} beside \`$ref: ${$ref}\` ${def ? 'differs from' : 'cannot be checked against'} `
-      + `the schema library entry '${entry}'${def ? ' as it is now' : ', which does not exist'}. A library type's definition IS the `
-      + `library entry, so this edit would be lost: change the entry (PUT /api/schema-library/${entry}), or drop \`$ref\` to `
-      + 'define the type inline. Sending back what the meta returned is always accepted — if you did not edit this type, '
-      + 'the library entry changed since you read it; read the meta again.',
-  });
-  // Stop here: the union below would otherwise add "unrecognized keys" beside the one refusal that says why.
-  return z.NEVER;
 }

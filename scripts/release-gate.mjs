@@ -92,7 +92,9 @@ function checkStoredShapeMatchesMajor(version) {
   }
 }
 function checkVersion() {
-  const manifests = ['package.json', 'server/package.json', 'client/package.json'];
+  // `schema/package.json` is `@ythril/schema`, versioned with the release it is cut from: a package that says 6.3.0 validates what a 6.3.0
+  // server accepts, so it is bumped with the others or it lies about which server it speaks for.
+  const manifests = ['package.json', 'server/package.json', 'client/package.json', 'schema/package.json'];
   const versions = new Map();
   for (const m of manifests) versions.set(m, JSON.parse(read(m)).version);
 

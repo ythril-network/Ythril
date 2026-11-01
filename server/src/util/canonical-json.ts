@@ -30,27 +30,14 @@
  *   (`brain/merkle.ts` `withoutTopLevel`, `sync/authored-content.ts`), so a nested key is content whatever it is called (Q-624).
  * - **The hash** is `sha256Hex` (`util/sha256-hex.ts`) of the text as UTF-8, so a content hash is made one way.
  */
+import { canonicalJson } from '@ythril/schema/internal';
 import { sha256Hex } from './sha256-hex.js';
 
-function sortedCopy(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(v => sortedCopy(v));
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      out[key] = sortedCopy((value as Record<string, unknown>)[key]);
-    }
-    return out;
-  }
-  return value;
-}
-
-/**
- * The canonical text of `value`: keys sorted at every level, serialised by `JSON.stringify`. `undefined` exactly when
- * `JSON.stringify` has no text for the value itself (`undefined`, a function).
+/*
+ * The text is `@ythril/schema`'s (`schema/src/canonical-json.ts`): the schema validator compares a library type's definition by it, so
+ * it is defined there once and re-exported here, beside the hash this server makes of it.
  */
-export function canonicalJson(value: unknown): string | undefined {
-  return JSON.stringify(sortedCopy(value)) as string | undefined;
-}
+export { canonicalJson };
 
 /** The lowercase hex SHA-256 of a document's canonical text — equal for two documents that differ only in key order. */
 export function canonicalJsonHash(doc: object): string {

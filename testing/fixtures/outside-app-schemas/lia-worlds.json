@@ -1,0 +1,783 @@
+{
+  "purpose": "Lia keeps your worlds here: their timelines, settings, common knowledge and secrets, side characters, the pictures of their places, and the stories set in them. Never store a password or key here.",
+  "validationMode": "strict",
+  "strictLinkage": true,
+  "usageNotes": "# Lia: worlds\n\nWritten by Lia. Every record has a description and a `key`, the UUID Lia minted for it; Ythril's own id only locates it in this space. A record in another of Lia's slots is named by its key in a *Ref property, never by an edge. Read a record by its key, never by its Ythril id.\n\n## Rules Lia enforces that Ythril cannot check\n\n- An AI mark id is used once: the API mints it unique across all accounts (D67), and a library refuses one it holds already.\n- Knowledge crosses one connects edge, never a chain.\n- A character enters a story only if they belong to its world, or arrive through an identity edge, and are born by its day.\n- A story's side characters are its world's own.\n- A secret is known only to its holders and to those who found it by its clue or were told by someone who knew, in a story still standing.\n- A secret with no clue cannot be found, only told.\n- Lore, setting facts, side characters and stories belong to one world; a character holds only what is theirs alone.\n",
+  "typeSchemas": {
+    "entity": {
+      "world": {
+        "description": "A context the creator named (R9.5); its name is the entity name. No world type or preset exists.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "time": {
+            "description": "Whose clock it runs on (D73): the visiting character's personal life, or its own timeline.",
+            "type": "string",
+            "enum": [
+              "personal",
+              "own"
+            ],
+            "required": true
+          },
+          "daysPerYear": {
+            "description": "Length of a year on its timeline, in days.",
+            "type": "number",
+            "minimum": 1,
+            "required": true,
+            "default": 365.2425
+          }
+        },
+        "rules": {
+          "solar-personal": {
+            "rule": "self.properties.time == 'own' || self.properties.daysPerYear == 365.2425",
+            "message": "A world on personal time keeps the solar year of the characters' lives"
+          }
+        }
+      },
+      "lore": {
+        "description": "Something known, or knowable, in one world; the entity name is its subject. Common lore everyone there knows; a secret only those who hold or found it; a secret with a clue can be discovered.",
+        "namingPattern": "^[a-z][a-z0-9.-]{0,199}$",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "value": {
+            "description": "What is true.",
+            "type": "string",
+            "required": true
+          },
+          "reach": {
+            "description": "Common knowledge or a secret.",
+            "type": "string",
+            "enum": [
+              "common",
+              "secret"
+            ],
+            "required": true
+          },
+          "clue": {
+            "description": "For a secret that can be discovered: how, as a hint generation can place in a scene.",
+            "type": "string"
+          },
+          "day": {
+            "description": "From when it is true and known on the world's timeline; absent for always.",
+            "type": "number"
+          }
+        },
+        "rules": {
+          "clue-on-secret": {
+            "rule": "self.properties.reach == 'secret' || !has(self.properties.clue)",
+            "message": "Only a secret is discovered; common lore needs no clue"
+          }
+        }
+      },
+      "extra": {
+        "description": "A side character of one world, such as \"the ferryman\"; the entity name is its label and the description what was said about it. Always fictional.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "promotedTo": {
+            "description": "The full character it became (characters slot), keeping what was said about it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        }
+      },
+      "story": {
+        "description": "An encounter set in one world; its name is the title. Abandoned stories stay for history and count for nothing elsewhere.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "status": {
+            "description": "Active, or abandoned with everything in it.",
+            "type": "string",
+            "enum": [
+              "active",
+              "abandoned"
+            ],
+            "required": true
+          },
+          "day": {
+            "description": "When it takes place on the world's timeline; absent where undefined.",
+            "type": "number"
+          }
+        }
+      },
+      "asset": {
+        "description": "One generated output or upload, and the file it describes (the file links to it). It belongs to one character or one world; a generated one records its model and seed so it can be made again, and every one is judged before it is shown.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "file": {
+            "description": "Space-relative path of its file.",
+            "type": "string",
+            "required": true
+          },
+          "hash": {
+            "description": "Perceptual hash of the file, so a found copy can be checked and a blocked file not slip in again.",
+            "type": "string",
+            "required": true
+          },
+          "media": {
+            "description": "What kind of output.",
+            "type": "string",
+            "enum": [
+              "image",
+              "video",
+              "voice",
+              "3d"
+            ],
+            "required": true
+          },
+          "ownerKind": {
+            "description": "Whose library it is in: a character's, or a world's shared one.",
+            "type": "string",
+            "enum": [
+              "character",
+              "world"
+            ],
+            "required": true
+          },
+          "ownerRef": {
+            "description": "The character or world it belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "source": {
+            "description": "Generated, or uploaded by the owner.",
+            "type": "string",
+            "enum": [
+              "generated",
+              "upload"
+            ],
+            "required": true
+          },
+          "depicts": {
+            "description": "Whose likeness it carries (D65): only the character, the owner, or another real person.",
+            "type": "string",
+            "enum": [
+              "character",
+              "owner",
+              "other-person"
+            ],
+            "required": true
+          },
+          "explicit": {
+            "description": "Sexual content was asked for (D66).",
+            "type": "boolean",
+            "required": true
+          },
+          "status": {
+            "description": "Its standing; blocked and held files are never shown.",
+            "type": "string",
+            "enum": [
+              "candidate",
+              "approved",
+              "rejected",
+              "superseded",
+              "blocked",
+              "held"
+            ],
+            "required": true
+          },
+          "mark": {
+            "description": "The id its invisible AI mark carries (D67, D69).",
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "characterRevision": {
+            "description": "The dossier revision it was made at.",
+            "type": "number",
+            "minimum": 0
+          },
+          "scope": {
+            "description": "Made for the whole character, one story, or one experiment.",
+            "type": "string",
+            "enum": [
+              "character",
+              "story",
+              "experiment"
+            ],
+            "required": true
+          },
+          "scopeRef": {
+            "description": "The story or experiment.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "slot": {
+            "description": "The coverage slot it was made for, such as turnaround:front.",
+            "type": "string"
+          },
+          "framing": {
+            "description": "Shot: framing.",
+            "type": "string"
+          },
+          "angle": {
+            "description": "Shot: camera angle.",
+            "type": "string"
+          },
+          "pose": {
+            "description": "Shot: pose.",
+            "type": "string"
+          },
+          "expression": {
+            "description": "Shot: expression.",
+            "type": "string"
+          },
+          "environment": {
+            "description": "Shot: surroundings.",
+            "type": "string"
+          },
+          "delivery": {
+            "description": "Voice: how the line is spoken.",
+            "type": "string"
+          },
+          "line": {
+            "description": "Voice: the line.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Generated: the model that made it.",
+            "type": "string"
+          },
+          "seed": {
+            "description": "Generated: the seed, for the same again or a variant.",
+            "type": "number"
+          },
+          "params": {
+            "description": "Generated: other settings the generator took, as JSON; opaque to Lia, read back only to make it again.",
+            "type": "string"
+          },
+          "settingDay": {
+            "description": "The day of its world's timeline it shows; its setting basis entries hold what it showed.",
+            "type": "number"
+          },
+          "establishesIdentity": {
+            "description": "Approved as a reference for the physical look.",
+            "type": "boolean"
+          },
+          "establishesPresentation": {
+            "description": "Approved as a reference for clothing and styling.",
+            "type": "boolean"
+          },
+          "establishesVoice": {
+            "description": "Approved as a reference for the voice.",
+            "type": "boolean"
+          },
+          "supersededByRef": {
+            "description": "The reference that took its slot.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "sexual": {
+            "description": "Judged sexual level, 0-6 (D68); absent until judged or when the classifier could not tell.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "violence": {
+            "description": "Judged violence level, 0-6 (D68); absent until judged or when the classifier could not tell.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "judged": {
+            "description": "A classifier has looked at it.",
+            "type": "boolean",
+            "required": true
+          },
+          "minor": {
+            "description": "Anyone shown is or appears under 18.",
+            "type": "string",
+            "enum": [
+              "no",
+              "yes",
+              "cannot-tell"
+            ]
+          },
+          "realPerson": {
+            "description": "It resembles an identifiable real person.",
+            "type": "string",
+            "enum": [
+              "no",
+              "yes",
+              "cannot-tell"
+            ]
+          },
+          "stylised": {
+            "description": "Clearly stylised: cannot pass for real.",
+            "type": "string",
+            "enum": [
+              "no",
+              "yes",
+              "cannot-tell"
+            ]
+          },
+          "glorifiedCruelty": {
+            "description": "Outlawed for everyone (StGB § 131).",
+            "type": "boolean"
+          },
+          "sexualViolence": {
+            "description": "Outlawed for everyone (§ 184a); consensual BDSM is not meant.",
+            "type": "boolean"
+          },
+          "sexualAnimals": {
+            "description": "Outlawed for everyone (§ 184a).",
+            "type": "boolean"
+          },
+          "judgedBy": {
+            "description": "The classifier model of the last judgement.",
+            "type": "string"
+          },
+          "blockedBecause": {
+            "description": "Why it was blocked or held.",
+            "type": "string"
+          },
+          "facesFound": {
+            "description": "Upload: faces a detector found.",
+            "type": "number",
+            "minimum": 0
+          },
+          "facesMatched": {
+            "description": "Upload: faces matched to a verified face.",
+            "type": "number",
+            "minimum": 0
+          },
+          "ownerCleared": {
+            "description": "Upload: cleared for the owner (face match or no face).",
+            "type": "boolean"
+          },
+          "ownerScore": {
+            "description": "Upload: the owner face-match score.",
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "rules": {
+          "generated": {
+            "rule": "self.properties.source != 'generated' || (has(self.properties.mark) && has(self.properties.model) && has(self.properties.seed))",
+            "message": "A generated output carries its AI mark id, model and seed"
+          },
+          "upload": {
+            "rule": "self.properties.source != 'upload' || !has(self.properties.model)",
+            "message": "An upload was not generated"
+          },
+          "scoped": {
+            "rule": "self.properties.scope == 'character' || has(self.properties.scopeRef)",
+            "message": "An output scoped to a story or an experiment names it"
+          },
+          "world-shows-nobody-real": {
+            "rule": "self.properties.ownerKind == 'character' || self.properties.depicts == 'character'",
+            "message": "A world's library shows no real person; an upload of a real person belongs in a character's library"
+          },
+          "shown-only-judged": {
+            "rule": "self.properties.status != 'approved' || self.properties.judged",
+            "message": "An output is approved only after it was judged"
+          }
+        }
+      }
+    },
+    "fact": {
+      "setting-fact": {
+        "description": "One fact of a world's setting, linked to the world: true from its day on, or always without one. A later fact on the same subject changes the setting from its day; the old one stays true before.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "subject": {
+            "description": "What it is about, a dotted key such as harbour.lighthouse.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]{0,199}$",
+            "required": true
+          },
+          "value": {
+            "description": "What is true about it.",
+            "type": "string",
+            "required": true
+          },
+          "day": {
+            "description": "From when it holds on the world's timeline.",
+            "type": "number"
+          }
+        }
+      },
+      "presence": {
+        "description": "A character belongs to this world, linked to the world; born on its own timeline where it keeps one.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "characterRef": {
+            "description": "The character (characters slot).",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "born": {
+            "description": "Day of birth on the world's own timeline; absent on personal time, where the character's own life.born counts.",
+            "type": "number"
+          }
+        }
+      },
+      "cast-member": {
+        "description": "A character who takes part in the story, linked to the story; allowed into its world on its day when it started.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "characterRef": {
+            "description": "The character (characters slot).",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          }
+        }
+      },
+      "beat": {
+        "description": "One step of a story, linked to it; the fact text says what happened. A rewind marks later beats undone and keeps them for history.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "index": {
+            "description": "Its place in the story, from 0.",
+            "type": "number",
+            "minimum": 0,
+            "required": true
+          },
+          "by": {
+            "description": "Who moved it: the user inside it, the character, a scene edit, a directive.",
+            "type": "string",
+            "enum": [
+              "interaction",
+              "character",
+              "scene",
+              "directive"
+            ],
+            "required": true
+          },
+          "undone": {
+            "description": "Undone by a rewind.",
+            "type": "boolean",
+            "required": true
+          }
+        }
+      },
+      "retcon-decision": {
+        "description": "Retcon the story to a newer character fact, or leave it as played; linked to the story. Answers that fact only: a later one asks again.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "characterRef": {
+            "description": "Whose fact.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "subject": {
+            "description": "The subject that changed.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]{0,199}$",
+            "required": true
+          },
+          "factRef": {
+            "description": "The newer fact it answers.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "choice": {
+            "description": "Retcon or leave.",
+            "type": "string",
+            "enum": [
+              "retcon",
+              "leave"
+            ],
+            "required": true
+          }
+        }
+      },
+      "basis-entry": {
+        "description": "One fact an output or a story was made with, as it was then, linked to that output or story. A character entry names the character; a setting entry the world.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "of": {
+            "description": "A character fact or a world setting fact.",
+            "type": "string",
+            "enum": [
+              "character",
+              "setting"
+            ],
+            "required": true
+          },
+          "subject": {
+            "description": "The subject of the fact.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]{0,199}$",
+            "required": true
+          },
+          "value": {
+            "description": "Its value then.",
+            "type": "string",
+            "required": true
+          },
+          "factRef": {
+            "description": "The character-fact or setting-fact it copies.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "characterRef": {
+            "description": "For a character entry: whose fact it is.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "worldRef": {
+            "description": "For a setting entry: which world.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "settingDay": {
+            "description": "For a setting entry: the day of the world timeline it shows; absent for the setting overall.",
+            "type": "number"
+          }
+        },
+        "rules": {
+          "owner": {
+            "rule": "(self.properties.of == 'character' && has(self.properties.characterRef)) || (self.properties.of == 'setting' && has(self.properties.worldRef))",
+            "message": "A character entry names its character, a setting entry its world"
+          }
+        }
+      },
+      "asset-issue": {
+        "description": "A known inconsistency in an output, such as \"the scar is on the wrong cheek\", linked to it; the fact text is the issue.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          }
+        }
+      }
+    },
+    "edge": {
+      "connects": {
+        "description": "From a world to a world it sends knowledge into. The reverse is its own edge; knowledge crosses one edge, never a chain (D72).",
+        "endpoints": {
+          "from": [
+            "world"
+          ],
+          "to": [
+            "world"
+          ]
+        },
+        "propertySchemas": {
+          "publicFacts": {
+            "description": "Carries what anyone could know about the source world's people.",
+            "type": "boolean",
+            "required": true
+          },
+          "worldEvents": {
+            "description": "Carries the source world's common knowledge and events.",
+            "type": "boolean",
+            "required": true
+          },
+          "livedMemories": {
+            "description": "Carries what a character lived through there.",
+            "type": "boolean",
+            "required": true
+          },
+          "identity": {
+            "description": "A character in the target is the same person as in the source.",
+            "type": "boolean",
+            "required": true
+          }
+        }
+      },
+      "lore-of": {
+        "description": "From lore to the one world it belongs to.",
+        "endpoints": {
+          "from": [
+            "lore"
+          ],
+          "to": [
+            "world"
+          ]
+        },
+        "functional": true
+      },
+      "extra-of": {
+        "description": "From a side character to the one world it belongs to.",
+        "endpoints": {
+          "from": [
+            "extra"
+          ],
+          "to": [
+            "world"
+          ]
+        },
+        "functional": true
+      },
+      "set-in": {
+        "description": "From a story to the one world it takes place in.",
+        "endpoints": {
+          "from": [
+            "story"
+          ],
+          "to": [
+            "world"
+          ]
+        },
+        "functional": true
+      },
+      "branches-from": {
+        "description": "From a branch to the story it continues, after `at` beats; the original stays.",
+        "endpoints": {
+          "from": [
+            "story"
+          ],
+          "to": [
+            "story"
+          ]
+        },
+        "functional": true,
+        "propertySchemas": {
+          "at": {
+            "description": "How many beats of the original the branch starts with.",
+            "type": "number",
+            "minimum": 0,
+            "required": true
+          }
+        }
+      },
+      "passes-through": {
+        "description": "From a side character to a story of its world it takes part in.",
+        "endpoints": {
+          "from": [
+            "extra"
+          ],
+          "to": [
+            "story"
+          ]
+        }
+      },
+      "made-from": {
+        "description": "From an output to an asset handed to the generator as a reference (lineage, R11.5).",
+        "endpoints": {
+          "from": [
+            "asset"
+          ],
+          "to": [
+            "asset"
+          ]
+        }
+      }
+    },
+    "chrono": {
+      "learning": {
+        "description": "Someone came to know a secret, linked to the lore and, unless they held it from the start, to the story it happened in. It stops counting when that story is abandoned or rewound past its beat.",
+        "whenDuePasses": "nothing",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "how": {
+            "description": "Held from the start, found by its clue, or told by someone who knew.",
+            "type": "string",
+            "enum": [
+              "holder",
+              "found",
+              "told"
+            ],
+            "required": true
+          },
+          "characterRef": {
+            "description": "The character who knows it (characters slot).",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "extraRef": {
+            "description": "The side character who knows it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "tellerRef": {
+            "description": "For told: the character or side character who told it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "beat": {
+            "description": "The beat of the story in which it happened.",
+            "type": "number",
+            "minimum": 0
+          },
+          "day": {
+            "description": "From when they know it on the world's timeline.",
+            "type": "number"
+          }
+        },
+        "rules": {
+          "one-knower": {
+            "rule": "has(self.properties.characterRef) != has(self.properties.extraRef)",
+            "message": "A learning names exactly one character or side character"
+          },
+          "told-by": {
+            "rule": "self.properties.how != 'told' || has(self.properties.tellerRef)",
+            "message": "Told by whom: name the teller"
+          },
+          "in-story": {
+            "rule": "self.properties.how == 'holder' || has(self.properties.beat)",
+            "message": "A secret found or told was learned at a beat of a story"
+          }
+        }
+      }
+    }
+  }
+}

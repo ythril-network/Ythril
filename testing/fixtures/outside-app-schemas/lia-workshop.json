@@ -1,0 +1,742 @@
+{
+  "purpose": "Lia keeps work in progress here: proposals, conflicts, notes, candidate outputs and the consents you gave. Never store a password or key here.",
+  "validationMode": "strict",
+  "strictLinkage": true,
+  "usageNotes": "# Lia: workshop\n\nWritten by Lia. Every record has a description and a `key`, the UUID Lia minted for it; Ythril's own id only locates it in this space. A record in another of Lia's slots is named by its key in a *Ref property, never by an edge. Read a record by its key, never by its Ythril id.\n\n## Rules Lia enforces that Ythril cannot check\n\n- An output is approved only while its basis still matches the character on what it establishes.\n- An output names every real person its inputs show, and carries the most personal likeness of them.\n- Sexual content of a real person needs a cleared upload of them in its lineage and their consent.\n- An AI mark id is used once: the API mints it unique across all accounts (D67), and a library refuses one it holds already.\n",
+  "typeSchemas": {
+    "entity": {
+      "proposal": {
+        "description": "Options for one subject of a character, of which the creator selects one (R7.2); the entity name is the subject. Its options are proposed-fact facts linked to it.",
+        "namingPattern": "^[a-z][a-z0-9.-]{0,199}$",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "characterRef": {
+            "description": "The character (characters slot).",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "origin": {
+            "description": "Proposed by the AI, or taken from a note.",
+            "type": "string",
+            "enum": [
+              "ai-proposal",
+              "note"
+            ],
+            "required": true
+          },
+          "status": {
+            "description": "Open, selected, rejected, or withdrawn because a premise stopped being true.",
+            "type": "string",
+            "enum": [
+              "open",
+              "selected",
+              "rejected",
+              "withdrawn"
+            ],
+            "required": true
+          },
+          "selectedRef": {
+            "description": "The character-fact the selected option became.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "revision": {
+            "description": "The dossier revision that created it.",
+            "type": "number",
+            "minimum": 1,
+            "required": true
+          }
+        }
+      },
+      "conflict": {
+        "description": "A request that contradicts a live fact of a character, kept whole until resolved; the entity name is the subject.",
+        "namingPattern": "^[a-z][a-z0-9.-]{0,199}$",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "characterRef": {
+            "description": "The character.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "scope": {
+            "description": "Where the request applies.",
+            "type": "string",
+            "enum": [
+              "character",
+              "story",
+              "experiment"
+            ],
+            "required": true
+          },
+          "scopeRef": {
+            "description": "The story or experiment.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "requestValue": {
+            "description": "What was asked.",
+            "type": "string",
+            "required": true
+          },
+          "requestOrigin": {
+            "description": "Where the request came from.",
+            "type": "string",
+            "enum": [
+              "ai-proposal",
+              "directive",
+              "authoritative-edit",
+              "improvisation",
+              "derivation",
+              "note"
+            ],
+            "required": true
+          },
+          "requestLayer": {
+            "description": "Which kind of truth was asked for.",
+            "type": "string",
+            "enum": [
+              "identity",
+              "evolving",
+              "temporary-state",
+              "author-truth",
+              "self-belief",
+              "public",
+              "subconscious"
+            ],
+            "required": true
+          },
+          "existingRef": {
+            "description": "The live character-fact it contradicts.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "status": {
+            "description": "Open or resolved.",
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved"
+            ],
+            "required": true
+          },
+          "resolution": {
+            "description": "How it was resolved.",
+            "type": "string",
+            "enum": [
+              "revise-character",
+              "revise-request",
+              "experiment",
+              "branch",
+              "cancel"
+            ]
+          },
+          "revision": {
+            "description": "The dossier revision that raised it.",
+            "type": "number",
+            "minimum": 1,
+            "required": true
+          }
+        },
+        "rules": {
+          "resolved": {
+            "rule": "self.properties.status == 'open' || has(self.properties.resolution)",
+            "message": "A resolved conflict says how"
+          }
+        }
+      },
+      "asset": {
+        "description": "One generated output or upload, and the file it describes (the file links to it). It belongs to one character or one world; a generated one records its model and seed so it can be made again, and every one is judged before it is shown.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "file": {
+            "description": "Space-relative path of its file.",
+            "type": "string",
+            "required": true
+          },
+          "hash": {
+            "description": "Perceptual hash of the file, so a found copy can be checked and a blocked file not slip in again.",
+            "type": "string",
+            "required": true
+          },
+          "media": {
+            "description": "What kind of output.",
+            "type": "string",
+            "enum": [
+              "image",
+              "video",
+              "voice",
+              "3d"
+            ],
+            "required": true
+          },
+          "ownerKind": {
+            "description": "Whose library it is in: a character's, or a world's shared one.",
+            "type": "string",
+            "enum": [
+              "character",
+              "world"
+            ],
+            "required": true
+          },
+          "ownerRef": {
+            "description": "The character or world it belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "source": {
+            "description": "Generated, or uploaded by the owner.",
+            "type": "string",
+            "enum": [
+              "generated",
+              "upload"
+            ],
+            "required": true
+          },
+          "depicts": {
+            "description": "Whose likeness it carries (D65): only the character, the owner, or another real person.",
+            "type": "string",
+            "enum": [
+              "character",
+              "owner",
+              "other-person"
+            ],
+            "required": true
+          },
+          "explicit": {
+            "description": "Sexual content was asked for (D66).",
+            "type": "boolean",
+            "required": true
+          },
+          "status": {
+            "description": "Its standing; blocked and held files are never shown.",
+            "type": "string",
+            "enum": [
+              "candidate",
+              "approved",
+              "rejected",
+              "superseded",
+              "blocked",
+              "held"
+            ],
+            "required": true
+          },
+          "mark": {
+            "description": "The id its invisible AI mark carries (D67, D69).",
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "characterRevision": {
+            "description": "The dossier revision it was made at.",
+            "type": "number",
+            "minimum": 0
+          },
+          "scope": {
+            "description": "Made for the whole character, one story, or one experiment.",
+            "type": "string",
+            "enum": [
+              "character",
+              "story",
+              "experiment"
+            ],
+            "required": true
+          },
+          "scopeRef": {
+            "description": "The story or experiment.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "slot": {
+            "description": "The coverage slot it was made for, such as turnaround:front.",
+            "type": "string"
+          },
+          "framing": {
+            "description": "Shot: framing.",
+            "type": "string"
+          },
+          "angle": {
+            "description": "Shot: camera angle.",
+            "type": "string"
+          },
+          "pose": {
+            "description": "Shot: pose.",
+            "type": "string"
+          },
+          "expression": {
+            "description": "Shot: expression.",
+            "type": "string"
+          },
+          "environment": {
+            "description": "Shot: surroundings.",
+            "type": "string"
+          },
+          "delivery": {
+            "description": "Voice: how the line is spoken.",
+            "type": "string"
+          },
+          "line": {
+            "description": "Voice: the line.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Generated: the model that made it.",
+            "type": "string"
+          },
+          "seed": {
+            "description": "Generated: the seed, for the same again or a variant.",
+            "type": "number"
+          },
+          "params": {
+            "description": "Generated: other settings the generator took, as JSON; opaque to Lia, read back only to make it again.",
+            "type": "string"
+          },
+          "settingDay": {
+            "description": "The day of its world's timeline it shows; its setting basis entries hold what it showed.",
+            "type": "number"
+          },
+          "establishesIdentity": {
+            "description": "Approved as a reference for the physical look.",
+            "type": "boolean"
+          },
+          "establishesPresentation": {
+            "description": "Approved as a reference for clothing and styling.",
+            "type": "boolean"
+          },
+          "establishesVoice": {
+            "description": "Approved as a reference for the voice.",
+            "type": "boolean"
+          },
+          "supersededByRef": {
+            "description": "The reference that took its slot.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "sexual": {
+            "description": "Judged sexual level, 0-6 (D68); absent until judged or when the classifier could not tell.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "violence": {
+            "description": "Judged violence level, 0-6 (D68); absent until judged or when the classifier could not tell.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "judged": {
+            "description": "A classifier has looked at it.",
+            "type": "boolean",
+            "required": true
+          },
+          "minor": {
+            "description": "Anyone shown is or appears under 18.",
+            "type": "string",
+            "enum": [
+              "no",
+              "yes",
+              "cannot-tell"
+            ]
+          },
+          "realPerson": {
+            "description": "It resembles an identifiable real person.",
+            "type": "string",
+            "enum": [
+              "no",
+              "yes",
+              "cannot-tell"
+            ]
+          },
+          "stylised": {
+            "description": "Clearly stylised: cannot pass for real.",
+            "type": "string",
+            "enum": [
+              "no",
+              "yes",
+              "cannot-tell"
+            ]
+          },
+          "glorifiedCruelty": {
+            "description": "Outlawed for everyone (StGB § 131).",
+            "type": "boolean"
+          },
+          "sexualViolence": {
+            "description": "Outlawed for everyone (§ 184a); consensual BDSM is not meant.",
+            "type": "boolean"
+          },
+          "sexualAnimals": {
+            "description": "Outlawed for everyone (§ 184a).",
+            "type": "boolean"
+          },
+          "judgedBy": {
+            "description": "The classifier model of the last judgement.",
+            "type": "string"
+          },
+          "blockedBecause": {
+            "description": "Why it was blocked or held.",
+            "type": "string"
+          },
+          "facesFound": {
+            "description": "Upload: faces a detector found.",
+            "type": "number",
+            "minimum": 0
+          },
+          "facesMatched": {
+            "description": "Upload: faces matched to a verified face.",
+            "type": "number",
+            "minimum": 0
+          },
+          "ownerCleared": {
+            "description": "Upload: cleared for the owner (face match or no face).",
+            "type": "boolean"
+          },
+          "ownerScore": {
+            "description": "Upload: the owner face-match score.",
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "rules": {
+          "generated": {
+            "rule": "self.properties.source != 'generated' || (has(self.properties.mark) && has(self.properties.model) && has(self.properties.seed))",
+            "message": "A generated output carries its AI mark id, model and seed"
+          },
+          "upload": {
+            "rule": "self.properties.source != 'upload' || !has(self.properties.model)",
+            "message": "An upload was not generated"
+          },
+          "scoped": {
+            "rule": "self.properties.scope == 'character' || has(self.properties.scopeRef)",
+            "message": "An output scoped to a story or an experiment names it"
+          },
+          "world-shows-nobody-real": {
+            "rule": "self.properties.ownerKind == 'character' || self.properties.depicts == 'character'",
+            "message": "A world's library shows no real person; an upload of a real person belongs in a character's library"
+          },
+          "shown-only-judged": {
+            "rule": "self.properties.status != 'approved' || self.properties.judged",
+            "message": "An output is approved only after it was judged"
+          }
+        }
+      },
+      "person": {
+        "description": "A real person other than the owner, by platform person id (the entity name). Kept under legal hold while an output names them, so they can learn where they appear.",
+        "namingPattern": "^[A-Za-z0-9_.:-]{1,128}$",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "legalHold": {
+            "description": "Kept regardless of deletion requests while outputs name them.",
+            "type": "boolean",
+            "required": true
+          }
+        }
+      }
+    },
+    "fact": {
+      "proposed-fact": {
+        "description": "One option of a proposal, linked to it; the fact text reads \"subject: value\".",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "option": {
+            "description": "Its place among the options, from 0.",
+            "type": "number",
+            "minimum": 0,
+            "required": true
+          },
+          "value": {
+            "description": "The proposed value.",
+            "type": "string",
+            "required": true
+          },
+          "layer": {
+            "description": "Which kind of truth it would be (R6).",
+            "type": "string",
+            "enum": [
+              "identity",
+              "evolving",
+              "temporary-state",
+              "author-truth",
+              "self-belief",
+              "public",
+              "subconscious"
+            ],
+            "required": true
+          },
+          "scope": {
+            "description": "The whole character, or one story or experiment.",
+            "type": "string",
+            "enum": [
+              "character",
+              "story",
+              "experiment"
+            ],
+            "required": true
+          },
+          "scopeRef": {
+            "description": "The story or experiment.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "aware": {
+            "description": "For a secret: whether the character would know it.",
+            "type": "boolean"
+          },
+          "influence": {
+            "description": "For a secret: how it would shape behaviour.",
+            "type": "string"
+          }
+        }
+      },
+      "note": {
+        "description": "A free note about a character; the fact text is the note. It may become a proposal (R5.3).",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "characterRef": {
+            "description": "The character.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "proposalRef": {
+            "description": "The proposal it was turned into.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "revision": {
+            "description": "The dossier revision that added it.",
+            "type": "number",
+            "minimum": 1,
+            "required": true
+          }
+        }
+      },
+      "asset-issue": {
+        "description": "A known inconsistency in an output, such as \"the scar is on the wrong cheek\", linked to it; the fact text is the issue.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          }
+        }
+      },
+      "basis-entry": {
+        "description": "One fact an output or a story was made with, as it was then, linked to that output or story. A character entry names the character; a setting entry the world.",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "of": {
+            "description": "A character fact or a world setting fact.",
+            "type": "string",
+            "enum": [
+              "character",
+              "setting"
+            ],
+            "required": true
+          },
+          "subject": {
+            "description": "The subject of the fact.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]{0,199}$",
+            "required": true
+          },
+          "value": {
+            "description": "Its value then.",
+            "type": "string",
+            "required": true
+          },
+          "factRef": {
+            "description": "The character-fact or setting-fact it copies.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "characterRef": {
+            "description": "For a character entry: whose fact it is.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "worldRef": {
+            "description": "For a setting entry: which world.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "settingDay": {
+            "description": "For a setting entry: the day of the world timeline it shows; absent for the setting overall.",
+            "type": "number"
+          }
+        },
+        "rules": {
+          "owner": {
+            "rule": "(self.properties.of == 'character' && has(self.properties.characterRef)) || (self.properties.of == 'setting' && has(self.properties.worldRef))",
+            "message": "A character entry names its character, a setting entry its world"
+          }
+        }
+      }
+    },
+    "edge": {
+      "made-from": {
+        "description": "From an output to an asset handed to the generator as a reference (lineage, R11.5).",
+        "endpoints": {
+          "from": [
+            "asset"
+          ],
+          "to": [
+            "asset"
+          ]
+        }
+      },
+      "measured-against": {
+        "description": "From an output to an approved reference it was compared with (D65); one per model.",
+        "endpoints": {
+          "from": [
+            "asset"
+          ],
+          "to": [
+            "asset"
+          ]
+        },
+        "propertySchemas": {
+          "aspect": {
+            "description": "Face or voice.",
+            "type": "string",
+            "enum": [
+              "identity",
+              "voice"
+            ],
+            "required": true
+          },
+          "score": {
+            "description": "Cosine similarity of the two fingerprints.",
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1,
+            "required": true
+          },
+          "model": {
+            "description": "The fingerprint model.",
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "shows-person": {
+        "description": "From an asset to a real person it shows; inherited from its inputs.",
+        "endpoints": {
+          "from": [
+            "asset"
+          ],
+          "to": [
+            "person"
+          ]
+        }
+      },
+      "cleared-for": {
+        "description": "From an upload to a person it was cleared for: their face matched, or it shows no face.",
+        "endpoints": {
+          "from": [
+            "asset"
+          ],
+          "to": [
+            "person"
+          ]
+        },
+        "propertySchemas": {
+          "score": {
+            "description": "The face-match score; absent when it shows no face.",
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          },
+          "model": {
+            "description": "The face model, or the classifier that saw no face.",
+            "type": "string",
+            "required": true
+          }
+        }
+      }
+    },
+    "chrono": {
+      "consent": {
+        "description": "The owner gave or withdrew one consent, at the entry's start; the latest entry per kind counts, and only for the current text version.",
+        "whenDuePasses": "nothing",
+        "propertySchemas": {
+          "key": {
+            "description": "Lia's key of this record, a UUID Lia minted; the same in every slot the record is copied to. Lia's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "consentKind": {
+            "description": "Which consent.",
+            "type": "string",
+            "enum": [
+              "owner-fingerprints",
+              "recreation-law",
+              "stylised-authorship"
+            ],
+            "required": true
+          },
+          "action": {
+            "description": "Given or withdrawn.",
+            "type": "string",
+            "enum": [
+              "give",
+              "withdraw"
+            ],
+            "required": true
+          },
+          "version": {
+            "description": "The version of the consent text agreed to, such as v3.",
+            "type": "string",
+            "pattern": "^v[0-9]+$"
+          }
+        },
+        "rules": {
+          "versioned": {
+            "rule": "self.properties.action == 'withdraw' || has(self.properties.version)",
+            "message": "A consent given names the text version agreed to"
+          }
+        }
+      }
+    }
+  }
+}

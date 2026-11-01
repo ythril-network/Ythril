@@ -45,18 +45,20 @@ WORKDIR /build
 # Copy workspace manifests first for layer caching
 COPY package.json package-lock.json* ./
 COPY tsconfig.base.json ./
+COPY schema/package.json ./schema/
 COPY server/package.json ./server/
 
 # Install all dependencies (including devDependencies for TypeScript compiler).
 # ONNXRUNTIME_NODE_INSTALL_CUDA=skip — see the client stage for why. Repeated because ENV does not cross a
 # stage boundary, which is exactly the kind of thing a reader assumes and a build silently disproves.
 ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
-RUN npm ci --workspace=server
+RUN npm ci --workspace=server --workspace=schema
 
-# Copy source
+# Copy source. `schema/` is `@ythril/schema`, the space-schema vocabulary and validator the server imports.
+COPY schema/ ./schema/
 COPY server/ ./server/
 
-# Compile TypeScript
+# Compile TypeScript (the server's `prebuild` compiles schema/ first)
 RUN npm run build --workspace=server
 
 # ── Stage 1b: Production dependencies, built WITH the toolchain ──────────────
@@ -82,11 +84,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
+COPY schema/package.json ./schema/
 COPY server/package.json ./server/
 # ONNXRUNTIME_NODE_INSTALL_CUDA=skip — see the client stage. This is the `npm ci` that produces the tree the
 # published image actually SHIPS, so it is the one where a GPU tarball would be both downloaded and carried.
+# `--workspace=schema` installs the package's own dependencies and links it as `node_modules/@ythril/schema`.
 ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
-RUN npm ci --workspace=server --omit=dev
+RUN npm ci --workspace=server --workspace=schema --omit=dev
 
 # ── Stage 1c: Warm the embedding model, in a stage of its own ─────────────────
 #
@@ -282,6 +286,9 @@ ENV HF_HUB_OFFLINE=1
 
 # Copy compiled output from builder
 COPY --from=builder /build/server/dist ./server/dist
+# The schema package the server imports: its manifest (what `node_modules/@ythril/schema` resolves through) and its build.
+COPY schema/package.json ./schema/
+COPY --from=builder /build/schema/dist ./schema/dist
 
 # Copy compiled Angular SPA from client-builder
 COPY --from=client-builder /build/client/dist/browser ./client/dist/browser

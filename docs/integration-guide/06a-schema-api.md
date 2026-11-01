@@ -397,6 +397,32 @@ first write that meets such a guard clears it and goes on to land, so the list i
 
 ---
 
+### Validate a schema offline (`@ythril/schema`)
+
+An app that writes a schema — a space template, a generator, a flow — can run the validator the server runs, without an
+instance. The vocabulary and the validator are the package `@ythril/schema` (`schema/` in this repository); the server
+imports it, so its answer is the answer an instance gives, refusal text included.
+
+```ts
+import { validateSpaceMeta } from '@ythril/schema';
+
+const result = validateSpaceMeta(meta, { library: entriesMyRefsName });
+if (!result.ok) throw new Error(`${result.message}\n${result.failed.join('\n')}`);
+```
+
+- **`meta`** is a space's `meta`, not the space: leave out `id`, `label` and the other space fields. The server-owned fields a
+  `GET` returns (`version`, `updatedAt`, ...) are dropped, as `PATCH` drops them.
+- **`library`** is the schema-library entries the meta's `$ref`s name (`{ name, knowledgeType, schema }`). The package never
+  reads an instance: without them a `$ref` is answered as an entry that does not exist, the `422` text above.
+- **What it checks** is what a write checks before it stores a meta: the bodies (`.strict()`, so an unknown key is refused),
+  the patterns (ReDoS), the CEL rules (parse, what they read, cost) and the library references. It does not scan stored records:
+  that is the dry run above, which needs the space's data.
+
+`parseTypeSchema(kind, name, definition)` answers the single-type upsert's refusal (`{ error, issues }`), and the types
+(`SpaceMeta`, `TypeSchema`, `PropertySchema`, ...), the tuples (the knowledge types, the merge functions, ...) and the
+limits (the purpose cap, the rules per type, ...) are exported for an app to type what it writes. The package is
+versioned with the release it was cut from; its README lists every export.
+
 ### Schema Validation
 
 Each space can define a schema in its `meta` block that governs what data is accepted. The `validationMode` controls enforcement:

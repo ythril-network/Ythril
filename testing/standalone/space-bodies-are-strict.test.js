@@ -34,6 +34,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const SRC = 'server/src/spaces/body-schemas.ts';
+/** The space-schema bodies (`SpaceMetaBody`, `PropertySchemaZ`, ...) are `@ythril/schema`'s; `body-schemas.ts` re-exports them. */
+const PACKAGE_SRC = 'schema/src/space-meta.ts';
 
 /** Line comments first, then block — a block-open inside a line comment otherwise swallows real code. */
 const strip = (src) => src.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -68,7 +70,7 @@ function exportedObjects(src) {
 }
 
 let bodies;
-before(() => { bodies = exportedObjects(strip(readFileSync(SRC, 'utf8'))); });
+before(() => { bodies = [SRC, PACKAGE_SRC].flatMap(file => exportedObjects(strip(readFileSync(file, 'utf8')))); });
 
 describe('space request bodies refuse unknown keys', () => {
   it('finds every exported body — the parser is checked before the property is', () => {

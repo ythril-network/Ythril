@@ -63,7 +63,8 @@ describe('every SpaceMeta key is accepted by the body or owned by the server', (
   before(async () => {
     ({ SpaceMetaBody, SERVER_OWNED_META_FIELDS: SERVER_OWNED } = await import('../../server/dist/spaces/body-schemas.js'));
     bodyKeys = Object.keys(SpaceMetaBody.shape);
-    interfaceMetaKeys = interfaceKeys('server/src/config/types-knowledge.ts', 'SpaceMeta');
+    // The schema vocabulary is `@ythril/schema`'s (`schema/src/vocabulary.ts`); `config/types-knowledge.ts` re-exports it.
+    interfaceMetaKeys = interfaceKeys('schema/src/vocabulary.ts', 'SpaceMeta');
     inst = await bootSchemaInstance(dir, { spaces: [{ id: 'sch', label: 'Schema', folders: [], meta: { validationMode: 'strict' } }] });
   });
   after(() => inst?.close());

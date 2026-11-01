@@ -43,7 +43,7 @@ export const TELEMETRY_SPACE = 'y-proj-ythril';
 /** The chrono types a space has before it declares its own; declaring one without them closes the space to them. */
 const DEFAULT_CHRONO_TYPES = Object.freeze(['event', 'deadline', 'plan', 'prediction', 'milestone']);
 
-/** What a chrono property can be (`PropertySchemaZ`, server/src/spaces/body-schemas.ts): no array, no date. */
+/** What a chrono property can be (`PropertySchemaZ`, schema/src/space-meta.ts): no array, no date. */
 const PROPERTY_TYPES = new Set(['string', 'number', 'boolean']);
 
 /** `maxChars` asked of `filter`: a record's own bulky fields are excluded, the rest is small. */
