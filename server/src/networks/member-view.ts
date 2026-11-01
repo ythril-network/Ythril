@@ -39,7 +39,7 @@ const IDENTITY_KEYS = [
 ] as const satisfies readonly (keyof NetworkMember)[];
 
 /** Status an administrator reads on the member row: the last exchange, how it is going, and the spaces the member declined. */
-const STATUS_KEYS = ['lastSyncAt', 'consecutiveFailures', 'declinedSpaces'] as const satisfies readonly (keyof NetworkMember)[];
+const STATUS_KEYS = ['lastSyncAt', 'consecutiveFailures', 'consecutiveLocalFaults', 'declinedSpaces'] as const satisfies readonly (keyof NetworkMember)[];
 
 /** The keys of `NetworkMember` each audience is shown. */
 export const MEMBER_VIEW_KEYS = {

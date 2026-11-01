@@ -171,7 +171,9 @@ export const FROZEN = {
   // LOWERED 453 -> 406 with bundle-106 X11: what a served vote list changes here (shape, evidence, adoption, cast merge) moved out to
   // `sync/served-rounds.ts`; the engine fetches the list and settles what changed.
   // LOWERED 406 -> 405 with bundle-81 I2 (the cycle's accounting moved to `sync/cycle-outcome.ts`, the 5.x refusal is one fold).
-  'server/src/sync/engine.ts': 405,
+  // LOWERED 405 -> 368 with bundle-39 (Q-220): both doors classify a member's turn in `sync/cycle-outcome.ts`, which now holds the
+  // failure counting and PEER UNREACHABLE the engine carried twice.
+  'server/src/sync/engine.ts': 368,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

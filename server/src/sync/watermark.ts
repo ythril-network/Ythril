@@ -28,10 +28,15 @@
  *
  * **Every transfer that ran must be passed.** An omitted one places no ceiling, which makes it exactly the transfer whose records get skipped.
  *
- * ## Why a stop is either a cap or an error
+ * ## What stopped a transfer: one closed list (`TransferStop`, bundle-39 D1)
  *
- * A transfer that stopped at the cycle's page cap did nothing wrong: it is PARTIAL (`stoppedBy: 'cap'`) and the member is not failing. One that
- * stopped for any other reason (the peer answered an error, a write failed) is an ERROR, the cycle is incomplete and the member's failure is counted.
+ *  - `'cap'`: the cycle's page bound. Nothing failed: PARTIAL, the member is catching up.
+ *  - `'held'`: the receiver holds the family while it rebuilds an index. Nothing failed; offered again from the held position.
+ *  - `'local'`: THIS instance could not land a page the peer delivered (its own store failed, or the landing threw). Not the peer's fault, so never
+ *    counted toward PEER UNREACHABLE; the turn did not complete, so it is not success either, and the page is fetched again next cycle.
+ *  - `'closing'`: shutdown began, so the transfer stopped at its page boundary. Nothing failed; the mark moves to what landed, as for a cap.
+ *  - `'error'`: anything else (the peer answered an error, a transport or JSON fault): the member failed this cycle.
+ *
  * A transfer says which (`stopTransfer`, `stopAtPageBound`), and the engine reads that, never the comparison of the mark before and after: a page error
  * after earlier pages moved the mark is still a failure (decision 33).
  */
@@ -53,12 +58,14 @@ export interface TransferOutcome {
   deliveredThrough: number;
   /** True when it stopped before exhausting what the peer had: a non-`ok` response, a throw, or the cycle's page cap. */
   truncated: boolean;
-  /**
-   * Why a truncated transfer stopped: `'cap'` (the cycle's page bound: nothing failed), `'held'` (the receiver holds this family while it builds an
-   * index: nothing failed, the family is offered again from the held position) or `'error'`. Absent while it has not stopped.
-   */
-  stoppedBy?: 'cap' | 'held' | 'error';
+  /** Why a truncated transfer stopped (the module docblock lists the kinds). Absent while it has not stopped. */
+  stoppedBy?: TransferStop;
+  /** Set with a `'local'` stop when this instance's store is not answering at all (`storeIsNotAnswering`): the cycle attempts no further member (v6 S6). */
+  storeDown?: true;
 }
+
+/** What stopped a transfer: the one closed list every stop is written and read by (the module docblock says what each means). */
+export type TransferStop = 'cap' | 'held' | 'local' | 'closing' | 'error';
 
 /**
  * The position a transfer is COMPLETE through, given the highest position it has delivered and whether the run at that position may go on.
@@ -85,13 +92,13 @@ export type TransferStopped = (why: string, heldAt: number) => void;
  * Marking and saying are one step because the pair is what the mark depends on: a stop that logs but leaves `truncated` false lets the mark
  * advance past what did not transfer, and one that marks without logging is a silent hold.
  *
- * **A hold is never downgraded to a fault.** The page step that learns the RECEIVER holds the family (`edge_identity_building`) stops the transfer as `'held'`
- * and hands the loop its reason; the loop's own generic stop for that reason then runs through here with the default `'error'`, and must not rewrite what the
- * step knew. Only `'error'` yields to a hold: a cap and a hold are both partial and neither failed.
+ * **What the page step knew is never downgraded to a fault.** The step that learns the RECEIVER holds the family (`edge_identity_building`), or that THIS
+ * instance could not land the page (`'local'`), stops the transfer with that kind and hands the loop its reason; the loop's own generic stop for that reason
+ * then runs through here with the default `'error'`, and must not rewrite what the step knew. Only `'error'` yields, to `'held'`, `'local'` or `'closing'`.
  */
-export function stopTransfer(outcome: TransferOutcome, stopped: TransferStopped, why: string, by: 'cap' | 'held' | 'error' = 'error'): void {
+export function stopTransfer(outcome: TransferOutcome, stopped: TransferStopped, why: string, by: TransferStop = 'error'): void {
   outcome.truncated = true;
-  outcome.stoppedBy = by === 'error' && outcome.stoppedBy === 'held' ? 'held' : by;
+  outcome.stoppedBy = by === 'error' && outcome.stoppedBy !== undefined && outcome.stoppedBy !== 'cap' ? outcome.stoppedBy : by;
   stopped(why, outcome.deliveredThrough);
 }
 
@@ -128,7 +135,7 @@ export function safeWatermark(from: number, transfers: readonly TransferOutcome[
 type LabelledTransfer = TransferOutcome & { label: string };
 
 /** The labels of the transfers a stop of kind `by` ended. A truncated transfer that says nothing is read as a fault. */
-export function stoppedTransfers(transfers: readonly LabelledTransfer[], by: 'cap' | 'held' | 'error'): string[] {
+export function stoppedTransfers(transfers: readonly LabelledTransfer[], by: TransferStop): string[] {
   return transfers.filter(t => t.truncated && (t.stoppedBy ?? 'error') === by).map(t => t.label);
 }
 
@@ -155,6 +162,12 @@ export interface WatermarkResolution {
   readonly capped: string[];
   /** The transfers the receiver HOLDS (`edge_identity_building` on the edges family): partial, nothing failed, offered again from the held position. */
   readonly held: string[];
+  /** The transfers THIS instance could not land a page of: not the peer's failure, and not complete; fetched again next cycle. */
+  readonly local: string[];
+  /** The transfers shutdown stopped at a page boundary: nothing failed, the mark moves to what landed. */
+  readonly closing: string[];
+  /** A local stop found this instance's store not answering at all. */
+  readonly storeDown: boolean;
 }
 
 /**
@@ -182,13 +195,17 @@ export function resolveWatermark<T extends TransferOutcome>(opts: {
   const errored = stoppedTransfers(labelled, 'error');
   const capped = stoppedTransfers(labelled, 'cap');
   const held = stoppedTransfers(labelled, 'held');
-  const stopped = [...errored, ...capped, ...held];
+  const local = stoppedTransfers(labelled, 'local');
+  const closing = stoppedTransfers(labelled, 'closing');
+  const stopped = [...errored, ...capped, ...held, ...local, ...closing];
   if (stopped.length > 0) {
     opts.warn(
       `Sync ${opts.direction} from/to ${peerText(opts.peerLabel)} space '${peerText(opts.spaceId)}': ${peerList(stopped, ', ')} stopped `
-      + `early, so the ${opts.direction} mark advances only to ${at}. The rest is ${errored.length > 0 ? 'retried' : 'continued'} next cycle`
-      + `${held.length > 0 ? ` (held: ${peerList(held, ', ')}, which the receiver is rebuilding an index for)` : ''}.`,
+      + `early, so the ${opts.direction} mark advances only to ${at}. The rest is ${errored.length > 0 || local.length > 0 ? 'retried' : 'continued'} next cycle`
+      + `${held.length > 0 ? ` (held: ${peerList(held, ', ')}, which the receiver is rebuilding an index for)` : ''}`
+      + `${local.length > 0 ? ` (this instance's database failed: ${peerList(local, ', ')} could not be landed here)` : ''}`
+      + `${closing.length > 0 ? ` (stopped for shutdown: ${peerList(closing, ', ')})` : ''}.`,
     );
   }
-  return { at, errored, capped, held };
+  return { at, errored, capped, held, local, closing, storeDown: labelled.some(t => t.storeDown === true) };
 }

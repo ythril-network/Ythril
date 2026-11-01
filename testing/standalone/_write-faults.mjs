@@ -582,6 +582,44 @@ export function failWrites(proto, methods) {
   };
 }
 
+// ── The store gone, for one collection ───────────────────────────────────────────────────────────────────────
+
+/** The write methods a landing page can reach a collection through: what `injectStoreFault` wraps when a test names none. */
+export const STORE_WRITE_METHODS = Object.freeze(['bulkWrite', 'replaceOne', 'insertOne', 'insertMany', 'updateOne', 'updateMany', 'findOneAndReplace', 'findOneAndUpdate']);
+
+/**
+ * Every call of `methods` on `collectionName` rejects with the driver's own connection error (`MongoNetworkError`) until `restore()`: this
+ * instance's store failing for that collection, as a reset connection or a stepping-down primary does, while every other collection works.
+ *
+ * ## Why here (bundle-39)
+ *
+ * Two sync tests wrote it by hand (`both-doors-classify-a-members-turn-alike-db`, and the landing fault of `a-pulled-page-lands-by-the-receivers-rules-db`):
+ * the question "what does a turn do when this instance's own store fails" is asked by more than one, so it lives once.
+ *
+ * ## The guard a hand-written copy drops
+ *
+ * **A fault nothing reached.** `fired()` counts the rejections; a test asserts it before trusting what the code did with them, or a turn that never
+ * wrote to the collection passes as one that classified the fault right. And `restore()` puts back exactly what it wrapped.
+ *
+ * @param {object} proto  `Collection.prototype` (`Object.getPrototypeOf(mongo.col('x'))`)
+ * @param {string[]} methods  the methods to fail
+ * @param {string} collectionName  the collection whose calls fail
+ * @returns {Promise<{ fired: () => number, restore: () => void }>}
+ */
+export async function injectStoreFault(proto, methods, collectionName) {
+  const { MongoNetworkError } = await import('mongodb');
+  const originals = Object.fromEntries(methods.map(m => [m, proto[m]]));
+  for (const m of methods) assert.equal(typeof originals[m], 'function', `injectStoreFault: ${m} is not a collection method — the fault would fail nothing`);
+  let fired = 0;
+  for (const m of methods) {
+    proto[m] = function faulty(...args) {
+      if (this.collectionName === collectionName) { fired++; return Promise.reject(new MongoNetworkError('injected: connection reset')); }
+      return originals[m].apply(this, args);
+    };
+  }
+  return { fired: () => fired, restore: () => { Object.assign(proto, originals); } };
+}
+
 // ── A commit that lands and whose reply does not ─────────────────────────────────────────────────────────────
 
 /**

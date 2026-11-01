@@ -51,6 +51,7 @@ import express from 'express';
 import compression from 'compression';
 import { openPushDoor } from './_push-door.mjs';
 import { privateHostAddress } from './_private-address.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 process.env['SYNC_ALLOW_PRIVATE_PEERS'] = 'true';
 process.env['SYNC_ALLOW_INSECURE_PEERS'] = 'true';
@@ -167,8 +168,18 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
      * discarding records it answered 200 for. `undefined` falls through to the default.
      */
     batchUpsert: null,
-    /** Every `batch-upsert` request the receiver sent, accepted or not: `{ key, ids, status }`, in arrival order. */
+    /**
+     * The `batch-upsert` requests (numbered from 1 since `reset`) answered `503` whatever they carry, before `batchUpsert` is asked: a receiver that fails
+     * one request of a push, for a case about what the sender does after a family stopped early (bundle-39 D4).
+     */
+    failBatchAt: [],
+    /**
+     * Every `batch-upsert` request the receiver sent, accepted or not: `{ n, key, ids, status, incomplete, body }`, in arrival order. `incomplete` is the
+     * field as the sender wrote it (`undefined` when absent), `body` the whole request, for a case that replays it into a receiver.
+     */
     batchRequests: [],
+    /** A status `GET /api/sync/tombstones` answers instead of the real handler: the peer failing its tombstone page. Unset, the real handler answers. */
+    tombstoneStatus: null,
     /** Every record-family page GET `serveFamily` answered, its query as the receiver wrote it plus the `family`. */
     familyRequests: [],
     /**
@@ -221,6 +232,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   app.get('/api/sync/tombstones', async (req, res) => {
     const asked = { ...req.query };
     state.requests.push(asked);
+    if (state.tombstoneStatus) { res.status(state.tombstoneStatus).json({ error: 'scripted: the peer failed on its tombstone page' }); return; }
     const query = { ...asked, spaceId: peerSide(asked.spaceId) };
     delete query.networkId;
     Object.defineProperty(req, 'query', { value: query, writable: true, configurable: true, enumerable: true });
@@ -244,11 +256,14 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   });
   // A record page this instance pushes is accepted whole — what a push of records does is the push door's question.
   app.post('/api/sync/batch-upsert', express.json({ limit: '100mb' }), (req, res) => {
-    const entries = Object.entries(req.body ?? {}).filter(([, items]) => Array.isArray(items));
-    const scripted = entries.length === 1 && state.batchUpsert
-      ? state.batchUpsert(entries[0][0], entries[0][1], state.batchRequests.length + 1) : undefined;
+    // Only the FAMILY keys are records: a request also carries `incomplete` (bundle-39 D4), an array that is no family.
+    const entries = Object.entries(req.body ?? {}).filter(([key, items]) => families.includes(key) && Array.isArray(items));
+    const n = state.batchRequests.length + 1;
+    const scripted = state.failBatchAt.includes(n) ? { status: 503 }
+      : entries.length === 1 && state.batchUpsert ? state.batchUpsert(entries[0][0], entries[0][1], n) : undefined;
     const status = scripted?.status ?? 200;
-    for (const [key, items] of entries) state.batchRequests.push({ key, ids: items.map(d => d?._id), status });
+    const incomplete = req.body?.incomplete;
+    for (const [key, items] of entries) state.batchRequests.push({ n, key, ids: items.map(d => d?._id), status, incomplete, body: req.body });
     if (status !== 200) { res.status(status).json(scripted?.body ?? { error: 'scripted refusal' }); return; }
     for (const [key, items] of entries) state.pushedRecords.push(...items.map(d => ({ key, ...d })));
     // A scripted answer is a 6.0 receiver's too: it says `positions: 1` unless the case wrote its own (a 5.x-shaped answer is made by `_b81b-wire.mjs`, in front of this peer).
@@ -362,6 +377,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   const engine = await import('../../server/dist/sync/engine.js');
   const stamp = await import('../../server/dist/util/version-stamp.js');
   const { log } = await import('../../server/dist/util/log.js');
+  const { syncCyclesTotal } = await import('../../server/dist/metrics/registry.js');
   families = (await import('../../server/dist/sync/replicated-families.js')).REPLICATED_FAMILIES.map(f => f.payloadKey);
   maxCap = (await import('../../server/dist/util/bounded-read.js')).maxUpstreamResponseBytes();
 
@@ -511,7 +527,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     for (const p of peerSpaces) for (const f of families) await door.mongo.col(`${p}_${familyCollection(f)}`).deleteMany({});
     Object.assign(state, {
       tamper: null, requests: [], answers: [], received: [], pushedRecords: [], records: {}, failFamily: null, network: null, meta: null, metaRequests: [],
-      family: null, merkle: null, batchUpsert: null, batchRequests: [], familyRequests: [],
+      family: null, merkle: null, batchUpsert: null, failBatchAt: [], batchRequests: [], tombstoneStatus: null, familyRequests: [],
       fileTombstoneRequests: [], fileTombstonesReceived: [], fileTombstonePosts: [], fileTombstoneGet: null, fileTombstonePost: null,
       manifestRequests: [], manifest: null, fileDownloads: [], fileUploads: [], fileUpload: null,
     });
@@ -551,6 +567,41 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
     return out;
   }
 
+  /** The cycles `ythril_sync_cycles_total` counted for this door's network under `status`. */
+  const cyclesCounted = async (status) => {
+    const { values } = await syncCyclesTotal.get();
+    return values.filter(v => v.labels.network === NET && v.labels.status === status).reduce((n, v) => n + v.value, 0);
+  };
+
+  /**
+   * One SCHEDULED cycle of the network, as a cron tick runs it (`runSyncForNetwork`), and what it wrote: its answer, the history row's status and
+   * errors, and what the cycle metric gained per status (`{ failed: 1 }`). The twin of `sync()`, which is the manual door and writes neither.
+   *
+   * The history row is waited for (it is written after the answer, unawaited) and read by the cycle's own start time, so a row an earlier cycle
+   * left never stands in for this one's.
+   */
+  async function cycle() {
+    const since = new Date().toISOString();
+    const statuses = ['success', 'partial', 'failed', 'refused'];
+    const before = Object.fromEntries(await Promise.all(statuses.map(async s => [s, await cyclesCounted(s)])));
+    const out = await engine.runSyncForNetwork(NET);
+    await door.settled();
+    let row;
+    await waitFor(async () => {
+      row = (await door.mongo.col('_sync_history').find({ networkId: NET, triggeredAt: { $gte: since } }).toArray())[0];
+      return row !== undefined;
+    }, 10_000, 100, undefined, { what: 'the sync history row of the cycle' });
+    const metric = {};
+    for (const s of statuses) { const d = await cyclesCounted(s) - before[s]; if (d !== 0) metric[s] = d; }
+    return { out, row, history: row.status, historyErrors: row.errors ?? [], metric };
+  }
+
+  /** The fake peer's entry in an answer's `members[]` on this door's network, or `undefined` when there is not exactly one. */
+  function memberOf(out) {
+    const mine = (Array.isArray(out?.members) ? out.members : []).filter(m => m.instanceId === PEER && m.networkId === NET);
+    return mine.length === 1 ? mine[0] : undefined;
+  }
+
   /** Every warn and error line the server logs while `fn` runs, and its result. */
   async function logsDuring(fn) {
     const lines = [];
@@ -567,7 +618,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
 
   return {
     ...door, NET, url, state, instanceId: `${suite}-receiver`, remoteOf: (local) => remoteOf.get(local), maxUpstreamBytes: maxCap,
-    member, seedPeer, seedPeerRecords, serveFamily, peerSide, reset, sync, logsDuring, raiseVersionTo: stamp.raiseVersionTo, close,
+    member, seedPeer, seedPeerRecords, serveFamily, peerSide, reset, sync, cycle, memberOf, logsDuring, raiseVersionTo: stamp.raiseVersionTo, close,
     configure, config: () => loader.getConfig(), LATERAL_NET, seedPeerFileTombstones, seedPeerFile, writeLocalFile, localFileExists, peerFilesRoot, localFilesRoot,
     failRecordWrite, clearRecordFault,
   };

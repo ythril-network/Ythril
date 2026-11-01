@@ -44,7 +44,8 @@ import { PeerPagesBySeq, PositionsBuilding } from '../util/errors.js';
 import { warnOnce } from '../util/warn-once.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import { pushSelection } from './push-selection.js';
-import { MAX_TRANSFER_PAGES, type TransferOutcome } from './watermark.js';
+import { MAX_TRANSFER_PAGES, stopTransfer, type TransferOutcome } from './watermark.js';
+import { landingStop, stopKindOfThrow } from './arrival-stop.js';
 import { deliveryOfMember } from './deletion-authority.js';
 import { SAID_AGAIN_MS, declinedCountOf, refusedCountOf, sayPeerDeclined, sayPeerRefused } from './decline-report.js';
 
@@ -116,7 +117,15 @@ export async function pullTombstones(opts: {
         // The peer pulled from is the authenticated source: its own tombstones are authorised, and — when it is this
         // space's upstream — so is one for what it relayed. One it relays for a third author of a record it did NOT
         // deliver is refused here and applied when this instance syncs with that author directly.
-        const out = await applyPeerTombstones(spaceId, items, delivery, where, repair ? { repair: true } : {});
+        let out: Awaited<ReturnType<typeof applyPeerTombstones>>;
+        try {
+          out = await applyPeerTombstones(spaceId, items, delivery, where, repair ? { repair: true } : {});
+        } catch (err) {
+          // The peer's page parsed; the apply writes THIS instance's collections, so a throw here is this instance's (bundle-39 D1): the transfer stops
+          // as `'local'`, held at the page, and is never the peer's failure. A space that owes its positions ends the turn as a hold, as before.
+          if (err instanceof PositionsBuilding || err instanceof PeerPagesBySeq) throw err;
+          return landingStop(outcome, err, spaceId);
+        }
         refusedHere += out.refused.length;
         if (tally) { tally.issuer += out.deleted.issuer; tally.upstream += out.deleted.upstream; }
         return out.unknownTypes.length > 0 ? 'a tombstone type this instance does not know' : null;
@@ -132,8 +141,8 @@ export async function pullTombstones(opts: {
   } catch (err) {
     // A peer that does not page by position, and a space that owes its positions, are the ENGINE's to read: they end the member's turn.
     if (err instanceof PeerPagesBySeq || err instanceof PositionsBuilding) throw err;
-    outcome.truncated = true;
-    outcome.stoppedBy = 'error';
+    // The fetch, the JSON and the pager's own checks: the peer's fault, or shutdown's abort (bundle-39 D5). The apply's own throws stopped above.
+    stopTransfer(outcome, () => {}, 'the tombstone transfer threw', stopKindOfThrow(err));
     say('failed', () => log.warn(repair
       ? `Re-read of tombstones from ${peerText(peer)} for space '${peerText(spaceId)}' failed: ${logSafe(err instanceof Error ? err.message : String(err))} `
         + `— read through position ${outcome.deliveredThrough}; the one-time repair stays owed and is tried again next cycle.`

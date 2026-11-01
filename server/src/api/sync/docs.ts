@@ -26,7 +26,7 @@ import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { acceptArrivingPage, type AcceptedFamily } from '../../sync/accept-page.js';
 import { LinkageCheck } from '../../sync/linkage-check.js';
 import type { ArrivalVerdict } from '../../sync/upsert-plan.js';
-import { REPLICATED_FAMILIES, familyOf, familiesAfter, type PayloadKey } from '../../sync/replicated-families.js';
+import { REPLICATED_FAMILIES, familyOf, familiesAfter, parseIncompleteFamilies, type PayloadKey } from '../../sync/replicated-families.js';
 
 export const syncDocsRouter = Router();
 
@@ -381,7 +381,11 @@ syncDocsRouter.post('/batch-upsert', syncRateLimit, requireAuth, denyReadOnly, a
     // answer does not wait for the check: this door's bound promises a stalled push a 503 before the sender gives up.
     const linkage = new LinkageCheck(spaceId, pusherOf(req) ?? 'unknown');
     const out = await acceptArrivingPage(spaceId, page, { door: 'push', deliveredBy: pusherOf(req), linkage });
-    linkage.start({ stillToCome: familiesAfter(REPLICATED_FAMILIES.map(f => f.payloadKey).filter(k => page[k].length > 0)) });
+    // The target families the sender says stopped early earlier in its cycle (bundle-39 D4, Q-334): still to come too. An untrusted peer's field, read by
+    // the one parser, which drops anything that is not a target family's key; this request's check is all it can leave unjudged.
+    const incomplete = parseIncompleteFamilies((req.body as { incomplete?: unknown } | undefined)?.incomplete);
+    if (incomplete.ignored) log.warn(`batch-upsert: peer '${logSafe(peer)}' sent an 'incomplete' for space '${peerText(spaceId)}' that is not a list of target families; what is not one was ignored.`);
+    linkage.start({ stillToCome: familiesAfter(REPLICATED_FAMILIES.map(f => f.payloadKey).filter(k => page[k].length > 0), incomplete.keys) });
 
     const parsed = (key: PushKey) => out[key].docs.filter((d): d is NonNullable<typeof d> => d !== undefined);
     // P-21 = C: judged against THIS space's schema, counted, and let in — never refused for it. The count is the page accept's: documents

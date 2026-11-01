@@ -49,10 +49,9 @@
  */
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { MongoNetworkError } from 'mongodb';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
-import { waitFor } from '../_shared/wait-for.mjs';
+import { injectStoreFault as storeFault, STORE_WRITE_METHODS } from './_write-faults.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { clearPositionMarks, readMark, setMark, positioned } from './_b81b-positions.mjs';
@@ -64,22 +63,12 @@ const SENTINEL = 3;
 const SEEDED = 5;
 /** Positions well above the sentinel. */
 const BASE = 100;
-const WRITE_METHODS = ['bulkWrite', 'replaceOne', 'insertOne', 'insertMany', 'updateOne', 'updateMany', 'findOneAndReplace', 'findOneAndUpdate'];
+const WRITE_METHODS = STORE_WRITE_METHODS;
 
-let door, engine, loader, syncCyclesTotal, forgetPositionsReady, fullReread, networkStatus, proto, ME;
+let door, engine, loader, forgetPositionsReady, fullReread, networkStatus, proto, ME;
 
-/** Wrap `methods` of the collection prototype: a call on `collectionName` rejects with a store connection error. Returns `{ fired, restore }`. */
-function injectStoreFault(methods, collectionName) {
-  const originals = Object.fromEntries(methods.map(m => [m, proto[m]]));
-  let fired = 0;
-  for (const m of methods) {
-    proto[m] = function faulty(...args) {
-      if (this.collectionName === collectionName) { fired++; return Promise.reject(new MongoNetworkError('injected: connection reset')); }
-      return originals[m].apply(this, args);
-    };
-  }
-  return { fired: () => fired, restore: () => { Object.assign(proto, originals); } };
-}
+/** `methods` on `collectionName` reject with the driver's connection error (`_write-faults.mjs`). Returns `{ fired, restore }`. */
+const injectStoreFault = (methods, collectionName) => storeFault(proto, methods, collectionName);
 
 /** `facts` pages of ONE record each from the real handler (the cycle cap is 50 pages, so a peer holding more is read to the cap). */
 function pagedAtOne() {
@@ -89,39 +78,19 @@ function pagedAtOne() {
   };
 }
 
-const statusCount = async (status) => {
-  const { values } = await syncCyclesTotal.get();
-  return values.filter(v => v.labels.network === door.NET && v.labels.status === status).reduce((n, v) => n + v.value, 0);
-};
 const failures = () => door.member().consecutiveFailures ?? 0;
 const factsSeed = (ids) => ids.map((id, i) => positioned(build.fact(S, id, BASE + i + 1, { author: PEER_AUTHOR })));
 
-/** What the member's turn came to, read off an answer's `members[]`. */
-function memberOf(out) {
-  const mine = (Array.isArray(out?.members) ? out.members : []).filter(m => m.instanceId === PEER && m.networkId === door.NET);
-  return mine.length === 1 ? mine[0] : undefined;
-}
+/** What the member's turn came to, read off an answer's `members[]` (`door.memberOf`). */
+const memberOf = (out) => door.memberOf(out);
 const NO_MEMBERS = '(no members[] entry for the peer on the answer)';
 
 /**
- * Both doors, each as production runs it. `scheduled` is the network cycle (`runSyncForNetwork`) and reads the history row and the cycle metric
- * it wrote; `manual` is `runSyncForPeer` and writes neither.
+ * Both doors, each as production runs it. `scheduled` is the network cycle (`door.cycle()`: `runSyncForNetwork`, with the history row and the cycle
+ * metric it wrote); `manual` is `runSyncForPeer` and writes neither.
  */
 const DOORS = {
-  async scheduled() {
-    const since = new Date().toISOString();
-    const before = { success: await statusCount('success'), partial: await statusCount('partial'), failed: await statusCount('failed'), refused: await statusCount('refused') };
-    const out = await engine.runSyncForNetwork(door.NET);
-    await door.settled();
-    let row;
-    await waitFor(async () => {
-      row = (await door.mongo.col('_sync_history').find({ networkId: door.NET, triggeredAt: { $gte: since } }).toArray())[0];
-      return row !== undefined;
-    }, 10_000, 100, undefined, { what: 'the sync history row of the cycle' });
-    const metric = {};
-    for (const status of Object.keys(before)) { const d = await statusCount(status) - before[status]; if (d !== 0) metric[status] = d; }
-    return { out, history: row.status, historyErrors: row.errors ?? [], metric };
-  },
+  scheduled: () => door.cycle(),
   async manual() {
     return { out: await door.sync() };
   },
@@ -139,7 +108,7 @@ const CASES = [
     scheduled: { history: 'failed', metric: { failed: 1 }, errorNamesThisInstance: true },
     async seed() { await door.seedPeerRecords(S, 'facts', factsSeed(['wf-1', 'wf-2'])); door.state.family = door.serveFamily; },
     async withFault(run) {
-      const fault = injectStoreFault(WRITE_METHODS, `${S}_facts`);
+      const fault = await injectStoreFault(WRITE_METHODS, `${S}_facts`);
       try { return await run(); } finally {
         fault.restore();
         assert.ok(fault.fired() > 0, 'fixture check: the injected write fault was never reached — the page was not written');
@@ -157,7 +126,7 @@ const CASES = [
     scheduled: { history: 'failed', metric: { failed: 1 }, errorNamesThisInstance: true },
     async seed() { await door.seedPeerRecords(S, 'facts', factsSeed(['rf-1'])); door.state.family = door.serveFamily; forgetPositionsReady(S); },
     async withFault(run) {
-      const fault = injectStoreFault(['findOne'], 'ythril_counters');
+      const fault = await injectStoreFault(['findOne'], 'ythril_counters');
       try { return await run(); } finally {
         fault.restore();
         assert.ok(fault.fired() > 0, 'fixture check: the injected counter read fault was never reached — the turn did not read the positions marker');
@@ -242,7 +211,6 @@ describe('both doors classify a member\'s turn alike', { skip }, () => {
     door = await openPullDoor({ suite: 'b39A_both', spaces: [S], direction: 'pull' });
     engine = await import('../../server/dist/sync/engine.js');
     loader = await import('../../server/dist/config/loader.js');
-    ({ syncCyclesTotal } = await import('../../server/dist/metrics/registry.js'));
     ({ forgetPositionsReady } = await import('../../server/dist/sync/positions-ready.js'));
     fullReread = await import('../../server/dist/sync/full-reread.js');
     networkStatus = await import('../../server/dist/spaces/network-status.js');
@@ -294,7 +262,7 @@ describe('both doors classify a member\'s turn alike', { skip }, () => {
         await door.seedPeerRecords(S, 'facts', factsSeed(['rr-1', 'rr-2']));
         door.state.family = door.serveFamily;
         assert.equal(fullReread.requestFullReread(door.NET, [S]), 1, 'fixture check: the re-read was not requested');
-        const fault = injectStoreFault(WRITE_METHODS, `${S}_facts`);
+        const fault = await injectStoreFault(WRITE_METHODS, `${S}_facts`);
         let got;
         try { got = await run(); } finally { fault.restore(); }
         assert.ok(fault.fired() > 0, 'fixture check: the injected write fault was never reached');
@@ -315,7 +283,7 @@ describe('both doors classify a member\'s turn alike', { skip }, () => {
         // The door's network row carries no open rounds, which the chip reads.
         for (const n of door.config().networks) n.pendingRounds ??= [];
         const chip = () => networkStatus.spaceNetworkInfo(door.config().networks, S, () => false, door.instanceId)?.networkStatus;
-        const fault = injectStoreFault(WRITE_METHODS, `${S}_facts`);
+        const fault = await injectStoreFault(WRITE_METHODS, `${S}_facts`);
         const seen = [];
         try {
           for (let i = 1; i <= 3; i++) { await run(); seen.push({ turn: i, chip: chip(), failures: failures() }); }

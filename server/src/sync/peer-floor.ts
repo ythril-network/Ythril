@@ -202,5 +202,13 @@ export function assertPeerAtFloor(networkId: string, instanceId: string, reporte
     .find(n => n.id === networkId)?.members
     .find(m => m.instanceId === instanceId);
   const refusal = peerFloorRefusal(member?.version ?? reported, member?.versionCheckedAt);
-  if (refusal) throw new Error(refusal);
+  if (refusal) throw new PeerBelowFloor(refusal);
+}
+
+/**
+ * The member is below the version floor: its turn ended before any data moved. Typed (bundle-39 D1 v2) so the classifier reads it as `peer-too-old`
+ * beside `PeerPagesBySeq` and moves no failure counter: as a plain `Error` a pre-6.0 peer counted as failing every cycle after its first refusal.
+ */
+export class PeerBelowFloor extends Error {
+  override readonly name = 'PeerBelowFloor';
 }
