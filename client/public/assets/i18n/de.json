@@ -2985,6 +2985,7 @@
   "brain.overview.usageResetDone.other": "{{count}} Nutzungsintervalle zurückgesetzt.",
   "brain.overview.usageResetFailed": "Das Zurücksetzen der Nutzung ist fehlgeschlagen. Prüfen Sie die Server-Logs.",
   "spaces.dangerZone.act.repeatHint.rename": "Eine Umbenennung wird automatisch wiederholt; keine Schaltfläche hier schließt sich ihr an.",
+  "spaces.dangerZone.act.repeatHint.import": "Ein Import wird automatisch aus dem empfangenen Inhalt wiederholt; keine Schaltfläche hier schließt sich ihm an.",
   "spaces.dangerZone.act.repeatHint.restore": "Das betrifft die ganze Instanz und wird automatisch wiederholt. Verfolgen oder abbrechen können Sie es auf der Seite Datenbank.",
   "spaces.dangerZone.act.repeatHint.migrate": "Das betrifft die ganze Instanz und wird automatisch wiederholt. Verfolgen können Sie es auf der Seite Datenbank.",
   "spaces.dangerZone.act.repeatHint.other": "Es wird automatisch wiederholt; dieser Tab zeigt, wann es endet.",

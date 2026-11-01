@@ -2985,6 +2985,7 @@
   "brain.overview.usageResetDone.other": "Wyzerowano {{count}} przedziałów użycia.",
   "brain.overview.usageResetFailed": "Nie udało się wyzerować użycia. Sprawdź logi serwera.",
   "spaces.dangerZone.act.repeatHint.rename": "Zmiana nazwy jest ponawiana automatycznie; żaden przycisk tutaj do niej nie dołącza.",
+  "spaces.dangerZone.act.repeatHint.import": "Import jest ponawiany automatycznie z otrzymanej treści; żaden przycisk tutaj do niego nie dołącza.",
   "spaces.dangerZone.act.repeatHint.restore": "Dotyczy to całej instancji i jest ponawiane automatycznie. Śledź to lub porzuć na stronie Baza danych.",
   "spaces.dangerZone.act.repeatHint.migrate": "Dotyczy to całej instancji i jest ponawiane automatycznie. Śledź to na stronie Baza danych.",
   "spaces.dangerZone.act.repeatHint.other": "Jest ponawiane automatycznie; ta karta pokaże, kiedy się zakończy.",
