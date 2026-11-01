@@ -455,7 +455,7 @@ export async function* readFamilyPages(
   let bytes = 0;
   for await (const [i, raw] of elementsOf(file, family, fam)) {
     if (fam.keep !== null && fam.keep[i] !== 1) continue;
-    page.push(JSON.parse(raw.toString('utf8')));
+    page.push(parseOrFail(raw, `document ${i} of '${family.slice(0, 200)}'`));
     bytes += raw.length;
     if (page.length >= pageSize || bytes >= pageBytes) { yield page; page = []; bytes = 0; }
   }

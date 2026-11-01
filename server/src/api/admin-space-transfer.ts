@@ -15,8 +15,9 @@
  * The body never reaches the global JSON parser (`markImportBody`, mounted before it, sets the flag both parsers skip), so a caller is let in
  * before a byte of the body is read, and no 10 MB ceiling stands between a backup and its restore. In order:
  *
- *  1. auth (the route's guard), a JSON content type (else 415) and a known encoding, no other import standing anywhere (409,
- *     `space_being_imported`); an act already standing for the space runs first, the import waiting behind it in the space's queue;
+ *  1. auth (the route's guard), a JSON content type (else 415) and a known encoding, no other import standing anywhere and no other door
+ *     importing (409, `space_being_imported`, held until this door answered); an act already standing for the space runs first, the import
+ *     waiting behind it in the space's queue;
  *  2. the body is inflated by its `Content-Encoding` (gzip, deflate, br) and spooled under `<data root>/import-spool/` (through the master
  *     secret's chunked envelope when one is configured), its INFLATED bytes counted against `importBodyMaxBytes` (413), after a free-disk
  *     check (507);
@@ -50,7 +51,7 @@ import { log, peerText } from '../util/log.js';
 import { settledWithin } from '../util/time-bound.js';
 import { runSpaceAct, releaseSpaceActWaiter, spaceActAnswerMs, spaceActClosedAnswer } from '../spaces/space-act-runner.js';
 import { SPACE_ACT_KINDS } from '../config/types-space-acts.js';
-import { ensureSpoolRoot, importStanding, indexSpool, registerImport, removeSpool, spoolPathOf, takeImportResult } from '../spaces/import-act.js';
+import { ImportBusyError, ensureSpoolRoot, holdImportDoor, indexSpool, registerImport, removeSpool, spoolPathOf, takeImportResult } from '../spaces/import-act.js';
 import { importTotals, type ImportResult } from '../sync/space-import.js';
 
 /** The import route's full path, for the parser marker `app.ts` mounts before the global parsers (the router serves it under its mount). */
@@ -205,7 +206,6 @@ function importChanges(result: ImportResult): Array<{ field: string; to: number 
 
 spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
-  const where = 'POST /api/admin/spaces/:spaceId/import';
   if (answeredUnknownSpace(req, res, spaceId)) return;
   if (!JSON_TYPE.test(req.headers['content-type'] ?? '')) {
     res.status(415).json({ error: 'An import body is an export: send it as application/json.' });
@@ -216,12 +216,18 @@ spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaSco
     res.status(415).json({ error: `Content-Encoding '${peerText(encoding)}' is not one an import inflates (gzip, deflate, br).` });
     return;
   }
-  // One import at a time, instance-wide. An act already standing for the space runs first: the import waits behind it in the space's queue.
-  if (importStanding()) {
+  // One import at a time, instance-wide, held from before the body is spooled until the door answered (`holdImportDoor`). An act already
+  // standing for the space runs first: the import waits behind it in the space's queue.
+  const busy = (): void => {
     res.status(409).json({ error: `Space '${spaceId}' takes no import now: ${SPACE_ACT_KINDS.import.writeRefusalWhy()}.`, code: SPACE_ACT_KINDS.import.writeRefusalCode });
-    return;
-  }
+  };
+  const door = await holdImportDoor(() => importThroughDoor(req, res, spaceId, encoding, busy));
+  if (!door.held) busy();
+});
 
+/** The import door past its one-at-a-time check: spool, validate, register, wait and answer. Never throws. */
+async function importThroughDoor(req: Request, res: Response, spaceId: string, encoding: string, busy: () => void): Promise<void> {
+  const where = 'POST /api/admin/spaces/:spaceId/import';
   const spoolId = crypto.randomUUID();
   const file = spoolPathOf(spoolId)!;
   let registered = false;
@@ -249,6 +255,7 @@ spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaSco
   } catch (err) {
     if (!registered) removeSpool(spoolId);
     if (err instanceof ClientGone) return;
+    if (err instanceof ImportBusyError) { busy(); return; }
     const refused = refusalOf(err, encoding);
     if (refused) {
       // The rest of a body this door will not read is drained, so the answer reaches a client still sending, and the connection then closes.
@@ -261,4 +268,4 @@ spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaSco
     if (closed) { res.status(closed.status).json(closed.body); return; }
     sendCaughtFailure(res, where, err, { error: 'The import did not complete; see the log.' });
   }
-});
+}

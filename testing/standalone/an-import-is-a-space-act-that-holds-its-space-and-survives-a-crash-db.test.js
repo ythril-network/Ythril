@@ -13,6 +13,11 @@
  *  3. **A resumed act whose spool is missing completes as failed and removes itself**, with the runner's completion row (`space.act_completed`,
  *     path `internal:space-act:import:...`), and lands nothing: its input was validated before it was registered, so no abandon door is owed.
  *  4. **A spool no standing act names is swept by the boot's `resumeSpaceActs`**, and the spool a standing act does name is kept.
+ *  5. **A resumed act whose spool can no longer be read completes as failed (422) with its row and removes itself and its spool** (bundle-40
+ *     pre-ship R1): a spool written through the master secret that is read with the secret removed, and a spool corrupted on disk. Red on
+ *     505b5790c: the read threw an ordinary error, the runner retried it for ever, and the space stayed held.
+ *  6. **Two imports sent at once: one is let in, the other is answered 409 `space_being_imported`** (pre-ship R2). Red on 505b5790c: the
+ *     one-at-a-time check ran before the body was spooled, so both doors spooled, both registered and both landed.
  *
  * ## How it is driven
  *
@@ -33,7 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { ADMIN_TOKEN, build } from './_push-door.mjs';
-import { openImportDoor, exportText, fact, idsOf } from './_import-door.mjs';
+import { openImportDoor, exportText, fact, idsOf, paddedFacts } from './_import-door.mjs';
 import { clearActEntries, deferred, resetRunnerForTest, untilRunnerIdle, auditRowsOf } from './_space-act-harness.mjs';
 
 const skip = await mongoSkipReason();
@@ -133,6 +138,57 @@ describe('an import is a space act: it holds its space, resumes from its spool a
     // successful completion of the resumed import the test before this one ran.
     const own = rows.filter(r => String(r.path).includes(actId));
     assert.ok(own.every(r => typeof r.status === 'number' && r.status >= 400), `the completion row of an import with no spool reads as a success: ${JSON.stringify(own.map(r => [r.path, r.status]))}`);
+  });
+
+  describe('a resumed act whose spool can no longer be read completes as failed (422), lands nothing and removes itself and its spool', () => {
+    const unreadable = {
+      'written through a master secret that is now removed': async (file) => {
+        // The door writes the spool through the chunked envelope when a secret is configured; the secret is gone at the resume.
+        const box = await import('../../server/dist/config/secretbox.js');
+        const enc = box.createChunkedEncryptor(box.deriveKey({ kind: 'key', key: Buffer.alloc(32, 9) }));
+        const sealed = await new Promise((resolve, reject) => {
+          const parts = [];
+          enc.on('data', c => parts.push(c)); enc.on('end', () => resolve(Buffer.concat(parts))); enc.on('error', reject);
+          enc.end(fs.readFileSync(file));
+        });
+        fs.writeFileSync(file, sealed);
+      },
+      'corrupted on disk': async (file) => { fs.writeFileSync(file, fs.readFileSync(file, 'utf8').slice(0, 40)); },
+    };
+    for (const [how, spoil] of Object.entries(unreadable)) {
+      it(how, T, async () => {
+        await crashedImport();
+        await door.coll(SPACE, 'facts').deleteMany({});
+        const [spool] = door.spoolFiles();
+        await spoil(path.join(door.spoolDir, spool));
+        const actId = door.importActs()[0].id;
+        await restart();
+        await runner.resumeSpaceActs(Date.now() + DAY);
+        // `now` is the real clock: an act the runner failed and owes again is not due yet, so idle is reached and the act is still read.
+        await untilRunnerIdle(runner, door.loader);
+        assert.deepEqual(door.importActs().map(e => [e.state, e.lastError]), [], 'an import whose spool cannot be read stays standing: it is retried for ever and its space stays held');
+        assert.deepEqual(door.spoolFiles(), [], 'the unreadable spool of a failed import was left on disk');
+        assert.deepEqual(await idsOf(door, SPACE), [], 'an import whose spool cannot be read landed rows');
+        const own = (await auditRowsOf(door.mongo, 'space.act_completed')).filter(r => String(r.path).includes(actId));
+        assert.deepEqual(own.map(r => r.status), [422], `want one completion row with status 422 for ${actId}: ${JSON.stringify(own.map(r => [r.path, r.status]))}`);
+      });
+    }
+  });
+
+  it('two imports sent at once: one is let in, the other is answered 409 space_being_imported', T, async () => {
+    // Bodies of about 12 MB each: both doors are past their headers long before either body is spooled and validated.
+    const body = (prefix) => exportText({ facts: paddedFacts(3000, 4000, { idPrefix: prefix }) });
+    const [a, b] = await Promise.all([door.post(SPACE, body('one')), door.post(SPACE, body('two'))]);
+    await untilRunnerIdle(runner, door.loader);
+    const statuses = [a.status, b.status].sort();
+    const refused = [a, b].find(r => r.status === 409);
+    assert.ok(refused, `two concurrent imports were answered ${JSON.stringify(statuses)}: both were let in`);
+    assert.equal(refused.json?.code, 'space_being_imported', `the refused import's code is ${JSON.stringify(refused.json?.code)}`);
+    const taken = [a, b].find(r => r !== refused);
+    assert.ok(taken.status === 200 || taken.status === 202, `the import that was let in was answered ${taken.status}: ${taken.text.slice(0, 160)}`);
+    const prefixes = new Set((await idsOf(door, SPACE)).map(id => id.split('-')[0]));
+    assert.deepEqual([...prefixes], [taken === a ? 'one' : 'two'], `the space holds the records of ${JSON.stringify([...prefixes])}, not only those of the import let in`);
+    assert.deepEqual(door.spoolFiles(), [], 'a spool was left behind');
   });
 
   it('a spool no act names is swept at boot, and the spool a standing act names is kept', T, async () => {
