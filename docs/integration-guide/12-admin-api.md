@@ -158,7 +158,7 @@ server's request timeout (5 minutes), so the largest body a client can send is a
 `application/json`, and the encoding one of the three above); a malformed body, anywhere in it — not one object, a
 family that is not an array or appears twice, a document over 10 MB or nested deeper than 64 levels, a body cut off or
 never closed (`400`); either ceiling (`413`); a disk without room for the body (`507`); another import standing on this
-instance (`409`, `code: "space_being_imported"`: one import runs at a time).
+instance, or another import still being received (`409`, `code: "space_being_imported"`: one import runs at a time).
 
 **The import is a space act.** Once the body is valid it is registered as an act of kind `import` on the space, and
 while it stands the space takes no local write and no peer's push (`409`, `code: "space_being_imported"`), as during a
@@ -169,7 +169,8 @@ the [audit log](13-audit-log-api.md) (`space.act_completed`, path `internal:spac
 resumes it from its spooled body at the next start; a resumed run reports the records the first run landed as
 `updated`. An import never needs abandoning: its body was validated before it was registered, a store failure is
 retried, and a resumed import whose body is gone from disk completes as failed (its completion row has a status of
-`410`) and writes nothing. The spool is removed when the act completes, and at the next start when no standing import
+`410`) and writes nothing. One whose body can no longer be read (corrupted on disk, or saved under a master secret
+since changed or removed) completes as failed with `422` and is not retried; what it landed before stays. The spool is removed when the act completes, and at the next start when no standing import
 names it. When the import completes it forgets what the space RECEIVED from each peer (as a restore of the whole
 instance does), so the next sync reads every member from the start.
 
