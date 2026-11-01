@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Records an earlier import stored with an expiry that is not a date are repaired by the sweep; those whose repaired expiry is past are deleted over the first cycles, on every instance of a network | Check the retention windows of restored spaces before upgrading |
 | A space import may answer `202` (queued) instead of `200`; its result is then in the audit log | A client that imports reads `202` as accepted |
 | A space import whose body is not `application/json` answers `415` | Send the export as `application/json` |
-| A space import from another instance's or another space's export no longer keeps file sync agreements, so a file that differs from a peer becomes a conflict copy at the next sync | None |
+| A space import from another instance's or another space's export no longer keeps file sync agreements: a file that differs from a peer becomes a conflict copy at the next sync | None |
 
 ### Changed
 

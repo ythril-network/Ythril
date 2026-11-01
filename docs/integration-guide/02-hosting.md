@@ -722,7 +722,7 @@ server {
 ```
 
 `client_max_body_size` is the outer cap on every request body, the admin import's included: a space export larger than
-it cannot be imported through the proxy, whatever `importBodyMaxBytes` says ([Admin API](12-admin-api.md#import-space)).
+it is refused by nginx before it reaches Ythril, whatever `importBodyMaxBytes` says ([Admin API](12-admin-api.md#import-space)).
 
 #### Caddy
 
