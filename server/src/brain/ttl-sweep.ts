@@ -58,10 +58,7 @@ import { leakedRowsDeadline, publishLeakedRowScansOwed, repairLeakedRows } from 
 import { retirePeerSidecars } from '../sync/peer-sidecar-retirement.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { TTL_EXPIRE_OPERATION } from '../audit/middleware.js';
-import { healStoredStamps, resetStampHealLatch } from './retention-stamp-heal.js';
-
-/** What an import tells the heal of stored retention stamps (`brain/retention-stamp-heal.ts`): look again at this space's collections. */
-export { resetStampHealLatch };
+import { healStoredStamps } from './retention-stamp-heal.js';
 
 /** How often the sweep runs, ms. Cited by the docs (`doc-cited-constants`). */
 export const SWEEP_INTERVAL_MS = 5 * 60_000; // 5 min
