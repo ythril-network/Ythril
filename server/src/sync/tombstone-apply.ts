@@ -120,7 +120,7 @@ export interface TombstoneApplyOutcome {
   declined: ArrivalRefusal[];
   /** Types this instance does not know. Non-empty: nothing of the page was applied and the counter did not move. */
   unknownTypes: string[];
-  /** The highest admitted seq — what the counter was advanced to at least. */
+  /** The highest admitted seq. No counter moves for it: an arrival never bumps a counter (D-19 B). */
   maxSeq: number;
   /** Records deleted on each ground — what the page did, for the caller's own line. */
   deleted: Record<DeletionGround, number>;

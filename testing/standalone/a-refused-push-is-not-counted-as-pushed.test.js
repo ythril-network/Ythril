@@ -46,7 +46,7 @@ describe('both ends are wired', () => {
     assert.ok(families.length >= 6, `parsed ${families.length} families — the gate would pass on too few`);
     for (const f of families) assert.match(body, new RegExp(`${f}: \\{[^}]*rejected:`), `${f} answers without a rejected count`);
   });
-  it('the engine subtracts the refused count and makes the cycle partial — without failing the member', () => {
+  it('the engine subtracts the refused count and makes the cycle partial — without failing the member', async () => {
     // The cycle is the engine plus the per-space turn it hands each space to (`sync/space-exchange.ts`, bundle-106 §3.4).
     // bundle-81: how a member's refusals and catch-up fold into the cycle's status moved beside the engine (`sync/cycle-outcome.ts`, which the frozen engine asks).
     const src = ['server/src/sync/engine.ts', 'server/src/sync/space-exchange.ts', 'server/src/sync/cycle-outcome.ts'].map(f => stripComments(readFileSync(f, 'utf8'))).join('\n');
@@ -55,9 +55,14 @@ describe('both ends are wired', () => {
     assert.match(family, /pushed \+= batch\.length - r;/);
     assert.match(src, /const refused = refusedTransfers\(pushed\)/);
     assert.doesNotMatch(src, /stoppedEarly\.push\(\.\.\.refusedTransfers/, 'a refusal in the incomplete list fails the member and raises its failure count');
-    assert.match(src, /cycle\.fold\(member, counts, errorMessages\)/, 'the engine no longer folds a member\'s refusals into the cycle');
-    assert.match(src, /if \(counts\.refused\.length > 0\) \{ this\.refusals\+\+;/, 'a refusal no longer makes the cycle partial with the reason');
-    assert.match(src, /errors > 0 \|\| this\.refusals > 0 \|\| this\.catchingUp > 0\) return synced === 0 && members > 0 \? 'failed' : 'partial'/, 'the cycle status no longer reads refusals beside errors');
-    assert.match(src, /return 'success'/);
+    // bundle-39: the regex pins on the hand-written fold are replaced by what the one classifier and the one verdict SAY (their truth table is
+    // `sync-verdict-is-one-table.test.js`); here the refusal's own row: the member is `records-refused`, the cycle `partial`, and the counter resets.
+    assert.match(src, /cycle\.member\(net, member, counts\)/, 'the scheduled cycle no longer hands a member\'s exchange to the one classifier');
+    const { classifyMemberTurn, syncVerdict } = await import('../../server/dist/sync/cycle-outcome.js');
+    const exchange = { pulled: {}, pushed: {}, incomplete: [], capped: [], refused: ['facts: 2 refused'], recorded: [], held: [], declined: [], localFaults: [], interrupted: [] };
+    assert.equal(classifyMemberTurn(exchange), 'records-refused', 'records the peer refused fail the member');
+    assert.equal(syncVerdict([{ outcome: 'records-refused' }]).outcome, 'partial', 'a refusal no longer makes the cycle partial');
+    assert.match(stripComments(readFileSync('server/src/sync/cycle-outcome.ts', 'utf8')), /outcome === 'records-refused'[^\n]*consecutiveFailures = 0/,
+      'a member whose records were refused no longer resets its failure counter (it answered)');
   });
 });

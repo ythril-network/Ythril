@@ -129,13 +129,25 @@ describe('a held family stops like a capped one, is told from a fault and from a
     assert.equal(faulted.stoppedBy, 'error', 'the default stays a fault');
   });
 
-  it('the third reason is part of the type, not only of what the JavaScript happens to accept', () => {
-    // The two functions above take any string at run time, so the cases pass on a build that never declared the reason: the declaration is what makes
-    // `held` something a caller may write, and what the member-exchange types (`MemberExchange.held`) are read from.
+  it('every stop kind is part of ONE type, and every stop is written and read by it, not only by what the JavaScript happens to accept', () => {
+    // The functions above take any string at run time, so the cases pass on a build that never declared a kind: the declaration is what makes `held`,
+    // `local` and `closing` something a caller may write (bundle-39 D1: one `TransferStop`, where three hand-written unions had to agree).
     const wm = stripComments(readFileSync('server/src/sync/watermark.ts', 'utf8'));
-    assert.match(wm, /stoppedBy\?:\s*'cap'\s*\|\s*'held'\s*\|\s*'error'/, 'TransferOutcome.stoppedBy does not declare the held reason');
-    assert.match(wm, /function stopTransfer\([^)]*by:\s*'cap'\s*\|\s*'held'\s*\|\s*'error'/, 'stopTransfer does not take the held reason');
-    assert.match(wm, /function stoppedTransfers\([^)]*by:\s*'cap'\s*\|\s*'held'\s*\|\s*'error'/s, 'stoppedTransfers cannot list the held families');
+    assert.match(wm, /export type TransferStop\s*=\s*'cap'\s*\|\s*'held'\s*\|\s*'local'\s*\|\s*'closing'\s*\|\s*'error'/, 'the stop kinds are not one declared type');
+    assert.match(wm, /stoppedBy\?:\s*TransferStop\b/, 'TransferOutcome.stoppedBy is not the one type');
+    assert.match(wm, /function stopTransfer\([^)]*by:\s*TransferStop\b/, 'stopTransfer does not take the one type');
+    assert.match(wm, /function stoppedTransfers\([^)]*by:\s*TransferStop\b/s, 'stoppedTransfers does not read the one type');
+  });
+
+  it('a page this instance could not land and a stop for shutdown keep their kind against the loop\'s generic stop, and are listed apart', () => {
+    for (const kind of ['local', 'closing']) {
+      const o = { deliveredThrough: 7, truncated: false };
+      stopTransfer(o, () => {}, 'the step knew', kind);
+      stopTransfer(o, () => {}, 'the loop\'s generic stop');
+      assert.equal(o.stoppedBy, kind, `the default 'error' overwrote '${kind}'`);
+    }
+    const all = [{ ...stopped(1, 'local'), label: 'facts' }, { ...stopped(2, 'closing'), label: 'edges' }, { ...stopped(3), label: 'links' }];
+    assert.deepEqual([stoppedTransfers(all, 'local'), stoppedTransfers(all, 'closing'), stoppedTransfers(all, 'error')], [['facts'], ['edges'], ['links']]);
   });
 
   it('stoppedTransfers names the held families, and a held one is neither an error nor a cap', () => {

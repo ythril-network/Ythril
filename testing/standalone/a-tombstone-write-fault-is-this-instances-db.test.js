@@ -34,10 +34,8 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { privateAddressSkipReason, privateHostAddress } from './_private-address.mjs';
-import { waitFor } from '../_shared/wait-for.mjs';
+import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { withCollectionAsView } from './_write-faults.mjs';
@@ -51,47 +49,15 @@ const SEEDED = 5;
 const TOMB_SEQ = 400;
 const NO_MEMBERS = '(no members[] entry for the peer on the answer)';
 
-let door, engine, syncCyclesTotal;
+let door;
 
-const statusCount = async (status) => {
-  const { values } = await syncCyclesTotal.get();
-  return values.filter(v => v.labels.network === door.NET && v.labels.status === status).reduce((n, v) => n + v.value, 0);
-};
-const memberOf = (out) => (Array.isArray(out?.members) ? out.members : []).find(m => m.instanceId === PEER && m.networkId === door.NET);
+const memberOf = (out) => door.memberOf(out);
 
-/** Both doors as production runs them; the scheduled one reads the history row and the cycle metric it wrote. */
+/** Both doors as production runs them; the scheduled one (`door.cycle()`) reads the history row and the cycle metric it wrote. */
 const DOORS = {
-  async scheduled() {
-    const since = new Date().toISOString();
-    const before = { success: await statusCount('success'), partial: await statusCount('partial'), failed: await statusCount('failed'), refused: await statusCount('refused') };
-    const out = await engine.runSyncForNetwork(door.NET);
-    await door.settled();
-    let row;
-    await waitFor(async () => {
-      row = (await door.mongo.col('_sync_history').find({ networkId: door.NET, triggeredAt: { $gte: since } }).toArray())[0];
-      return row !== undefined;
-    }, 10_000, 100, undefined, { what: 'the sync history row of the cycle' });
-    const metric = {};
-    for (const status of Object.keys(before)) { const d = await statusCount(status) - before[status]; if (d !== 0) metric[status] = d; }
-    return { out, history: row.status, historyErrors: row.errors ?? [], metric };
-  },
+  scheduled: () => door.cycle(),
   async manual() { return { out: await door.sync() }; },
 };
-
-/** A peer whose tombstone route answers 500 and which serves nothing else: the fetch that fails. */
-async function startTombstoneFailingPeer() {
-  const host = privateHostAddress();
-  const hits = [];
-  const server = http.createServer((req, res) => {
-    const path = new URL(req.url, 'http://x').pathname;
-    hits.push(path);
-    res.writeHead(path === '/api/sync/tombstones' ? 500 : 404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'the peer failed on its tombstone page' }));
-  });
-  // own-listener: binds every interface so the LAN address answers, because the SSRF guards block loopback
-  await new Promise(resolve => server.listen(0, '0.0.0.0', resolve));
-  return { url: `http://${host}:${server.address().port}`, hits, close: () => new Promise(r => server.close(r)) };
-}
 
 /** `<space>_facts` is a view on `<space>_entities` while `fn` runs, and the entity the tombstone targets sits in it: found, authored by the issuer, and its delete fails. */
 async function withFactsAView(targets, fn) {
@@ -103,8 +69,6 @@ async function withFactsAView(targets, fn) {
 describe('a tombstone apply that fails locally is this instance\'s fault; a tombstone fetch that fails is the peer\'s', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'b39A_tomb', spaces: [F] });
-    engine = await import('../../server/dist/sync/engine.js');
-    ({ syncCyclesTotal } = await import('../../server/dist/metrics/registry.js'));
   });
   after(async () => { await door?.close(); });
 
@@ -139,12 +103,9 @@ describe('a tombstone apply that fails locally is this instance\'s fault; a tomb
 
       it('the tombstone fetch fails (the peer answers 500 on its tombstone page): still failed, counted against the peer', async () => {
         await fresh();
-        const failing = await startTombstoneFailingPeer();
-        const real = door.member().url;
-        door.member().url = failing.url;
-        let got;
-        try { got = await run(); } finally { door.member().url = real; await failing.close(); }
-        assert.ok(failing.hits.includes('/api/sync/tombstones'), `fixture check: the failing peer was never asked for its tombstones (asked: ${failing.hits.join(', ') || 'nothing'})`);
+        door.state.tombstoneStatus = 500;
+        const got = await run();
+        assert.ok(door.state.requests.length > 0, 'fixture check: the peer was never asked for its tombstones');
         const actual = {
           outcome: memberOf(got.out)?.outcome ?? NO_MEMBERS,
           failures: door.member().consecutiveFailures ?? 0,

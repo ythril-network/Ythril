@@ -7,7 +7,7 @@ export interface SpaceNetworkInfo {
   networkStatus: 'vote' | 'degraded' | 'syncing' | 'idle';
 }
 
-/** Consecutive failed sync cycles before a peer reads as "degraded" rather than a
+/** Consecutive failed sync cycles (or turns this instance could not complete) before a peer reads as "degraded" rather than a
  *  transient blip that the next cycle recovers. Keeps the red indicator meaningful
  *  ("investigate") instead of firing on every retried hiccup. */
 export const DEGRADE_THRESHOLD = 3;
@@ -60,8 +60,10 @@ export function spaceNetworkInfo(
       (!r.requiredVoters || r.requiredVoters.includes(myInstanceId)) &&
       // not yet cast by us
       !(r.votes ?? []).some(v => v.instanceId === myInstanceId)));
+  // A peer that does not answer, or THIS instance failing to complete its turns with one (bundle-39 v5): a lasting local fault resets the failure
+  // counter (the peer answered) and must not leave the chip idle.
   const degraded = nets.some(n =>
-    n.members.some(m => (m.consecutiveFailures ?? 0) >= DEGRADE_THRESHOLD));
+    n.members.some(m => (m.consecutiveFailures ?? 0) >= DEGRADE_THRESHOLD || (m.consecutiveLocalFaults ?? 0) >= DEGRADE_THRESHOLD));
   const syncing = nets.some(n => isSyncing(n.id));
 
   const networkStatus = degraded ? 'degraded' : syncing ? 'syncing' : awaitingMyVote ? 'vote' : 'idle';

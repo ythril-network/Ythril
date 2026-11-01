@@ -19,6 +19,7 @@
  * failure".
  */
 import { POSITIONS_BUILDING, EDGE_IDENTITY_BUILDING } from '../util/errors.js';
+import { shutdownSignal } from '../lifecycle.js';
 
 /**
  * What a refused transfer means to its sender. `held` and `declined` end the space's exchange with this member for the cycle
@@ -78,10 +79,11 @@ async function readVerdict(resp: Pick<Response, 'clone'>): Promise<TransferRefus
 }
 
 /**
- * The signal a fetch of the turn takes: the request's own (its timeout) and the turn's (cut when an act on the space
- * registers), whichever fires first. Without a turn, the request's own alone.
+ * The signal a fetch of the turn takes: the request's own (its timeout), the turn's (cut when an act on the space
+ * registers) and the process's shutdown signal (bundle-39 D5 v6 S2: a batch fetch would otherwise outlive the drain),
+ * whichever fires first. Without a turn, the request's own and shutdown's.
  */
 export function turnSignal(own: AbortSignal | null | undefined, turn: ExchangeTurn | undefined): AbortSignal | undefined {
-  if (!turn) return own ?? undefined;
-  return own ? AbortSignal.any([own, turn.signal]) : turn.signal;
+  const signals = [own ?? undefined, turn?.signal, shutdownSignal()].filter((s): s is AbortSignal => s !== undefined);
+  return signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 }

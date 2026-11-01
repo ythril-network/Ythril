@@ -1,19 +1,14 @@
 import { col, asFilter, asDoc } from '../db/mongo.js';
 import { v4 as uuidv4 } from 'uuid';
 
-export interface SyncCounts {
-  facts: number;
-  entities: number;
-  edges: number;
-  files: number;
-  chrono: number;
-  /**
-   * Added with the link records (`M-2`). Stored history written before then has no key here, so a reader
-   * gets `undefined` rather than `0` — which is correct and not a gap: that cycle could not have pushed a
-   * link, and reporting `0` would claim it looked and found none.
-   */
-  links: number;
-}
+/**
+ * A cycle's counts: one per replicated family under its `countKey`, and `files` (the files the file routes moved, not bytes), derived from the
+ * family list (`sync/replicated-families.ts`, bundle-39 Q-265). Stored history written before a key existed has no key there (`links` before
+ * `M-2`, `filemeta` before bundle-39), so a reader gets `undefined` rather than `0` — which is correct and not a gap: that cycle did not count
+ * it, and reporting `0` would claim it looked and found none.
+ */
+export type { SyncCounts } from './replicated-families.js';
+import type { SyncCounts } from './replicated-families.js';
 
 /**
  * What a cycle's pulled pages stored that the receiving space's schema does not accept and the copy they replaced lacked, for ONE space
@@ -31,7 +26,12 @@ export interface SyncHistoryRecord {
   networkId: string;
   triggeredAt: string;
   completedAt: string;
-  status: 'success' | 'partial' | 'failed';
+  /**
+   * The cycle's verdict word (`syncVerdict`, `sync/cycle-outcome.ts`), the same word the metric and the waited answer carry. `refused` (only peers
+   * too old to sync with, nothing failed) was recorded as `failed` before bundle-39; an older version reads it as a word it does not know. A cycle
+   * stopped by shutdown is recorded `partial`, its errors saying so.
+   */
+  status: 'success' | 'partial' | 'failed' | 'refused';
   pulled: SyncCounts;
   pushed: SyncCounts;
   errors?: string[];

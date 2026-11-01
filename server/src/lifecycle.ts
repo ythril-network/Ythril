@@ -28,18 +28,30 @@
  */
 
 let shuttingDown = false;
+let shutdownController = new AbortController();
 
 /** True once a shutdown signal has been received. Readiness reports not-ready from this moment. */
 export function isShuttingDown(): boolean {
   return shuttingDown;
 }
 
+/**
+ * Aborted when shutdown begins: a sync turn's fetches take it beside their own timeout (`turnSignal`, `sync/held-answer.ts`), so a batch fetch of up
+ * to a minute ends at once instead of outliving the drain (bundle-39 D5 v6 S2). It is its OWN signal, never the act fence's: an abort here is read as
+ * shutdown (`stopKindOfThrow`, `sync/arrival-stop.ts`), never as an act cutting a space.
+ */
+export function shutdownSignal(): AbortSignal {
+  return shutdownController.signal;
+}
+
 /** Called by the signal handler, before anything is torn down. Idempotent. */
 export function beginShutdown(): void {
   shuttingDown = true;
+  if (!shutdownController.signal.aborted) shutdownController.abort(new Error('shutting down'));
 }
 
 /** Test-only: restore the initial state between cases. */
 export function resetLifecycleForTests(): void {
   shuttingDown = false;
+  shutdownController = new AbortController();
 }

@@ -1435,6 +1435,20 @@ export const syncCyclesTotal = new Counter({
 for (const status of SYNC_CYCLE_STATUSES) syncCyclesTotal.labels({ network: '', status }).inc(0);
 
 /**
+ * How a member's turn ended, one closed list (bundle-39 D1, v4 S3): the classifier in `sync/cycle-outcome.ts` reads it as its `MEMBER_OUTCOMES` and
+ * writes one of them per member per turn, on both sync doors. Declared here, not there, because this module is imported by it and imports nothing back.
+ */
+export const SYNC_MEMBER_OUTCOMES = ['success', 'catching-up', 'records-refused', 'peer-too-old', 'local-fault', 'interrupted', 'failed'] as const;
+
+export const syncMemberOutcomesTotal = new Counter({
+  name: 'ythril_sync_member_outcomes_total',
+  help: 'Member turns of sync cycles by outcome (success, catching-up, records-refused, peer-too-old, local-fault, interrupted, failed), on every sync door',
+  labelNames: ['outcome'] as const,
+  registers: [register],
+});
+for (const outcome of SYNC_MEMBER_OUTCOMES) syncMemberOutcomesTotal.labels({ outcome }).inc(0);
+
+/**
  * What became of an item an exchange was handed: `stored` (it moved), `refused` (the receiver's own rules refused it: counted and passed, never a
  * reason to stop) or `held` (a peer answered `positions_building` to the batch that carried it: nothing moved and nothing failed).
  */
@@ -1442,14 +1456,14 @@ export const SYNC_ITEM_OUTCOMES = ['stored', 'refused', 'held'] as const;
 
 export const syncItemsPulledTotal = new Counter({
   name: 'ythril_sync_items_pulled_total',
-  help: 'Items received during sync by type (facts, entities, edges, files, chrono, links) and outcome (stored, refused, held)',
+  help: 'Items received during sync by type (facts, entities, chrono, filemeta, edges, links, and files: files moved) and outcome (stored, refused, held)',
   labelNames: ['type', 'outcome'] as const,
   registers: [register],
 });
 
 export const syncItemsPushedTotal = new Counter({
   name: 'ythril_sync_items_pushed_total',
-  help: 'Items sent during sync by type (facts, entities, edges, files, chrono, links) and outcome (stored, refused, held)',
+  help: 'Items sent during sync by type (facts, entities, chrono, filemeta, edges, links, and files: files moved) and outcome (stored, refused, held)',
   labelNames: ['type', 'outcome'] as const,
   registers: [register],
 });

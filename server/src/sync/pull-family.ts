@@ -13,14 +13,14 @@
  *
  * The receiver decides what it stores (`sync/accept-page.ts`, `Q-204`): the wire schema per document, held tombstones,
  * forks within the caps, then the one arrival writer (`sync/arrivals.ts`) and its guards — the deliverer is the member the
- * page was read from. A write the store could not do is a RECORD-WRITE failure, not an unreachable peer: the transfer
- * stops, holds `deliveredThrough` below the page, and fetches it again next cycle. It used to escape to the member-level
- * catch, which counts toward PEER UNREACHABLE and names the driver error and nothing else.
+ * page was read from. A page that cannot land here is THIS INSTANCE's fault, not an unreachable peer: the transfer
+ * stops as `'local'` (`landingStop`, `sync/arrival-stop.ts`), holds `deliveredThrough` below the page, and fetches it again next
+ * cycle; the member's turn is a `local-fault`, never counted toward PEER UNREACHABLE (bundle-39 D1).
  *
  * ## What it reports
  *
  * `deliveredThrough` is what the pager says: the peer's own position this transfer is COMPLETE through (a stop inside a run of equal
- * positions reports the position before it), and `stoppedBy` says whether a stop was the cycle's cap, a hold (the edges family while this instance rebuilds its edge identity index) or a fault. A record carries no position
+ * positions reports the position before it), and `stoppedBy` says whether a stop was the cycle's cap, a hold (the edges family while this instance rebuilds its edge identity index), a page that could not land here, shutdown or a fault. A record carries no position
  * on the wire, so nothing here derives one from a record; there is no author guard either — the mark is the peer's position in ITS stream
  * and a relayed record is as much a part of it as an authored one.
  */
@@ -31,8 +31,9 @@ import { mergeSummaries, NOTHING_RECORDED, type RecordedSummary } from './arriva
 import { pagePositionRuns } from './position-run-pager.js';
 import { stopTransfer, truncationWarn, type TransferOutcome } from './watermark.js';
 import { boundedJson } from '../util/bounded-read.js';
-import { log, logSafe, peerText } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { PositionsBuilding, EdgeIdentityBuilding } from '../util/errors.js';
+import { landingStop } from './arrival-stop.js';
 import type { LinkageCheck } from './linkage-check.js';
 import type { ReplicatedFamily } from './replicated-families.js';
 import type { NetworkMember, FactDoc } from '../config/types.js';
@@ -106,8 +107,9 @@ export async function pullFamily(o: {
           stopTransfer(outcome, () => {}, reason, 'held');   // said once, by the pager's own stop for the reason handed back
           return reason;
         }
-        return `a record write failed in space '${peerText(spaceId)}' (${logSafe(err instanceof Error ? err.message : String(err))}); `
-          + "this is this instance's database, not the peer, and the page is fetched again next cycle";
+        // Anything else thrown while landing a page the peer delivered is this instance's (bundle-39 D1): the transfer stops as `'local'`, never the peer's
+        // failure, and the page is fetched again next cycle.
+        return landingStop(outcome, err, spaceId);
       }
       for (const verdict of written.verdicts) {
         // A fork dropped at its cap and a malformed fork row are refused, not stored: counted as the receiver's own rules refusing them (Q-624).

@@ -58,13 +58,21 @@ export type ReplicatedFamily = {
   readonly payloadKey: BrainCollection | 'filemeta';
   /** The collection this family is stored in — derived, so a seventh collection cannot be invented here. */
   readonly collection: BrainCollection;
+  /**
+   * The key this family is COUNTED under, in a cycle's history (`pulled` / `pushed`) and as the `type` label of the item metrics (bundle-39, Q-265).
+   * File metadata counts as `filemeta`: `files` is the count of FILES the file routes moved, a different thing, and one label with two meanings made
+   * a cycle that moved only file metadata count nothing.
+   */
+  readonly countKey: Exclude<CountKey, 'files'>;
   readonly pushFilter?: Record<string, unknown>;
 };
 
 /**
  * **The ORDER is a rule: every family a reference can point at comes before every family that holds references**
  * (bundle-30 I13). A sender pushes one family per `batch-upsert` request in this order, and the receiver checks strict
- * linkage after each request (`sync/linkage-check.ts`). The order was facts, entities, edges, chrono, links, filemeta,
+ * linkage after each request (`sync/linkage-check.ts`).
+ * <!-- replicated-family-order: history -->
+ * The order was facts, entities, edges, chrono, links, filemeta,
  * so an edge to a chrono entry and a link to a file created in the same interval arrived ahead of their targets and
  * were recorded missing for good. Targets first, the receiver never sees a reference before a target the same cycle
  * carries — and neither does a receiver that predates this order, since it checks the same way.
@@ -75,22 +83,81 @@ export type ReplicatedFamily = {
  * `the-sync-order-puts-targets-before-references.test.js`, which derives both sets from the code.
  */
 export const REPLICATED_FAMILIES: readonly ReplicatedFamily[] = [
-  { payloadKey: 'facts', collection: 'facts' },
-  { payloadKey: 'entities', collection: 'entities' },
-  { payloadKey: 'chrono', collection: 'chrono' },
-  { payloadKey: 'filemeta', collection: 'files', pushFilter: LIVE_FILE_ROW },
-  { payloadKey: 'edges', collection: 'edges' },
-  { payloadKey: 'links', collection: 'links' },
+  { payloadKey: 'facts', collection: 'facts', countKey: 'facts' },
+  { payloadKey: 'entities', collection: 'entities', countKey: 'entities' },
+  { payloadKey: 'chrono', collection: 'chrono', countKey: 'chrono' },
+  { payloadKey: 'filemeta', collection: 'files', countKey: 'filemeta', pushFilter: LIVE_FILE_ROW },
+  { payloadKey: 'edges', collection: 'edges', countKey: 'edges' },
+  { payloadKey: 'links', collection: 'links', countKey: 'links' },
 ] as const;
+
+/**
+ * What a cycle counts: each family under its `countKey`, and `files`, the FILES the file routes moved (`sync/file-sync.ts`; a count, not bytes).
+ * Spelled here because the rows' own type names it; `every-replicated-family-is-counted-db` holds that the counts a cycle writes are exactly the
+ * rows' keys plus `files`.
+ */
+export const COUNT_KEYS = ['facts', 'entities', 'chrono', 'filemeta', 'edges', 'links', 'files'] as const;
+export type CountKey = typeof COUNT_KEYS[number];
+
+/** A cycle's counts, one per key: the `pulled` / `pushed` of a history row. */
+export type SyncCounts = Record<CountKey, number>;
+
+/** Every count at 0: where a member's or a cycle's tally starts. */
+export function zeroCounts(): SyncCounts {
+  return Object.fromEntries(COUNT_KEYS.map(k => [k, 0])) as SyncCounts;
+}
+
+/** One direction's family counts, each under its `countKey`, read off the per-family results by `pick`: a family that did not run counts 0. */
+export function countsOf<T>(perFamily: Partial<Record<PayloadKey, T>>, pick: (r: T) => number): SyncCounts {
+  const out = zeroCounts();
+  for (const f of REPLICATED_FAMILIES) { const r = perFamily[f.payloadKey]; if (r !== undefined) out[f.countKey] = pick(r); }
+  return out;
+}
+
+/** Add `more` into `into`, every key of the list: a hand-written sum of five keys never summed links (Q-59). */
+export function addCounts(into: SyncCounts, more: Partial<SyncCounts>): void {
+  for (const k of COUNT_KEYS) into[k] += more[k] ?? 0;
+}
 
 /**
  * The collections a sender pushing in `REPLICATED_FAMILIES` order has still to send after a request carrying `keys`:
  * every family after the LAST one the request carries. What the push door passes the linkage check as `stillToCome`,
  * so a target in one of them is not judged missing before its request arrives.
  */
-export function familiesAfter(keys: readonly PayloadKey[]): BrainCollection[] {
+export function familiesAfter(keys: readonly PayloadKey[], incomplete: readonly TargetKey[] = []): BrainCollection[] {
   const last = Math.max(-1, ...keys.map(k => REPLICATED_FAMILIES.indexOf(familyOf(k))));
-  return REPLICATED_FAMILIES.slice(last + 1).map(f => f.collection);
+  const after = REPLICATED_FAMILIES.slice(last + 1).map(f => f.collection);
+  // The target families the sender says stopped early earlier in its cycle (bundle-39 D4, Q-334): still to come, whatever the order says. Mapped to
+  // their collections, which is what the check is told (`filemeta` is the `files` collection, v6 S3).
+  for (const k of incomplete) { const c = familyOf(k).collection; if (!after.includes(c)) after.push(c); }
+  return after;
+}
+
+/**
+ * The families a reference can point at, by payload key: every family but the two that hold references (`REFERENCE_FAMILIES`, `sync/linkage-check.ts`).
+ * Nothing points at an edge or a link, so naming one would hide nothing a receiver judges.
+ */
+export const TARGET_KEYS = ['facts', 'entities', 'chrono', 'filemeta'] as const satisfies readonly PayloadKey[];
+export type TargetKey = typeof TARGET_KEYS[number];
+
+/**
+ * The target families whose transfer stopped early (truncated, any kind) among `transfers`, in list order: a reference that travels after them must
+ * not be judged against them this cycle (bundle-39 D4). The pull's own check reads it; the push sends it as `incomplete` on every later request.
+ */
+export function familiesNotComplete(transfers: Partial<Record<PayloadKey, { truncated: boolean } | undefined>>): TargetKey[] {
+  return TARGET_KEYS.filter(k => transfers[k]?.truncated === true);
+}
+
+/**
+ * A pushing peer's `incomplete`, read defensively (bundle-39 v4 S1, v6 S4): the target payload keys it names, deduped; anything else (a string, an
+ * unknown key, a non-string, an object) is dropped and never reaches `familyOf`, which throws. `ignored` says something was dropped, for the one warn.
+ * An untrusted peer can only leave its own request's targets unjudged, which it could already do by splitting requests (`familiesAfter`).
+ */
+export function parseIncompleteFamilies(raw: unknown): { keys: TargetKey[]; ignored: boolean } {
+  if (raw === undefined) return { keys: [], ignored: false };
+  if (!Array.isArray(raw)) return { keys: [], ignored: true };
+  const keys = TARGET_KEYS.filter(k => raw.includes(k));
+  return { keys, ignored: raw.length > TARGET_KEYS.length || raw.some(v => typeof v !== 'string' || !(TARGET_KEYS as readonly string[]).includes(v)) };
 }
 
 /** A family's payload key. One declaration, on the row type, so the union cannot drift from the rows. */

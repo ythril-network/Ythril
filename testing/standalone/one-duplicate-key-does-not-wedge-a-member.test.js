@@ -144,7 +144,7 @@ describe('one duplicate key does not wedge a member', () => {
     // Re-anchored for Q-624 (design rev 4 section 5.4): the page-write catch carries ONE other hold besides the positions one, the receiver's own edges family
     // (`EdgeIdentityBuilding`), which stops the transfer as HELD and hands the pager its reason; every other failure still returns a record-write failure, and
     // nothing in the catch throws but the positions hold (checked below).
-    assert.match(after, /catch \(err\) \{\s*\n\s*(?:if \(isPositionsBuilding\(err\)\) throw err;\s*\n\s*)?(?:(?:\/\/[^\n]*\n\s*)*if \(err instanceof EdgeIdentityBuilding\) \{[\s\S]*?\n\s*\}\s*\n\s*)?return `a record write failed[\s\S]*?\}\s*$/,
+    assert.match(after, /catch \(err\) \{\s*\n\s*(?:if \(isPositionsBuilding\(err\)\) throw err;\s*\n\s*)?(?:(?:\/\/[^\n]*\n\s*)*if \(err instanceof EdgeIdentityBuilding\) \{[\s\S]*?\n\s*\}\s*\n\s*)?(?:return `a record write failed[\s\S]*?|return landingStop\(outcome, err, spaceId\);\s*)\}\s*$/,
       'a failed page write must be caught in the transfer — and handed back as a record-write failure that stops it, '
       + 'not rethrown into the member-level catch, which counts it toward PEER UNREACHABLE');
     // The one rethrow is a space that owes its positions: that is the member's HOLD (the turn catches it), never a failure to count.
@@ -164,7 +164,9 @@ describe('one duplicate key does not wedge a member', () => {
   it('the member-level escalation still exists for real failures', () => {
     // Guard against the fix being "stop escalating anything". PEER UNREACHABLE is correct when the peer is
     // actually unreachable; the defect was a record fault reaching it, not the escalation itself.
-    assert.match(engine, /PEER UNREACHABLE/,
+    // bundle-39 (Q-220): the escalation moved with the member's accounting to `sync/cycle-outcome.ts`, which both sync doors call.
+    const outcome = stripComments(readFileSync('server/src/sync/cycle-outcome.ts', 'utf8'));
+    assert.match(engine + outcome, /PEER UNREACHABLE/,
       'the peer-unreachable escalation must survive — this gate is about what reaches it, not about removing it');
   });
 });

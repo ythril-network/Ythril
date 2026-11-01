@@ -207,7 +207,8 @@ describe('sync engine — the per-network dedup lock', () => {
 
   it('completes a members-less cycle as a success, not an error', async () => {
     const result = await engine.runSyncForNetwork('net-empty');
-    assert.deepEqual(result, { synced: 0, errors: 0 });
+    assert.deepEqual({ synced: result.synced, errors: result.errors, outcome: result.outcome, members: result.members },
+      { synced: 0, errors: 0, outcome: 'success', members: [] });
     await waitFor(() => !engine.isNetworkSyncing('net-empty'), 5_000, 50, undefined, { what: 'the sync lock for net-empty to be released' });
   });
 });

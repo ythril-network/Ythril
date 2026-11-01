@@ -89,7 +89,17 @@ export interface NetworkMember {
    * restore re-reads anyway), and never shown by a network view: the admin view's `rereadOwed` lists it.
    */
   fullRereadState?: Record<string, string>;
-  consecutiveFailures?: number;  // incremented on each failed sync; reset to 0 on success
+  /**
+   * Consecutive cycles in which the PEER did not answer (`failed`, `sync/cycle-outcome.ts`); reset by any turn in which it answered, whatever this
+   * instance then failed to do (bundle-39 D1 v2). PEER UNREACHABLE is logged at 10; the network chip turns degraded at 3.
+   */
+  consecutiveFailures?: number;
+  /**
+   * Consecutive turns with this member that THIS instance could not complete (`local-fault`: a page it could not land, its own store failing, no
+   * token stored): reset only by a turn with no local fault, so a lasting one stays visible though `consecutiveFailures` resets (bundle-39 v5, v6 S7).
+   * The network chip turns degraded at 3; LOCAL STORE FAILING is logged once at 10.
+   */
+  consecutiveLocalFaults?: number;
   /**
    * LOCAL to a publisher: the network space ids this subscriber answered `423 space_declined` for — it left the space (design v5 §2.9,
    * X10). The publisher stops requesting a declined space from it until the subscriber announces the space again. Never announced,

@@ -4,8 +4,10 @@
  *
  * ## What this prevents (bundle-30 I8, pre-ship data-integrity and performance lenses)
  *
- * The check ran fire-and-forget right after each PAGE landed. A pull lands its families one page at a time in
- * `REPLICATED_FAMILIES` order — then facts, entities, edges, chrono, links, filemeta — so an edge to a chrono entry, or a
+ * The check ran fire-and-forget right after each PAGE landed.
+ * <!-- replicated-family-order -->
+ * A pull lands its families one page at a time in `REPLICATED_FAMILIES` order, now facts, entities, chrono, filemeta, edges, links;
+ * in the order the list had then (it is quoted as history in `sync/replicated-families.ts`) an edge to a chrono entry, or a
  * link to a file, created in the same interval was checked while its target was still to be pulled, and recorded as a
  * violation. Each record had a fresh uuid that nothing dedupes, so every later re-landing of the edge added another.
  * This is the copy that RECORDS rather than refuses (the y-flows red flag `red-flag-architecture-copy-that-records`): an operator reads each of those as real damage. And
@@ -13,7 +15,8 @@
  *
  * So a door collects what landed (`add`) and checks once (`run`) when its transfer is whole: a pull after every
  * family of the space's transfer, a push after the request's page — with the families the sender has still to push
- * after it named as `stillToCome` (`familiesAfter`). The push door's request is ONE family, because the sender pushes
+ * after it named as `stillToCome` (`familiesAfter`), and the target families the sender says stopped early earlier in its cycle (`incomplete`,
+ * bundle-39 D4) beside them. The push door's request is ONE family, because the sender pushes
  * one per request; that is why the families travel targets first (`REPLICATED_FAMILIES`, bundle-30 I13), and why an
  * edge to a chrono entry pushed in the old order (edges before chrono) was still recorded after I8.
  *

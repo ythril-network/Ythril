@@ -16,15 +16,16 @@
  */
 
 import { getConfig, saveConfig, saveConfigSoon, getSecrets } from '../config/loader.js';
-import { CycleOutcome } from './cycle-outcome.js';
+import { CycleOutcome, REASONS, cycleStatusOf, type MemberResult, type SyncVerdict } from './cycle-outcome.js';
+import { isShuttingDown } from '../lifecycle.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { col, asFilter } from '../db/mongo.js';
 import { deliverChangeNotes } from './change-notes.js';
-import { recordSyncResult, type SyncCounts, type SyncSchemaRecording } from './history.js';
+import { recordSyncResult, type SyncSchemaRecording } from './history.js';
 import { mergeSummaries, NOTHING_RECORDED, type RecordedSummary } from './arrival-recording.js';
 import type { SyncHeldSpace, SyncDeclinedSpace } from './history.js';
 import { log, peerText } from '../util/log.js';
-import { exchangeSpacesWithMember, type MemberExchange } from './space-exchange.js';
+import { emptyExchange, exchangeSpacesWithMember, type MemberExchange } from './space-exchange.js';
 import { liftDeclinesFromAnnounce } from './space-exchange-set.js';
 import { takeServedRounds } from './served-rounds.js';
 import { adoptAnnouncedSpaces, announcedSpaces, healAnnouncedAliases } from '../networks/network-spaces.js';
@@ -54,10 +55,6 @@ import { stampLastSync } from './member-status.js';
 // receiver's hold deadline is derived from the batch one (`db/write-bound.ts`).
 import { FETCH_TIMEOUT_MS, BATCH_FETCH_TIMEOUT_MS } from './peer-timeouts.js';
 
-// After this many consecutive sync failures for a single member, we emit a
-// prominent warning. The member is NOT auto-removed — that is a human decision.
-const STALE_FAILURE_THRESHOLD = 10;
-
 /**
  * A refused members or votes pull, said once per (route, network, member, status) and window, not per cycle: the peer may list this
  * instance only after a join vote passes, or on one side only, and both routes now refuse a caller without standing (Q-454).
@@ -79,22 +76,7 @@ export { remoteToLocal, localToRemote } from './space-map.js';
 // against a cycle that would have been load-order-dependent and intermittent.
 
 // ── Per-network sync ────────────────────────────────────────────────────────
-
-/** Set or increment the consecutive failure counter for a member and persist it.
- *  Pass `'increment'` to add 1 and return the new count; pass a number to set
- *  the counter to that value (use 0 to reset on success). */
-function _setFailureCount(networkId: string, instanceId: string, value: number | 'increment'): number {
-  const cfg = getConfig();
-  const net = cfg.networks.find(n => n.id === networkId);
-  const member = net?.members.find(m => m.instanceId === instanceId);
-  if (!member) return typeof value === 'number' ? value : 1;
-  const newValue = value === 'increment' ? (member.consecutiveFailures ?? 0) + 1 : value;
-  member.consecutiveFailures = newValue;
-  // Hot-path bookkeeping: written for every member every cycle. Coalesced async
-  // write — a lost counter on crash is cosmetic (it re-derives on the next cycle).
-  saveConfigSoon(cfg);
-  return newValue;
-}
+// A member's failure counters, PEER UNREACHABLE and the local-fault streak are moved by the one classifier both doors use (`sync/cycle-outcome.ts`).
 
 // ── Per-network sync dedup lock ─────────────────────────────────────────────
 // Prevents concurrent sync cycles for the same network from competing for
@@ -106,7 +88,7 @@ function _setFailureCount(networkId: string, instanceId: string, value: number |
 // `runSyncForNetwork` is async, so the in-flight promise it returns is never referentially equal to
 // the one it holds, and a members-less cycle resolves in microtasks, so a queued rerun starts and
 // finishes before any caller resumes.
-const _syncRunner = createCoalescingRunner<{ synced: number; errors: number }>({
+const _syncRunner = createCoalescingRunner<NetworkCycleResult>({
   onQueued: (id) => log.debug(`Sync cycle already running for network ${peerText(id)} — queuing rerun`),
   onRerun: (id) => log.debug(`Rerun requested for network ${peerText(id)} — starting`),
 });
@@ -122,7 +104,7 @@ export function isNetworkSyncing(networkId: string): boolean {
  *  Concurrent triggers for the same network join the running cycle rather than starting another, and
  *  schedule exactly one follow-up. Resolves with the result of the cycle the caller JOINED, not of
  *  any rerun. */
-export async function runSyncForNetwork(networkId: string): Promise<{ synced: number; errors: number }> {
+export async function runSyncForNetwork(networkId: string): Promise<NetworkCycleResult> {
   return _syncRunner.run(networkId, () => inCycle(() => _runSyncForNetworkImpl(networkId)));
 }
 
@@ -134,102 +116,67 @@ async function inCycle<T>(run: () => Promise<T>): Promise<T> {
   try { return await run(); } finally { cyclesInFlight--; }
 }
 
-async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: number; errors: number }> {
+async function _runSyncForNetworkImpl(networkId: string): Promise<NetworkCycleResult> {
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
   if (!net) throw new Error(`Network ${networkId} not found`);
 
   const triggeredAt = new Date().toISOString();
-  const pulled: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
-  const pushed: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
-  const errorMessages: string[] = [];
   // What the cycle's pulls stored against the local schemas' rules, per space across every member (`sync/arrival-recording.ts`, R6-9).
   const recordedBySpace = new Map<string, RecordedSummary>();
   // Spaces not exchanged and why, per space across every member: a hold or a decline is not a failure (W9, X10).
   const heldBySpace = new Map<string, SyncHeldSpace>(); const declinedBySpace = new Map<string, SyncDeclinedSpace>();
 
   log.info(`Starting sync cycle for network '${peerText(net.label)}' (${net.members.length} members)`);
-  let synced = 0; let errors = 0; const cycle = new CycleOutcome();
+  // Every member's turn is read by the one classifier both doors use (`sync/cycle-outcome.ts`): its outcome, its counters, the cycle's tally.
+  const cycle = new CycleOutcome();
   const syncTimer = syncDurationSeconds.startTimer({ network: networkId });
 
   for (const member of net.members) {
-    try {
-      const counts = await runSyncForMember(net, member);
-      // Every family, links included: a hand-written list of five here never summed links into the cycle (Q-59).
-      for (const k of Object.keys(pulled) as (keyof SyncCounts)[]) { pulled[k] += counts.pulled[k]; pushed[k] += counts.pushed[k]; }
-      for (const r of counts.recorded) recordedBySpace.set(r.spaceId, mergeSummaries(recordedBySpace.get(r.spaceId) ?? NOTHING_RECORDED, r));
-      for (const h of counts.held) (heldBySpace.get(h.spaceId) ?? heldBySpace.set(h.spaceId, { spaceId: h.spaceId, members: [], reason: h.reason, ...(h.families ? { families: h.families } : {}) }).get(h.spaceId)!).members.push(member.instanceId);
-      for (const d of counts.declined) (declinedBySpace.get(d) ?? declinedBySpace.set(d, { spaceId: d, members: [] }).get(d)!).members.push(member.instanceId);
-      // A member whose transfers were refused or cut short moved nothing it was asked to move. Counting it as
-      // synced recorded `success` for a network that had transferred nothing since it was created (`Q-48`), so
-      // it takes the failure path below: an error for the cycle, a reason in the history, a failure counted.
-      if (counts.incomplete.length > 0) throw new Error(`transfer did not complete — ${counts.incomplete.join('; ')}`);
-      // Q-59: records the peer answered for and refused make the cycle PARTIAL with the reason, not a failure of the
-      // member — it answered, so its failure counter (and the "unreachable" alarm read from it) must not move.
-      // A pull stopped at the cycle's page cap is catching up, not failed (decision 33): it answered and its mark moved.
-      cycle.fold(member, counts, errorMessages);
-      synced++;
-      // Reset failure counter on success
-      _setFailureCount(net.id, member.instanceId, 0);
-
-      // If any members were temporarily re-parented away from this peer while it was
-      // offline, now is the right moment to surface the choice to the admin.
-      const reparentedChildren = net.members.filter(
-        m => m.originalParentInstanceId === member.instanceId,
+    // Shutdown began, or this instance's store stopped answering: the rest are not attempted, and no counter moves for them (bundle-39 D5, v6 S6).
+    const stop = cycle.stopped();
+    if (stop) { cycle.skip(net, member, stop); continue; }
+    let counts: MemberExchange;
+    try { counts = await runSyncForMember(net, member); } catch (err) { cycle.member(net, member, { thrown: err }); continue; }
+    for (const r of counts.recorded) recordedBySpace.set(r.spaceId, mergeSummaries(recordedBySpace.get(r.spaceId) ?? NOTHING_RECORDED, r));
+    for (const h of counts.held) (heldBySpace.get(h.spaceId) ?? heldBySpace.set(h.spaceId, { spaceId: h.spaceId, members: [], reason: h.reason, ...(h.families ? { families: h.families } : {}) }).get(h.spaceId)!).members.push(member.instanceId);
+    for (const d of counts.declined) (declinedBySpace.get(d) ?? declinedBySpace.set(d, { spaceId: d, members: [] }).get(d)!).members.push(member.instanceId);
+    const { outcome } = cycle.member(net, member, counts);
+    if (outcome !== 'success' && outcome !== 'catching-up' && outcome !== 'records-refused') continue;
+    // If any members were temporarily re-parented away from this peer while it was
+    // offline, now is the right moment to surface the choice to the admin.
+    const reparentedChildren = net.members.filter(
+      m => m.originalParentInstanceId === member.instanceId,
+    );
+    for (const rc of reparentedChildren) {
+      log.warn(
+        `REPARENT_REVERT_AVAILABLE: original parent '${peerText(member.label)}' is back online. ` +
+        `'${peerText(rc.label)}' (${peerText(rc.instanceId)}) was temporarily re-parented during the outage. ` +
+        `To restore original topology: POST /api/networks/${peerText(net.id)}/members/${peerText(rc.instanceId)}/revert-parent. ` +
+        `To make the adoption permanent:  POST /api/networks/${peerText(net.id)}/members/${peerText(rc.instanceId)}/adopt.`,
       );
-      for (const rc of reparentedChildren) {
-        log.warn(
-          `REPARENT_REVERT_AVAILABLE: original parent '${peerText(member.label)}' is back online. ` +
-          `'${peerText(rc.label)}' (${peerText(rc.instanceId)}) was temporarily re-parented during the outage. ` +
-          `To restore original topology: POST /api/networks/${peerText(net.id)}/members/${peerText(rc.instanceId)}/revert-parent. ` +
-          `To make the adoption permanent:  POST /api/networks/${peerText(net.id)}/members/${peerText(rc.instanceId)}/adopt.`,
-        );
-      }
-    } catch (err) {
-      // A peer answered in the 5.x shape: its turn ended, no mark was written, and no failure is counted (Q-59: a refusal is not a failure).
-      if (cycle.foldRefusal(err, net, member, errorMessages)) continue;
-      const errMsg = `Sync failed for member ${member.label} (${member.instanceId}): ${err}`;
-      log.error(peerText(errMsg));
-      errorMessages.push(errMsg);
-      errors++;
-      const failures = _setFailureCount(net.id, member.instanceId, 'increment');
-      if (failures === STALE_FAILURE_THRESHOLD) {
-        const hasChildren = net.type === 'braintree' && (member.children?.length ?? 0) > 0;
-        log.warn(
-          `PEER UNREACHABLE: '${peerText(member.label)}' in network '${peerText(net.label)}' has failed ` +
-          `${failures} consecutive sync cycles. Last success: ${peerText(member.lastSyncAt ?? 'never')}. ` +
-          `Member has NOT been removed — manual action required.` +
-          (hasChildren
-            ? ` NOTE: this node has ${member.children!.length} child(ren) in a braintree network — its entire subtree is now partitioned from this brain until it comes back online.`
-            : ''),
-        );
-      } else if (failures > STALE_FAILURE_THRESHOLD && failures % 10 === 0) {
-        log.warn(`PEER STILL UNREACHABLE: '${peerText(member.label)}' (${failures} consecutive failures, last success: ${peerText(member.lastSyncAt ?? 'never')})`);
-      }
     }
   }
+  const { synced, errors, members, pulled, pushed, errorMessages } = cycle;
 
   // Q-135: pair with every club member a peer introduced this cycle (or earlier, and not yet paired). Never throws.
-  await pairIntroduced(networkId);
+  if (!isShuttingDown()) await pairIntroduced(networkId);
 
   log.info(`Sync cycle complete for '${peerText(net.label)}': ${synced} ok, ${errors} errors`);
   syncTimer();
 
-  // Calculate status once and share between Prometheus and sync history
-  const status = cycle.status(synced, errors, net.members.length);
-
-  // Record Prometheus metrics
+  // One verdict, from the members' outcomes (`syncVerdict`): the metric, the history and every door read the same word.
+  const verdict = cycle.verdict();
+  const status = cycleStatusOf(verdict);
   syncCyclesTotal.inc({ network: networkId, status });
-  // Every knowledge collection, so a new one is counted without an edit. Order is irrelevant here: the
-  // body only increments two Prometheus counters.
-  cycle.countItems(pulled, pushed);
+  cycle.countItems();
 
   // Persist sync history
   recordSyncResult({
     networkId,
     triggeredAt,
     completedAt: new Date().toISOString(),
-    status: status === 'refused' ? 'failed' : status, // nothing was exchanged: the history says `failed`, its errors say why
+    status,
     pulled,
     pushed,
     ...(errorMessages.length > 0 ? { errors: errorMessages } : {}),
@@ -291,19 +238,17 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<{ synced: numb
     }
   }
 
-  return { synced, errors };
+  return { synced, errors, members, outcome: verdict.outcome };
 }
 
 /**
  * Trigger a sync cycle for a single peer across every network it appears in.
  * `peerId` must be an exact instanceId match from the registered member list —
  * it is never used as a URL (SSRF guard, SEC-16).
- * Returns a summary of how many network/member pairs were synced and how many
- * errored.
+ * Returns how many network/member pairs were synced, errored (failed or this instance's fault) and too old, each pair's outcome by the
+ * classifier the scheduled cycle uses (bundle-39 D1), and the verdict over them. No history row and no cycle metric: it is no network's cycle.
  */
-export async function runSyncForPeer(
-  peerId: string,
-): Promise<{ networksSynced: number; errors: number; refused: number; notFound: boolean }> {
+export async function runSyncForPeer(peerId: string): Promise<PeerCycleResult> {
   const cfg = getConfig();
   const matches: Array<{ net: typeof cfg.networks[number]; member: typeof cfg.networks[number]['members'][number] }> = [];
 
@@ -312,24 +257,26 @@ export async function runSyncForPeer(
     if (member) matches.push({ net, member });
   }
 
-  if (matches.length === 0) return { networksSynced: 0, errors: 0, refused: 0, notFound: true };
+  if (matches.length === 0) return { networksSynced: 0, errors: 0, refused: 0, notFound: true, members: [], outcome: 'success' };
 
-  let networksSynced = 0; let errors = 0; let refused = 0;
-  for (const { net, member } of matches) {
-    try {
-      await inCycle(() => runSyncForMember(net, member));
-      networksSynced++;
-      _setFailureCount(net.id, member.instanceId, 0);
-    } catch (err) {
-      // A peer that pages by seq (pre-6.0) ended its turn: nothing was exchanged and no failure is counted, as in a cycle (decision 33).
-      if (new CycleOutcome().foldRefusal(err, net, member, [])) { refused++; continue; }
-      log.error(`network_sync failed for peer ${peerText(member.label)} (${peerText(member.instanceId)}) in network '${peerText(net.label)}': ${peerText(err)}`);
-      errors++;
-      _setFailureCount(net.id, member.instanceId, 'increment');
+  const cycle = new CycleOutcome();
+  await inCycle(async () => {
+    for (const { net, member } of matches) {
+      const stop = cycle.stopped();
+      if (stop) { cycle.skip(net, member, stop); continue; }
+      try { cycle.member(net, member, await runSyncForMember(net, member)); } catch (err) { cycle.member(net, member, { thrown: err }); }
     }
-  }
-  return { networksSynced, errors, refused, notFound: false };
+  });
+  const refused = cycle.members.filter(m => m.outcome === 'peer-too-old').length;
+  return { networksSynced: cycle.synced, errors: cycle.errors, refused, notFound: false, members: cycle.members, outcome: cycle.verdict().outcome };
 }
+
+/** What a network cycle answers: the members synced and errored, each member's outcome, and the cycle's verdict word (`syncVerdict`). */
+export type NetworkCycleResult = { synced: number; errors: number; members: MemberResult[]; outcome: SyncVerdict['outcome'] };
+/** What a single-peer sync answers: the same, over every network the peer is a member of. */
+export type PeerCycleResult = {
+  networksSynced: number; errors: number; refused: number; notFound: boolean; members: MemberResult[]; outcome: SyncVerdict['outcome'];
+};
 
 /** Sync a single member across all network spaces. */
 async function runSyncForMember(
@@ -341,8 +288,8 @@ async function runSyncForMember(
   const peerToken = getSecrets().peerTokens[member.instanceId];
   if (!peerToken) {
     log.warn(`No peer token for ${peerText(member.label)} (${peerText(member.instanceId)}) — skipping sync`);
-    const none: SyncCounts = { facts: 0, entities: 0, edges: 0, files: 0, chrono: 0, links: 0 };
-    return { pulled: none, pushed: { ...none }, incomplete: ['no peer token for this member'], capped: [], refused: [], recorded: [], held: [], declined: [] };
+    // This instance's own configuration, not the peer's failure (v6 S10): a local fault, and the peer was not asked.
+    return { ...emptyExchange(), localFaults: [REASONS['no-token']] };
   }
 
   const headers: Record<string, string> = {
@@ -360,8 +307,8 @@ async function runSyncForMember(
   // Ask the peer to eagerly warm its embedding model, bcrypt token cache,
   // and MongoDB collection handles BEFORE we start the real sync cycle.
   // The peer's POST /api/sync/warm returns only once everything is ready.
-  // In parallel, warm our own local MongoDB collections.
-  {
+  // In parallel, warm our own local MongoDB collections. Neither it nor governance starts once shutdown has (bundle-39 D5).
+  if (!isShuttingDown()) {
     const peerWarm = peerSafeFetch(`${member.url}/api/sync/warm`, {
       ...fetchOpts(),
       method: 'POST',
@@ -405,9 +352,9 @@ async function runSyncForMember(
   // internally best-effort (they catch their own errors); the extra guard here
   // keeps a data-plane failure below from ever masking governance progress.
   try {
-    await gossipWithPeer(net, member, fetchOpts);
-    await propagateVotesWithPeer(net, member, fetchOpts);
-    await deliverChangeNotes(net, member, fetchOpts); // F-42: only to a member below us; never throws, undelivered stays queued
+    if (!isShuttingDown()) await gossipWithPeer(net, member, fetchOpts);
+    if (!isShuttingDown()) await propagateVotesWithPeer(net, member, fetchOpts);
+    if (!isShuttingDown()) await deliverChangeNotes(net, member, fetchOpts); // F-42: only to a member below us; never throws, undelivered stays queued
   } catch (err) {
     log.warn(`Governance gossip with ${peerText(member.label)} (${peerText(member.instanceId)}): ${peerText(err)}`);
   }

@@ -14,13 +14,16 @@
  *  - **An EMPTY or SHORT read is complete through the settled cap less one**, not through the last row sent and not through nothing: every position
  *    below the cap is delivered or does not exist (a write in flight holds the cap below it), so a cycle whose only content was a tombstone, or whose
  *    selection found nothing, still moves the mark (Q-394). Without that the same rows were offered again every cycle for ever.
- *  - **A refusal stops the transfer** (`stopTransfer`) at the position it is complete through; the cycle's page bound stops it as a CAP.
+ *  - **A refusal stops the transfer** (`stopTransfer`) at the position it is complete through; the cycle's page bound stops it as a CAP, and shutdown at
+ *    the next page boundary as `'closing'` (bundle-39 D5: the record push has no page bound of its own, so this hook carries the whole bound).
  *
  * The rows come back without their position (a position is local and never on the wire), and `read` is the position reader (`readAfterPosition`),
  * which asks the readiness of the space inside, so a space that owes its positions throws `PositionsBuilding` here and sends nothing.
  */
 import { completeThrough, stopAtPageBound, stopTransfer, type TransferOutcome, type TransferStopped } from './watermark.js';
 import type { PositionRead, PositionStart } from '../util/position-keyset.js';
+import { stopKindOfThrow } from './arrival-stop.js';
+import { isShuttingDown } from '../lifecycle.js';
 
 export async function pushPositionRuns<T extends { _id: string }>(o: {
   /** In: `deliveredThrough` is the mark the push starts from. Out: what the peer is complete through, and whether and why the push stopped. */
@@ -32,16 +35,25 @@ export async function pushPositionRuns<T extends { _id: string }>(o: {
   /** Send a page. `null`: the peer took it; a string: why the push must stop (the peer refused it). */
   send: (rows: T[]) => Promise<string | null>;
   stopped: TransferStopped;
+  /** Asked at each page boundary: true stops the push as `'closing'` (bundle-39 D5). Defaults to shutdown having begun, as the pull pager's. */
+  shouldStop?: () => boolean;
 }): Promise<void> {
   const { outcome } = o;
+  const shouldStop = o.shouldStop ?? isShuttingDown;
   let after: PositionStart = { pos: outcome.deliveredThrough };
   for (let pages = 0; ; pages++) {
+    if (shouldStop()) { stopTransfer(outcome, o.stopped, 'shutdown began', 'closing'); return; }
     if (stopAtPageBound(outcome, o.stopped, pages, o.maxPages)) return;
     const read = await o.read(after, o.pageSize);
     const rows = read.rows.map(r => r.row);
     const last = read.rows[read.rows.length - 1];
     if (last !== undefined) {
-      const refusal = await o.send(rows);
+      let refusal: string | null;
+      try { refusal = await o.send(rows); } catch (err) {
+        // A send the shutdown signal aborted stops the push for shutdown where the last page was taken; any other throw is the member's, as always.
+        if (stopKindOfThrow(err) === 'closing') { stopTransfer(outcome, o.stopped, 'shutdown began', 'closing'); return; }
+        throw err;
+      }
       if (refusal !== null) { stopTransfer(outcome, o.stopped, refusal); return; }
     }
     const full = read.rows.length >= o.pageSize;

@@ -163,7 +163,8 @@ describe('an arriving record that breaks the schema, as push, pull and import re
         const space = spaceOf('strict');
         door.state.records[space] = { [f.key]: [f.bad(space, `${name}-pulled-bad`, 20), f.ok(space, `${name}-pulled-ok`, 21)] };
         const { result, lines } = await door.logsDuring(() => door.sync());
-        assert.deepEqual(result, { networksSynced: 1, errors: 0, refused: 0, notFound: false });
+        const { networksSynced, errors, refused, notFound, outcome } = result;
+        assert.deepEqual({ networksSynced, errors, refused, notFound, outcome }, { networksSynced: 1, errors: 0, refused: 0, notFound: false, outcome: 'success' });
         assert.deepEqual(ids(await door.coll(space, f.collection).find({}).toArray()), [`${name}-pulled-bad`, `${name}-pulled-ok`].sort(),
           'a pulled violating document was not stored');
         // bundle-23: R6-9 Q-93 (a pulled record is recorded: one warnOnce line per (space, peer) per window, by names and counts, never values) — was no line.

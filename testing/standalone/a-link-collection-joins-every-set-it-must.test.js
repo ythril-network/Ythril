@@ -100,11 +100,12 @@ describe('the link collection joins every set it belongs to', () => {
       + 'drop links and MERKLE_DIVERGENCE stays silent while data is missing');
   });
 
-  it('it REPLICATES — the counts, and the push path', () => {
+  it('it REPLICATES — the counts, and the push path', async () => {
     // Two halves, and each is silent alone: a payload key with no counter loses the number, a counter with
     // no payload key counts a push that never happens.
-    assert.match(code('server/src/sync/history.ts'), new RegExp(`\\b${LINKS}\\s*:\\s*number`),
-      'SyncCounts needs a links count');
+    // bundle-39 (Q-265): the counts are DERIVED from the family list (`COUNT_KEYS`, a key per family's `countKey`), so the links count is read there.
+    const { COUNT_KEYS, REPLICATED_FAMILIES } = await import('../../server/dist/sync/replicated-families.js');
+    assert.ok(COUNT_KEYS.includes(LINKS) && REPLICATED_FAMILIES.some(f => f.countKey === LINKS), 'SyncCounts needs a links count');
     // The engine's two enumerations became one table in `sync/replicated-families.ts` (`A-12`), so the
     // family list is where a missing collection now hides — and it is the only place, which is the point.
     assert.match(code('server/src/sync/replicated-families.ts'), new RegExp(`['"]${LINKS}['"]`),

@@ -22,12 +22,16 @@
  *    went backwards (a database restore with the wall clock set back). The transfer restarts from 0 once, tells the caller (`onBehind`) so the mark is
  *    forgotten and counted, and the re-read sorts it out by id and version.
  *  - **The cycle's page bound is a CAP, not a fault** (`stopAtPageBound`): the transfer reports `stoppedBy: 'cap'` and the engine counts the cycle partial.
+ *  - **Shutdown stops it at a page boundary** (`shouldStop`, bundle-39 D5): `stoppedBy: 'closing'`, the page in flight landed and nothing failed; a fetch
+ *    the shutdown signal aborted is the same stop.
  *
  * `deliveredThrough` rides on `outcome`, updated as the loop goes, so a throw leaves it at the last page delivered.
  */
 import { decodePositionCursor, comparePositionStarts, type PositionStart } from '../util/position-keyset.js';
 import { MAX_TRANSFER_PAGES, stopAtPageBound, stopTransfer, type TransferOutcome, type TransferStopped } from './watermark.js';
 import { parsePageAnswer } from './wire-answer.js';
+import { stopKindOfThrow } from './arrival-stop.js';
+import { isShuttingDown } from '../lifecycle.js';
 
 /** What one request asks: the position to read after, or the peer's own cursor (which wins). */
 export interface PositionRunAsk {
@@ -60,9 +64,15 @@ export async function pagePositionRuns(o: {
   stopped: TransferStopped;
   /** The peer's `head` is below the mark this transfer started from: the peer's positions went backwards. Called once; the transfer then restarts from 0. */
   onBehind?: (peerHead: number, startedFrom: number) => void;
+  /**
+   * Asked at each page boundary: true stops the transfer as `'closing'` where the last page landed (bundle-39 D5). Defaults to shutdown having begun
+   * (`isShuttingDown`), so no caller can leave a transfer paging through the drain; a test passes its own.
+   */
+  shouldStop?: () => boolean;
 }): Promise<void> {
   const { outcome } = o;
   const maxPages = o.maxPages ?? MAX_TRANSFER_PAGES;
+  const shouldStop = o.shouldStop ?? isShuttingDown;
   let ask: PositionRunAsk = { afterPos: outcome.deliveredThrough, cursor: null };
   /** The position the current ask reads AFTER: the mark, or the pair cursor last followed. */
   let floor: PositionStart = { pos: ask.afterPos };
@@ -70,8 +80,14 @@ export async function pagePositionRuns(o: {
   const stop = (why: string): void => stopTransfer(outcome, o.stopped, why);
 
   for (let pages = 0; ; pages++) {
+    if (shouldStop()) { stopTransfer(outcome, o.stopped, 'shutdown began', 'closing'); return; }
     if (stopAtPageBound(outcome, o.stopped, pages, maxPages)) return;
-    const got = await o.fetch(ask, o.limit);
+    let got: PositionRunPage;
+    try { got = await o.fetch(ask, o.limit); } catch (err) {
+      // A fetch the shutdown signal aborted is a stop for shutdown, not the peer's failure; any other throw is the caller's to read, as always.
+      if (stopKindOfThrow(err) === 'closing') { stopTransfer(outcome, o.stopped, 'shutdown began', 'closing'); return; }
+      throw err;
+    }
     if ('status' in got) { stop(`the peer answered ${got.status}`); return; }
     const page = parsePageAnswer(got.body);
 

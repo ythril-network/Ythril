@@ -45,7 +45,7 @@ import { fileMetaForWire, fileMetaForOlderPeer, withAuthoredKeys } from '../api/
 import { log, peerText } from '../util/log.js';
 import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { syncItemsPushedTotal } from '../metrics/registry.js';
-import type { ReplicatedFamily } from './replicated-families.js';
+import type { ReplicatedFamily, TargetKey } from './replicated-families.js';
 import type { NetworkConfig, NetworkMember, FileMetaDoc } from '../config/types.js';
 import type { Document } from 'mongodb';
 
@@ -77,6 +77,12 @@ export async function pushFamily(o: {
   requestInit: () => RequestInit;
   /** The space's turn with this member: its signal cuts the batch in flight, and a refusal the peer answers is handed to it. */
   turn?: ExchangeTurn;
+  /**
+   * The target families whose push stopped early earlier in this cycle (`familiesNotComplete`), sent as `incomplete` on every request, so the receiver
+   * does not judge a reference whose target is still on its way as missing (bundle-39 D4, Q-334). Empty: the field is not sent. An older receiver
+   * ignores it and checks as before.
+   */
+  incomplete?: readonly TargetKey[];
 }): Promise<{ pushed: number; refused: number } & TransferOutcome> {
   const { family, member, spaceId, remoteSpaceId, networkId } = o;
   const key = family.payloadKey;
@@ -104,7 +110,7 @@ export async function pushFamily(o: {
         body: JSON.stringify({ [key]: key === 'filemeta' ? batch.map(d => {
           const wire = fileMetaForWire(d as unknown as FileMetaDoc);
           return onNewerWire ? withAuthoredKeys(wire) : fileMetaForOlderPeer(wire);
-        }) : batch }),
+        }) : batch, ...(o.incomplete && o.incomplete.length > 0 ? { incomplete: o.incomplete } : {}) }),
       });
       const resp = await offer(newer);
       if (!resp.ok) {
@@ -113,13 +119,13 @@ export async function pushFamily(o: {
         if (verdict === 'family-held') {
           // The peer is rebuilding its edge identity index and holds THIS family only. It is not handed to the turn (`refusedBy` would end the whole space's
           // exchange): the family stops as held, the mark stops with it, and every other family of the space goes on.
-          syncItemsPushedTotal.inc({ type: family.collection, outcome: 'held' }, batch.length);
+          syncItemsPushedTotal.inc({ type: family.countKey, outcome: 'held' }, batch.length);
           const reason = `the peer holds the ${key} family (${resp.status}): it is rebuilding its edge identity index`;
           stopTransfer(outcome, () => {}, reason, 'held');   // said once, by the loop's own stop for the reason handed back
           return reason;
         }
         o.turn?.refusedBy(verdict);
-        if (verdict === 'held') syncItemsPushedTotal.inc({ type: family.collection, outcome: 'held' }, batch.length);
+        if (verdict === 'held') syncItemsPushedTotal.inc({ type: family.countKey, outcome: 'held' }, batch.length);
         return `the peer answered ${resp.status}`;
       }
       // A 6.0 receiver stamps its answer; one without the stamp is a 5.x receiver, and this THROWS (the member's turn ends, no mark is written).
@@ -142,7 +148,7 @@ export async function pushFamily(o: {
         }
       }
       pushed += batch.length - r; refused += r; // Q-59: what the peer refused was not pushed
-      if (r > 0) syncItemsPushedTotal.inc({ type: family.collection, outcome: 'refused' }, r);
+      if (r > 0) syncItemsPushedTotal.inc({ type: family.countKey, outcome: 'refused' }, r);
       return null;
     },
     stopped: (why, heldAt) => log.warn(peerText(truncationWarn(`Batch push ${key} to`, member.label ?? '', spaceId, why, heldAt))),

@@ -41,15 +41,14 @@
  * ## The harness
  *
  * The sender is the REAL engine (`runSyncForPeer`) against the pull door's fake peer; the receiver is the REAL `batch-upsert` handler over the same
- * space (`door.push`). The fake peer reads a request that carries a second array key as two families, so the requests are read and the 503 is
- * answered by a tap on the fake peer's HTTP server (the Nth request is answered 503 before the peer sees it) rather than by `door.state.batchUpsert`.
+ * space (`door.push`). The requests are read off the fake peer's own log (`door.state.batchRequests`, which reads only the family keys of a body
+ * and keeps `incomplete` as sent), and the Nth request is answered 503 by `door.state.failBatchAt`.
  *
  * Template: `a-push-never-skips-records-that-share-a-seq-db.test.js` (503 on a family's second batch), `a-push-cycle-records-no-violation-for-a-target-later-in-it-db.test.js`.
  * Run: node --test testing/standalone/a-push-says-which-targets-are-still-coming-db.test.js (requires a prior `npm run build` in server/)
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
@@ -66,42 +65,23 @@ const PUSH_BATCH = 200;
 let door, linkage, linkIdFor, ME;
 let tap;
 
-// ── a tap on the fake peer's HTTP server ───────────────────────────────────────────────────────────────────────────
+// ── the fake peer's own request log ────────────────────────────────────────────────────────────────────────────────
 /**
- * Read every `batch-upsert` request the fake peer's server receives, and answer the numbered ones `failAt` 503 before the peer sees them.
+ * The `batch-upsert` requests the fake peer receives from now on, read off its own log (`door.state.batchRequests`), with the numbered ones `failAt`
+ * (counted from 1 since `reset`) answered 503 before the peer takes them (`door.state.failBatchAt`).
  *
- * What it records per request: `{ n, family, ids, incomplete, body, failed }`, where `family` is the one record family the body carries (the key that
- * is not `incomplete`) and `incomplete` is the field as sent (`undefined` when the body has none). Restored by `release()`.
+ * Per request: `{ n, family, ids, incomplete, body, failed }`, `family` the one record family the body carries and `incomplete` the field as sent
+ * (`undefined` when the body has none). `release()` stops the scripted refusals.
  */
-function installTap(port, failAt = []) {
-  const requests = [];
-  const realEmit = http.Server.prototype.emit;
-  let n = 0;
-  http.Server.prototype.emit = function emit(event, req, res, ...rest) {
-    const mine = event === 'request' && req?.method === 'POST' && String(req.url ?? '').startsWith('/api/sync/batch-upsert') && this.address()?.port === port;
-    if (!mine) return realEmit.call(this, event, req, res, ...rest);
-    const entry = { n: ++n, family: undefined, ids: [], incomplete: undefined, body: undefined, failed: failAt.includes(n) };
-    requests.push(entry);
-    const chunks = [];
-    req.on('data', c => chunks.push(c));
-    req.on('end', () => {
-      try {
-        entry.body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        const families = Object.keys(entry.body).filter(k => k !== 'incomplete' && Array.isArray(entry.body[k]));
-        entry.family = families[0];
-        entry.ids = (entry.body[entry.family] ?? []).map(d => d?._id);
-        entry.incomplete = entry.body.incomplete;
-      } catch { /* an unreadable body leaves the entry empty: the assertions name it */ }
-    });
-    if (entry.failed) {
-      req.resume();
-      res.writeHead(503, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'scripted refusal' }));
-      return true;
-    }
-    return realEmit.call(this, event, req, res, ...rest);
+function installTap(_port, failAt = []) {
+  const from = door.state.batchRequests.length;
+  door.state.failBatchAt = [...failAt];
+  return {
+    get requests() {
+      return door.state.batchRequests.slice(from).map(r => ({ n: r.n, family: r.key, ids: r.ids, incomplete: r.incomplete, body: r.body, failed: r.status !== 200 }));
+    },
+    release: () => { door.state.failBatchAt = []; },
   };
-  return { requests, release: () => { http.Server.prototype.emit = realEmit; } };
 }
 
 const portOf = () => Number(new URL(door.url).port);
