@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Import:** a restore leaves out what this instance deleted after the export was taken, and the next sync brings the network's newer versions and deletions back.
 - **Import:** an export from another instance or another space no longer brings its file sync agreements or its owed fork decisions.
 - **Export:** a space export leaves out file chunks, face records and legacy read spills, which the import never restored.
+- **Export:** a space export whose database fails before the first record answers `503`; the client got a closed connection and no status.
 - **Audit:** exporting a space (`space.export`), importing one (`space.import`), rotating the signing key (`signing.rotate`) and approving a client in the MCP OAuth consent (`mcp.oauth.consent`) each write an audit entry; none was written before.
 - **Audit:** an export the client cuts off is audited once, with `complete: false`, whichever way `audit.logReads` is set; the export of the audit log too.
 - **Audit:** an entity the duplicate scanner merges on its own is audited (`duplicate.automerge`), and each TTL sweep cycle audits what it deleted per space and kind (`ttl.expire`); the sweep's log line names each space and its count.

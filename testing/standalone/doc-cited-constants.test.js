@@ -490,6 +490,22 @@ const CITED = [
     doc: 'docs/integration-guide/06a-schema-api.md',
     text: (v) => new RegExp(sentence(v)),
   })),
+  // How much of a validated import body one page lands (Q-267): a page closes at a count OR a byte size, whichever comes first. The guide
+  // said "a page of 500 documents" after the byte bound landed (b9e0cd1e9), which tells an operator 500 records of 10 MB are one 5 GB page.
+  {
+    what: 'the documents one import page lands at most (admin guide)',
+    source: 'server/src/sync/space-import.ts',
+    code: /export const IMPORT_PAGE_SIZE = ([0-9_]+);/,
+    doc: 'docs/integration-guide/12-admin-api.md',
+    text: (v) => new RegExp(`a page closing at \\*\\*${v}\\*\\* documents or about \\*\\*[0-9]+ MiB\\*\\* of them,\\s+whichever\\s+comes\\s+first`),
+  },
+  {
+    what: 'the bytes one import page lands at most, in MiB (admin guide)',
+    source: 'server/src/sync/export-stream.ts',
+    code: /export const PAGE_MAX_BYTES = ([0-9]+) \* 1024 \* 1024;/,
+    doc: 'docs/integration-guide/12-admin-api.md',
+    text: (v) => new RegExp(`documents or about \\*\\*${v} MiB\\*\\* of them,\\s+whichever\\s+comes\\s+first`),
+  },
 ];
 
 /**
