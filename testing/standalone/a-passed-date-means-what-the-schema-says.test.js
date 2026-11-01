@@ -120,7 +120,8 @@ describe('both doors take the same space-meta fields', () => {
    * that already went wrong.
    */
   const restKeys = (() => {
-    const src2 = src('server/src/spaces/body-schemas.ts');
+    // The space meta body is `@ythril/schema`'s (`schema/src/space-meta.ts`), re-exported by `spaces/body-schemas.ts`.
+    const src2 = src('schema/src/space-meta.ts');
     const at = src2.indexOf('export const SpaceMetaBody = z.object({');
     assert.ok(at > -1, 'SpaceMetaBody moved — re-anchor this gate');
     // The body ends at its `.strict()`, which may be followed by a refinement (F-46 judges the rules there), not only by `;`.

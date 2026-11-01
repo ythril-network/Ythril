@@ -67,7 +67,7 @@
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { resolveRelativeSpecifier } from './_relative-specifier.mjs';
+import { resolveSpecifier } from './_relative-specifier.mjs';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { argumentsOf, balancedFrom, statementFrom } from './_structural-window.mjs';
@@ -267,12 +267,36 @@ export function topLevelBindings(src, taken = new Set()) {
 export function namespaceImports(src, file, has) {
   const map = new Map();
   const add = (local, spec) => {
-    const target = resolveRelativeSpecifier(spec, file, has);
+    const target = resolveSpecifier(spec, file, has);
     if (target) map.set(local, target);
   };
   for (const m of src.matchAll(/import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s*['"]([^'"]+)['"]/g)) add(m[1], m[2]);
   for (const m of src.matchAll(/(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+import\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) add(m[1], m[2]);
   return map;
+}
+
+/**
+ * What one source hands on from another module: `export { a, b as c } from '…'` as `c -> { file, exported: 'b' }`, and the files of
+ * every `export * from '…'`. A name a module re-exports has no body there; {@link indexSources} follows it to the module that has.
+ * The server re-exports what moved to `@ythril/schema` from the modules that used to define it, so a call the server makes through
+ * one of those names is followed into the package.
+ */
+export function reExports(src, file, has) {
+  const named = new Map();
+  const star = [];
+  for (const m of src.matchAll(/export\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) {
+    const target = resolveSpecifier(m[2], file, has);
+    if (!target) continue;
+    for (const part of m[1].split(',')) {
+      const p = /^\s*(?:type\s+)?([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(part);
+      if (p) named.set(p[2] ?? p[1], { file: target, exported: p[1] });
+    }
+  }
+  for (const m of src.matchAll(/export\s*\*\s*from\s*['"]([^'"]+)['"]/g)) {
+    const target = resolveSpecifier(m[1], file, has);
+    if (target) star.push(target);
+  }
+  return { named, star };
 }
 
 /**
@@ -286,7 +310,7 @@ export function namespaceImports(src, file, has) {
 export function relativeImports(src, file, has) {
   const map = new Map();
   const add = (clause, spec) => {
-    const target = resolveRelativeSpecifier(spec, file, has);
+    const target = resolveSpecifier(spec, file, has);
     if (!target) return;
     for (const part of clause.split(',')) {
       const m = /^\s*([A-Za-z_$][\w$]*)(?:\s+as\s+|\s*:\s*)?([A-Za-z_$][\w$]*)?\s*$/.exec(part);
@@ -451,7 +475,10 @@ function callableText(body, closures) {
  */
 export function moduleIndex(dirs, opts = {}) {
   const { functionFloor = 500, ...sourceOpts } = opts;
-  const files = trackedSources(dirs, { untracked: true, ...sourceOpts });
+  // The server's code includes the package it imports by name (`@ythril/schema`): a walk from a door follows a call into it.
+  const list = [dirs].flat();
+  if (list.includes('server/src') && !list.includes('schema/src')) list.push('schema/src');
+  const files = trackedSources(list, { untracked: true, ...sourceOpts });
   const sources = new Map(files.map(file => [file, readFileSync(join(REPO_ROOT, file), 'utf8')]));
   return indexSources(sources, { functionFloor, label: [dirs].flat().join(', ') });
 }
@@ -470,6 +497,7 @@ export function indexSources(rawSources, { functionFloor = 500, label = 'the giv
 
   const bodies = new Map();
   const imports = new Map();
+  const reexports = new Map();
   const namespaces = new Map();
   const objects = new Map();
   const sources = new Map();
@@ -491,6 +519,7 @@ export function indexSources(rawSources, { functionFloor = 500, label = 'the giv
       bodies.set(`${file}:${name}`, { file, name, body, start, end: start + body.length, binding: true });
     }
     imports.set(file, relativeImports(src, file, has));
+    reexports.set(file, reExports(src, file, has));
     namespaces.set(file, namespaceImports(src, file, has));
   }
 
@@ -504,10 +533,29 @@ export function indexSources(rawSources, { functionFloor = 500, label = 'the giv
       + 'answer "no" and every gate built on it pass about code it never read.');
   }
 
+  /**
+   * Where `name`, exported by `file`, has its body: `file` itself, or — when `file` only hands it on (a re-export, an `export { x }` of
+   * an import, an `export *`) — the module it came from, followed a few hops. Null when no body is in this tree.
+   */
+  const bodyOfExport = (file, name, depth = 0) => {
+    if (bodies.has(`${file}:${name}`)) return `${file}:${name}`;
+    if (depth > 6) return null;
+    const named = reexports.get(file)?.named.get(name) ?? imports.get(file)?.get(name);
+    if (named) return bodyOfExport(named.file, named.exported, depth + 1);
+    for (const target of reexports.get(file)?.star ?? []) {
+      const found = bodyOfExport(target, name, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+
   /** The `path:name` a bare call in `file` refers to, or null when it leaves this tree. */
   const resolve = (file, name) => {
     const imported = imports.get(file)?.get(name);
-    if (imported && bodies.has(`${imported.file}:${imported.exported}`)) return `${imported.file}:${imported.exported}`;
+    if (imported) {
+      const found = bodyOfExport(imported.file, imported.exported);
+      if (found) return found;
+    }
     if (bodies.has(`${file}:${name}`)) return `${file}:${name}`;
     return null;
   };

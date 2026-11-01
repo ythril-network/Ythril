@@ -149,7 +149,7 @@ const CITED = [
   },
   {
     what: 'the most characters of one value a log line carries (integration guide)',
-    source: 'server/src/util/log.ts',
+    source: 'schema/src/text.ts',
     code: /export const LOG_VALUE_MAX = ([0-9_]+);/,
     doc: 'docs/integration-guide.md',
     text: (v) => new RegExp(`cut at \\*\\*${v}\\*\\* characters per value`),
@@ -177,7 +177,7 @@ const CITED = [
   },
   {
     what: 'how much of one unknown key either door quotes (integration guide, bundle-30 I6 C18)',
-    source: 'server/src/util/log.ts',
+    source: 'schema/src/text.ts',
     code: /export const NAME_QUOTED = ([0-9_]+);/,
     doc: 'docs/integration-guide.md',
     text: (v) => new RegExp(`each unknown key\\s+cut at \\*\\*${v}\\*\\* characters`),
@@ -485,7 +485,7 @@ const CITED = [
     ['string a rule reads', /export const LONGEST_CHECKED_STRING = ([0-9_]+);/, (v) => `strings up to ${Number(v).toLocaleString('en-US')} characters`],
   ].map(([what, code, sentence]) => ({
     what: `CEL ${what}`,
-    source: 'server/src/spaces/schema-rules.ts',
+    source: 'schema/src/rules.ts',
     code,
     doc: 'docs/integration-guide/06a-schema-api.md',
     text: (v) => new RegExp(sentence(v)),

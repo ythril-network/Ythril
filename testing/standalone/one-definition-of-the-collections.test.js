@@ -174,7 +174,8 @@ describe('a collection list derives from the one tuple, or declares itself a sub
      * here is the DECLARATION, so the bound is the declaration's own end.
      */
     const at = clean.indexOf('RECORD_COLLECTION');
-    const decl = clean.slice(at, clean.indexOf('};', at) + 2);
+    // To the declaration's own `;`: the map ends `} as const satisfies …;`, and the next `};` in the file belongs to something else.
+    const decl = clean.slice(at, clean.indexOf(';', at) + 1);
     // `file` is the KEY and `'files'` is the value — the record kind is singular and the collection plural,
     // which is the whole reason this map exists. The first draft asserted it the other way round.
     assert.match(decl, /\bfile\s*:\s*['"]files['"]/,

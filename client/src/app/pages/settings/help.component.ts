@@ -137,6 +137,7 @@ export const HELP_DOCS = [
       'decisions/16-a-peers-numbering-may-start-over-and-positions-continue-above-everything-handed-out.md',
       'decisions/17-the-first-carry-is-an-owed-job-and-a-space-answers-positions-building-until-it-ends.md',
       'decisions/18-every-kind-keeps-both-edits-and-each-instance-decides-its-own-copy.md',
+      'decisions/19-the-schema-vocabulary-and-its-validator-are-one-package-the-server-imports.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },

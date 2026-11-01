@@ -1,0 +1,47 @@
+{
+  "name": "@ythril/schema",
+  "version": "6.3.0",
+  "description": "The vocabulary of a Ythril space schema and the validator a Ythril server runs on it, for apps that write schemas.",
+  "license": "PolyForm-Small-Business-1.0.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ythril-network/Ythril.git",
+    "directory": "schema"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "import": "./dist/internal.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build && node -e \"for (const f of ['LICENSE', 'NOTICE']) require('node:fs').copyFileSync('../' + f, f)\"",
+    "postpack": "node -e \"for (const f of ['LICENSE', 'NOTICE']) require('node:fs').rmSync(f, { force: true })\""
+  },
+  "dependencies": {
+    "@bufbuild/cel": "0.6.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

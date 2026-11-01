@@ -240,8 +240,9 @@ describe('the feature is reachable and wired', () => {
   it('the space PATCH accepts retention inside a type schema', () => {
     // `TypeSchemaZ` is `.strict()`, so an unlisted key is REJECTED — without this the field would be stripped
     // from every request and the whole tier would silently not exist.
-    // `TypeSchemaZ` moved to `spaces/body-schemas.ts` with the rest of the space request bodies.
-    const src = readFileSync(join(ROOT, 'server/src/spaces/body-schemas.ts'), 'utf8');
+    // `TypeSchemaZ` moved to `spaces/body-schemas.ts` with the rest of the space request bodies, then into `@ythril/schema`
+    // (`schema/src/space-meta.ts`), which `body-schemas.ts` re-exports.
+    const src = readFileSync(join(ROOT, 'schema/src/space-meta.ts'), 'utf8');
     // A WINDOW, converted: the subject is the `retention` object, bounded by the brace that closes it.
     // 200 characters reached past it into the sibling fields, so a `contentDays` declared on a NEIGHBOURING
     // property would have satisfied a check about this one.
