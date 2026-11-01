@@ -164,7 +164,8 @@ instance (`409`, `code: "space_being_imported"`: one import runs at a time).
 while it stands the space takes no local write and no peer's push (`409`, `code: "space_being_imported"`), as during a
 wipe. The door waits for it within the act budget and answers `200` with the result below, or `202`
 `{ "queued": true, "spaceId": "..." }` when it is still running; a queued import's outcome is its completion row in
-the [audit log](13-audit-log-api.md) (`space.act_completed`, path `internal:space-act:import:<space>:<act id>`). A crash
+the [audit log](13-audit-log-api.md) (`space.act_completed`, path `internal:space-act:import:<space>:<act id>`, its
+`changes` the totals below). A crash
 resumes it from its spooled body at the next start; a resumed run reports the records the first run landed as
 `updated`. An import never needs abandoning: its body was validated before it was registered, a store failure is
 retried, and a resumed import whose body is gone from disk completes as failed (its completion row has a status of

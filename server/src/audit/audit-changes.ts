@@ -136,6 +136,8 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // What a space import landed, in totals: records stored new, records replaced, records refused, records the restore left out because this
   // instance deleted them after the backup, and records that were already past their expiry when they landed (the next sweep takes them).
   'space.import': ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due'],
+  // A queued space act's completion row: the totals its body reports (an import's, the same as above), the only place nobody waiting is told.
+  'space.act_completed': ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due'],
   // The new signing key's fingerprint and never the key itself: a peer that pinned the old one compares fingerprints.
   'signing.rotate': ['fingerprint'],
   // What a TTL sweep took from a space: one change per record collection, `to` the number deleted this cycle (`field` is the collection's name).

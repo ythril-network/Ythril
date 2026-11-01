@@ -83,18 +83,18 @@ describe('audit changes — every allowlist is actually reachable', () => {
     'server/src/api/brain/edges.ts', 'server/src/api/brain/chrono.ts',
   ];
 
-  it('every allowlisted key is a REAL operation name from the middleware', () => {
+  it('every allowlisted key is a REAL operation name from the middleware', async () => {
     // The failure this catches, found end-to-end rather than by any unit test: the media route's
     // operation is `config.media.update`, and the allowlist said `media-config.update`. A key that
     // matches no operation is silent forever — the entry is written, `changes` never appears, and
     // nothing anywhere reports the mismatch.
     const middleware = read('server/src/audit/middleware.ts');
-    // A rule's literal, or an operation the module declares as a constant (`export const TTL_EXPIRE_OPERATION = 'ttl.expire'`): an act that
-    // writes its own entry (a sweep, a scanner) has no rule, and a rule may name its constant.
-    const known = new Set([
-      ...middleware.matchAll(/operation:\s*'([^']+)'/g),
-      ...middleware.matchAll(/export const [A-Z_]+_OPERATION\s*=\s*'([^']+)'/g),
-    ].map(m => m[1]));
+    // A rule's literal, or an operation the module exports as a constant: an act that writes its own entry (a sweep, a scanner, a space act's
+    // completion) has no rule. The constants are read from the module's EXPORTS, so one it re-exports from where it is declared
+    // (`SPACE_ACT_COMPLETED_OPERATION`, declared in networks/round-audit.ts) counts like one declared in the file.
+    const exported = await import('../../server/dist/audit/middleware.js');
+    const constants = Object.entries(exported).filter(([k, v]) => /_OPERATION$/.test(k) && typeof v === 'string').map(([, v]) => v);
+    const known = new Set([...[...middleware.matchAll(/operation:\s*'([^']+)'/g)].map(m => m[1]), ...constants]);
     assert.ok(known.size > 50, `expected the middleware operation table, parsed ${known.size}`);
     for (const key of Object.keys(AUDIT_CHANGE_FIELDS)) {
       assert.ok(known.has(key), `"${key}" is not an operation name in middleware.ts — it can never match`);

@@ -735,7 +735,7 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
   } else if (!waiters.has(id) && covered.length === 0) {
     // Nobody is told of this completion — the door answered `queued`, or the act was resumed — so it is said in the audit log.
     // The kind is in the path, so a restore's per-space rows read apart from a wipe's or a deletion's.
-    logInternalAudit(completionRow(entry, id));
+    logInternalAudit(completionRow(entry, id, outcome.counts));
   } else if (!waiters.has(id)) {
     // A passed round's act nobody is waiting for — a relay, gossip, the tick, or a door that already answered (X17, VR7): one entry
     // per round it carried out. The request a door is still waiting on is that door's route's own entry.
@@ -749,9 +749,11 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
   });
 }
 
-/** The completion row of an act with no round that nobody is told of: the kind is in the path, so a restore's rows read apart from a wipe's. */
-const completionRow = (entry: SpaceActEntry, id: string) => ({
+/** The completion row of an act with no round that nobody is told of: the kind is in the path, so a restore's rows read apart from a wipe's.
+ *  The body's counts ride as changes (an import's totals), since this row is the only place a queued act's result is told. */
+const completionRow = (entry: SpaceActEntry, id: string, counts?: Record<string, number>) => ({
   method: 'DELETE', path: `internal:space-act:${entry.kind}:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId,
+  ...(counts ? { changes: Object.entries(counts).map(([field, to]) => ({ field, to })) } : {}),
 });
 
 /** Run the body's after-completion step once the completion write removed the entry; a throw is said and changes nothing. */
