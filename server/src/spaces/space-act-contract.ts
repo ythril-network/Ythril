@@ -9,6 +9,7 @@ import type { Config, SpaceActEntry, SpaceActKind, SpaceActRound, SpaceActSet, S
 import type { BrainCollection } from '../config/types-knowledge.js';
 import { housekeepingOpMs } from '../db/write-bound.js';
 import { PEER_TRANSFER_TIMEOUT_MS } from '../sync/peer-fetch.js';
+import { SPACE_ACT_COMPLETED_OPERATION } from '../networks/round-audit.js';
 
 /** What a caller asks the runner to do. */
 export interface SpaceActRequest {
@@ -204,5 +205,16 @@ export function actEntryView(e: SpaceActEntry): ActEntryView {
     ...(e.lastError ? { lastError: e.lastError } : {}),
     ...(e.needsAbandon ? { needsAbandon: true as const } : {}),
     ...(e.backupId ? { backupId: e.backupId } : {}),
+  };
+}
+
+/**
+ * The audit row of an act with no round that nobody is told of: the kind is in the path, so a restore's rows read apart from a wipe's.
+ * The body's counts ride as changes (an import's totals), since this row is the only place a queued act's result is told.
+ */
+export function spaceActCompletionRow(entry: SpaceActEntry, id: string, counts?: Record<string, number>) {
+  return {
+    method: 'DELETE', path: `internal:space-act:${entry.kind}:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId,
+    ...(counts ? { changes: Object.entries(counts).map(([field, to]) => ({ field, to })) } : {}),
   };
 }
