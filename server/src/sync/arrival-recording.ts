@@ -217,16 +217,58 @@ export function mergeSummaries(a: RecordedSummary, b: RecordedSummary | undefine
 /** What was recorded in each family of a page: the rows of each document, by the document's id. */
 export type RecordedFamilies = ReadonlyMap<string, ReadonlyMap<string, readonly SchemaViolation[]>>;
 
-/** The summary of `families`: how many documents, and the names most of them carried. Pure; names and counts only. */
-export function summarise(families: RecordedFamilies): RecordedSummary {
-  const records = [...families.values()].reduce((n, docs) => n + docs.size, 0);
-  const names = new Map<string, number>();
-  for (const docs of families.values()) {
-    for (const rows of docs.values()) for (const field of new Set(rows.map(r => r.field))) names.set(field, (names.get(field) ?? 0) + 1);
+/** How many distinct names a {@link RecordedTally} counts; a name first seen after them adds to the documents and to no name. */
+export const TALLY_NAMES_HELD = 1000;
+/** The longest name a tally keys by; the summary quotes a name shorter still (`NAME_QUOTED`). */
+const TALLY_NAME_CHARS = 512;
+
+/**
+ * What a recording came to, as counts: the documents per family and, per field name, how many documents carried it. What
+ * {@link summarise} and {@link sayRecorded} read, held WITHOUT the documents, so an import of millions of records that break the
+ * schema keeps a few numbers per name rather than every document's rows until it ends (bundle-40 P2).
+ */
+export interface RecordedTally {
+  readonly families: Map<string, number>;
+  readonly names: Map<string, number>;
+}
+
+/** An empty tally. */
+export function newRecordedTally(): RecordedTally {
+  return { families: new Map(), names: new Map() };
+}
+
+/** Count, into `tally`, the documents of `family` whose rows are `docs` (one entry per document; each document counts a name once). */
+export function tallyRecorded(tally: RecordedTally, family: string, docs: Iterable<readonly SchemaViolation[]>): void {
+  let n = 0;
+  for (const rows of docs) {
+    n++;
+    for (const field of new Set(rows.map(r => r.field.slice(0, TALLY_NAME_CHARS)))) {
+      const held = tally.names.get(field);
+      if (held !== undefined) tally.names.set(field, held + 1);
+      else if (tally.names.size < TALLY_NAMES_HELD) tally.names.set(field, 1);
+    }
   }
-  const top = [...names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, TOP_NAMES)
+  if (n > 0) tally.families.set(family, (tally.families.get(family) ?? 0) + n);
+}
+
+/** The tally of `families`. */
+function tallyOf(families: RecordedFamilies): RecordedTally {
+  const tally = newRecordedTally();
+  for (const [family, docs] of families) tallyRecorded(tally, family, docs.values());
+  return tally;
+}
+
+/** The summary of a tally: how many documents, and the names most of them carried. Pure; names and counts only. */
+function summariseTally(tally: RecordedTally): RecordedSummary {
+  const records = [...tally.families.values()].reduce((n, c) => n + c, 0);
+  const top = [...tally.names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, TOP_NAMES)
     .map(([name, count]) => ({ name: peerText(name, { max: NAME_QUOTED }), count }));
   return { records, top };
+}
+
+/** The summary of `families`: how many documents, and the names most of them carried. Pure; names and counts only. */
+export function summarise(families: RecordedFamilies): RecordedSummary {
+  return summariseTally(tallyOf(families));
 }
 
 /**
@@ -237,7 +279,12 @@ export function summarise(families: RecordedFamilies): RecordedSummary {
  * so a failure reported before is forgotten and the next one is news again. Never throws.
  */
 export function sayRecorded(o: { spaceId: string; source: RecordingSource; peer: string; families: RecordedFamilies }): RecordedSummary {
-  const summary = summarise(o.families);
+  return sayRecordedTally({ spaceId: o.spaceId, source: o.source, peer: o.peer, tally: tallyOf(o.families) });
+}
+
+/** {@link sayRecorded} of a tally a caller kept as it went (an import's pages). Never throws. */
+export function sayRecordedTally(o: { spaceId: string; source: RecordingSource; peer: string; tally: RecordedTally }): RecordedSummary {
+  const summary = summariseTally(o.tally);
   const { records, top } = summary;
   if (records === 0) {
     failureSaid.forget(FAILURE);
@@ -245,8 +292,8 @@ export function sayRecorded(o: { spaceId: string; source: RecordingSource; peer:
   }
   try {
     schemaViolationsRecordedTotal.inc({ source: o.source }, records);
-    said(`${o.spaceId}\u0000${o.peer}`, () => {
-      const per = peerList([...o.families].filter(([, docs]) => docs.size > 0).map(([family, docs]) => `${docs.size} ${family}`), ', ');
+    said(`${o.spaceId} ${o.peer}`, () => {
+      const per = peerList([...o.tally.families].filter(([, n]) => n > 0).map(([family, n]) => `${n} ${family}`), ', ');
       log.warn(`${peerText(o.source)} from ${peerText(o.peer)}: ${per} record(s) stored in space '${peerText(o.spaceId)}' carry something its schema does not accept `
         + `that the copy each replaced did not: ${peerList(top.map(t => `${t.name} (${t.count})`), ', ')}. Stored as sent; the key and field names are all this line says`);
     });

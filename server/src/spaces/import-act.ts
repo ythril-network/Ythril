@@ -28,7 +28,7 @@ import { isMissingPath } from '../files/stored-bytes.js';
 import { log, peerText } from '../util/log.js';
 import { indexExportBody, type ExportBodyIndex } from '../sync/export-stream.js';
 import { arrivalRefusal } from '../sync/arrivals.js';
-import { importSpool, restoreOriginOf, type ImportResult } from '../sync/space-import.js';
+import { importSpool, importTotals, restoreOriginOf, type ImportResult } from '../sync/space-import.js';
 import { defineSpaceActBody, defineSpaceActBootSweep, registerOwnSpaceAct, spaceActsOfKind, type SpaceActBodyOutcome } from './space-act-runner.js';
 
 const KIND = 'import' as const;
@@ -117,15 +117,7 @@ async function importBody({ entry }: { entry: Readonly<SpaceActEntry> }): Promis
   const cfg = getConfig();
   const result = await importSpool(entry.localId, file, index, { origin: restoreOriginOf(index.envelope, cfg.instanceId, entry.localId) });
   results.set(entry.id, result);
-  const totals = Object.values(result.results);
-  return {
-    counts: {
-      inserted: totals.reduce((n, r) => n + r.inserted, 0), updated: totals.reduce((n, r) => n + r.updated, 0),
-      refused: totals.reduce((n, r) => n + r.errors, 0), deletedOnRestore: totals.reduce((n, r) => n + (r.deletedOnRestoreTotal ?? 0), 0),
-      due: totals.reduce((n, r) => n + (r.dueTotal ?? 0), 0),
-    },
-    afterCompletion: forget,
-  };
+  return { counts: { ...importTotals(result) }, afterCompletion: forget };
 }
 
 /** The start's sweep: every spool no standing import names is removed (a door that died between the spool and the act left it). */
