@@ -51,6 +51,7 @@ import { COLLECTION_SUFFIX, TYPE_FIELD, retentionStamps } from './ttl.js';
 import type { ChronoEntry, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { healStoredStamps } from './retention-stamp-heal.js';
 
 /** Every collection the schema tier can reach. `files` is absent: a file has no type, so no schema window. */
 const TYPED_COLLECTIONS: readonly KnowledgeType[] = KNOWLEDGE_TYPES;
@@ -207,6 +208,9 @@ export async function sweepChronoRetention(now: Date = new Date()): Promise<Chro
         run: async () => { result.stamped += await backfillTypedExpiry(s.id, space, collection); },
       })),
       { name: 'redaction: chrono', run: async () => { result.redacted += await redactLapsedChronoContent(s.id, now); } },
+      // After the redaction, so a content stamp healed to a past instant takes effect on the NEXT cycle, as a healed `_expireAt` does. Its own unit:
+      // the heal of a chrono record's content stamp (`brain/retention-stamp-heal.ts`) failing is not the redaction failing.
+      { name: 'heal: chrono _contentExpireAt', run: async () => { await healStoredStamps(s.id, 'chrono', '_contentExpireAt'); } },
     ];
     await eachUnit(units, unit => unit.run());
   });

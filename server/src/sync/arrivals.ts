@@ -96,6 +96,7 @@ import { log, logSafe, peerList, peerText } from '../util/log.js';
 import { BRAIN_COLLECTIONS } from '../config/types.js';
 import type { BrainCollection, BrainEmbedRecordType } from '../config/types.js';
 import { RESTORED_LOCAL_FIELDS, RESTORED_DATE_FIELDS, NOT_CARRIED_BY_BACKUP, WRITE_GUARD_FIELDS, WRITTEN_HERE, carriedFields, stampOfArrival } from './local-only-fields.js';
+import { retentionStampOf } from '../brain/retention-stamp.js';
 import { retagToLocalSpace, seqGuard, divergesFrom, forkRowVerdict, isForkingFamily, CONVERGE_BLANKED } from './upsert-plan.js';
 import { isNewerCopy } from './held-tombstone-rules.js';
 import { authoredContentHash, bodyProjectionOf } from './authored-content.js';
@@ -320,12 +321,13 @@ function prepared(raw: Doc, family: BrainCollection, restore: boolean): Doc {
   delete doc[WRITTEN_HERE];
   for (const f of RESTORED_LOCAL_FIELDS) {
     if (!restore) { delete doc[f]; continue; }
-    // JSON turned a stamp into text; stored as text it never compares with a Date and the sweep never fires.
-    // Only the date-typed ones: a peer's id is text, and read as a date it would be thrown away.
-    const v = doc[f];
-    if (RESTORED_DATE_FIELDS.has(f) && typeof v === 'string') {
-      const at = new Date(v);
-      if (Number.isNaN(at.getTime())) delete doc[f]; else doc[f] = at;
+    // JSON turned a stamp into text, and a backup may carry any shape; stored as anything but a Date it never matches the sweep's range
+    // query and the record never expires. Every date-typed one goes through the one rule (`retentionStampOf`): a Date or nothing, and
+    // nothing means the field is dropped and the record is stamped as an unstamped one is (D-9 / D-13). Only the date-typed ones: a peer's id
+    // is text, and read as a date it would be thrown away.
+    if (RESTORED_DATE_FIELDS.has(f)) {
+      const at = retentionStampOf(doc[f]);
+      if (at === undefined) delete doc[f]; else doc[f] = at;
     }
   }
   if (family === 'files') {
