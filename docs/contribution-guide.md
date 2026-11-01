@@ -61,6 +61,7 @@ points at an agent's local, untracked rule sheet instead: `no-tracked-file-cites
 ```text
 ythril/
 ├── client/          Angular 21 SPA (workspace: @ythril/client)
+├── schema/          The space-schema vocabulary and validator, published for apps (workspace: @ythril/schema)
 ├── server/          Express 5 + TypeScript API (workspace: @ythril/server)
 ├── sidecars/        First-party sidecars (doc-render: PDF → page PNGs for the F11 VLM extraction path)
 ├── testing/
@@ -81,7 +82,7 @@ ythril/
 └── tsconfig.base.json  Shared TypeScript config
 ```
 
-npm workspaces: the root `package.json` declares `["server", "client"]`. All `npm` commands should be run from the repo root using `--workspace=` flags.
+npm workspaces: the root `package.json` declares `["schema", "server", "client"]`. All `npm` commands should be run from the repo root using `--workspace=` flags.
 
 ---
 
@@ -126,8 +127,12 @@ Or, to reuse the bundled container, expose its port with a dev-only `docker-comp
 ### Server (TypeScript → JavaScript)
 
 ```bash
-npm run build:server          # Compiles server/src → server/dist
+npm run build:server          # Compiles schema/src → schema/dist, then server/src → server/dist
 ```
+
+The server imports `@ythril/schema` (the space-schema bodies, parses, tuples and limits) from `schema/dist`, and its
+`prebuild` and `predev` compile the package first. A change to a schema body, a limit or a rule check is a change to
+`schema/src`; `server/src` re-exports it and defines none of it (`an-outside-apps-schema-validates-through-the-schema-package.test.js`).
 
 ### Client (Angular production build)
 

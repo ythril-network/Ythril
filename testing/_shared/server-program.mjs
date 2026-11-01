@@ -35,7 +35,8 @@ let built = null;
  * @returns {{ program: import('typescript').Program, checker: import('typescript').TypeChecker,
  *   sourceOf: Map<string, import('typescript').SourceFile>, repoPath: (abs: string) => string,
  *   serverSources: () => import('typescript').SourceFile[] }}
- *   `sourceOf` maps `server/src/...` repo paths to their source file; `serverSources()` is every non-declaration source under it.
+ *   `sourceOf` maps `server/src/...` (and `schema/src/...`) repo paths to their source file; `serverSources()` is every non-declaration
+ *   source under `server/src`, and `schemaSources()` every one under `schema/src`.
  */
 export function serverProgram() {
   if (built) return built;
@@ -48,9 +49,19 @@ export function serverProgram() {
     throw new Error(`server/tsconfig.json names only ${inSrc.length} source file(s) under server/src (floor ${SERVER_SOURCE_FLOOR}): `
       + 'a gate over this program would conclude about almost nothing');
   }
-  const program = ts.createProgram({ rootNames: parsed.fileNames, options: { ...parsed.options, noEmit: true } });
+  /*
+   * `@ythril/schema` (the space-schema vocabulary and validator the server imports) resolves to its SOURCE here, not to the built
+   * `schema/dist/*.d.ts` the compiler reads: a gate that follows a call or a declaration into `peerText`, `parseSpaceMeta` or
+   * `refusalOfParse` must land on the code that runs, and a declaration file has no bodies to read. Its files are `schema/src/...`.
+   */
+  const options = {
+    ...parsed.options, noEmit: true, baseUrl: REPO_ROOT,
+    paths: { '@ythril/schema': ['schema/src/index.ts'], '@ythril/schema/internal': ['schema/src/internal.ts'] },
+  };
+  const program = ts.createProgram({ rootNames: parsed.fileNames, options });
   const sourceOf = new Map(program.getSourceFiles().map((sf) => [repoPath(sf.fileName), sf]));
   const serverSources = () => [...sourceOf].filter(([p, sf]) => p.startsWith('server/src/') && !sf.isDeclarationFile).map(([, sf]) => sf);
-  built = { program, checker: program.getTypeChecker(), sourceOf, repoPath, serverSources };
+  const schemaSources = () => [...sourceOf].filter(([p, sf]) => p.startsWith('schema/src/') && !sf.isDeclarationFile).map(([, sf]) => sf);
+  built = { program, checker: program.getTypeChecker(), sourceOf, repoPath, serverSources, schemaSources };
   return built;
 }

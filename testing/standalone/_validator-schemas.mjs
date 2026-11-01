@@ -44,7 +44,9 @@ export function toolValidators({ floor = 60 } = {}) {
  */
 export async function zodValidators({ floor = 70 } = {}) {
   const files = trackedSources('server/src', { untracked: true, exclude: ['server/src/local-agent-connector/index.ts'] })
-    .filter(f => /from ['"]zod['"]/.test(readFileSync(join(REPO_ROOT, f), 'utf8')));
+    // A module that declares a zod schema, or hands on one `@ythril/schema` declares (the space-schema bodies and the rule bodies are the
+    // package's, and the server modules that held them re-export them under the same names a route refers to).
+    .filter(f => /from ['"](?:zod|@ythril\/schema(?:\/internal)?)['"]/.test(readFileSync(join(REPO_ROOT, f), 'utf8')));
   const out = [];
   for (const file of files) {
     const dist = join(REPO_ROOT, file.replace(/^server\/src\//, 'server/dist/').replace(/\.ts$/, '.js'));

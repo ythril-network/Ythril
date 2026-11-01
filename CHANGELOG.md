@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Schema:** `@ythril/schema` (in `schema/`) carries the space-schema types, limits and validator: `validateSpaceMeta` checks a space meta offline with the server's own refusals. The server imports it; no answer changes.
+
 ## [6.3.0] — 2026-11-01
 
 **A minor release: a space export of any size restores, as an act on its space that catches up with its network on the next sync, and exports, imports, key rotations and the server's own deletions are audited.**

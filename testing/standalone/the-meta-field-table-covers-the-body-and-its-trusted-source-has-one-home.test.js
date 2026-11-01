@@ -26,7 +26,7 @@ const { SpaceMetaBody } = await import('../../server/dist/spaces/body-schemas.js
 const fields = await import('../../server/dist/spaces/meta-fields.js');
 
 /** The one store that derives a meta from stored parts, and the module that mints the brand. */
-const HOMES = new Set(['server/src/spaces/effective-meta.ts', 'server/src/spaces/body-schemas.ts']);
+const HOMES = new Set(['server/src/spaces/effective-meta.ts', 'schema/src/space-meta.ts']);
 
 describe('the merge table covers every key the meta body accepts', () => {
   const bodyKeys = Object.keys(SpaceMetaBody.shape);
@@ -74,7 +74,8 @@ describe('the merge table covers every key the meta body accepts', () => {
 });
 
 describe('derivedFromStored has one home', () => {
-  const calls = () => readTrackedSources('server/src', { untracked: true, floor: 300 })
+  // The server's sources and `@ythril/schema`'s, where the brand is minted (`body-schemas.ts` re-exports it).
+  const calls = () => readTrackedSources(['server/src', 'schema/src'], { untracked: true, floor: 300 })
     .filter(({ text }) => /\bderivedFromStored\s*\(/.test(stripComments(text)))
     .map(f => f.file);
 

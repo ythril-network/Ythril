@@ -67,14 +67,18 @@ const INSTALLED = (() => {
 const MANIFESTS = [
   ['server', 'server/package.json'],
   ['client', 'client/package.json'],
+  ['schema', 'schema/package.json'],
 ];
 
-/** Direct, redistributed dependencies of both workspaces. */
+/** The packages this repository builds itself (`@ythril/schema`, which the server depends on): first-party, so NOTICE owes them nothing. */
+const FIRST_PARTY = new Set(MANIFESTS.map(([, file]) => JSON.parse(readFileSync(file, 'utf8')).name));
+
+/** Direct, redistributed dependencies of the workspaces, less the workspaces themselves. */
 function redistributed() {
   const out = [];
   for (const [where, file] of MANIFESTS) {
     const pkg = JSON.parse(readFileSync(file, 'utf8'));
-    for (const name of Object.keys(pkg.dependencies ?? {})) out.push({ where, name });
+    for (const name of Object.keys(pkg.dependencies ?? {})) if (!FIRST_PARTY.has(name)) out.push({ where, name });
   }
   return out;
 }

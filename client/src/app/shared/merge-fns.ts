@@ -5,7 +5,7 @@ import type { PropertySchema } from '../core/api.types';
  *
  * ## Why the control needs this at all
  *
- * The server refuses an incompatible pair outright: `PropertySchemaZ` in `server/src/spaces/body-schemas.ts`
+ * The server refuses an incompatible pair outright: `PropertySchemaZ` in `schema/src/space-meta.ts`
  * has a `.refine` that rejects a numeric function on anything but `number`, a boolean function on anything
  * but `boolean`, and ANY merge function on `string` or `date`.
  *
@@ -22,7 +22,7 @@ import type { PropertySchema } from '../core/api.types';
  * There is no catalog endpoint for property-schema rules the way there is for token rights, and inventing one
  * for seven strings is a bigger change than the defect. So this is a second copy of a server rule, which this
  * repo treats as a liability rather than a convenience — and it is pinned: `merge-fns-match-the-server.test.js`
- * reads the `.refine` in `body-schemas.ts` and fails if the two disagree. A copy nobody compares is the one
+ * reads the `.refine` in `space-meta.ts` and fails if the two disagree. A copy nobody compares is the one
  * that drifts; a copy compared on every push is a cache.
  *
  * `undefined` type means NOT STATED, and the server allows any of the seven there — narrowing it in the UI
