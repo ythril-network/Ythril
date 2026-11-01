@@ -49,12 +49,20 @@ import type { RereadState } from './network-reread-view';
         <ph-icon name="warning" [size]="11"/> {{ 'networks.member.belowFloor' | transloco }}
       </span>
     }
-    <!-- Sync health at a glance: a failing badge when a run streak is failing. -->
+    <!-- Sync health at a glance, two questions apart (bundle-39, Q-220): the PEER did not answer, or THIS instance's own store failed while it
+         landed what the peer sent. One badge for both made a lasting local fault look like a failing peer. -->
     @if (member().consecutiveFailures) {
       <span class="member-failing"
         [attr.title]="failingTitle()">
         <ph-icon name="warning" [size]="11"/>
         {{ 'networks.member.failing' | transloco: { count: member().consecutiveFailures } }}
+      </span>
+    }
+    @if (member().consecutiveLocalFaults) {
+      <span class="member-failing member-local-failing"
+        [attr.title]="localFailingTitle()">
+        <ph-icon name="warning" [size]="11"/>
+        {{ 'networks.member.localFailing' | transloco: { count: member().consecutiveLocalFaults } }}
       </span>
     }
 
@@ -127,9 +135,13 @@ export class NetworkMemberRowComponent {
   readonly member = input.required<NetworkMember>();
   /** Whether this member still owes a re-read of the network (`owed`: spaces still to come, `catching`: one is being read now); null when nothing is owed. */
   readonly reread = input<RereadState | null>(null);
-  /** "N consecutive failed sync attempts since the last success", in the plural form the reader's language uses for N. */
+  /** "N consecutive sync cycles in which the peer did not answer", in the plural form the reader's language uses for N. */
   protected failingTitle(): string {
     return this.plural.text('networks.member.failingTitle', this.member().consecutiveFailures ?? 0);
+  }
+  /** "N consecutive sync cycles in which this instance's own database failed", likewise. */
+  protected localFailingTitle(): string {
+    return this.plural.text('networks.member.localFailingTitle', this.member().consecutiveLocalFaults ?? 0);
   }
   /** Disables the remove button while the parent's request is in flight. */
   readonly removing = input(false);

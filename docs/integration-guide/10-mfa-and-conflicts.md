@@ -259,6 +259,7 @@ GET /api/conflicts/link-violations
 
 Returns sync-ingested documents that violate strict linkage rules.
 
+<!-- replicated-family-order -->
 **A reference is checked once its transfer is whole, and a dangling end is ONE record.** A pull checks the edges
 and links it received after every record family of the space's transfer has landed — and still checks what landed
 when a later family's fetch fails mid-cycle. A sender pushes one family per request, **targets first**: facts,
@@ -266,7 +267,12 @@ entities, chrono, file metadata, then edges, then links. So when an edge or a li
 point at that the same cycle carries is already here, and the push door checks after each request with the
 families still to come in that order left unjudged. Either way, an edge to a chrono entry or a link to a file that
 arrives in the same transfer is never recorded missing. A family whose transfer stopped early (a page cap, a failed
-write, a failed fetch) leaves its targets unchecked that cycle. A violation's `_id` is derived from the document,
+write, a failed fetch) leaves its targets unchecked that cycle: on a pull the later families wait for it, and on a
+push the sender still sends the edges and links (the push mark is one number per space, so leaving them out would
+let it pass them) but names the target families that stopped in the request's `incomplete` field, so a receiver
+that reads it counts them among the families still to come and records nothing missing for them in that request.
+A receiver from before this field judges those references as it did, and may record one whose target is still
+coming; the next cycle delivers the target, and the record is not added a second time (below). A violation's `_id` is derived from the document,
 the field and the target, so receiving the same edge again adds no second record, and `link_violation.created` fires
 once, for the new one.
 

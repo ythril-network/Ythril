@@ -783,11 +783,11 @@ members' note says so too, and each can retire the type locally.
 
 ### Sync history
 
-Expand a network card and click **Sync History** to see a log of every sync cycle — timestamp, status, items pulled and pushed, and any errors.
+Expand a network card and click **Sync History** to see a log of every sync cycle — timestamp, status, items pulled and pushed, and any errors. A row shows the records a cycle moved in each direction (every kind of record: facts, entities, edges, chrono entries, links and file descriptions) and, apart, how many files it moved.
 
 A cycle shows **success** only when every member's transfers completed and nothing sent was refused; a member that refused records shows the cycle as **partial**, with the kind and count, without being treated as unreachable. If a peer refused a transfer or a transfer
 was cut short, the cycle shows **partial** (some members completed) or **failed** (none did), and its errors name
-the space, the direction and what stopped. A network that shows **failed** on every cycle is not syncing at all,
+the space, the direction and what stopped. A cycle that met only peers too old to sync with shows **refused**: nothing was exchanged and nothing failed. **When this brain's own database fails while it stores what a peer sent, the peer is not blamed:** the cycle does not show success, its errors say this brain's database failed, and the member row shows a **Local store failing (N)** badge, not *Failing (N)* (below). A network that shows **failed** on every cycle is not syncing at all,
 even though it looks connected.
 
 **A push answered `503` is the peer's database, and it is retried.** When the receiving brain's database cannot
@@ -796,7 +796,7 @@ leaving the request hanging; this brain keeps its place and sends the page again
 stopped until the peer's database recovers. The peer's own Server Log names the stalled write
 (`record position held …`).
 
-Each member row in the expanded card also shows its **last successful sync** (or *Never synced*) and, when a peer's recent sync attempts have been failing, a red **Failing (N)** badge counting the consecutive failures since the last success — so you can spot a stuck peer without opening the full history.
+Each member row in the expanded card also shows its **last successful sync** (or *Never synced*) and, when a peer's recent sync attempts have been failing, a red **Failing (N)** badge counting the consecutive cycles in which the peer did not answer — so you can spot a stuck peer without opening the full history. A **Local store failing (N)** badge counts the consecutive cycles in which this brain's own database failed while it stored what the peer sent; the network's status chip turns *degraded* at 3. It is about this brain, not the peer: look at this brain's database and Server Log, not at the peer.
 
 **A *Version too old* badge is a different thing from *Failing (N)*, and telling them apart saves an
 afternoon.** *Failing* means the peer was called and did not answer. *Version too old* means it was never

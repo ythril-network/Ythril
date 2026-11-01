@@ -63,12 +63,45 @@ POST /api/networks/peers/:peerId/sync  one peer, across every network it belongs
 Authorization: Bearer <instance-admin token>
 ```
 
-Both answer the same shape: `{ "ok": true, "status": "triggered", ... }` when fire-and-forget, and with
-`?wait=true` either `completed`, `504 timeout` (still running) or `500 error`. `ok` is the one-bit summary
-and `status` the detail. A cycle that fails on the store is answered as every door answers a store failure —
-`503`, `Retry-After`, `{ "error": …, "retryable": true, "code": … }` in our words — and never with the
-database driver's message (it names internal hosts and ports). A member whose own run failed is not a failed
-cycle: it is counted in `errors` of a `completed` answer.
+Both answer the same shape: `{ "ok": true, "status": "triggered", ... }` when fire-and-forget (the request was
+accepted; no cycle has ended, so there is no `outcome` and no `members` yet), and with `?wait=true` either
+`completed`, `504 timeout` (still running: `ok: false`, with the members that had finished) or `500 error`. A
+cycle that fails on the store is answered as every door answers a store failure — `503`, `Retry-After`,
+`{ "error": …, "retryable": true, "code": … }` in our words — and never with the database driver's message (it
+names internal hosts and ports).
+
+**A completed answer says what the cycle was, once.** `outcome` is the cycle's one verdict, computed from its
+members' outcomes by one function and the same word the sync history and `ythril_sync_cycles_total` carry,
+whichever door asked: `success` (every member synced), `partial` (some did not), `refused` (only members that are
+too old to sync with — nothing was exchanged and nothing failed), `failed` (no member synced) or `interrupted`
+(this instance was shutting down; the answer is the `503 shutting_down` below). `ok` is `true` only when
+`outcome` is `success`: a cycle that ran and left a member out is `ok: false`, never "ok with errors". A client
+treats an `outcome` word it does not know as not-success. `members` lists each member's own part, one entry per
+member and network, `{ "networkId", "instanceId", "label", "outcome", "reason" }`:
+
+| member `outcome` | the member's turn |
+|---|---|
+| `success` | every transfer finished |
+| `catching-up` | a transfer stopped at its page bound; the mark advanced and the next cycle goes on |
+| `records-refused` | the peer answered; it refused some records (counted, never a reason to stop) |
+| `peer-too-old` | the peer answers in the pre-6.0 shape or is below this instance's version floor: nothing was exchanged and no failure was counted against it |
+| `local-fault` | THIS instance's own database failed while it landed what the peer sent (or before the peer was asked); the peer is not at fault |
+| `interrupted` | shutdown began; the turn stopped at its next page |
+| `failed` | the peer did not answer, answered something unusable, or a transfer stopped for a reason on its side |
+
+`reason` is one of a closed list of sentences of ours (at most 200 characters), such as "this instance's database
+failed while landing the peer's page", "the peer did not answer" or "the peer runs a version this one cannot sync
+with". The database driver's or the peer's own text stays in the log; it names internal hosts and ports and is
+never in an answer.
+
+The HTTP status is the same on both doors, the dedicated route and the generic `POST /api/network_sync`, which
+takes it from the tool's result: `200` for `success`, `partial` and `refused` (the cycle ran, and the body says
+what happened); `502 sync_failed` when no member synced (the servers behind this one failed); `503
+sync_store_failed` when the members that were not too old all failed on this instance's own database (the same
+`503` rule as a store failure above, never `502`); `503 shutting_down` (with `members`) once shutdown has begun,
+and a trigger that arrives after it is refused the same way before any cycle starts. The MCP tool answers the
+same outcome, `members` and `ok`, with `isError` true whenever `ok` is false. A network with no member is
+`success`.
 
 `?timeoutMs` (default `30000`, clamped `1000`–`120000`) bounds the WAIT on the network door only. A peer
 cycle is already bounded by that peer's own request timeouts, so racing it would report a timeout for
@@ -81,10 +114,13 @@ outside `1000`–`120000` is held to it, never refused) and the same peer rule (
 **One default differs, on purpose:** `wait` defaults to **`true` on MCP** and **`false` on REST**, because an agent
 calling the tool wants what the cycle did and a script or the UI's button wants the answer at once; send `wait`
 explicitly and the two doors behave alike. The same tool reached through the generic REST door
-(`POST /api/network_sync`) answers as REST does. A full MCP cycle (no `networkId`, no `peerId`) applies `timeoutMs` to
-each network in turn, and a network still running past it is reported as `timeout`, not stopped.
+(`POST /api/network_sync`) answers as REST does, with the same status for the same cycle. A full MCP cycle (no
+`networkId`, no `peerId`) applies `timeoutMs` to each network in turn, and a network still running past it is
+reported as `timeout`, not stopped; every network is waited for and reported with its own `members` (one that failed
+does not hide the others), and the answer's `outcome` is the verdict over all of them.
 
-`refused` (REST and the MCP `network_sync` result alike) counts the networks in which the peer answered in the 5.x shape and its turn was ended: nothing was exchanged with it and no failure was counted against it (it is shown as too old).
+`errors` (REST and the MCP `network_sync` result alike) counts the members whose outcome is `failed` or
+`local-fault`; `refused` counts the networks in which a member's turn was ended because the peer is too old (it answered in the 5.x shape, or is below the version floor): nothing was exchanged with it and no failure was counted against it (it is shown as too old, `peer-too-old` in `members`).
 
 The peer id must be an exact `instanceId` of a configured member, as `GET /api/networks` returns — never a
 URL and never a label. An id belonging to no network is refused `404`, because an unvalidated value would
@@ -178,7 +214,7 @@ major upgrade as one window. Minor and patch upgrades are unaffected and can be 
 The last row is load-bearing rather than a courtesy. A member can be legitimately versionless for ever:
 a manually-provisioned peer, or a single-side-configured network, may never complete the gossip exchange
 that reports a version. Refusing those stops the data plane permanently. Unreachability is already
-counted and surfaced by `consecutiveFailures`, and the floor does not answer a question it has no
+counted and surfaced by `consecutiveFailures` (a peer below the floor is not counted there: it is `peer-too-old`), and the floor does not answer a question it has no
 evidence for.
 
 So do not infer a verdict from `version` — read `belowFloor`, which is the refusal sentence or `null`.
@@ -234,7 +270,7 @@ Base path: `/api/sync` — used by the sync engine between peers. All endpoints 
 | `/api/sync/links/:id` | GET | Fetch one full link doc |
 | `/api/sync/filemeta` | GET | Page a file's METADATA changes — parents only, never chunks |
 | `/api/sync/filemeta/:id` | GET | Fetch one full file metadata doc |
-| `/api/sync/batch-upsert` | POST | Bulk upsert facts/entities/edges/chrono/links/filemeta |
+| `/api/sync/batch-upsert` | POST | Bulk upsert facts/entities/chrono/filemeta/edges/links (the order a sender pushes them in) <!-- replicated-family-order --> |
 | `/api/sync/tombstones` | GET | Page tombstones, the same stream and answer as the record routes |
 | `/api/sync/tombstones` | POST | Apply remote tombstones |
 | `/api/sync/manifest` | GET | File manifest diff |
@@ -450,11 +486,16 @@ POST /api/sync/batch-upsert?spaceId=general&networkId=net-uuid
   "edges": [ ... ],
   "chrono": [ ... ],
   "links": [ ... ],
-  "filemeta": [ ... ]
+  "filemeta": [ ... ],
+  "incomplete": [ "entities" ]
 }
 ```
 
-Each array is capped at 500 items; documents past the cap are counted in `rejected` rather than dropped unsaid. Response includes per-family counters for all six families:
+Each array is capped at 500 items; documents past the cap are counted in `rejected` rather than dropped unsaid.
+
+**`incomplete` (optional, best effort) names the target families whose push stopped early earlier in the same cycle.** A sender pushes targets first, and a target family can stop early (a page bound, a `503` from this receiver); the edges and links of that cycle are still pushed, because the push mark is one number per space and leaving them out would let it pass them. The field tells the receiver which targets are still to come, so a reference to one of them is not recorded as a violation for this request: the receiver judges it with the families still to come (`familiesAfter`) joined by these, as the pull does with its own. Only the target families count (`facts`, `entities`, `chrono`, `filemeta`; nothing points at an edge or a link); the array is deduplicated and read up to four entries, and anything else, an unknown key or a value that is not an array of strings, is ignored with a warning in the receiver's log, counted, and never refused. It suppresses recording for that request only, and the next cycle re-sends what stopped. Only `batch-upsert` carries it; the single-document routes are not used by the engine and do not read it. A receiver that does not know the field ignores it and judges as before (a reference whose target is still coming may then be recorded missing, as it was), so the field is safe in a network of mixed versions.
+
+Response includes per-family counters for all six families:
 
 ```json
 { "status": "ok",

@@ -885,8 +885,10 @@ export interface NetworkMember {
   direction?: 'both' | 'push' | 'pull';
   /** ISO8601 of the last SUCCESSFUL sync with this member (absent = never synced yet). */
   lastSyncAt?: string;
-  /** Consecutive failed sync attempts since the last success (0/absent = healthy). */
+  /** Consecutive sync cycles in which the PEER did not answer, since a cycle in which it did (0/absent = healthy). */
   consecutiveFailures?: number;
+  /** Consecutive sync cycles in which THIS instance's own database failed while landing what the peer sent (0/absent = none). Runtime only. */
+  consecutiveLocalFaults?: number;
   /** The version this peer last reported over gossip; absent if it never has. */
   version?: string;
   /** Why this peer is refused on version grounds, or absent when it is fine. The SENTENCE, not a
@@ -1062,14 +1064,31 @@ export interface DuplicateRecord {
   updatedAt: string;
 }
 
+/**
+ * What a sync cycle moved, per replicated family (`pulled` / `pushed` of a history row). `files` is the number of FILES moved, not bytes.
+ * The family keys after `edges` are optional: a row written before they were counted lacks them, and a client reads each `?? 0`. A key this
+ * client does not know is a count too (the server may add a family), so the type is open.
+ */
+export interface SyncCounts {
+  facts: number;
+  entities: number;
+  edges: number;
+  files: number;
+  chrono?: number;
+  links?: number;
+  filemeta?: number;
+  [family: string]: number | undefined;
+}
+
 export interface SyncHistoryRecord {
   _id: string;
   networkId: string;
   triggeredAt: string;
   completedAt: string;
-  status: 'success' | 'partial' | 'failed';
-  pulled: { facts: number; entities: number; edges: number; files: number };
-  pushed: { facts: number; entities: number; edges: number; files: number };
+  /** The cycle's one verdict word (the same one the metric and a waited sync answer carry). A word this client does not know is not-success. */
+  status: 'success' | 'partial' | 'failed' | 'refused' | (string & {});
+  pulled: SyncCounts;
+  pushed: SyncCounts;
   errors?: string[];
 }
 

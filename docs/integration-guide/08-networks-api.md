@@ -72,7 +72,7 @@ Returns one network object (same shape as entries in `GET /api/networks`).
 on [`GET /api/networks/:id/vote-outcomes`](#vote-outcomes); `pendingRounds` is no longer a field of the network, and nothing
 on it, or on a member, ends in `Hash`.
 
-**A member is shown by an allow list per audience, never by subtraction** (6.0). The network views (`GET /api/networks`, `GET /api/networks/:id`, `network_get`) show a member's identity and topology (`instanceId`, `label`, `url`, `direction`, `parentInstanceId`, `originalParentInstanceId`, `children`, `signingPublicKey`, `version`, `versionCheckedAt`, `admittedAt`, `introducedBy`), its status (`lastSyncAt`, `consecutiveFailures`, `declinedSpaces`) and the computed `belowFloor` and `minPeerVersion`. **They carry no per-space mark** (the positions this instance has read from the member, sent to it and served it, the frozen 5.6 `lastSeq*` marks, the file-deletion acknowledgements, the re-read cursors and state) and no `lastSyncAtBy6`: those are this instance's bookkeeping about a peer, and every one that earlier builds returned is gone from the answer. The member list a joiner receives, the roster `GET /api/sync/networks/:id/members` serves a peer and the candidate a join round carries are identity and topology only. A member key nobody listed is not shown.
+**A member is shown by an allow list per audience, never by subtraction** (6.0). The network views (`GET /api/networks`, `GET /api/networks/:id`, `network_get`) show a member's identity and topology (`instanceId`, `label`, `url`, `direction`, `parentInstanceId`, `originalParentInstanceId`, `children`, `signingPublicKey`, `version`, `versionCheckedAt`, `admittedAt`, `introducedBy`), its status (`lastSyncAt`, `consecutiveFailures`, `consecutiveLocalFaults`, `declinedSpaces`) and the computed `belowFloor` and `minPeerVersion`. **They carry no per-space mark** (the positions this instance has read from the member, sent to it and served it, the frozen 5.6 `lastSeq*` marks, the file-deletion acknowledgements, the re-read cursors and state) and no `lastSyncAtBy6`: those are this instance's bookkeeping about a peer, and every one that earlier builds returned is gone from the answer. The member list a joiner receives, the roster `GET /api/sync/networks/:id/members` serves a peer and the candidate a join round carries are identity and topology only. A member key nobody listed is not shown. `consecutiveFailures` counts the cycles in a row in which the PEER did not answer (it resets whenever the peer answered, whatever this instance then failed to do); `consecutiveLocalFaults` counts the cycles in a row in which THIS instance's own database failed while it landed what the peer sent. It is runtime state, not stored in `config.json`, and resets on a restart or on a cycle with no local fault; absent or `0` is none.
 
 **An instance administrator also reads two fields, always present:** `rereadOwed`, the full re-reads this instance still has to run ([Re-read a Network](#re-read-a-network-d-20)), one `{ instanceId, space, state }` per member and space with `state` `owed` or `catching` (an empty array when none), and `spaceRecordCounts`, `{ <spaceId>: n }` over the network's spaces, an estimate of the records each holds (read from the collections' metadata, not counted) from which a client estimates a re-read's duration. A token that may only read the network sees neither, as with `owedSpaceActs`.
 
@@ -671,8 +671,8 @@ without saying so and pass a negative through (`Q-109`).
       "triggeredAt": "2026-03-26T12:00:00.000Z",
       "completedAt": "2026-03-26T12:00:02.500Z",
       "status": "success",
-      "pulled": { "facts": 5, "entities": 2, "edges": 1, "files": 0 },
-      "pushed": { "facts": 3, "entities": 0, "edges": 0, "files": 1 },
+      "pulled": { "facts": 5, "entities": 2, "edges": 1, "chrono": 0, "links": 0, "filemeta": 0, "files": 0 },
+      "pushed": { "facts": 3, "entities": 0, "edges": 0, "chrono": 0, "links": 0, "filemeta": 1, "files": 1 },
       "schemaViolations": [
         { "spaceId": "research", "records": 4, "top": [ { "name": "properties.statuz", "count": 4 } ] }
       ]
@@ -689,10 +689,20 @@ The records are stored as the peer sent them, never refused ([What arrivals reco
 It is absent on a cycle that recorded nothing, so a clean row is the row it always was; a push is not in it, because a
 pushing peer is answered per document. MCP `network_sync_history` answers the same field.
 
-**`status` says whether every member's transfers completed.** `success` means each member was reached and every
-transfer finished; `partial` means some members did not; `failed` means none did. A member counts as not
-completed when any of its transfers was refused or cut short (a `403`, a failed batch, no peer token), and
-`errors` then names the member, the space, the direction and the transfers that stopped. A space listed as `held` (a wipe or deletion of it is being applied here) or `declined` (a pub/sub member left it) is reported as such and is not a failure. `errors` is present
+**`pulled` and `pushed` count every replicated family**, one key each (`facts`, `entities`, `edges`, `chrono`, `links`,
+`filemeta`: records moved) and `files`, the number of FILES moved (not bytes). A row written before a family was
+counted lacks its key, so read each count as `0` when absent; a key this client does not know is a count to show
+under its name (the server may add a family).
+
+**`status` is the cycle's one verdict, the same word a waited sync answers as `outcome`** ([the sync answer](09-sync-api.md#trigger-sync)).
+`success` means each member synced and every transfer finished; `partial` means some members did not (or one is
+still catching up); `failed` means none synced; `refused` means the only members met were too old to sync with
+(nothing was exchanged and nothing failed; an older version of this server wrote `failed` for such a cycle, and
+reads `refused` as an unknown word after a rollback). A client treats a status word it does not know as
+not-success. A member counts as not completed when any of its transfers was refused or cut short (a `403`, a
+failed batch, no peer token) or when this instance's own database failed while it landed the peer's page (the
+peer is not counted as failing then), and `errors` names the member, the space, the direction and the transfers
+that stopped. A cycle stopped by shutdown is written `partial` with the error "stopped for shutdown". A space listed as `held` (a wipe or deletion of it is being applied here) or `declined` (a pub/sub member left it) is reported as such and is not a failure. `errors` is present
 only when something failed.
 
 `limit` defaults to 20, max 100. Ordered most-recent-first. The last 100 records per network are retained; older entries are pruned automatically.

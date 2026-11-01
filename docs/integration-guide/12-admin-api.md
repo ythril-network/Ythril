@@ -191,7 +191,8 @@ Each document must have a string `_id` and a `seq` that is a non-negative intege
 ceiling (`2^50 − 2^40`); file metadata older than seqs may carry none. Documents with an existing `_id` in the space
 are **replaced, whatever their seq** — an import is a restore, so a backup restored over newer data wins; new
 `_id`s are inserted. A body holding the same `_id` twice stores the copy with the highest seq, and of equal seqs the
-earlier one, wherever in the body the copies are. The families land in a fixed order (facts, entities, chrono, files,
+earlier one, wherever in the body the copies are. <!-- replicated-family-order -->
+The families land in a fixed order (facts, entities, chrono, files,
 edges, links) whatever their order in the body.
 
 What the import stores of each document:

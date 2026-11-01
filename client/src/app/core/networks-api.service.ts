@@ -18,6 +18,24 @@ export interface CastVoteResult {
   round: ServerVoteRound & { outcome?: string; concludedAt?: string };
 }
 
+/** One member's part of a waited sync, as the server words it (a closed sentence per outcome, never driver text). */
+export interface SyncMemberResult {
+  networkId: string;
+  instanceId: string;
+  label: string;
+  /** success | catching-up | records-refused | peer-too-old | local-fault | interrupted | failed; a word this client does not know is not-success. */
+  outcome: string;
+  reason?: string;
+}
+
+/** What a sync trigger answers. A request that was only accepted (not waited for) has neither `outcome` nor `members`. */
+export interface SyncTriggerAnswer {
+  ok: boolean;
+  /** The cycle's one verdict: success | partial | refused | failed (| interrupted on a 503 during shutdown). */
+  outcome?: string;
+  members?: SyncMemberResult[];
+}
+
 /** Networks, sync scheduling/triggering, governance votes, invites, and the local agent. */
 @Injectable({ providedIn: 'root' })
 export class NetworksApi {
@@ -96,8 +114,13 @@ export class NetworksApi {
     return this.http.patch<any>(`/api/networks/${networkId}`, { syncSchedule });
   }
 
-  triggerSync(networkId: string): Observable<{ ok: boolean }> {
-    return this.http.post<{ ok: boolean }>(`/api/networks/${networkId}/sync`, {});
+  /**
+   * `ok` is true only when every member synced; `outcome` is the cycle's one verdict word (success | partial | refused | failed) and `members`
+   * says each member's own outcome, in our words. A waited sync where no member succeeded is an HTTP error (502 sync_failed, or 503
+   * sync_store_failed when this instance's database failed). A client treats a word it does not know as not-success.
+   */
+  triggerSync(networkId: string): Observable<SyncTriggerAnswer> {
+    return this.http.post<SyncTriggerAnswer>(`/api/networks/${networkId}/sync`, {});
   }
 
   /**
