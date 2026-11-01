@@ -187,7 +187,25 @@ function argsFor(schema) {
   return out;
 }
 
-let door, base, adminKey, callTool, ADMIN, server, TOOLS, schemaOf, log, getConfig, mutateConfig;
+let door, base, adminKey, callTool, ADMIN, server, TOOLS, schemaOf, log, getConfig, mutateConfig, getSecrets, saveSecrets;
+
+/**
+ * Undo what a door left that would close the doors after it, so each is asked about the store and not about its neighbour:
+ *
+ * - a space act a door started and the failing store stopped is OWED, and an owed act closes its space to every writer until it is
+ *   retried (bundle-106);
+ * - `POST /api/mfa/setup` switches MFA on (no code is asked while it is off), and every admin door after it answered `403 MFA_REQUIRED`
+ *   to the probe's code-less token without reaching the store. That hid the space export's no-answer from this gate on 6c64a7112, where
+ *   the export was probed after the setup door in every case (bundle-40, Q-267).
+ */
+function undoNeighbours() {
+  if (getConfig().pendingSpaceActs || getConfig().pendingSpaceOp) mutateConfig(cfg => { delete cfg.pendingSpaceActs; delete cfg.pendingSpaceOp; });
+  const secrets = getSecrets();
+  if (secrets.totpSecret || secrets.totpLastStep !== undefined) {
+    const { totpSecret: _s, totpLastStep: _l, ...rest } = secrets;
+    saveSecrets(rest);
+  }
+}
 
 /**
  * Operations the fault failed BEFORE the request was answered, per request id — so a door is judged only on what it
@@ -232,6 +250,8 @@ const SERVES_THE_LOG = new Set(['GET /api/about/logs', 'GET /api/about/logs/stre
  */
 const ANSWERS_AROUND_A_FAILED_WRITE = new Map([
   ['POST /api/update_file_meta', 'the one write that failed is the embed job queued behind the update, which is best-effort by design; the metadata update itself changed nothing'],
+  // Asked since MFA is switched off before every door (bundle-40): the setup door before it had closed it with `403 MFA_REQUIRED`.
+  ['POST /api/admin/reload-config', 'the writes that failed are the stale-spaceId self-heal of the built-in space\'s init (`repairStaleSpaceIds`), best-effort and idempotent by design: it is logged and runs again on the next boot, reload or rename'],
 ]);
 
 /**
@@ -258,7 +278,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
   before(async () => {
     door = await openPushDoor({ suite: 'storedown', spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
     ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));
-    ({ getConfig, mutateConfig } = await import('../../server/dist/config/loader.js'));
+    ({ getConfig, mutateConfig, getSecrets, saveSecrets } = await import('../../server/dist/config/loader.js'));
     log = await import('../../server/dist/util/log.js');
     const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
     ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
@@ -321,9 +341,8 @@ describe('a store failure answers alike on every door', { skip }, () => {
    * over the first one's leftovers would be asked different questions and conclude about neither.
    */
   async function freshSpace() {
-    // A space act a door started and the failing store stopped is OWED, and an owed act closes its space to every writer until it is
-    // retried (bundle-106): what the last case left registered is not this case's subject.
-    mutateConfig(cfg => { delete cfg.pendingSpaceActs; delete cfg.pendingSpaceOp; });
+    // What the last case's doors left (an owed act, MFA switched on) is not this case's subject.
+    undoNeighbours();
     const files = path.join(process.env['DATA_ROOT'], 'files', S);
     fs.rmSync(files, { recursive: true, force: true });
     fs.mkdirSync(files, { recursive: true });
@@ -403,8 +422,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
       const networks = getConfig().networks;
       failing = true;
       for (const d of all) {
-        // A door that started a space act the failing store stopped leaves it owed, closing the space to the doors after it.
-        if (getConfig().pendingSpaceActs || getConfig().pendingSpaceOp) mutateConfig(cfg => { delete cfg.pendingSpaceActs; delete cfg.pendingSpaceOp; });
+        undoNeighbours();
         if (!d.variant) { results.push({ d, a: await ask(d) }); continue; }
         networks.push(structuredClone(NETWORK));
         try { results.push({ d, a: await ask(d) }); } finally {
@@ -432,6 +450,8 @@ describe('a store failure answers alike on every door', { skip }, () => {
       }
       // A stream that opened (a status line, then events) is a stream, not an answer that never came.
       if (a.timedOut && !(a.streaming && a.status === 200)) wrong.push(`${d.name}: no answer within ${PER_DOOR_MS} ms of a store failure`);
+      // MFA is off before every door (`undoNeighbours`): a door that asks the probe for a code was closed by its neighbour, not asked.
+      if (a.status === 403 && /MFA_REQUIRED/.test(a.raw)) wrong.push(`${d.name}: answered MFA_REQUIRED, so it was never asked about the store`);
     }
     for (const { d, a } of reached) {
       if (a.streaming || REPORTS_THE_STORE.has(d.name) || (answers === 'misconfigured' && ANSWERS_AROUND_A_FAILED_WRITE.has(d.name))) continue;
