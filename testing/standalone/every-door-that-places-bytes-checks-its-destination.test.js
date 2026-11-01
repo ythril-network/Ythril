@@ -70,7 +70,7 @@ const NOT_PLACING = Object.freeze({
   StoredFileUnreadable: 'an error class', getUploadReceived: 'reads the staged byte count', parseContentRange: 'parses a header',
   hashStagedChunks: 'reads staged chunks, writes nothing', discardStagedChunks: 'removes staged chunks',
   deleteStoredIfPresent: 'removes bytes; a delete places nothing', recordStoredFile: 'records the row of bytes already placed by the caller',
-  peerBytesShadowed: 'a question about a tombstone, writes nothing', cleanupStaleChunks: 'removes stale staged chunks',
+  peerBytesShadowed: 'a question about a tombstone, writes nothing',
   ensureSpaceFilesDir: 'creates a space\'s own root, a path the instance names, never a caller\'s',
   removeTree: 'removes a tree; a delete places nothing',
   moveTree: 'moves a space\'s own directory to its renamed id, a path the instance names (the new id is validated by the rename), never a caller\'s destination',

@@ -138,7 +138,7 @@ describe('NetworkSyncHistoryComponent: status words, counts and plurals (bundle-
     fixture.detectChanges();
     return fixture;
   }
-  const rowsOf = (f: { nativeElement: HTMLElement }) => [...f.nativeElement.querySelectorAll<HTMLElement>('.history-row')];
+  const rowsOf = (f: { nativeElement: HTMLElement }) => [...(f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.history-row')];
   const flat = (el: Element) => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
 
   beforeEach(() => TestBed.resetTestingModule());
@@ -153,7 +153,7 @@ describe('NetworkSyncHistoryComponent: status words, counts and plurals (bundle-
 
   it("the badge shows the translated word of each status, never the server's raw word", () => {
     const f = open(STATUSES.map((s, i) => row(`r${i}`, s, { facts: 1 }, { facts: 1 })));
-    const badges = [...f.nativeElement.querySelectorAll<HTMLElement>('.status-badge')].map(b => (b.textContent ?? '').trim());
+    const badges = [...(f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.status-badge')].map(b => (b.textContent ?? '').trim());
     expect(badges).toHaveLength(STATUSES.length);
     STATUSES.forEach((s, i) => {
       const want = EN[`sync.status.${s}`] ?? `<no sync.status.${s} key in en.json>`;
@@ -163,7 +163,7 @@ describe('NetworkSyncHistoryComponent: status words, counts and plurals (bundle-
 
   it("a 'refused' row has a badge style of its own, as success, partial and failed have", () => {
     const f = open([row('r1', 'refused', { facts: 1 }, { facts: 0 })]);
-    const badge = f.nativeElement.querySelector<HTMLElement>('.status-badge')!;
+    const badge = (f.nativeElement as HTMLElement).querySelector<HTMLElement>('.status-badge')!;
     expect(badge.classList.contains('status-refused'), 'the badge is not classed status-refused').toBe(true);
     // The component's styles are emulated-encapsulated into <style> elements of the document head.
     const css = [...document.querySelectorAll('style')].map(el => el.textContent ?? '').join(' ');
