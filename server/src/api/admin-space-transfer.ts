@@ -51,7 +51,7 @@ import { settledWithin } from '../util/time-bound.js';
 import { runSpaceAct, releaseSpaceActWaiter, spaceActAnswerMs, spaceActClosedAnswer } from '../spaces/space-act-runner.js';
 import { SPACE_ACT_KINDS } from '../config/types-space-acts.js';
 import { ensureSpoolRoot, importStanding, indexSpool, registerImport, removeSpool, spoolPathOf, takeImportResult } from '../spaces/import-act.js';
-import type { ImportResult } from '../sync/space-import.js';
+import { importTotals, type ImportResult } from '../sync/space-import.js';
 
 /** The import route's full path, for the parser marker `app.ts` mounts before the global parsers (the router serves it under its mount). */
 export const IMPORT_PATH = '/api/admin/spaces/:spaceId/import';
@@ -200,12 +200,7 @@ function roomFor(dir: string, declared: number): boolean {
 
 /** The counts of a landed import, for its audit row: ids never, totals only. */
 function importChanges(result: ImportResult): Array<{ field: string; to: number }> {
-  const all = Object.values(result.results);
-  const sum = (f: (r: (typeof all)[number]) => number): number => all.reduce((n, r) => n + f(r), 0);
-  return [
-    { field: 'inserted', to: sum(r => r.inserted) }, { field: 'updated', to: sum(r => r.updated) }, { field: 'refused', to: sum(r => r.errors) },
-    { field: 'deletedOnRestore', to: sum(r => r.deletedOnRestoreTotal ?? 0) }, { field: 'due', to: sum(r => r.dueTotal ?? 0) },
-  ];
+  return Object.entries(importTotals(result)).map(([field, to]) => ({ field, to }));
 }
 
 spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {

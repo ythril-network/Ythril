@@ -64,7 +64,7 @@
  * The door lands a body of any size from its spool a page at a time (`importSpool`, `sync/export-stream.ts`), and the
  * tests' `importDocuments` lands an object one family at a time: both through ONE page entry, {@link importPage}, the only
  * caller of the writer here, so what the tests exercise is what the door does. The answer's bounded lists are cut while
- * merging and their totals kept; the summary line, `sayRecorded` and the leaked-row restart are said once per import.
+ * merging and their totals kept; the summary line, `sayRecordedTally` and the leaked-row restart are said once per import.
  *
  * **Files are not schema-validated.** A file has no `type` and therefore no type schema — the same asymmetry
  * `embeddingSuppressedFor` encodes by skipping the middle tier for files.
@@ -74,7 +74,7 @@ import type { BrainCollection } from '../config/types.js';
 import { log, logSafe, peerList, peerText } from '../util/log.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { boundedRows } from '../brain/write-validation.js';
-import { watchArrivals, recordedOf, sayRecorded, type RecordedFamilies } from './arrival-recording.js';
+import { watchArrivals, recordedOf, sayRecordedTally, newRecordedTally, tallyRecorded, type RecordedTally } from './arrival-recording.js';
 import { isNewerCopy } from './held-tombstone-rules.js';
 import { writeArrivals, arrivalId, arrivalRefusal, NAMED_IN_SUMMARY, type ArrivalOutcome } from './arrivals.js';
 import { PageStoppedError } from './page-stopped.js';
@@ -179,6 +179,28 @@ export interface ImportResult {
   results: Record<ImportType, ImportTypeResult>;
 }
 
+/** What a whole import came to, every family together: the counts its audit row carries, never an id. */
+export interface ImportTotals {
+  inserted: number;
+  updated: number;
+  refused: number;
+  deletedOnRestore: number;
+  due: number;
+}
+
+/** The totals of an import's result over every family: the door's audit row and the act's completion row say the same numbers. */
+export function importTotals(result: ImportResult): ImportTotals {
+  const t: ImportTotals = { inserted: 0, updated: 0, refused: 0, deletedOnRestore: 0, due: 0 };
+  for (const r of Object.values(result.results)) {
+    t.inserted += r.inserted;
+    t.updated += r.updated;
+    t.refused += r.errors;
+    t.deletedOnRestore += r.deletedOnRestoreTotal ?? 0;
+    t.due += r.dueTotal ?? 0;
+  }
+  return t;
+}
+
 /** How an import treats what it lands. */
 export interface ImportOptions {
   /**
@@ -188,11 +210,14 @@ export interface ImportOptions {
   origin?: RestoreOrigin;
 }
 
-/** What a whole import has gathered so far, merged page by page: the answer, and what `sayRecorded` says once at the end. */
+/**
+ * What a whole import has gathered so far, merged page by page: the answer, and the counts `sayRecordedTally` says once at the end. Bounded
+ * whatever the body holds: the answer's lists are cut, and what was recorded is a tally of counts, never the documents (bundle-40 P2).
+ */
 export interface ImportAccumulator {
   readonly spaceId: string;
   readonly results: Record<ImportType, ImportTypeResult>;
-  readonly recorded: Map<string, Map<string, readonly SchemaViolation[]>>;
+  readonly recorded: RecordedTally;
 }
 
 /** Why a family could not be written at all — every document of it is refused with this reason. */
@@ -276,7 +301,7 @@ export function newImportAccumulator(spaceId: string): ImportAccumulator {
   return {
     spaceId,
     results: Object.fromEntries(IMPORT_TYPES.map(t => [t, { inserted: 0, updated: 0, errors: 0 } as ImportTypeResult])) as Record<ImportType, ImportTypeResult>,
-    recorded: new Map(),
+    recorded: newRecordedTally(),
   };
 }
 
@@ -359,9 +384,7 @@ export async function importPage(family: BrainCollection, docs: readonly unknown
     })), IMPORT_VIOLATIONS_NAMED);
     result.schemaViolationsTotal = (result.schemaViolationsTotal ?? 0) + rows.length;
     if (result.schemaViolationsTotal > IMPORT_VIOLATIONS_NAMED) result.schemaViolationsTruncated = true;
-    const seen = acc.recorded.get(family) ?? new Map<string, readonly SchemaViolation[]>();
-    for (const [doc, found] of rows) seen.set(doc._id, found);
-    acc.recorded.set(family, seen);
+    tallyRecorded(acc.recorded, family, rows.map(([, found]) => found));
   }
   // A PEER's deletion this instance holds for a record the restore just brought back: named, and settled by the next sync.
   nameInto(result, 'restoredOverTombstone', landed.filter(id => held.has(id)));
@@ -378,7 +401,7 @@ async function importInto(spaceId: string, pages: ImportPages, opts: ImportOptio
   const results = acc.results;
 
   // Said once for the restore, names and counts only. Never throws, so it cannot turn a restore that landed into one that failed.
-  sayRecorded({ spaceId, source: 'import', peer: 'import', families: acc.recorded as RecordedFamilies });
+  sayRecordedTally({ spaceId, source: 'import', peer: 'import', tally: acc.recorded });
 
   log.info(
     `Import into space '${peerText(spaceId)}': `
