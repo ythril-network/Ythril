@@ -123,7 +123,7 @@ describe('the shutdown sequence (shutdown.ts, started from index.ts)', () => {
     const mongo = sequence.indexOf('closeMongo(');
     assert.ok(drain > 0 && wait > drain, 'the wait for sync cycles is not in the same Promise.all as the HTTP drain: the two would add up inside the stop grace');
     assert.ok(wait < flush && flush < mongo, 'the cycle wait must come before flushConfig and closeMongo, or a page lands on a closing client');
-    assert.match(sequence.slice(wait, wait + 80), /Math\.min\(\s*CYCLE_WAIT_MS\s*,\s*httpDrainMs\s*\)/, 'the wait is not bounded by the drain budget it shares');
+    assert.match(sequence, /waitForSyncCycles\(\s*Math\.min\(\s*CYCLE_WAIT_MS\s*,\s*httpDrainMs\s*\)/, 'the wait is not bounded by the drain budget it shares');
     assert.match(src, /const CYCLE_WAIT_MS\s*=\s*5_000\b/, 'the cycle wait is not the 5 s the docs state (02-hosting.md, SHUTDOWN_DRAIN_MS)');
     assert.ok(sequence.indexOf('beginShutdown()') < drain, 'shutdown must begin (which ends a cycle at its next page) before the wait starts');
   });
