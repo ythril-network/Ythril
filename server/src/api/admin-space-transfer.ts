@@ -194,9 +194,22 @@ async function spoolBody(req: Request, file: string, encoding: string, max: numb
   }
 }
 
+/** The bytes free under `dir`, or null when its file system cannot say. */
+type FreeSpaceReader = (dir: string) => number | null;
+const statfsFree: FreeSpaceReader = (dir) => {
+  try { const st = fs.statfsSync(dir); return Number(st.bavail) * Number(st.bsize); } catch { return null; }
+};
+let freeSpaceOf: FreeSpaceReader = statfsFree;
+
+/** Replace the free-space reader the door asks before it spools (a test fills the disk without filling it); null restores `statfs`. */
+export function setImportFreeSpaceForTest(reader: FreeSpaceReader | null): void {
+  freeSpaceOf = reader ?? statfsFree;
+}
+
 /** Is there room for a body of `declared` bytes under `dir`? A file system that cannot say is not refused. */
 function roomFor(dir: string, declared: number): boolean {
-  try { const st = fs.statfsSync(dir); return Number(st.bavail) * Number(st.bsize) >= declared; } catch { return true; }
+  const free = freeSpaceOf(dir);
+  return free === null || free >= declared;
 }
 
 /** The counts of a landed import, for its audit row: ids never, totals only. */
