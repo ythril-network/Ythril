@@ -70,7 +70,7 @@ import { withinSpaceActScope } from './space-act-scope.js';
 import { auditRoundEffect, ROUND_SPACE_ACT_OPERATION, SPACE_ACT_COMPLETED_OPERATION } from '../networks/round-audit.js';
 import type * as Registry from '../metrics/registry.js';
 import {
-  spaceActKnob, setSpaceActKnobs, SpaceActInputFailure, SpaceActsClosedError,
+  spaceActKnob, setSpaceActKnobs, SpaceActInputFailure, SpaceActsClosedError, spaceActCompletionRow as completionRow,
   type SpaceActRequest, type SpaceRoundSettled, type SpaceActStanding, type SpaceActKnobs, type SpaceActBodyContext,
   type SpaceActBodyOutcome, type SpaceActSetHooks, type SpaceActBody,
 } from './space-act-contract.js';
@@ -748,13 +748,6 @@ function complete(id: string, entry: SpaceActEntry, outcome: SpaceActBodyOutcome
     ...(outcome.renamed ? { renamed: outcome.renamed } : {}),
   });
 }
-
-/** The completion row of an act with no round that nobody is told of: the kind is in the path, so a restore's rows read apart from a wipe's.
- *  The body's counts ride as changes (an import's totals), since this row is the only place a queued act's result is told. */
-const completionRow = (entry: SpaceActEntry, id: string, counts?: Record<string, number>) => ({
-  method: 'DELETE', path: `internal:space-act:${entry.kind}:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId,
-  ...(counts ? { changes: Object.entries(counts).map(([field, to]) => ({ field, to })) } : {}),
-});
 
 /** Run the body's after-completion step once the completion write removed the entry; a throw is said and changes nothing. */
 function afterCompletion(entry: SpaceActEntry, outcome: SpaceActBodyOutcome): void {
