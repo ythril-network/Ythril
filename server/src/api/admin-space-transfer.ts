@@ -53,7 +53,7 @@ import { SPACE_ACT_KINDS } from '../config/types-space-acts.js';
 import { ensureSpoolRoot, importStanding, indexSpool, registerImport, removeSpool, spoolPathOf, takeImportResult } from '../spaces/import-act.js';
 import type { ImportResult } from './admin-import.js';
 
-/** The import route's path, for the parser marker `app.ts` mounts before the global parsers; the route below spells the same literal (the route scans read it). */
+/** The import route's full path, for the parser marker `app.ts` mounts before the global parsers (the router serves it under its mount). */
 export const IMPORT_PATH = '/api/admin/spaces/:spaceId/import';
 
 const IMPORT_BODY = Symbol('importBody');
@@ -69,11 +69,12 @@ export function skipsGlobalParsers(req: unknown): boolean {
   return (req as Record<symbol, boolean>)[IMPORT_BODY] === true;
 }
 
+/** Mounted by `app.ts` at `/api/admin/spaces` (a literal there, which the route scans read). */
 export const spaceTransferRouter = express.Router();
 
 // ── the export ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-spaceTransferRouter.get('/api/admin/spaces/:spaceId/export', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
+spaceTransferRouter.get('/:spaceId/export', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
@@ -207,7 +208,7 @@ function importChanges(result: ImportResult): Array<{ field: string; to: number 
   ];
 }
 
-spaceTransferRouter.post('/api/admin/spaces/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
+spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const where = 'POST /api/admin/spaces/:spaceId/import';
   if (answeredUnknownSpace(req, res, spaceId)) return;

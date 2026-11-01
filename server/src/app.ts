@@ -415,7 +415,7 @@ export function createApp() {
 
   // ── Admin: space export and import ────────────────────────────────────────
   // Both live in `api/admin-space-transfer.ts`: the export writes a backup of one space, the import restores one of any size as an act.
-  app.use(spaceTransferRouter);
+  app.use('/api/admin/spaces', spaceTransferRouter);
 
   // ── Admin: config reload ───────────────────────────────────────────────────────────────
   // Reload config.json from disk without a container restart.  Useful when the

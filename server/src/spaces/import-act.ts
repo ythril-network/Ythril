@@ -23,6 +23,8 @@ import path from 'node:path';
 import { getConfig, getDataRoot } from '../config/loader.js';
 import type { SpaceActEntry } from '../config/types.js';
 import { mkdirPrivateSync } from '../util/fs-modes.js';
+import { LruMap } from '../util/lru-map.js';
+import { isMissingPath } from '../files/stored-bytes.js';
 import { log, peerText } from '../util/log.js';
 import { indexExportBody, type ExportBodyIndex } from '../sync/export-stream.js';
 import { arrivalRefusal } from '../sync/arrivals.js';
@@ -78,8 +80,7 @@ export function indexSpool(file: string, maxDocuments: number): Promise<ExportBo
 /** The index the door read, kept for the body's first run so the body is not read whole a third time. A resume reads it again. */
 const indexes = new Map<string, ExportBodyIndex>();
 /** The result each completed import's body came to, by entry id, for the door that waits for it; bounded, the oldest first out. */
-const results = new Map<string, ImportResult>();
-const RESULTS_KEPT = 32;
+const results = new LruMap<string, ImportResult>(32);
 
 /**
  * Register the import of the body spooled as `spoolId` (validated whole, `index`) into `spaceId`, in a config write of its own, and answer its
@@ -116,7 +117,6 @@ async function importBody({ entry }: { entry: Readonly<SpaceActEntry> }): Promis
   const cfg = getConfig();
   const result = await importSpool(entry.localId, file, index, { origin: restoreOriginOf(index.envelope, cfg.instanceId, entry.localId) });
   results.set(entry.id, result);
-  while (results.size > RESULTS_KEPT) results.delete(results.keys().next().value!);
   const totals = Object.values(result.results);
   return {
     counts: {
@@ -132,7 +132,7 @@ async function importBody({ entry }: { entry: Readonly<SpaceActEntry> }): Promis
 function sweepOrphanSpools(standing: readonly SpaceActEntry[]): void {
   const named = new Set(standing.map(e => e.spoolId).filter((id): id is string => typeof id === 'string'));
   let names: string[];
-  try { names = fs.readdirSync(spoolRoot()); } catch (err) { if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return; throw err; }
+  try { names = fs.readdirSync(spoolRoot()); } catch (err) { if (isMissingPath(err)) return; throw err; }
   for (const name of names) {
     if (named.has(name.replace(/\.json$/, ''))) continue;
     try { fs.rmSync(path.join(spoolRoot(), name), { force: true, recursive: true }); log.info(`removed an import spool no standing import names: ${peerText(name)}`); }
