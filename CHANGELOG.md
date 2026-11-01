@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Import:** a space export of any size restores, compressed with gzip, deflate or br or not, bounded by `importBodyMaxBytes` and `importMaxDocuments`; a malformed body is refused whole before anything is written, and an import resumes after a crash.
+- **Import:** an import whose saved body can no longer be read after a restart (corrupted, or the master secret changed or removed) fails with `422` and frees its space; it was retried for ever.
+- **Import:** of two imports sent at once, the second is answered `409` (`space_being_imported`); both were taken.
 - **Import:** a body of large records lands about 32 MiB at a time, not 500 records at once whatever their size.
 - **Import:** a restore leaves out what this instance deleted after the export was taken, and the next sync brings the network's newer versions and deletions back.
 - **Import:** an export from another instance or another space no longer brings its file sync agreements or its owed fork decisions.

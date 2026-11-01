@@ -16,7 +16,15 @@
  * ({@link spoolPathOf}). It is removed when the act completes, when it fails for good, and at the next start when no standing act names it.
  *
  * An import act never needs abandoning: its input was validated before it was registered, a store failure is retried by the runner, and a
- * resumed act whose spool is gone completes as FAILED (its completion row says so) and removes itself.
+ * resumed act whose spool is gone (410) or can no longer be read (422: corrupted on disk, or written through a master secret that was since
+ * changed or removed) completes as FAILED (its completion row says so) and removes itself and its spool. A spool that cannot be read is never
+ * retried: it will not read better the next time, and the act would hold its space for ever (bundle-40 pre-ship R1).
+ *
+ * ## One import at a time
+ *
+ * The door lets one import in, instance-wide, from before it spools a body until it has answered ({@link holdImportDoor}), and an import
+ * registers only while no other import stands ({@link registerImport}); two doors that both passed a check made before their bodies were
+ * spooled both registered (pre-ship R2).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +34,8 @@ import { mkdirPrivateSync } from '../util/fs-modes.js';
 import { LruMap } from '../util/lru-map.js';
 import { isMissingPath } from '../files/stored-bytes.js';
 import { log, peerText } from '../util/log.js';
-import { indexExportBody, type ExportBodyIndex } from '../sync/export-stream.js';
+import { ChunkedEnvelopeError } from '../config/secretbox.js';
+import { ExportBodyMalformed, indexExportBody, type ExportBodyIndex } from '../sync/export-stream.js';
 import { arrivalRefusal } from '../sync/arrivals.js';
 import { importSpool, importTotals, restoreOriginOf, type ImportResult } from '../sync/space-import.js';
 import { defineSpaceActBody, defineSpaceActBootSweep, registerOwnSpaceAct, spaceActsOfKind, type SpaceActBodyOutcome } from './space-act-runner.js';
@@ -69,6 +78,26 @@ export function importStanding(): boolean {
   return spaceActsOfKind(getConfig(), KIND).length > 0;
 }
 
+/** Another import stands, or another door holds the import door: the door answers 409 `space_being_imported`, and its spool is removed. */
+export class ImportBusyError extends Error {
+  override readonly name = 'ImportBusyError';
+}
+
+/** A door is between its one-at-a-time check and its answer: from before its body is spooled until it answered. */
+let doorHeld = false;
+
+/**
+ * Run `work` holding the import door, or answer `{ held: false }` when another door holds it or an import stands: the one-at-a-time rule,
+ * held from before the body is spooled until the door answered, so two doors never both spool, register and land. Released in `finally`,
+ * whatever `work` came to.
+ */
+export async function holdImportDoor<T>(work: () => Promise<T>): Promise<{ held: true; value: T } | { held: false }> {
+  if (doorHeld || importStanding()) return { held: false };
+  doorHeld = true;
+  try { return { held: true, value: await work() }; }
+  finally { doorHeld = false; }
+}
+
 /** Does a document take part in the repeated-id rule of a body: only one the writer would not refuse (it refuses before it collapses). */
 const competes = (family: string, doc: Record<string, unknown>): boolean => arrivalRefusal(doc, { seqOptional: family === 'files' }) === null;
 
@@ -84,9 +113,11 @@ const results = new LruMap<string, ImportResult>(32);
 
 /**
  * Register the import of the body spooled as `spoolId` (validated whole, `index`) into `spaceId`, in a config write of its own, and answer its
- * entry id. THROWS `SpaceActsClosedError` once shutdown closed the runner.
+ * entry id. THROWS `SpaceActsClosedError` once shutdown closed the runner, and {@link ImportBusyError} when an import stands already: the check
+ * and the registration are one synchronous step, so no other import registers between them.
  */
 export function registerImport(spaceId: string, spoolId: string, index: ExportBodyIndex): string {
+  if (importStanding()) throw new ImportBusyError('another import stands');
   indexes.set(spoolId, index);
   try { return registerOwnSpaceAct({ kind: KIND, localId: spaceId, spoolId }); }
   catch (err) { indexes.delete(spoolId); throw err; }
@@ -113,11 +144,38 @@ async function importBody({ entry }: { entry: Readonly<SpaceActEntry> }): Promis
       afterCompletion: forget,
     };
   }
-  const index = indexes.get(spoolId) ?? await indexSpool(file, Number.MAX_SAFE_INTEGER);
-  const cfg = getConfig();
-  const result = await importSpool(entry.localId, file, index, { origin: restoreOriginOf(index.envelope, cfg.instanceId, entry.localId) });
+  // The door's index serves the first run only: a retry or a resume reads the spool again, so a spool that changed under it is found.
+  const held = indexes.get(spoolId);
+  indexes.delete(spoolId);
+  let result: ImportResult;
+  try {
+    const index = held ?? await indexSpool(file, Number.MAX_SAFE_INTEGER);
+    const cfg = getConfig();
+    result = await importSpool(entry.localId, file, index, { origin: restoreOriginOf(index.envelope, cfg.instanceId, entry.localId) });
+  } catch (err) {
+    const why = unreadableSpool(err);
+    if (why === null) throw err;
+    return {
+      failedFinally: {
+        status: 422,
+        message: `The import into space '${entry.localId}' cannot complete: the body it was given can no longer be read (${why}). `
+          + 'What it landed before stays; import the export again.',
+      },
+      afterCompletion: forget,
+    };
+  }
   results.set(entry.id, result);
   return { counts: { ...importTotals(result) }, afterCompletion: forget };
+}
+
+/**
+ * Why a spool cannot be read, or null when `err` is not about the spool (a store failure, which the runner retries): a body that no longer
+ * parses (corrupted on disk), or an envelope the configured master secret does not open (changed, removed, or the file tampered with).
+ */
+function unreadableSpool(err: unknown): string | null {
+  if (err instanceof ExportBodyMalformed) return peerText(err.message);
+  if (err instanceof ChunkedEnvelopeError) return `its encryption: ${peerText(err.message)}`;
+  return null;
 }
 
 /** The start's sweep: every spool no standing import names is removed (a door that died between the spool and the act left it). */
