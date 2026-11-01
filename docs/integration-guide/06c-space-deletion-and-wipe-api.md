@@ -164,7 +164,7 @@ acts of the whole instance: one act on every space it serves, registered togethe
 reported at [`GET /api/admin/data/restore`](12a-data-management-api.md#get-apiadmindatarestore) and
 [`GET /api/admin/data/migrate`](12a-data-management-api.md#get-apiadmindatamigrate), never through a vote. While any act stands for a space,
 the space takes no writes (`409` with the kind's own code: `space_being_deleted`, `space_being_wiped`, `space_being_renamed`,
-`space_being_restored`, `space_being_migrated`) and its peer exchanges are held; the space's `actPending` names it.
+`space_being_restored`, `space_being_migrated`, `space_being_imported`) and its peer exchanges are held; the space's `actPending` names it.
 
 | `kind` | What it acts on | Write refusal |
 |---|---|---|
@@ -173,6 +173,7 @@ the space takes no writes (`409` with the kind's own code: `space_being_deleted`
 | `rename` | One space | `space_being_renamed` |
 | `restore` | Every space, made equal to a backup | `space_being_restored` |
 | `migrate` | Every space, copied to another database | `space_being_migrated` |
+| `import` | One space, an admin import of an export landing in it ([Admin API](12-admin-api.md#import-space)) | `space_being_imported` |
 
 **A client treats a kind, or a `space_being_*` code, it does not know as "this space is busy"**: a newer server adds kinds,
 and an older client must still show the space as closed rather than fail on the word.

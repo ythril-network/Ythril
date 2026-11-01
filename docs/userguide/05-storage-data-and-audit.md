@@ -150,9 +150,11 @@ file bytes) — and the import puts them back. What to expect from a restore:
   That is harmless: the label's rule still refuses a second edge written after them.
 - **Search comes back on its own.** Vectors are not exported; every restored record is queued for embedding on
   this instance, so nothing has to be reindexed by hand.
+- **What you deleted here after the export stays deleted.** A record or file this instance deleted after the export was
+  taken is not put back; the answer lists it as deleted on restore.
 - **Nothing is refused silently.** A record the import could not store is listed by id with the reason; a record
-  restored over a deletion this instance remembers is listed too, because a synced peer that remembers the same
-  deletion will remove it again.
+  restored over a deletion another instance made is listed too: the next sync applies that deletion again where the
+  network still holds it. A record already past its expiry is listed as due, because the next sweep removes it.
 - **A record that breaks this space's schema is restored anyway, and reported.** A backup taken before a schema was
   tightened must still restore. In a space whose validation is **warn** or **strict**, the answer lists the first 50
   such records by id with the field and reason (never the value) and says how many there were in all; **off** reports
@@ -161,9 +163,16 @@ file bytes) — and the import puts them back. What to expect from a restore:
 - **The file bytes are not part of it, and an import gives no report on them.** A file's record comes back without its
   size and hash, so the import does not say which files on disk no longer match their records. A whole [restore](#restore)
   does.
-- **It keeps this instance's sync positions, unlike a whole [restore](#restore).** Peers do not send again what they had
-  already sent, so a record the import put back to an older copy than a peer holds stays older here until it changes again
-  on that peer. A record the export does not hold is left as it is, not removed.
+- **The next sync catches up with the network, as for an instance that was offline since the export.** The import
+  forgets what this space had received from its peers, so they send everything again: a newer version a peer holds
+  replaces the restored copy, and a deletion a peer still holds is applied again. A record the export does not hold is
+  left as it is, not removed. A whole [restore](#restore) differs: it brings back records deleted after its backup too.
+- **Any size, one at a time.** The export can be as large as the instance allows (`importBodyMaxBytes`, 1 GiB by
+  default), compressed or not. While an import runs, the space takes no other writes, and a second import waits until
+  the first has finished. A very large one may answer that it is still running; its result is then in the audit log.
+- **Sync agreements travel only with this instance's own export of this space.** An export from another instance or
+  another space leaves out which file versions this instance had agreed with each peer; a file that differs from a
+  peer then shows as a conflict copy instead of being replaced, and nothing is lost.
 
 ### Uploaded files are encrypted at rest
 

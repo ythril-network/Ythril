@@ -98,6 +98,7 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   "spaceId": "eng-kb",
   "spaceName": "Engineering Knowledge Base",
   "version": "1.0.0",
+  "instanceId": "3f0c2a1e-...",
   "facts": [ { "_id": "...", "fact": "...", "tags": [], "...": "..." } ],
   "entities": [ { "_id": "...", "name": "...", "type": "...", "...": "..." } ],
   "edges":    [ { "_id": "...", "from": "...", "to": "...", "label": "...", "...": "..." } ],
@@ -107,17 +108,23 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
 }
 ```
 
+- **The envelope names the instance that wrote it** (`instanceId`) beside the space (`spaceId`). The import reads both to
+  tell a restore of this instance's own backup of this space from any other (below).
 - **Every replicated family is exported, keyed by its collection name** — facts, entities, edges, chrono, links and
-  file metadata. Links were missing until this release, so an export-then-import lost every link.
+  file metadata.
+- **Of the files collection, only the rows a backup holds**: no conversion chunk or face record (a row with a string
+  `parentFileId`, which every instance derives from the blob) and no legacy read spill (`_tmp/graph-<uuid>.json`,
+  `_tmp/results-<uuid>.json` at the root, in any spelling of the separators). A soft-deleted (flagged) row IS exported.
+  The import drops by the same rule, so an export and an import never disagree about what a backup is.
 - What this instance DERIVES with its own model is left out — `embedding`, `embeddingModel` and `matchedText` — so
   exported data is model-independent; the import re-embeds. So is an edge's write guard (`_functionalGuard`): this
   instance's own lock on a functional label's subject, never a backup's to carry.
 - The record's own local state is kept: the retention stamps (`_expireAt`, `_contentExpireAt`), a file's
   `syncBase`, who delivered the record (`deliveredBy`), whether this instance wrote its current version
-  (`writtenHere`), and on a fork row the decision still owed here (`_resolvedElsewhere`: another instance resolved its own
-  copy and this one has not decided yet). The record's landing position (`pos`, `posAtSeq`) is not kept: a restore takes a fresh one, so it
-  is not exported, and a tombstone's own local fields (`storedVia`, `issuedHere`, `pos`, `posAtSeq`) are this instance's alone. JSON writes the stamps as ISO strings; the import turns
-  them back into dates.
+  (`writtenHere`), and on a fork row the decision still owed here (`_resolvedElsewhere`). The record's landing position
+  (`pos`, `posAtSeq`) is not kept: a restore takes a fresh one, so it is not exported, and a tombstone's own local fields
+  (`storedVia`, `issuedHere`, `pos`, `posAtSeq`) are this instance's alone. JSON writes the stamps as ISO strings; the
+  import turns them back into dates.
 - Binary file content is **not** included — only file metadata. Use the Files API to download actual files.
 
 ---
@@ -127,15 +134,51 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
 ```http
 POST /api/admin/spaces/:spaceId/import
 Content-Type: application/json
+Content-Encoding: gzip            (optional: gzip, deflate or br)
 Authorization: Bearer <admin-token>
 ```
 
-Upserts exported data into a space. Requires admin token + TOTP when MFA is enabled.
+Restores an export into a space. Requires admin token + TOTP when MFA is enabled.
 
-**Request body** — same shape as the export response. Each array is optional:
+**A body of any size.** The import does not go through the server's 10 MB JSON parser: the caller is authenticated before
+a byte of the body is read, the body is inflated by its `Content-Encoding` and written to disk under the data root
+(`import-spool/`, through the master secret's encryption when one is configured), then read whole once to validate it,
+and only then restored, a page of 500 documents at a time. Its bounds are two config keys, read live:
+
+| key | default | answered when exceeded |
+|---|---|---|
+| `importBodyMaxBytes` | 1 GiB (1 073 741 824) | `413`: counted on the INFLATED body, so a small compressed body cannot expand past it |
+| `importMaxDocuments` | 5 000 000 | `413`: documents in every family together |
+
+Both must be positive whole numbers; any other value refuses the config at load or reload. A reverse proxy's own
+body limit (nginx `client_max_body_size`, [Hosting](02-hosting.md)) is the outer cap, and the body must arrive within the
+server's request timeout (5 minutes), so the largest body a client can send is about its bandwidth times that.
+
+**Refused before anything is written, and nothing is kept:** a body that is not JSON (`415`: the content type must be
+`application/json`, and the encoding one of the three above); a malformed body, anywhere in it — not one object, a
+family that is not an array or appears twice, a document over 10 MB or nested deeper than 64 levels, a body cut off or
+never closed (`400`); either ceiling (`413`); a disk without room for the body (`507`); another import standing on this
+instance (`409`, `code: "space_being_imported"`: one import runs at a time).
+
+**The import is a space act.** Once the body is valid it is registered as an act of kind `import` on the space, and
+while it stands the space takes no local write and no peer's push (`409`, `code: "space_being_imported"`), as during a
+wipe. The door waits for it within the act budget and answers `200` with the result below, or `202`
+`{ "queued": true, "spaceId": "..." }` when it is still running; a queued import's outcome is its completion row in
+the [audit log](13-audit-log-api.md) (`space.act_completed`, path `internal:space-act:import:<space>:<act id>`). A crash
+resumes it from its spooled body at the next start; a resumed run reports the records the first run landed as
+`updated`. An import never needs abandoning: its body was validated before it was registered, a store failure is
+retried, and a resumed import whose body is gone from disk completes as failed (its completion row has a status of
+`410`) and writes nothing. The spool is removed when the act completes, and at the next start when no standing import
+names it. When the import completes it forgets what the space RECEIVED from each peer (as a restore of the whole
+instance does), so the next sync reads every member from the start.
+
+**Request body** — the export's shape. Each array is optional; the envelope keys are read wherever they sit, and a key
+the import does not know is skipped:
 
 ```json
 {
+  "instanceId": "3f0c2a1e-...",
+  "spaceId": "eng-kb",
   "facts": [ { "_id": "...", "fact": "...", "tags": [] } ],
   "entities": [ { "_id": "...", "name": "...", "type": "..." } ]
 }
@@ -144,30 +187,46 @@ Upserts exported data into a space. Requires admin token + TOTP when MFA is enab
 Each document must have a string `_id` and a `seq` that is a non-negative integer below the protocol's ingest
 ceiling (`2^50 − 2^40`); file metadata older than seqs may carry none. Documents with an existing `_id` in the space
 are **replaced, whatever their seq** — an import is a restore, so a backup restored over newer data wins; new
-`_id`s are inserted. A file holding the same `_id` twice stores the copy with the highest seq.
+`_id`s are inserted. A body holding the same `_id` twice stores the copy with the highest seq, and of equal seqs the
+earlier one, wherever in the body the copies are. The families land in a fixed order (facts, entities, chrono, files,
+edges, links) whatever their order in the body.
 
 What the import stores of each document:
 
 - **Kept**: everything the export carried as the record's content, plus its retention stamps (as dates — they ARE
-  the record's own retention, since a per-record `ttlDays` is never stored), a file's `syncBase` and `deliveredBy`. A record that
+  the record's own retention, since a per-record `ttlDays` is never stored) and `deliveredBy`. A record that
   carries no stamp is stamped by THIS space's retention policy (type schema over space), counted from its own
   `createdAt`. **Never the replaced copy's**: a stamp or `syncBase` the export does not carry is not taken from the
   record the import overwrites — a record restored to "never expires" no longer keeps the replaced copy's expiry.
+- **Kept only from this instance's own backup of this space**: a file's `syncBase` (what this instance last agreed
+  with each peer about the file) and a fork row's `_resolvedElsewhere` (a decision this instance still owes). The
+  backup is OWN when its envelope names this instance (`instanceId`) and this space (`spaceId`); any other — another
+  instance, another space, an export older than `instanceId`, a body with no envelope — is FOREIGN, and both fields are
+  dropped. This is a convenience, not an authority: an administrator can write any envelope, and what it decides is
+  limited to these two fields. The cost of the safe direction: an older own backup taken before `instanceId` existed, or
+  a backup restored onto a rebuilt instance, turns a file that diverged from a peer into a conflict copy at the next
+  sync instead of a replacement — visible, and nothing is lost.
 - **Dropped**: `embedding`, `embeddingModel` and `matchedText` (re-embedded here); an edge's write guard
   `_functionalGuard` (a restored edge arrives unguarded, and a second edge under a functional label is still refused
-  when one is written); every file chunk and face record
-  (`parentFileId` set — re-derived from the blob); and every file-metadata key that is not on the sync wire
-  (`sizeBytes`, `sha256`, `excerpt` and the like describe bytes this instance may not hold). File metadata is merged
-  onto what is stored, as sync merges it — except that an export is a full record, so every authored key
-  (the description, tags and properties, for example) the exported row lacks is **removed** from the row it
-  replaces. A row the export carries flagged `deletedAt` (a file this instance had soft-deleted) is restored
-  flagged, never as a live file (`flagsKept` below). The summary counts what a restore removed this way (`keysRemoved`).
-- The space's seq counter is moved past every imported seq, chunk by chunk, so the next local write sorts above
-  every restored record. Into an emptied space, that write is also stamped above every version the instance handed out
-  before the space was emptied, because the space's first write after the counter went backwards raises it to the version
-  mark kept in `config.json` ([`versionMarks`](02-hosting.md#versionmarks-in-configjson)).
+  when one is written); every file row a backup does not hold (a chunk, a face record, a legacy spill — the export's
+  own rule); and every file-metadata key that is not on the sync wire (`sizeBytes`, `sha256`, `excerpt` and the like
+  describe bytes this instance may not hold). File metadata is merged onto what is stored, as sync merges it — except
+  that an export is a full record, so every authored key (the description, tags and properties, for example) the
+  exported row lacks is **removed** from the row it replaces. A row the export carries flagged `deletedAt` (a file
+  this instance had soft-deleted) is restored flagged, never as a live file (`flagsKept` below).
+- **Not landed: what THIS instance deleted after the backup.** A document whose tombstone this instance issued at a
+  version at or above the document's — for a file row, its path's file tombstone, a row with no seq counting as 0 — is
+  left out and named in `deletedOnRestore`. Nothing is written for it, so no tombstone is made or moved.
+- The space's version counter is not moved: an arrival never moves it, a restore's included. A restored record keeps
+  the version it was exported at and takes a fresh position in this instance's stream, so it is offered to peers again.
 
-**`503` with `code: "edge_identity_building"`**: the `edges` array carries a fork edge (a row with a `forkOf`) and the space still has the full unique edge identity index, which counts a fork as a duplicate of its subject. The families before `edges` have been stored, and nothing of `edges` is. Nothing is lost: a restore is idempotent, so run the same import again once `ythril_edge_identity_building_spaces` no longer counts the space (the owed job swaps the index within a minute). A space created by this release, or one with no edge yet, never answers it ([Upgrading](02b-upgrading.md)).
+**Instance restore and space import differ here on purpose.** A [restore of the whole instance](12a-data-management-api.md)
+puts the database back as it was, records deleted after the backup included. A space import restores the state of the
+space when the export was taken, as seen from the network now: what this instance deleted since is left out, and what
+the network changed since comes back with the next sync — like an instance reconnecting after being offline since the
+backup ([decision 13](../decisions/13-a-restore-is-a-set-of-space-acts-and-forgets-only-what-it-received.md)).
+
+**`503` with `code: "edge_identity_building"`**: the body carries a fork edge (a row with a `forkOf`) and the space still has the full unique edge identity index, which counts a fork as a duplicate of its subject. The import act fails and is retried automatically; the families before `edges` stay stored. Nothing is lost: a restore is idempotent, and the retry lands the edges once `ythril_edge_identity_building_spaces` no longer counts the space (the owed job swaps the index within a minute). A space created by this release, or one with no edge yet, never answers it ([Upgrading](02b-upgrading.md)).
 
 **Response** `200`:
 
@@ -190,11 +249,13 @@ Per family, alongside the counts, and each present only when it has something to
 
 | field | what it holds |
 |---|---|
-| `refused` | the documents NOT stored, `{ _id, reason }` — a malformed id or seq, a value the store refuses, a uniquely-indexed duplicate of a record held under another id, or (when the store failed part-way through a family) every document after the fault. **The first 10 are named**; `errors` is the total. Documents written before a part-way fault are counted in `inserted`/`updated`, not here |
-| `derived` | how many file chunks and face records were left out because this instance derives them from the blob |
+| `refused` | the documents NOT stored, `{ _id, reason }` — a malformed id or seq, a value the store refuses, a uniquely-indexed duplicate of a record held under another id, or (when the store failed part-way through a page) every document of the page after the fault. **The first 10 are named**; `errors` is the total. Documents written before a part-way fault are counted in `inserted`/`updated`, not here |
+| `derived` | how many file rows were left out because a backup does not hold them (chunks, face records, legacy spills) |
 | `flagsKept` | files only: how many restored rows kept the `deletedAt` flag their export carried (files this instance had soft-deleted, brought back as the audit records they were rather than as live rows with no bytes). Present only when any did |
 | `keysRemoved` | files only: how many authored keys (a description, its source, the properties, the tags, a suppression mark) the restored rows lost because their export row lacks them. It counts the keys the replaced rows held, so a key a row never had is not counted. Present only when any were removed |
-| `restoredOverTombstone` | ids of records restored over a deletion this instance holds **and that deletion would still apply to** (judged by the same [deletion rule](../sync-protocol.md#tombstone-deletion-authorisation) sync uses: the issuer wrote the record, or this instance's upstream delivered it) — a peer holding the same tombstone will delete them again on the next sync. **The first 10**; `restoredOverTombstoneTotal` is how many there were |
+| `deletedOnRestore` | ids of documents NOT landed because this instance deleted them after the backup (above). **The first 10**; `deletedOnRestoreTotal` is how many there were |
+| `restoredOverTombstone` | ids of records restored over a deletion this instance holds from a PEER. The next sync settles each by the [deletion rule](../sync-protocol.md#tombstone-deletion-authorisation): a peer that still serves the deletion deletes the record here again, and a peer holding it refuses the restored copy unless the record's author pushes it past another issuer's deletion. A deletion pruned on every peer is not served again, so that record comes back everywhere. **The first 10**; `restoredOverTombstoneTotal` is how many there were |
+| `due` | ids of records that landed already past their retention stamp: the next sweep deletes them, and each deletion is a tombstone peers apply. **The first 10**; `dueTotal` is how many there were |
 | `schemaViolations` | documents stored carrying something the space's schema does not accept that the copy they replaced lacked (below); `schemaViolationsTotal` and, past 50, `schemaViolationsTruncated: true` |
 
 **A document that breaks the space's schema is STORED, and reported.** It is not refused: a backup taken before
@@ -224,23 +285,17 @@ with at most 20 rows; `schemaViolationsTotal` is how many documents there were, 
 present only when it is more than were named. The array is absent when there is nothing to report. The restore also
 says it once in the log and counts the documents in `ythril_schema_violations_recorded_total{source="import"}`.
 
-**Imported records are queued for embedding.** Until 3.7 they were not — a restored backup was stored and
-invisible to meaning-ranked search until somebody ran a reindex they were never told they needed. The import
-now writes through the same arrival writer every sync door does, which writes and enqueues in one call — a
-restored file included, whether or not its blob is here yet. A reindex is
-still the tool for rebuilding vectors after an embedding-model change; it is no longer required to make an
-import searchable at all.
+**Imported records are queued for embedding.** The import writes through the same arrival writer every sync door
+does, which writes and enqueues in one call — a restored file included, whether or not its blob is here yet. A
+reindex is still the tool for rebuilding vectors after an embedding-model change; it is not required to make an
+import searchable.
 
 **What an import deliberately does NOT do**, though sync does:
 
 - **It does not reallocate `seq`.** An exported document keeps the one it had, so a restored instance and its
   peers still agree about which copy of a record is newer.
-- **It does not refuse over tombstones.** Sync refuses a document whose id has been deleted, so a lagging peer
-  cannot resurrect it. A restore is the one case where resurrection is the point — but a record deleted *after*
-  the backup will come back, and the tombstone will remove it again on the next sync with a peer that still holds
-  one, where that deletion applies to the record under the same rule. Such records are counted in
-  `restoredOverTombstoneTotal` and the first of them named in `restoredOverTombstone`, so it is known rather than
-  discovered. A restored record keeps the delivery stamp its export carried (empty when the backup has none).
+- **It does not refuse over a peer's tombstone.** Such a record lands and is named (`restoredOverTombstone`); the next
+  sync, not the import, judges the peer's deletion.
 - **It does not guard by seq.** Sync keeps a stored copy that is newer than the incoming one; a restore replaces.
 
 **Files are stored without schema validation**, because a file has no `type` and therefore no type schema.
