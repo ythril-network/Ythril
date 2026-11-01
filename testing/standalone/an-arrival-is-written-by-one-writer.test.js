@@ -53,7 +53,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { moduleIndex, routeHandlerRoots, walkFrom, pathTo } from './_call-graph.mjs';
+import { moduleIndex, routeHandlerRoots, walkFrom, pathTo, spaceActBodies } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
 import { recordWrites } from './_record-writes.mjs';
 
@@ -179,6 +179,16 @@ const INDEX = moduleIndex('server/src');
 const ROUTES = mountedRoutes();
 // Registered BEFORE the writers are derived, so a write inside an inline handler belongs to its route.
 const ROUTE_ROOTS = new Map(ROUTES.map(r => [`${r.method} ${r.path}`, routeHandlerRoots(INDEX, r)]));
+
+// The import door's work runs in its space act (bundle-40 R1): a route that registers an import continues into the import act's body, as the runner's
+// dispatch runs it (`spaceActBodies`), so the door is followed to what the body lands.
+{
+  const importBody = spaceActBodies(INDEX).bodies.find(b => b.kind === 'import')?.key;
+  if (!importBody) throw new Error('no body is handed to defineSpaceActBody for the import act - re-anchor');
+  for (const [key, roots] of ROUTE_ROOTS) {
+    if (walkFrom(INDEX, roots, { closures: true }).seen.has('server/src/spaces/import-act.ts:registerImport')) ROUTE_ROOTS.set(key, [...roots, importBody]);
+  }
+}
 
 const RECORDS = recordWrites(INDEX, { collections: BRAIN_COLLECTIONS, floors: { space: 150 }, recordFloor: 50 });
 

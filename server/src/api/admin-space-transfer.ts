@@ -15,8 +15,8 @@
  * The body never reaches the global JSON parser (`markImportBody`, mounted before it, sets the flag both parsers skip), so a caller is let in
  * before a byte of the body is read, and no 10 MB ceiling stands between a backup and its restore. In order:
  *
- *  1. auth (the route's guard), a JSON content type (else 415) and a known encoding, no other import standing anywhere and no act standing for
- *     the space (409, `space_being_imported` or the standing act's code);
+ *  1. auth (the route's guard), a JSON content type (else 415) and a known encoding, no other import standing anywhere (409,
+ *     `space_being_imported`); an act already standing for the space runs first, the import waiting behind it in the space's queue;
  *  2. the body is inflated by its `Content-Encoding` (gzip, deflate, br) and spooled under `<data root>/import-spool/` (through the master
  *     secret's chunked envelope when one is configured), its INFLATED bytes counted against `importBodyMaxBytes` (413), after a free-disk
  *     check (507);
@@ -48,13 +48,12 @@ import { ExportBodyMalformed, ExportBodyTooLarge } from '../sync/export-stream.j
 import { SERVER_VERSION } from '../util/server-version.js';
 import { log, peerText } from '../util/log.js';
 import { settledWithin } from '../util/time-bound.js';
-import { assertSpaceTakesWrites, spaceWriteClosedAnswer } from '../spaces/space-write-gate.js';
 import { runSpaceAct, releaseSpaceActWaiter, spaceActAnswerMs, spaceActClosedAnswer } from '../spaces/space-act-runner.js';
 import { SPACE_ACT_KINDS } from '../config/types-space-acts.js';
 import { ensureSpoolRoot, importStanding, indexSpool, registerImport, removeSpool, spoolPathOf, takeImportResult } from '../spaces/import-act.js';
 import type { ImportResult } from './admin-import.js';
 
-/** The import route, as Express matches it: the parser marker and the route are mounted on this one string. */
+/** The import route's path, for the parser marker `app.ts` mounts before the global parsers; the route below spells the same literal (the route scans read it). */
 export const IMPORT_PATH = '/api/admin/spaces/:spaceId/import';
 
 const IMPORT_BODY = Symbol('importBody');
@@ -208,7 +207,7 @@ function importChanges(result: ImportResult): Array<{ field: string; to: number 
   ];
 }
 
-spaceTransferRouter.post(IMPORT_PATH, globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
+spaceTransferRouter.post('/api/admin/spaces/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   const where = 'POST /api/admin/spaces/:spaceId/import';
   if (answeredUnknownSpace(req, res, spaceId)) return;
@@ -221,15 +220,10 @@ spaceTransferRouter.post(IMPORT_PATH, globalRateLimit, requireAdminMfaScoped('sp
     res.status(415).json({ error: `Content-Encoding '${peerText(encoding)}' is not one an import inflates (gzip, deflate, br).` });
     return;
   }
-  // One import at a time, instance-wide; and none into a space another act holds.
+  // One import at a time, instance-wide. An act already standing for the space runs first: the import waits behind it in the space's queue.
   if (importStanding()) {
     res.status(409).json({ error: `Space '${spaceId}' takes no import now: ${SPACE_ACT_KINDS.import.writeRefusalWhy()}.`, code: SPACE_ACT_KINDS.import.writeRefusalCode });
     return;
-  }
-  try { assertSpaceTakesWrites(spaceId); } catch (err) {
-    const closed = spaceWriteClosedAnswer(err);
-    if (closed) { res.status(closed.status).json(closed.body); return; }
-    throw err;
   }
 
   const spoolId = crypto.randomUUID();

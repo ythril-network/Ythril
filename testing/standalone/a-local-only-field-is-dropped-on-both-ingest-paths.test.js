@@ -112,7 +112,7 @@ describe('the two ingest paths agree about local-only fields', () => {
 
   it('the drop happens BEFORE the write, not after it', () => {
     const body = bodyOf(src(ARRIVALS), 'writeArrivals');
-    const strip = body.search(/prepared\(doc, family, restore\)/);
+    const strip = body.search(/prepared\(doc, family, restore/);
     const write = body.indexOf('.bulkWrite(');
     assert.ok(strip > 0 && write > 0, 'cannot locate the drop and the write in the arrival writer');
     assert.ok(strip < write,

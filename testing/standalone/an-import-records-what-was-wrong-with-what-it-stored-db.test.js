@@ -186,7 +186,7 @@ describe('the import writes through the one arrival writer', () => {
      * Seen red by mutation, restored by hand: the call's `{ restore: true }` removed; an `updateOne` added.
      */
     const src = stripComments(readFileSync('server/src/api/admin-import.ts', 'utf8'));
-    assert.match(src, /await writeArrivals\([^;]*\{\s*restore:\s*true\s*\}\)/,
+    assert.match(src, /await writeArrivals\([^;]*\{\s*restore:\s*true\s*[,}]/,
       'the import does not write through the arrival writer as a restore');
     assert.doesNotMatch(src, /\.(?:replaceOne|insertOne|insertMany|updateOne|updateMany|bulkWrite)\(/,
       'a second write path into the same collections is how the embed queue got skipped the first time');

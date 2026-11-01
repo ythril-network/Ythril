@@ -200,7 +200,7 @@ describe('a caller\'s projection cannot ask the store for the write guard', () =
 
 describe('the export streams no write guard', () => {
   it('builds its projection from NOT_CARRIED_BY_BACKUP, which holds the derived fields AND the write guards', () => {
-    const src = withoutComments(readFileSync('server/src/app.ts', 'utf8'));
+    const src = withoutComments(readFileSync('server/src/api/admin-space-transfer.ts', 'utf8'));
     const m = /const projection = Object\.fromEntries\(\[([^\]]*)\]\.map/.exec(src);
     assert.ok(m, 'the export projection is not built the way this gate reads it - re-anchor it');
     assert.match(m[1], /\.\.\.NOT_CARRIED_BY_BACKUP/, 'the export no longer reads the one set a backup leaves out');
