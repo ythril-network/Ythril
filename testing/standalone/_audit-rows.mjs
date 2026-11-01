@@ -24,10 +24,19 @@ import { elapse } from '../_shared/sleep.mjs';
  * @param {object} [filter]
  */
 export async function auditRowsOf(mongo, filter = {}) {
+  await untilAuditWritesLanded();
+  return mongo.getDb().collection('audit_log').find(filter).sort({ timestamp: 1 }).toArray();
+}
+
+/**
+ * Resolve once no audit insert is on the wire (`auditWritesPending` read as zero twice running). Every reader of audit rows waits here
+ * first: a reader that stops at "a row of this operation exists" takes a row an EARLIER step left for the one it asked about, and reads
+ * before its own insert lands (CI run 41329371938: an import act's failed-completion row, read while the earlier test's row stood).
+ */
+export async function untilAuditWritesLanded() {
   const { auditWritesPending } = await import('../../server/dist/audit/audit.js');
   for (let still = 0, i = 0; still < 2 && i < 400; i++) {
     if (auditWritesPending() === 0) still++; else still = 0;
     await elapse(15, 'sampler interval: the audit writer\'s pending inserts are read at a fixed rate until none is on the wire');
   }
-  return mongo.getDb().collection('audit_log').find(filter).sort({ timestamp: 1 }).toArray();
 }
