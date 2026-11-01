@@ -28,8 +28,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { balancedFrom, bodyOf, between, argumentsOf } from './_structural-window.mjs';
+import { balancedFrom, bodyOf, argumentsOf } from './_structural-window.mjs';
 import { importClosure, relativeImports, bareImports } from './_import-closure.mjs';
+import { SHUTDOWN_FILE, shutdownSequenceOf } from './_shutdown-sequence.mjs';
 
 const SRC = trackedSources('server/src', { floor: 100, untracked: true });
 const read = (f) => readFileSync(join(REPO_ROOT, f), 'utf8');
@@ -261,7 +262,7 @@ describe('what a fork passes the child', () => {
 });
 
 describe('shutdown stops the inference process before the database goes', () => {
-  const body = () => between(read('server/src/index.ts'), 'const shutdown =', "process.on('SIGTERM'", 'the shutdown handler');
+  const body = () => shutdownSequenceOf(read(SHUTDOWN_FILE));
 
   it('awaits stopLocalInference with a budget, after the brain worker stops and before closeMongo', () => {
     const src = stripComments(body());

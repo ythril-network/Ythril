@@ -11,7 +11,7 @@
  * 1. A reload in flight that re-arms sync after `closeScheduling` gave up waiting arms nothing (arming closed before it
  *    could). Only once per process: closing is one-way, which is the point.
  * 2. The watcher is unwatched, by the listener it registered, before anything else.
- * 3. The shutdown handler (`index.ts`, the file defining `const shutdown = async`) calls `closeScheduling(` before it stops
+ * 3. The shutdown sequence (`runShutdown` in `shutdown.ts`, started by `index.ts`) calls `closeScheduling(` before it stops
  *    any scheduler by name; a stop before it leaves a window in which a reload re-arms what was just stopped.
  * 4. `POST /api/admin/reload-config` runs under the watcher's reload lock (`runConfigReload(`), so the bounded wait waits
  *    for a manual reload too.
@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { SHUTDOWN_FILE, shutdownSequenceOf } from './_shutdown-sequence.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-close-scheduling-'));
 process.env['CONFIG_PATH'] = path.join(dir, 'config.json');
@@ -74,13 +75,10 @@ describe('closeScheduling', () => {
 });
 
 describe('the shutdown handler and the reload route', () => {
-  const index = stripComments(readFileSync('server/src/index.ts', 'utf8'));
   const app = stripComments(readFileSync('server/src/app.ts', 'utf8'));
 
   it('the shutdown closes scheduling before it stops any scheduler by name', () => {
-    const at = index.indexOf('const shutdown = async');
-    assert.ok(at > -1, 'no shutdown handler in server/src/index.ts: this gate reads the wrong file');
-    const body = index.slice(at);
+    const body = shutdownSequenceOf(stripComments(readFileSync(SHUTDOWN_FILE, 'utf8')));
     const close = body.search(/\bawait\s+closeScheduling\s*\(/);
     assert.ok(close > -1, 'the shutdown handler does not await closeScheduling(): a reload during the drain re-arms the schedulers it stops');
     const stops = [...body.matchAll(/\bstop(?:Sync|Backup)Scheduler\s*\(|\bstop(?:Dupe|Contradiction)Scanner\s*\(/g)].map(m => m.index);

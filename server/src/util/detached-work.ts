@@ -16,9 +16,10 @@
  * and logs it under the name the work was given. And the set: an entry removed only on success is a leak.
  */
 import { log, peerText } from './log.js';
+import { settledWithin, type SettledWithin } from './time-bound.js';
 
 export class DetachedWork {
-  private readonly inFlight = new Set<Promise<void>>();
+  private readonly inFlight = new Set<Promise<unknown>>();
 
   /** @param what names the work in the one log line a rejection gets */
   constructor(private readonly what: string) {}
@@ -32,8 +33,30 @@ export class DetachedWork {
     this.inFlight.add(settled);
   }
 
-  /** Resolves once everything started so far — and anything it started in turn — has settled. For tests. */
+  /**
+   * Count work a caller already started and awaits itself (a sync cycle: its caller wants the answer), so a shutdown can wait for it.
+   * Returns the work's own outcome — its value or its rejection — to that caller, and forgets it the moment it settles, BEFORE the caller
+   * resumes: a caller that reads {@link size} right after its await sees the work gone. A rejection stays the caller's: nothing is logged here.
+   */
+  track<T>(work: Promise<T>): Promise<T> {
+    const tracked: Promise<T> = work.finally(() => { this.inFlight.delete(tracked); });
+    this.inFlight.add(tracked);
+    return tracked;
+  }
+
+  /** How much work is running now, started or tracked. */
+  get size(): number { return this.inFlight.size; }
+
+  /** Resolves once everything started so far — and anything it started in turn — has settled, whether it succeeded or not. For tests and shutdown. */
   async settled(): Promise<void> {
-    while (this.inFlight.size > 0) await Promise.all([...this.inFlight]);
+    while (this.inFlight.size > 0) await Promise.allSettled([...this.inFlight]);
+  }
+
+  /**
+   * {@link settled}, waited for at most `ms` (`settledWithin`, `util/time-bound.ts`): says whether everything finished. The work goes on when the
+   * bound wins; only this wait ends. What it prevents: a shutdown that waits for a cycle with a hand-written race, and so forgets the timer.
+   */
+  settledWithin(ms: number): Promise<SettledWithin<void>> {
+    return settledWithin(this.settled(), ms);
   }
 }

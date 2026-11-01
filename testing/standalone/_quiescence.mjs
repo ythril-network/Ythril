@@ -156,7 +156,7 @@ export const UNAWAITED_BACKGROUND = {
   'server/src/brain/ttl-sweep.ts :: TTL sweep': 'deletes records past their LOCAL retention; its tombstones travel on a later cycle, and it starts no round, act or notice',
   'server/src/files/media/worker.ts :: Media stall sweep': 'requeues stalled media embedding jobs; local derived data only',
   'server/src/files/media/worker.ts :: Media provider refresh': 'refreshes the media provider list; no network state',
-  'server/src/index.ts :: Stale chunk cleanup': 'removes abandoned upload chunks from disk; no network state',
+  'server/src/files/chunk-cleanup-job.ts :: Stale chunk cleanup': 'removes abandoned upload chunks from disk; no network state',
   'server/src/metrics/space-activity-store.ts :: Space activity flush': 'flushes activity counters to the store; no network state',
   'server/src/util/horizon-holds.ts :: Horizon hold watchdog': 'warns about a held read horizon; sends nothing',
   'server/src/webhooks/dispatcher.ts :: Webhook retry poll': 'retries OPERATOR webhooks, never a member notice or a round; a row asserting a webhook ABSENCE (R-X10d) drains the dispatcher itself, since it is not a network-state writer',
