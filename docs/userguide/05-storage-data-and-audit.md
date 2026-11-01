@@ -424,6 +424,8 @@ minutes (`stampSkew.warnMinutes`) is a recorded field of the same row. **A call 
 row too**, at the status it got (and with no change list, because nothing changed), so a refused attempt is as visible
 here as one made through the API. Reads are included when the audit log is set to record reads, the same rule as the API. A **schema check** (`space.schema.validate`) is recorded only when the audit log is set to record reads.
 
+**Doors that move a whole space, and the work the server does by itself, are in the log.** Taking an export of a space (`space.export`, written even when the audit log is not set to record reads, and written once, with `complete: false`, when the download is cut off before its end), restoring one (`space.import`, with the totals of what landed, what was refused, what the restore left out because this instance deleted it after the backup, and what landed already past its expiry), rotating the signing key (`signing.rotate`, with the new key's fingerprint and never a key) and a client's approval to act with a token (`mcp.oauth.consent`, naming the approving token, the client and the outcome) are each an entry. So are an entity the duplicate scanner merged into another on its own (`duplicate.automerge`, the survivor as the entry and the absorbed entity's id in its changes) and the retention sweep's deletions (`ttl.expire`, above); both have the address `internal` and no token.
+
 **Personal views are in the log too, and the log never names them.** Making, renaming, deleting, copying or claiming a personal view is a row (`view.create`, `view.update`, `view.delete`, `view.copy`, `view.claim`) that holds the owner's key and **how many** spaces the view lists — never its name and never which spaces, because a view is its owner's and the log is read by an admin. A **read through a view** is one row with no single space: the row's **spaces** field lists the spaces that read actually reached, and the row counts one call in the Usage panel of each of those spaces and nothing under the view. Like any read, it is written only when the audit log is set to record reads. Releasing a reserved id after the 6.0 upgrade is `space.retired_id.purge` (see [Settings → Spaces](04-settings.md#after-the-60-upgrade-what-became-of-the-read-across-spaces)).
 
 **Metrics to alert on for schemas.** `ythril_schema_rules_invalid` above `0` means a stored rule no longer compiles
@@ -642,12 +644,17 @@ line carries the count and the first few ids — `TTL sweep: facts delete failed
 — retried next cycle` — and when a collection keeps failing so many records that the cycle gives up on it, it says so:
 `… records keep failing; the rest wait for the next cycle`. A collection that cannot even be read is named without
 `delete` (`TTL sweep: facts failed for space …`), and a failed settle of file tombstones, a failed finish of an
-interrupted file move, a failed repair of what a deleted file left behind and a failed index check are named
+interrupted file move, a failed repair of what a deleted file left behind, a failed repair of expiries that are not dates
+and a failed index check are named
 `TTL sweep: settling file tombstones`, `TTL sweep: finishing interrupted file moves`,
-`TTL sweep: repairing rows a deleted file left` and `TTL sweep: indexes`. The count of records that did not delete is `ythril_housekeeping_records_failed_total`.
+`TTL sweep: repairing rows a deleted file left`, `TTL sweep: healing retention stamps that are not dates` and `TTL sweep: indexes`. The count of records that did not delete is `ythril_housekeeping_records_failed_total`.
 The sweep's own indexes are checked at the start of every cycle on every space and any that is missing is built, so a
 space that lost them (a failed build, or a restore) has them back within one cycle; while a space has not got
 them, `TTL sweep: space '<id>' is swept without index ttl_expireAt on facts, …` is said once.
+
+**What a cycle deleted is in the log and in the audit log, space by space.** The line `TTL sweep deleted <n> expired record(s): <space>: <count>, …` names each space that lost records and how many, and a space that lost none is not named. Each such space also gets one audit entry for the cycle, operation `ttl.expire`, with no token, whose changes give the count per kind of record (`facts`, `entities`, `edges`, `chrono`, `files`). Every expiry is a normal delete whose tombstone goes to peers, so an operator asking where records went finds the cycle and the space here.
+
+**The same sweep repairs expiries an earlier import stored in a form it could not read.** A record whose expiry was stored as text, a number or an object never matched the sweep and never expired. Each cycle reads up to **500** of them per space and collection and rewrites each as the instant it names, or, where it names none, from the record's own creation time with the space's window (an expiry it cannot place at all is removed). A record whose expiry lands in the past is deleted by the next cycle, and on a synced space that deletion goes to peers: so after an upgrade, records an old import left with an expiry already past are removed over the first cycles, on every instance of the network. The log says `TTL sweep: healed <n> retention stamp(s) that were not dates: <space>: <count>`. A collection with nothing to repair is not asked again until the next import into the space.
 
 **The same sweep finishes a file move that was interrupted.** A rename or move carries the file first and its records
 after, and a database outage or restart between the two leaves the records at the old path until something finishes

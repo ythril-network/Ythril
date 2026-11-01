@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+| Changes on upgrade | Action |
+|---|---|
+| Records an earlier import stored with an expiry that is not a date are repaired by the sweep; those whose repaired expiry is already past are deleted over the first cycles, on every instance of a network (a TTL delete is passed to peers) | Before upgrading, check the retention windows of spaces that were restored from a backup |
+
+### Changed
+
+- **Audit:** an entry written by the server for its own work can carry an `entryId`, a `tokenLabel`, an address other than `internal` and a status, and a list of `changes`; every list of changes an act hands over is cut to the fields its operation allows, on REST and MCP alike.
+
+### Fixed
+
+- **Audit:** exporting a space (`space.export`, counts per record kind), importing one (`space.import`, totals including what landed already past its expiry), rotating the signing key (`signing.rotate`, the new key's fingerprint) and approving a client in the MCP OAuth consent (`mcp.oauth.consent`, the approving token and the client) each write an audit entry; none was written before.
+- **Audit:** an export the client cuts off before its end is audited once, with `complete: false`, whichever way `audit.logReads` is set; the export of the audit log too.
+- **Audit:** an entity the duplicate scanner merges on its own is audited (`duplicate.automerge`), and each TTL sweep cycle audits what it deleted per space and kind (`ttl.expire`); the sweep's log line names each space and its count.
+- **Audit:** a config reload by the file watcher or an operator is audited with its measured duration, the requester's address and the status it ended with.
+- **Retention:** an import keeps an expiry only when it is a real instant with an explicit time zone (`Z` or `±hh:mm`), whatever the backup carried it as; a number, an object, a zone-less or impossible date such as `2020-02-30` is dropped and the record gets this instance's window. A rolled date or a zone-less text used to be stored as a date nobody set, and any other shape as it came, so the record never expired.
+- **Retention:** the TTL sweep repairs expiries (`_expireAt`, and a chrono entry's `_contentExpireAt`) that an earlier import stored as anything but a date: each becomes the instant it names, or, where it names none, is counted from the record's own creation time with this instance's window. A repaired expiry already past is deleted by the next cycle, and the deletion goes to peers.
+- **Docs:** the settings guide says a plain edit never re-slides an expiry, how to apply a shortened window to existing records, and what an import and a peer's record are stamped with.
+
 ## [6.2.0] — 2026-10-31
 
 **A minor release: a token's request quota can be changed after it is created, two instances holding different copies of one record converge, and `reembed` repairs records whose vector no longer matches their text.**
