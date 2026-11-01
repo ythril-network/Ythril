@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.3.0] — 2026-11-01
+
+**A minor release: a space export of any size restores, as an act on its space that catches up with its network on the next sync, and exports, imports, key rotations and the server's own deletions are audited.**
+
 | Changes on upgrade | Action |
 |---|---|
 | Records an earlier import stored with an expiry that is not a date are repaired by the sweep; those whose repaired expiry is past are deleted over the first cycles, on every instance of a network | Check the retention windows of restored spaces before upgrading |
