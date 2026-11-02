@@ -120,7 +120,9 @@ describe('NetworkSyncHistoryComponent: status words, counts and plurals (bundle-
 
   /** A row as the server writes it now: every family a count, `files` the number of files moved. */
   const row = (id: string, status: string, pulled: Record<string, number>, pushed: Record<string, number>) => ({
-    _id: id, networkId: 'net', status, completedAt: '2026-10-28T00:00:00Z', startedAt: '2026-10-28T00:00:00Z', pulled, pushed,
+    // Every stored row carries `files` (the server has always written it); the family keys are what an older row may lack.
+    _id: id, networkId: 'net', status, completedAt: '2026-10-28T00:00:00Z', startedAt: '2026-10-28T00:00:00Z',
+    pulled: { files: 0, ...pulled }, pushed: { files: 0, ...pushed },
   });
 
   /** The component, opened, against the REAL English words, so a plural and a status word are read as a user reads them. */

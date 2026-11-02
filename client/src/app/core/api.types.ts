@@ -887,7 +887,7 @@ export interface NetworkMember {
   lastSyncAt?: string;
   /** Consecutive sync cycles in which the PEER did not answer, since a cycle in which it did (0/absent = healthy). */
   consecutiveFailures?: number;
-  /** Consecutive sync cycles in which THIS instance's own database failed while landing what the peer sent (0/absent = none). Runtime only. */
+  /** Consecutive sync cycles in which THIS instance's own database failed while landing what the peer sent (0/absent = none). Stored with the member, beside consecutiveFailures. */
   consecutiveLocalFaults?: number;
   /** The version this peer last reported over gossip; absent if it never has. */
   version?: string;
