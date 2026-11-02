@@ -242,6 +242,13 @@ export async function enqueueTextJob(
   const id = toDocId(filePath);
   const now = new Date().toISOString();
 
+  // The file row reads `pending` BEFORE the job can be claimed, and before the worker is woken: a worker fast enough to
+  // claim it, mark the row `processing` and finish inside the gap would otherwise be overwritten by this late `pending`,
+  // and a finished file would read pending for ever. The media branch does the same (`dispatch.ts` marks, then enqueues).
+  await setFileProcessingState(spaceId, id, { embeddingStatus: 'pending' }).catch(err => {
+    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${peerText(err)}`);
+  });
+
   const existing = await jobCollection(spaceId).findOne(
     asFilter<MediaJobDoc>({ _id: id }),
   ) as MediaJobDoc | null;
@@ -286,12 +293,6 @@ export async function enqueueTextJob(
 
   // Same as enqueueMediaJob: announce the work, or the claim walk will not probe this space.
   markSpaceMayHaveWork(spaceId);
-
-  // Reflect pending status on the file meta record immediately so the UI
-  // can show an "embedding" indicator without waiting for the worker.
-  await setFileProcessingState(spaceId, id, { embeddingStatus: 'pending' }).catch(err => {
-    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${peerText(err)}`);
-  });
 }
 
 // ── Claim ─────────────────────────────────────────────────────────────────
@@ -882,6 +883,9 @@ export async function retryJob(
   if (moveIsRunningAt(spaceId, fileId) || await moveCarriesRecordsAt(spaceId, fileId)) return 'processing';
 
   const now = new Date().toISOString();
+  // The row first: once the job is pending a worker may claim it, and a `pending` written after the worker's `processing`
+  // would overwrite it (see enqueueTextJob).
+  await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'pending', mediaJobError: undefined });
   await jobCollection(spaceId).updateOne(
     asFilter<MediaJobDoc>({ _id: fileId }),
     asUpdate<MediaJobDoc>({
@@ -895,7 +899,6 @@ export async function retryJob(
       },
     }),
   );
-  await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'pending', mediaJobError: undefined });
   // A manual retry must be picked up promptly — announce it, or the claim walk would not
   // probe this space until the next full scan (up to 30 s of the user staring at "pending").
   markSpaceMayHaveWork(spaceId);
@@ -915,13 +918,14 @@ export async function retryFailedJobs(spaceId: string): Promise<number> {
   if (!failed.length) return 0;
 
   const now = new Date().toISOString();
+  // The rows first, as in retryJob: a worker may claim a job the moment it is pending.
+  await setFileProcessingState(spaceId, failed.map(f => f._id), { embeddingStatus: 'pending', mediaJobError: undefined });
   await jc.updateMany(
     asFilter<MediaJobDoc>({ status: 'failed' }),
     asUpdate<MediaJobDoc>({
       $set: { status: 'pending', attempts: 0, lastError: null, claimedAt: null, claimableAfter: null, updatedAt: now },
     }),
   );
-  await setFileProcessingState(spaceId, failed.map(f => f._id), { embeddingStatus: 'pending', mediaJobError: undefined });
   // Same reason as retryJob: announce the work or the claim walk waits up to a full scan (~30 s).
   markSpaceMayHaveWork(spaceId);
   return failed.length;
