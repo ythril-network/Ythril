@@ -585,12 +585,15 @@ class UnknownNames {
 /** The keys a zod object accepts. Read from the schema, so a field added to it is known to the reader on the same commit. */
 const keysOf = (schema: { shape: Record<string, unknown> }): Set<string> => new Set(Object.keys(schema.shape));
 
+/** `key` under `path`, dotted; `path` '' is the root, so a name read relative to one definition carries no leading dot. */
+const under = (path: string, key: string): string => (path === '' ? key : `${path}.${key}`);
+
 /** `value` without the keys `known` lacks, each one named under `path`. A value that is not an object is left for the body to refuse. */
 function withoutUnknownKeys(value: unknown, known: Set<string>, path: string, names: UnknownNames): unknown {
   if (!isPlainObject(value)) return value;
   const out: Obj = {};
   for (const [k, v] of Object.entries(value)) {
-    if (known.has(k)) setOwn(out, k, v); else names.add(`${path}.${k}`);
+    if (known.has(k)) setOwn(out, k, v); else names.add(under(path, k));
   }
   return out;
 }
@@ -603,12 +606,23 @@ function readKnownType(def: unknown, path: string, names: UnknownNames): unknown
   if (isPlainObject(props)) {
     const known = keysOf(PropertySchemaZ);
     const next: Obj = {};
-    for (const [name, ps] of Object.entries(props)) setOwn(next, name, withoutUnknownKeys(ps, known, `${path}.propertySchemas.${name}`, names));
+    for (const [name, ps] of Object.entries(props)) setOwn(next, name, withoutUnknownKeys(ps, known, under(path, `propertySchemas.${name}`), names));
     out['propertySchemas'] = next;
   }
-  if (isPlainObject(out['retention'])) out['retention'] = withoutUnknownKeys(out['retention'], keysOf(InlineTypeSchemaZ.shape.retention.unwrap()), `${path}.retention`, names);
-  if (isPlainObject(out['endpoints'])) out['endpoints'] = withoutUnknownKeys(out['endpoints'], keysOf(InlineTypeSchemaZ.shape.endpoints.unwrap()), `${path}.endpoints`, names);
+  if (isPlainObject(out['retention'])) out['retention'] = withoutUnknownKeys(out['retention'], keysOf(InlineTypeSchemaZ.shape.retention.unwrap()), under(path, 'retention'), names);
+  if (isPlainObject(out['endpoints'])) out['endpoints'] = withoutUnknownKeys(out['endpoints'], keysOf(InlineTypeSchemaZ.shape.endpoints.unwrap()), under(path, 'endpoints'), names);
   return out;
+}
+
+/**
+ * One inline type definition read for what this release knows, with the names it left out, each relative to the definition
+ * (`futureField`, `propertySchemas.a.futureProp`). The tolerant reader's own rule for one type, for a reader that judges each type on its
+ * own (`typesOfSpaceMeta`): a second copy of the strip would drift from this one the day a field is added. A `$ref` is left alone, as above.
+ */
+export function readKnownTypeDefinition(def: unknown): { def: unknown; unknown: string[] } {
+  const names = new UnknownNames();
+  const out = readKnownType(def, '', names);
+  return { def: out, unknown: names.list() };
 }
 
 /**

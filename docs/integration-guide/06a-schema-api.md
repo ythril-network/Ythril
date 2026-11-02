@@ -430,6 +430,35 @@ limits (the purpose cap, the rules per type, ...) are exported for an app to typ
 versioned with the release it was cut from; its README lists every export. It is licensed **Apache-2.0** (its own
 `schema/LICENSE` and `schema/NOTICE`), unlike the rest of the repository, so an app of any licence can depend on it.
 
+### Generate TypeScript types for a space's properties
+
+`typesOfSpaceMeta(meta, { library })` from `@ythril/schema` writes a space's type schemas as a TypeScript source, for an app
+that reads and writes the space's records with types.
+
+```ts
+import { typesOfSpaceMeta } from '@ythril/schema';
+
+const { source, untranslated } = typesOfSpaceMeta(metaAnswer, { library: entriesMyRefsName });
+```
+
+- **What it writes**: per type `<Kind><Name>Properties`, the properties a create carries (a required property without a
+  default is required, no undeclared key), and `<Kind><Name>StoredProperties`, what a stored record may hold (every member
+  `unknown`, any other key allowed, among them keys the instance writes). `SpaceTypes[kind][typeName]` gives both as
+  `{ properties, stored }`. A patch is `Partial<...>` of the create type. An entity's untyped property is
+  `string | number | boolean`; a fact's, an edge's or a chrono entry's is `unknown`.
+- **Required members hold under `strict` only.** The types state the `strict` contract; under `warn` or `off` the server
+  accepts writes the types refuse, and a stored record may lack a required key.
+- **A snapshot**: regenerate the source after a schema change or a `validationMode` change.
+- **Which package**: convert with the package of the server the meta was read from, or a newer one. A field a newer server
+  added is stripped and reported, not translated.
+- **What it takes**: the `GET /api/spaces/:id/meta` answer or the MCP `space_meta` answer as it is (`spaceId`, `stats` and
+  the server-owned fields are ignored; a library type is read from the definition beside its `$ref`), or a meta the app
+  holds. `library` resolves a bare `$ref` and confirms an expanded one's kind.
+- **What it reports**: it never refuses as a whole. A type the parse refuses is skipped, and everything the source does not
+  carry (CEL rules, naming patterns, retention, endpoints, unresolved or wrong-kind `$ref`s, renamed identifiers, an enum
+  longer than the package's bound, written as its base type) is an `untranslated` entry `{ reason, kind?, type?, field?, detail? }`.
+  The reasons are a fixed list the package exports; its README names it and the bound.
+
 ### Schema Validation
 
 Each space can define a schema in its `meta` block that governs what data is accepted. The `validationMode` controls enforcement:

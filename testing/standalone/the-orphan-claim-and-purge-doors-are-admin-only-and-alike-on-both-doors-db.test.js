@@ -182,7 +182,7 @@ describe('the orphan, claim and purge doors (Q-531)', { skip }, () => {
 
       // b100 lens S3: REST escaped `released` for a log line while MCP answered it as stored, so one purge answered two ids.
       it('purge answers `released` as the id it released, character for character', async () => {
-        const id = `${RETIRED}-sep ${doorName}`;
+        const id = `${RETIRED}-sep\u2028${doorName}`;
         d.loader.mutateConfig(cfg => { cfg.retiredSpaceIds = [id]; });
         const a = await door.purge(admin.key, id);
         assert.ok(door.ok(a), `purge: ${fmt(a)}`);

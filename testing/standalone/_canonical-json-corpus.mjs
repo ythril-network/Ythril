@@ -24,7 +24,7 @@ export const CORPUS = [
   }],
   ['unicode keys and values', 'facts', {
     _id: 'f1', seq: 1, 'ä': 'Zürich – 東京 🚀', z: 'z', Z: 'Z', 'é': 'é', '𝒜': 'astral key', '10': 'ten', '9': 'nine', '2': 'two',
-    lone: '\ud800', mixed: 'a\udc00b', escapes: `quote " backslash \\ newline \n tab \t nul ${NUL} bell \u0007 line-sep  `,
+    lone: '\ud800', mixed: 'a\udc00b', escapes: `quote " backslash \\ newline \n tab \t nul ${NUL} bell \u0007 line-sep \u2028`,
   }],
   ['numbers', 'facts', {
     _id: 'f2', seq: 2, zero: 0, negZero: -0, half: 1.5, big: 1e21, small: 1e-7, safe: Number.MAX_SAFE_INTEGER,

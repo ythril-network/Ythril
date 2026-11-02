@@ -108,6 +108,36 @@ if (!r.ok) console.error(r.refusal.error, r.refusal.issues);
 
 `parseTypeSchema` answers the single-type door's refusal, `{ error, issues }`, on the paths of the definition you sent.
 
+## Generate TypeScript types
+
+```ts
+import { writeFileSync } from 'node:fs';
+import { typesOfSpaceMeta } from '@ythril/schema';
+
+const meta = await (await fetch(`${base}/api/spaces/garden/meta`, { headers })).json();
+const { source, untranslated } = typesOfSpaceMeta(meta, { library: entries });
+writeFileSync('src/garden-types.ts', source);
+for (const u of untranslated) console.warn(u.reason, u.kind ?? '', u.type ?? '', u.field ?? '', u.detail ?? '');
+```
+
+`typesOfSpaceMeta` turns a space's type schemas into TypeScript. Per type it writes `<Kind><Name>Properties`, what a create
+must carry, and `<Kind><Name>StoredProperties`, what a stored record may hold (every member `unknown`, any other key
+allowed); `SpaceTypes` maps each knowledge type and real type name to both, so `SpaceTypes['entity']['plant']['properties']`
+needs no identifier. A patch is `Partial<...>` of the create type.
+
+- Convert with the package of the server the meta was read from, or a newer one: a field a newer server added is stripped
+  and reported, not translated.
+- Required members and the closed key list hold under `validationMode: 'strict'` only; under `warn` or `off` the server
+  accepts more than the types state.
+- The output is a snapshot: regenerate it after a schema or validation-mode change.
+
+It takes the meta as the GET meta answer gives it (the answer's own fields are ignored, a library type is read from the
+definition beside its `$ref`), a stored meta, or a written one. It never throws and never refuses as a whole: a type the
+parse refuses is skipped, and everything the source does not carry (CEL rules, naming patterns, retention, endpoints,
+unresolved `$ref`s, renamed identifiers) is an entry in `untranslated`, with one of `UNTRANSLATED_REASONS`. Pass `library`
+to resolve a bare `$ref` and to confirm an expanded one's kind. An enum longer than `ENUM_LITERAL_MAX` is written as its
+base type.
+
 ## What else is exported
 
 | export | what it is |
@@ -126,6 +156,7 @@ if (!r.ok) console.error(r.refusal.error, r.refusal.issues);
 | `VIEW_FIELDS`, `ALL_VIEW_FIELDS`, `ViewField`, `ViewKind` | what `self` holds in a rule, per kind |
 | `hasReDoSRisk`, `REDOS_REFUSAL`, `typeRuleIssues`, `spaceRuleIssues`, `applicableRuleIssues`, `ruleMapIssues`, `collectionScopeIssues`, `readingStoredRules`, `RuleIssue`, `ChangedRuleParts` | single checks: a pattern the server would refuse to run and its wording, a rule it could not apply, the rules that apply to one record, a rules map's shape, a field that does not belong under `collection`, a read of a stored meta with the save-time rule checks off |
 | `refusalOfParse`, `peerText`, `peerList`, `unrecognizedKeysIssue`, `ParseRefusal`, `ParseRefusalIssue`, `ParseRefusalOptions`, `ParseIssueLike` | how a refusal is worded, and its shape |
+| `typesOfSpaceMeta`, `UNTRANSLATED_REASONS`, `ENUM_LITERAL_MAX`, `TypeScriptOptions`, `TypeScriptSource`, `Untranslated` | a space's type schemas as TypeScript, the reasons a part was not translated, the longest enum written as literals, and the call's options, answer and report entry |
 
 The entry's names are a fixed list, held by a test in the Ythril repository: a new export is a decision, not a side effect.
 This table names every one of them, and a second test holds the table to that list.

@@ -14,16 +14,17 @@
 
 /** The app entry's values. */
 export const APP_VALUES = [
-  'ALL_VIEW_FIELDS', 'BOOLEAN_MERGE_FNS', 'DATE_PASSED_VALUES', 'EndpointMemberZ', 'InlineTypeSchemaZ', 'KNOWLEDGE_TYPES',
+  'ALL_VIEW_FIELDS', 'BOOLEAN_MERGE_FNS', 'DATE_PASSED_VALUES', 'ENUM_LITERAL_MAX', 'EndpointMemberZ', 'InlineTypeSchemaZ', 'KNOWLEDGE_TYPES',
   'LIBRARY_REF_PREFIX', 'LIBRARY_SCHEMA_KEYS', 'LOG_VALUE_MAX', 'LONGEST_CHECKED_STRING', 'MAX_APPLICABLE_RULES', 'MAX_MESSAGE_LENGTH',
   'MAX_PATTERN_LENGTH', 'MAX_RULES_PER_SPACE', 'MAX_RULES_PER_TYPE', 'MAX_RULE_LENGTH', 'MAX_UNKNOWN_NAMES', 'MERGE_FNS',
   'META_FIELD_KINDS', 'NAME_QUOTED', 'NUMERIC_MERGE_FNS', 'PER_TYPE_META_FIELD', 'PROPERTY_DESCRIPTION_MAX', 'PropertySchemaZ',
   'REDOS_REFUSAL', 'REFUSAL_NAMES_MAX', 'RULE_NAME_PATTERN', 'SCHEMA_DESCRIPTION_MAX', 'SERVER_OWNED_META_FIELDS', 'SPACE_PURPOSE_MAX',
-  'SpaceMetaBody', 'SpaceRuleZ', 'TypeRuleZ', 'TypeSchemaZ', 'TypeSchemasZ', 'VIEW_FIELDS', 'applicableRuleIssues',
+  'SpaceMetaBody', 'SpaceRuleZ', 'TypeRuleZ', 'TypeSchemaZ', 'TypeSchemasZ', 'UNTRANSLATED_REASONS', 'VIEW_FIELDS', 'applicableRuleIssues',
   'collectionScopeIssues', 'currentSchemaLibrary', 'hasReDoSRisk', 'libraryDefinitionOf', 'libraryDeletePathProblem',
   'libraryEntryNameOf', 'libraryRefRefusal', 'metaFieldKind', 'parseInlineDefinition', 'parseSpaceMeta', 'parseTypeSchema', 'peerList',
   'peerText', 'readingStoredRules', 'refusalOfParse', 'ruleMapIssues', 'spaceRuleIssues', 'stripServerOwnedMeta',
-  'takeBackLibraryDefinition', 'typeRuleIssues', 'unknownMetaFields', 'unrecognizedKeysIssue', 'validateSpaceMeta', 'withSchemaLibrary',
+  'takeBackLibraryDefinition', 'typeRuleIssues', 'typesOfSpaceMeta', 'unknownMetaFields', 'unrecognizedKeysIssue', 'validateSpaceMeta',
+  'withSchemaLibrary',
 ];
 
 /** The app entry's types (names with no value). */
@@ -31,5 +32,6 @@ export const APP_TYPES = [
   'BooleanMergeFn', 'ChangedRuleParts', 'DatePassedPolicy', 'KnowledgeType', 'MergeFn', 'MetaFieldKind', 'MetaParse',
   'MetaParseOptions', 'NumericMergeFn', 'ParseIssueLike', 'ParseRefusal', 'ParseRefusalIssue', 'ParseRefusalOptions', 'ParsedSpaceMeta',
   'ParsedTypeSchema', 'PropertySchema', 'RuleIssue', 'SchemaLibraryEntryLike', 'SchemaLibrarySource', 'SchemaRule', 'SpaceMeta',
-  'SpaceSchemaRule', 'TypeSchema', 'ValidateSpaceMetaOptions', 'ValidationMode', 'ViewField', 'ViewKind', 'WrongKindLibraryRef',
+  'SpaceSchemaRule', 'TypeSchema', 'TypeScriptOptions', 'TypeScriptSource', 'Untranslated', 'ValidateSpaceMetaOptions', 'ValidationMode',
+  'ViewField', 'ViewKind', 'WrongKindLibraryRef',
 ];
