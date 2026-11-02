@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Schema:** the schema dry run (`POST /api/spaces/:id/validate-schema`, MCP `schema_validate`) refuses a `$ref` to a missing library entry, or to one of another kind, with `422` and the save's own sentence, as the save does.
+- **Embeddings:** a document whose text finishes embedding quickly is no longer left showing pending: the file row is marked before its job can be picked up.
 
 ## [6.3.1] — 2026-11-02
 
