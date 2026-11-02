@@ -483,6 +483,9 @@ export function moduleIndex(dirs, opts = {}) {
   return indexSources(sources, { functionFloor, label: [dirs].flat().join(', ') });
 }
 
+/** The most re-export hops a name is followed through before the call graph says it cannot tell (a real chain is two or three). */
+const REEXPORT_HOPS_MAX = 16;
+
 /**
  * The same index over sources already in hand, `path -> text` — what `moduleIndex` builds once it has read the
  * tree, and what a test builds over a fixture without writing files into the repo. Comments are stripped here.
@@ -535,15 +538,24 @@ export function indexSources(rawSources, { functionFloor = 500, label = 'the giv
 
   /**
    * Where `name`, exported by `file`, has its body: `file` itself, or — when `file` only hands it on (a re-export, an `export { x }` of
-   * an import, an `export *`) — the module it came from, followed a few hops. Null when no body is in this tree.
+   * an import, an `export *`) — the module it came from, followed hop by hop. Null when no body is in this tree, or when the chain comes
+   * back to a module it already asked (a cycle of `export *`, kept off by `seen`). A chain longer than {@link REEXPORT_HOPS_MAX}
+   * THROWS (Q-668, S-C3): it used to answer the same null as "not in this tree", so a call through a long chain was dropped and a walk
+   * over it reported a clean graph.
    */
-  const bodyOfExport = (file, name, depth = 0) => {
-    if (bodies.has(`${file}:${name}`)) return `${file}:${name}`;
-    if (depth > 6) return null;
+  const bodyOfExport = (file, name, depth = 0, seen = new Set()) => {
+    const key = `${file}:${name}`;
+    if (bodies.has(key)) return key;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    if (depth > REEXPORT_HOPS_MAX) {
+      throw new Error(`the call graph followed ${name} through more than ${REEXPORT_HOPS_MAX} re-export hops (now at ${file}): the reader `
+        + 'cannot tell where it is declared, and a null here would drop the call. Raise REEXPORT_HOPS_MAX if the chain is real.');
+    }
     const named = reexports.get(file)?.named.get(name) ?? imports.get(file)?.get(name);
-    if (named) return bodyOfExport(named.file, named.exported, depth + 1);
+    if (named) return bodyOfExport(named.file, named.exported, depth + 1, seen);
     for (const target of reexports.get(file)?.star ?? []) {
-      const found = bodyOfExport(target, name, depth + 1);
+      const found = bodyOfExport(target, name, depth + 1, seen);
       if (found) return found;
     }
     return null;

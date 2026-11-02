@@ -46,12 +46,15 @@ import { MAX_SPACE_IDS, MAX_CREATE_FOLDERS } from '../util/request-bounds.js';
 
 export {
   PropertySchemaZ, EndpointMemberZ, TypeSchemaZ, InlineTypeSchemaZ, collectionScopeIssues, TypeSchemasZ,
-  findBrokenLibraryRefs, withoutBrokenLibraryRefs, brokenRefsError, findWrongKindLibraryRefs, wrongKindRefsError,
   SpaceMetaBody, SERVER_OWNED_META_FIELDS, stripServerOwnedMeta,
-  parseSpaceMeta, readPeerMeta, readStoredMeta, parseTypeSchema, parseInlineDefinition, LIBRARY_SCHEMA_KEYS, libraryDeletePathProblem,
-  withTypeSchemas, derivedFromStored,
-  type WrongKindLibraryRef, type ParsedTypeSchema, type ParsedSpaceMeta, type MetaParse, type MetaParseOptions,
+  parseSpaceMeta, parseTypeSchema, parseInlineDefinition, LIBRARY_SCHEMA_KEYS, libraryDeletePathProblem, libraryRefRefusal,
+  type ParsedTypeSchema, type ParsedSpaceMeta, type MetaParse, type MetaParseOptions,
 } from '@ythril/schema';
+// The server-only reads (a peer's meta, a stored one, a subset of a parsed one) and the network's drop of unresolvable refs: the
+// package keeps them behind `./internal`, not in an app's API (Q-668). The `$ref` refusal itself is `libraryRefRefusal`, above.
+export {
+  withoutBrokenLibraryRefs, readPeerMeta, readStoredMeta, withTypeSchemas, derivedFromStored,
+} from '@ythril/schema/internal';
 
 /**
  * A schema-library entry whose `schema` the library's parse accepted (`parseInlineDefinition`), or one the library already held.

@@ -10,24 +10,27 @@
  *
  * ## What is held here
  *
- * - **An outside app's schema validates through the package**, offline: the three space metas Lia generates (fixtures, copied with
- *   their `id` stripped) pass `validateSpaceMeta` and `parseSpaceMeta(meta, { against: {} })`, and the package and the server answer
+ * - **An outside app's schema validates through the package**, offline: three space metas of the shape an app generates (made-up
+ *   fixtures of a garden-planning app: types of every kind, properties, edges, CEL rules and usage notes, no `$ref`, no `id`) pass `validateSpaceMeta` and `parseSpaceMeta(meta, { against: {} })`, and the package and the server answer
  *   alike for a good meta and a bad one, refusal text included.
  * - **The server's names ARE the package's**: every schema export a server module re-exports is the same object, not an equal one.
  * - **No second definition is left in the server**: the moved bodies, parses, tuples, limits and helpers are declared nowhere under
  *   `server/src`.
  * - **The package reads no instance**: its source imports zod, the CEL engine, Node built-ins and itself, and a `$ref` is checked
  *   against the library HANDED to it.
- * - **The package is publishable**: not private, with `exports`, `files`, a version, the repository's licence and a README.
+ * - **The package is publishable**: not private, with `exports`, `files`, a version, a README, and its own licence (Apache-2.0, owner
+ *   2026-11-01) in its own committed LICENSE and NOTICE: the repository's licence is not the package's (Q-668).
+ * - The app entry's names are held in `the-schema-packages-app-entry-names-a-fixed-surface.test.js`.
  *
  * Run: node --test testing/standalone/an-outside-apps-schema-validates-through-the-schema-package.test.js
  * (requires a prior `npm run build:server`, which builds `schema/` first)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
+import { isApacheLicenceText } from './_notice-closure.mjs';
 import * as pkg from '../../schema/dist/index.js';
 import * as pkgInternal from '../../schema/dist/internal.js';
 import * as bodies from '../../server/dist/spaces/body-schemas.js';
@@ -51,8 +54,8 @@ const fixtures = readdirSync(FIXTURES).filter(f => f.endsWith('.json'))
   .map(f => ({ name: f, meta: JSON.parse(readFileSync(join(FIXTURES, f), 'utf8')) }));
 
 describe('an outside app\'s schema validates through @ythril/schema', () => {
-  it('finds the fixtures it is about (three space metas Lia generates)', () => {
-    assert.deepEqual(fixtures.map(f => f.name).sort(), ['lia-characters.json', 'lia-workshop.json', 'lia-worlds.json']);
+  it('finds the fixtures it is about (three space metas an outside app generates)', () => {
+    assert.deepEqual(fixtures.map(f => f.name).sort(), ['garden-beds.json', 'garden-plants.json', 'garden-season.json']);
     for (const { name, meta } of fixtures) {
       assert.ok(meta.typeSchemas && Object.keys(meta.typeSchemas).length > 0, `${name} carries type schemas`);
       assert.ok(!('id' in meta), `${name} is a meta, not a space: its id is stripped`);
@@ -112,7 +115,8 @@ describe('a $ref is checked against the library handed in, never an instance\'s'
   it('without a library, an entry it names does not exist', () => {
     const r = pkg.validateSpaceMeta(meta, { library: [] });
     assert.equal(r.ok, false);
-    assert.equal(r.message, pkg.brokenRefsError(['service-v1']));
+    // The wording is package-internal (Q-668, 4'): an app reads it from the answer, never builds it.
+    assert.equal(r.message, pkgInternal.brokenRefsError(['service-v1']));
   });
 
   it('with the entry, the reference is accepted, and a round-tripped definition is taken back', () => {
@@ -132,8 +136,10 @@ describe('a $ref is checked against the library handed in, never an instance\'s'
   });
 
   it('a library scoped to one call does not outlive it', () => {
-    pkg.withSchemaLibrary([entry], () => assert.equal(pkg.findBrokenLibraryRefs(meta.typeSchemas).length, 0));
-    assert.deepEqual(pkg.findBrokenLibraryRefs(meta.typeSchemas, []), ['service-v1']);
+    // Asked through the one $ref refusal every door runs (Q-668, 4'), never the finders behind it.
+    assert.equal(typeof pkg.libraryRefRefusal, 'function', '@ythril/schema exports libraryRefRefusal, the one $ref refusal');
+    pkg.withSchemaLibrary([entry], () => assert.equal(pkg.libraryRefRefusal(meta.typeSchemas), null));
+    assert.equal(pkg.libraryRefRefusal(meta.typeSchemas, [])?.message, pkgInternal.brokenRefsError(['service-v1']));
   });
 });
 
@@ -141,8 +147,7 @@ describe('the server\'s schema names are the package\'s, not copies', () => {
   /** [server module, its label, the names it re-exports from the package]. */
   const REEXPORTS = [
     [bodies, 'spaces/body-schemas', ['PropertySchemaZ', 'EndpointMemberZ', 'TypeSchemaZ', 'InlineTypeSchemaZ', 'TypeSchemasZ', 'SpaceMetaBody',
-      'collectionScopeIssues', 'findBrokenLibraryRefs', 'withoutBrokenLibraryRefs', 'brokenRefsError', 'findWrongKindLibraryRefs', 'wrongKindRefsError',
-      'SERVER_OWNED_META_FIELDS', 'stripServerOwnedMeta', 'parseSpaceMeta', 'readPeerMeta', 'readStoredMeta', 'parseTypeSchema', 'parseInlineDefinition',
+      'collectionScopeIssues', 'withoutBrokenLibraryRefs', 'SERVER_OWNED_META_FIELDS', 'stripServerOwnedMeta', 'parseSpaceMeta', 'readPeerMeta', 'readStoredMeta', 'parseTypeSchema', 'parseInlineDefinition',
       'LIBRARY_SCHEMA_KEYS', 'libraryDeletePathProblem', 'withTypeSchemas', 'derivedFromStored']],
     [rules, 'spaces/schema-rules', ['MAX_RULE_LENGTH', 'MAX_MESSAGE_LENGTH', 'MAX_RULES_PER_TYPE', 'MAX_RULES_PER_SPACE', 'MAX_APPLICABLE_RULES',
       'RULE_NAME_PATTERN', 'LONGEST_CHECKED_STRING', 'TypeRuleZ', 'SpaceRuleZ', 'typeRuleIssues', 'spaceRuleIssues', 'applicableRuleIssues',
@@ -174,16 +179,6 @@ describe('the server\'s schema names are the package\'s, not copies', () => {
     });
   }
 
-  it('an app\'s entry point carries the schema API, and the server-only helpers stay behind /internal', () => {
-    for (const name of ['validateSpaceMeta', 'parseSpaceMeta', 'parseTypeSchema', 'SpaceMetaBody', 'TypeSchemasZ', 'KNOWLEDGE_TYPES', 'MERGE_FNS',
-      'withSchemaLibrary', 'hasReDoSRisk', 'refusalOfParse']) {
-      assert.ok(name in pkg, `@ythril/schema exports ${name}`);
-    }
-    for (const name of ['LruMap', 'compileRule', 'ruleEngine', 'render']) {
-      assert.ok(!(name in pkg), `${name} is not part of the app API`);
-      assert.ok(name in pkgInternal, `${name} is in /internal for the server`);
-    }
-  });
 });
 
 /** Every `.ts` file under `dir`. */
@@ -264,13 +259,21 @@ describe('the package is publishable', () => {
   const root = JSON.parse(readFileSync('package.json', 'utf8'));
   const server = JSON.parse(readFileSync('server/package.json', 'utf8'));
 
-  it('is named, versioned, licensed as the repository and not private', () => {
+  it('is named, versioned and not private', () => {
     assert.equal(manifest.name, '@ythril/schema');
     assert.equal(manifest.private, undefined);
     assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
     assert.equal(manifest.version, root.version, 'versioned with the release it is cut from');
-    assert.equal(manifest.license, root.license);
     assert.equal(manifest.type, 'module', 'ESM: the CEL engine is loaded with a top-level await');
+  });
+
+  it('is licensed Apache-2.0, with its own committed LICENSE and NOTICE', () => {
+    // The owner's ruling (2026-11-01): the package an outside app installs is Apache-2.0, not the repository's licence. Its LICENSE and
+    // NOTICE are committed in `schema/`, so the tarball and the image carry the package's own and never a copy of the root's.
+    assert.equal(manifest.license, 'Apache-2.0');
+    assert.ok(existsSync('schema/LICENSE'), 'schema/LICENSE is committed');
+    assert.ok(isApacheLicenceText(readFileSync('schema/LICENSE', 'utf8')), 'schema/LICENSE holds the Apache License 2.0 text');
+    assert.ok(existsSync('schema/NOTICE'), 'schema/NOTICE is committed');
   });
 
   it('exports its built entry points with types, and ships only dist, the README and the licence', () => {
@@ -285,6 +288,9 @@ describe('the package is publishable', () => {
   it('is a workspace of this repository, and the server depends on it and builds it first', () => {
     assert.ok(root.workspaces.includes('schema'));
     assert.equal(server.dependencies['@ythril/schema'], manifest.version);
-    assert.match(server.scripts.prebuild ?? '', /tsc -p \.\.\/schema/);
+    // Through the package's OWN build script (Q-668, S-C4), so the dist clean it runs first is not skipped by a bare `tsc -p`.
+    for (const script of ['predev', 'prebuild']) {
+      assert.match(server.scripts[script] ?? '', /npm run build -w @ythril\/schema(?:\s|&&|$)/, `server ${script} builds the package by its build script`);
+    }
   });
 });

@@ -289,6 +289,8 @@ COPY --from=builder /build/server/dist ./server/dist
 # The schema package the server imports: its manifest (what `node_modules/@ythril/schema` resolves through) and its build.
 COPY schema/package.json ./schema/
 COPY --from=builder /build/schema/dist ./schema/dist
+# Its own licence and notices (Apache-2.0, unlike the server): the package travels with them, in the image as in its tarball.
+COPY schema/LICENSE schema/NOTICE ./schema/
 
 # Copy compiled Angular SPA from client-builder
 COPY --from=client-builder /build/client/dist/browser ./client/dist/browser

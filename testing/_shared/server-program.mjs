@@ -20,6 +20,7 @@
 import { join, relative, sep } from 'node:path';
 import ts from 'typescript';
 import { REPO_ROOT } from '../standalone/_sources.mjs';
+import { SCHEMA_PACKAGE_ENTRIES } from '../standalone/_relative-specifier.mjs';
 
 /** Fewer `server/src` files than this and the tsconfig no longer says what the server is: `include` broke, or the config moved. */
 export const SERVER_SOURCE_FLOOR = 300;
@@ -56,7 +57,8 @@ export function serverProgram() {
    */
   const options = {
     ...parsed.options, noEmit: true, baseUrl: REPO_ROOT,
-    paths: { '@ythril/schema': ['schema/src/index.ts'], '@ythril/schema/internal': ['schema/src/internal.ts'] },
+    // The entries from the one table every reader of the package resolves through, never written here a second time.
+    paths: Object.fromEntries(Object.entries(SCHEMA_PACKAGE_ENTRIES).map(([spec, file]) => [spec, [file]])),
   };
   const program = ts.createProgram({ rootNames: parsed.fileNames, options });
   const sourceOf = new Map(program.getSourceFiles().map((sf) => [repoPath(sf.fileName), sf]));

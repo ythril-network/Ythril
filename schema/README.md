@@ -57,6 +57,14 @@ if (!result.ok) {
 `validateSpaceMeta` is dry: it stores nothing and reads no configuration. It answers `{ ok: true, meta, unknown }` with the
 parsed meta, or `{ ok: false, message, failed }`.
 
+`message` is the text a server sends as its refusal's `error`. The paths in it are the meta's own
+(`typeSchemas.entity.person...`); a `PATCH /api/spaces/:id` carries the meta under `meta`, so the server's paths for the
+same fault start `meta.` (`meta.typeSchemas.entity.person...`).
+
+Pass `{ tolerant: true }` to read a meta as a peer's: a key this release does not know is named in `unknown` instead of
+refused (a key it knows and finds wrong still refuses). Leave it off for a schema your app writes, where an unknown key is
+a typo the server would refuse.
+
 Strip what is not part of the meta before you validate it (a space's `id`, `label` and other space-level fields live beside
 `meta`, not in it). The server-owned fields a `GET` returns (`version`, `updatedAt`, `previousVersions`, ...) are dropped
 for you, as the server drops them.
@@ -77,8 +85,17 @@ validateSpaceMeta(meta, { library });
 ```
 
 With a library, each `$ref` must name one of its entries, filed under the knowledge type the referencing type sits under,
-and a round-tripped `{ $ref, ...definition }` must equal the entry's definition. Without one, a `$ref` that names an entry is
-refused as an entry that does not exist — which is what an instance without that entry would answer.
+and a round-tripped `{ $ref, ...definition }` must equal the entry's definition. Without one, the library is empty, and a
+`$ref` that names an entry is refused as an entry that does not exist — which is what an instance without that entry would
+answer.
+
+A server answers a `$ref` to a missing entry, or to one filed under another knowledge type, with **422** (not 400): its
+`error` is the same sentence as `message` here, with no `issues`. `libraryRefRefusal(typeSchemas, library)` asks that
+question alone, and answers `{ message, failed }`, or `null` when every reference holds.
+
+A direct parse (`parseSpaceMeta`, `parseTypeSchema`) reads the library for a round-tripped `{ $ref, ...definition }`. Run it
+inside `withSchemaLibrary(entries, () => ...)`, with a synchronous callback (an async one throws): outside one, such a parse
+throws "no schema library installed" rather than answering as if the library were empty.
 
 ## One type at a time
 
@@ -94,24 +111,27 @@ if (!r.ok) console.error(r.refusal.error, r.refusal.issues);
 ## What else is exported
 
 | export | what it is |
-|---|---|
+| --- | --- |
 | `SpaceMeta`, `TypeSchema`, `PropertySchema`, `SchemaRule`, `SpaceSchemaRule`, `KnowledgeType`, `ValidationMode`, `MergeFn`, `DatePassedPolicy` | the types |
 | `KNOWLEDGE_TYPES`, `MERGE_FNS`, `NUMERIC_MERGE_FNS`, `BOOLEAN_MERGE_FNS`, `DATE_PASSED_VALUES` | the runtime tuples the types derive from |
 | `SPACE_PURPOSE_MAX`, `SCHEMA_DESCRIPTION_MAX`, `PROPERTY_DESCRIPTION_MAX`, `MAX_RULE_LENGTH`, `MAX_MESSAGE_LENGTH`, `MAX_RULES_PER_TYPE`, `MAX_RULES_PER_SPACE`, `MAX_APPLICABLE_RULES`, `RULE_NAME_PATTERN`, `MAX_PATTERN_LENGTH` | the limits an editor shows a counter for |
 | `SpaceMetaBody`, `TypeSchemasZ`, `TypeSchemaZ`, `InlineTypeSchemaZ`, `PropertySchemaZ`, `TypeRuleZ`, `SpaceRuleZ` | the zod bodies (zod 4) |
-| `parseSpaceMeta`, `parseTypeSchema`, `readPeerMeta`, `readStoredMeta`, `validateSpaceMeta` | the parses |
+| `parseSpaceMeta`, `parseTypeSchema`, `parseInlineDefinition`, `validateSpaceMeta` | the parses |
+| `libraryRefRefusal`, `withSchemaLibrary`, `libraryDefinitionOf`, `libraryEntryNameOf` | the schema library: the `$ref` refusal, a scoped library, an entry's definition, the entry a reference names |
 | `hasReDoSRisk`, `typeRuleIssues`, `spaceRuleIssues` | single checks: a pattern the server would refuse to run, a rule it could not apply |
 | `refusalOfParse`, `peerText` | how a refusal is worded |
 
-`@ythril/schema/internal` exists for the Ythril server and moves with it; an app should not import it.
+The entry's names are a fixed list, held by a test in the Ythril repository: a new export is a decision, not a side effect.
+`@ythril/schema/internal` exists for the Ythril server (its merges, its reads of a peer's and a stored meta, its library
+installer) and moves with it; an app should not import it.
 
 ## Versions
 
-The package is versioned with the Ythril release it was cut from: `@ythril/schema@6.3.0` validates what a 6.3.0 server
+The package is versioned with the Ythril release it was cut from: `@ythril/schema@6.3.1` validates what a 6.3.1 server
 accepts. A newer server may accept a field an older package refuses; validate against the package of the oldest server you
 write to.
 
 ## Licence
 
-[PolyForm Small Business 1.0.0](https://github.com/ythril-network/Ythril/blob/main/LICENSE), the licence of the Ythril
-repository it is built from.
+[Apache License 2.0](LICENSE). This package is Apache-2.0, unlike the rest of the Ythril repository it is built from; its
+[NOTICE](NOTICE) names the runtime dependencies npm installs beside it.

@@ -46,7 +46,7 @@ import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { checkMetaPrecondition, preconditionErrorBody } from './meta-precondition.js';
 import { normaliseRecordTtl } from './record-ttl.js';
 import {
-  UpdateSpaceBody, findBrokenLibraryRefs, brokenRefsError, findWrongKindLibraryRefs, wrongKindRefsError, parseSpaceMeta,
+  UpdateSpaceBody, libraryRefRefusal, parseSpaceMeta,
   stripServerOwnedMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
 import type { TypeSchemasZ, ParsedSpaceMeta } from './body-schemas.js';
@@ -287,19 +287,11 @@ export function planSpaceMetaUpdate(input: {
   }
 
 
-  // Validate any $ref values in the incoming meta against the instance schema library
-  if (parsed.data.meta?.typeSchemas) {
-    const brokenRefs = findBrokenLibraryRefs(parsed.data.meta.typeSchemas as z.infer<typeof TypeSchemasZ>);
-    if (brokenRefs.length > 0) {
-      return { ok: false, refusal: { status: 422, body: { error: brokenRefsError(brokenRefs) } } };
-    }
-    // And a reference to an entry of ANOTHER kind: its endpoints and functional would never apply (`Q-215`). Checked here, at the save of
-    // the reference, against this instance's library — never inside the shared parse, because a peer's library is its own.
-    const wrongKind = findWrongKindLibraryRefs(parsed.data.meta.typeSchemas as z.infer<typeof TypeSchemasZ>);
-    if (wrongKind.length > 0) {
-      return { ok: false, refusal: { status: 422, body: { error: wrongKindRefsError(wrongKind) } } };
-    }
-  }
+  // Validate any $ref values in the incoming meta against the instance schema library: an entry that does not exist, or one of ANOTHER
+  // kind, whose endpoints and functional would never apply (`Q-215`). Checked here, at the save of the reference, against this
+  // instance's library — never inside the shared parse, because a peer's library is its own. The one refusal is the package's.
+  const refRefusal = libraryRefRefusal(parsed.data.meta?.typeSchemas as z.infer<typeof TypeSchemasZ> | undefined);
+  if (refRefusal) return { ok: false, refusal: { status: 422, body: { error: refRefusal.message } } };
 
   // Snapshot for the audit log's change list, taken BEFORE anything is applied. Handing the whole record
   // over is safe: `audit-changes.ts` reads only the fields allowlisted for `space.update` and never

@@ -7,6 +7,7 @@
  * table.
  */
 export {
-  META_FIELD_KINDS, metaFieldKind, PER_TYPE_META_FIELD, eachTypeDefinition, mergeTypeDefinition, mergeMetaFields, unknownMetaFields,
-  MAX_UNKNOWN_NAMES, boundedNames, type MetaFieldKind,
+  META_FIELD_KINDS, metaFieldKind, PER_TYPE_META_FIELD, unknownMetaFields, MAX_UNKNOWN_NAMES, type MetaFieldKind,
 } from '@ythril/schema';
+// The merges and the bounded naming are the server's, not app API: the package keeps them behind `./internal` (Q-668).
+export { eachTypeDefinition, mergeTypeDefinition, mergeMetaFields, boundedNames } from '@ythril/schema/internal';

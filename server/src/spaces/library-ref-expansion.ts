@@ -33,7 +33,8 @@
  * (`resolveMetaRefs`) and the peer-bound inlining (`inlineResolvableRefs`) answer other questions and stay where they
  * are.
  */
-import { useSchemaLibrary, libraryDefinitionOf } from '@ythril/schema';
+import { libraryDefinitionOf } from '@ythril/schema';
+import { useSchemaLibrary } from '@ythril/schema/internal';
 import { getSchemaLibrary } from '../config/loader.js';
 import type { SpaceMeta, TypeSchema } from '../config/types.js';
 

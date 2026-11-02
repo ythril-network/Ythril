@@ -413,15 +413,22 @@ if (!result.ok) throw new Error(`${result.message}\n${result.failed.join('\n')}`
 - **`meta`** is a space's `meta`, not the space: leave out `id`, `label` and the other space fields. The server-owned fields a
   `GET` returns (`version`, `updatedAt`, ...) are dropped, as `PATCH` drops them.
 - **`library`** is the schema-library entries the meta's `$ref`s name (`{ name, knowledgeType, schema }`). The package never
-  reads an instance: without them a `$ref` is answered as an entry that does not exist, the `422` text above.
+  reads an instance: without them a `$ref` is answered as an entry that does not exist, the `422` text above. A `$ref` to a
+  missing entry or to an entry of another kind is a `422` on every door that stores a schema, and on the dry run
+  (`POST /api/spaces/:id/validate-schema`, MCP `schema_validate`) too: `{ error }` with the sentence `message` holds here.
 - **What it checks** is what a write checks before it stores a meta: the bodies (`.strict()`, so an unknown key is refused),
   the patterns (ReDoS), the CEL rules (parse, what they read, cost) and the library references. It does not scan stored records:
   that is the dry run above, which needs the space's data.
+- **`tolerant: true`** reads the meta as a peer's: a key this release does not know is listed in the answer's `unknown`
+  instead of refused (a known key that is wrong still refuses). Leave it off for a schema the app writes.
+- **Paths**: `message` names the meta's own paths (`typeSchemas.entity.person...`); a `PATCH /api/spaces/:id`
+  refusal names the same fault under `meta.` (`meta.typeSchemas.entity.person...`), because that body carries the meta there.
 
 `parseTypeSchema(kind, name, definition)` answers the single-type upsert's refusal (`{ error, issues }`), and the types
 (`SpaceMeta`, `TypeSchema`, `PropertySchema`, ...), the tuples (the knowledge types, the merge functions, ...) and the
 limits (the purpose cap, the rules per type, ...) are exported for an app to type what it writes. The package is
-versioned with the release it was cut from; its README lists every export.
+versioned with the release it was cut from; its README lists every export. It is licensed **Apache-2.0** (its own
+`schema/LICENSE` and `schema/NOTICE`), unlike the rest of the repository, so an app of any licence can depend on it.
 
 ### Schema Validation
 

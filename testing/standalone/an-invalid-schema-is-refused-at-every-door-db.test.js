@@ -135,7 +135,7 @@ describe('an invalid schema is refused at every door that stores one', { skip },
     });
   });
 
-  describe('a library $ref of the wrong kind', () => {
+  describe('a library $ref of the wrong kind, or to an entry the library does not hold', () => {
     for (const row of REF_ROWS) {
       for (const door of INLINE_DOORS) {
         it(`${door} refuses ${row.id}, naming the entry, and stores nothing`, async () => {

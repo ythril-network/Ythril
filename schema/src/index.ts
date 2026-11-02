@@ -9,10 +9,14 @@ export * from './vocabulary.js';
 export * from './limits.js';
 export * from './redos.js';
 export * from './view-fields.js';
-export * from './meta-fields.js';
+// Named, not `export *` (Q-668): a helper the server needs is not app API by being written in a module this entry re-exports. The
+// server-only names (merging, peer and stored reads, the library installer, the `$ref` finders) are in `./internal`.
+export {
+  META_FIELD_KINDS, metaFieldKind, PER_TYPE_META_FIELD, unknownMetaFields, MAX_UNKNOWN_NAMES, type MetaFieldKind,
+} from './meta-fields.js';
 export * from './library-ref-name.js';
 export {
-  useSchemaLibrary, withSchemaLibrary, currentSchemaLibrary, libraryDefinitionOf, takeBackLibraryDefinition,
+  withSchemaLibrary, currentSchemaLibrary, libraryDefinitionOf, takeBackLibraryDefinition,
   type SchemaLibraryEntryLike, type SchemaLibrarySource,
 } from './library.js';
 export {
@@ -24,5 +28,10 @@ export {
   NAME_QUOTED, LOG_VALUE_MAX, REFUSAL_NAMES_MAX, peerText, peerList, refusalOfParse, unrecognizedKeysIssue,
   type ParseRefusal, type ParseRefusalIssue, type ParseRefusalOptions, type ParseIssueLike,
 } from './text.js';
-export * from './space-meta.js';
-export * from './validate.js';
+export {
+  PropertySchemaZ, EndpointMemberZ, TypeSchemaZ, InlineTypeSchemaZ, TypeSchemasZ, SpaceMetaBody, collectionScopeIssues,
+  SERVER_OWNED_META_FIELDS, stripServerOwnedMeta, parseSpaceMeta, parseTypeSchema, parseInlineDefinition, LIBRARY_SCHEMA_KEYS,
+  libraryDeletePathProblem,
+  type ParsedTypeSchema, type ParsedSpaceMeta, type MetaParse, type MetaParseOptions, type WrongKindLibraryRef,
+} from './space-meta.js';
+export { validateSpaceMeta, libraryRefRefusal, type ValidateSpaceMetaOptions } from './validate.js';

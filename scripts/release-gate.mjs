@@ -215,6 +215,7 @@ const NOTICE_GATES = [
   ['notice-coverage', 'every redistributed dependency is attributed in NOTICE'],
   ['notice-ships-in-the-image', 'NOTICE and LICENSE are inside the published image'],
   ['ffmpeg-licensing-is-stated', 'ffmpeg runs as a separate process and is attributed'],
+  ['the-schema-package-notice-names-its-production-closure', 'schema/NOTICE names every package @ythril/schema pulls into production'],
 ];
 
 function runTest(name) {

@@ -10,7 +10,8 @@
  * of a strict space — writes that arrive from a peer included:
  *
  * - **No rule can stall the server.** Each set of rules is priced at save (the package); here a value a rule reads over the input caps
- *   (strings of {@link LONGEST_CHECKED_STRING} code points, lists of 100, maps of 200) is not evaluated but reported as too large to check.
+ *   (strings of {@link LONGEST_CHECKED_STRING} code points, lists and maps of {@link ENGINE_INPUT_CAPS}) is not evaluated but reported
+ *   as too large to check.
  * - **A stored rule that goes bad later is skipped and reported, never enforced as a violation.** A property removed from its type, a
  *   hand-edited `config.json`, a layer from another release: one dead rule must not refuse every write of its type. It is skipped (the
  *   other rules still run), named on `space_meta` as `invalidRules`, counted in `ythril_schema_rules_invalid`, and said once per

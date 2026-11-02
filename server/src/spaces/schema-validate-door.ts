@@ -58,7 +58,7 @@ import { boundedRows } from '../brain/write-validation.js';
 import {
   budgetCeilingZ, budgetFields, budgetMeter, carriagesFor, defaultBudgetChars, resolveBudget, type CeilingRefusal, type ResolvedBudget,
 } from '../brain/result-budget.js';
-import { parseSpaceMeta, readStoredMeta } from './body-schemas.js';
+import { parseSpaceMeta, readStoredMeta, libraryRefRefusal, type TypeSchemasZ } from './body-schemas.js';
 import { violationsOfRecord, resolveMetaRefs, endsNotResolved, type SchemaViolation } from './schema-validation.js';
 import { validateStoredEdges, STORED_EDGE_PROJECTION, type StoredEdge, type StaleGuard } from './validate-stored-edges.js';
 
@@ -126,7 +126,7 @@ export interface SchemaValidateAnswer {
 export type SchemaValidateOutcome =
   | { status: 200; answer: SchemaValidateAnswer; mode: 'sample' | 'stored'; meta: SpaceMeta }
   /** A refusal. `body` is the whole answer where it has structure — a failed parse's `{ error, issues }` — which both doors send as it is. */
-  | { status: 400 | 403 | 404 | 409 | 410 | 429; error: string; body?: Readonly<Record<string, unknown>> };
+  | { status: 400 | 403 | 404 | 409 | 410 | 422 | 429; error: string; body?: Readonly<Record<string, unknown>> };
 
 /** The refusal a caller over the rail gets, the same words on both doors. */
 export const SCHEMA_VALIDATE_RATE_LIMITED = `the stored-data schema check is rate limited — at most ${HEAVY_CALLS_PER_WINDOW} runs a minute per token, `
@@ -263,6 +263,10 @@ export async function beginSchemaValidate(input: {
   if (parsed.data.meta !== undefined) {
     const proposed = parseSpaceMeta(parsed.data.meta);
     if (!proposed.ok) return { status: 400, error: proposed.message };
+    // And the `$ref` refusal a save makes after its parse (Q-668, S6): a reference to an entry this instance's library lacks, or to one
+    // of another kind, is refused here at 422 in the save's words — a dry run that passed what the save refuses would answer wrongly.
+    const refRefusal = libraryRefRefusal(proposed.meta.typeSchemas as z.infer<typeof TypeSchemasZ> | undefined);
+    if (refRefusal) return { status: 422, error: refRefusal.message };
     meta = proposed.meta as SpaceMeta;
     // A check runs the proposed rules on the event loop, a sample off the heavy-call rail and the walk over thousands of records, so
     // either mode may run only rules the caller could save: the price of a rule is paid by the right to write one. After the parse, so

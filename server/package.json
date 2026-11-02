@@ -4,10 +4,10 @@
   "license": "PolyForm-Small-Business-1.0.0",
   "type": "module",
   "scripts": {
-    "predev": "tsc -p ../schema",
+    "predev": "npm run build -w @ythril/schema",
     "dev": "tsx watch src/index.ts",
     "local-connector:dev": "tsx watch src/local-agent-connector/index.ts",
-    "prebuild": "tsc -p ../schema",
+    "prebuild": "npm run build -w @ythril/schema",
     "build": "tsc && node scripts/copy-src-assets.mjs",
     "start": "node dist/index.js",
     "local-connector:start": "node dist/local-agent-connector/index.js"
@@ -20,7 +20,7 @@
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@mozilla/readability": "^0.6.0",
     "@vladmandic/human": "^3.3.6",
-    "@ythril/schema": "6.3.0",
+    "@ythril/schema": "6.3.1",
     "ajv": "^8.18.0",
     "bcrypt": "^6.0.0",
     "compression": "^1.8.1",

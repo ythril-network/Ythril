@@ -8,13 +8,15 @@
  * entry's, and refuses it when it was edited ({@link takeBackLibraryDefinition}, `Q-168`). That needs the entry — and an app validating
  * a schema offline has no instance to read it from. So the library is a parameter:
  *
- *  - **an app** passes the entries it knows to `validateSpaceMeta(meta, { library })` (or wraps any parse in {@link withSchemaLibrary});
- *    with none, a `$ref` beside other keys is refused as "cannot be checked", which is what a meta whose entry is missing deserves;
- *  - **the server** installs its own library once ({@link useSchemaLibrary}, in `server/src/spaces/body-schemas.ts`), read at the moment
- *    of each parse, so a library edit reaches the next write.
+ *  - **an app** passes the entries it knows to `validateSpaceMeta(meta, { library })` (with none, `validateSpaceMeta` reads `[]`, and
+ *    a `$ref` is refused as naming an entry that does not exist), or wraps any direct parse in {@link withSchemaLibrary};
+ *  - **the server** installs its own library once ({@link useSchemaLibrary}, exported by `@ythril/schema/internal` and called in
+ *    `server/src/spaces/library-ref-expansion.ts`), read at the moment of each parse, so a library edit reaches the next write.
  *
- * A scoped library wins over the installed one for the length of the call. Nothing here reads a file, an environment variable or a
- * logger.
+ * A scoped library wins over the installed one for the length of the call. With neither — a parse that reads the library run outside
+ * `withSchemaLibrary` in an app, or before the server installed its own — the read THROWS "no schema library installed" (`Q-668`): an
+ * empty default answered every `$ref` as missing, a wrong refusal with nothing to say the setup was wrong. Nothing here reads a file,
+ * an environment variable or a logger.
  */
 import { z } from 'zod';
 import type { KnowledgeType, TypeSchema } from './vocabulary.js';
@@ -31,21 +33,43 @@ export interface SchemaLibraryEntryLike {
 /** The entries a parse reads, asked for at the moment of the parse. */
 export type SchemaLibrarySource = () => readonly SchemaLibraryEntryLike[];
 
-let installed: SchemaLibrarySource = () => [];
+/** The library read when none is installed or scoped: a setup error, said as one, never an empty library that answers wrongly. */
+const NONE_INSTALLED: SchemaLibrarySource = () => {
+  throw new Error('no schema library installed: a parse that reads the schema library ran outside withSchemaLibrary(entries, read) '
+    + 'and before any library was installed. An app scopes its entries with withSchemaLibrary (or passes them to validateSpaceMeta); '
+    + 'the server installs its own at import (server/src/spaces/library-ref-expansion.ts).');
+};
+
+let installed: SchemaLibrarySource = NONE_INSTALLED;
 const scoped: (readonly SchemaLibraryEntryLike[])[] = [];
 
-/** Install the library every parse reads when no call scopes its own. The server installs its instance library; an app need not. */
+/**
+ * Install the library every parse reads when no call scopes its own. The server's, in `@ythril/schema/internal` only: an app scopes its
+ * entries with {@link withSchemaLibrary} instead, so no app replaces a library another part of the process reads.
+ */
 export function useSchemaLibrary(source: SchemaLibrarySource): void {
   installed = source;
 }
 
-/** Run `read` with `entries` as the library — for an app checking a meta against the entries it knows, and for a test. */
+/**
+ * Run `read` with `entries` as the library — for an app checking a meta against the entries it knows, and for a test.
+ *
+ * `read` must be synchronous: the scope ends when it returns, so the awaited half of an async `read` would run against the installed
+ * library (or another call's scope). A `read` that returns a promise, or any thenable, throws.
+ */
 export function withSchemaLibrary<T>(entries: readonly SchemaLibraryEntryLike[], read: () => T): T {
   scoped.push(entries);
-  try { return read(); } finally { scoped.pop(); }
+  let result: T;
+  try { result = read(); } finally { scoped.pop(); }
+  if (result !== null && (typeof result === 'object' || typeof result === 'function')
+    && typeof (result as { then?: unknown }).then === 'function') {
+    throw new Error('withSchemaLibrary: read returned a promise (a thenable): an async read is not supported, because the library is '
+      + 'scoped only until read returns. Await what you need first, then parse synchronously inside withSchemaLibrary.');
+  }
+  return result;
 }
 
-/** The library a parse reads now: the innermost scoped one, else the installed one. */
+/** The library a parse reads now: the innermost scoped one, else the installed one; throws when neither exists. */
 export function currentSchemaLibrary(): readonly SchemaLibraryEntryLike[] {
   return scoped.length > 0 ? scoped[scoped.length - 1]! : installed();
 }
@@ -72,6 +96,11 @@ export function takeBackLibraryDefinition(
   const { $ref, _unresolvedRef: _mark, ...rest } = value as Record<string, unknown>;
   if (typeof $ref !== 'string') return value;
   if (Object.keys(rest).length === 0) return { $ref };
+  // A `$ref` naming no library entry is refused for its format, as a bare one is, not told its entry "does not exist".
+  if (libraryEntryNameOf($ref) === undefined) {
+    ctx.addIssue({ code: 'custom', input: value, message: '$ref must be in format "library:<name>"' });
+    return z.NEVER;
+  }
 
   const def = libraryDefinitionOf($ref);
   // Compared as canonical JSON (`canonical-json.ts`): two definitions that differ only in key order are equal.

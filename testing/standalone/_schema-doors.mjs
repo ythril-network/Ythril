@@ -50,6 +50,7 @@ export async function bootSchemaInstance(dir, { spaces, library = [], networks =
   const { spacesRouter } = await import('../../server/dist/api/spaces.js');
   const { schemaLibraryRouter } = await import('../../server/dist/api/schema-library.js');
   const spacesTools = await import('../../server/dist/mcp/tools/spaces.js');
+  const { schema_validateTool } = await import('../../server/dist/mcp/tools/schema-validate.js');
   const librarySeed = JSON.parse(JSON.stringify(library));
   const metaSeed = new Map(seed.map(s => [s.id, JSON.parse(JSON.stringify(s.meta ?? {}))]));
 
@@ -69,6 +70,21 @@ export async function bootSchemaInstance(dir, { spaces, library = [], networks =
         const [type, schema] = Object.entries(types)[0];
         return callRoute(spacesRouter, 'put', '/:id/meta/typeSchemas/:knowledgeType/:typeName',
           { params: { id: spaceId, knowledgeType: kind, typeName: type }, body: schema, authToken: AUTH }).then(fromRoute);
+      },
+      // The create door: a NEW space whose meta arrives with it (`POST /`), id derived from the space the row is driven against.
+      'space-create': (spaceId, meta) => callRoute(spacesRouter, 'post', '/',
+        { body: { id: `${spaceId}-new`, label: 'New space', meta }, authToken: AUTH }).then(fromRoute),
+      // The dry-run doors (F-46): a proposed meta checked over one sample record, so nothing stored is read and no rail is taken.
+      'validate-rest': (spaceId, meta) => callRoute(spacesRouter, 'post', '/:id/validate-schema',
+        { params: { id: spaceId }, body: { meta, sample: SAMPLE }, authToken: AUTH }).then(fromRoute),
+      'validate-mcp': async (spaceId, meta) => {
+        try {
+          return fromTool(await schema_validateTool.handle({ ...mcpCtx(spaceId, { meta, sample: SAMPLE }), rateKey: 'schema-doors', transport: 'mcp' }));
+        } catch (err) {
+          // A tool refuses by throwing `ToolRefusal(status, message)`; the MCP layer prints it as `Error (NNN): message`.
+          if (typeof err?.status !== 'number') throw err;
+          return { refused: true, status: err.status, text: `Error (${err.status}): ${err.message}`, body: err.body };
+        }
       },
     },
     library: {
@@ -96,6 +112,13 @@ export async function bootSchemaInstance(dir, { spaces, library = [], networks =
 
 /** Every inline door's name, in the order the table reports them. */
 export const INLINE_DOORS = Object.freeze(['space-patch', 'mcp-schema-update', 'put-schema', 'put-single-type']);
+
+/** The doors a `$ref` reaches besides the inline ones: the create door, and the two dry-run doors that claim to refuse what a save refuses. */
+export const CREATE_DOOR = 'space-create';
+export const VALIDATE_DOORS = Object.freeze(['validate-rest', 'validate-mcp']);
+
+/** The record a dry-run door checks a proposed meta over: one entity, so nothing stored is read. */
+const SAMPLE = Object.freeze({ kind: 'entity', record: { name: 'sample', type: 'Sample' } });
 
 /**
  * @typedef {object} SchemaInstance

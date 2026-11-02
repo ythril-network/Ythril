@@ -53,6 +53,11 @@ worded by `util/log.ts`, the logger itself.
 - `schema/src/space-meta.ts` — the bodies and the parses; `schema/src/validate.ts` — the app's dry entry.
 - `schema/src/library.ts` — how the schema library is handed in.
 - `schema/src/rules.ts` — the save-time CEL checks and `compileRule`; `server/src/spaces/schema-rules.ts` — evaluation.
+- Applied before it shipped (Q-668, owner 2026-11-01): the package is **Apache-2.0** with its own `schema/LICENSE` and
+  `schema/NOTICE`, not the repository's licence; it is versioned 6.3.1 with the release; the server builds it through its
+  own build script (`npm run build -w @ythril/schema`, which clears `dist` first); its app entry names a fixed list and the
+  server-only helpers (`useSchemaLibrary` among them) are in `./internal`; a parse with no library installed throws; the
+  `$ref` refusal is one function, `libraryRefRefusal`.
 - `testing/standalone/an-outside-apps-schema-validates-through-the-schema-package.test.js` — an outside app's metas
   validate through the package, the server's names are the package's, and no definition is left in the server.
 - `docs/integration-guide/06a-schema-api.md` — the schema contract, and the package that checks it offline.

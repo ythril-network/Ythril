@@ -1,5 +1,5 @@
 /**
- * Every route that accepts `typeSchemas` refuses a broken library `$ref`.
+ * Every route that accepts `typeSchemas` refuses a broken library `$ref`, through the one refusal the package declares.
  *
  * ## The report
  *
@@ -13,170 +13,214 @@
  * already. Only `POST /` did not, so the identical mistake was loud on every path except the one people make
  * it on, which is the one where the space and its schema arrive together.
  *
- * It matters most in a `strict` space, and `POST /` is the handler that SEEDS `validationMode: 'strict'`: one
- * mistyped ref leaves that type with no constraints, and the space then accepts anything for it while its
- * schema looks authored.
+ * ## One refusal, and what this gate keys on (Q-668, 4', B2, S4)
+ *
+ * The check was written five times — the package's `validateSpaceMeta`, the two planners and the two schema PUTs, the PUTs with the
+ * "not found" sentence typed out by hand — because this gate keyed on the finder's name and on a message literal, so a copy of the
+ * sequence was the way to satisfy it. The package now declares `libraryRefRefusal(typeSchemas, library?)`, the finders and their
+ * wording are package-internal, and this gate requires a call of `libraryRefRefusal(` and a 422 in the route's own handler or in the
+ * server-side function it delegates to. Never the package's source: the earlier gate appended `schema/src` to any delegate that imported
+ * the package, so a route whose delegate merely imported it passed (B2). A function imported from `@ythril/schema` or
+ * `@ythril/schema/internal` is the package's, and a call of it is not the route consulting the refusal.
  *
  * ## Why this is derived rather than a list of four routes
  *
  * A list would have been written against the routes that existed and agreed with itself. This finds every
- * route handler that takes `typeSchemas` from a request and requires each one to consult the checker — so a
- * fifth route added later is covered on the day it is written, which is the only time it is cheap.
+ * route handler that takes `typeSchemas` from a request and requires each one to consult the refusal — so a
+ * fifth route added later is covered on the day it is written, which is the only time it is cheap. The readers it stands on are proved
+ * on a planted router whose routes skip the call in each way a route could.
  *
  * Run: node --test testing/standalone/broken-library-ref-refused-everywhere.test.js
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join, posix } from 'node:path';
+import { stripComments } from './_strip-comments.mjs';
+import { bodyOf } from './_structural-window.mjs';
 
 const ROOT = process.cwd();
-const SRC = 'server/src/api/spaces.ts';
-const src = readFileSync(join(ROOT, SRC), 'utf8');
+const ROUTER = 'server/src/api/spaces.ts';
+/** The package's two entries: a name imported from either is the package's, never a server-side delegate. */
+const PACKAGE_SPECIFIER = /^@ythril\/schema(?:\/internal)?$/;
+/** The one refusal, called. */
+const CHECK = /\blibraryRefRefusal\s*\(/;
 
-/** Split the file into route handlers: from one `spacesRouter.<verb>(` to the next. */
-function routes() {
-  const starts = [];
-  const re = /spacesRouter\.(get|post|put|patch|delete)\(\s*'([^']+)'/g;
-  let m;
-  while ((m = re.exec(src)) !== null) starts.push({ verb: m[1], path: m[2], at: m.index });
-  return starts.map((s, i) => ({
-    ...s,
-    body: src.slice(s.at, i + 1 < starts.length ? starts[i + 1].at : src.length),
-  }));
+/** A repo file's source with its comments out, so a comment naming the call neither satisfies nor trips a rule. */
+const readRepo = (file) => stripComments(readFileSync(join(ROOT, file), 'utf8'));
+
+/** Route handlers: from one `spacesRouter.<verb>(` to the next. */
+function routesOf(src) {
+  const starts = [...src.matchAll(/spacesRouter\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)]
+    .map(m => ({ verb: m[1], path: m[2], at: m.index }));
+  return starts.map((s, i) => ({ ...s, body: src.slice(s.at, i + 1 < starts.length ? starts[i + 1].at : src.length) }));
 }
 
 /**
- * Local name → source text, for every module this router imports from `../…`.
- *
- * Needed because a handler is allowed to DELEGATE the check. `PATCH /:id` now calls `planSpaceMetaUpdate`, which
- * owns the whole refusal chain so an MCP tool can reach the same rules — and a gate that only accepted an inline
- * call would have to be weakened for every such extraction, one route at a time.
- *
- * The delegate is RESOLVED and READ rather than named in an allowlist. That is the difference between following
- * the check and taking a route's word for it: `effectiveChecker` below only accepts a delegate whose own source
- * calls the checker, so "I call a function" is not an escape hatch — the function has to do the work.
+ * `localName -> { file, exported } | { package }` for every named import of `text` (written in `fromFile`), static and dynamic. A
+ * relative specifier resolves to the `.ts` file it names; `@ythril/schema` and `@ythril/schema/internal` are the package's.
  */
-/**
- * The schema package's source, read whole: `spaces/body-schemas.ts` re-exports the ref checks and their 422 wording from
- * `@ythril/schema`, so a module that hands them on is read with the package it hands them on from.
- */
-const SCHEMA_PACKAGE = readdirSync(join(ROOT, 'schema/src')).filter(f => f.endsWith('.ts'))
-  .map(f => readFileSync(join(ROOT, 'schema/src', f), 'utf8')).join('\n');
-
-function resolveImports(text, fromDir) {
+function importsOf(text, fromFile) {
   const byName = new Map();
-  const re = /import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+'(\.\.?\/[^']+)\.js'/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const file = join(fromDir, `${m[2]}.ts`);
-    let body;
-    try { body = readFileSync(file, 'utf8'); } catch { continue; }
-    if (/from\s+'@ythril\/schema'/.test(body)) body += `\n${SCHEMA_PACKAGE}`;
-    for (const raw of m[1].split(',')) {
-      const name = raw.trim().split(/\s+as\s+/).pop().trim();
-      if (name) byName.set(name, { text: body, dir: dirname(file) });
+  const add = (clause, spec) => {
+    const pkg = PACKAGE_SPECIFIER.test(spec);
+    if (!pkg && !spec.startsWith('.')) return;
+    const file = pkg ? null : posix.join(posix.dirname(fromFile), spec).replace(/\.js$/, '.ts');
+    for (const raw of clause.split(',')) {
+      const part = raw.trim().replace(/^type\s+/, '');
+      const m = /^([A-Za-z_$][\w$]*)(?:\s+as\s+|\s*:\s*)?([A-Za-z_$][\w$]*)?$/.exec(part);
+      if (!m) continue;
+      byName.set(m[2] ?? m[1], pkg ? { package: spec } : { file, exported: m[1] });
     }
-  }
+  };
+  for (const m of text.matchAll(/import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+'([^']+)'/g)) add(m[1], m[2]);
+  for (const m of text.matchAll(/\{([^{}();]*)\}\s*=\s*await\s+import\s*\(\s*'([^']+)'\s*\)/g)) add(m[1], m[2]);
   return byName;
 }
 
-const ROUTER_IMPORTS = resolveImports(src, join(ROOT, 'server/src/api'));
-
 /**
- * The source that actually performs the ref check for a handler: its own body, plus — when it delegates — the
- * delegate's source and the source of whatever the delegate calls to build the message.
+ * Where a handler consults the refusal: `{ where, text }` — its own body, or the body of the ONE server-side function it calls that
+ * does. `null` when nothing in reach calls it, which is the defect this file exists to catch. `read(file)` gives a file's source,
+ * comments out.
  *
- * **Two hops, and no more.** The check and its wording are allowed to live one module apart: `planSpaceMetaUpdate`
- * calls `findBrokenLibraryRefs` and answers with `brokenRefsError`, which is declared beside the schema it reads.
- * A third hop would mean this gate no longer reads as "this route refuses"; at that distance it is asserting the
- * shape of a call graph rather than a guarantee, and it would start passing for reasons nobody intended.
- *
- * `null` means nothing in reach checks, which is the defect this file exists to catch.
+ * The delegate is the called FUNCTION's body, not its module: a module whose other function calls the refusal does not make this one
+ * refuse. One hop: at two, the gate would be asserting the shape of a call graph rather than "this route refuses".
  */
-function effectiveChecker(handlerBody) {
-  if (/findBrokenLibraryRefs\(/.test(handlerBody)) return handlerBody;
-  for (const [name, mod] of ROUTER_IMPORTS) {
-    if (!new RegExp(`\\b${name}\\s*\\(`).test(handlerBody)) continue;
-    if (!/findBrokenLibraryRefs\(/.test(mod.text)) continue;
-    // Second hop: whatever this delegate calls, so the 422 and its message count wherever they are declared.
-    let bundle = mod.text;
-    for (const [, dep] of resolveImports(mod.text, mod.dir)) bundle += `\n${dep.text}`;
-    return bundle;
+function effectiveChecker(handlerBody, imports, read) {
+  if (CHECK.test(handlerBody)) return { where: 'the handler', text: handlerBody };
+  for (const [name, imp] of imports) {
+    if (imp.package) continue;
+    if (!new RegExp(`(?<![\\w$.])${name}\\s*\\(`).test(handlerBody)) continue;
+    let body;
+    try { body = bodyOf(read(imp.file), imp.exported); } catch { continue; }
+    if (CHECK.test(body)) return { where: `${imp.file}:${imp.exported}`, text: body };
   }
   return null;
 }
 
+/** Text that takes schemas: `typeSchemas` named, or `meta` destructured from a parsed body (the route that had the defect did that). */
+const TAKES_SCHEMAS = /typeSchemas|const \{[^}]*\bmeta\b[^}]*\} = parsed\.data/;
+
+/**
+ * The mutating handlers that take schemas from the caller: the handler's own text says so, or the server-side function it hands the
+ * body to does. The create route names neither `typeSchemas` nor `meta` (`planSpaceCreate(req.body)`); its planner does.
+ */
+function takingSchemas(routes, imports, read) {
+  return routes.filter(r => ['post', 'put', 'patch'].includes(r.verb)).filter(r => {
+    if (TAKES_SCHEMAS.test(r.body)) return true;
+    for (const [name, imp] of imports) {
+      if (imp.package || !new RegExp(`(?<![\\w$.])${name}\\s*\\(`).test(r.body)) continue;
+      try { if (TAKES_SCHEMAS.test(bodyOf(read(imp.file), imp.exported))) return true; } catch { /* not a function of that file */ }
+    }
+    return false;
+  });
+}
+
+/** The routes among `routes` that take schemas and reach no refusal, as `VERB /path`. */
+function offendersOf(routes, imports, read) {
+  return takingSchemas(routes, imports, read).filter(r => !effectiveChecker(r.body, imports, read)).map(r => `${r.verb.toUpperCase()} ${r.path}`);
+}
+
+describe('the readers this gate stands on (proved on a planted router)', () => {
+  const files = new Map([
+    ['fx/api/router.ts', `
+import { planGood, planSkip } from '../spaces/plans.js';
+import { validateSpaceMeta } from '@ythril/schema/internal';
+import { parseSpaceMeta } from '@ythril/schema';
+spacesRouter.post('/', async (req, res) => { const d = planGood(req.body); res.status(d.status).json(d.body); });
+spacesRouter.put('/:id/schema', async (req, res) => { const { typeSchemas } = req.body; res.json({ typeSchemas }); });
+spacesRouter.patch('/:id', async (req, res) => { const d = planSkip(req.body); res.status(d.status).json(d.body); });
+spacesRouter.post('/:id/pkg', async (req, res) => { const { typeSchemas } = req.body; const r = validateSpaceMeta({ typeSchemas }); res.status(r.ok ? 200 : 422).json(r); });
+spacesRouter.put('/:id/comment', async (req, res) => {
+  const { typeSchemas } = req.body;
+  // libraryRefRefusal(typeSchemas) would go here
+  res.status(422).json({});
+});
+spacesRouter.put('/:id/inline', async (req, res) => { const r = libraryRefRefusal(req.body.typeSchemas); if (r) return res.status(422).json({ error: r.message }); });
+`],
+    ['fx/spaces/plans.ts', `
+import { libraryRefRefusal } from '@ythril/schema';
+export function planGood(body) {
+  const refusal = libraryRefRefusal(body.typeSchemas);
+  if (refusal) return { status: 422, body: { error: refusal.message } };
+  return { ok: true };
+}
+export function planSkip(body) {
+  return { ok: true, typeSchemas: body.typeSchemas };
+}
+export function neighbour(body) {
+  return libraryRefRefusal(body.typeSchemas);
+}
+`],
+  ]);
+  const read = (file) => stripComments(files.get(file) ?? '');
+  const routerText = read('fx/api/router.ts');
+  const imports = importsOf(routerText, 'fx/api/router.ts');
+
+  it('reads both package entries as the package\'s, and a relative import as the file it names', () => {
+    assert.deepEqual(imports.get('validateSpaceMeta'), { package: '@ythril/schema/internal' });
+    assert.deepEqual(imports.get('parseSpaceMeta'), { package: '@ythril/schema' });
+    assert.deepEqual(imports.get('planGood'), { file: 'fx/spaces/plans.ts', exported: 'planGood' });
+  });
+
+  it('flags a route that skips the call: inline, through a delegate whose NEIGHBOUR calls it, through the package, or in a comment', () => {
+    assert.deepEqual(offendersOf(routesOf(routerText), imports, read).sort(),
+      ['PATCH /:id', 'POST /:id/pkg', 'PUT /:id/comment', 'PUT /:id/schema']);
+  });
+
+  it('accepts a route that calls it inline or through its delegate, and says where', () => {
+    const routes = routesOf(routerText);
+    assert.equal(effectiveChecker(routes.find(r => r.path === '/').body, imports, read).where, 'fx/spaces/plans.ts:planGood');
+    assert.equal(effectiveChecker(routes.find(r => r.path === '/:id/inline').body, imports, read).where, 'the handler');
+  });
+});
+
 describe('a broken schema-library $ref is refused on every route that accepts one', () => {
-  const all = routes();
+  const src = readRepo(ROUTER);
+  const all = routesOf(src);
+  const imports = importsOf(src, ROUTER);
 
   it('found the routes to check', () => {
     // Floors the enumeration — a changed router name would otherwise make every check below vacuous.
-    assert.ok(all.length >= 10, `only found ${all.length} route handlers in ${SRC}`);
+    assert.ok(all.length >= 10, `only found ${all.length} route handlers in ${ROUTER}`);
     assert.ok(all.some(r => r.verb === 'post' && r.path === '/'), 'the space-create route must be among them');
+    const taking = takingSchemas(all, imports, readRepo);
+    assert.ok(taking.length >= 4, `only ${taking.length} handlers read as taking schemas: the scope reader is broken`);
   });
 
-  it('every handler that reads typeSchemas from the request consults the ref checker', () => {
-    const offenders = [];
-    for (const r of all) {
-      // Only mutating handlers that take schemas from the CALLER. A read route returning them is not
-      // accepting a ref and has nothing to reject.
-      if (!['post', 'put', 'patch'].includes(r.verb)) continue;
-      // `meta` counts, not just a literal `typeSchemas`. The route that had the defect destructured `meta`
-      // from the body and never named `typeSchemas` at all — a detector keyed on that word would have
-      // reported the tree clean on the day the bug was live, which is the one day it needed to speak.
-      const takesSchemas = /typeSchemas/.test(r.body)
-        || /const \{[^}]*\bmeta\b[^}]*\} = parsed\.data/.test(r.body)
-        // A handler that hands the whole body to a planner names neither `typeSchemas` nor `meta`. It still
-        // accepts schemas — via `req.body` — so it is in scope, and the delegate is what has to check.
-        || /planSpaceMetaUpdate\(/.test(r.body);
-      if (!takesSchemas) continue;
-      if (!effectiveChecker(r.body)) offenders.push(`${r.verb.toUpperCase()} ${r.path}`);
-    }
-    assert.deepEqual(offenders, [],
-      'these accept `typeSchemas` from a request without checking its library refs — directly or through a '
-      + 'delegate that checks. An unresolvable ref degrades to an empty schema, so in a strict space the type '
-      + 'silently loses every constraint while the call reports success — and the other routes answer 422 for '
-      + 'the same input.');
+  it('every handler that reads typeSchemas from the request calls libraryRefRefusal, itself or in its delegate', () => {
+    assert.deepEqual(offendersOf(all, imports, readRepo), [],
+      'these accept `typeSchemas` from a request without calling `libraryRefRefusal(` — in the handler or in the server-side function it '
+      + 'delegates to. An unresolvable ref degrades to an empty schema, so in a strict space the type silently loses every constraint '
+      + 'while the call reports success — and the other routes answer 422 for the same input.');
   });
 
   it('the create route refuses BEFORE the space exists', () => {
-    // Ordering is the guarantee: a check after `createSpace` would leave a space behind whose schema is the thing
-    // being rejected, and the caller would have to clean it up.
-    //
-    // The route delegates now, and the two halves live in different functions of `spaces/space-create.ts` — so a
-    // position test would be comparing two things that have no order at runtime. What actually holds the ordering is
-    // the signature: `applySpaceCreate` takes a `SpaceCreatePlan`, and a plan is only ever constructed by
-    // `planSpaceCreate`, after the `$ref` check, in the expression that returns `ok: true`. A caller cannot reach
-    // `createSpace` without having passed the check, which is stronger than what this assertion used to say.
+    // Ordering is the guarantee: a check after `createSpace` would leave a space behind whose schema is the thing being rejected.
+    // What holds the ordering is the signature: `applySpaceCreate` takes a `SpaceCreatePlan`, and a plan is only ever constructed by
+    // `planSpaceCreate`, after the refusal, in the expression that returns `ok: true`.
     const create = all.find(r => r.verb === 'post' && r.path === '/');
-    assert.ok(effectiveChecker(create.body), 'the create route must reach the checker, directly or by delegation');
+    assert.ok(effectiveChecker(create.body, imports, readRepo), 'the create route must reach libraryRefRefusal, directly or by delegation');
 
-    const planner = readFileSync(join(ROOT, 'server/src/spaces/space-create.ts'), 'utf8');
-    // The second argument is who the space is credited to (Q-134) — it carries no body, so the plan is still the
-    // only way in.
+    const planner = readRepo('server/src/spaces/space-create.ts');
     assert.match(planner, /export async function applySpaceCreate\(plan: SpaceCreatePlan, creator: SpaceCreator\)/,
       'apply must take a SpaceCreatePlan and nothing looser, or a caller could assemble one without the checks');
     assert.match(planner, /await createSpace\(plan\.args, creator\)/, 'and it must create from the PLAN, not from a body');
 
-    const planFn = planner.slice(planner.indexOf('export function planSpaceCreate'));
-    const check = planFn.indexOf('findBrokenLibraryRefs(');
+    const planFn = bodyOf(planner, 'planSpaceCreate');
+    const check = planFn.search(CHECK);
     const built = planFn.indexOf('ok: true');
-    assert.ok(check > 0 && built > check, 'the ref check must run before a plan is returned');
+    assert.ok(check > 0 && built > check, 'libraryRefRefusal must run before a plan is returned');
     assert.equal((planner.match(/ok: true,\s*\n\s*plan: \{/g) ?? []).length, 1,
       'a second place constructing a plan is a second way to reach createSpace without the check');
   });
 
-  it('all four answer with the same status and a message naming what is missing', () => {
-    // Read from the EFFECTIVE checker, so a route that delegates is held to the same two requirements as one that
-    // checks inline. A delegate reports the status in its refusal rather than by calling `res`, which is why 422
-    // is matched as a bare status here rather than as `res.status(422)`.
-    const checking = all.map(r => ({ r, src: effectiveChecker(r.body) })).filter(x => x.src);
-    assert.ok(checking.length >= 4, `only ${checking.length} routes check refs; expected the create route plus three editors`);
-    for (const { r, src: checker } of checking) {
-      assert.match(checker, /422/, `${r.verb.toUpperCase()} ${r.path} must answer 422`);
-      assert.match(checker, /Schema library[^\n]*not found/,
-        `${r.verb.toUpperCase()} ${r.path} must name the missing entry — "invalid schema" sends the caller looking in the wrong place`);
+  it('every route that checks answers 422 from the same place it checks', () => {
+    // A delegate reports the status in its refusal rather than by calling `res`, so 422 is matched as a bare status.
+    const checking = all.map(r => ({ r, found: effectiveChecker(r.body, imports, readRepo) })).filter(x => x.found);
+    assert.ok(checking.length >= 4, `only ${checking.length} routes call libraryRefRefusal; expected the create route plus three editors`);
+    for (const { r, found } of checking) {
+      assert.match(found.text, /\b422\b/, `${r.verb.toUpperCase()} ${r.path} calls libraryRefRefusal in ${found.where} but answers no 422 there`);
     }
   });
 });

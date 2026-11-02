@@ -24,6 +24,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
+import { stripComments } from './_strip-comments.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_SRC = path.join(__dirname, '..', '..', 'server', 'src', 'util', 'log.ts');
@@ -63,6 +64,13 @@ describe('log.ts — structural invariants (SEC-14)', () => {
   it('redact() produces a "[redacted]" replacement string', () => {
     assert.ok(src.includes('[redacted]'),
       'redact() must replace tokens with "[redacted]" so logs are searchable for scrubbing');
+  });
+
+  it('log.ts ITSELF applies redact() — the package\'s text module defining and using it does not count (Q-668, O1)', () => {
+    // The sources above are read as one, so the count below is met by the package's own definition and its own uses even when the
+    // logger stopped calling it. The logger's half is asked of the logger's file alone, comments out.
+    const logOnly = stripComments(readFileSync(LOG_SRC, 'utf8'));
+    assert.match(logOnly, /(?<![\w$.])redact\s*\(/, 'server/src/util/log.ts never calls redact(): its lines are written unredacted');
   });
 
   it('redact() is called at least twice — once defined and once applied in fmt()', () => {
