@@ -138,6 +138,20 @@ unresolved `$ref`s, renamed identifiers) is an entry in `untranslated`, with one
 to resolve a bare `$ref` and to confirm an expanded one's kind. An enum longer than `ENUM_LITERAL_MAX` is written as its
 base type.
 
+`ENUM_LITERAL_MAX` is `200`: an enum with more values is written as its base type and reported as `enum-too-long`. The
+reasons, the whole list (a reason added is a deliberate edit an app's switch can see):
+
+- `not-translated`: a field TypeScript cannot carry (a type's rules, naming pattern, retention, a space's rules), named in `field`.
+- `type-skipped`: a type the parse refuses, or one that is not an object; `detail` has the parse's words.
+- `unknown-field`: a field this release does not know (a newer server wrote it), stripped before the parse; named in `field`.
+- `unresolved-ref`: a `$ref` no library entry answers; the type is written open.
+- `wrong-kind-ref`: a `$ref` to an entry filed under another knowledge type; the type is written open, `detail` names that kind.
+- `kind-not-verified`: a type converted from the definition beside its `$ref` with no library entry to confirm the kind.
+- `enum-emptied`: an enum none of whose values has the declared type; the member is `never`.
+- `enum-too-long`: an enum longer than `ENUM_LITERAL_MAX`; the member is its base type.
+- `renamed`: a type whose identifier was taken; `detail` is the one it got.
+- `no-type-schemas`: a meta with no type schemas to read (missing, or not an object, or the meta itself is not one).
+
 ## What else is exported
 
 | export | what it is |

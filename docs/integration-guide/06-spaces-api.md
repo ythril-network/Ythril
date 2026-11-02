@@ -145,8 +145,9 @@ most current open models emit 512.
 > **A collection has a search index only while it holds a record.** A new space starts with none and reads `ready`
 > as soon as the check runs; a collection's vector index (and, on `files`, the face gallery) is built when its first
 > record arrives and dropped a minute after its last one is deleted (`SEARCH_INDEX_DROP_DELAY_MS`). This is invisible to
-> a search: an empty collection answers empty with no `degraded` reason, and a first record is returned at once — the
-> fresh-write channel scores the newest records from the collection itself while their index builds.
+> a search: an empty collection answers empty with no `degraded` reason, and (with the default fresh-write window,
+> `DUPE_FRESH_WINDOW_MS`; at `0` a first record counts as older and an unbuilt index is flagged) a first record is
+> returned at once — the fresh-write channel scores the newest records from the collection itself while their index builds.
 
 **A database that cannot answer while a space is created is a `503`**, retryable and with `Retry-After`, in our words
 and never the `409` or `404` of the driver's message that the same failure was once read as ([Auth and limits](03-auth-and-limits.md#a-failure-of-the-store-is-a-503-and-says-so-in-a-field)).

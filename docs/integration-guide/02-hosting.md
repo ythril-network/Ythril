@@ -534,12 +534,12 @@ into a crashloop, which then looks like a failure to start rather than a probe t
 > `docker stats` as a space grows and raise the limit before it is reached.
 >
 > **The search process's heap** is a share of that same limit: `YTHRIL_MONGOT_HEAP_PERCENT` (default `25`, so 1 GiB at
-> `4g`; range 1-90), passed to `mongot` as `-XX:MaxRAMPercentage`. It is the JVM's own default made visible, and it
-> still follows the limit, so raising `YTHRIL_MONGO_MEM_LIMIT` raises the heap with it. The rule, measured on the
-> shipped image (Q-373): the heap needs a fixed floor of about 128 MiB to build any index at all, and above it it does
-> **not** grow with records times dimensions: an index's vectors are memory-mapped outside the heap, so what grows with
-> the records times the vector width of every index is the container's memory, not the heap. Raise
-> `YTHRIL_MONGO_MEM_LIMIT` as spaces grow; lower the share only to give the database cache more of a tight limit, and
+> `4g`; sensible range 1-90, though the JVM takes any 1-100 value as given), passed to `mongot` as
+> `-XX:MaxRAMPercentage`. It is the JVM's own default made visible, and it still follows the limit, so raising
+> `YTHRIL_MONGO_MEM_LIMIT` raises the heap with it. The rule, measured on the shipped image (Q-373): the
+> heap needs a fixed floor of about 128 MiB to build any index at all, and above it it does **not** grow with records
+> times dimensions: an index's vectors are memory-mapped outside the heap, so what grows with the records times the
+> vector width of every index is the container's memory, not the heap. Raise `YTHRIL_MONGO_MEM_LIMIT` as spaces grow; lower the share only to give the database cache more of a tight limit, and
 > never below that floor. Changing either value recreates the database container, and every search index is rebuilt
 > on its next start (recall answers with `index_not_ready` until each one serves). A value the JVM refuses (not a
 > number) stops the container on start; `runner.log` names the refusal.
