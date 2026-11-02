@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [6.4.0] — 2026-11-02
+## [6.4.0] — 2026-11-03
 
 **A minor release: recall and similar answer with what they can find and say so while a search index builds or cannot serve, the search process's heap and logs are the operator's to set and read, a token's default rate limit is 1200 a minute, and `@ythril/schema` types a space's schemas.**
 
