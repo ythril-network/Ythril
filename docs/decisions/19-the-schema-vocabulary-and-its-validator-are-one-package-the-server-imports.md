@@ -1,6 +1,6 @@
 # 19 — The space-schema vocabulary and its validator are one package, `@ythril/schema`, which the server imports and an app can run
 
-**Status:** proposed, 2026-11-01 · **Scope:** the types, tuples and limits of a space schema, the zod bodies of a space meta and its type schemas, the parses that mint a stored meta (`parseSpaceMeta`, `parseTypeSchema`, `readStoredMeta`, `readPeerMeta`), the save-time CEL rule checks, and the text a refusal of them is worded in
+**Status:** accepted, 2026-11-01 · **Scope:** the types, tuples and limits of a space schema, the zod bodies of a space meta and its type schemas, the parses that mint a stored meta (`parseSpaceMeta`, `parseTypeSchema`, `readStoredMeta`, `readPeerMeta`), the save-time CEL rule checks, and the text a refusal of them is worded in
 
 ## Context
 
@@ -31,7 +31,7 @@ worded by `util/log.ts`, the logger itself.
 - **The text a refusal is worded in moved with the validator**: `peerText`, `peerList`, `refusalOfParse` and the secret
   redaction they apply are the package's, and the logger formats its lines with them. Two copies would be a validator
   whose refusal drifts from the server's on the first edit of either.
-- **The package is versioned with the release** (`@ythril/schema@6.3.1` validates what a 6.3.1 server accepts) and is
+- **The package is versioned with the release** (the package at X.Y.Z validates what an X.Y.Z server accepts; it is first published with 6.3.2) and is
   Apache-2.0, with its own LICENSE and NOTICE (see Q-668 below). Publishing it is a release step, not part of this decision.
 
 ## Consequences
@@ -54,7 +54,7 @@ worded by `util/log.ts`, the logger itself.
 - `schema/src/library.ts` — how the schema library is handed in.
 - `schema/src/rules.ts` — the save-time CEL checks and `compileRule`; `server/src/spaces/schema-rules.ts` — evaluation.
 - Applied before it shipped (Q-668, owner 2026-11-01): the package is **Apache-2.0** with its own `schema/LICENSE` and
-  `schema/NOTICE`, not the repository's licence; it is versioned 6.3.1 with the release; the server builds it through its
+  `schema/NOTICE`, not the repository's licence; it is versioned with the release, 6.3.2 being the first version published; the server builds it through its
   own build script (`npm run build -w @ythril/schema`, which clears `dist` first); its app entry names a fixed list and the
   server-only helpers (`useSchemaLibrary` among them) are in `./internal`; a parse with no library installed throws; the
   `$ref` refusal is one function, `libraryRefRefusal`.
