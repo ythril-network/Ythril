@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.3.1] — 2026-11-02
+
+**A patch release: every door answers a waited sync with the same verdict, a local database failure is no longer counted against the peer, file metadata is counted, and shutdown waits for a running sync cycle's page.**
+
 | Changes on upgrade | Action |
 |---|---|
 | REST `ok` of a waited sync is true only when `outcome` is `success` (it was true whenever the cycle ran) | Read `outcome` and `members` |
