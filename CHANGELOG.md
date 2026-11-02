@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.4.0] — 2026-11-02
+
+**A minor release: recall and similar answer with what they can find and say so while a search index builds or cannot serve, the search process's heap and logs are the operator's to set and read, a token's default rate limit is 1200 a minute, and `@ythril/schema` types a space's schemas.**
+
+| Changes on upgrade | Action |
+|---|---|
+| The first start recreates the database container and every search index rebuilds; recall and `similar` answer `degraded: ["index_not_ready"]` with fewer old records until each index serves | Expect it; ask again once serving |
+| A recall or `similar` over an index that is re-initialising or rebuilding answers `200` with `degraded`; it answered `503` | Read `degraded`; keep handling `503` for a dead search process |
+| `degraded` gains `index_not_ready` and `index_unavailable` on recall, `similar` and the ingest run | Treat an unknown reason as degraded |
+| A token with no limit of its own gets 1200 requests a minute; it got 300 | None; set a token's own limit to change it |
+| New setting `YTHRIL_MONGOT_HEAP_PERCENT` (default 25, sensible range 1-90); changing it recreates the database container | None; raise `YTHRIL_MONGO_MEM_LIMIT` as spaces grow |
+| New volume `ythril-mongo-logs`; `docker logs` still shows nothing for the database container (its logging driver is `none`); its search process and runner write `mongot.log` and `runner.log` to the volume, and neither file rotates | Read them there; truncate them when large |
+| `index_not_ready` that lasts for hours means a lost index, which the server does not recreate | Run the space's **Rebuild search indexes** |
+
 ### Added
 
 - **Schema:** `typesOfSpaceMeta` in `@ythril/schema` turns a space's type schemas into TypeScript types for its properties, and reports what the types cannot carry (rules, naming patterns, unresolved `$ref`s).
@@ -27,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Duplicates:** the duplicate scanner scans again, once the index serves, the records it read while the index was not ready; on `index_unavailable` it moves on.
 - **Ingest:** an ingest run whose entity matching read an incomplete index completes and lists the reasons in a new `degraded` field on the run, instead of failing on one refusing index.
 - **Hosting:** on the first start after the upgrade the database container is recreated (new settings and volume), and every search index is rebuilt; recall answers with fewer records and says so until each one serves.
+- **Docs:** the hosting guide gains the search process's heap, the `ythril-mongo-logs` volume, reading a database stop and truncating the logs; the dependencies note and the workstation mode guide name the volume and the setting.
+- **Docs:** the recall, choosing-a-search, authentication and limits, MCP, ingest, setup (metrics) and spaces guides carry the new reasons, the `200` in place of a `503`, the new metric and the new default rate limit.
+- **Docs:** the brain operations, media embedding and duplicates guides and the `@ythril/schema` README say what an index that is not ready or refuses does, and the README lists the reasons `typesOfSpaceMeta` reports.
+- **Docs:** the space schemas guide documents `typesOfSpaceMeta`; the face recognition guide and the user guide's Brain, Settings, Media Processing and Storage pages say what an unready index shows and how to repair it.
 
 ### Fixed
 

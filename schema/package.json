@@ -1,6 +1,6 @@
 {
   "name": "@ythril/schema",
-  "version": "6.3.2",
+  "version": "6.4.0",
   "description": "The vocabulary of a Ythril space schema and the validator a Ythril server runs on it, for apps that write schemas.",
   "license": "Apache-2.0",
   "type": "module",
