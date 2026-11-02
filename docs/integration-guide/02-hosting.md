@@ -146,6 +146,7 @@ All persistent data lives in named Docker volumes:
 | `ythril-data` | File storage (`/data/files/{spaceId}/`), upload chunks, media/face-model files |
 | `ythril-mongo-data` | Brain data: facts, entities, edges, tombstones |
 | `ythril-mongo-configdb` | MongoDB replica set keyfile |
+| `ythril-mongo-logs` | The search process's and the database runner's logs (`mongot.log`, `runner.log`): where the cause of a database stop is read. Logs only, so a Docker wipe may delete it |
 
 **The data volume should support hard links.** A file move gives the file its new name by a hard
 link before it removes the old one, which is what makes a move unable to overwrite a file that appears at the destination
@@ -531,6 +532,34 @@ into a crashloop, which then looks like a failure to start rather than a probe t
 > cache is sized from it). Building and serving the vector indexes of a space of tens of thousands of records needs
 > more memory than a small limit gives. The figure at `4g` for a given record count has not been measured, so watch
 > `docker stats` as a space grows and raise the limit before it is reached.
+>
+> **The search process's heap** is a share of that same limit: `YTHRIL_MONGOT_HEAP_PERCENT` (default `25`, so 1 GiB at
+> `4g`; range 1-90), passed to `mongot` as `-XX:MaxRAMPercentage`. It is the JVM's own default made visible, and it
+> still follows the limit, so raising `YTHRIL_MONGO_MEM_LIMIT` raises the heap with it. The rule, measured on the
+> shipped image (Q-373): the heap needs a fixed floor of about 128 MiB to build any index at all, and above it it does
+> **not** grow with records times dimensions: an index's vectors are memory-mapped outside the heap, so what grows with
+> the records times the vector width of every index is the container's memory, not the heap. Raise
+> `YTHRIL_MONGO_MEM_LIMIT` as spaces grow; lower the share only to give the database cache more of a tight limit, and
+> never below that floor. Changing either value recreates the database container, and every search index is rebuilt
+> on its next start (recall answers with `index_not_ready` until each one serves). A value the JVM refuses (not a
+> number) stops the container on start; `runner.log` names the refusal.
+>
+> **After the database stopped.** When `mongot` runs out of heap it dies, and the image's runner stops the database
+> with it within about two seconds; the container exits with code 0 and `docker logs` says nothing useful (its logging
+> driver is `none`, because the database's slow-operation lines carry command bodies). The cause is on the
+> `ythril-mongo-logs` volume:
+>
+> ```bash
+> docker exec ythril-mongo tail -n 50 /var/log/mongodb/mongot.log    # while it runs
+> docker run --rm -v ythril_ythril-mongo-logs:/l alpine tail -n 50 /l/mongot.log /l/runner.log   # after it stopped
+> ```
+>
+> `Terminating due to java.lang.OutOfMemoryError: Java heap space` in `mongot.log` means the heap is too small: raise
+> `YTHRIL_MONGO_MEM_LIMIT` (or the share). `restart: unless-stopped` starts the container again either way.
+>
+> **Neither log file rotates.** `mongot.log` grows by a few KB a minute idle and about 100 KB a minute while an index
+> builds (roughly 5 MB a day idle); `runner.log` stays near empty. Truncate it in place when it has grown, which the
+> running process tolerates: `docker exec ythril-mongo truncate -s 0 /var/log/mongodb/mongot.log`.
 >
 > **If you are upgrading a 2.0.x instance with many spaces, upgrade straight to 2.1** rather than
 > restarting 2.0.x, and there is no need to raise the startup budget for it.

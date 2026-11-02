@@ -353,11 +353,19 @@ export async function handlePair(spaceId: string, type: DupeScanType, seed: Reca
  * `NotFoundError` and is not a failure. Everything else (a read that fails, a write that fails, a TIMEOUT) belongs to the caller,
  * which isolates a seed from its neighbours and ends the space on a timeout (`scan-seed-runner.ts`). This used to be an empty
  * `catch`, which read a hung space's timeout as one record's trouble and paid a bound for every record in it.
+ *
+ * `indexNotReady` says the answer came from an index still being built over records it should serve (`findSimilar`'s
+ * `degraded` holds `index_not_ready`, `Q-326`): the record's duplicates were not all looked for, so the caller must not
+ * mark it scanned. An index that will not serve (`index_unavailable`) is not this: waiting does not help, the scan moves
+ * on, and recall warns about the index (throttled, once per collection per ten minutes).
  */
-async function evalOneRecord(spaceId: string, type: DupeScanType, recordId: string, threshold: number): Promise<number> {
+async function evalOneRecord(spaceId: string, type: DupeScanType, recordId: string, threshold: number):
+  Promise<{ pairs: number; indexNotReady: boolean }> {
   let n = 0;
+  let indexNotReady = false;
   try {
-    const { source, results } = await findSimilar(spaceId, recordId, type as RecallKnowledgeType, TOPK, [type as RecallKnowledgeType], threshold);
+    const { source, results, degraded } = await findSimilar(spaceId, recordId, type as RecallKnowledgeType, TOPK, [type as RecallKnowledgeType], threshold);
+    indexNotReady = degraded?.includes('index_not_ready') ?? false;
     // A fork is an unchosen version of a record, not a duplicate of it, and automerge would absorb it with nobody having chosen (Q-624): never a counterpart.
     const unchosen = await unchosenVersionsAmong(spaceId, type, results.filter(m => m.type === type).map(m => m._id));
     for (const match of results) {
@@ -368,7 +376,7 @@ async function evalOneRecord(spaceId: string, type: DupeScanType, recordId: stri
   } catch (err) {
     if (!(err instanceof NotFoundError)) throw err;
   }
-  return n;
+  return { pairs: n, indexNotReady };
 }
 
 /** Effective detection threshold for a space: the scanner floor, lowered to the
@@ -443,16 +451,31 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
       const batch = read.rows.map(r => ({ _id: r.row._id, pos: r.pos }));
       if (batch.length === 0) break;
 
+      /*
+       * Set when a seed's answer came from an index still being built (`index_not_ready`, `Q-326`, vet A-S8). The position is
+       * one keyset cursor per type, not a mark per record, so the record cannot be held back alone: the type ENDS for this run
+       * without writing its position, as a timeout ends it, and the next run reads the same records once the index serves.
+       * Every seed after it in the batch is skipped, not counted: it would meet the same index.
+       */
+      let held = false;
       await runSeeds(batch, async (rec) => {
+        if (held) return;
         // The cursor moves past a seed that FAILED too: one record that fails every night would otherwise hold it for ever.
         // (A timeout that ends the space skips the `setCursor` below, so nothing past it is claimed as scanned.)
         try {
-          pairs += await evalOneRecord(spaceId, type, rec._id, threshold);
+          const one = await evalOneRecord(spaceId, type, rec._id, threshold);
+          pairs += one.pairs;
+          held = one.indexNotReady;
         } finally {
           cursor = advanceScanPosition(cursor, rec);
           scanned++;
         }
       }, type);
+      if (held) {
+        log.info(`Dupe scan '${spaceId}': the ${type} index is not ready over records it should serve — holding the scan position `
+          + 'for the next run');
+        break;
+      }
       await writeScanPosition(cursorId(spaceId, type), { spaceId, type }, cursor);
     }
   }

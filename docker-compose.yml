@@ -104,9 +104,19 @@
     # sizes the cache from the ceiling instead, so this caps the cache too. The image also runs mongot, the
     # vector-search process, inside the same limit. Raise YTHRIL_MONGO_MEM_LIMIT for very large spaces.
     mem_limit: ${YTHRIL_MONGO_MEM_LIMIT:-4g}
+    # "none": mongod's slow-operation lines carry command bodies, and json-file would keep them in host files outside
+    # Ythril's retention. Why the database stopped is read from mongot.log and runner.log on ythril-mongo-logs instead.
     logging:
       driver: "none"
     environment:
+      # mongot's heap, as a share of the container limit above (the JVM's own default, made visible and settable): it
+      # grows with the records times the vector width of every search index, and an exhausted heap stops the whole
+      # container with OutOfMemoryError in mongot.log. 1-90; see docs/integration-guide/02-hosting.md "Database memory".
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=${YTHRIL_MONGOT_HEAP_PERCENT:-25}
+      # Under /var/log/mongodb, the one directory the image owns for its own user: a volume at a path it does not own is
+      # root-owned and the runner crash-loops on "permission denied". Neither file rotates (see 02-hosting.md).
+      MONGOT_LOG_FILE: /var/log/mongodb/mongot.log
+      RUNNER_LOG_FILE: /var/log/mongodb/runner.log
       # SECURITY: authenticate the bundled database. Unauthenticated, anything that can reach
       # port 27017 can read and rewrite EVERY space — Ythril's tokens, space scoping and audit
       # log are enforced at the API layer only, not at the database (S7).
@@ -123,6 +133,7 @@
     volumes:
       - ythril-mongo-data:/data/db
       - ythril-mongo-configdb:/data/configdb
+      - ythril-mongo-logs:/var/log/mongodb
     healthcheck:
       # The image's own `runner healthcheck` FIRST, once, before either branch: the Atlas Local
       # image boots in three phases and restarts mongod a last time after the replica set already
@@ -429,10 +440,11 @@ volumes:
   ythril-data:
   ythril-mongo-data:
   ythril-mongo-configdb:
+  ythril-mongo-logs:
   ythril-ollama-models:
   ythril-whisper-cache:
 
-# The volumes that hold only what is fetched again (model weights, a model cache). A Docker wipe
+# The volumes that hold only what is fetched again (model weights, a model cache) or only logs. A Docker wipe
 # (scripts/owner-instance.ps1) deletes a running instance's named volume only when it is named here, and
 # never one at /data, /data/db or /data/configdb. A list here and not a label on the volume: a label added
 # to an existing volume makes compose ask to recreate it - deleting it - on every install's next `up`.
@@ -440,6 +452,7 @@ x-ythril:
   disposable-volumes:
     - ythril-ollama-models
     - ythril-whisper-cache
+    - ythril-mongo-logs
 
 networks:
   # SECURITY: the database and the media sidecars are deliberately on SEPARATE networks.

@@ -49,6 +49,12 @@ a minute; change the write concern in `MONGO_URI` (or the deployment) and restar
 database even though it was not confirmed, so look before repeating it. The same answer is given by the REST API and by
 the MCP tools, with the `code` and `codeName` in the tool's structured result.
 
+**When the bundled database stops by itself.** The `ythril-mongo` container runs the database and its search process
+together, and when the search process runs out of memory the container stops whole. Its logs are kept on the
+`ythril-mongo-logs` volume: `Terminating due to java.lang.OutOfMemoryError` in `mongot.log` means it needs more memory.
+Raise `YTHRIL_MONGO_MEM_LIMIT` in `.env` (the search process's share of it is `YTHRIL_MONGOT_HEAP_PERCENT`, default 25);
+the [hosting guide](../integration-guide/02-hosting.md) has the commands and what grows with your spaces.
+
 ### Maintenance mode
 
 Maintenance mode answers every API and MCP request with `503 Service Unavailable`, reads included, **except an instance

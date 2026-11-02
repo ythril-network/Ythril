@@ -31,6 +31,13 @@ export interface MediaJobDoc {
    * when it is queued, so the setting is honoured as it stands at that moment. Absent means "written here".
    */
   arrival?: boolean;
+  /**
+   * Set by a deferral (`job-queue.ts:deferJob`, Q-327): when the job was FIRST deferred, so the deferral cap is measured from
+   * it, and that its file's caption is already stored, so the re-run need not make it again. Both go when the job ends or a new
+   * write re-queues it.
+   */
+  deferredSince?: string | null;
+  facesOnly?: boolean;
   status: 'pending' | 'processing' | 'complete' | 'failed';
   attempts: number;
   maxAttempts: number;

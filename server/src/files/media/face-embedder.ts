@@ -53,6 +53,10 @@ import { holdsClaim, isAbandonment, JobLeaseLostError, stopIfLeaseLost } from '.
 import { IMAGE_STEPS, type MediaRunOpts } from './progress.js';
 import { predicateRecall, type PredicateIdMemo } from '../../brain/predicate-recall.js';
 import { isMaxTimeExpired } from '../../db/max-time.js';
+import { isStoreUnreachable } from '../../db/store-condition.js';
+import { isIndexNotQueryableYet } from '../../brain/index-not-queryable.js';
+import { holdsRecordTheIndexShouldServe } from '../../brain/index-should-serve.js';
+import { facesStoredUnmatchedTotal } from '../../metrics/registry.js';
 
 // ── Singleton Human instance (lazy init) ──────────────────────────────────
 
@@ -193,9 +197,9 @@ export async function labelStillResolves(spaceId: string, entityId: string): Pro
 /**
  * The gallery could not give an answer — distinct from "no match", which is one.
  *
- * `embedImage` rethrows it so the media job RETRIES. Returning `null` instead writes the face chunk unlabelled,
- * and nothing ever runs it again: a timeout or an index still updating would become a permanently unlabelled
- * face, indistinguishable from a stranger.
+ * `embedImage` rethrows it so the media job is DEFERRED and run again (`job-queue.ts: deferJob`, no attempt spent). Returning
+ * `null` instead writes the face chunk unlabelled, and nothing ever runs it again: a timeout or an index still updating would
+ * become a permanently unlabelled face, indistinguishable from a stranger.
  */
 export class GalleryIncompleteError extends Error {
   constructor(spaceId: string, why: string) {
@@ -206,6 +210,25 @@ export class GalleryIncompleteError extends Error {
 
 /** The whole budget one gallery search gets. A media job is background work: accuracy over speed. */
 const GALLERY_BUDGET_MS = 30_000;
+
+/** The labelled faces: the gallery's records, and the only ones whose absence makes an empty or refused search an answer. */
+const LABELLED_FACE = { faceEntityId: { $exists: true, $ne: null } };
+
+/**
+ * Does the space hold a labelled face the face index should be serving (Q-327)? Any age: the gallery has no fresh-write scan, so a face
+ * labelled seconds ago is one the search must still find. A failed read answers `true` (`holdsRecordTheIndexShouldServe`): the face is
+ * deferred, never stored unlabelled on a read that did not run.
+ */
+function holdsLabelledFace(spaceId: string, startedAt: number): Promise<boolean> {
+  return holdsRecordTheIndexShouldServe(spaceCollection(spaceId, 'files'), 'faceEmbedding',
+    { filter: LABELLED_FACE, maxTimeMS: Math.max(100, GALLERY_BUDGET_MS - (Date.now() - startedAt)) });
+}
+
+/** "This space's face index refuses every search": said once per space per ten minutes, not once per face of a backlog. */
+const faceIndexRefusalSaid = warnOnce<string>({ every: 10 * 60_000 });
+
+/** "A face was stored unlabelled because the job's deferrals were spent": the same window, the same reason. */
+const deferralSpentSaid = warnOnce<string>({ every: 10 * 60_000 });
 
 /**
  * Search the face gallery (labelled face-chunk records in the space) for the closest match to the given
@@ -221,8 +244,17 @@ const GALLERY_BUDGET_MS = 30_000;
  * it held the best one.
  *
  * Returns `{ entityId, score }` when the best labelled face passes the threshold, `null` when the gallery holds
- * no labelled face that does (or no face index exists yet), and THROWS {@link GalleryIncompleteError} when the
- * search could not be completed — see there. Exported as the test seam.
+ * no labelled face that does, and THROWS {@link GalleryIncompleteError} when the search could not be completed — see there.
+ * Exported as the test seam.
+ *
+ * ## A search that could not answer is asked whether there is a gallery (Q-327)
+ *
+ * A refused search and one that answered NOTHING (an absent or still-building index answers no documents, no error) read the
+ * space's labelled faces once, at any age. None: there is no gallery, and `null` is the answer, whatever the index is doing (B7).
+ * One: a deadline, an index not serving yet, an index that answered nothing, or a store condition (a dead mongot) is
+ * {@link GalleryIncompleteError}, so the job is deferred and run again; an index that will not serve without action (a dimension
+ * mismatch, FAILED) answers `null`, so the caption and the job still complete, and `ythril_faces_stored_unmatched_total` counts the
+ * face stored unlabelled with a warning once per space per window.
  */
 export async function gallerySearch(
   spaceId: string,
@@ -241,16 +273,33 @@ export async function gallerySearch(
       vectorPath: 'faceEmbedding',
       queryVector: descriptor,
       topK: 1,
-      predicate: { faceEntityId: { $exists: true, $ne: null } },
+      predicate: LABELLED_FACE,
       shape: [{ $project: { score: 1, faceEntityId: 1 } }],
       remaining: () => Math.max(100, GALLERY_BUDGET_MS - (Date.now() - startedAt)),
       memo,
     });
   } catch (err) {
     if (isMaxTimeExpired(err)) throw new GalleryIncompleteError(spaceId, 'the search ran out of time');
-    // No face index yet (the feature just enabled, the space's indexes still building): no gallery to match
-    // against, which is an answer — as it always was.
-    log.debug(`Face gallery search failed for ${spaceId}: ${err instanceof Error ? err.message : String(err)}`);
+    // Every other refusal asks whether there IS a gallery: with no labelled face anywhere, there is nothing to be incomplete
+    // about, and null is the answer (B7). With one, the kind of refusal decides.
+    if (!await holdsLabelledFace(spaceId, startedAt)) return null;
+    // Not serving YET (being built, absent) or a store condition (a dead mongot, a lost connection): the job is deferred and
+    // run again once the index serves (05c "the face index is still being updated").
+    if (isIndexNotQueryableYet(err) || isStoreUnreachable(err)) {
+      throw new GalleryIncompleteError(spaceId, isIndexNotQueryableYet(err) ? 'the face index is not serving yet' : 'the search store did not answer');
+    }
+    // An index that will not serve without action (a dimension mismatch, FAILED): waiting would hold every face photo of the space
+    // for ever and lose its caption, so the face is stored unlabelled - counted, and said once per space per window.
+    faceIndexRefusalSaid(spaceId, () => log.warn(`Face gallery: the face index of ${peerText(spaceId)} (${peerText(indexName)}) refuses `
+      + `every search (${peerText(err)}); faces are stored unlabelled until it is rebuilt from Settings → Spaces → Danger Zone`));
+    facesStoredUnmatchedTotal.labels({ reason: 'index_unavailable' }).inc();
+    return null;
+  }
+
+  // NOTHING came back - an absent, dropped or still-building index answers no documents without an error (stage 1 reads that as
+  // an exhausted window). That is "no match" only while there is no labelled face to match; with one the search is incomplete.
+  if (out.docs.length === 0) {
+    if (await holdsLabelledFace(spaceId, startedAt)) throw new GalleryIncompleteError(spaceId, out.degraded.join(', ') || 'the face index answered nothing');
     return null;
   }
   if (out.degraded.length > 0) throw new GalleryIncompleteError(spaceId, out.degraded.join(', '));
@@ -278,13 +327,14 @@ export async function gallerySearch(
  * @param spaceId  Space that owns the file
  * @param fileId   File _id (normalised path) — the parent FileMetaDoc
  * @param image  The file's plaintext, as a path and a size (`files/plaintext-file.ts`)
- * @param opts  The run's heartbeat, lease flag and claim (`MediaRunOpts`)
+ * @param opts  The run's heartbeat, lease flag and claim (`MediaRunOpts`), and `galleryMayDefer: false` once the job's deferral cap
+ *              is spent (a gallery that cannot answer then stores the face unlabelled instead of deferring the job again)
  */
 export async function embedFaces(
   spaceId: string,
   fileId: string,
   image: PlaintextFile,
-  opts: MediaRunOpts,
+  opts: MediaRunOpts & { galleryMayDefer?: boolean },
 ): Promise<void> {
   const faceCfg = getFaceRecognitionConfig();
 
@@ -401,8 +451,18 @@ export async function embedFaces(
       if (faceSizePx < minFacePixels) continue;
     }
 
-    // Gallery search — find the closest labeled face
-    const match = await gallerySearch(spaceId, embedding, faceCfg.confidenceThreshold, galleryMemo);
+    // Gallery search — find the closest labeled face. A gallery that cannot answer defers the job, until the job's deferral is
+    // spent (`job-queue.ts: DEFERRAL_CAP_MS`): then the face is stored unlabelled, counted, and said, rather than waited for again.
+    let match: Awaited<ReturnType<typeof gallerySearch>>;
+    try {
+      match = await gallerySearch(spaceId, embedding, faceCfg.confidenceThreshold, galleryMemo);
+    } catch (err) {
+      if (!(err instanceof GalleryIncompleteError) || opts.galleryMayDefer !== false) throw err;
+      deferralSpentSaid(spaceId, () => log.warn(`Face gallery of ${peerText(spaceId)}: ${peerText(err)} after the job's deferrals were `
+        + 'spent; the face is stored unlabelled'));
+      facesStoredUnmatchedTotal.labels({ reason: 'deferral_spent' }).inc();
+      match = null;
+    }
 
     const faceEntityId = match?.entityId;
     const faceScore = match?.score;

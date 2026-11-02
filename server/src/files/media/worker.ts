@@ -39,7 +39,7 @@ import { log } from '../../util/log.js';
 import { createMediaProviders } from './providers.js';
 import type { MediaProviderBundle } from './providers.js';
 import { removeFileHere } from '../remove-file-here.js';
-import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob, holdJobsForMove } from './job-queue.js';
+import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob, holdJobsForMove, deferJob, mayDeferAgain } from './job-queue.js';
 import { moveCarriesRecordsAt } from '../move-markers.js';
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
@@ -480,14 +480,18 @@ async function processJob(
     // as 'partial' (not 'complete') so it stays visible and retry-eligible (B3).
     let fileEmbeddingStatus: 'complete' | 'partial' = 'complete';
     switch (mediaType) {
-      case 'image':
+      case 'image': {
+        // A deferred job (`deferJob`) re-runs for its faces: the caption is skipped when its row is stored. Past the deferral cap the
+        // gallery is not waited for again, and a face it cannot match is stored unlabelled (`embedFaces`).
         derivedDescription = await embedImage(spaceId, fileId, plaintext, mimeType, providers.vision,
-          { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: IMAGE_STEPS, claim, arrival: job.arrival === true });
+          { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: IMAGE_STEPS, claim, arrival: job.arrival === true,
+            facesOnly: job.facesOnly === true, galleryMayDefer: mayDeferAgain(job) });
         // A caption IS model output, so the record says so. It was the reference point for the whole
         // complaint — the images carried generated captions while the parent carried a truncation — and it
         // had no provenance of its own either.
         if (derivedDescription) derivedSource = 'generated';
         break;
+      }
       case 'audio': {
         // A chunk that failed to transcribe makes this PARTIAL, never complete. The count used to be
         // discarded here, so an operator saw success over audio that was never transcribed — the
@@ -674,6 +678,19 @@ async function processJob(
         + ` than stalledJobTimeoutMs — in that case see the re-queue warning above for how long it was silent.`);
       mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
       return;
+    }
+    // The face gallery could not answer yet (Q-327): not a failure, so the job is DEFERRED behind a short wait with no attempt spent,
+    // and its re-run skips the caption it already stored. `deferJob` refuses past the deferral cap or for a lost claim; the job then
+    // takes the failure path below like any other (a lost claim there is an abandonment, and the next run past the cap stores the
+    // face unlabelled instead of waiting).
+    if (mediaType === 'image' && err instanceof (await import('./face-embedder.js')).GalleryIncompleteError) {
+      const deferred = await deferJob(spaceId, claim.jobId, claim.claimToken, message).catch((innerErr: unknown) => {
+        // A claim taken while the run was deferring is an abandonment: the job that holds the path now is not this run's to fail either.
+        if (isAbandonment(innerErr)) { log.info(`Media worker: ${spaceId}/${fileId} was deferring, but its claim was taken first — nothing more is written for it`); return true; }
+        log.warn(`Media worker: deferJob error: ${innerErr instanceof Error ? innerErr.message : String(innerErr)}`);
+        return false;
+      });
+      if (deferred) return;
     }
     log.warn(`Media worker: job ${spaceId}/${fileId} failed:`, err);   // as meta, so a wrapper that says "see the log" (a file-system fault) has its cause in it
     // An oversized document will never shrink — fail permanently instead of

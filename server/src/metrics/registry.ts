@@ -1805,6 +1805,23 @@ export const mediaJobsRetriedTotal = new Counter({
 });
 mediaJobsRetriedTotal.labels({ space: '', media_type: 'image' }).inc(0);
 
+/**
+ * Why a face was stored UNLABELLED although the space holds labelled faces: the gallery could not answer (Q-327).
+ *
+ * `index_unavailable`: the face index refuses every search without action (a dimension mismatch, FAILED), so waiting would hold
+ * every face photo of the space for ever. `deferral_spent`: the gallery was not serving yet, and the job's deferrals ran out
+ * (`job-queue.ts: DEFERRAL_CAP_MS`). Either way the face reads as a stranger until it is labelled or the image re-analysed, and
+ * this is where an operator sees how many. A face that matched nobody in a working gallery is not counted.
+ */
+export const FACES_STORED_UNMATCHED_REASONS = ['index_unavailable', 'deferral_spent'] as const;
+export const facesStoredUnmatchedTotal = new Counter({
+  name: 'ythril_faces_stored_unmatched_total',
+  help: 'Faces stored unlabelled because the face gallery could not answer, by reason',
+  labelNames: ['reason'] as const,
+  registers: [register],
+});
+for (const reason of FACES_STORED_UNMATCHED_REASONS) facesStoredUnmatchedTotal.labels({ reason }).inc(0);
+
 export const mediaJobDurationSeconds = new Histogram({
   name: 'ythril_media_job_duration_seconds',
   help: 'End-to-end processing time per media embedding job',
@@ -1944,12 +1961,9 @@ embedChunksTotal.labels({ space: '' }).inc(0);
  * operator can answer, and alert on.
  *
  * `reason` is a closed set, deliberately: an unbounded label is a cardinality bomb. The set is
- * `DEGRADED_REASONS` in `brain/degraded-reasons.ts`, and the series below are pre-declared from it:
- *  - `filter_window`         — a filtered answer could not be completed and may be missing matching records
- *  - `rerank_unavailable`    — configured, but it did not answer (unreachable, non-2xx, unreadable body)
- *  - `rerank_skipped_budget` — not attempted; the end-to-end budget was already spent (see RECALL_BUDGET_MS)
- *  - `search_timeout`        — one collection's vector search hit its `maxTimeMS` deadline, so the answer is
- *    partial. This one clears the bar the paragraph below sets: it is keyed on MongoDB error **code 50**
+ * `DEGRADED_REASONS` in `brain/degraded-reasons.ts`, which says what each reason means; the series below are
+ * pre-declared from it, so a new reason is counted without an edit here. Each reason is counted once per recall.
+ * Every reason clears the bar the paragraph below sets. `search_timeout`, for example, is keyed on MongoDB error **code 50**
  *    (`MaxTimeMSExpired`), so it cannot fire for "this collection held nothing" the way a missing lexical
  *    channel would. A deadline the caller set is still degradation — they got less than the pipeline could
  *    have found — and it is counted so an operator can see a client's 5 s bound biting in aggregate rather

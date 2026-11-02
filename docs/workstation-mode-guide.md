@@ -263,7 +263,7 @@ Example MCP config:
 Persistent data locations:
 
 - Host bind mount: `./config` (config and secrets)
-- Docker volumes: `ythril-data`, `ythril-mongo-data`, `ythril-mongo-configdb`, `ythril-ollama-models`, `ythril-whisper-cache` (the last two hold the vision and speech model caches, ~2 GB)
+- Docker volumes: `ythril-data`, `ythril-mongo-data`, `ythril-mongo-configdb`, `ythril-mongo-logs`, `ythril-ollama-models`, `ythril-whisper-cache` (`ythril-mongo-logs` holds the search process's and the database runner's logs, where the cause of a database stop is read; the last two hold the vision and speech model caches, ~2 GB)
 
 Common operations:
 

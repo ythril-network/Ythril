@@ -678,7 +678,11 @@ export interface RecallResponse extends RecallGraphReport, SpillReport {
   /** Present only when `traverse > 0` was asked for. */
   traverseDepth?: number;
   /** How many traversed nodes the `_graph` trees hold in total. Present only with `traverse > 0`. */
-  /** Present only when something degraded — a timeout, or a rerank that was skipped. */
+  /**
+   * Present only when something degraded: a timeout, a rerank that was skipped or did not answer, a filtered answer
+   * that could not be completed, or a collection whose vector index is being built or refused (`index_not_ready`,
+   * `index_unavailable`). The server's `DEGRADED_REASONS` is the set, and it grows: treat an unknown reason as degraded.
+   */
   degraded?: string[];
 }
 

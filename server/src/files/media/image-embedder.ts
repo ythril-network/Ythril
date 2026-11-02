@@ -16,6 +16,19 @@ import { upsertDerivedFileRow } from '../derived-fields.js';
 import type { PlaintextFile } from '../plaintext-file.js';
 import { isAbandonment, stopIfLeaseLost } from './lease.js';
 import { IMAGE_STEPS, type MediaRunOpts } from './progress.js';
+import { col, asFilter } from '../../db/mongo.js';
+import { spaceCollection } from '../../db/space-collection.js';
+import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
+
+/** What an image run carries beyond every media run's options: read from its job by the worker. */
+export interface ImageRunOpts {
+  /** The job's {@link MediaJobDoc.arrival}: the caption is made either way, the face analysis follows {@link facesAreWithheldFor}. */
+  arrival?: boolean;
+  /** A deferred job's re-run (`job-queue.ts: deferJob`): the stored caption is reused when its row is there. */
+  facesOnly?: boolean;
+  /** False once the job's deferral cap is spent: a face the gallery cannot match yet is stored unlabelled (`embedFaces`). */
+  galleryMayDefer?: boolean;
+}
 
 
 /**
@@ -39,8 +52,8 @@ export function facesAreWithheldFor(arrival: boolean): boolean {
  * Generate caption + embedding for an image and store one chunk record.
  * Returns the derived caption text.
  *
- * `opts.arrival` is the job's {@link MediaJobDoc.arrival}: the caption is made either way, the face analysis follows
- * {@link facesAreWithheldFor}.
+ * `opts` carries the job's {@link ImageRunOpts}: an arrival's faces follow {@link facesAreWithheldFor}, and a deferred job's re-run
+ * (`facesOnly`) reuses the caption its first run stored instead of calling the vision model again.
  *
  * **Every hop beats at its entry and checks the lease before it spends a model budget**: a caption hop that outlasts the stall
  * threshold used to leave the job silent, stall recovery took it, and the run met its own fence at the first write after the recovery.
@@ -60,14 +73,60 @@ export async function embedImage(
   image: PlaintextFile,
   mimeType: string,
   vision: VisionProvider,
-  opts: MediaRunOpts & { arrival?: boolean },
+  opts: MediaRunOpts & ImageRunOpts,
 ): Promise<string> {
   const beat = (step: typeof IMAGE_STEPS[number]): void => opts.onProgress?.({ step, steps: [...(opts.steps ?? IMAGE_STEPS)] });
+  const chunkId = `${fileId}#media-chunk0`;
+  beat('caption');
+  stopIfLeaseLost(spaceId, opts);
+  const stored = opts.facesOnly ? await storedCaption(spaceId, chunkId) : null;
+  const caption = stored ?? await captionAndStore(spaceId, fileId, chunkId, image, mimeType, vision, opts);
+
+  // Face recognition — run after the caption chunk is stored so the job can
+  // still complete if face detection fails. Non-fatal.
+  const mediaCfg = getMediaEmbeddingConfig();
+  if (mediaCfg.faceRecognition?.enabled && !facesAreWithheldFor(opts.arrival === true)) {
+    const { embedFaces, GalleryIncompleteError } = await import('./face-embedder.js');
+    beat('faces');
+    stopIfLeaseLost(spaceId, opts);
+    await embedFaces(spaceId, fileId, image, opts).catch((err: unknown) => {
+      // Two failures must NOT be absorbed. The gallery could not answer: absorbing it writes the face unlabelled for
+      // good, so it is rethrown and the worker defers the job (`deferJob`, no attempt spent; its re-run skips the caption
+      // stored above). And an ABANDONMENT — the claim is gone or the space is no longer writable: it is not a face that failed,
+      // and absorbing it let the run go on writing for a file that is not its.
+      if (err instanceof GalleryIncompleteError || isAbandonment(err)) throw err;
+      log.warn(`Face recogniser: embedFaces failed for ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
+
+  return caption;
+}
+
+/**
+ * The caption a deferred run's first attempt stored, or `null` when there is none to reuse (Q-327).
+ *
+ * A deferred image job re-runs for its faces (`job-queue.ts: deferJob`), possibly many times while a face index rebuilds, and the caption
+ * is a vision model call per run per photo. Reused only when its row is there: the flag skips work that is done, never work that is owed.
+ */
+async function storedCaption(spaceId: string, chunkId: string): Promise<string | null> {
+  const row = await col<FileMetaDoc>(spaceCollection(spaceId, 'files'))
+    .findOne(asFilter<FileMetaDoc>({ _id: chunkId, ...NOT_A_FLAGGED_ROW }), { projection: { content: 1 } }) as { content?: unknown } | null;
+  return typeof row?.content === 'string' && row.content.trim().length > 0 ? row.content : null;
+}
+
+/** Caption the image with the vision model and store it as the file's caption row; the caption. */
+async function captionAndStore(
+  spaceId: string,
+  fileId: string,
+  chunkId: string,
+  image: PlaintextFile,
+  mimeType: string,
+  vision: VisionProvider,
+  opts: MediaRunOpts,
+): Promise<string> {
   // Asked ONCE for the job, at its entry. A suppressed file (or an image extracted from a suppressed document) keeps its
   // caption as text and holds no vector; the embedder is asked nothing (Q-255).
   const vectors = await chunkVectorsFor(spaceId, fileId);
-  beat('caption');
-  stopIfLeaseLost(spaceId, opts);
   const caption = await vision.caption({ path: image.path, size: image.size }, mimeType);
 
   // Hard guard: embedding input MUST be a string — never a raw vector
@@ -77,7 +136,6 @@ export async function embedImage(
 
   const vectorFields = await vectors.fieldsFor(caption);
   const now = new Date().toISOString();
-  const chunkId = `${fileId}#media-chunk0`;
 
   const chunkDoc: FileMetaDoc = {
     _id: chunkId,
@@ -100,23 +158,5 @@ export async function embedImage(
   // PARENT first: a caption written after the file was deleted is an orphan row nothing removes, and the upsert is why
   // the check cannot be a predicate in the filter — a non-matching filter on an upsert inserts.
   await upsertDerivedFileRow(spaceId, opts.claim, chunkDoc);
-
-  // Face recognition — run after the caption chunk is stored so the job can
-  // still complete if face detection fails. Non-fatal.
-  const mediaCfg = getMediaEmbeddingConfig();
-  if (mediaCfg.faceRecognition?.enabled && !facesAreWithheldFor(opts.arrival === true)) {
-    const { embedFaces, GalleryIncompleteError } = await import('./face-embedder.js');
-    beat('faces');
-    stopIfLeaseLost(spaceId, opts);
-    await embedFaces(spaceId, fileId, image, opts).catch((err: unknown) => {
-      // Two failures must NOT be absorbed. The gallery could not answer: absorbing it writes the face unlabelled for
-      // good, so it is rethrown and the job retries like any other transient failure (the caption chunk above is an upsert,
-      // so the retry rewrites it rather than duplicating it). And an ABANDONMENT — the claim is gone or the space is no
-      // longer writable: it is not a face that failed, and absorbing it let the run go on writing for a file that is not its.
-      if (err instanceof GalleryIncompleteError || isAbandonment(err)) throw err;
-      log.warn(`Face recogniser: embedFaces failed for ${spaceId}/${fileId}: ${err instanceof Error ? err.message : String(err)}`);
-    });
-  }
-
   return caption;
 }

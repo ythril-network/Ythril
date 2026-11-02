@@ -21,13 +21,13 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-let register, recallDegradedTotal;
+let register, recallDegradedTotal, REASONS;
 
 before(async () => {
   ({ register, recallDegradedTotal } = await import('../../server/dist/metrics/registry.js'));
+  // Derived, never listed (bundle-72): this file held three of the reasons as its own list and missed every one added since.
+  ({ DEGRADED_REASONS: REASONS } = await import('../../server/dist/brain/degraded-reasons.js'));
 });
-
-const REASONS = ['rerank_unavailable', 'rerank_skipped_budget', 'search_timeout'];
 
 describe('ythril_recall_degraded_total', () => {
   it('exposes every reason at zero before anything has degraded', async () => {
@@ -57,11 +57,18 @@ describe('ythril_recall_degraded_total', () => {
     // noticing the literal was gone and wrongly concluding the reason was uncounted. Matching both keeps it
     // honest without forcing the code back into a shape that serves the test rather than the caller.
     // Both files: the rerank step reports from `rerank-pool.ts` since `P-35`, where both callers reach it.
+    //
+    // Two more typed carriers reach `noteDegraded` and count as its call (bundle-72): a collection search throws
+    // `RecallSearchIncomplete(type, 'x')`, which `settleSearches` hands to it, and `predicate-recall.ts` answers a
+    // `degraded: ['x']` list, which `recallByType` hands to it reason by reason.
     const recall = readFileSync('server/src/brain/recall.ts', 'utf8') + readFileSync('server/src/brain/rerank-pool.ts', 'utf8');
+    const predicate = readFileSync('server/src/brain/predicate-recall.ts', 'utf8');
     for (const reason of REASONS) {
       const direct = recall.includes(`reason: '${reason}'`);
       const viaHelper = recall.includes(`noteDegraded('${reason}')`);
-      assert.ok(direct || viaHelper, `${reason} is declared but never incremented`);
+      const viaIncomplete = new RegExp(`new RecallSearchIncomplete\\([^)]*'${reason}'\\)`).test(recall);
+      const viaPredicate = new RegExp(`\\[\\s*'${reason}'\\s*\\]`).test(predicate);
+      assert.ok(direct || viaHelper || viaIncomplete || viaPredicate, `${reason} is declared but never incremented`);
     }
   });
 

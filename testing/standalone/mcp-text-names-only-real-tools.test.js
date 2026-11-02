@@ -84,7 +84,10 @@ before(async () => {
   // `network_sync` names them), from the verdict table's own list (bundle-39 D2).
   const { SYNC_ANSWER_CODES } = await import('../../server/dist/sync/trigger.js');
   assert.ok(SYNC_ANSWER_CODES.length >= 3, `only ${SYNC_ANSWER_CODES.length} sync answer codes were read`);
-  ANSWER_VALUES = [...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
+  // And the reasons a `degraded` list can carry (`index_not_ready`, ...): the recall and similar texts list them, from the constant.
+  const { DEGRADED_REASONS } = await import('../../server/dist/brain/degraded-reasons.js');
+  assert.ok(DEGRADED_REASONS.length >= 2, 'the degraded reasons were not read');
+  ANSWER_VALUES = [...DEGRADED_REASONS,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
     ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });

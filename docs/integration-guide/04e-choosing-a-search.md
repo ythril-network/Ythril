@@ -76,7 +76,8 @@ message is rarely textually similar to the message's subject.
 **Filter first, rank second — in one call.** `recall`'s `filter` accepts the same grammar the `filter` tool does, including
 `$or` and `$regex` nested to depth 8. **`topK` is filled from every record that satisfies the filter, whatever its
 vector rank** — so a filtered `topK: 10` returns ten when ten match, and nothing matching is silently dropped. An
-answer that could not be completed says `filter_window` in `degraded`.
+answer that could not be completed says `filter_window` in `degraded`, and one whose vector index is still being built
+over older records says `index_not_ready` (any recall, filtered or not).
 
 That promise holds however the filter is written; only the cost differs. A flat condition on `tags`, `type`,
 `name`, `status`, `label` or a declared property is applied by the vector index itself. Anything else — including
@@ -156,7 +157,8 @@ has to be one.
 | a phrase search finds nothing | `$regex` over prose | `recall` |
 | "this record is not in the results" | a match left out because its graph could not be read whole | check `incompleteRows` — it names the match and the `reason`; a narrower `edgeLabels` or a lower `traverse` brings it back whole |
 | "there are no more matches" | a budgeted answer read as the whole result | check `truncated` and page with `nextSkip` as `skip`; `remainder.spillId` is the same records kept in one spill |
-| a filtered recall returns fewer than `topK` | assuming a post-filter | `topK` is filled from every record that satisfies the filter, whatever its rank, so nothing matching was dropped — the matches genuinely ran out. The exception says so: `degraded` carries `filter_window` |
+| a filtered recall returns fewer than `topK` | assuming a post-filter | `topK` is filled from every record that satisfies the filter, whatever its rank, so nothing matching was dropped — the matches genuinely ran out. The exception says so: `degraded` carries `filter_window`, or `index_not_ready` / `index_unavailable` when a collection's vector index could not answer |
+| a recall or `similar` right after an upgrade finds fewer old records | the search index being rebuilt (after an upgrade or a database container recreate) | `degraded` carries `index_not_ready` while it rebuilds; ask again once it serves. A search straight after a space's first write is complete and carries no reason |
 | slow, wide answers | `traverse` 2+ with a large `topK` | narrow the seeds first |
 
 ---

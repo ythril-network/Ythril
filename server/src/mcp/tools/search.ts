@@ -38,6 +38,18 @@ import { NotFoundError, NotEmbeddedYetError } from '../../util/errors.js';
 import { rankingFields } from '../../brain/recall-shape.js';
 import { pageBudgetSchema } from './_page-budget-schema.js';
 import { MAX_TAGS } from '../../util/request-bounds.js';
+import { DEGRADED_REASONS } from '../../brain/degraded-reasons.js';
+
+/**
+ * The `degraded` bullet both search tools' descriptions carry, its reasons read from `DEGRADED_REASONS` so a reason added
+ * there reaches an agent's tool list without a second list here (`Q-326`).
+ */
+const DEGRADED_BULLET = '• `degraded` — present ONLY when the answer may be incomplete, listing why: '
+  + DEGRADED_REASONS.map(r => `\`${r}\``).join(', ') + '. `index_not_ready` means a collection\'s vector index is being '
+  + 'built or rebuilt over records it should serve (older records may be missing; ask again in a few minutes), '
+  + '`index_unavailable` that an index refused for another reason and its collection\'s records are missing until an '
+  + 'operator repairs it — what the other collections found is still returned. Treat a reason you do not know as degraded: '
+  + 'the set grows between releases.\n';
 
 /**
  * Space scope for find_similar — mirrors recall's omit-space idiom (F1 consistency).
@@ -144,6 +156,7 @@ export const recallTool: ToolHandler = {
     + '• `results` — the ranked matches. Each carries `_id`, its name/fact/title, type, tags, properties, `spaceId`, timestamps and `score` (vector similarity).\n'
     + '• WHAT THIS DOOR DOES NOT SEND YOU, so you do not go looking for a flag to switch it off: the embedding VECTOR (never returned by anything here, and no parameter can ask for it), `matchedText` (the pre-embedding source string — for a file chunk it is the passage a SECOND time), `embeddingModel` (identical for every record in a space), and `seq` (a sync counter that is not an input to any tool). Withheld on REST too, with the same default, since 3.1.0 — `includeDiagnostics: true` restores them on either door and applies recursively, so a `graph_traverse` answer\'s `_graph` follows it at every depth. Leave it off: each of these is multiplied by `topK` and paid for in your context, and you want them only to answer WHY something ranked where it did. The other size lever is `includeFileContent: false`, which drops file-passage bodies and keeps their locations.\n'
     + '• `count` — the number of MATCHES. Traversed nodes are NOT counted in it.\n'
+    + DEGRADED_BULLET
     + '• `graphNodes` — an integer COUNT of what a traversal reached, not the content. The content is nested per-result under `_graph`, and a result with no edges simply has no `_graph` at all: reading `results[0]` and concluding the feature is absent is the mistake to avoid.\n'
     + '• THE SIZE ANSWER, and it is a slope now rather than a cliff. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so you never have to interpret an absence (`budgetBytes` is null unless you asked for a byte ceiling). `results` is a PREFIX of the ranked matches that fits BOTH ceilings you set, and every record in it is WHOLE — full body, full properties, its complete `_graph`, byte-identical to that record from an unbudgeted call. A match is counted together with its whole `_graph` subtree, so a deeper or wider traversal means fewer matches fit — they are absent, not shortened. When `truncated` is true, `nextSkip` says where to continue from — send it back as `skip` for the next prefix. The matches that did not fit are also kept as a SPILL and reported as `remainder` (`spillId`, `download`, `expiresAt`), but ONLY if you ask with `remainderDump: true`: readable with `read_spill` by your token alone, for up to one day (your own newer spills may evict it sooner), and never written into any space. A spill that cannot be kept says why in `spillRefused`, and `nextSkip` still reaches every record.\n'
     + '  Until 3.2.0 this was a record CAP that collapsed a large answer to three inline records plus a download of the whole set — including the three you already had. That roughly doubled what a caller had to read, so most abandoned the remainder. If you have logic keyed on `complete` or on a hard 25, it is `remainder` and a byte budget now.\n'
@@ -473,6 +486,7 @@ export const find_similarTool: ToolHandler = {
     + '• `source` — the entry you asked about, as {type, id, summary}. This tool has one and `recall` does not.\n'
     + '• `results` — the matches, each {score, spaceId, type, record}, the SAME per-result shape `recall` returns. With `traverse > 0` each carries its own `_graph`.\n'
     + '• `count` — how many matches, and `traverseDepth` — the depth echoed back, present at every depth including 0.\n'
+    + DEGRADED_BULLET
     + '• `graphNodes` — a COUNT of what a traversal reached, not its content, and only when one ran.\n'
     + '• THE SIZE ANSWER, and it is the same envelope `recall` returns. `returned`, `count`, `truncated`, `budgetChars`, `budgetBytes`, `charsReturned` and `bytesReturned` are on EVERY response, so you never have to interpret an absence (`budgetBytes` is null unless you asked for a byte ceiling). `results` is a PREFIX of the ranked matches that fits both ceilings you set, and every record in it is WHOLE — a match is counted together with its whole `_graph` subtree, so a deeper or wider traversal means FEWER MATCHES fit: they are absent, not shortened. When `truncated` is true, `nextSkip` says where to continue from — send it back as `skip` for the next prefix. The matches that did not fit are also kept as a SPILL and reported as `remainder` (`spillId`, `download`, `expiresAt`), but ONLY if you ask with `remainderDump: true`: readable with `read_spill` by your token alone, for up to one day (your own newer spills may evict it sooner), and never written into any space. A spill that cannot be kept says why in `spillRefused`, and `nextSkip` still reaches every record. THIS PARAGRAPH USED TO NAME A `complete` FIELD — there is no such field, and has not been since the record cap became a byte budget, so a caller waiting for it waited for something nothing sends while `nextSkip` and `remainder` went unmentioned.\n'
     + '• `incompleteRows`, `incompleteCount` and `graphTruncated` — the same rule for a neighbourhood as on `recall`: a match comes with its WHOLE `_graph` or is left out and named, `truncatedBy` says which bound stopped a truncated answer, and `budgetBoundBy` names the size parameter to raise when it was the budget.\n\n'
@@ -614,6 +628,8 @@ export const find_similarTool: ToolHandler = {
         results: plainBudgeted.results,
         ...plainBudgeted.fields,
         traverseDepth: 0,
+        // Only when something degraded, as on `recall` (`Q-326`): additive, so a client that does not know it sees no change.
+        ...(result.degraded?.length ? { degraded: result.degraded } : {}),
       };
       return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output };
     }
@@ -643,6 +659,7 @@ export const find_similarTool: ToolHandler = {
       results: itemsBudgeted.results,
       ...itemsBudgeted.fields,
       traverseDepth: traverse,
+      ...(result.degraded?.length ? { degraded: result.degraded } : {}),
     };
     return { content: [{ type: 'text' as const, text: JSON.stringify(output) }], structuredContent: output };
   },

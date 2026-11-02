@@ -48,7 +48,7 @@ import { isMaxTimeExpired } from '../db/max-time.js';
 import { log, peerText } from '../util/log.js';
 import { inChunks } from '../util/chunks.js';
 import { andPredicates } from './recall-filter.js';
-import { FRESH_WINDOW_MS } from './fresh-writes.js';
+import { holdsRecordTheIndexShouldServe } from './index-should-serve.js';
 import type { DegradedReason } from './degraded-reasons.js';
 
 /** Ids per stage-2 search. A native `_id $in` over 40k ids measured 79–92 ms; this keeps each call well under. */
@@ -145,6 +145,14 @@ export async function predicateRecall(args: PredicateRecallArgs): Promise<Predic
 
   const seen = facet?.window?.[0] ?? { n: 0, min: 0 };
   const hits = facet?.hits ?? [];
+  // A window holding NOTHING, whatever the predicate, is not "exhausted": the index returned no record at all, which an
+  // absent, dropped or still-building index does without an error (bundle-72 PROBE M1, case (a)). When the collection
+  // holds a vectored record older than the fresh-write window, the empty answer may be missing it and says so; when it
+  // holds none, the collection is new or empty and the answer is complete (B1).
+  if (seen.n === 0) {
+    const missing = await holdsRecordTheIndexShouldServe(collName, vectorPath, { maxAge: true, maxTimeMS: remaining() });
+    return { docs: [], degraded: missing ? ['index_not_ready'] : [], stage: 1 };
+  }
   const exhausted = seen.n < window;
   const clearOfTheCut = hits.length >= topK && (hits[topK - 1]!['score'] as number) > seen.min;
   if (exhausted || clearOfTheCut) return { docs: hits, degraded: [], stage: 1 };
@@ -175,12 +183,7 @@ export async function predicateRecall(args: PredicateRecallArgs): Promise<Predic
 async function indexIsBehind(collName: string, vectorPath: string, ids: string[], seen: Set<string>, maxTimeMS: number): Promise<boolean> {
   const missing = ids.filter(id => !seen.has(id));
   if (missing.length === 0) return false;
-  const cutoff = new Date(Date.now() - FRESH_WINDOW_MS).toISOString();
-  const stale = await col(collName).findOne(
-    { _id: { $in: missing } as never, [vectorPath]: { $type: 'array' }, updatedAt: { $not: { $gte: cutoff } } },
-    { projection: { _id: 1 }, maxTimeMS },
-  );
-  return stale !== null;
+  return holdsRecordTheIndexShouldServe(collName, vectorPath, { ids: missing, maxAge: true, maxTimeMS });
 }
 
 /**

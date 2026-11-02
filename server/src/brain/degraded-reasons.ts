@@ -25,6 +25,18 @@ export const DEGRADED_REASONS = [
    * bound — so it may hold matches the recall never considered (`Q-103`).
    */
   'candidate_cap',
+  /**
+   * A collection's vector index is absent or still being built (or rebuilt) over records it should serve — records
+   * older than the fresh-write window — so the answer may be missing them (`Q-326`). Never on a new or empty
+   * collection: the fresh-write scan already holds every record of one.
+   */
+  'index_not_ready',
+  /**
+   * A collection's vector index exists and refused for another reason (a dimension mismatch, a path not indexed as
+   * vector, a failed index), over records it should serve: that collection's records are missing until an operator
+   * repairs the index; what the other collections found was returned (`Q-326`).
+   */
+  'index_unavailable',
 ] as const;
 
 export type DegradedReason = typeof DEGRADED_REASONS[number];
