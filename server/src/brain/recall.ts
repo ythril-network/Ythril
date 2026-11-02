@@ -40,6 +40,7 @@ import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
 import { isIndexNotQueryableYet } from './index-not-queryable.js';
 import { holdsRecordTheIndexShouldServe } from './index-should-serve.js';
 import { isStoreUnreachable } from '../db/store-condition.js';
+import { isStoreSide } from './store-failure.js';
 import { warnOnce } from '../util/warn-once.js';
 import { MongoServerError } from 'mongodb';
 import type { ChronoStatus, RecordType } from '../config/types.js';
@@ -1025,7 +1026,9 @@ async function recallByType(
     if (isMaxTimeExpired(err)) throw new RecallSearchIncomplete(knowledgeType, 'search_timeout');
     if (isStoreUnreachable(err)) throw err;
     const notYet = isIndexNotQueryableYet(err);
-    if (!notYet && !(err instanceof MongoServerError)) throw err;
+    // Only the store's own failure can be an index that cannot answer: a refusal the classifier answers as the
+    // caller's (a filter the database rejects, BadValue) stays that caller's 400, as it was before the index reasons.
+    if (!notYet && (!(err instanceof MongoServerError) || !isStoreSide(err))) throw err;
     if (!await holdsServable()) return [];
     if (notYet) throw new RecallSearchIncomplete(knowledgeType, 'index_not_ready');
     indexUnavailableSaid(collName, () => log.warn(`Recall: the vector index ${peerText(indexName)} refused a search `

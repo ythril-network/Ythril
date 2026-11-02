@@ -33,6 +33,7 @@
 import path from 'path';
 import { authorRef } from '../../config/author.js';
 import sharp from 'sharp';
+import { MongoServerError } from 'mongodb';
 import { col, asFilter } from '../../db/mongo.js';
 import type { PlaintextFile } from '../plaintext-file.js';
 import { getDataRoot, getFaceRecognitionConfig } from '../../config/loader.js';
@@ -288,6 +289,8 @@ export async function gallerySearch(
     if (isIndexNotQueryableYet(err) || isStoreUnreachable(err)) {
       throw new GalleryIncompleteError(spaceId, isIndexNotQueryableYet(err) ? 'the face index is not serving yet' : 'the search store did not answer');
     }
+    // Only the store refusing is an index that will not serve; anything else (a fault of ours) is thrown as it was, not counted as one.
+    if (!(err instanceof MongoServerError)) throw err;
     // An index that will not serve without action (a dimension mismatch, FAILED): waiting would hold every face photo of the space
     // for ever and lose its caption, so the face is stored unlabelled - counted, and said once per space per window.
     faceIndexRefusalSaid(spaceId, () => log.warn(`Face gallery: the face index of ${peerText(spaceId)} (${peerText(indexName)}) refuses `
