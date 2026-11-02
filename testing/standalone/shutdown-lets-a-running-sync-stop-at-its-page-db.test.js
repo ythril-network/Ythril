@@ -51,6 +51,8 @@ import { build, ADMIN_TOKEN } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { clearPositionMarks, readMark, setMark, positioned } from './_b81b-positions.mjs';
 import { parkWrites, settleWithin } from './_write-faults.mjs';
+import { fakeRes } from './_vote-round-instance.mjs';
+import { syncToolCtx } from './_sync-doors.mjs';
 import { waitFor, holdsWithin } from '../_shared/wait-for.mjs';
 
 // The sequence's own waits are read when it runs; none of them is the subject here.
@@ -69,13 +71,6 @@ const ENTITY_POS = 10, ENTITY_COUNT = 2;
 
 let door, runShutdown, shutdownMissing, lifecycle, engine, trigger, notifyHandler, syncTool, proto;
 
-const ctx = (args, transport = 'mcp') => ({
-  args, name: 'network_sync', transport, callSpace: undefined, callSpaces: [], accessibleSpaceIds: [], viewReads: new Map(),
-  accessibleSpaces: [], cfg: {}, rateKey: 'test', actor: { tokenLabel: 'test' },
-});
-const fakeRes = () => ({ code: 200, body: undefined, headers: {}, headersSent: false,
-  status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
-  json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } });
 
 const need = () => assert.ok(runShutdown,
   `the shutdown sequence is not exported: ${SHUTDOWN_MODULE} exports no runShutdown (${shutdownMissing?.message ?? 'no module'}). `
@@ -119,7 +114,7 @@ function triggerDoors() {
   const rest = async (call) => { const res = fakeRes(); await call(res); return { status: res.code, body: res.body }; };
   const mcp = async (args, transport = 'mcp') => {
     try {
-      const r = await syncTool.handle(ctx(args, transport));
+      const r = await syncTool.handle(syncToolCtx(args, transport));
       return { status: r.isError ? 'error' : 'ok', body: { text: r.content?.map(c => c.text).join(' ') ?? '', structured: r.structuredContent, isError: r.isError } };
     } catch (err) { return { status: 'threw', body: { text: String(err?.message ?? err) } }; }
   };

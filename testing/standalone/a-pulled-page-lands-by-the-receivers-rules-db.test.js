@@ -41,8 +41,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { MongoNetworkError } from 'mongodb';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { injectStoreFault, STORE_WRITE_METHODS } from './_write-faults.mjs';
 import { privateHostAddress, privateAddressSkipReason } from './_private-address.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -324,25 +324,15 @@ describe('a pulled page lands by the receiver\'s rules', { skip }, () => {
     const fam = writtenFamilies().find(f => recordTypeOf[f.collection] === 'fact');
     served[S.fault] = { [fam.payloadKey]: [[fixture('fact', 'flt-1', 701), fixture('fact', 'flt-2', 702)]] };
     const target = `${S.fault}_${fam.collection}`;
-    const proto = Object.getPrototypeOf(mongo.col('probe'));
-    const METHODS = ['bulkWrite', 'replaceOne', 'insertOne', 'insertMany', 'updateOne', 'updateMany', 'findOneAndReplace',
-      'findOneAndUpdate'];
-    const originals = Object.fromEntries(METHODS.map(m => [m, proto[m]]));
-    let faults = 0;
-    for (const m of METHODS) {
-      proto[m] = function faulty(...args) {
-        if (this.collectionName === target) { faults++; return Promise.reject(new MongoNetworkError('injected: connection reset')); }
-        return originals[m].apply(this, args);
-      };
-    }
+    const fault = await injectStoreFault(Object.getPrototypeOf(mongo.col('probe')), STORE_WRITE_METHODS, target);
     const failuresBefore = member().consecutiveFailures ?? 0;
     let captured;
     try {
       captured = await capturingLogs(() => engine.runSyncForPeer(PEER));
     } finally {
-      Object.assign(proto, originals);
+      fault.restore();
     }
-    assert.ok(faults > 0, 'fixture check: the injected fault was never reached — the page was not written');
+    assert.ok(fault.fired() > 0, 'fixture check: the injected fault was never reached — the page was not written');
     const through = member().lastPosReceived?.[S.fault] ?? 0;
     assert.ok(through < 701, `the watermark moved to ${through}, past a page that never landed`);
     assert.equal(await coll(S.fault, fam.collection).countDocuments({}), 0, 'fixture check: something landed');

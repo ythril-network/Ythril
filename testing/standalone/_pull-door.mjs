@@ -377,7 +377,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
   const engine = await import('../../server/dist/sync/engine.js');
   const stamp = await import('../../server/dist/util/version-stamp.js');
   const { log } = await import('../../server/dist/util/log.js');
-  const { syncCyclesTotal } = await import('../../server/dist/metrics/registry.js');
+  const { syncCyclesTotal, SYNC_CYCLE_STATUSES } = await import('../../server/dist/metrics/registry.js');
   families = (await import('../../server/dist/sync/replicated-families.js')).REPLICATED_FAMILIES.map(f => f.payloadKey);
   maxCap = (await import('../../server/dist/util/bounded-read.js')).maxUpstreamResponseBytes();
 
@@ -582,7 +582,7 @@ export async function openPullDoor({ suite, spaces, spaceMap, extraSpaces = [], 
    */
   async function cycle() {
     const since = new Date().toISOString();
-    const statuses = ['success', 'partial', 'failed', 'refused'];
+    const statuses = SYNC_CYCLE_STATUSES;
     const before = Object.fromEntries(await Promise.all(statuses.map(async s => [s, await cyclesCounted(s)])));
     const out = await engine.runSyncForNetwork(NET);
     await door.settled();

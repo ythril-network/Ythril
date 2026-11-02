@@ -13,17 +13,17 @@
  *  - {@link landingStop}: the page step's catch (`pull-family.ts`, the tombstone apply inside `pullTombstones`). Whatever is thrown while LANDING a page
  *    the peer delivered is this instance's: the peer's part is done once the page parsed. Not limited to `isStoreSide`: a bug that throws while landing
  *    is not the peer's either, and counting it toward PEER UNREACHABLE is the defect. The reason says which (store failure or not), in our words.
- *  - {@link stopKindOfThrow}: the catches around a fetch. A throw while shutdown is under way is the shutdown's abort (`shutdownSignal`), `'closing'`;
- *    anything else stays `'error'`.
+ *  - {@link stopKindIfShutdownBegan}: the catches around a fetch. A throw while shutdown is under way is the shutdown's abort (`shutdownSignal`), `'closing'`;
+ *    anything else stays `'error'`. {@link stopAtClosing} and {@link stopIfClosingThrew} are the two pagers' shutdown stops, written once.
  *
  * The guard each caller would forget is inside: the transfer is stopped with its kind here, so a catch cannot log a local fault and leave the
  * transfer to the pager's generic `'error'` (`stopTransfer` lets `'error'` yield to the kind set first).
  */
 import { isStoreSide } from '../brain/store-failure.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
-import { isShuttingDown, shutdownSignal } from '../lifecycle.js';
+import { isShuttingDown } from '../lifecycle.js';
 import { logSafe, peerText } from '../util/log.js';
-import { stopTransfer, type TransferOutcome, type TransferStop } from './watermark.js';
+import { stopTransfer, type TransferOutcome, type TransferStop, type TransferStopped } from './watermark.js';
 
 /**
  * The sentence a page that could not land here is logged and recorded under. Names this instance, never the peer, and carries the error's message
@@ -44,7 +44,35 @@ export function landingStop(outcome: TransferOutcome, err: unknown, spaceId: str
   return reason;
 }
 
-/** `'closing'` for a throw while shutdown is under way (the shutdown signal aborted the fetch), `'error'` for anything else. */
-export function stopKindOfThrow(_err: unknown): Extract<TransferStop, 'closing' | 'error'> {
-  return isShuttingDown() && shutdownSignal().aborted ? 'closing' : 'error';
+/**
+ * `'closing'` for a throw while shutdown is under way, `'error'` for anything else. It reads no error: it asks only whether shutdown has begun, which is
+ * the shutdown signal's abort for the fetch that threw (`beginShutdown`, `lifecycle.ts`, sets `shuttingDown` and aborts `shutdownSignal` in the one call,
+ * so `isShuttingDown()` already says the signal is aborted and a second check would only restate it).
+ */
+export function stopKindIfShutdownBegan(): Extract<TransferStop, 'closing' | 'error'> {
+  return isShuttingDown() ? 'closing' : 'error';
+}
+
+/** The reason a transfer that stopped for shutdown carries. */
+const CLOSING_REASON = 'shutdown began';
+
+/**
+ * The page-boundary stop for shutdown, in both pagers (`position-run-pager.ts`, `push-position-runs.ts`): stop the transfer as `'closing'` where the last
+ * page landed, `true` when it did. `shouldStop` defaults to shutdown having begun, so no caller can leave a transfer paging through the drain; a test
+ * passes its own.
+ */
+export function stopAtClosing(outcome: TransferOutcome, stopped: TransferStopped, shouldStop: () => boolean = isShuttingDown): boolean {
+  if (!shouldStop()) return false;
+  stopTransfer(outcome, stopped, CLOSING_REASON, 'closing');
+  return true;
+}
+
+/**
+ * The catch around a page's fetch or send, in both pagers: a throw the shutdown signal caused stops the transfer for shutdown (`true`) and is never the
+ * member's failure; any other throw is `false`, and the caller rethrows it for the engine to read.
+ */
+export function stopIfClosingThrew(outcome: TransferOutcome, stopped: TransferStopped): boolean {
+  if (stopKindIfShutdownBegan() !== 'closing') return false;
+  stopTransfer(outcome, stopped, CLOSING_REASON, 'closing');
+  return true;
 }

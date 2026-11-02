@@ -50,7 +50,7 @@ import { DetachedWork } from '../util/detached-work.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { LinkViolationDoc } from '../config/types.js';
 import type { SpacePart } from '../db/space-collection.js';
-import type { PayloadKey } from './replicated-families.js';
+import { REFERENCE_FAMILIES } from './replicated-families.js';
 
 interface Arrived { _id: string; [k: string]: unknown }
 
@@ -97,11 +97,9 @@ function violationId(t: Target): string {
   return derivedV4Id('ythril.link-violation', t.docType, t.docId, t.field, t.id);
 }
 
-/**
- * The families whose records hold references — the ones this check collects. Every family a reference can point at
- * travels before these (`REPLICATED_FAMILIES`), which the order gate derives from this list and `REF_KINDS`.
- */
-export const REFERENCE_FAMILIES = ['edges', 'links'] as const satisfies readonly PayloadKey[];
+// The families whose records hold references — the ones this check collects — are declared beside the family rows (`replicated-families.ts`), where
+// `TARGET_KEYS` derives from them; re-exported because this check is what reads them and the order gate asks it.
+export { REFERENCE_FAMILIES };
 const holdsReferences = (key: string): key is typeof REFERENCE_FAMILIES[number] =>
   (REFERENCE_FAMILIES as readonly string[]).includes(key);
 

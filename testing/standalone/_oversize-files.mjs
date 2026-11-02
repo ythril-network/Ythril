@@ -173,8 +173,9 @@ export const FROZEN = {
   // LOWERED 406 -> 405 with bundle-81 I2 (the cycle's accounting moved to `sync/cycle-outcome.ts`, the 5.x refusal is one fold).
   // LOWERED 405 -> 368 with bundle-39 (Q-220): both doors classify a member's turn in `sync/cycle-outcome.ts`, which now holds the
   // failure counting and PEER UNREACHABLE the engine carried twice. LOWERED 368 -> 367 with bundle-39 D5: the in-flight counter became a
-  // `DetachedWork` (`util/detached-work.ts`).
-  'server/src/sync/engine.ts': 367,
+  // `DetachedWork` (`util/detached-work.ts`). LOWERED 367 -> 360 with the bundle-39 duplicated-rule merge: both doors run a member's turn through
+  // `CycleOutcome.runMember` (`sync/cycle-outcome.ts`), which holds the stop guard and the thrown-turn read the engine wrote twice.
+  'server/src/sync/engine.ts': 360,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

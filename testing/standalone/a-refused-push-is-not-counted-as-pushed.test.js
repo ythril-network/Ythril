@@ -57,7 +57,8 @@ describe('both ends are wired', () => {
     assert.doesNotMatch(src, /stoppedEarly\.push\(\.\.\.refusedTransfers/, 'a refusal in the incomplete list fails the member and raises its failure count');
     // bundle-39: the regex pins on the hand-written fold are replaced by what the one classifier and the one verdict SAY (their truth table is
     // `sync-verdict-is-one-table.test.js`); here the refusal's own row: the member is `records-refused`, the cycle `partial`, and the counter resets.
-    assert.match(src, /cycle\.member\(net, member, counts\)/, 'the scheduled cycle no longer hands a member\'s exchange to the one classifier');
+    assert.match(src, /cycle\.runMember\(net, member, \(\) => runSyncForMember\(net, member\)\)/, 'the scheduled cycle no longer hands a member\'s turn to the one runner');
+    assert.match(src, /this\.member\(net, member, exchange\)/, 'the one runner no longer hands a member\'s exchange to the one classifier');
     const { classifyMemberTurn, syncVerdict } = await import('../../server/dist/sync/cycle-outcome.js');
     const exchange = { pulled: {}, pushed: {}, incomplete: [], capped: [], refused: ['facts: 2 refused'], recorded: [], held: [], declined: [], localFaults: [], interrupted: [] };
     assert.equal(classifyMemberTurn(exchange), 'records-refused', 'records the peer refused fail the member');

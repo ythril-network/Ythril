@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fakeRes } from './_vote-round-instance.mjs';
 
 const { MongoNetworkError } = createRequire(path.resolve('server/package.json'))('mongodb');
 const LEAK = /10\.1\.2\.3|27017/;
@@ -31,10 +32,6 @@ function failingNetwork(id) {
   Object.defineProperty(net, 'members', { enumerable: true, get() { throw new MongoNetworkError('connection 3 to 10.1.2.3:27017 closed'); } });
   return net;
 }
-
-const fakeRes = () => ({ code: 200, body: undefined, headers: {}, headersSent: false,
-  status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
-  json(b) { this.body = b; this.headersSent = true; return this; } });
 
 describe('a sync trigger answers a store failure in our words', () => {
   before(async () => {

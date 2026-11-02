@@ -32,7 +32,7 @@
  */
 import { getConfig, saveConfigSoon } from '../config/loader.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
-import { SYNC_MEMBER_OUTCOMES, syncItemsPulledTotal, syncItemsPushedTotal, syncMemberOutcomesTotal } from '../metrics/registry.js';
+import { SYNC_CYCLE_STATUSES, SYNC_MEMBER_OUTCOMES, syncItemsPulledTotal, syncItemsPushedTotal, syncMemberOutcomesTotal } from '../metrics/registry.js';
 import { PeerPagesBySeq } from '../util/errors.js';
 import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -41,12 +41,12 @@ import { isStoreSide } from '../brain/store-failure.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
 import { isShuttingDown } from '../lifecycle.js';
 import { PeerBelowFloor } from './peer-floor.js';
-import { stopKindOfThrow } from './arrival-stop.js';
+import { stopKindIfShutdownBegan } from './arrival-stop.js';
 import { COUNT_KEYS, addCounts, zeroCounts, type SyncCounts } from './replicated-families.js';
 import type { MemberExchange } from './space-exchange.js';
 
 /** How a cycle is counted: `ythril_sync_cycles_total{status}` and the history row's `status`, the same word. */
-export type CycleStatus = 'success' | 'partial' | 'failed' | 'refused';
+export type CycleStatus = typeof SYNC_CYCLE_STATUSES[number];
 
 /** Every way a member's turn can end, in the plan's order. A word added here is added to the verdict table and to the metric's series. */
 export const MEMBER_OUTCOMES = SYNC_MEMBER_OUTCOMES;
@@ -131,13 +131,14 @@ export function classifyMemberTurn(ended: MemberExchange | unknown): MemberOutco
     return 'success';
   }
   if (ended instanceof PeerPagesBySeq || ended instanceof PeerBelowFloor) return 'peer-too-old';
-  if (stopKindOfThrow(ended) === 'closing') return 'interrupted';
+  if (stopKindIfShutdownBegan() === 'closing') return 'interrupted';
   if (isStoreSide(ended)) return 'local-fault';
   return 'failed';
 }
 
 // After this many consecutive sync failures for a single member, we emit a prominent warning. The member is NOT auto-removed — that is a human decision.
-const STALE_FAILURE_THRESHOLD = 10;
+// Exported because the reparent invite warns when a parent has failed fewer than this (`api/invite.ts`): the one number "appears offline" means.
+export const STALE_FAILURE_THRESHOLD = 10;
 /** The same threshold for this instance's own faults with a member (v4 S3): logged once, at error. */
 const LOCAL_FAULT_THRESHOLD = 10;
 
@@ -279,6 +280,20 @@ export class CycleOutcome {
     const result: MemberResult = { networkId: net.id, instanceId: member.instanceId, label, outcome: stop.outcome, reason: stop.reason };
     this.members.push(result);
     return result;
+  }
+
+  /**
+   * One member's whole turn, for both doors: skipped when the cycle has stopped ({@link stopped}), else run, with a throw read as the member's outcome
+   * ({@link member}). Returns the member's result and, when the turn ran to its end, the exchange it returned (what the scheduled door folds into the
+   * cycle's per-space records). The guard each caller would forget is inside: a member after a stop is never attempted, and a throw is never rethrown
+   * out of the loop that holds the other members.
+   */
+  async runMember(net: NetworkConfig, member: NetworkMember, run: () => Promise<MemberExchange>): Promise<{ result: MemberResult; exchange?: MemberExchange }> {
+    const stop = this.stopped();
+    if (stop) return { result: this.skip(net, member, stop) };
+    let exchange: MemberExchange;
+    try { exchange = await run(); } catch (err) { return { result: this.member(net, member, { thrown: err }) }; }
+    return { result: this.member(net, member, exchange), exchange };
   }
 
   /** The cycle's verdict, from its members. */
