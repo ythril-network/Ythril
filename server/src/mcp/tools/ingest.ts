@@ -79,7 +79,7 @@ export const ingest_statusTool: ToolHandler = {
   description: 'Read a conversation run started earlier (see `help()`): its `phase` (queued, extracting, writing, done, '
     + 'failed), what it wrote, the claims it dropped and why, the turns no claim covers, which backends answered, any '
     + 'write errors, and `degraded` when entity matching searched an index that could not answer in full (the same reasons a '
-    + 'recall gives; review the new entities or ingest again once it serves). A run is found only under the space it was started in, and is held in memory — a restart forgets '
+    + 'recall gives; review the new entities, or send the conversation again once it serves). A run is found only under the space it was started in, and is held in memory — a restart forgets '
     + 'it, not the records.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
