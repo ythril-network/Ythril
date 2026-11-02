@@ -70,8 +70,8 @@ export interface TokenRecord {
    * This token's own request quota, in requests per minute. Absent = inherit the instance value.
    *
    * Owner request, 2026-08-20. Resolution is `record > instance > default`, the same order `ttlDays` and
-   * `suppressEmbeddings` use: this field, then `YTHRIL_RATE_LIMIT_PER_MINUTE`, then the 300/minute the global
-   * limiter has always allowed — so an instance that configures nothing behaves exactly as it does today.
+   * `suppressEmbeddings` use: this field, then `YTHRIL_RATE_LIMIT_PER_MINUTE`, then the default of 1200/minute
+   * (`DEFAULT_PER_MINUTE`; 300 before 6.4).
    *
    * **Set by an instance admin; bounded by infra.** When `YTHRIL_RATE_LIMIT_PER_MINUTE` is set it is a CEILING
    * and not merely a default: a write above it is refused naming the ceiling, because a ceiling an admin can

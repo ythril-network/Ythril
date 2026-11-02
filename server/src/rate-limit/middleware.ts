@@ -36,7 +36,7 @@ import { resolveLimitFor, WINDOW_MS } from './per-token.js';
  * carrying `?token=` is now unauthenticated. Bucketing by it would let an anonymous caller mint a fresh
  * quota bucket per request by varying a string nobody checks, and — because `globalRateLimit` skips
  * entirely for a request that presents a credential — a bare `?token=anything` moved that caller off the
- * 300/min global limit and onto the 3000/min IP flood backstop. The backstop bounded it, so this was a
+ * 300/min global limit of the time and onto the 3000/min IP flood backstop. The backstop bounded it, so this was a
  * tenfold amplification rather than an open door, but it was available to anyone with a query string.
  *
  * Header only. A credential that cannot travel in a URL cannot be spoofed in one.
@@ -144,7 +144,8 @@ export const ipFloodBackstop = rateLimit({
 });
 
 /**
- * 300 requests/minute for a request that presents NO credential — and only for those.
+ * 300 requests/minute for a request that presents NO credential — and only for those. A token's own default
+ * (`DEFAULT_PER_MINUTE`) is higher since 6.4; an anonymous caller keeps the tighter cap.
  *
  * ## Why it steps aside for a credential
  *

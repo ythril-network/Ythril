@@ -46,12 +46,12 @@ beforeEach(() => { delete process.env[ENV]; });
 after(() => { if (original === undefined) delete process.env[ENV]; else process.env[ENV] = original; });
 
 describe('which number applies', () => {
-  it('nothing configured anywhere: the number the global limiter has always used', () => {
-    // The point of this default. A deployment that sets neither tier must behave exactly as it does today —
-    // a lower number here would silently tighten every existing instance on upgrade.
-    assert.equal(resolveLimitFor(undefined), 300);
-    assert.equal(resolveLimitFor({}), 300);
-    assert.equal(DEFAULT_PER_MINUTE, 300);
+  it('nothing configured anywhere: 1200 a minute, the default since 6.4 (300 before it)', () => {
+    // The owner raised the default from 300 (Q-692). It must never fall below that again: a lower number here
+    // would silently tighten every existing instance on upgrade.
+    assert.equal(resolveLimitFor(undefined), 1200);
+    assert.equal(resolveLimitFor({}), 1200);
+    assert.equal(DEFAULT_PER_MINUTE, 1200);
   });
 
   it('infra sets it: every token inherits that', () => {
@@ -90,7 +90,7 @@ describe('which number applies', () => {
     // `envIntOpt` returns undefined for anything it cannot parse, and the boot check reports it separately.
     process.env[ENV] = 'three hundred';
     assert.equal(instanceCeiling(), undefined);
-    assert.equal(resolveLimitFor({}), 300);
+    assert.equal(resolveLimitFor({}), 1200);
   });
 });
 
