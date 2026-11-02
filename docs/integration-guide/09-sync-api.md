@@ -79,20 +79,19 @@ too old to sync with — nothing was exchanged and nothing failed), `failed` (no
 treats an `outcome` word it does not know as not-success. `members` lists each member's own part, one entry per
 member and network, `{ "networkId", "instanceId", "label", "outcome", "reason" }`:
 
-| member `outcome` | the member's turn |
-|---|---|
-| `success` | every transfer finished |
-| `catching-up` | a transfer stopped at its page bound; the mark advanced and the next cycle goes on |
-| `records-refused` | the peer answered; it refused some records (counted, never a reason to stop) |
-| `peer-too-old` | the peer answers in the pre-6.0 shape or is below this instance's version floor: nothing was exchanged and no failure was counted against it |
-| `local-fault` | THIS instance's own database failed while it landed what the peer sent (or before the peer was asked); the peer is not at fault |
-| `interrupted` | shutdown began; the turn stopped at its next page |
-| `failed` | the peer did not answer, answered something unusable, or a transfer stopped for a reason on its side |
+| member `outcome` | the member's turn | its `reason`, word for word |
+|---|---|---|
+| `success` | every transfer finished | "every transfer with the peer completed" |
+| `catching-up` | a transfer stopped at its page bound; the mark advanced and the next cycle goes on | "the peer answered; a transfer reached the cycle's page bound and continues next cycle" |
+| `records-refused` | the peer answered; it refused some records (counted, never a reason to stop) | "the peer answered and refused some records by its own rules" |
+| `peer-too-old` | the peer answers in the pre-6.0 shape or is below this instance's version floor: nothing was exchanged and no failure was counted against it | "the peer runs a version this one cannot sync with" |
+| `local-fault` | THIS instance's own database failed while it landed what the peer sent (or before the peer was asked), or no token is stored for the peer; the peer is not at fault | "this instance's database failed while exchanging with the peer"; "this instance's database is not answering" (the store is down: the members not yet tried are `local-fault` too); "no token is stored for this peer on this instance" |
+| `interrupted` | shutdown began; the turn stopped at its next page | "stopped for shutdown" |
+| `failed` | the peer did not answer, answered something unusable, or a transfer stopped for a reason on its side | "the peer did not answer, or answered an error" |
 
-`reason` is one of a closed list of sentences of ours (at most 200 characters), such as "this instance's database
-failed while landing the peer's page", "the peer did not answer" or "the peer runs a version this one cannot sync
-with". The database driver's or the peer's own text stays in the log; it names internal hosts and ports and is
-never in an answer.
+`reason` is one of the closed list of sentences of ours in the table's last column, word for word (at most 200
+characters each). The database driver's or the peer's own text stays in the log; it names internal hosts and ports
+and is never in an answer.
 
 The HTTP status is the same on both doors, the dedicated route and the generic `POST /api/network_sync`, which
 takes it from the tool's result: `200` for `success`, `partial` and `refused` (the cycle ran, and the body says
@@ -354,7 +353,7 @@ POST /api/sync/batch-upsert?spaceId=general&networkId=net-uuid
 
 Each array is capped at 500 items; documents past the cap are counted in `rejected` rather than dropped unsaid.
 
-**`incomplete` (optional, best effort) names the target families whose push stopped early earlier in the same cycle.** A sender pushes targets first, and a target family can stop early (a page bound, a `503` from this receiver); the edges and links of that cycle are still pushed, because the push mark is one number per space and leaving them out would let it pass them. The field tells the receiver which targets are still to come, so a reference to one of them is not recorded as a violation for this request: the receiver judges it with the families still to come (`familiesAfter`) joined by these, as the pull does with its own. Only the target families count (`facts`, `entities`, `chrono`, `filemeta`; nothing points at an edge or a link); the array is deduplicated and read up to four entries, and anything else, an unknown key or a value that is not an array of strings, is ignored with a warning in the receiver's log, counted, and never refused. It suppresses recording for that request only, and the next cycle re-sends what stopped. Only `batch-upsert` carries it; the single-document routes are not used by the engine and do not read it. A receiver that does not know the field ignores it and judges as before (a reference whose target is still coming may then be recorded missing, as it was), so the field is safe in a network of mixed versions.
+**`incomplete` (optional, best effort) names the target families whose push stopped early earlier in the same cycle.** A sender pushes targets first, and a target family can stop early (a page bound, a `503` from this receiver); the edges and links of that cycle are still pushed, because the push mark is one number per space and leaving them out would let it pass them. The field tells the receiver which targets are still to come, so a reference to one of them is not recorded as a violation for this request: the receiver judges it with the families still to come (`familiesAfter`) joined by these, as the pull does with its own. Only the target families count (`facts`, `entities`, `chrono`, `filemeta`; nothing points at an edge or a link); the array is deduplicated, and the target keys in it are kept even when other entries are not valid: an entry that is not a target family's key (an unknown key, a non-string, an edge or a link) is dropped, and a value that is not an array is dropped whole; either, or a list longer than there are target families, logs one warning in the receiver's log (nothing is counted), and the request is never refused. It suppresses recording for that request only, and the next cycle re-sends what stopped. Only `batch-upsert` carries it; the single-document routes are not used by the engine and do not read it. A receiver that does not know the field ignores it and judges as before (a reference whose target is still coming may then be recorded missing, as it was), so the field is safe in a network of mixed versions.
 
 Response includes per-family counters for all six families:
 

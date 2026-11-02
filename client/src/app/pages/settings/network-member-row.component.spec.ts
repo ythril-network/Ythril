@@ -6,7 +6,7 @@
  * One badge, `Failing (N)`, answered two questions: the peer did not answer, and this instance's own database failed while it landed what the
  * peer sent. A lasting local fault therefore showed as a failing peer (and, once the engine stopped counting it against the peer, as a healthy
  * one with no badge at all, because the member's failure count no longer moves). The server now keeps a per-member streak of cycles in which
- * this instance's store failed (`consecutiveLocalFaults`, runtime only, beside `consecutiveFailures`), the member view carries it, and the row
+ * this instance's store failed (`consecutiveLocalFaults`, stored with the member, beside `consecutiveFailures`), the member view carries it, and the row
  * says so apart from the peer: `Local store failing (N)`.
  *
  * ## The rules, each as the reader sees it (the real English words)

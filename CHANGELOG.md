@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Changes on upgrade | Action |
 |---|---|
-| REST `ok` of a waited sync is true only when every member synced (it was true whenever the cycle ran) | Read `outcome` and `members` |
+| REST `ok` of a waited sync is true only when `outcome` is `success` (it was true whenever the cycle ran) | Read `outcome` and `members` |
 | A waited sync in which no member synced answers `502` `sync_failed` (`503` `sync_store_failed` when this instance's database failed) on every door, the generic `POST /api/network_sync` included (it answered `422`) | Handle the status |
 | Sync history and `ythril_sync_cycles_total` write `refused` for a cycle that met only too-old peers (history wrote `failed`); a version from before this one reads `refused` in history as an unknown word after a rollback | None |
 | The metric `ythril_sync_items_pulled_total` / `_pushed_total` gains `type="filemeta"`, and `type="files"` counts files moved on every series (a held or refused file metadata row was counted under `files`) | Update dashboards that read `files` |
-| A member's failure counter resets whenever the peer answered, and no longer moves for this instance's own database failure | None |
+| A member's failure counter resets on a turn in which the peer answered with a sync (a peer too old to sync with neither raises nor resets it), and no longer moves for this instance's own database failure | None |
 | A push request may carry `incomplete`; sync triggers answer `503` `shutting_down` while the server shuts down | An older receiver ignores the field; retry a trigger after the restart |
 
 ### Added
