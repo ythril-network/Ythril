@@ -45,7 +45,7 @@ import { warnOnce } from '../util/warn-once.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import { pushSelection } from './push-selection.js';
 import { MAX_TRANSFER_PAGES, stopTransfer, type TransferOutcome } from './watermark.js';
-import { landingStop, stopKindOfThrow } from './arrival-stop.js';
+import { landingStop, stopKindIfShutdownBegan } from './arrival-stop.js';
 import { deliveryOfMember } from './deletion-authority.js';
 import { SAID_AGAIN_MS, declinedCountOf, refusedCountOf, sayPeerDeclined, sayPeerRefused } from './decline-report.js';
 
@@ -142,7 +142,7 @@ export async function pullTombstones(opts: {
     // A peer that does not page by position, and a space that owes its positions, are the ENGINE's to read: they end the member's turn.
     if (err instanceof PeerPagesBySeq || err instanceof PositionsBuilding) throw err;
     // The fetch, the JSON and the pager's own checks: the peer's fault, or shutdown's abort (bundle-39 D5). The apply's own throws stopped above.
-    stopTransfer(outcome, () => {}, 'the tombstone transfer threw', stopKindOfThrow(err));
+    stopTransfer(outcome, () => {}, 'the tombstone transfer threw', stopKindIfShutdownBegan());
     say('failed', () => log.warn(repair
       ? `Re-read of tombstones from ${peerText(peer)} for space '${peerText(spaceId)}' failed: ${logSafe(err instanceof Error ? err.message : String(err))} `
         + `— read through position ${outcome.deliveredThrough}; the one-time repair stays owed and is tried again next cycle.`

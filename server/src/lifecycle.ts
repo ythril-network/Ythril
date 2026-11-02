@@ -38,7 +38,7 @@ export function isShuttingDown(): boolean {
 /**
  * Aborted when shutdown begins: a sync turn's fetches take it beside their own timeout (`turnSignal`, `sync/held-answer.ts`), so a batch fetch of up
  * to a minute ends at once instead of outliving the drain (bundle-39 D5 v6 S2). It is its OWN signal, never the act fence's: an abort here is read as
- * shutdown (`stopKindOfThrow`, `sync/arrival-stop.ts`), never as an act cutting a space.
+ * shutdown (`stopKindIfShutdownBegan`, `sync/arrival-stop.ts`), never as an act cutting a space.
  */
 export function shutdownSignal(): AbortSignal {
   return shutdownController.signal;

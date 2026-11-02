@@ -134,14 +134,11 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<NetworkCycleRe
 
   for (const member of net.members) {
     // Shutdown began, or this instance's store stopped answering: the rest are not attempted, and no counter moves for them (bundle-39 D5, v6 S6).
-    const stop = cycle.stopped();
-    if (stop) { cycle.skip(net, member, stop); continue; }
-    let counts: MemberExchange;
-    try { counts = await runSyncForMember(net, member); } catch (err) { cycle.member(net, member, { thrown: err }); continue; }
+    const { result: { outcome }, exchange: counts } = await cycle.runMember(net, member, () => runSyncForMember(net, member));
+    if (!counts) continue;
     for (const r of counts.recorded) recordedBySpace.set(r.spaceId, mergeSummaries(recordedBySpace.get(r.spaceId) ?? NOTHING_RECORDED, r));
     for (const h of counts.held) (heldBySpace.get(h.spaceId) ?? heldBySpace.set(h.spaceId, { spaceId: h.spaceId, members: [], reason: h.reason, ...(h.families ? { families: h.families } : {}) }).get(h.spaceId)!).members.push(member.instanceId);
     for (const d of counts.declined) (declinedBySpace.get(d) ?? declinedBySpace.set(d, { spaceId: d, members: [] }).get(d)!).members.push(member.instanceId);
-    const { outcome } = cycle.member(net, member, counts);
     if (outcome !== 'success' && outcome !== 'catching-up' && outcome !== 'records-refused') continue;
     // If any members were temporarily re-parented away from this peer while it was
     // offline, now is the right moment to surface the choice to the admin.
@@ -262,11 +259,7 @@ export async function runSyncForPeer(peerId: string): Promise<PeerCycleResult> {
 
   const cycle = new CycleOutcome();
   await inCycle(async () => {
-    for (const { net, member } of matches) {
-      const stop = cycle.stopped();
-      if (stop) { cycle.skip(net, member, stop); continue; }
-      try { cycle.member(net, member, await runSyncForMember(net, member)); } catch (err) { cycle.member(net, member, { thrown: err }); }
-    }
+    for (const { net, member } of matches) await cycle.runMember(net, member, () => runSyncForMember(net, member));
   });
   const refused = cycle.members.filter(m => m.outcome === 'peer-too-old').length;
   return { networksSynced: cycle.synced, errors: cycle.errors, refused, notFound: false, members: cycle.members, outcome: cycle.verdict().outcome };

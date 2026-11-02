@@ -33,7 +33,6 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor } from './_pull-door.mjs';
 import { undeclaredKeySpaces, spaceOf } from './_undeclared-key-doors.mjs';
-import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -42,21 +41,14 @@ const SPACES = Object.freeze({ warn: 'pullhistwarn', off: 'pullhistoff', replay:
 const metaOf = (mode) => structuredClone(undeclaredKeySpaces().find(s => s.id === spaceOf(mode)).meta);
 const META = { [SPACES.warn]: metaOf('warn'), [SPACES.off]: metaOf('off'), [SPACES.replay]: metaOf('warn'), [SPACES.clean]: metaOf('warn') };
 
-let door, engine;
+let door;
 
 /** A `service` entity (its type declares `status` only), carrying `extra` beside a declared `status`. */
 const entity = (space, id, seq, extra = {}) => build.entity(space, id, seq, { type: 'service', properties: { status: 'up', ...extra } });
 
-/** One real sync cycle against the fake peer, and the history row it wrote (written without the cycle awaiting it). */
+/** One real scheduled cycle against the fake peer (`door.cycle`), which must not have failed, and the history row it wrote. */
 async function cycle() {
-  const since = new Date().toISOString();
-  const out = await engine.runSyncForNetwork(door.NET);
-  await door.settled();
-  let row;
-  await waitFor(async () => {
-    row = (await door.mongo.col('_sync_history').find({ networkId: door.NET, triggeredAt: { $gte: since } }).toArray())[0];
-    return row !== undefined;
-  }, 10_000, 100, undefined, { what: 'the sync history row of the cycle' });
+  const { out, row } = await door.cycle();
   assert.equal(out.errors, 0, `the cycle failed: ${JSON.stringify(out)}`);
   return row;
 }
@@ -65,7 +57,6 @@ const rowFor = (row, space) => (row.schemaViolations ?? []).find(r => r.spaceId 
 describe('a pull says what it stored against the local schema in its sync history', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'pullhistory', spaces: Object.values(SPACES), meta: META });
-    engine = await import('../../server/dist/sync/engine.js');
   });
   after(async () => { await door?.close(); });
 

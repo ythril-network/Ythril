@@ -30,14 +30,13 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
-import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const REFUSED = 'refusedsp';
 const FREE = 'refusedfree';
 
-let door, loader, engine, asked, refusal;
+let door, loader, asked, refusal;
 
 /** Install the peer's behaviour: the refused space answers `refusal` on every transfer door, the other is served by the real handlers. Reset clears every hook, so each case installs them. */
 function installPeer() {
@@ -59,24 +58,10 @@ function installPeer() {
   };
 }
 
-/** One real cycle through the network runner, and the history row it wrote. */
-async function cycleRow() {
-  const since = new Date().toISOString();
-  const out = await engine.runSyncForNetwork(door.NET);
-  await door.settled();
-  let row;
-  await waitFor(async () => {
-    row = (await door.mongo.col('_sync_history').find({ networkId: door.NET, triggeredAt: { $gte: since } }).toArray())[0];
-    return row !== undefined;
-  }, 10_000, 100, undefined, { what: 'the sync history row of the cycle' });
-  return { out, row };
-}
-
 describe('a refused transfer is held or declined, never failed', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'refused', spaces: [REFUSED, FREE], type: 'club', direction: 'both', files: true });
     loader = await import('../../server/dist/config/loader.js');
-    engine = await import('../../server/dist/sync/engine.js');
   });
   after(async () => { await door?.close(); });
 
@@ -96,7 +81,7 @@ describe('a refused transfer is held or declined, never failed', { skip }, () =>
   it('R-W9: a 423 space_held for one space is a held space on a successful cycle, and the other space is exchanged', async () => {
     refusal = 'space_held';
     const before = Date.now();
-    const { out, row } = await cycleRow();
+    const { out, row } = await door.cycle();
     const net = loader.getConfig().networks.find(n => n.id === door.NET);
     const member = net.members[0];
     assert.equal(out.errors, 0, `the cycle failed: ${JSON.stringify(out)}`);
@@ -110,7 +95,7 @@ describe('a refused transfer is held or declined, never failed', { skip }, () =>
 
   it('R-X10: a 423 space_declined is recorded as a decline - not held, not failed - and the next cycle makes no request for the space', async () => {
     refusal = 'space_declined';
-    const first = await cycleRow();
+    const first = await door.cycle();
     const member = () => loader.getConfig().networks.find(n => n.id === door.NET).members[0];
     assert.equal(first.out.errors, 0, `the cycle failed: ${JSON.stringify(first.out)}`);
     assert.equal(first.row.status, 'success');
@@ -120,7 +105,7 @@ describe('a refused transfer is held or declined, never failed', { skip }, () =>
     assert.equal(member().consecutiveFailures ?? 0, 0, 'a decline moved the failure counter');
 
     asked.length = 0;
-    const second = await cycleRow();
+    const second = await door.cycle();
     assert.equal(second.out.errors, 0);
     assert.ok(asked.includes(FREE), 'the positive twin failed: the second cycle did not exchange the carried space, so an absence for the declined one means nothing');
     assert.ok(!asked.includes(REFUSED), 'the publisher asked a member that declined the space for it again, every cycle, for ever (it should hear nothing)');
@@ -128,11 +113,11 @@ describe('a refused transfer is held or declined, never failed', { skip }, () =>
 
   it('R-X10 twin: with the decline lifted, the very next cycle asks for the space again', async () => {
     refusal = 'space_declined';
-    await cycleRow();
+    await door.cycle();
     loader.mutateConfig((cfg) => { delete cfg.networks.find(n => n.id === door.NET).members[0].declinedSpaces; });
     refusal = undefined;
     asked.length = 0;
-    const { out } = await cycleRow();
+    const { out } = await door.cycle();
     assert.equal(out.errors, 0);
     assert.ok(asked.includes(REFUSED), 'the space is never asked for again after its decline was lifted: the decline is read from somewhere that is never cleared');
   });

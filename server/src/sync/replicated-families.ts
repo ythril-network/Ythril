@@ -134,11 +134,21 @@ export function familiesAfter(keys: readonly PayloadKey[], incomplete: readonly 
 }
 
 /**
- * The families a reference can point at, by payload key: every family but the two that hold references (`REFERENCE_FAMILIES`, `sync/linkage-check.ts`).
- * Nothing points at an edge or a link, so naming one would hide nothing a receiver judges.
+ * The families whose records hold references: the ones the linkage check collects (`sync/linkage-check.ts`, which re-exports this). Every family a
+ * reference can point at travels before these (`REPLICATED_FAMILIES`), which the order gate derives from this list and `REF_KINDS`. Declared here, beside
+ * the rows, so `TARGET_KEYS` derives from the two without this module importing the check (which pulls in the database).
  */
-export const TARGET_KEYS = ['facts', 'entities', 'chrono', 'filemeta'] as const satisfies readonly PayloadKey[];
-export type TargetKey = typeof TARGET_KEYS[number];
+export const REFERENCE_FAMILIES = ['edges', 'links'] as const satisfies readonly PayloadKey[];
+
+/**
+ * The families a reference can point at, by payload key: every replicated family but the two that hold references (`REFERENCE_FAMILIES`), in list order.
+ * Nothing points at an edge or a link, so naming one would hide nothing a receiver judges. Derived, so a seventh family is a target unless it is declared
+ * a holder.
+ */
+export type TargetKey = Exclude<PayloadKey, typeof REFERENCE_FAMILIES[number]>;
+export const TARGET_KEYS: readonly TargetKey[] = REPLICATED_FAMILIES
+  .map(f => f.payloadKey)
+  .filter((k): k is TargetKey => !(REFERENCE_FAMILIES as readonly string[]).includes(k));
 
 /**
  * The target families whose transfer stopped early (truncated, any kind) among `transfers`, in list order: a reference that travels after them must

@@ -22,8 +22,7 @@
  */
 import { completeThrough, stopAtPageBound, stopTransfer, type TransferOutcome, type TransferStopped } from './watermark.js';
 import type { PositionRead, PositionStart } from '../util/position-keyset.js';
-import { stopKindOfThrow } from './arrival-stop.js';
-import { isShuttingDown } from '../lifecycle.js';
+import { stopAtClosing, stopIfClosingThrew } from './arrival-stop.js';
 
 export async function pushPositionRuns<T extends { _id: string }>(o: {
   /** In: `deliveredThrough` is the mark the push starts from. Out: what the peer is complete through, and whether and why the push stopped. */
@@ -39,10 +38,9 @@ export async function pushPositionRuns<T extends { _id: string }>(o: {
   shouldStop?: () => boolean;
 }): Promise<void> {
   const { outcome } = o;
-  const shouldStop = o.shouldStop ?? isShuttingDown;
   let after: PositionStart = { pos: outcome.deliveredThrough };
   for (let pages = 0; ; pages++) {
-    if (shouldStop()) { stopTransfer(outcome, o.stopped, 'shutdown began', 'closing'); return; }
+    if (stopAtClosing(outcome, o.stopped, o.shouldStop)) return;
     if (stopAtPageBound(outcome, o.stopped, pages, o.maxPages)) return;
     const read = await o.read(after, o.pageSize);
     const rows = read.rows.map(r => r.row);
@@ -51,7 +49,7 @@ export async function pushPositionRuns<T extends { _id: string }>(o: {
       let refusal: string | null;
       try { refusal = await o.send(rows); } catch (err) {
         // A send the shutdown signal aborted stops the push for shutdown where the last page was taken; any other throw is the member's, as always.
-        if (stopKindOfThrow(err) === 'closing') { stopTransfer(outcome, o.stopped, 'shutdown began', 'closing'); return; }
+        if (stopIfClosingThrew(outcome, o.stopped)) return;
         throw err;
       }
       if (refusal !== null) { stopTransfer(outcome, o.stopped, refusal); return; }

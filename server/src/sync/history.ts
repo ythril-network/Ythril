@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export type { SyncCounts } from './replicated-families.js';
 import type { SyncCounts } from './replicated-families.js';
+import type { CycleStatus } from './cycle-outcome.js';
 
 /**
  * What a cycle's pulled pages stored that the receiving space's schema does not accept and the copy they replaced lacked, for ONE space
@@ -31,7 +32,7 @@ export interface SyncHistoryRecord {
    * too old to sync with, nothing failed) was recorded as `failed` before bundle-39; an older version reads it as a word it does not know. A cycle
    * stopped by shutdown is recorded `partial`, its errors saying so.
    */
-  status: 'success' | 'partial' | 'failed' | 'refused';
+  status: CycleStatus;
   pulled: SyncCounts;
   pushed: SyncCounts;
   errors?: string[];

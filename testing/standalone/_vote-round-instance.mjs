@@ -114,14 +114,19 @@ export function handlerFor(router, method, routePath) {
   return layer.route.stack.at(-1).handle;
 }
 
-/** A response that records what a handler answered. */
+/**
+ * A response that records what a handler answered: `code`, `body`, `headers`, and `sent` / `headersSent` (the same fact under the two names callers
+ * read: this file's own harnesses read `sent`, an express handler that guards a late answer reads `headersSent`). `end()` settles without a body.
+ * The one fake response of the standalone tests: the sync doors' (`_sync-doors.mjs`) and the file-act doors' (`_file-act-doors.mjs`) use it too.
+ */
 export function fakeRes() {
   return {
-    code: 200, body: undefined, sent: false, headers: {},
+    code: 200, body: undefined, sent: false, headersSent: false, headers: {},
     status(c) { this.code = c; return this; },
     setHeader(n, v) { this.headers[n.toLowerCase()] = v; return this; },
     set(n, v) { if (typeof n === 'string') this.headers[n.toLowerCase()] = v; return this; },
-    json(b) { this.body = b; this.sent = true; return this; },
+    json(b) { this.body = b; this.sent = true; this.headersSent = true; return this; },
+    end() { this.sent = true; this.headersSent = true; return this; },
   };
 }
 

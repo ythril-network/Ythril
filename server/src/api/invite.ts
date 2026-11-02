@@ -60,6 +60,7 @@ import { stampAdmission, isMeshNetwork } from '../networks/member-introductions.
 import type { NetworkMember } from '../config/types.js';
 import { proposeRound } from '../networks/propose-round.js';
 import { networkRole } from '../networks/network-role.js';
+import { STALE_FAILURE_THRESHOLD } from '../sync/cycle-outcome.js';
 import { openSession, findSession, updateSession, dropSession, redeemedOpen } from './invite-sessions.js';
 
 export const inviteRouter = Router();
@@ -163,7 +164,7 @@ inviteRouter.post('/generate', globalRateLimit, requireAuth, denyReadOnly, async
       res.status(404).json({ error: 'reparentInstanceId is not a member of this network' });
       return;
     }
-    if ((target.consecutiveFailures ?? 0) < 10) {
+    if ((target.consecutiveFailures ?? 0) < STALE_FAILURE_THRESHOLD) {
       // Warn but don't block — admin may want to reparent proactively
       log.warn(`Reparent invite generated for '${peerText(target.label)}' whose parent does not yet appear offline (${target.consecutiveFailures ?? 0} consecutive failures)`);
     }

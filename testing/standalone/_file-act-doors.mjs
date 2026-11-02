@@ -36,6 +36,7 @@ import express from 'express';
 import { openPushDoor } from './_push-door.mjs';
 import { privateHostAddress } from './_private-address.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { fakeRes } from './_vote-round-instance.mjs';
 
 process.env['SYNC_ALLOW_PRIVATE_PEERS'] = 'true';
 process.env['SYNC_ALLOW_INSECURE_PEERS'] = 'true';
@@ -313,9 +314,6 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
     conflictDoorsCache = { resolve: handlerOf('post', '/:id/resolve'), bulk: handlerOf('post', '/bulk-resolve') };
     return conflictDoorsCache;
   };
-  const fakeRes = () => ({ code: 200, body: undefined, headers: {}, headersSent: false,
-    status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
-    json(b) { this.body = b; this.headersSent = true; return this; }, end() { this.headersSent = true; return this; } });
   /** The rights a resolver holds: `{ [space]: { area: rung } }` over no floor — for a token that is not an administrator. */
   const rightsFor = (perSpace) => ({ instanceAdmin: false, createSpaces: false, floor: null,
     perSpace: Object.fromEntries(Object.entries(perSpace).map(([sp, areas]) => [sp, { knowledge: 'none', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none', ...areas }])) });

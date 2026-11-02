@@ -32,7 +32,6 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
-import { waitFor } from '../_shared/wait-for.mjs';
 import { build, derivedLinkBuilder } from './_push-door.mjs';
 import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
 import { clearPositionMarks, positioned } from './_b81b-positions.mjs';
@@ -42,7 +41,7 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'everyfamily';
 const BASE = 100;
 
-let door, engine, FAMILIES, itemsPulled, itemsPushed, linkOf, ME;
+let door, FAMILIES, itemsPulled, itemsPushed, linkOf, ME;
 
 /** Each family's count key as the list names it, or an assertion that it names none (the derived set cannot be built without it). */
 function countKeys() {
@@ -64,17 +63,10 @@ async function stored(counter) {
 }
 const grown = (before, after) => Object.fromEntries(Object.entries(after).map(([k, v]) => [k, v - (before[k] ?? 0)]).filter(([, d]) => d !== 0));
 
-/** One network cycle as the scheduler runs it: the history row it wrote and what the item metrics gained. */
+/** One network cycle as the scheduler runs it (`door.cycle`): its answer, the history row it wrote and what the item metrics gained. */
 async function cycle() {
-  const since = new Date().toISOString();
   const before = { pulled: await stored(itemsPulled), pushed: await stored(itemsPushed) };
-  const out = await engine.runSyncForNetwork(door.NET);
-  await door.settled();
-  let row;
-  await waitFor(async () => {
-    row = (await door.mongo.col('_sync_history').find({ networkId: door.NET, triggeredAt: { $gte: since } }).toArray())[0];
-    return row !== undefined;
-  }, 10_000, 100, undefined, { what: 'the sync history row of the cycle' });
+  const { out, row } = await door.cycle();
   return { out, row, metric: { pulled: grown(before.pulled, await stored(itemsPulled)), pushed: grown(before.pushed, await stored(itemsPushed)) } };
 }
 
@@ -84,7 +76,6 @@ const only = (keys, moved) => Object.fromEntries(keys.map(k => [k, moved[k] ?? 0
 describe('every replicated family is counted, from the family list', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'b39A_counts', spaces: [S], direction: 'pull', files: true });
-    engine = await import('../../server/dist/sync/engine.js');
     ({ REPLICATED_FAMILIES: FAMILIES } = await import('../../server/dist/sync/replicated-families.js'));
     ({ syncItemsPulledTotal: itemsPulled, syncItemsPushedTotal: itemsPushed } = await import('../../server/dist/metrics/registry.js'));
     linkOf = await derivedLinkBuilder();

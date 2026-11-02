@@ -24,6 +24,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { SHUTDOWN_FILE } from './_shutdown-sequence.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -99,7 +100,7 @@ describe('releaseClaimedJob — against a real MongoDB', { skip }, () => {
   describe('the shutdown path is wired to it', () => {
     // The suite above proves the function works. These prove something calls it — otherwise the whole finding
     // is still live and the tests pass.
-    const shutdown = readFileSync('server/src/shutdown.ts', 'utf8');
+    const shutdown = readFileSync(SHUTDOWN_FILE, 'utf8');
 
     it('stops the media worker, so it cannot claim while draining', () => {
       assert.match(shutdown, /stopMediaEmbeddingWorker\(\);/,

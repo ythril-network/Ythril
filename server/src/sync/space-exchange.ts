@@ -45,7 +45,7 @@ import { recordFileMetaMerkleComparison, rereadFileMeta } from './file-meta-rere
 import { readMemberSpaceMark, setMemberSpaceMark } from './member-space-mark.js';
 import { RereadSlot, beginFullReread, endFullReread } from './full-reread.js';
 import { REPLICATED_FAMILIES, addCounts, countsOf, familiesNotComplete, zeroCounts, type PayloadKey } from './replicated-families.js';
-import { arrivalStopReason, stopKindOfThrow } from './arrival-stop.js';
+import { arrivalStopReason, stopKindIfShutdownBegan } from './arrival-stop.js';
 import { isStoreSide } from '../brain/store-failure.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
 import { isShuttingDown } from '../lifecycle.js';
@@ -182,7 +182,7 @@ type Turn = Omit<MemberExchange, 'held' | 'declined'> & { held?: string; decline
  * Mongo stepdown during the positions read or a push's read is this instance's, never PEER UNREACHABLE.
  */
 function turnThrowIsOurs(err: unknown, out: Turn, spaceId: string, direction: string): boolean {
-  if (stopKindOfThrow(err) === 'closing') { out.interrupted.push(spaceId); return true; }
+  if (stopKindIfShutdownBegan() === 'closing') { out.interrupted.push(spaceId); return true; }
   if (!isStoreSide(err)) return false;
   out.localFaults.push(`space '${spaceId}' ${direction}: ${arrivalStopReason(err, spaceId)}`);
   if (storeIsNotAnswering(err)) out.storeDown = true;

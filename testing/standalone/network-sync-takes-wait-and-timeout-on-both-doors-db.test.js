@@ -26,6 +26,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { fakeRes } from './_vote-round-instance.mjs';
+import { syncToolCtx } from './_sync-doors.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
@@ -37,13 +39,6 @@ process.env['DATA_ROOT'] = tmpDir;
 const NET = 'net-wait-test';
 let tool, trigger, getConfig, mongo;
 
-const ctx = (args, transport = 'mcp') => ({
-  args, name: 'network_sync', transport, callSpace: undefined, callSpaces: [], accessibleSpaceIds: [], viewReads: new Map(),
-  accessibleSpaces: [], cfg: {}, rateKey: 'test', actor: { tokenLabel: 'test' },
-});
-const fakeRes = () => ({ code: 200, body: undefined, headers: {}, headersSent: false,
-  status(c) { this.code = c; return this; }, setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
-  json(b) { this.body = b; this.headersSent = true; return this; } });
 
 describe('network_sync takes wait and timeoutMs on both doors and says what it used', { skip }, () => {
   before(async () => {
@@ -84,7 +79,7 @@ describe('network_sync takes wait and timeoutMs on both doors and says what it u
   });
 
   it('MCP waits when `wait` is not stated, and the answer says so, with the bound it applied', async () => {
-    const r = await tool.handle(ctx({ networkId: NET }));
+    const r = await tool.handle(syncToolCtx({ networkId: NET }));
     assert.equal(r.isError, false);
     assert.equal(r.structuredContent.wait, true);
     assert.equal(r.structuredContent.timeoutMs, 30_000);
@@ -93,7 +88,7 @@ describe('network_sync takes wait and timeoutMs on both doors and says what it u
   });
 
   it('MCP `wait: false` answers at once that a cycle was started, and names no bound (none applied)', async () => {
-    const r = await tool.handle(ctx({ networkId: NET, wait: false }));
+    const r = await tool.handle(syncToolCtx({ networkId: NET, wait: false }));
     assert.equal(r.structuredContent.wait, false);
     assert.equal(r.structuredContent.status, 'triggered');
     assert.equal(r.structuredContent.timeoutMs, undefined);
@@ -101,9 +96,9 @@ describe('network_sync takes wait and timeoutMs on both doors and says what it u
   });
 
   it('`timeoutMs` is clamped to 1 000-120 000 and the answer says which number applied, as REST does', async () => {
-    const low = await tool.handle(ctx({ networkId: NET, timeoutMs: 5 }));
+    const low = await tool.handle(syncToolCtx({ networkId: NET, timeoutMs: 5 }));
     assert.equal(low.structuredContent.timeoutMs, 1_000);
-    const high = await tool.handle(ctx({ networkId: NET, timeoutMs: 99_999_999 }));
+    const high = await tool.handle(syncToolCtx({ networkId: NET, timeoutMs: 99_999_999 }));
     assert.equal(high.structuredContent.timeoutMs, 120_000);
     const res = fakeRes();
     await trigger.triggerNetworkSync(res, NET, { wait: true, timeoutMs: trigger.syncTimeoutMs(5) });
@@ -111,10 +106,10 @@ describe('network_sync takes wait and timeoutMs on both doors and says what it u
   });
 
   it('a cycle for every network applies the wait and the bound per network and says so', async () => {
-    const r = await tool.handle(ctx({}));
+    const r = await tool.handle(syncToolCtx({}));
     assert.equal(r.structuredContent.wait, true);
     assert.equal(r.structuredContent.timeoutMs, 30_000);
-    const nowait = await tool.handle(ctx({ wait: false }));
+    const nowait = await tool.handle(syncToolCtx({ wait: false }));
     assert.equal(nowait.structuredContent.wait, false);
     assert.notEqual(nowait.isError, true);
   });
