@@ -109,9 +109,11 @@
     logging:
       driver: "none"
     environment:
-      # mongot's heap, as a share of the container limit above (the JVM's own default, made visible and settable): it
-      # grows with the records times the vector width of every search index, and an exhausted heap stops the whole
-      # container with OutOfMemoryError in mongot.log. 1-90; see docs/integration-guide/02-hosting.md "Database memory".
+      # mongot's heap, as a share of the container limit above (the JVM's own default, made visible and settable). The
+      # vectors of an index are memory-mapped outside the heap, so the heap needs a floor of about 128 MiB and does not
+      # grow with records times vector width; the container's memory does. An exhausted heap stops the whole container
+      # with OutOfMemoryError in mongot.log. 1-90 is the sensible range (the JVM takes any 1-100 as given; a non-number
+      # stops the container); see docs/integration-guide/02-hosting.md "Database memory".
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=${YTHRIL_MONGOT_HEAP_PERCENT:-25}
       # Under /var/log/mongodb, the one directory the image owns for its own user: a volume at a path it does not own is
       # root-owned and the runner crash-loops on "permission denied". Neither file rotates (see 02-hosting.md).

@@ -374,7 +374,7 @@ scans, raise the relevant ceiling in `.env` rather than editing `docker-compose.
 ```bash
 YTHRIL_MEM_LIMIT=8g        # default 4g  — the app itself, and its embedding process (one ceiling for both)
 YTHRIL_MONGO_MEM_LIMIT=8g  # default 4g  — MongoDB and vector search; the database cache is sized from it
-YTHRIL_MONGOT_HEAP_PERCENT=25  # default 25 — the vector search heap, as a share of YTHRIL_MONGO_MEM_LIMIT (1-90)
+YTHRIL_MONGOT_HEAP_PERCENT=25  # default 25 — the vector search heap, as a share of YTHRIL_MONGO_MEM_LIMIT (sensible range 1-90)
 OLLAMA_MEM_LIMIT=16g       # default 8g  / OLLAMA_PIDS_LIMIT 2048       / OLLAMA_CPUS 8.0
 WHISPER_MEM_LIMIT=8g       # default 4g  / WHISPER_PIDS_LIMIT 1024      / WHISPER_CPUS 4.0
 UNSTRUCTURED_MEM_LIMIT=8g  # default 6g  / UNSTRUCTURED_PIDS_LIMIT 1024 / UNSTRUCTURED_CPUS 4.0

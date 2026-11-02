@@ -182,10 +182,11 @@ queued: a view holds no index, so there is nothing to rebuild. Reindex each memb
 
 **What a run does when the embedder is away.** A rebuild that fails because the embedder cannot be reached leaves the record exactly as it was and is retried; nothing is stripped. A record whose own text the embedder refuses fails like any other embed job and is counted in `reindexRun.failed`.
 
-> **Reindexing does NOT repair "search returns nothing".** It re-computes the embeddings *stored on*
+> **Reindexing does NOT repair a missing or refusing search index.** It re-computes the embeddings *stored on*
 > your records. Recall queries those vectors through a separate `$vectorSearch` index, and that index
 > can be missing while every record still holds a perfectly good embedding — after restoring a backup,
-> or after an index build that search refused. (A database search process that is merely late is not this case: the
+> or after an index build that search refused. Recall then answers with `degraded: ["index_not_ready"]` (or
+> `index_unavailable`) and what it could find without the index, so older records are missing from it. (A database search process that is merely late is not this case: the
 > instance finds it by itself and builds the indexes when it answers; see `indexWaiting` on `GET /api/spaces`.)
 > Reindexing every record in the space will not create it. Use the rebuild endpoint below.
 
@@ -449,9 +450,10 @@ than any type definition, which is why the area is `knowledge` and not `schema` 
 `POST /reindex` and `POST /:id/reembed`. Also available in the UI at **Settings → Spaces → Danger Zone →
 Rebuild search indexes**.
 
-**Runs asynchronously** — the call returns as soon as the build is submitted. **Recall returns empty
-for that space until the build completes**, which is why it sits in the danger zone; no records are
-modified.
+**Runs asynchronously** — the call returns as soon as the build is submitted. **Until the build completes, a
+recall over that space answers with `degraded: ["index_not_ready"]` and may be missing records older than the
+fresh-write window** (what recent writes, keyword search and the other collections find is still returned),
+which is why it sits in the danger zone; no records are modified.
 
 ```json
 { "ok": true, "spaceId": "general", "status": "rebuilding" }
@@ -461,8 +463,8 @@ Returns `404` when the space does not exist.
 
 You should rarely need this: indexes are built when a space is created, retried on startup if the
 database search process is slow to come up, and rebuilt automatically after a restore. It exists
-because an index going missing is otherwise **silent** — an empty result set is indistinguishable from
-"no matches", and `/ready` reports `vectorSearch: ok` regardless, since it probes the capability
+because an index going missing is otherwise easy to overlook — recall says `index_not_ready` in `degraded`
+while it lasts, but `/ready` reports `vectorSearch: ok` regardless, since it probes the capability
 rather than each space's indexes.
 
 ---
