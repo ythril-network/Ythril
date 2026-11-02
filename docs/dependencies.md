@@ -13,8 +13,8 @@ dependencies of its own — they live in `server/package.json`,
 across the three workspaces are reproduced in `NOTICE`. They are MIT, Apache 2.0,
 0BSD, BSD-3-Clause, or ISC licensed.
 
-The third workspace, `schema/` (`@ythril/schema`, the schema vocabulary and validator the server imports), is published to
-npm with each release, from 6.3.2, under the Apache License 2.0. Its runtime dependencies (zod, `@bufbuild/cel` and what it pulls in) are the server's own,
+The third workspace, `schema/` (`@ythril/schema`, the schema vocabulary and validator the server imports), is versioned with
+each release under the Apache License 2.0 and is meant for npm (not on the registry yet; packed from the repository until then). Its runtime dependencies (zod, `@bufbuild/cel` and what it pulls in) are the server's own,
 at the same versions, and are named again in `schema/NOTICE`, which a gate holds to the package's production closure.
 
 **Two packages are dual-licensed with a copyleft arm**, and Ythril elects the permissive arm in both. A dual grant

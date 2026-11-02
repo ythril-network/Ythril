@@ -26,6 +26,13 @@ its machine-checkable half.
 npm install @ythril/schema
 ```
 
+The package is not on the npm registry yet. Until it is, pack it from a clone of the repository and install the tarball:
+
+```sh
+npm pack -w @ythril/schema
+npm install ./ythril-schema-*.tgz
+```
+
 ESM only, Node 22 or later: the CEL rule engine (`@bufbuild/cel`) is loaded with a top-level `await`.
 
 ## Validate a space meta
@@ -179,8 +186,8 @@ installer) and moves with it; an app should not import it.
 
 ## Versions
 
-The package is versioned with the Ythril release it was cut from: `@ythril/schema@6.3.2` validates what a 6.3.2 server
-accepts. The package is first published with 6.3.2. A newer server may accept a field an older package refuses; validate against the package of the oldest server you
+The package is versioned with the Ythril release it was cut from: `@ythril/schema@6.4.0` validates what a 6.4.0 server
+accepts. It is not on the npm registry yet; until it is, install it from the repository's `schema/` folder. A newer server may accept a field an older package refuses; validate against the package of the oldest server you
 write to.
 
 ## Licence
