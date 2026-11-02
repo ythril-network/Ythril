@@ -17,6 +17,14 @@
  * the metric's name, every `maxTimeMS` row that talks about `degraded` — not by filename, because the guide is
  * split across thirty parts and a section moves.
  *
+ * ## And no test keeps a list of its own (bundle-72)
+ *
+ * `integration/recall-filter.test.js` and `mcp-tools.test.js` each held "the closed set" as a literal of three reasons,
+ * already missing `filter_window` and `candidate_cap`, and nothing read them. A literal list of degraded reasons
+ * anywhere in `testing/` must equal the set derived from `DEGRADED_REASONS`, unless a `degraded-reasons: partial`
+ * comment on its line or the line above says it is deliberately a subset. `index_not_ready` and `index_unavailable`
+ * (Q-326) are pinned by name beside the derived checks, so the pair cannot be dropped and still pass.
+ *
  * Run: node --test testing/standalone/every-degraded-reason-is-one-constant-and-documented.test.js
  * (requires a prior `npm run build` in server/)
  */
@@ -67,6 +75,14 @@ describe('the degraded reasons are one constant', () => {
       'a filtered answer that could not be completed must be able to say so');
   });
 
+  it('it includes index_not_ready and index_unavailable, the reasons bundle-72 adds (Q-326)', () => {
+    // A recall whose collection's vector index is being built, or refuses for another reason, over records it should
+    // serve, may be missing them; before these two reasons that refusal read as an empty collection or as a 503.
+    for (const reason of ['index_not_ready', 'index_unavailable']) {
+      assert.ok(REASONS?.includes(reason), `${reason} is not in DEGRADED_REASONS: ${JSON.stringify(REASONS)}`);
+    }
+  });
+
   it('every literal reason handed to noteDegraded is in the constant', () => {
     const used = new Set();
     for (const { text } of sources()) {
@@ -91,8 +107,80 @@ describe('the degraded reasons are one constant', () => {
   });
 });
 
+/** A comment on the list's line or the line above it marks a list that deliberately names only some reasons. */
+const PARTIAL_MARK = /degraded-reasons:\s*partial/;
+
+/**
+ * Every array literal in `text` that lists degraded reasons: all elements plain string literals, at least two of them in
+ * `reasons`. Returns where it starts, what it lists, and whether it is marked partial. A literal list of the reasons is a
+ * copy of the closed vocabulary, and a copy drifts: `integration/recall-filter.test.js` and `mcp-tools.test.js` each
+ * held three of the five reasons, as "the closed set", for as long as nothing read them.
+ */
+function literalReasonLists(text, reasons) {
+  const found = [];
+  const lines = text.split('\n');
+  for (const m of text.matchAll(/\[([^\[\]]*)\]/g)) {
+    const items = m[1].split(',').map(s => s.trim()).filter(Boolean);
+    const strings = items.map(s => /^(['"])([^'"]*)\1$/.exec(s)?.[2]);
+    if (strings.length < 2 || strings.some(s => s === undefined)) continue;
+    if (strings.filter(s => reasons.includes(s)).length < 2) continue;
+    const line = text.slice(0, m.index).split('\n').length;
+    found.push({ line, listed: strings, partial: PARTIAL_MARK.test(lines[line - 1]) || PARTIAL_MARK.test(lines[line - 2] ?? '') });
+  }
+  return found;
+}
+
+/** The literal lists (unmarked, and not equal to the derived set) in `text`, as "line: [what]" for a failure message. */
+function driftedReasonLists(text, reasons) {
+  return literalReasonLists(text, reasons)
+    .filter(l => !l.partial && (l.listed.length !== reasons.length || !reasons.every(r => l.listed.includes(r))))
+    .map(l => `line ${l.line}: [${l.listed.join(', ')}]`);
+}
+
+describe('no test keeps its own list of the reasons', () => {
+  const SELF = 'testing/standalone/every-degraded-reason-is-one-constant-and-documented.test.js';
+
+  it('a literal list of degraded reasons anywhere in testing/ equals the derived set, unless marked partial', () => {
+    assert.ok(Array.isArray(REASONS), 'DEGRADED_REASONS is not exported — see the cases above');
+    const drift = [];
+    let scanned = 0;
+    for (const { file, text } of readTrackedSources('testing', { ext: ['.js', '.mjs'], floor: 100, exclude: [SELF] })) {
+      scanned++;
+      for (const d of driftedReasonLists(text, REASONS)) drift.push(`${file} ${d}`);
+    }
+    assert.ok(scanned >= 100, `only ${scanned} testing file(s) read — the sweep is broken, not the code`);
+    assert.deepEqual(drift, [],
+      'these lists name some reasons and not all of DEGRADED_REASONS: derive the set from the constant, or mark the list '
+      + 'with a comment `degraded-reasons: partial` on its line or the line above when it is deliberately a subset');
+  });
+
+  it('the sweep sees a planted drifted list, a marked one and a full one', () => {
+    const all = ['a_one', 'b_two', 'c_three'];
+    assert.deepEqual(driftedReasonLists("const K = new Set(['a_one', 'b_two']);", all), ["line 1: [a_one, b_two]"]);
+    assert.deepEqual(driftedReasonLists("// degraded-reasons: partial\nconst K = ['a_one', 'b_two'];", all), []);
+    assert.deepEqual(driftedReasonLists("const K = ['c_three', 'a_one', 'b_two'];", all), []);
+    assert.deepEqual(driftedReasonLists("const one = ['a_one'];\nconst other = ['x', 'y'];", all), []);
+  });
+});
+
 describe('every place a caller reads the reasons names all of them', () => {
   const reasons = () => { assert.ok(Array.isArray(REASONS), 'DEGRADED_REASONS is not exported — see the case above'); return REASONS; };
+
+  it('the reason table has a row for index_not_ready and index_unavailable', () => {
+    const rows = guideParts().flatMap(p => p.lines.filter(l => /^\|\s*`(index_not_ready|index_unavailable)`\s*\|/.test(l))
+      .map(l => ({ file: p.file, l })));
+    for (const reason of ['index_not_ready', 'index_unavailable']) {
+      assert.ok(rows.some(r => r.l.startsWith(`| \`${reason}\` |`)),
+        `no integration-guide reason-table row for ${reason}: a caller that gets it cannot look up what it means`);
+    }
+  });
+
+  it('the metric row names index_not_ready and index_unavailable', () => {
+    const row = guideParts().flatMap(p => p.lines.filter(l => l.startsWith('| `ythril_recall_degraded_total` |')))[0] ?? '';
+    for (const reason of ['index_not_ready', 'index_unavailable']) {
+      assert.ok(row.includes(`\`${reason}\``), `the ythril_recall_degraded_total row does not name ${reason}`);
+    }
+  });
 
   it('the reason table', () => {
     const owners = guideParts().filter(p => p.lines.some(l => /^\|\s*reason\s*\|\s*meaning\s*\|/i.test(l)));

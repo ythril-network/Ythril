@@ -17,7 +17,9 @@
  * cache holds the SPACE's answer only: the run's entities are matched fresh each time, because they grow while
  * the run proceeds and a cached hand would miss the one made a turn ago.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { recall } from '../../brain/recall.js';
+import type { DegradedReason } from '../../brain/degraded-reasons.js';
 
 export interface KnownEntity {
   id: string;
@@ -155,12 +157,34 @@ export class Shortlister {
 }
 
 /**
+ * Where the space searches of one extraction say they were incomplete (`Q-326`, vet A-S10, P10).
+ *
+ * While the space's entity index is being built or rebuilt, `recall` answers fewer candidates and says so in `degraded`;
+ * a hand dealt from that answer can miss the entity a mention names, and the judge then makes a NEW one — a duplicate,
+ * with nobody told. Deferring the extraction was ruled out (P10: a run does not retry, a thrown deferral fails it), so
+ * the run proceeds and RECORDS the reasons. Ambient rather than a parameter, because the search is called from deep
+ * inside the extractor (`extractConversation` → `Shortlister` → `searchSpace`) and the run that must hear it is the
+ * caller of all of them: {@link collectingSearchDegraded} opens the scope, {@link spaceEntitySearch} adds to it.
+ */
+const searchDegraded = new AsyncLocalStorage<DegradedReason[]>();
+
+/** Run `fn`, collecting into `into` every reason a space search inside it answered `degraded` for, once each. */
+export function collectingSearchDegraded<T>(into: DegradedReason[], fn: () => Promise<T>): Promise<T> {
+  return searchDegraded.run(into, fn);
+}
+
+/**
  * The production `searchSpace`: the space's own entity search — lexical and vector together, so a misspelt
  * name still finds its entity — limited to a handful. What `recall` ranks is what the space already trusts.
+ * Its `degraded` reasons reach the scope {@link collectingSearchDegraded} opened, when one is open.
  */
 export function spaceEntitySearch(spaceId: string, topK = 5): (text: string) => Promise<KnownEntity[]> {
   return async (text) => {
-    const results = await recall(spaceId, text, topK, undefined, ['entity']);
+    // One collector per recall, merged after: the recall counts a reason on the metric once per recall it is new to.
+    const degraded: string[] = [];
+    const results = await recall(spaceId, text, topK, undefined, ['entity'], undefined, undefined, undefined, { degraded });
+    const scope = searchDegraded.getStore();
+    for (const reason of degraded as DegradedReason[]) if (scope && !scope.includes(reason)) scope.push(reason);
     return results.flatMap(r => (r.type === 'entity'
       ? [{ id: r._id, name: r.name, type: r.entityType, ...(r.description ? { description: r.description } : {}), source: 'space' as const }]
       : []));

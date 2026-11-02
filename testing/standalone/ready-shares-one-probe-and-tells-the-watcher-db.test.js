@@ -63,6 +63,10 @@ describe('/ready and the search watcher', { skip }, () => {
     outage.setDown(true);
     const r = await ready.getReadiness();
     assert.equal(r.checks.vectorSearch.status, 'error', 'fixture check: the simulated outage must fail the /ready probe');
+    // The two checks are separate questions (Q-373, bundle-72): a search service that does not answer while the database does is
+    // `vectorSearch` failing beside `mongodb` ok, never one "database down". Green on the base already (premise P9); it guards the
+    // readiness report against a change that folds the search probe into the database check.
+    assert.equal(r.checks.mongodb.status, 'ok', 'a failed search probe reported the database as down too: /ready must tell them apart');
     assert.equal(readiness.searchReadinessSnapshot().state, 'unknown', '/ready set the state from a failure');
   });
 

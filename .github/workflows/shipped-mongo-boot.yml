@@ -1,0 +1,65 @@
+name: Shipped Mongo Boot
+
+# Boots the SHIPPED compose file's database service alone and reads the two log files it must keep on its volume (Q-373).
+#
+# Why this exists: `ythril-mongo` runs mongot (the vector-search process) inside the same container as mongod. When mongot
+# dies of an exhausted heap the image's runner stops mongod, the container exits 0, and `docker logs` holds nothing (its
+# logging driver is "none" on purpose: slow-operation lines carry command bodies). The cause is only in mongot.log, and only
+# because the compose file sets MONGOT_LOG_FILE and RUNNER_LOG_FILE on the `ythril-mongo-logs` volume. The standalone gate
+# `the-shipped-mongo-sizes-mongot-and-keeps-its-logs-on-a-volume` holds the SHAPE of that; this holds that the image honours
+# it: a volume at a path the image does not own is root-owned, and the runner crash-loops on "permission denied" (bundle-72
+# premise P4), which no reading of the YAML can see. Every other job starts the TEST compose file, never this one.
+#
+# It needs no secrets and no build: the atlas-local image is pulled by its pinned digest, and the database runs without
+# credentials, in a throwaway project of its own that `down -v` removes whatever happened.
+
+on:
+  pull_request:
+    paths:
+      - 'docker-compose.yml'
+      - '.github/workflows/shipped-mongo-boot.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docker-compose.yml'
+      - '.github/workflows/shipped-mongo-boot.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  boot:
+    name: Shipped ythril-mongo boots and keeps its logs on a volume
+    runs-on: ubuntu-latest
+    # A pull of the atlas-local image (about 2 GB) and one first boot; 20 minutes is a hung boot, not a slow one.
+    timeout-minutes: 20
+    env:
+      PROJECT: shipped-mongo-boot
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every later step.
+          persist-credentials: false
+
+      - name: Start the shipped database service alone
+        run: docker compose -p "$PROJECT" -f docker-compose.yml up -d --wait --wait-timeout 600 ythril-mongo
+
+      - name: Both log files are on the volume, and mongot was given its heap setting
+        # Read through the VOLUME, from a second container, so a file written inside the container's own layer does not pass.
+        run: |
+          set -eu
+          image=$(docker compose -p "$PROJECT" -f docker-compose.yml config --images ythril-mongo)
+          docker run --rm --entrypoint sh -v "${PROJECT}_ythril-mongo-logs:/l" "$image" -c '
+            set -eu
+            ls -l /l
+            test -s /l/mongot.log || { echo "::error::mongot.log is missing or empty on ythril-mongo-logs"; exit 1; }
+            test -s /l/runner.log || { echo "::error::runner.log is missing or empty on ythril-mongo-logs"; exit 1; }
+            grep -q "Picked up JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=" /l/mongot.log \
+              || { echo "::error::mongot did not pick up the heap share from JAVA_TOOL_OPTIONS"; exit 1; }
+          '
+
+      - name: Remove the throwaway project
+        if: always()
+        run: docker compose -p "$PROJECT" -f docker-compose.yml down -v

@@ -134,7 +134,7 @@ describe('an embedder whose claim is gone ends the run (real MongoDB, real write
     const countDocuments = filesProto.countDocuments;
     filesProto.aggregate = function gallery(pipeline, ...rest) {
       if (this.collectionName === `${S}_files` && Array.isArray(pipeline) && pipeline[0]?.['$vectorSearch']) {
-        return { toArray: async () => [{ window: [{ n: 0, min: 0 }], hits: [{ _id: 'labelled', score: 0.99, faceEntityId: PERSON }] }] };
+        return { toArray: async () => [{ window: [{ n: 1, min: 0.99 }], hits: [{ _id: 'labelled', score: 0.99, faceEntityId: PERSON }] }] };
       }
       return aggregate.call(this, pipeline, ...rest);
     };

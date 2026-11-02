@@ -61,6 +61,26 @@ const RETRY_BACKOFF_MS: Record<number, number> = {
   2: 120_000,   // second retry available 2 min after the second failure
 };
 
+/** How long a deferred job waits before it is claimable again ({@link deferJob}). */
+export const DEFERRAL_WAIT_MS = 60_000;
+
+/** How long a job may be deferred in all, measured from its first deferral; past it {@link deferJob} refuses. */
+export const DEFERRAL_CAP_MS = 30 * 60_000;
+
+/**
+ * What a deferral leaves on a media job (Q-327), written only by {@link deferJob} and read by the worker.
+ *
+ * `deferredSince` is stamped by the FIRST deferral and kept by every later one, so the cap is measured from it. `facesOnly` says the
+ * caption of the job's file is already stored, so the re-run need not make it again (`image-embedder.ts` skips it only when the caption
+ * row is there). Both go when the job ends ({@link endJob}) and when a new write re-queues it ({@link enqueueMediaJob}).
+ */
+export type MediaJobDeferral = Pick<MediaJobDoc, 'deferredSince' | 'facesOnly'>;
+
+/** May this job be deferred again: never deferred, or first deferred less than {@link DEFERRAL_CAP_MS} ago. */
+export function mayDeferAgain(job: MediaJobDeferral): boolean {
+  return !job.deferredSince || Date.now() - Date.parse(job.deferredSince) < DEFERRAL_CAP_MS;
+}
+
 function nextClaimableAfter(nextAttempt: number): string {
   const delay = RETRY_BACKOFF_MS[nextAttempt] ?? 300_000;
   // Jittered: twenty files failing together while a sidecar restarts would otherwise all become
@@ -171,12 +191,17 @@ export async function enqueueMediaJob(
   ) as MediaJobDoc | null;
 
   if (existing && (existing.status === 'pending' || existing.status === 'processing')) {
-    // Already queued — do not disturb. One exception: a LOCAL write to a path whose queued job is an arrival's takes the
-    // arrival mark off, because the file is now one a person wrote and a person's image is analysed as a person's.
-    if (existing.arrival && !arrival) {
+    // Already queued — do not disturb. Two exceptions: a LOCAL write to a path whose queued job is an arrival's takes the
+    // arrival mark off, because the file is now one a person wrote and a person's image is analysed as a person's. And a
+    // deferred job's `facesOnly` goes: it says the caption of the OLD bytes is stored, and the new bytes owe their own.
+    const offArrival = existing.arrival && !arrival;
+    if (offArrival || existing.facesOnly) {
       await jobCollection(spaceId).updateOne(
         asFilter<MediaJobDoc>({ _id: id }),
-        asUpdate<MediaJobDoc>({ $set: { arrival: false } }),
+        asUpdate<MediaJobDoc>({
+          ...(offArrival ? { $set: { arrival: false } } : {}),
+          ...(existing.facesOnly ? { $unset: { facesOnly: '' } } : {}),
+        }),
       );
     }
     return;
@@ -198,6 +223,7 @@ export async function enqueueMediaJob(
           mediaType,
           arrival,
         },
+        $unset: { deferredSince: '', facesOnly: '' },
       }),
     );
   } else {
@@ -433,7 +459,8 @@ async function endJob(
     await setFileProcessingState(spaceId, claim.jobId, row, { session });
     await jobCollection(spaceId).updateOne(
       asFilter<MediaJobDoc>({ _id: claim.jobId }),
-      asUpdate<MediaJobDoc>({ $set: { ...job, claimedAt: null, updatedAt: new Date().toISOString() } }),
+      // A deferral's marks end with the job: a manual retry or a re-upload of the path starts a whole run, caption included.
+      asUpdate<MediaJobDoc>({ $set: { ...job, claimedAt: null, updatedAt: new Date().toISOString() }, $unset: { deferredSince: '', facesOnly: '' } }),
       { session },
     );
   });
@@ -635,6 +662,52 @@ export async function releaseClaimedJob(spaceId: string, jobId: string, claimTok
     log.debug(`Could not release claim on ${spaceId}/${jobId}: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
+}
+
+/**
+ * Give a claimed job back behind a short wait WITHOUT spending an attempt, because something it needs is not ready yet (Q-327).
+ *
+ * ## Why it is not `failJob`
+ *
+ * An image whose face gallery cannot answer yet (the face index rebuilding, 120 s or more after a container recreate) must run again
+ * later, and that is not a failure. `failJob` is the only other way back with a wait, and it spends the attempt the claim counted:
+ * three of them (30 s, then 2 min) end the job `failed` before a rebuild is over, and the caption of every face photo in the space
+ * with it. This puts the job back to `pending`, claimable after {@link DEFERRAL_WAIT_MS}, and refunds the claim's increment.
+ *
+ * ## What bounds it
+ *
+ * `deferredSince` is stamped by the first deferral and kept by every later one; past {@link DEFERRAL_CAP_MS} from it the job is NOT
+ * deferred again: it stays claimed and this answers `false`, and the run goes on to its end ({@link mayDeferAgain} is the same rule,
+ * read by the worker before the run). A gallery that never comes back cannot hold a job for ever.
+ *
+ * Fenced on the claim's token in the one conditional write, as every write a run makes: a holder that lost its claim defers nothing
+ * and gets `false`. The deferred job carries `facesOnly`, so its re-run does not make the stored caption again. `reason` is the
+ * caller's and is only said in the log: the queue stores no policy beyond the wait and the cap.
+ */
+export async function deferJob(spaceId: string, jobId: string, claimToken: string | null | undefined, reason: string): Promise<boolean> {
+  if (!claimToken) return false;
+  const now = new Date();
+  const capStart = new Date(now.getTime() - DEFERRAL_CAP_MS).toISOString();
+  const claimableAfter = new Date(now.getTime() + DEFERRAL_WAIT_MS).toISOString();
+  const res = await jobCollection(spaceId).updateOne(
+    asFilter<MediaJobDoc>({
+      _id: jobId,
+      status: 'processing',
+      claimToken,
+      $or: [{ deferredSince: { $exists: false } }, { deferredSince: null }, { deferredSince: { $gt: capStart } }],
+    }),
+    // A pipeline, so the first deferral's stamp is kept by the same write that would otherwise set it, and the refund never goes
+    // below zero (a job claimed by a build that counted no attempt).
+    [{ $set: {
+      status: 'pending', claimedAt: null, claimToken: null, claimableAfter, updatedAt: now.toISOString(), facesOnly: true,
+      deferredSince: { $ifNull: ['$deferredSince', now.toISOString()] },
+      attempts: { $max: [0, { $subtract: ['$attempts', 1] }] },
+    } }],
+  );
+  if (res.matchedCount === 0) return false;
+  markSpaceMayHaveWork(spaceId);
+  log.info(`Media job ${peerText(spaceId)}/${peerText(jobId)} deferred for ${DEFERRAL_WAIT_MS / 1000} s, no attempt spent: ${peerText(reason)}`);
+  return true;
 }
 
 export async function resetStalledJobs(

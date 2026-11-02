@@ -1725,9 +1725,10 @@ describe('MCP brain tools � recall and recall_global with minPerType', () => {
     const parsed = JSON.parse(result?.content?.[0]?.text ?? '{}');
     assert.ok(Array.isArray(parsed.results), 'results must be an array even on a partial answer');
     if (parsed.degraded !== undefined) {
+      // The closed set, read from the constant (bundle-72): a hand-written copy held three reasons and missed every one added since.
+      const { DEGRADED_REASONS } = await import('../../server/dist/brain/degraded-reasons.js');
       for (const reason of parsed.degraded) {
-        assert.ok(['search_timeout', 'rerank_skipped_budget', 'rerank_unavailable'].includes(reason),
-          `unknown degraded reason "${reason}"`);
+        assert.ok(DEGRADED_REASONS.includes(reason), `unknown degraded reason "${reason}"`);
       }
     }
   });

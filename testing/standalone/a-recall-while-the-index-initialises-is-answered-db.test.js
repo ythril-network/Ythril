@@ -40,9 +40,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Collection, MongoServerError } from 'mongodb';
+import { Collection } from 'mongodb';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { queryAxis, startStubEmbedder, createSpaceCollections } from './_vector-harness.mjs';
+// The injection and mongot's wordings live once, there (bundle-72): this file held its own copy of both.
+import { REFUSALS, refuseVectorSearch } from './_mongot-refusals.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -115,25 +117,6 @@ function watchVectorSearch() {
   return { of: (ns) => seen.get(ns) ?? { refused: 0, served: 0 }, restore: () => { Collection.prototype.aggregate = original; } };
 }
 
-/**
- * Every `$vectorSearch` aggregate goes to the store and comes back as mongot's refusal of an index it has not
- * initialised — the message verbatim as the test store gave it, the namespace and index name this space's.
- */
-function refuseVectorSearchAsNotInitialized() {
-  const original = Collection.prototype.aggregate;
-  let refused = 0;
-  Collection.prototype.aggregate = function aggregate(pipeline, ...rest) {
-    const cursor = original.call(this, pipeline, ...rest);
-    const stage = Array.isArray(pipeline) ? pipeline[0]?.['$vectorSearch'] : undefined;
-    if (!stage) return cursor;
-    const err = new MongoServerError({ ok: 0, code: 8, codeName: 'UnknownError',
-      errmsg: `Executor error during aggregate command on namespace: ${this.dbName}.${this.collectionName} :: caused by :: `
-        + `Index ${stage.index} not initialized` });
-    cursor.toArray = async () => { refused++; await cursor.close(); throw err; };
-    return cursor;
-  };
-  return { refused: () => refused, restore: () => { Collection.prototype.aggregate = original; } };
-}
 
 describe('a vector read while the index initialises is answered', { skip }, () => {
   before(async () => {
@@ -190,14 +173,19 @@ describe('a vector read while the index initialises is answered', { skip }, () =
 
   it('"Index … not initialized" is answered by recall, findSimilar and checkDuplicates', async () => {
     const id = await writeFirstRecord(INJECTED);
-    const fault = refuseVectorSearchAsNotInitialized();
+    const fault = refuseVectorSearch(REFUSALS.notInitialized);
     try {
-      const recalled = await recallMod.recall(INJECTED, 'Q', 10, undefined, ['entity']);
+      const degraded = [];
+      const recalled = await recallMod.recall(INJECTED, 'Q', 10, undefined, ['entity'], undefined, undefined, undefined, { degraded });
       assert.ok(recalled.some(r => r._id === id),
         `recall lost the record the fresh-write channel holds: ${JSON.stringify(recalled.map(r => r._id))}`);
+      // The space's first write is inside the fresh-write window, so nothing the index should serve is missing (B1, B2):
+      // a search straight after a first write is never "degraded" (Q-326 keeps index_not_ready for aged records).
+      assert.deepEqual(degraded, [], 'a recall over a new collection whose index is not ready yet must carry no reason');
 
       const similar = await recallMod.findSimilar(INJECTED, id, 'entity');
       assert.deepEqual(similar.results, [], 'findSimilar answers from the index alone, so an index not serving yet is an empty answer');
+      assert.equal(similar.degraded, undefined, 'and, over a collection holding only fresh writes, a reasonless one');
 
       const dupes = await recallMod.checkDuplicates(INJECTED, 'entity', queryAxis(DIMS));
       assert.deepEqual(dupes.map(d => d._id), [id],

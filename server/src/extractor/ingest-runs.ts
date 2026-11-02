@@ -11,6 +11,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { WriteOutcome } from './conversation/write-extraction.js';
+import type { DegradedReason } from '../brain/degraded-reasons.js';
 import { MAX_ACTIVE_INGEST_RUNS } from '../util/request-bounds.js';
 
 export type IngestPhase = 'queued' | 'extracting' | 'writing' | 'done' | 'failed';
@@ -32,6 +33,13 @@ export interface IngestRun {
   judgements?: number;
   /** Set when transcripts were not written, and why. */
   transcripts?: string;
+  /**
+   * Why entity matching may have run on an incomplete hand (`Q-326`): every reason a space search of the shortlist
+   * answered `degraded` for, in recall's closed vocabulary (`DEGRADED_REASONS`) — `index_not_ready` while the entity
+   * index is being built. Absent when none did. The run still completes; a mention whose entity was not in the hand
+   * may have become a new entity, so a caller may review the run's entities or ingest again once the index serves.
+   */
+  degraded?: DegradedReason[];
   /** Every key the extraction named, and the record id it has now — written by this run or already there. */
   ids?: WriteOutcome['ids'];
   /**

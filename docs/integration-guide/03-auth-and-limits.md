@@ -138,8 +138,11 @@ a `400` in its own words.
 > defect; the message being truncated was the half an operator saw.
 
 **Read `retryable` rather than matching the prose**, and treat a `503` from these routes as transient: the
-conditions behind it (a search index re-initialising after a restart, a replica set stepping down, a search
-process that died) clear on their own, in seconds for a blip and in hours for a large reindex.
+conditions behind it (a replica set stepping down, a search process that died) clear on their own, in seconds for a
+blip and longer for a restart. A search index re-initialising after a restart, or rebuilding over a large space, is
+not a `503` since 6.4: `recall` and `similar` answer `200` with what they could find and say `index_not_ready` in
+`degraded` until the index serves (`index_unavailable` for an index that refuses for another reason) — see the
+[reason table](04a-recall-api.md#bounding-a-recall-in-time-maxtimems-and-degraded).
 
 **Writes answer the same way, on every door.** A write the database could not complete in time — every
 operation a write issues while it holds its sequence number is bounded (`YTHRIL_WRITE_TIMEOUT_MS`,

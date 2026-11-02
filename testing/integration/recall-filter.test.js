@@ -138,8 +138,14 @@ describe('Recall maxPerType — input validation over REST', () => {
 });
 
 describe('Recall maxTimeMS — the per-call deadline over REST', () => {
-  /** The closed set of degradation reasons. An unknown value here means the metric label set drifted too. */
-  const KNOWN_REASONS = new Set(['search_timeout', 'rerank_skipped_budget', 'rerank_unavailable']);
+  /**
+   * The closed set of degradation reasons, read from the constant (bundle-72): a hand-written copy here held three of
+   * them and missed every reason added since. An unknown value means the metric label set drifted too.
+   */
+  let KNOWN_REASONS;
+  before(async () => {
+    KNOWN_REASONS = new Set((await import('../../server/dist/brain/degraded-reasons.js')).DEGRADED_REASONS);
+  });
 
   it('a non-integer maxTimeMS returns 400', async () => {
     const r = await post(INSTANCES.a, token(), '/api/brain/recall', { space: SPACE, ...({

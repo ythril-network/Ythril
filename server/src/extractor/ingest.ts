@@ -25,6 +25,8 @@ import type { Extraction } from './conversation/assemble.js';
 import type { SchemaEntry } from './validate-extraction.js';
 import type { WriteOutcome } from './conversation/write-extraction.js';
 import { ingestRuns, type IngestRun } from './ingest-runs.js';
+import { collectingSearchDegraded } from './conversation/shortlist.js';
+import type { DegradedReason } from '../brain/degraded-reasons.js';
 import { log, peerText } from '../util/log.js';
 import { unknownBodyFields } from '../brain/query.js';
 
@@ -179,7 +181,10 @@ export async function runIngest(
     let extraction = request.extraction;
     if (!extraction) {
       run.phase = 'extracting';
-      const r = await deps.extract(request.conversationId, request.source!, ctx.vocabulary);
+      // The shortlist's space searches say here when they were incomplete; the run proceeds and records it (`Q-326`).
+      const degraded: DegradedReason[] = [];
+      const r = await collectingSearchDegraded(degraded, () => deps.extract(request.conversationId, request.source!, ctx.vocabulary));
+      if (degraded.length > 0) run.degraded = degraded;
       const text = transcriptOf(request.conversation!);
       extraction = { ...r.extraction, sessions: r.extraction.sessions.map(s => ({ ...s, text: text.get(s.key ?? s.date) ?? '' })) };
       run.dropped = r.dropped;

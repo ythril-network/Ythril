@@ -28,7 +28,7 @@ Available as both — REST `POST /api/brain/recall`, MCP tool `recall`:
 | `tags` | — | none | Array of strings — restrict to records carrying these tags |
 | `minPerType` | — | none | Object mapping knowledge type → minimum hits, e.g. `{ "entity": 2 }`. Guarantees at least that many results of the type; each value is clamped to `topK` and to the 2000-per-type bound |
 | `maxPerType` | — | none | Object mapping knowledge type → **maximum** hits, e.g. `{ "file": 2 }` — the ceiling to `minPerType`'s floor. A slot the cap frees goes to another type. Each value must be at least `1` and is clamped to `topK`; a value below `minPerType` for the same type is a `400` (see below) |
-| `maxTimeMS` | — | the instance budget | Deadline for this recall, in ms. **Can only lower the instance's `RECALL_BUDGET_MS`, never raise it** — a larger value is clamped to it, and a very small one is clamped up to a 250 ms floor. On expiry you get a **partial** answer with a `degraded` field, not an error and not a hang. `degraded` names one or more of `search_timeout`, `rerank_skipped_budget`, `rerank_unavailable`, `filter_window` and `candidate_cap` — see the reason table below |
+| `maxTimeMS` | — | the instance budget | Deadline for this recall, in ms. **Can only lower the instance's `RECALL_BUDGET_MS`, never raise it** — a larger value is clamped to it, and a very small one is clamped up to a 250 ms floor. On expiry you get a **partial** answer with a `degraded` field, not an error and not a hang. `degraded` names one or more of `search_timeout`, `rerank_skipped_budget`, `rerank_unavailable`, `filter_window`, `candidate_cap`, `index_not_ready` and `index_unavailable` — see the reason table below |
 | `traverse` | — | `0` | Graph expansion: an integer depth `0`–`5`, **or an object `{depth, edgeLabels, direction}`** — a `traverse` call without its start node, because the matches *are* the start nodes. `0` = classic recall. See [Graph-Augmented Recall](04h-graph-augmented-recall.md#graph-augmented-recall-traverse-parameter) |
 | `rerank` | — | `true` | Whether the configured cross-encoder re-orders the answer. `false` skips it — no over-fetch for it and no rerank pass, on a single space and across spaces alike — and returns the fused order at once; nothing is reported in `degraded`, because it is a skip you chose. For a caller waiting on the answer as a user types; the reranked answer stays the default. No effect on an instance without a reranker |
 | `includeFileContent` | — | `true` | Whether file-chunk results carry `content` — the passage body. `false` returns locations and metadata only (path, heading, chunk index, tags, properties). **File chunks ONLY** — it does nothing on a search returning entities, facts, edges or chrono entries; use `projection` to trim those. A non-boolean is a `400`, never coerced |
@@ -67,7 +67,9 @@ call and are directly comparable. `maxTimeMS` puts the bound where the work is i
 in each caller's HTTP timeout, which is the difference between a rule and a convention.
 
 **What happens on expiry is the useful part: you get what finished.** Collections that answered are returned;
-one that ran out of time contributes nothing and the response gains a `degraded` array:
+one that ran out of time contributes nothing and the response gains a `degraded` array. The same array says when a
+collection's vector index could not answer (`index_not_ready`, `index_unavailable`) and when a filtered answer could
+not be completed (`filter_window`), deadline or not — and `similar` carries it too:
 
 ```json
 {
@@ -84,6 +86,8 @@ one that ran out of time contributes nothing and the response gains a `degraded`
 | `rerank_unavailable` | the cross-encoder was configured and did not answer (unreachable, non-2xx, unreadable body) — or it is **cooling down** after one of those, a timeout of its own, or a pass slower than half its time limit: it is then skipped at once for 30 s, doubling to 5 min, and a background probe reopens it (`Q-157`). A recall in a cool-down answers without waiting on the reranker at all |
 | `filter_window` | a filtered answer could not be completed, so it **may be missing records that satisfy the filter**: the vector index was still being updated to a definition that can complete it, the index did not yet hold matching records the collection has had for longer than the fresh-write window, or more than 500 000 records matched a filter the index cannot apply. What was found is returned |
 | `candidate_cap` | `topK` asked for more of one knowledge type than a recall considers — at most 2000 per type, however large `topK` is — and that type filled the bound, so it **may hold matches the recall never looked at**. Narrow the query or add a `filter` rather than raising `topK` |
+| `index_not_ready` | a collection's vector index is absent or still being built (or rebuilt — after an upgrade, a definition change or a database container recreate) over records it should serve: records written longer ago than the fresh-write window (`DUPE_FRESH_WINDOW_MS`, 3 min). The answer holds what the fresh-write scan, the lexical channel and the other collections found, and **may be missing older records**; ask again once the index serves. Never on a new or empty collection: its records are all inside the fresh-write window and the scan finds them, so a search straight after a space's first write is complete and reasonless. Where `filter_window` says a filtered answer could not be completed, this says the index answered nothing at all |
+| `index_unavailable` | a collection's vector index exists and refused the search for another reason (a dimension mismatch, a path not indexed as vector, a failed index) over records it should serve: **that collection's records are missing** until an operator repairs or rebuilds the index, and the server logs the index's name once per ten minutes. The other collections and spaces still answer — before 6.4 this refusal failed the whole recall, across every space, with a `503` |
 
 The set grows between releases: **treat an unknown reason as "degraded"**, never as an error.
 
@@ -778,6 +782,11 @@ Given an existing entry's `_id`, find other entries with high vector similarity.
 - `source` names the entry you asked about as `{type, id, summary}` — it is never among `results`
 - Results sorted by `score` descending; `spaceId` is on every hit
 - The size answer (`returned`, `truncated`, `budgetChars`, `charsReturned`, …) is on every response, as on `recall`
+- `degraded` (since 6.4) — present only when the matches may be incomplete, with the same reasons as `recall`'s
+  [reason table](#bounding-a-recall-in-time-maxtimems-and-degraded): `index_not_ready` while a collection's vector index
+  is being built over records it should serve, `index_unavailable` when one refused for another reason. Every space and
+  type is searched together, so one broken index no longer fails a cross-space `similar`; the others answer. Treat a
+  reason you do not know as "degraded". A `similar` is not a recall, so it does not move `ythril_recall_degraded_total`
 
 **With `traverse > 0`** the response carries the same graph-augmented shape `recall` uses: each match gains a `_graph`
 array of `{edges, node, paths}`, nested nodes carry their own `_graph`, and the envelope adds `traverseDepth` and

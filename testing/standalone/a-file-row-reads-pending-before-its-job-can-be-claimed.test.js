@@ -54,6 +54,7 @@ const wake = () => /\bmarkSpaceMayHaveWork\s*\(/;
 const ROW_ALREADY_RIGHT = {
   enqueueMediaJob: 'the media branch: `dispatch.ts` marks the row (`setMediaStatus(\'pending\')`) before it calls this',
   failJob: 'a retry: the row already reads `processing` and stays so until the job ends; the row is not told anything until then',
+  deferJob: 'a deferral while the face gallery cannot answer: the row already reads `processing` and stays so until the job ends, as for a failJob retry',
   releaseClaimedJob: 'hands a claimed job back at shutdown: the row already reads `processing`, and the next claim writes it again',
   resetStalledJobs: 'stall recovery re-queues a job that stopped reporting: the row already reads `processing`',
   holdJobsForMove: 'the job is held (not claimable) for a move; the move rewrites the row itself',

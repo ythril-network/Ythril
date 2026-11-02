@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Schema:** `typesOfSpaceMeta` in `@ythril/schema` turns a space's type schemas into TypeScript types for its properties, and reports what the types cannot carry (rules, naming patterns, unresolved `$ref`s).
+- **Hosting:** the search process's heap is a setting, `YTHRIL_MONGOT_HEAP_PERCENT` (default 25, the JVM's own default made visible), as a share of `YTHRIL_MONGO_MEM_LIMIT`. Changing it recreates the database container.
+- **Hosting:** the bundled database keeps `mongot.log` and `runner.log` on a new volume, `ythril-mongo-logs`. Neither file rotates; the hosting guide gives the sizes and the truncate command.
+- **Metrics:** `ythril_faces_stored_unmatched_total{reason}` counts faces stored unlabelled while the face gallery could not answer (`index_unavailable`, `deferral_spent`).
+
+### Changed
+
+- **Faces:** an image whose face gallery cannot answer yet, in a space with a labelled face, is deferred: it runs again a minute later without spending a retry, and reuses its stored caption. Deferral stops after 30 minutes; the face is then stored unlabelled.
+- **Faces:** a face index that refuses every search (for example one of another width) stores the face unlabelled at once, and the image job completes.
+- **Recall:** a recall over a collection whose vector index is absent, or still being built or rebuilt, over records written before the last few minutes now says so: `degraded` carries the new reason `index_not_ready`, and the answer keeps what recent writes, keyword search and the other collections found. A new or empty collection still answers with no reason.
+- **Recall:** an index that refuses for another reason (a dimension mismatch, a field not indexed as a vector, a failed index) no longer turns every recall of every space into a 503: its collection is left out, `degraded` carries the new reason `index_unavailable`, and the log names the index once per collection every ten minutes. A dead search process or a lost connection is still a retryable 503.
+- **Recall:** only the states the search process reports while it builds an index, and an absent index, are read as "not ready yet". A failed or stale index, and any message that merely mentions a search index, no longer read as an empty collection.
+- **Similar:** `similar` (MCP, and REST `/api/brain/similar`) returns `degraded` when its matches may be incomplete. It searches every space and type together, so one broken index no longer fails a cross-space `similar`, and it does not count toward `ythril_recall_degraded_total`.
+- **Metrics:** `ythril_recall_degraded_total` counts each reason once per recall, not once per collection that gave it.
+- **Duplicates:** the duplicate scanner holds a type's scan position while its index is not ready, so the records it read during a rebuild are scanned again once the index serves; on `index_unavailable` it moves on.
+- **Ingest:** an ingest run whose entity matching read an incomplete index completes and lists the reasons in a new `degraded` field on the run, instead of failing on one refusing index.
+- **Hosting:** on the first start after the upgrade the database container is recreated (new settings and volume), and every search index is rebuilt; recall answers with fewer records and says so until each one serves.
+
+### Fixed
+
+- **Faces:** a photo uploaded while the face index was rebuilding, or while it did not exist, was recorded as a stranger for good in a space whose gallery had labelled faces: the gallery now waits for the index instead, as the face recognition guide promised.
 
 ## [6.3.2] — 2026-11-02
 

@@ -66,7 +66,8 @@ const ALLOWED = new Map([
   ['server/src/brain/forks.ts:forksOfSpace',
     'Review\'s page: the fork rows and their parents by `$in` with a projection of the version fields, inside the list\'s read bound; the parents'
     + ' may be absent (an orphan) and the answer says so per row, which the reader\'s map would equally say, but the read is the list\'s own page.'],
-  ['server/src/brain/predicate-recall.ts:indexIsBehind',
+  // bundle-72: lifted out of `predicate-recall.ts:indexIsBehind`, which now asks it, as do recall and the face gallery.
+  ['server/src/brain/index-should-serve.ts:holdsRecordTheIndexShouldServe',
     'an existence PROBE (`findOne`, one row or none) over the ids a vector batch did not return, ANDed with a vector-'
     + 'presence and freshness predicate; the caller chunks the ids by ID_CHUNK. It asks "is any of these missing from '
     + 'the index", not for the stored copies.'],

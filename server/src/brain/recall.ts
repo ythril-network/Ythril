@@ -38,6 +38,10 @@ import { lexicalSearch, stampFusion, fuseAcrossSpaces, hybridSearchEnabled, LEXI
 import { atlasVectorScore, scoresAgree } from './vector-score.js';
 import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
 import { isIndexNotQueryableYet } from './index-not-queryable.js';
+import { holdsRecordTheIndexShouldServe } from './index-should-serve.js';
+import { isStoreUnreachable } from '../db/store-condition.js';
+import { warnOnce } from '../util/warn-once.js';
+import { MongoServerError } from 'mongodb';
 import type { ChronoStatus, RecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { log, peerText } from '../util/log.js';
@@ -90,14 +94,17 @@ export const MIN_RECALL_BUDGET_MS = 250;
 export const MIN_SEARCH_DEADLINE_MS = 100;
 
 /**
- * Await per-type searches, keeping what answered and flagging what timed out.
+ * Await per-type searches, keeping what answered and flagging what could not.
  *
  * `Promise.all` was correct while a search could only succeed or fail the whole recall. With a deadline that
  * is no longer the right shape: the integrator's stated preference is **partial results plus a truthful flag
  * over an error over hanging**, so one collection running out of time must not discard the four that
- * answered. Every other rejection still propagates — a real error is not degradation, and swallowing it here
- * would turn a broken index into a quietly shorter answer, which is the failure mode this release exists to
- * remove.
+ * answered. A collection whose vector index cannot answer over records it should serve is the same shape
+ * (`Q-326`): `recallByType` throws a {@link RecallSearchIncomplete} naming `index_not_ready` or
+ * `index_unavailable`, and the answer keeps every other collection and says which reason applies, where one
+ * broken index used to fail every space of a global recall with a 503. Every other rejection still propagates
+ * — a store that cannot answer is a store failure, not degradation, and swallowing it here would turn it into
+ * a quietly shorter answer, which is the failure mode this release exists to remove.
  */
 async function settleSearches(
   searches: Promise<RecallResult[]>[],
@@ -107,9 +114,11 @@ async function settleSearches(
   const kept: RecallResult[][] = [];
   for (const s of settled) {
     if (s.status === 'fulfilled') { kept.push(s.value); continue; }
-    if (s.reason instanceof RecallSearchTimeout) {
-      log.warn(`Recall: ${peerText(s.reason.message)} — returning a partial answer`);
-      noteDegraded('search_timeout');
+    if (s.reason instanceof RecallSearchIncomplete) {
+      // A timeout is said per search; an index reason is said where it is found (`index_unavailable` throttled per
+      // collection), because a rebuild after a recreate would otherwise put a line on every recall for minutes.
+      if (s.reason.reason === 'search_timeout') log.warn(`Recall: ${peerText(s.reason.message)} — returning a partial answer`);
+      noteDegraded(s.reason.reason);
       continue;
     }
     throw s.reason;
@@ -654,10 +663,19 @@ export function effectiveBudgetFor(maxTimeMS: number | undefined): number {
   return Math.max(MIN_RECALL_BUDGET_MS, Math.min(maxTimeMS ?? RECALL_BUDGET_MS, RECALL_BUDGET_MS));
 }
 
-/** Count a degradation on the metric AND tell the caller, once per reason. One channel, two readers. */
+/**
+ * Count a degradation on the metric AND tell the caller, once per reason. One channel, two readers.
+ *
+ * Counted ONCE per recall, not once per collection that gave it (`Q-326`, vet S11): an index being rebuilt refuses
+ * every collection of a space at once, and five increments for one recall would make the counter read collections.
+ * The caller's collector is the recall's record of what it already said, so a `recallGlobal` sharing one across its
+ * spaces counts each reason once for the whole call.
+ */
 function degradedNoter(collector: string[] | undefined): (reason: DegradedReason) => void {
+  const counted = new Set<DegradedReason>();
   return (reason) => {
-    recallDegradedTotal.labels({ reason }).inc();
+    if (!counted.has(reason) && !collector?.includes(reason)) recallDegradedTotal.labels({ reason }).inc();
+    counted.add(reason);
     if (collector && !collector.includes(reason)) collector.push(reason);
   };
 }
@@ -734,7 +752,10 @@ export async function checkDuplicates(
   try {
     // In parallel: the two halves are independent, and the check sits on a write path.
     const [hits, fresh] = await Promise.all([
-      recallByType(spaceId, type, vector, topK),
+      // An index that cannot answer is an empty index half here, not a lost fresh half: the hint stores nothing, so
+      // the reason has nobody to reach (`Q-326`, vet A-S1).
+      recallByType(spaceId, type, vector, topK)
+        .catch((e: unknown) => e instanceof RecallSearchIncomplete ? [] : Promise.reject(e)),
       // `.catch` here as well as inside, because the property being protected belongs to this composition
       // rather than to the callee: `Promise.all` rejects as a unit, so a throw from the fresh half would
       // reach the catch below and discard the index results too — turning a best-effort addition into a
@@ -838,10 +859,23 @@ function recallProjection(knowledgeType: RecallKnowledgeType): {
  * - `memo` — the matching-id sets, so the floor search and the main search over one collection read them once.
  */
 interface SearchBudget {
-  remaining: () => number;
+  /** Absent for a caller with no deadline (`findSimilar`), which still needs the reporting channel. */
+  remaining?: () => number;
   noteDegraded: (reason: DegradedReason) => void;
   memo?: PredicateIdMemo;
 }
+
+/**
+ * The bound on the holds-read a search with no deadline of its own makes after a refusal (`findSimilar`, the
+ * insert-time check): one indexed `findOne`, so 2 s is generous, and a timeout answers "holds", the safe side.
+ */
+const HOLDS_READ_MS = 2_000;
+
+/**
+ * `index_unavailable` is said once per collection per ten minutes (vet S10): the index will not serve until an
+ * operator acts, every recall in the meantime meets it, and the reason already reaches each caller on its answer.
+ */
+const indexUnavailableSaid = warnOnce<string>({ every: 10 * 60_000 });
 
 /** Run $vectorSearch against a single collection and map results to RecallResult. */
 /*
@@ -862,7 +896,7 @@ async function recallByType(
   budget?: SearchBudget,
 ): Promise<RecallResult[]> {
   /** Read before EVERY round trip: one filtered search can make several, and each must fit what is left. */
-  const deadline = (): number | undefined => budget?.remaining();
+  const deadline = (): number | undefined => budget?.remaining?.();
   const collSuffix = KNOWLEDGE_COLLECTION[knowledgeType];
   const collName = `${spaceId}_${collSuffix}`;
   // Through `liveIndexName`: while a definition change is being swapped in, the stand-in answers.
@@ -929,7 +963,8 @@ async function recallByType(
   const fileRowsNarrowed = knowledgeType === 'file';
   let primary: () => Promise<Record<string, unknown>[]>;
   let usedNativeFilter = false;
-  if (!hasFilter && !hasTags && !fileRowsNarrowed) {
+  const unfiltered = !hasFilter && !hasTags && !fileRowsNarrowed;
+  if (unfiltered) {
     primary = () => run([annStage(), ...tail]);
   } else if (fileRowsNarrowed) {
     if (hasFilter || hasTags) observe?.scanned();
@@ -966,12 +1001,37 @@ async function recallByType(
     }
   }
 
-  // A missing OR not-yet-queryable vector index means "no results from this collection", not a failure: a
-  // collection's index is built after its first record, asynchronously. Every wording mongot uses for it is
-  // `isIndexNotQueryableYet`'s to know (Q-325) — the copy that lived here missed the first one and answered 503.
-  const swallowIndexError = (err: unknown): RecallResult[] => {
-    if (isIndexNotQueryableYet(err)) return [];
-    throw err;
+  /** Does this collection hold a record its index should be serving? Asked only when the index answered nothing. */
+  const holdsServable = (): Promise<boolean> => holdsRecordTheIndexShouldServe(collName, 'embedding',
+    { maxAge: true, maxTimeMS: deadline() ?? HOLDS_READ_MS });
+
+  /*
+   * A refusal from the vector index (`Q-325`, `Q-326`). mongot tells three cases apart only by its message
+   * (`isIndexNotQueryableYet` knows the not-yet ones), and none of them says whether the collection is empty — so
+   * the holds-read decides between an empty answer and a partial one:
+   *
+   *  - no record the index should serve (a new or empty collection, or one holding only fresh writes, which the
+   *    fresh-write scan answers): an empty answer with no reason (B1, B2), whatever the refusal said;
+   *  - a not-yet refusal over such records: `index_not_ready`, the other collections answer;
+   *  - any other refusal from the store over such records (a dimension mismatch, a path not indexed as vector, a
+   *    failed index): `index_unavailable`, said once per collection per ten minutes with the index name and code,
+   *    never the driver's text. It used to be thrown, so one broken collection made every recall of every space a
+   *    503 (O6).
+   *
+   * A store that cannot answer at all (a dead mongot, a lost connection: `isStoreUnreachable`) and anything that is
+   * not the store's refusal still throw, to the store-failure classifier.
+   */
+  const answerRefusal = async (err: unknown): Promise<RecallResult[]> => {
+    if (isMaxTimeExpired(err)) throw new RecallSearchIncomplete(knowledgeType, 'search_timeout');
+    if (isStoreUnreachable(err)) throw err;
+    const notYet = isIndexNotQueryableYet(err);
+    if (!notYet && !(err instanceof MongoServerError)) throw err;
+    if (!await holdsServable()) return [];
+    if (notYet) throw new RecallSearchIncomplete(knowledgeType, 'index_not_ready');
+    indexUnavailableSaid(collName, () => log.warn(`Recall: the vector index ${peerText(indexName)} refused a search `
+      + `(code ${peerText(String((err as MongoServerError).code))}) over records it should serve — answering without `
+      + `${peerText(collName)}, flagged index_unavailable, until the index is repaired or rebuilt`));
+    throw new RecallSearchIncomplete(knowledgeType, 'index_unavailable');
   };
 
   /**
@@ -989,15 +1049,15 @@ async function recallByType(
     return col(collName).aggregate<Record<string, unknown>>(pipeline, ms != null ? { maxTimeMS: ms } : {}).toArray();
   }
 
+  let docs: Record<string, unknown>[];
   try {
-    const docs = await primary();
-    return docs.map(d => mapToRecallResult(d, knowledgeType));
+    docs = await primary();
   } catch (err) {
     // A deadline that expired is NOT an index error and must not be swallowed as an empty collection —
     // that is the difference between "this space holds nothing matching" and "we ran out of time", and
     // reporting the first when the second happened is the failure this whole release has been about. It is
     // rethrown so `recall` can count it and flag the answer as partial.
-    if (isMaxTimeExpired(err)) throw new RecallSearchTimeout(knowledgeType);
+    if (isMaxTimeExpired(err)) throw new RecallSearchIncomplete(knowledgeType, 'search_timeout');
     // If the native-filter query failed — e.g. the index has not yet been rebuilt with a
     // just-added filter field — retry on the exhaustive path, which needs no declared fields. This
     // keeps recall correct through the brief window after a schema change while the index rebuilds.
@@ -1010,15 +1070,21 @@ async function recallByType(
          * is empty and has none. Counting it reported `exhaustive` on almost every recall in a space that
          * does not hold all five record kinds, which is most of them, for a cost nobody paid.
          */
-        const docs = await predicateSearch();
-        return docs.map(d => mapToRecallResult(d, knowledgeType));
+        const retried = await predicateSearch();
+        return retried.map(d => mapToRecallResult(d, knowledgeType));
       } catch (err2) {
-        if (isMaxTimeExpired(err2)) throw new RecallSearchTimeout(knowledgeType);
-        return swallowIndexError(err2);
+        return answerRefusal(err2);
       }
     }
-    return swallowIndexError(err);
+    return answerRefusal(err);
   }
+  // An unfiltered ANN search answering NOTHING is what an absent or dropped index gives (no error, no hits: PROBE M1
+  // case (a)), and what an index lost while the process believes it built one gives for ever. Over records the index
+  // should serve it is not an empty collection (`Q-326`, O3). The filtered paths ask the same in `predicateRecall`.
+  if (unfiltered && docs.length === 0 && await holdsServable()) {
+    throw new RecallSearchIncomplete(knowledgeType, 'index_not_ready');
+  }
+  return docs.map(d => mapToRecallResult(d, knowledgeType));
 }
 
 /**
@@ -1065,16 +1131,20 @@ async function hydrateFreshHits(
 }
 
 /**
- * One collection's search hit the deadline.
+ * One collection's search could not give a complete answer: it hit the deadline (`search_timeout`), or its vector
+ * index cannot answer over records it should serve (`index_not_ready`, `index_unavailable`; `Q-326`).
  *
  * A named error rather than an empty array, because those two mean opposite things and the caller has to be
- * able to tell them apart: an empty result is an answer, a timeout is an admission. `recall` turns this into
- * a `search_timeout` flag on a partial answer instead of letting it fail the whole call.
+ * able to tell them apart: an empty result is an answer, this is an admission. `settleSearches` turns it into
+ * the reason on a partial answer instead of letting it fail the whole call. It was `RecallSearchTimeout`, for
+ * the deadline alone; an index that cannot answer is the same shape with another reason.
  */
-class RecallSearchTimeout extends Error {
-  constructor(public readonly knowledgeType: RecallKnowledgeType) {
-    super(`recall: the ${knowledgeType} search exceeded its deadline`);
-    this.name = 'RecallSearchTimeout';
+class RecallSearchIncomplete extends Error {
+  constructor(public readonly knowledgeType: RecallKnowledgeType, public readonly reason: DegradedReason) {
+    super(reason === 'search_timeout'
+      ? `recall: the ${knowledgeType} search exceeded its deadline`
+      : `recall: the ${knowledgeType} search could not be completed (${reason})`);
+    this.name = 'RecallSearchIncomplete';
   }
 }
 
@@ -1257,6 +1327,11 @@ async function getEntryEmbedding(
 export interface FindSimilarResult {
   source: RecallResult;
   results: RecallResult[];
+  /**
+   * Why the neighbours may be incomplete, in recall's closed vocabulary (`DEGRADED_REASONS`); absent when nothing
+   * is (`Q-326`). Additive: a caller that does not read it sees the answer it always did.
+   */
+  degraded?: DegradedReason[];
 }
 
 /**
@@ -1304,13 +1379,19 @@ export async function findSimilar(
   // Determine which spaces to search
   const searchSpaces = crossSpaceIds && crossSpaceIds.length > 0 ? crossSpaceIds : [spaceId];
 
-  const allResults: RecallResult[] = [];
-  for (const sid of searchSpaces) {
-    if (needsReindex(sid)) continue; // skip spaces needing reindex
-    const searches = activeTypes.map(t => recallByType(sid, t, entry.vector, fetchK));
-    const spaceResults = (await Promise.all(searches)).flat();
-    allResults.push(...spaceResults);
-  }
+  /*
+   * Every space and type settled TOGETHER, with a collector of its own (`Q-326`, vet S11, S16). Each search was
+   * awaited with `Promise.all`, so one collection whose index refused failed every space of a cross-space call, and
+   * a not-yet index read as "no neighbours" with nothing saying so. A `similar` is not a recall, so its reasons reach
+   * its caller and never `ythril_recall_degraded_total`.
+   */
+  const degraded: DegradedReason[] = [];
+  const noteDegraded = (reason: DegradedReason): void => { if (!degraded.includes(reason)) degraded.push(reason); };
+  const budget: SearchBudget = { noteDegraded };
+  const searches = searchSpaces
+    .filter(sid => !needsReindex(sid)) // skip spaces needing reindex
+    .flatMap(sid => activeTypes.map(t => recallByType(sid, t, entry.vector, fetchK, undefined, undefined, undefined, budget)));
+  const allResults = (await settleSearches(searches, noteDegraded)).flat();
 
   // Sort by score descending, exclude self-match, deduplicate
   allResults.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || byIdAsc(a, b));
@@ -1329,5 +1410,5 @@ export async function findSimilar(
   const source = mapToRecallResult(entry.doc, entryType);
   source.score = 1.0;
 
-  return { source, results: filtered };
+  return { source, results: filtered, ...(degraded.length > 0 ? { degraded } : {}) };
 }
