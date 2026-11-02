@@ -37,7 +37,7 @@
 import assert from 'node:assert/strict';
 import { mongoSkipReason, TEST_MONGO_HOST, TEST_MONGO_PORT } from './_mongo-harness.mjs';
 import { RECORD_PARTS, snapshotSpaceInOneRead, changedDocuments } from './_space-snapshot.mjs';
-import { holdCounterLock, settleWithin, setWriteBoundForTest } from './_write-faults.mjs';
+import { holdCounterLock, settleWithin, setWriteBoundForTest, eventually } from './_write-faults.mjs';
 import { sawLiveWrite } from './_active-operations.mjs';
 import { startDelayedWriteRelay } from './_delayed-write-relay.mjs';
 import { openStalledWriteDoors, seedDoorSpace, stalledWriteDoors } from './_stalled-write-doors.mjs';
@@ -78,6 +78,36 @@ const heldToTimeout = [];
 /** Did the server say, while this call waited, that the lane's own hold was ended by the bound? */
 const holdEndedByBound = (lane, startedAt, answeredAt) => !!lane.stallSaidBy && heldToTimeout.some(l => l.at >= startedAt - 50 && l.at <= answeredAt + 50
   && new RegExp(`\\bspace=${lane.space}\\b.*\\bholder=${lane.stallSaidBy.replace(/\./g, '\\.')} ended=timeout`).test(l.line));
+
+/** Is a hold open on this space's horizon, of either kind (`util/horizon-holds.ts`)? Set by `before`, from the server's own registries. */
+let holdOpenOn = () => false;
+
+/**
+ * {@link settleWithin}, its window counted from the moment the lane's write STALLED — a hold opened on the lane's space — not from the call.
+ *
+ * ## What it prevents
+ *
+ * The window is how long past the bound a stalled write may take to answer, and the bound starts at the write. A lane whose act does work of its own
+ * before it reaches the stall (a file move: its plan, its pending tombstones, the holds on its jobs, the bytes; only then does the carry meet the lock)
+ * spent that work inside the window while it was counted from the call. On a loaded CI runner (PR #1576, run 41374067183) the move's work before its
+ * hold took over 1.7 s and the hold the bound ended took 1.8 s, so the lane read "no bound ended it" while the server had said it did
+ * (`record position held 1.8s space=landlane26 … holder=file.move ended=timeout`). The work before the stall is still held to the window: a call that
+ * opens no hold within it is counted from the call, as before.
+ *
+ * @returns {Promise<{ settled: boolean, fromStall: boolean, ok?: boolean, value?: unknown, error?: unknown, rest: Promise<unknown> }>}
+ */
+async function settleFromStall(call, space, ms) {
+  const started = Date.now();
+  let answered = false;
+  let stalledAt = null;
+  call.then(() => { answered = true; }, () => { answered = true; });
+  await eventually(() => {
+    if (stalledAt === null && holdOpenOn(space)) stalledAt = Date.now();
+    return answered || stalledAt !== null;
+  }, ms, 10);
+  const res = await settleWithin(call, Math.max(0, (stalledAt ?? started) + ms - Date.now()));
+  return { ...res, fromStall: stalledAt !== null };
+}
 
 /** Filled by `before`; the doors and the holder cases read them when they run. */
 const env = {};
@@ -144,7 +174,7 @@ async function stallAndRelease(lane) {
     const started = Date.now();
     startedAt = started;
     watching = sawLiveWrite(env.fixture.mongo, lane.collection, () => answered);
-    res = await settleWithin(Promise.resolve().then(lane.call), CAP_MS);
+    res = await settleFromStall(Promise.resolve().then(lane.call), lane.space, CAP_MS);
     answered = true;
     answeredAt = Date.now();
     res.elapsedMs = answeredAt - started;
@@ -190,6 +220,7 @@ async function finishOnce(lane, rep, ran) {
       ? answered5xx.filter(l => l.at >= ran.startedAt - 50 && l.at <= ran.answeredAt + 50 && new RegExp(`\\b${lane.space}\\b`).test(l.line)).map(l => l.line.slice(0, 300)) : [],
     thrown: ran.res?.settled && !ran.res.ok ? `${ran.res.error?.name}: ${String(ran.res.error?.message).slice(0, 200)}` : null,
     releaseError: ran.releaseError ? String(ran.releaseError.message ?? ran.releaseError) : null,
+    fromStall: !!ran.res?.fromStall,
     landed: ran.atAnswer ? await watchForLanding(lane, ran.atAnswer) : [],
   };
 }
@@ -360,6 +391,11 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
     });
 
 
+    it('a stalled call\'s window is counted from its stall: the lanes\' holds were seen opening (util/horizon-holds.ts horizonHoldsForTest)', () => {
+      const all = results.flat();
+      assert.ok(all.some(r => r.fromStall), `none of ${all.length} repetitions saw its lane's hold open — the server's hold registries were not reached, so every window was counted from the call again`);
+    });
+
     for (const [i, lane] of lanes.entries()) {
       it(`${lane.name}: nothing it would have written lands after the answer (${REPS} repetitions)`, (t) => {
         const rs = results[i];
@@ -367,6 +403,8 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
           t.diagnostic(`${lane.name}: attempt ${r.attempt} of #${r.rep} proved nothing and was run again — answered after ${r.elapsedMs} ms (${r.thrown ?? r.status}), no write alive on ${lane.collection}: ${r.said || r.thrown}; the server said: ${r.serverSaid.join(' | ') || 'nothing'}`);
         }
         assert.equal(rs.length, REPS, `only ${rs.length} of ${REPS} repetitions ran — ${seamError ? 'no seam' : 'the experiment stopped'}`);
+        const took = rs.filter(r => r.answered).map(r => r.elapsedMs).sort((a, b) => a - b);
+        if (took.length > 0) t.diagnostic(`${lane.name}: answered ${took[0]}..${took[took.length - 1]} ms after the call; ${rs.filter(r => r.fromStall).length} of ${rs.length} windows counted from the stall`);
         if (clientTimeoutMs !== undefined) {
           const early = rs.filter(r => r.answered && r.elapsedMs < clientTimeoutMs + CLOCK_WINDOW_MS);
           assert.deepEqual(early.map(r => `#${r.rep}: answered after ${r.elapsedMs} ms`), [],
@@ -414,6 +452,8 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
       Object.assign(ctx, { door: env.door, fixture: env.fixture, mods: await loadHolderModules() });
       try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; return; }
       relay.setDelay(lateByMs);
+      const { horizonHoldsForTest } = await import('../../server/dist/util/horizon-holds.js');
+      holdOpenOn = (space) => horizonHoldsForTest().some(h => h.lowest(space) !== undefined);
       const { subscribeLogLines } = await import('../../server/dist/util/log.js');
       stopListening = subscribeLogLines((line) => {
         if (/answered 5\d\d/.test(line)) { answered5xx.push({ at: Date.now(), line }); if (answered5xx.length > 500) answered5xx.shift(); }
