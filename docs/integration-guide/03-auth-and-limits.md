@@ -222,8 +222,8 @@ to correct. The information is identical; only the envelope differs.
 | Scope | Limit | Keyed by | Applies To |
 |---|---|---|---|
 | Auth | 10 / min | source IP | Token creation, setup, invite/apply |
-| Global | 300 / min | client | All authenticated endpoints — the pre-auth backstop |
-| Per token | 300 / min by default, **settable** | token id | All authenticated endpoints, once the token is resolved |
+| Global | 300 / min | client | Requests with no credential — the pre-auth backstop |
+| Per token | 1 200 / min by default (300 before 6.4), **settable** | token id | All authenticated endpoints, once the token is resolved |
 | Sync | 2 000 / min | client (peer) | Sync API endpoints |
 | Notify | 60 / min | client | `GET /api/notify`, `POST /api/notify` |
 | Bulk wipe | 5 / min | client | `POST /api/delete_space_data` |
@@ -278,7 +278,7 @@ Added in 3.3.0. The number a token gets is resolved in this order:
 
 1. the token's own `rateLimitPerMinute`, set by an instance admin, or by a space admin for a token in scope;
 2. `YTHRIL_RATE_LIMIT_PER_MINUTE`, set by whoever runs the instance;
-3. **300 / min**, which is what the global limiter has always allowed.
+3. **1 200 / min** (300 before 6.4). A request with no credential stays at the global limiter's 300.
 
 So an instance that configures neither tier behaves exactly as it did before.
 
@@ -320,8 +320,8 @@ unbounded number of buckets. You should never see it in normal operation.
 Rate limit headers follow the IETF draft-7 format: a single combined `RateLimit` header plus a `RateLimit-Policy` header (the legacy draft-6 `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset` headers are not emitted):
 
 ```text
-RateLimit: limit=300, remaining=297, reset=42
-RateLimit-Policy: 300;w=60
+RateLimit: limit=1200, remaining=1197, reset=42
+RateLimit-Policy: 1200;w=60
 Retry-After: 42
 ```
 

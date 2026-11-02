@@ -25,8 +25,7 @@
  *
  *   1. the token's own `rateLimitPerMinute`, set by an instance admin, or a space admin for a token in scope;
  *   2. `YTHRIL_RATE_LIMIT_PER_MINUTE`, set by infra;
- *   3. `DEFAULT_PER_MINUTE`, which is the number the global limiter has always used — so an instance that sets
- *      nothing behaves exactly as it does today.
+ *   3. `DEFAULT_PER_MINUTE`, never below what the global limiter allows a request with no credential.
  *
  * ## The infra value is a CEILING, not just a default
  *
@@ -40,12 +39,13 @@ import { envIntOpt } from '../config/env-num.js';
 import type { TokenRecord } from '../config/types.js';
 
 /**
- * What the global limiter has always allowed, and therefore what an instance that configures nothing gets.
+ * What an instance that configures nothing gives a token with no limit of its own: 1200 a minute since 6.4, raised
+ * from 300 on the owner's order (Q-692), because 300 throttled ordinary agent sessions.
  *
- * Kept equal to `globalRateLimit`'s `max` on purpose: the per-token limiter is a second gate on the same
- * traffic, so a lower default here would silently tighten every existing deployment.
+ * Never below `globalRateLimit`'s `max` (300, the cap for a request with no credential; a gate holds the order), and
+ * never lowered: a lower default would silently tighten every existing deployment on upgrade.
  */
-export const DEFAULT_PER_MINUTE = 300;
+export const DEFAULT_PER_MINUTE = 1200;
 
 /** The window both limiters count over. One minute, stated once so the two cannot drift. */
 export const WINDOW_MS = 60_000;

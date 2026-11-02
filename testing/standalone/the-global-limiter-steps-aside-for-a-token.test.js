@@ -123,21 +123,19 @@ describe('what a token is granted is what it gets', () => {
       'the per-token limit must still come from the resolved record');
   });
 
-  it('a token that was granted NOTHING sees the same number as before', async () => {
+  it('a token that was granted NOTHING is never held tighter than an anonymous request', async () => {
     /*
-     * The guarantee that makes this invisible to every existing deployment, and it is not a coincidence:
-     * `DEFAULT_PER_MINUTE` was deliberately kept equal to `globalRateLimit`'s max, so a token with no
-     * `rateLimitPerMinute` and an instance with no `YTHRIL_RATE_LIMIT_PER_MINUTE` resolves to exactly the
-     * number the global limiter used to impose.
-     *
-     * So the cap only LIFTS where somebody explicitly granted more — which is the whole defect — and the
-     * Docker gate that bursts 300 requests with a bearer token still gets its 429, from the other limiter.
+     * Until 6.4 `DEFAULT_PER_MINUTE` was kept equal to `globalRateLimit`'s max, so a token with no
+     * `rateLimitPerMinute` on an instance with no `YTHRIL_RATE_LIMIT_PER_MINUTE` got exactly the number the global
+     * limiter used to impose. 6.4 raised the token default to 1200 on the owner's order (Q-692) and kept the
+     * anonymous cap at 300, so the rule is now an order: a token never gets less than a caller with no credential,
+     * and the default never drops below it, which would silently tighten every ungranted token on upgrade.
      */
     const { DEFAULT_PER_MINUTE, resolveLimitFor } = await import('../../server/dist/rate-limit/per-token.js');
     const mw = MW();
     const globalMax = /max: (\d+)/.exec(bodyOf(mw, 'globalRateLimit'))?.[1];
-    assert.equal(Number(globalMax), DEFAULT_PER_MINUTE,
-      'the two numbers have drifted, so this change silently moves the limit for every ungranted token');
+    assert.ok(DEFAULT_PER_MINUTE >= Number(globalMax),
+      `a token's default (${DEFAULT_PER_MINUTE}) fell below the anonymous cap (${globalMax}): every ungranted token is tightened`);
     assert.equal(resolveLimitFor(undefined), DEFAULT_PER_MINUTE);
     assert.equal(resolveLimitFor({}), DEFAULT_PER_MINUTE);
   });

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Limits:** the default rate limit is 1200 requests a minute per token, up from 300. A token's own limit and `YTHRIL_RATE_LIMIT_PER_MINUTE` still win; a request with no credential stays at 300.
 - **Faces:** an image whose face gallery cannot answer yet, in a space with a labelled face, is deferred: it runs again a minute later without spending a retry, and reuses its stored caption. Deferral stops after 30 minutes; the face is then stored unlabelled.
 - **Faces:** a face index that refuses every search (for example one of another width) stores the face unlabelled at once, and the image job completes.
 - **Recall:** a recall over records whose vector index is absent or still being built now carries `degraded: ["index_not_ready"]` and keeps what recent writes, keyword search and other collections found. A new or empty collection answers with no reason.
