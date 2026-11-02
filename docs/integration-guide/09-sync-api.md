@@ -120,7 +120,7 @@ reported as `timeout`, not stopped; every network is waited for and reported wit
 does not hide the others), and the answer's `outcome` is the verdict over all of them.
 
 `errors` (REST and the MCP `network_sync` result alike) counts the members whose outcome is `failed` or
-`local-fault`; `refused` counts the networks in which a member's turn was ended because the peer is too old (it answered in the 5.x shape, or is below the version floor): nothing was exchanged with it and no failure was counted against it (it is shown as too old, `peer-too-old` in `members`).
+`local-fault`; `refused` counts the members whose turn was ended because the peer is too old (it answered in the 5.x shape, or is below the version floor): nothing was exchanged with it and no failure was counted against it (it is shown as too old, `peer-too-old` in `members`). Every waited answer carries it, on every door (the dedicated network door, the peer door, the generic door and MCP, for a network, a peer or all networks), `0` when no member was too old.
 
 The peer id must be an exact `instanceId` of a configured member, as `GET /api/networks` returns — never a
 URL and never a label. An id belonging to no network is refused `404`, because an unvalidated value would

@@ -108,6 +108,14 @@ export function syncVerdict(members: readonly Pick<MemberResult, 'outcome'>[]): 
   return { outcome: 'partial', ok: false, status: 200 };
 }
 
+/**
+ * How many members a cycle ended because the peer is too old (`peer-too-old`: it answered in the 5.x shape or is below the version floor). The
+ * one definition of the `refused` every waited answer carries, so no door counts it by hand and a door cannot leave it out (`verdictFields`).
+ */
+export function refusedMemberCount(members: readonly Pick<MemberResult, 'outcome'>[]): number {
+  return members.filter(m => m.outcome === 'peer-too-old').length;
+}
+
 /** The word a history row and the cycle metric record for a verdict: a shutdown is no sync result, so an interrupted cycle is `partial` there. */
 export function cycleStatusOf(verdict: SyncVerdict): CycleStatus {
   return verdict.outcome === 'interrupted' ? 'partial' : verdict.outcome;

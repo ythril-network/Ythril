@@ -83,7 +83,15 @@ async function readVerdict(resp: Pick<Response, 'clone'>): Promise<TransferRefus
  * registers) and the process's shutdown signal (bundle-39 D5 v6 S2: a batch fetch would otherwise outlive the drain),
  * whichever fires first. Without a turn, the request's own and shutdown's.
  */
-export function turnSignal(own: AbortSignal | null | undefined, turn: ExchangeTurn | undefined): AbortSignal | undefined {
-  const signals = [own ?? undefined, turn?.signal, shutdownSignal()].filter((s): s is AbortSignal => s !== undefined);
-  return signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+export function turnSignal(own: AbortSignal | null | undefined, turn: ExchangeTurn | undefined): AbortSignal {
+  return AbortSignal.any([own ?? undefined, turn?.signal, shutdownSignal()].filter((s): s is AbortSignal => s !== undefined));
+}
+
+/**
+ * The signal a fetch that belongs to no space's turn takes (the warm-up, the governance gossip, the vote and change-note deliveries, each cycle's own
+ * 10 s / 60 s timeout as `own`): the request's own and the process's shutdown signal, whichever fires first. Without it only the fetch's timeout ended
+ * such a fetch, so a cycle held in one outlived the shutdown's wait (bundle-39 D5: every peer fetch a cycle makes is cut when shutdown begins).
+ */
+export function shutdownBoundSignal(own: AbortSignal): AbortSignal {
+  return AbortSignal.any([own, shutdownSignal()]);
 }

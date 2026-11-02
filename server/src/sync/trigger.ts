@@ -68,7 +68,7 @@ import { log, peerText } from '../util/log.js';
 import { sendCaughtFailure } from '../api/send-failure.js';
 import { withinTimeBound, isTimeBoundEnded } from '../util/time-bound.js';
 import { isShuttingDown } from '../lifecycle.js';
-import { MEMBER_OUTCOMES, syncVerdict, type MemberResult, type SyncVerdict } from './cycle-outcome.js';
+import { MEMBER_OUTCOMES, refusedMemberCount, syncVerdict, type MemberResult, type SyncVerdict } from './cycle-outcome.js';
 
 /** What a synchronous trigger says when its cycle failed for a reason that is not the store's: the reason is in the server log, never in the body. */
 const SYNC_FAILED_TEXT = 'The sync cycle failed; the reason is in the server log.';
@@ -111,11 +111,11 @@ export interface SyncAnswer {
 /**
  * The fields every waited answer carries about the cycle, from the ONE verdict (`syncVerdict`, bundle-39 D2): `ok` is true only when every
  * member synced, `outcome` is the cycle's word, `code` the refusal code a 502 / 503 carries, `members` each member's own outcome with OUR
- * sentence as its reason (never the driver's or the peer's text). The dedicated REST doors, the generic one and MCP all spread this, so the
+ * sentence as its reason (never the driver's or the peer's text), `refused` the members the peer's age ended (`peer-too-old`). The dedicated REST doors, the generic one and MCP all spread this, so the
  * same cycle reads the same on each (owner, 2026-11-01: "how can they differ? its different doors to the same house??").
  */
-export function verdictFields(verdict: SyncVerdict, members: MemberResult[]): { ok: boolean; outcome: SyncVerdict['outcome']; code?: string; members: MemberResult[] } {
-  return { ok: verdict.ok, outcome: verdict.outcome, ...(verdict.code ? { code: verdict.code } : {}), members };
+export function verdictFields(verdict: SyncVerdict, members: MemberResult[]): { ok: boolean; outcome: SyncVerdict['outcome']; code?: string; refused: number; members: MemberResult[] } {
+  return { ok: verdict.ok, outcome: verdict.outcome, ...(verdict.code ? { code: verdict.code } : {}), refused: refusedMemberCount(members), members };
 }
 
 /**
@@ -238,7 +238,7 @@ export async function peerSyncOutcome(peerId: string, opts: { wait: boolean }): 
     const verdict = syncVerdict(r.members);
     return {
       status: verdict.status,
-      body: { status: 'completed', peerId, wait: true, networksSynced: r.networksSynced, errors: r.errors, refused: r.refused, notFound: r.notFound, ...verdictFields(verdict, r.members) },
+      body: { status: 'completed', peerId, wait: true, networksSynced: r.networksSynced, errors: r.errors, notFound: r.notFound, ...verdictFields(verdict, r.members) },
       detail: { ...r, verdict },
     };
   } catch (err) {

@@ -16,11 +16,12 @@
  */
 
 import { getConfig, saveConfig, saveConfigSoon, getSecrets } from '../config/loader.js';
-import { CycleOutcome, REASONS, cycleStatusOf, type MemberResult, type SyncVerdict } from './cycle-outcome.js';
+import { CycleOutcome, REASONS, cycleStatusOf, refusedMemberCount, type MemberResult, type SyncVerdict } from './cycle-outcome.js';
 import { isShuttingDown } from '../lifecycle.js';
 import { boundedJson } from '../util/bounded-read.js';
 import { col, asFilter } from '../db/mongo.js';
 import { deliverChangeNotes } from './change-notes.js';
+import { shutdownBoundSignal } from './held-answer.js';
 import { recordSyncResult, type SyncSchemaRecording } from './history.js';
 import { mergeSummaries, NOTHING_RECORDED, type RecordedSummary } from './arrival-recording.js';
 import type { SyncHeldSpace, SyncDeclinedSpace } from './history.js';
@@ -261,8 +262,7 @@ export async function runSyncForPeer(peerId: string): Promise<PeerCycleResult> {
   await inCycle(async () => {
     for (const { net, member } of matches) await cycle.runMember(net, member, () => runSyncForMember(net, member));
   });
-  const refused = cycle.members.filter(m => m.outcome === 'peer-too-old').length;
-  return { networksSynced: cycle.synced, errors: cycle.errors, refused, notFound: false, members: cycle.members, outcome: cycle.verdict().outcome };
+  return { networksSynced: cycle.synced, errors: cycle.errors, refused: refusedMemberCount(cycle.members), notFound: false, members: cycle.members, outcome: cycle.verdict().outcome };
 }
 
 /** What a network cycle answers: the members synced and errored, each member's outcome, and the cycle's verdict word (`syncVerdict`). */
@@ -294,8 +294,8 @@ async function runSyncForMember(
   // Build fresh RequestInit per call so each fetch gets its own AbortSignal.
   // Sharing one AbortSignal.timeout() across sequential fetches starves later
   // requests because the timer starts at creation time, not at fetch time.
-  const fetchOpts = (): RequestInit => ({ headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  const batchFetchOpts = (): RequestInit => ({ headers, signal: AbortSignal.timeout(BATCH_FETCH_TIMEOUT_MS) });
+  const fetchOpts = (): RequestInit => ({ headers, signal: shutdownBoundSignal(AbortSignal.timeout(FETCH_TIMEOUT_MS)) });
+  const batchFetchOpts = (): RequestInit => ({ headers, signal: shutdownBoundSignal(AbortSignal.timeout(BATCH_FETCH_TIMEOUT_MS)) });
 
   // ── Presync warm-up ────────────────────────────────────────────────────
   // Ask the peer to eagerly warm its embedding model, bcrypt token cache,

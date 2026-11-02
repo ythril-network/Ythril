@@ -217,6 +217,7 @@ describe('shutdown lets a running sync stop at its page', { skip }, () => {
       positioned(build.entity(S, `se-${i + 1}`, ENTITY_POS + i, { author: PEER_AUTHOR }))));
     setMark(door, 'received', S, SENTINEL);
     door.state.family = pagedAtOne();
+    door.state.network = null;
   });
 
   /**
@@ -328,5 +329,32 @@ describe('shutdown lets a running sync stop at its page', { skip }, () => {
     assert.equal(dbOpen(), false, 'the database is still open: this is not the whole sequence');
     for (const [label, call] of doors) assertRefusedForShutdown(`${label} (after the database closed)`, await answerOf(label, call));
     assert.equal(factRequests(), fetchedBefore, 'a trigger after the database closed fetched a page');
+  });
+
+  it('a cycle held in a fetch BEFORE any page (the governance gossip, which the peer never answers) is cut by the shutdown, not by its own 10 s timeout: answered interrupted / 503 shutting_down, the member not failed', async () => {
+    need();
+    let asked = 0;
+    // The peer takes the connection and says nothing: the first governance fetch of the cycle (our self-record to it) is held for as long as the fetch lives.
+    door.state.network = () => { asked++; return new Promise(() => {}); };
+    const res = fakeRes();
+    const answered = trigger.triggerNetworkSync(res, door.NET, { wait: true, timeoutMs: trigger.syncTimeoutMs(120_000) }).then(() => res);
+    await waitFor(() => asked > 0, 15_000, 20, undefined, { what: 'the cycle to be held in its first governance fetch' });
+    const { down, seen } = beginTheShutdown();
+    await waitFor(() => lifecycle.isShuttingDown(), 5_000, 10, undefined, { what: 'the shutdown to begin' });
+    // The pre-sync fetches carry no page, so only the shutdown signal can end them early: well inside the cycle wait (5 s) and the fetch's own timeout (10 s).
+    const r = await settleWithin(answered, 2_500);
+    const dbOpenAtAnswer = r.settled ? dbOpen() : null;
+    const end = await settleWithin(down, 8_000);
+    await reopen();
+    assert.equal(r.settled, true, 'the waiting caller was not answered within 2.5 s of the shutdown beginning: the cycle held in a pre-sync fetch outlives the shutdown (that fetch does not carry the shutdown signal)');
+    assert.equal(dbOpenAtAnswer, true, 'the database was closed before the held cycle was answered');
+    assert.equal(end.settled, true, 'the shutdown did not finish');
+    assert.deepEqual(seen.exits, [0]);
+    assert.equal(r.value.code, 503, `the waiting caller was answered ${r.value.code} ${JSON.stringify(r.value.body)}`);
+    assert.equal(r.value.body.code, 'shutting_down');
+    assert.equal(r.value.body.outcome, 'interrupted');
+    assert.equal(r.value.body.members?.[0]?.outcome, 'interrupted', `the member says ${JSON.stringify(r.value.body.members?.[0])}: a fetch the shutdown aborted is nobody's failure`);
+    assert.equal(door.member().consecutiveFailures, 4, `the member's failure count moved to ${door.member().consecutiveFailures}`);
+    assert.equal(factRequests(), 0, 'the cycle fetched a page after the shutdown began');
   });
 });
