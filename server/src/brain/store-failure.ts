@@ -250,9 +250,8 @@ export function classifyReadFailure(err: unknown): ReadFailure {
   return {
     status: 503,
     retryable: true,
-    // Short, because the condition clears in seconds when it is a blip (a rebuilding vector index is no longer a 503:
-    // recall answers it `index_not_ready`) and a database that stays down is the operator's to repair — a number that
-    // pretends to know which would be worse than a small one plus `retryable`.
+    // Short, because the condition clears in seconds when it is a blip and in hours when an index is
+    // rebuilding — a number that pretends to know which would be worse than a small one plus `retryable`.
     retryAfterSeconds: 5,
     // In our words; the store's code below is the stable identifier, and the driver's text is the log's.
     error: STORE_FAILURE_MESSAGE,
