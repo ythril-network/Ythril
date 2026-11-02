@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.3.2] — 2026-11-02
+
+**A patch release: the space-schema vocabulary and its validator are the `@ythril/schema` package, and the schema dry run refuses a `$ref` to a missing or wrong-kind library entry as the save does.**
+
+| Changes on upgrade | Action |
+|---|---|
+| The schema dry run (`POST /api/spaces/:id/validate-schema`) answers `422` with the save's sentence for a `$ref` to a missing library entry or one of another kind; it answered `200` | Handle `422` |
+| `ToolRefusal` statuses on MCP `schema_validate` gain `422` (they were 400, 403, 404, 409, 410, 429) | Handle the status |
+
 ### Added
 
 - **Schema:** `@ythril/schema` (in `schema/`) carries the space-schema types, limits and validator: `validateSpaceMeta` checks a space meta offline with the server's own refusals. The server imports it.
