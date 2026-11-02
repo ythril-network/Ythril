@@ -24,7 +24,7 @@ import { budgetSizeSchema } from './_page-budget-schema.js';
 export const schema_validateTool: ToolHandler = {
   name: 'schema_validate',
   description: 'Check a schema against records without writing anything — the space\'s stored schema, or one you propose in `meta` '
-    + '(parsed exactly as a schema save would parse it, so a rule the save would refuse is refused here in the same words). '
+    + '(parsed exactly as a schema save would parse it, so a rule the save would refuse is refused here in the same words, a `$ref` to a missing or wrong-kind schema-library entry included: 422, as on the save). '
     + 'Needs the `read` rung on the `schema` area of the space — and a check (a `sample`, or the stored-data check) that runs rules in a '
     + 'proposed `meta` needs the right to SAVE those rules (`admin` on `schema`): it runs only the stored rules, or rules you could save, and is otherwise refused '
     + '(403) naming each rule field and what it needs. A proposed `meta` whose rules equal the stored ones is not a change of them.\n\n'

@@ -90,7 +90,7 @@ note saying which types were kept, and each can retire a type locally.
   ([Error Format](03-auth-and-limits.md#error-format)). A rule this instance could not apply is refused here too, with
   the rule's name in the issue path ([Rules](#rules)).
 - `404` — space not found.
-- `422` — one or more `$ref` values point at non-existent schema-library entries.
+- `422` — a `$ref` names a schema-library entry that does not exist, or one filed under another knowledge type. The same `422` answers a schema save on every door and the dry run (`POST /api/spaces/:id/validate-schema`, MCP `schema_validate`).
 
 ---
 

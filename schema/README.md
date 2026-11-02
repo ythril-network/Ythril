@@ -112,23 +112,30 @@ if (!r.ok) console.error(r.refusal.error, r.refusal.issues);
 
 | export | what it is |
 | --- | --- |
-| `SpaceMeta`, `TypeSchema`, `PropertySchema`, `SchemaRule`, `SpaceSchemaRule`, `KnowledgeType`, `ValidationMode`, `MergeFn`, `DatePassedPolicy` | the types |
+| `SpaceMeta`, `TypeSchema`, `PropertySchema`, `SchemaRule`, `SpaceSchemaRule`, `KnowledgeType`, `ValidationMode`, `MergeFn`, `NumericMergeFn`, `BooleanMergeFn`, `DatePassedPolicy` | the schema types |
 | `KNOWLEDGE_TYPES`, `MERGE_FNS`, `NUMERIC_MERGE_FNS`, `BOOLEAN_MERGE_FNS`, `DATE_PASSED_VALUES` | the runtime tuples the types derive from |
-| `SPACE_PURPOSE_MAX`, `SCHEMA_DESCRIPTION_MAX`, `PROPERTY_DESCRIPTION_MAX`, `MAX_RULE_LENGTH`, `MAX_MESSAGE_LENGTH`, `MAX_RULES_PER_TYPE`, `MAX_RULES_PER_SPACE`, `MAX_APPLICABLE_RULES`, `RULE_NAME_PATTERN`, `MAX_PATTERN_LENGTH` | the limits an editor shows a counter for |
-| `SpaceMetaBody`, `TypeSchemasZ`, `TypeSchemaZ`, `InlineTypeSchemaZ`, `PropertySchemaZ`, `TypeRuleZ`, `SpaceRuleZ` | the zod bodies (zod 4) |
+| `SPACE_PURPOSE_MAX`, `SCHEMA_DESCRIPTION_MAX`, `PROPERTY_DESCRIPTION_MAX`, `MAX_RULE_LENGTH`, `MAX_MESSAGE_LENGTH`, `MAX_RULES_PER_TYPE`, `MAX_RULES_PER_SPACE`, `MAX_APPLICABLE_RULES`, `RULE_NAME_PATTERN`, `MAX_PATTERN_LENGTH`, `LONGEST_CHECKED_STRING` | the limits an editor shows a counter for |
+| `NAME_QUOTED`, `LOG_VALUE_MAX`, `REFUSAL_NAMES_MAX`, `MAX_UNKNOWN_NAMES` | how much of a caller's text, and how many names, a refusal shows before it cuts and counts the rest |
+| `SpaceMetaBody`, `TypeSchemasZ`, `TypeSchemaZ`, `InlineTypeSchemaZ`, `PropertySchemaZ`, `EndpointMemberZ`, `TypeRuleZ`, `SpaceRuleZ` | the zod bodies (zod 4) |
 | `parseSpaceMeta`, `parseTypeSchema`, `parseInlineDefinition`, `validateSpaceMeta` | the parses |
-| `libraryRefRefusal`, `withSchemaLibrary`, `libraryDefinitionOf`, `libraryEntryNameOf` | the schema library: the `$ref` refusal, a scoped library, an entry's definition, the entry a reference names |
-| `hasReDoSRisk`, `typeRuleIssues`, `spaceRuleIssues` | single checks: a pattern the server would refuse to run, a rule it could not apply |
-| `refusalOfParse`, `peerText` | how a refusal is worded |
+| `ParsedSpaceMeta`, `ParsedTypeSchema`, `MetaParse`, `MetaParseOptions`, `ValidateSpaceMetaOptions` | what the parses answer and the options they take |
+| `libraryRefRefusal`, `withSchemaLibrary`, `currentSchemaLibrary`, `libraryDefinitionOf`, `libraryEntryNameOf`, `takeBackLibraryDefinition`, `libraryDeletePathProblem` | the schema library: the `$ref` refusal, a scoped library and the one a parse reads now, an entry's definition, the entry a reference names, a round-tripped `$ref` taken back to its entry, why a `deleteFields` path names nothing |
+| `LIBRARY_REF_PREFIX`, `LIBRARY_SCHEMA_KEYS` | the prefix a library reference carries (`library:`) and the keys an entry's schema can hold |
+| `SchemaLibraryEntryLike`, `SchemaLibrarySource`, `WrongKindLibraryRef` | the library's types: an entry as a parse reads it, where a parse gets its entries, a `$ref` to an entry of another kind |
+| `META_FIELD_KINDS`, `PER_TYPE_META_FIELD`, `SERVER_OWNED_META_FIELDS`, `metaFieldKind`, `unknownMetaFields`, `stripServerOwnedMeta`, `MetaFieldKind` | the fields of a meta: the kind of each, the ones a server owns and a request drops, the names a tolerant read reports |
+| `VIEW_FIELDS`, `ALL_VIEW_FIELDS`, `ViewField`, `ViewKind` | what `self` holds in a rule, per kind |
+| `hasReDoSRisk`, `REDOS_REFUSAL`, `typeRuleIssues`, `spaceRuleIssues`, `applicableRuleIssues`, `ruleMapIssues`, `collectionScopeIssues`, `readingStoredRules`, `RuleIssue`, `ChangedRuleParts` | single checks: a pattern the server would refuse to run and its wording, a rule it could not apply, the rules that apply to one record, a rules map's shape, a field that does not belong under `collection`, a read of a stored meta with the save-time rule checks off |
+| `refusalOfParse`, `peerText`, `peerList`, `unrecognizedKeysIssue`, `ParseRefusal`, `ParseRefusalIssue`, `ParseRefusalOptions`, `ParseIssueLike` | how a refusal is worded, and its shape |
 
 The entry's names are a fixed list, held by a test in the Ythril repository: a new export is a decision, not a side effect.
+This table names every one of them, and a second test holds the table to that list.
 `@ythril/schema/internal` exists for the Ythril server (its merges, its reads of a peer's and a stored meta, its library
 installer) and moves with it; an app should not import it.
 
 ## Versions
 
-The package is versioned with the Ythril release it was cut from: `@ythril/schema@6.3.1` validates what a 6.3.1 server
-accepts. A newer server may accept a field an older package refuses; validate against the package of the oldest server you
+The package is versioned with the Ythril release it was cut from: `@ythril/schema@6.3.2` validates what a 6.3.2 server
+accepts. The package is first published with 6.3.2. A newer server may accept a field an older package refuses; validate against the package of the oldest server you
 write to.
 
 ## Licence

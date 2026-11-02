@@ -8,13 +8,13 @@ status of each, and why Ythril's PolyForm Small Business License obligations are
 ## Node.js packages
 
 Ythril is an npm-workspaces monorepo: the **root** `package.json` declares no runtime
-dependencies of its own — they live in `server/package.json`
-and `client/package.json`. The attribution-requiring packages
-across both workspaces are reproduced in `NOTICE`. They are MIT, Apache 2.0,
+dependencies of its own — they live in `server/package.json`,
+`client/package.json` and `schema/package.json`. The attribution-requiring packages
+across the three workspaces are reproduced in `NOTICE`. They are MIT, Apache 2.0,
 0BSD, BSD-3-Clause, or ISC licensed.
 
 The third workspace, `schema/` (`@ythril/schema`, the schema vocabulary and validator the server imports), is published to
-npm under the Apache License 2.0. Its runtime dependencies (zod, `@bufbuild/cel` and what it pulls in) are the server's own,
+npm with each release, from 6.3.2, under the Apache License 2.0. Its runtime dependencies (zod, `@bufbuild/cel` and what it pulls in) are the server's own,
 at the same versions, and are named again in `schema/NOTICE`, which a gate holds to the package's production closure.
 
 **Two packages are dual-licensed with a copyleft arm**, and Ythril elects the permissive arm in both. A dual grant

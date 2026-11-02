@@ -11,13 +11,14 @@
  *
  * ## What is held
  *
- * - The app entry's VALUE names (`Object.keys` of the built `schema/dist/index.js`) equal {@link APP_VALUES}.
+ * - The app entry's VALUE names (`Object.keys` of the built `schema/dist/index.js`) equal `APP_VALUES`.
  * - Its TYPE names (the TypeScript checker's `getExportsOfModule` over `schema/dist/index.d.ts`, the names with no value) equal
- *   {@link APP_TYPES}. `Object.keys` cannot see a type, and `export *` hands types on as silently as values.
+ *   `APP_TYPES`. `Object.keys` cannot see a type, and `export *` hands types on as silently as values.
  * - The server-only helpers are absent from `.` and present in `./internal`; `libraryRefRefusal` (what `validateSpaceMeta` runs) and
  *   `withSchemaLibrary` (how an app scopes a library) are in `.`.
  *
- * A new public name is a deliberate edit of a list below, made in the same change as the export.
+ * A new public name is a deliberate edit of a list in `_schema-app-entry-names.mjs`, made in the same change as the export; the package README's
+ * export table is held to the same lists by `the-schema-readme-names-every-name-of-the-app-entry.test.js`.
  *
  * Run: node --test testing/standalone/the-schema-packages-app-entry-names-a-fixed-surface.test.js
  * (requires a prior `npm run build -w @ythril/schema`)
@@ -28,28 +29,7 @@ import { join } from 'node:path';
 import ts from 'typescript';
 import * as app from '../../schema/dist/index.js';
 import * as internal from '../../schema/dist/internal.js';
-
-/** The app entry's values. */
-const APP_VALUES = [
-  'ALL_VIEW_FIELDS', 'BOOLEAN_MERGE_FNS', 'DATE_PASSED_VALUES', 'EndpointMemberZ', 'InlineTypeSchemaZ', 'KNOWLEDGE_TYPES',
-  'LIBRARY_REF_PREFIX', 'LIBRARY_SCHEMA_KEYS', 'LOG_VALUE_MAX', 'LONGEST_CHECKED_STRING', 'MAX_APPLICABLE_RULES', 'MAX_MESSAGE_LENGTH',
-  'MAX_PATTERN_LENGTH', 'MAX_RULES_PER_SPACE', 'MAX_RULES_PER_TYPE', 'MAX_RULE_LENGTH', 'MAX_UNKNOWN_NAMES', 'MERGE_FNS',
-  'META_FIELD_KINDS', 'NAME_QUOTED', 'NUMERIC_MERGE_FNS', 'PER_TYPE_META_FIELD', 'PROPERTY_DESCRIPTION_MAX', 'PropertySchemaZ',
-  'REDOS_REFUSAL', 'REFUSAL_NAMES_MAX', 'RULE_NAME_PATTERN', 'SCHEMA_DESCRIPTION_MAX', 'SERVER_OWNED_META_FIELDS', 'SPACE_PURPOSE_MAX',
-  'SpaceMetaBody', 'SpaceRuleZ', 'TypeRuleZ', 'TypeSchemaZ', 'TypeSchemasZ', 'VIEW_FIELDS', 'applicableRuleIssues',
-  'collectionScopeIssues', 'currentSchemaLibrary', 'hasReDoSRisk', 'libraryDefinitionOf', 'libraryDeletePathProblem',
-  'libraryEntryNameOf', 'libraryRefRefusal', 'metaFieldKind', 'parseInlineDefinition', 'parseSpaceMeta', 'parseTypeSchema', 'peerList',
-  'peerText', 'readingStoredRules', 'refusalOfParse', 'ruleMapIssues', 'spaceRuleIssues', 'stripServerOwnedMeta',
-  'takeBackLibraryDefinition', 'typeRuleIssues', 'unknownMetaFields', 'unrecognizedKeysIssue', 'validateSpaceMeta', 'withSchemaLibrary',
-];
-
-/** The app entry's types (names with no value). */
-const APP_TYPES = [
-  'BooleanMergeFn', 'ChangedRuleParts', 'DatePassedPolicy', 'KnowledgeType', 'MergeFn', 'MetaFieldKind', 'MetaParse',
-  'MetaParseOptions', 'NumericMergeFn', 'ParseIssueLike', 'ParseRefusal', 'ParseRefusalIssue', 'ParseRefusalOptions', 'ParsedSpaceMeta',
-  'ParsedTypeSchema', 'PropertySchema', 'RuleIssue', 'SchemaLibraryEntryLike', 'SchemaLibrarySource', 'SchemaRule', 'SpaceMeta',
-  'SpaceSchemaRule', 'TypeSchema', 'ValidateSpaceMetaOptions', 'ValidationMode', 'ViewField', 'ViewKind', 'WrongKindLibraryRef',
-];
+import { APP_VALUES, APP_TYPES } from './_schema-app-entry-names.mjs';
 
 /** What the server uses and an app must not: the nine server-only helpers, the installer, and the $ref finders and their wording. */
 const SERVER_ONLY = [
