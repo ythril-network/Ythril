@@ -49,7 +49,7 @@
  *
  * `ok` used to mean "the cycle ran", so a cycle in which EVERY member failed answered `200 { ok: true }`, MCP answered `isError` from an error
  * count each of its three branches wrote by hand, and the generic door answered 422. It is now read from the ONE verdict
- * (`syncVerdict`, `sync/cycle-outcome.ts`) that the history row and the metric also use: `ok` is true only when every member synced, the
+ * (`syncVerdict`, `sync/cycle-outcome.ts`) that the history row and the metric also use: `ok` is true only when `outcome` is `success`, the
  * answer carries `outcome` and each member's own outcome (`members[]`, our sentence as its reason), and the HTTP status follows the table — 200
  * (the cycle ran and the body says what it came to), 502 `sync_failed` (no member succeeded), 503 `sync_store_failed` (this instance's
  * database failed), 503 `shutting_down`. A trigger that was only accepted (`wait: false`) says `ok: true`, `status: 'triggered'`: it has no
