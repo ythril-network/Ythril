@@ -279,7 +279,7 @@ guarded at the rung it advertises rather than at "administers the whole space".
 
 | Parameter | Meaning |
 |---|---|
-| `meta` | The schema to check, in the shape `GET /:id/meta` returns it. Parsed exactly as a schema save parses it, so a rule or type the save would refuse is refused here in the same words (`400`). Omit it to check the space's stored schema |
+| `meta` | The schema to check, in the shape `GET /:id/meta` returns it. Parsed exactly as a schema save parses it, so a rule or type the save would refuse is refused here in the same words (`400`; a `$ref` to a missing or wrong-kind library entry `422`, as on the save). Omit it to check the space's stored schema |
 | `sample` | `{ "kind": "entity" \| "edge" \| "fact" \| "chrono", "record": { … } }` — check **one record you supply** instead of the stored ones, in the STORED shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, with `type`, `description`, `tags`, `properties`; a field left out is empty). Nothing stored is read, it costs one evaluation, and it is not rate limited — **and, in either mode, a check runs only rules you could save**: a call with a `meta` whose rules (`rules`, or any type's `rules`) differ from the stored ones needs `admin` on `schema`, the right to save them, and is otherwise refused `403` (see *What it costs*) |
 | `limit` | Violating records per page, 1 to 500 (default 500) |
 | `after` | The `nextAfter` of the previous page. Opaque; one this check did not give is a `400` |

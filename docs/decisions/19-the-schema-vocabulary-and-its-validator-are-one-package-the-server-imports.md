@@ -31,13 +31,13 @@ worded by `util/log.ts`, the logger itself.
 - **The text a refusal is worded in moved with the validator**: `peerText`, `peerList`, `refusalOfParse` and the secret
   redaction they apply are the package's, and the logger formats its lines with them. Two copies would be a validator
   whose refusal drifts from the server's on the first edit of either.
-- **The package is versioned with the release** (`@ythril/schema@6.3.0` validates what a 6.3.0 server accepts) and carries
-  the repository's licence. Publishing it is a release step, not part of this decision.
+- **The package is versioned with the release** (`@ythril/schema@6.3.1` validates what a 6.3.1 server accepts) and is
+  Apache-2.0, with its own LICENSE and NOTICE (see Q-668 below). Publishing it is a release step, not part of this decision.
 
 ## Consequences
 
 - **A change to a schema body, limit or rule check is a change to `schema/src`.** The server picks it up on its next
-  build (`server` runs `tsc -p ../schema` before itself); the Docker image builds and ships `schema/dist` beside
+  build (`server` runs the package's own build, `npm run build -w @ythril/schema`, before itself); the Docker image builds and ships `schema/dist` beside
   `server/dist`.
 - **`@ythril/schema/internal` is not an app API.** It carries what the server shares beyond the schema (the text
   renderer, the bounded cache, the rule engine hook) and moves with the server.
