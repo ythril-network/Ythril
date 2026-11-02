@@ -7,7 +7,7 @@
  *  - RateLimit-* headers present in responses
  *  - POST /api/invite/apply (authRateLimit, unauth) rate-limited after threshold
  *  - bulkWipeRateLimit (5/min): the destructive bulk-delete limiter actually 429s
- *  - globalRateLimit (300/min): general API limiter actually 429s
+ *  - a token's default limit (DEFAULT_PER_MINUTE, 1200/min since 6.4): the per-token limiter actually 429s
  *  - syncRateLimit (2000/min): sync-surface limiter actually 429s
  *
  * IMPORTANT: These tests consume from the rate-limit window for the test
@@ -172,7 +172,7 @@ describe('the destructive-call throttle, on the tool door (5/min)', () => {
     assert.notEqual(first, 429, `First bulk delete must reach the route, got ${first}`);
 
     // Slots 2..7 → the limit (5) is crossed, so a 429 must appear. A swap to
-    // globalRateLimit (300/min) would yield NO 429 here — that is the mechanism
+    // the token's default limit (1200/min) would yield NO 429 here — that is the mechanism
     // this catches.
     const rest = [];
     for (let i = 0; i < 6; i++) rest.push((await bulkDelete()).status);
@@ -183,20 +183,24 @@ describe('the destructive-call throttle, on the tool door (5/min)', () => {
   });
 });
 
-describe('globalRateLimit (300/min)', () => {
+// A bearer token is counted by the per-token limiter (the global one steps aside for a credential), whose default is
+// DEFAULT_PER_MINUTE: 1200 since 6.4 (Q-692), 300 before. The burst is sized past it, read from the build.
+const { DEFAULT_PER_MINUTE } = await import('../../server/dist/rate-limit/per-token.js');
+
+describe(`a token's default rate limit (${DEFAULT_PER_MINUTE}/min)`, () => {
   before(() => {
     tokenC = fs.readFileSync(TOKEN_FILE_C, 'utf8').trim();
   });
 
-  it('Burst past 300 GET /api/networks → first succeeds, at least one 429', async () => {
+  it(`Burst past ${DEFAULT_PER_MINUTE} GET /api/networks → first succeeds, at least one 429`, async () => {
     const req = () => fetch(`${INSTANCES.c}/api/networks`, { headers: { 'Authorization': `Bearer ${tokenC}` } });
     const first = await waitForFreshWindow(req);
     assert.equal(first, 200, `First request must succeed (positive control), got ${first}`);
 
-    const statuses = await burstStatuses(305, req);
+    const statuses = await burstStatuses(DEFAULT_PER_MINUTE + 5, req, 200);
     const count429 = statuses.filter(s => s === 429).length;
     assert.ok(count429 >= 1,
-      `Expected at least one 429 after 300 requests (globalRateLimit), got statuses: ` +
+      `Expected at least one 429 after ${DEFAULT_PER_MINUTE} requests (the token's default limit), got statuses: ` +
       `${JSON.stringify([...new Set(statuses)])} (429 count: ${count429})`);
   });
 });
