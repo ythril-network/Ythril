@@ -16,7 +16,7 @@
     "build": "npm run build --workspace=server && npm run build:prod --workspace=client",
     "build:server": "npm run build --workspace=server",
     "build:client": "npm run build:prod --workspace=client",
-    "lint:docs": "markdownlint-cli2 \"docs/**/*.md\"",
+    "lint:docs": "markdownlint-cli2 \"docs/**/*.md\" \"schema/README.md\"",
     "preflight": "node ./scripts/preflight.mjs",
     "preflight:static": "node ./scripts/preflight.mjs --static",
     "trade": "node scripts/trade.mjs",

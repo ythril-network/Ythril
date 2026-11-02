@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Schema:** `typesOfSpaceMeta` in `@ythril/schema` turns a space's type schemas into TypeScript types for its properties, and reports what the types cannot carry (rules, naming patterns, unresolved `$ref`s).
+
 ## [6.3.2] — 2026-11-02
 
 **A patch release: the space-schema vocabulary and its validator are the `@ythril/schema` package, and the schema dry run refuses a `$ref` to a missing or wrong-kind library entry as the save does.**

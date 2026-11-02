@@ -35,3 +35,6 @@ export {
   type ParsedTypeSchema, type ParsedSpaceMeta, type MetaParse, type MetaParseOptions, type WrongKindLibraryRef,
 } from './space-meta.js';
 export { validateSpaceMeta, libraryRefRefusal, type ValidateSpaceMetaOptions } from './validate.js';
+export {
+  typesOfSpaceMeta, UNTRANSLATED_REASONS, ENUM_LITERAL_MAX, type TypeScriptOptions, type TypeScriptSource, type Untranslated,
+} from './typescript.js';
