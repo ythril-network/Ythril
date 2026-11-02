@@ -47,6 +47,24 @@ function resolveKey(packages, fromKey, name) {
 export function productionClosure(packages, entryName, from = 'server') {
   const start = resolveKey(packages, from, entryName);
   if (!start) throw new Error(`${entryName} is not in the lock file (looked from '${from}')`);
+  return closureFromKey(packages, start);
+}
+
+/**
+ * Every package a WORKSPACE pulls into production, the workspace itself left out: `[{ name, key, version, license }]`. `workspaceKey`
+ * is the workspace's own lock key (`schema`), never its `node_modules/<name>` entry: that one is a link (`{ resolved, link: true }`)
+ * with no dependencies, so a walk started there finds nothing and a gate over it passes about nothing (Q-668, B1). Throws when the key
+ * is not in the lock or is a link.
+ */
+export function workspaceClosure(packages, workspaceKey) {
+  const entry = packages[workspaceKey];
+  if (!entry) throw new Error(`workspace '${workspaceKey}' is not in the lock file`);
+  if (entry.link === true) throw new Error(`'${workspaceKey}' is a link in the lock file, not a workspace: walk from the workspace's own key`);
+  return closureFromKey(packages, workspaceKey).filter(p => p.key !== workspaceKey);
+}
+
+/** The production closure from one lock key, that key included. */
+function closureFromKey(packages, start) {
   const seen = new Map();
   const queue = [start];
   while (queue.length) {
@@ -64,6 +82,18 @@ export function productionClosure(packages, entryName, from = 'server') {
     }
   }
   return [...seen.values()];
+}
+
+/** A line only the full Apache License 2.0 text carries (its appendix boilerplate does not). */
+export const APACHE_TEXT = 'TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION';
+
+/**
+ * Whether `text` is the Apache License 2.0 itself: its first non-blank line is the title and the terms are there. A byte-order mark and
+ * the leading indentation the published text carries are not a difference.
+ */
+export function isApacheLicenceText(text) {
+  const lines = String(text).replace(/^﻿/, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  return lines[0] === 'Apache License' && /^Version 2\.0\b/.test(lines[1] ?? '') && lines.includes(APACHE_TEXT);
 }
 
 /** The package names the headings of a NOTICE list (`### a, b` gives both), full scoped names only. */

@@ -38,7 +38,7 @@ import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { writeFile as writeSpaceFile } from '../files/files.js';
 import {
   TypeSchemasZ,
-  findBrokenLibraryRefs, findWrongKindLibraryRefs, wrongKindRefsError,
+  libraryRefRefusal,
   parseTypeSchema, withTypeSchemas,
   DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
@@ -399,16 +399,11 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
     return;
   }
 
-  // Validate any $ref values against the instance schema library
-  const brokenRefs = findBrokenLibraryRefs(parsed.data.typeSchemas as z.infer<typeof TypeSchemasZ>);
-  if (brokenRefs.length > 0) {
-    res.status(422).json({ error: `Schema library ${brokenRefs.length === 1 ? 'entry' : 'entries'} not found: ${brokenRefs.join(', ')}. Create ${brokenRefs.length === 1 ? 'it' : 'them'} via POST /api/schema-library before referencing.` });
-    return;
-  }
-  // And a reference to an entry filed under ANOTHER kind (`Q-215`): its fields would never apply.
-  const wrongKind = findWrongKindLibraryRefs(parsed.data.typeSchemas as z.infer<typeof TypeSchemasZ>);
-  if (wrongKind.length > 0) {
-    res.status(422).json({ error: wrongKindRefsError(wrongKind) });
+  // Validate any $ref values against the instance schema library: an entry that does not exist, or one filed under ANOTHER kind
+  // (`Q-215`), whose fields would never apply. The package's one refusal, in its words.
+  const refRefusal = libraryRefRefusal(parsed.data.typeSchemas as z.infer<typeof TypeSchemasZ>);
+  if (refRefusal) {
+    res.status(422).json({ error: refRefusal.message });
     return;
   }
 
@@ -550,17 +545,11 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   }
 
   // Validate any $ref against the instance schema library before writing
-  if ('$ref' in parsed.schema) {
-    const brokenRefs = findBrokenLibraryRefs({ [knowledgeType]: { _check: parsed.schema } });
-    if (brokenRefs.length > 0) {
-      res.status(422).json({ error: `Schema library ${brokenRefs.length === 1 ? 'entry' : 'entries'} not found: ${brokenRefs.join(', ')}. Create ${brokenRefs.length === 1 ? 'it' : 'them'} via POST /api/schema-library before referencing.` });
-      return;
-    }
-    const wrongKind = findWrongKindLibraryRefs({ [knowledgeType]: { [typeName]: parsed.schema } });
-    if (wrongKind.length > 0) {
-      res.status(422).json({ error: wrongKindRefsError(wrongKind) });
-      return;
-    }
+  // A one-type map: the refusal reads the kind the type is filed under, for the wrong-kind half.
+  const refRefusal = libraryRefRefusal({ [knowledgeType]: { [typeName]: parsed.schema } });
+  if (refRefusal) {
+    res.status(422).json({ error: refRefusal.message });
+    return;
   }
 
   const cfg = getConfig();

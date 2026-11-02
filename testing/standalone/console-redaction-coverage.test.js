@@ -81,7 +81,10 @@ describe('console output cannot bypass the redactor', () => {
   });
 
   it('the redactor is actually exported for them to use', () => {
+    // Defined once with the rest of the text rules in `@ythril/schema` (`schema/src/text.ts`) and handed on by `util/log.ts`.
+    const textSrc = readFileSync(`${ROOT}/../../schema/src/text.ts`, 'utf8');
+    assert.match(textSrc, /export function redactSecrets/);
     const logSrc = readFileSync(`${ROOT}/util/log.ts`, 'utf8');
-    assert.match(logSrc, /export function redactSecrets/);
+    assert.match(logSrc, /export\s*\{[^}]*\bredactSecrets\b[^}]*\}\s*from\s*'@ythril\/schema\/internal'/);
   });
 });

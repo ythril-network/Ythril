@@ -1,0 +1,826 @@
+{
+  "purpose": "The garden planner keeps your seasons here: the beds and their soil, the varieties you sow, the helpers who come, and the pictures of each bed through the year.",
+  "validationMode": "strict",
+  "strictLinkage": true,
+  "usageNotes": "# Garden planner: season\n\nWritten by the garden planner, a made-up app used as a test fixture. Every record has a description and a `key`, the UUID the planner minted for it; Ythril's own id only locates it in this space.\n\n## What lives here\n\nBeds and how they connect, the varieties grown in them, seasons and how one follows the other, the helpers who come for a season, the stages a crop goes through, and a log of what grew.\n\n## Rules of the house\n\n- Pictures are approved only after a gardener judged them.\n- A generated preview always carries its provenance mark, model and seed.\n- No passwords, keys or home addresses are stored in this space.\n\n## Reading it\n\nRead by `key`, never by Ythril id: a record copied to another space keeps its key and gets a new id.",
+  "typeSchemas": {
+    "entity": {
+      "bed": {
+        "description": "A bed in the garden: raised, in the ground, or a set of pots treated as one.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "layout": {
+            "description": "What kind of bed it is.",
+            "type": "string",
+            "enum": [
+              "raised",
+              "ground",
+              "pots"
+            ],
+            "required": true
+          },
+          "areaSquareMetres": {
+            "description": "Its area in square metres.",
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "rules": {
+          "pots-have-no-area": {
+            "rule": "self.properties.layout != 'pots' || !has(self.properties.areaSquareMetres)",
+            "message": "A set of pots is counted, not measured"
+          }
+        }
+      },
+      "variety": {
+        "description": "A variety you sow: a cultivar with its own seed, its own habits, and the beds it was grown in.",
+        "namingPattern": "^[a-z][a-z0-9.-]{0,199}$",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "supplier": {
+            "description": "Where the seed came from.",
+            "type": "string"
+          },
+          "saved": {
+            "description": "Whether the seed was saved from your own plants.",
+            "type": "boolean"
+          },
+          "origin": {
+            "description": "The garden or the club the saved seed came from.",
+            "type": "string"
+          },
+          "heirloom": {
+            "description": "Whether it is an heirloom variety.",
+            "type": "boolean"
+          }
+        },
+        "rules": {
+          "saved-has-origin": {
+            "rule": "!self.properties.saved || has(self.properties.origin)",
+            "message": "Saved seed says where it was saved"
+          }
+        }
+      },
+      "helper": {
+        "description": "Someone who helps for a season and is not a gardener of the club.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "displayName": {
+            "description": "The name shown in the planner.",
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "season": {
+        "description": "A growing season: when it started and ended, and what it was called.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "startsOn": {
+            "description": "The first day of the season.",
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "required": true
+          },
+          "endsOn": {
+            "description": "The last day, once it ended.",
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          }
+        }
+      },
+      "photo": {
+        "description": "A picture in the season gallery: a photo a gardener took, or a preview the planner generated. Its file lives in the space's files; this record says where it came from, what it shows, and whether it was approved for the gallery.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "title": {
+            "description": "A short title shown under the picture.",
+            "type": "string",
+            "required": true
+          },
+          "source": {
+            "description": "Where the picture came from.",
+            "type": "string",
+            "enum": [
+              "generated",
+              "upload"
+            ],
+            "required": true
+          },
+          "status": {
+            "description": "Where the picture stands in the gallery.",
+            "type": "string",
+            "enum": [
+              "draft",
+              "approved",
+              "rejected"
+            ],
+            "required": true
+          },
+          "judged": {
+            "description": "Whether a gardener looked at the picture and decided on it.",
+            "type": "boolean"
+          },
+          "mark": {
+            "description": "The id of the provenance mark a generated preview carries.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,64}$"
+          },
+          "model": {
+            "description": "The generator that made a preview.",
+            "type": "string"
+          },
+          "seed": {
+            "description": "The seed a preview was generated with.",
+            "type": "number",
+            "minimum": 0
+          },
+          "scope": {
+            "description": "What the picture is about.",
+            "type": "string",
+            "enum": [
+              "plant",
+              "bed",
+              "season"
+            ],
+            "required": true
+          },
+          "scopeRef": {
+            "description": "The key of the bed or season this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "ownerKind": {
+            "description": "Whose gallery holds the picture.",
+            "type": "string",
+            "enum": [
+              "gardener",
+              "plant"
+            ],
+            "required": true
+          },
+          "depicts": {
+            "description": "What is in the picture.",
+            "type": "string",
+            "enum": [
+              "gardener",
+              "plant",
+              "bed"
+            ],
+            "required": true
+          },
+          "takenOn": {
+            "description": "The day the photo was taken.",
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "width": {
+            "description": "Width in pixels.",
+            "type": "number",
+            "minimum": 1
+          },
+          "height": {
+            "description": "Height in pixels.",
+            "type": "number",
+            "minimum": 1
+          },
+          "bytes": {
+            "description": "Size of the file in bytes.",
+            "type": "number",
+            "minimum": 0
+          },
+          "mime": {
+            "description": "The file's media type.",
+            "type": "string",
+            "enum": [
+              "image/jpeg",
+              "image/png",
+              "image/webp"
+            ],
+            "required": true
+          },
+          "checksum": {
+            "description": "SHA-256 of the file, hex.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "camera": {
+            "description": "The camera or phone model, as the file reports it.",
+            "type": "string"
+          },
+          "lens": {
+            "description": "The lens, as the file reports it.",
+            "type": "string"
+          },
+          "iso": {
+            "description": "Sensor sensitivity.",
+            "type": "number",
+            "minimum": 50,
+            "maximum": 102400
+          },
+          "exposure": {
+            "description": "Exposure time, as written on the camera (1/250).",
+            "type": "string",
+            "pattern": "^\\d+(/\\d+)?$"
+          },
+          "aperture": {
+            "description": "The f-number.",
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 64
+          },
+          "focalLength": {
+            "description": "Focal length in millimetres.",
+            "type": "number",
+            "minimum": 1
+          },
+          "latitude": {
+            "description": "Where it was taken: latitude.",
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "description": "Where it was taken: longitude.",
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "altitude": {
+            "description": "Where it was taken: metres above sea level.",
+            "type": "number"
+          },
+          "weather": {
+            "description": "The weather when it was taken.",
+            "type": "string",
+            "enum": [
+              "sun",
+              "cloud",
+              "rain",
+              "frost",
+              "unknown"
+            ]
+          },
+          "light": {
+            "description": "The light it was taken in.",
+            "type": "string",
+            "enum": [
+              "morning",
+              "noon",
+              "evening",
+              "artificial"
+            ]
+          },
+          "angle": {
+            "description": "The angle it was taken from.",
+            "type": "string",
+            "enum": [
+              "above",
+              "side",
+              "close-up",
+              "wide"
+            ]
+          },
+          "caption": {
+            "description": "A longer caption for the gallery.",
+            "type": "string"
+          },
+          "altText": {
+            "description": "What the picture shows, for a reader who cannot see it.",
+            "type": "string",
+            "required": true
+          },
+          "licence": {
+            "description": "Under what terms the gardener shares the picture.",
+            "type": "string",
+            "enum": [
+              "private",
+              "club",
+              "public"
+            ]
+          },
+          "credit": {
+            "description": "Who to credit when the picture is shown.",
+            "type": "string"
+          },
+          "consentRef": {
+            "description": "The key of the consent a gardener gave to be shown this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "sharedPublicly": {
+            "description": "Whether the picture is in the public gallery.",
+            "type": "boolean"
+          },
+          "cropX": {
+            "description": "Crop: left edge in pixels.",
+            "type": "number",
+            "minimum": 0
+          },
+          "cropY": {
+            "description": "Crop: top edge in pixels.",
+            "type": "number",
+            "minimum": 0
+          },
+          "cropWidth": {
+            "description": "Crop: width in pixels.",
+            "type": "number",
+            "minimum": 1
+          },
+          "cropHeight": {
+            "description": "Crop: height in pixels.",
+            "type": "number",
+            "minimum": 1
+          },
+          "rotation": {
+            "description": "Rotation in degrees, clockwise.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 359
+          },
+          "colourProfile": {
+            "description": "The colour profile the file carries.",
+            "type": "string",
+            "enum": [
+              "srgb",
+              "display-p3",
+              "none"
+            ]
+          },
+          "steps": {
+            "description": "Generated: how many steps the generator ran.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "guidance": {
+            "description": "Generated: the guidance scale.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 30
+          },
+          "prompt": {
+            "description": "Generated: the text the preview was asked for.",
+            "type": "string"
+          },
+          "settings": {
+            "description": "Generated: other settings the generator took, as JSON; opaque to the planner, read back only to make it again.",
+            "type": "string"
+          },
+          "version": {
+            "description": "How many times the record was revised.",
+            "type": "number",
+            "minimum": 1
+          }
+        },
+        "rules": {
+          "generated": {
+            "rule": "self.properties.source != 'generated' || (has(self.properties.mark) && has(self.properties.model) && has(self.properties.seed))",
+            "message": "A generated preview carries its provenance mark, model and seed"
+          },
+          "upload": {
+            "rule": "self.properties.source != 'upload' || !has(self.properties.model)",
+            "message": "A photo a gardener took was not generated"
+          },
+          "scoped": {
+            "rule": "self.properties.scope == 'plant' || has(self.properties.scopeRef)",
+            "message": "A picture of a bed or a season names it"
+          },
+          "plants-show-no-people": {
+            "rule": "self.properties.ownerKind == 'gardener' || self.properties.depicts != 'gardener'",
+            "message": "A plant's gallery shows no gardener; a picture of a person belongs in that gardener's gallery"
+          },
+          "approved-after-judged": {
+            "rule": "self.properties.status != 'approved' || self.properties.judged",
+            "message": "A picture is approved only after it was judged"
+          }
+        }
+      }
+    },
+    "fact": {
+      "soil-fact": {
+        "description": "Something measured about a bed's soil.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "bedRef": {
+            "description": "The key of the bed this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "measure": {
+            "description": "What was measured.",
+            "type": "string",
+            "enum": [
+              "ph",
+              "nitrogen",
+              "phosphorus",
+              "potassium",
+              "organic-matter"
+            ],
+            "required": true
+          },
+          "value": {
+            "description": "The value measured.",
+            "type": "number",
+            "required": true
+          }
+        }
+      },
+      "planting": {
+        "description": "A variety was planted in a bed for a season.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "varietyRef": {
+            "description": "The key of the variety this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "count": {
+            "description": "How many plants.",
+            "type": "number",
+            "minimum": 1
+          }
+        }
+      },
+      "crew-member": {
+        "description": "A helper is on the crew of a season.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "helperRef": {
+            "description": "The key of the helper this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          }
+        }
+      },
+      "stage": {
+        "description": "A stage a crop goes through in a season: sown, sprouted, flowering, harvested.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "seasonRef": {
+            "description": "The key of the season this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "name": {
+            "description": "Which stage.",
+            "type": "string",
+            "enum": [
+              "sown",
+              "sprouted",
+              "flowering",
+              "fruiting",
+              "harvested"
+            ],
+            "required": true
+          },
+          "order": {
+            "description": "Where the stage sits in the season, from 1.",
+            "type": "number",
+            "minimum": 1,
+            "required": true
+          }
+        }
+      },
+      "plan-change": {
+        "description": "A decision to change the plan mid-season, and why.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "seasonRef": {
+            "description": "The key of the season this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "change": {
+            "description": "What changed.",
+            "type": "string",
+            "required": true
+          },
+          "reason": {
+            "description": "Why.",
+            "type": "string",
+            "required": true
+          },
+          "decidedOn": {
+            "description": "The day it was decided.",
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          }
+        }
+      },
+      "source-entry": {
+        "description": "Where a fact about a plant or a bed came from: a seed packet, a book, a gardener's own notes, a soil test.",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "of": {
+            "description": "What the entry is about.",
+            "type": "string",
+            "enum": [
+              "plant",
+              "bed"
+            ],
+            "required": true
+          },
+          "plantRef": {
+            "description": "The key of the plant this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "bedRef": {
+            "description": "The key of the bed this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "kind": {
+            "description": "What kind of source it is.",
+            "type": "string",
+            "enum": [
+              "packet",
+              "book",
+              "notes",
+              "soil-test",
+              "nursery"
+            ],
+            "required": true
+          },
+          "citation": {
+            "description": "Where to find it again: a title and page, a label, a lab report number.",
+            "type": "string"
+          },
+          "trust": {
+            "description": "How far the gardener trusts it.",
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "addedOn": {
+            "description": "The day it was added.",
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          }
+        },
+        "rules": {
+          "owner": {
+            "rule": "(self.properties.of == 'plant' && has(self.properties.plantRef)) || (self.properties.of == 'bed' && has(self.properties.bedRef))",
+            "message": "A plant entry names its plant, a bed entry its bed"
+          }
+        }
+      },
+      "photo-issue": {
+        "description": "Something wrong with a picture that a gardener reported: blurred, wrong plant, shows someone who did not agree.",
+        "propertySchemas": {
+          "photoRef": {
+            "description": "The key of the picture this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          }
+        }
+      }
+    },
+    "edge": {
+      "adjoins": {
+        "description": "Two beds next to each other, and what lies between them.",
+        "endpoints": {
+          "from": [
+            "bed"
+          ],
+          "to": [
+            "bed"
+          ]
+        },
+        "propertySchemas": {
+          "side": {
+            "description": "Which side of the first bed the second lies on.",
+            "type": "string",
+            "enum": [
+              "north",
+              "east",
+              "south",
+              "west"
+            ]
+          },
+          "gapMetres": {
+            "description": "The gap between them in metres.",
+            "type": "number",
+            "minimum": 0
+          },
+          "path": {
+            "description": "Whether a path runs between them.",
+            "type": "boolean"
+          },
+          "shade": {
+            "description": "Whether one shades the other.",
+            "type": "string",
+            "enum": [
+              "none",
+              "morning",
+              "afternoon"
+            ]
+          }
+        }
+      },
+      "variety-of": {
+        "description": "The variety belongs to this bed's plan; a variety has one.",
+        "endpoints": {
+          "from": [
+            "variety"
+          ],
+          "to": [
+            "bed"
+          ]
+        },
+        "functional": true
+      },
+      "helper-of": {
+        "description": "The helper works this bed; a helper has one.",
+        "endpoints": {
+          "from": [
+            "helper"
+          ],
+          "to": [
+            "bed"
+          ]
+        },
+        "functional": true
+      },
+      "sown-in": {
+        "description": "The season was sown in this bed; one bed per season record.",
+        "endpoints": {
+          "from": [
+            "season"
+          ],
+          "to": [
+            "bed"
+          ]
+        },
+        "functional": true
+      },
+      "follows": {
+        "description": "This season follows that one in the rotation.",
+        "endpoints": {
+          "from": [
+            "season"
+          ],
+          "to": [
+            "season"
+          ]
+        },
+        "functional": true,
+        "propertySchemas": {
+          "rotation": {
+            "description": "What the rotation moved: a crop family, a cover crop.",
+            "type": "string"
+          }
+        }
+      },
+      "works-in": {
+        "description": "The helper works in this season.",
+        "endpoints": {
+          "from": [
+            "helper"
+          ],
+          "to": [
+            "season"
+          ]
+        }
+      },
+      "cropped-from": {
+        "description": "This picture is a crop or an edit of that one.",
+        "endpoints": {
+          "from": [
+            "photo"
+          ],
+          "to": [
+            "photo"
+          ]
+        }
+      }
+    },
+    "chrono": {
+      "growth-log": {
+        "description": "A dated entry of how a crop grew: measured, observed, or reported by a helper. Nothing happens when its date passes.",
+        "whenDuePasses": "nothing",
+        "propertySchemas": {
+          "key": {
+            "description": "The planner's key of this record, a UUID the planner minted; the same in every space the record is copied to. The planner's references hold it.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "required": true
+          },
+          "varietyRef": {
+            "description": "The key of the variety this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "helperRef": {
+            "description": "The key of the helper this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "how": {
+            "description": "How it was learned.",
+            "type": "string",
+            "enum": [
+              "measured",
+              "observed",
+              "reported"
+            ],
+            "required": true
+          },
+          "reporterRef": {
+            "description": "The key of the helper who reported it this record belongs to.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "stage": {
+            "description": "The stage the crop was at.",
+            "type": "string"
+          },
+          "heightCm": {
+            "description": "The height measured, in centimetres.",
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "rules": {
+          "one-subject": {
+            "rule": "has(self.properties.varietyRef) != has(self.properties.helperRef)",
+            "message": "A log entry is about exactly one variety or one helper"
+          },
+          "reported-by": {
+            "rule": "self.properties.how != 'reported' || has(self.properties.reporterRef)",
+            "message": "Reported by whom: name the helper"
+          },
+          "at-a-stage": {
+            "rule": "self.properties.how == 'measured' || has(self.properties.stage)",
+            "message": "An observation or a report names the stage the crop was at"
+          }
+        }
+      }
+    }
+  }
+}

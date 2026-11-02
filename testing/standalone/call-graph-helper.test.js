@@ -156,3 +156,35 @@ describe('a closure built at module scope is followed', () => {
     assert.equal(pathTo(parent, `${ENGINE}:_syncRunner`).at(-2), `${ENGINE}:runSyncForNetwork`);
   });
 });
+
+describe('a re-export chain deeper than the cap is an error, not an answer (Q-668, S-C3)', () => {
+  /*
+   * `bodyOfExport` followed a re-export a fixed number of hops and returned null past it: the same null as "this name leaves the tree",
+   * so a call through a long chain was DROPPED and a walk over it reported a clean graph. Past the cap is a failure of the reader, and
+   * says so; a cycle of `export *` is not a chain, and answers null by a visited set rather than by running into the cap.
+   */
+  /** A chain `m0` re-exports `f` from `m1` ... from `m<n>`, which declares it; `user.ts` imports `f` from `m0` and calls it. */
+  const chain = (n) => {
+    const files = new Map([['fx/user.ts', "import { f } from './m0.js';\nexport function use() { return f(); }\n"]]);
+    for (let i = 0; i < n; i++) files.set(`fx/m${i}.ts`, `export { f } from './m${i + 1}.js';\n`);
+    files.set(`fx/m${n}.ts`, 'export function f() { return 1; }\n');
+    return indexSources(files, { functionFloor: 1 });
+  };
+
+  it('a short chain resolves to the body (the control)', () => {
+    assert.equal(chain(3).resolve('fx/user.ts', 'f'), 'fx/m3.ts:f');
+  });
+
+  it('a chain past the cap throws, naming the reader, instead of returning the null of "not in this tree"', () => {
+    assert.throws(() => chain(40).resolve('fx/user.ts', 'f'), /re-export|depth|hops|chain/i);
+  });
+
+  it('a cycle of export * answers null without throwing', () => {
+    const files = new Map([
+      ['fx/user.ts', "import { g } from './a.js';\nexport function use() { return g(); }\n"],
+      ['fx/a.ts', "export * from './b.js';\n"],
+      ['fx/b.ts', "export * from './a.js';\n"],
+    ]);
+    assert.equal(indexSources(files, { functionFloor: 1 }).resolve('fx/user.ts', 'g'), null);
+  });
+});

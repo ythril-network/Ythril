@@ -224,9 +224,11 @@ function sourceMentionsRefusal(sf, site) {
 
 const { program: PROGRAM, repoPath } = serverProgram();
 
+// The server's sources and `@ythril/schema`'s, which the server imports: the space-schema parses live there, and their failures are
+// answered through `refusalOfParse` like every other door's.
 const inServerSrc = (sf) => {
   const rel = repoPath(sf.fileName);
-  return rel.startsWith('server/src/') && !rel.endsWith('.d.ts') ? rel : null;
+  return (rel.startsWith('server/src/') || rel.startsWith('schema/src/')) && !rel.endsWith('.d.ts') ? rel : null;
 };
 
 describe('every zod parse failure that is answered or logged goes through refusalOfParse', () => {
@@ -236,14 +238,16 @@ describe('every zod parse failure that is answered or logged goes through refusa
     assert.ok(sites.length >= 50, `only ${sites.length} zod parse calls were derived from the server program — the receiver-type test has stopped matching`);
     assert.ok(sites.filter(s => s.method === 'safeParse').length >= 50, 'fewer than fifty safeParse sites');
     const files = new Set(sites.map(s => s.file));
-    for (const known of ['server/src/spaces/meta-update.ts', 'server/src/api/spaces.ts', 'server/src/sync/arrival-shape.ts']) {
+    for (const known of ['server/src/spaces/meta-update.ts', 'server/src/api/spaces.ts', 'server/src/sync/arrival-shape.ts', 'schema/src/space-meta.ts']) {
       assert.ok(files.has(known), `${known} holds a zod parse and the derivation did not find it`);
     }
   });
 
-  it('util/log.ts exports refusalOfParse, so the rule below has something to be satisfied by', () => {
-    const src = stripComments(readFileSync(join(REPO_ROOT, 'server/src/util/log.ts'), 'utf8'));
-    assert.ok(/export\s+function\s+refusalOfParse\s*\(/.test(src), 'util/log.ts has no `export function refusalOfParse`');
+  it('refusalOfParse is defined once (in @ythril/schema) and util/log.ts hands it on, so the rule below has something to be satisfied by', () => {
+    const text = stripComments(readFileSync(join(REPO_ROOT, 'schema/src/text.ts'), 'utf8'));
+    assert.ok(/export\s+function\s+refusalOfParse\s*\(/.test(text), 'schema/src/text.ts has no `export function refusalOfParse`');
+    const log = stripComments(readFileSync(join(REPO_ROOT, 'server/src/util/log.ts'), 'utf8'));
+    assert.match(log, /export\s*\{[^}]*\brefusalOfParse\b[^}]*\}\s*from\s*'@ythril\/schema\/internal'/, 'util/log.ts does not re-export refusalOfParse');
   });
 
   it('no failure is read outside refusalOfParse (the discarded class aside)', () => {

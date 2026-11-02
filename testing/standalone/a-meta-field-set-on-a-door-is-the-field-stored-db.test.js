@@ -74,7 +74,8 @@ describe('a meta key set by a door is the key stored', { skip }, () => {
   before(async () => {
     await openTestMongo('meta_door');
     const { SERVER_OWNED_META_FIELDS } = await import('../../server/dist/spaces/body-schemas.js');
-    settable = interfaceKeys('server/src/config/types-knowledge.ts', 'SpaceMeta').filter(k => !SERVER_OWNED_META_FIELDS.includes(k));
+    // `SpaceMeta` is `@ythril/schema`'s (`schema/src/vocabulary.ts`), re-exported by `config/types-knowledge.ts`.
+    settable = interfaceKeys('schema/src/vocabulary.ts', 'SpaceMeta').filter(k => !SERVER_OWNED_META_FIELDS.includes(k));
     inst = await bootSchemaInstance(dir, { spaces: [{ id: SPACE, label: 'Schema', folders: [], meta: { validationMode: 'strict' } }] });
   });
   after(async () => {

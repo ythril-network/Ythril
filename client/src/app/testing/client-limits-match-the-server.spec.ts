@@ -23,8 +23,10 @@ import { resolve } from 'node:path';
 import { CLIENT_ROOT } from './tracked-sources';
 import { interfaceBody, interfaceKeys, readClientSource, readRepoSource } from './server-source';
 
-const SERVER_RULES = 'server/src/spaces/schema-rules.ts';
-const SERVER_BODIES = 'server/src/spaces/body-schemas.ts';
+// The rule limits and the space-schema bodies are `@ythril/schema`'s, which the server imports and re-exports
+// (`server/src/spaces/schema-rules.ts`, `server/src/spaces/body-schemas.ts`): the gate reads where they are declared.
+const SERVER_RULES = 'schema/src/rules.ts';
+const SERVER_BODIES = 'schema/src/space-meta.ts';
 const CLIENT_LIMITS = 'src/app/shared/rule-limits.ts';
 const CLIENT_TYPES = 'src/app/core/api.types.ts';
 
@@ -92,7 +94,7 @@ function clientLimits(src: string): Record<string, string> {
 }
 
 describe('the server rule limits exist and are found before anything is compared', () => {
-  it('server/src/spaces/schema-rules.ts exports every limit the editor shows a counter for', () => {
+  it('the rule module (schema/src/rules.ts) exports every limit the editor shows a counter for', () => {
     const found = serverConstants(serverSource(SERVER_RULES));
     for (const [, serverName] of PAIRS) {
       expect(found[serverName], `${SERVER_RULES} does not export ${serverName}`).toBeDefined();
@@ -269,7 +271,7 @@ function returnedExpression(src: string, name: string, where: string): string {
 describe('the other limits and questions the editor copies from the server (G1, G2)', () => {
   const SERVER_BOUNDS = 'server/src/util/request-bounds.ts';
   const CLIENT_RETYPE = 'src/app/pages/brain/retype-flow.ts';
-  const SERVER_NAMES = 'server/src/util/object-internal-keys.ts';
+  const SERVER_NAMES = 'schema/src/object-internal-keys.ts';
 
   it('the retype flow\'s MAX_DELETE_FIELDS is the server\'s cap on deleteFields per write', () => {
     // A client cap above the server's sends a removal the server refuses; one below makes two saves where one would do.

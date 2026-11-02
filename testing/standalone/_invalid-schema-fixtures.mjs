@@ -98,6 +98,9 @@ export const ENTITY_ENTRY = Object.freeze({
  */
 export const REF_ROWS = Object.freeze([
   { id: 'an entity type referencing an edge entry', kind: 'entity', type: 'RefToAnEdgeEntry', ref: EDGE_ENTRY.name, mentions: /edge|kind|knowledge/i },
+  // An entry the library does not hold (Q-668, B5): refused at 422 with the package's one sentence (`brokenRefsError`) on every door,
+  // the dry-run doors included. `missing` marks the row whose exact refusal text is the package's broken-ref wording.
+  { id: 'an entity type referencing a missing entry', kind: 'entity', type: 'RefToAMissingEntry', ref: 'no-such-entry', mentions: /not found/i, missing: true },
 ]);
 
 /** Rows that cannot be driven until a type schema accepts a `rules` field (F-46); listed so the plan's table is whole. */

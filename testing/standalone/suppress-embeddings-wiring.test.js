@@ -107,7 +107,8 @@ describe('suppression removes a stale vector', () => {
 });
 
 describe('the field exists on both tiers of the type', () => {
-  const TYPES = readFileSync(new URL('../../server/src/config/types-knowledge.ts', import.meta.url), 'utf8');
+  // `TypeSchema` and `SpaceMeta` are `@ythril/schema`'s (`schema/src/vocabulary.ts`), re-exported by `config/types-knowledge.ts`.
+  const TYPES = readFileSync(new URL('../../schema/src/vocabulary.ts', import.meta.url), 'utf8');
 
   it('is declared on TypeSchema and on SpaceMeta', () => {
     const count = (TYPES.match(/^\s*suppressEmbeddings\?: boolean;/gm) ?? []).length;
@@ -127,12 +128,13 @@ describe('both write surfaces accept it', () => {
     // both write surfaces call. Read together, because the pair IS the guarantee — a field the body accepts and
     // the merge drops is the same silent failure as one the body rejects.
     const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
-    assert.match(read('server/src/spaces/body-schemas.ts'), /suppressEmbeddings: z\.boolean\(\)\.optional\(\)/);
+    // The space meta body is `@ythril/schema`'s (`schema/src/space-meta.ts`), re-exported by `spaces/body-schemas.ts`.
+    assert.match(read('schema/src/space-meta.ts'), /suppressEmbeddings: z\.boolean\(\)\.optional\(\)/);
     // The merge is table-driven now (`spaces/meta-fields.ts`, Q-217): the key's KIND is `scalar`, and the one loop that merges
     // (`mergeMetaFields`) replaces a stated value on `!== undefined` — `false` is how suppression is turned back OFF, and a truthy
     // guard would drop that patch while answering 200. `a-meta-field-keeps-its-merge-kind-through-every-merge.test.js` runs it.
-    assert.match(read('server/src/spaces/meta-fields.ts'), /suppressEmbeddings:\s*'scalar'/);
-    assert.match(read('server/src/spaces/meta-fields.ts'), /if \(value === undefined\) continue;/);
+    assert.match(read('schema/src/meta-fields.ts'), /suppressEmbeddings:\s*'scalar'/);
+    assert.match(read('schema/src/meta-fields.ts'), /if \(value === undefined\) continue;/);
     // The merge a write makes lives with the base it is merged over (`meta-write-base.ts`), read by the planner and the rights check alike.
     assert.match(read('server/src/spaces/meta-write-base.ts'), /mergeMetaFields\(/);
   });

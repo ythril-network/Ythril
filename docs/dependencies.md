@@ -13,6 +13,10 @@ and `client/package.json`. The attribution-requiring packages
 across both workspaces are reproduced in `NOTICE`. They are MIT, Apache 2.0,
 0BSD, BSD-3-Clause, or ISC licensed.
 
+The third workspace, `schema/` (`@ythril/schema`, the schema vocabulary and validator the server imports), is published to
+npm under the Apache License 2.0. Its runtime dependencies (zod, `@bufbuild/cel` and what it pulls in) are the server's own,
+at the same versions, and are named again in `schema/NOTICE`, which a gate holds to the package's production closure.
+
 **Two packages are dual-licensed with a copyleft arm**, and Ythril elects the permissive arm in both. A dual grant
 is a choice the distributor makes, so each election is recorded in its NOTICE entry rather than left to be inferred
 — "no copyleft applies" is a conclusion a reader should be able to check rather than take on trust.

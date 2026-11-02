@@ -1,0 +1,56 @@
+@ythril/schema
+Copyright Ythril contributors
+
+This product is the vocabulary of a Ythril space schema and the validator a Ythril server runs on it, published for apps
+that write schemas. It is licensed under the Apache License, Version 2.0 (see LICENSE), unlike the Ythril server, whose
+licence is the repository's.
+
+This package bundles no third-party code: its `dist` is compiled from its own `src` only.
+
+---
+
+## Runtime dependencies (installed by npm, not bundled)
+
+npm installs the packages below beside this one; each is distributed under its own licence, named here with its
+copyright notice. This list is the package's whole production closure, read from the repository's lock file and held
+to it by `testing/standalone/the-schema-package-notice-names-its-production-closure.test.js`.
+
+### zod
+
+The schema bodies every parse runs through.
+
+License: MIT
+Copyright (c) 2025 Colin McDonnell
+
+### @bufbuild/cel
+
+The schema-rule engine (custom validation rules written in CEL).
+
+License: Apache License 2.0
+Copyright 2024-2026 Buf Technologies, Inc.
+
+### @bufbuild/cel-spec
+
+The CEL language definitions `@bufbuild/cel` depends on, generated from Google's CEL specification and implementation
+(github.com/google/cel-spec, github.com/google/cel-go), both distributed under the Apache License 2.0.
+
+License: Apache License 2.0
+Copyright 2024-2026 Buf Technologies, Inc.
+
+### @bufbuild/protobuf
+
+The Protocol Buffers runtime `@bufbuild/cel` reads its syntax trees with. Its licence expression is
+`Apache-2.0 AND BSD-3-Clause`: both apply.
+
+License: Apache License 2.0 AND BSD-3-Clause
+Copyright 2021-2026 Buf Technologies, Inc. (Apache License 2.0)
+Copyright 2008 Google Inc.  All rights reserved. (BSD-3-Clause; the varint and wire-format code derived from Google's
+protobuf JavaScript runtime, whose wording of the clause names Google)
+
+### @bufbuild/re2
+
+The linear-time regular-expression engine behind a rule's `matches()`. A port of RE2JS (itself a port of RE2J, the Java
+port of Go's `regexp` package).
+
+License: MIT
+Copyright (c) 2023 Alexey Vasiliev

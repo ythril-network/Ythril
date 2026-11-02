@@ -279,7 +279,7 @@ guarded at the rung it advertises rather than at "administers the whole space".
 
 | Parameter | Meaning |
 |---|---|
-| `meta` | The schema to check, in the shape `GET /:id/meta` returns it. Parsed exactly as a schema save parses it, so a rule or type the save would refuse is refused here in the same words (`400`). Omit it to check the space's stored schema |
+| `meta` | The schema to check, in the shape `GET /:id/meta` returns it. Parsed exactly as a schema save parses it, so a rule or type the save would refuse is refused here in the same words (`400`; a `$ref` to a missing or wrong-kind library entry `422`, as on the save). Omit it to check the space's stored schema |
 | `sample` | `{ "kind": "entity" \| "edge" \| "fact" \| "chrono", "record": { … } }` — check **one record you supply** instead of the stored ones, in the STORED shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, with `type`, `description`, `tags`, `properties`; a field left out is empty). Nothing stored is read, it costs one evaluation, and it is not rate limited — **and, in either mode, a check runs only rules you could save**: a call with a `meta` whose rules (`rules`, or any type's `rules`) differ from the stored ones needs `admin` on `schema`, the right to save them, and is otherwise refused `403` (see *What it costs*) |
 | `limit` | Violating records per page, 1 to 500 (default 500) |
 | `after` | The `nextAfter` of the previous page. Opaque; one this check did not give is a `400` |
@@ -396,6 +396,39 @@ budget with the violations; a page that holds `limit` guards ends there, so a gu
 first write that meets such a guard clears it and goes on to land, so the list is how to see them before a write does.
 
 ---
+
+### Validate a schema offline (`@ythril/schema`)
+
+An app that writes a schema — a space template, a generator, a flow — can run the validator the server runs, without an
+instance. The vocabulary and the validator are the package `@ythril/schema` (`schema/` in this repository); the server
+imports it, so its answer is the answer an instance gives, refusal text included.
+
+```ts
+import { validateSpaceMeta } from '@ythril/schema';
+
+const result = validateSpaceMeta(meta, { library: entriesMyRefsName });
+if (!result.ok) throw new Error(`${result.message}\n${result.failed.join('\n')}`);
+```
+
+- **`meta`** is a space's `meta`, not the space: leave out `id`, `label` and the other space fields. The server-owned fields a
+  `GET` returns (`version`, `updatedAt`, ...) are dropped, as `PATCH` drops them.
+- **`library`** is the schema-library entries the meta's `$ref`s name (`{ name, knowledgeType, schema }`). The package never
+  reads an instance: without them a `$ref` is answered as an entry that does not exist, the `422` text above. A `$ref` to a
+  missing entry or to an entry of another kind is a `422` on every door that stores a schema, and on the dry run
+  (`POST /api/spaces/:id/validate-schema`, MCP `schema_validate`) too: `{ error }` with the sentence `message` holds here.
+- **What it checks** is what a write checks before it stores a meta: the bodies (`.strict()`, so an unknown key is refused),
+  the patterns (ReDoS), the CEL rules (parse, what they read, cost) and the library references. It does not scan stored records:
+  that is the dry run above, which needs the space's data.
+- **`tolerant: true`** reads the meta as a peer's: a key this release does not know is listed in the answer's `unknown`
+  instead of refused (a known key that is wrong still refuses). Leave it off for a schema the app writes.
+- **Paths**: `message` names the meta's own paths (`typeSchemas.entity.person...`); a `PATCH /api/spaces/:id`
+  refusal names the same fault under `meta.` (`meta.typeSchemas.entity.person...`), because that body carries the meta there.
+
+`parseTypeSchema(kind, name, definition)` answers the single-type upsert's refusal (`{ error, issues }`), and the types
+(`SpaceMeta`, `TypeSchema`, `PropertySchema`, ...), the tuples (the knowledge types, the merge functions, ...) and the
+limits (the purpose cap, the rules per type, ...) are exported for an app to type what it writes. The package is
+versioned with the release it was cut from; its README lists every export. It is licensed **Apache-2.0** (its own
+`schema/LICENSE` and `schema/NOTICE`), unlike the rest of the repository, so an app of any licence can depend on it.
 
 ### Schema Validation
 

@@ -36,7 +36,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
-const SPACES = 'server/src/spaces/body-schemas.ts';
+// The space bodies are `@ythril/schema`'s (`schema/src/space-meta.ts`); `spaces/body-schemas.ts` re-exports them to the library door.
+const SPACES = 'schema/src/space-meta.ts';
 const LIBRARY = 'server/src/api/schema-library.ts';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));

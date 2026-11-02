@@ -163,7 +163,8 @@ jobs:
         run: |
           IMAGE="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
           echo "Checking $IMAGE"
-          for f in NOTICE LICENSE; do
+          # schema/LICENSE and schema/NOTICE: @ythril/schema is Apache-2.0 with its own notices, shipped beside its build.
+          for f in NOTICE LICENSE schema/LICENSE schema/NOTICE; do
             if docker run --rm --entrypoint sh "$IMAGE" -c "test -s /app/$f"; then
               echo "  ok: /app/$f present and non-empty"
             else

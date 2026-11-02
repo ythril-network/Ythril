@@ -30,10 +30,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { productionClosure, packagesOf, missingFromNotice, noticeHeadingNames } from './_notice-closure.mjs';
+import { productionClosure, packagesOf, missingFromNotice, noticeHeadingNames, APACHE_TEXT } from './_notice-closure.mjs';
 
 const ENGINE = '@bufbuild/cel';
-const APACHE_TEXT = 'TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION';
 
 describe('the closure walker (proved on fixtures, so the real answer means what it says)', () => {
   const lock = {

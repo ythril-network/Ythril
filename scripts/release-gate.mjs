@@ -92,7 +92,9 @@ function checkStoredShapeMatchesMajor(version) {
   }
 }
 function checkVersion() {
-  const manifests = ['package.json', 'server/package.json', 'client/package.json'];
+  // `schema/package.json` is `@ythril/schema`, versioned with the release it is cut from: a package that says 6.3.0 validates what a 6.3.0
+  // server accepts, so it is bumped with the others or it lies about which server it speaks for.
+  const manifests = ['package.json', 'server/package.json', 'client/package.json', 'schema/package.json'];
   const versions = new Map();
   for (const m of manifests) versions.set(m, JSON.parse(read(m)).version);
 
@@ -213,6 +215,7 @@ const NOTICE_GATES = [
   ['notice-coverage', 'every redistributed dependency is attributed in NOTICE'],
   ['notice-ships-in-the-image', 'NOTICE and LICENSE are inside the published image'],
   ['ffmpeg-licensing-is-stated', 'ffmpeg runs as a separate process and is attributed'],
+  ['the-schema-package-notice-names-its-production-closure', 'schema/NOTICE names every package @ythril/schema pulls into production'],
 ];
 
 function runTest(name) {

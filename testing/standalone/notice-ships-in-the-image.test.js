@@ -40,6 +40,38 @@ import { join } from 'node:path';
 const ROOT = process.cwd();
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
+/** The image's app directory as a COPY destination (`WORKDIR /app`). */
+const APP_DIR = /^(?:\.\/?|\/app\/?)$/;
+
+/** Every `COPY` instruction of `dockerfile`: `{ fromStage, sources, dest }`, flags (`--chown`, `--from`) set apart. */
+function copyLines(dockerfile) {
+  return [...dockerfile.matchAll(/^COPY[ \t]+([^\r\n]+)/gm)].map(m => {
+    const words = m[1].trim().split(/\s+/);
+    const flags = words.filter(w => w.startsWith('--'));
+    const paths = words.filter(w => !w.startsWith('--'));
+    return { fromStage: flags.some(f => f.startsWith('--from=')), sources: paths.slice(0, -1), dest: paths[paths.length - 1] };
+  });
+}
+
+/** The workspaces whose manifest ships its own LICENSE or NOTICE (`files`), from the root's `workspaces`. */
+function ownNoticeWorkspaces() {
+  const root = JSON.parse(read('package.json'));
+  return (root.workspaces ?? []).filter(ws => {
+    const files = JSON.parse(read(`${ws}/package.json`)).files ?? [];
+    return files.includes('LICENSE') || files.includes('NOTICE');
+  });
+}
+
+/** The image paths a publish workflow checks: each word of a `for f in …; do` loop whose body runs `test -s /app/$f`, as `/app/<word>`. */
+function imageCheckedPaths(workflow) {
+  const out = [];
+  for (const m of workflow.matchAll(/for f in ([^;\r\n]+);\s*do\b([\s\S]*?)(?:\n\s*done\b|$(?![\s\S]))/g)) {
+    if (!/test -s \/app\/\$f\b/.test(m[2])) continue;
+    out.push(...m[1].trim().split(/\s+/).map(w => `/app/${w}`));
+  }
+  return out;
+}
+
 /** The production stage: from the last `FROM … AS production` to the end of the file. */
 function productionStage(dockerfile) {
   const at = dockerfile.lastIndexOf('AS production');
@@ -61,10 +93,29 @@ describe('the licence and notices ship inside the image', () => {
   it('the production stage copies them in', () => {
     // Matched in the PRODUCTION stage specifically: a COPY in a builder stage would satisfy a whole-file grep and
     // ship nothing, since builder layers are discarded.
+    //
+    // Matched as a SOURCE of one COPY line, the bare root path, into the app directory (Q-668, B7): `\bNOTICE\b` anywhere on a COPY
+    // line was also satisfied by `COPY schema/NOTICE ./schema/`, so the root file could go missing while a workspace's copy held the
+    // assertion up.
     for (const f of ['NOTICE', 'LICENSE']) {
-      assert.match(stage, new RegExp(`^COPY[^\\n]*\\b${f}\\b`, 'm'),
-        `the production stage does not COPY ${f} — the image would ship without it, which is what Apache-2.0 §4(d) `
-        + 'and the MIT notice clause both require it not to do');
+      assert.ok(copyLines(stage).some(c => !c.fromStage && c.sources.includes(f) && APP_DIR.test(c.dest)),
+        `the production stage does not COPY the root ${f} into the app directory — the image would ship without it, which is what `
+        + 'Apache-2.0 §4(d) and the MIT notice clause both require it not to do');
+    }
+  });
+
+  it('a workspace that ships its own LICENSE and NOTICE has them copied beside it', () => {
+    // `@ythril/schema` is Apache-2.0 with its own LICENSE and NOTICE (owner, 2026-11-01), and the image carries the package
+    // (`schema/package.json`, `schema/dist`). Its notices travel with it. Which workspaces: every one whose manifest ships a LICENSE
+    // or NOTICE (`files`), read from the repository, so the next package with its own licence is covered on the day it is added.
+    const shipping = ownNoticeWorkspaces();
+    assert.ok(shipping.includes('schema'), `the workspaces read as shipping their own notices are [${shipping.join(', ')}]: schema is one`);
+    const lines = copyLines(stage).filter(c => !c.fromStage);
+    for (const ws of shipping) {
+      for (const f of ['LICENSE', 'NOTICE']) {
+        assert.ok(lines.some(c => c.sources.includes(`${ws}/${f}`) && new RegExp(`^(?:\\./|/app/)${ws}/?$`).test(c.dest)),
+          `the production stage does not COPY ${ws}/${f} into ./${ws}/: the image carries ${ws} without its own ${f}`);
+      }
     }
   });
 
@@ -99,5 +150,34 @@ describe('the licence and notices ship inside the image', () => {
       'the publish workflow must ask the built image whether the notices are actually in it');
     assert.match(wf, /for f in NOTICE LICENSE/,
       'the artefact check must cover both files');
+  });
+
+  it('the publish workflow asks the image for each workspace\'s own notices too', () => {
+    // The effect half of the workspace COPY above (Q-668, B7): the paths the image is asked about, read from the loop that runs
+    // `test -s /app/$f`, include `/app/<workspace>/LICENSE` and `/app/<workspace>/NOTICE` for each workspace shipping its own.
+    const checked = imageCheckedPaths(read('.github/workflows/publish.yml'));
+    assert.ok(checked.includes('/app/NOTICE') && checked.includes('/app/LICENSE'), `read the checked paths as [${checked.join(', ')}]: the parse is broken`);
+    for (const ws of ownNoticeWorkspaces()) {
+      for (const f of ['LICENSE', 'NOTICE']) {
+        assert.ok(checked.includes(`/app/${ws}/${f}`), `the publish workflow never asks the image for /app/${ws}/${f}; it checks [${checked.join(', ')}]`);
+      }
+    }
+  });
+});
+
+describe('the readers this gate stands on (proved on planted copies)', () => {
+  it('a workspace copy alone does not stand in for the root copy', () => {
+    const planted = 'FROM node AS production\nCOPY schema/NOTICE schema/LICENSE ./schema/\n';
+    const lines = copyLines(planted);
+    assert.equal(lines.length, 1);
+    assert.ok(!lines.some(c => c.sources.includes('NOTICE')), 'schema/NOTICE was read as the root NOTICE');
+    assert.deepEqual(copyLines('COPY --from=builder /build/NOTICE ./\n')[0].fromStage, true);
+    assert.deepEqual(copyLines('COPY --chown=node NOTICE LICENSE ./\n')[0], { fromStage: false, sources: ['NOTICE', 'LICENSE'], dest: './' });
+  });
+
+  it('the publish loop is read as the paths it checks', () => {
+    const wf = '        for f in NOTICE LICENSE schema/NOTICE; do\n          if docker run "$IMAGE" -c "test -s /app/$f"; then\n';
+    assert.deepEqual(imageCheckedPaths(wf), ['/app/NOTICE', '/app/LICENSE', '/app/schema/NOTICE']);
+    assert.deepEqual(imageCheckedPaths('for f in NOTICE LICENSE; do\n echo "$f"\ndone\n'), [], 'a loop that never tests /app/$f checks nothing');
   });
 });

@@ -73,6 +73,11 @@ import { mountedRoutes } from './_routes.mjs';
 import { serverProgram } from '../_shared/server-program.mjs';
 
 const LOG_MODULE = 'server/src/util/log.ts';
+/**
+ * Where the bounding functions are DECLARED: `@ythril/schema`'s text module, which `util/log.ts` re-exports (the schema validator words
+ * its refusals with them too). The server program resolves the package to its source, so a call of `peerText` lands here.
+ */
+const TEXT_MODULE = 'schema/src/text.ts';
 /** The functions that bound a value for a log line. `logSafe` is the older name, kept as an alias of `peerText`. */
 const BOUNDING = ['peerText', 'peerList', 'logSafe'];
 const ENGINE = 'server/src/sync/engine.ts';
@@ -238,7 +243,7 @@ const isBoundingCall = e => {
   e = unwrap(e);
   if (!e || !ts.isCallExpression(e)) return false;
   const d = declOf(ts.isPropertyAccessExpression(e.expression) ? e.expression.name : e.expression);
-  return !!d && fileOf(d) === LOG_MODULE && BOUNDING.includes(d.name?.text);
+  return !!d && (fileOf(d) === TEXT_MODULE || fileOf(d) === LOG_MODULE) && BOUNDING.includes(d.name?.text);
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -550,11 +555,15 @@ describe('the derivation works', () => {
 });
 
 describe('a steerable value reaches a log line only bounded', () => {
-  it('util/log.ts exports peerText and peerList, and logSafe is peerText', () => {
-    const sf = SOURCE.get(LOG_MODULE);
+  it('util/log.ts exports peerText and peerList (declared once, in @ythril/schema), and logSafe is peerText', () => {
+    const sf = SOURCE.get(TEXT_MODULE);
+    assert.ok(sf, `${TEXT_MODULE} is not in the server program — the package no longer resolves to its source; re-anchor TEXT_MODULE`);
     for (const name of ['peerText', 'peerList', 'logSafe']) {
-      assert.ok(topLevelNamed(sf, name), `${LOG_MODULE} has no top-level \`${name}\``);
+      assert.ok(topLevelNamed(sf, name), `${TEXT_MODULE} has no top-level \`${name}\``);
     }
+    const reexport = SOURCE.get(LOG_MODULE).statements.find(st => ts.isExportDeclaration(st) && st.moduleSpecifier?.text === '@ythril/schema/internal');
+    const handedOn = new Set(reexport?.exportClause?.elements?.map(e => e.name.text) ?? []);
+    for (const name of BOUNDING) assert.ok(handedOn.has(name), `${LOG_MODULE} does not re-export \`${name}\` from @ythril/schema/internal`);
     const alias = topLevelNamed(sf, 'logSafe');
     const init = ts.isVariableDeclaration(alias) ? unwrap(alias.initializer) : null;
     assert.ok(init && ts.isIdentifier(init) && init.text === 'peerText',

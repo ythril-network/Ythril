@@ -26,8 +26,7 @@ import type { z } from 'zod';
 import { slugify } from './_shared.js';
 import { createSpace, type SpaceCreator } from './lifecycle.js';
 import {
-  CreateSpaceBody, TypeSchemasZ, findBrokenLibraryRefs, brokenRefsError, findWrongKindLibraryRefs, wrongKindRefsError,
-  parseSpaceMeta, stripServerOwnedSpace,
+  CreateSpaceBody, TypeSchemasZ, libraryRefRefusal, parseSpaceMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
 import { retiredSpaceFieldError } from '../brain/retired-write-fields.js';
@@ -89,17 +88,9 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
   // schema and the create reported success. It matters most in a `strict` space — which is the posture seeded a few
   // lines below — because one mistyped ref leaves that type with no constraints at all while its schema looks
   // authored. The check must stay AHEAD of the create, or a rejected schema leaves a space behind.
-  if (requestMeta?.typeSchemas) {
-    const brokenRefs = findBrokenLibraryRefs(requestMeta.typeSchemas as z.infer<typeof TypeSchemasZ>);
-    if (brokenRefs.length > 0) {
-      return { ok: false, refusal: { status: 422, body: { error: brokenRefsError(brokenRefs) } } };
-    }
-    // A reference to an entry of another kind would carry fields that never apply (`Q-215`): refused at the save of the reference.
-    const wrongKind = findWrongKindLibraryRefs(requestMeta.typeSchemas as z.infer<typeof TypeSchemasZ>);
-    if (wrongKind.length > 0) {
-      return { ok: false, refusal: { status: 422, body: { error: wrongKindRefsError(wrongKind) } } };
-    }
-  }
+  // A reference to an entry of another kind would carry fields that never apply (`Q-215`): refused too, by the same one refusal.
+  const refRefusal = libraryRefRefusal(requestMeta?.typeSchemas as z.infer<typeof TypeSchemasZ> | undefined);
+  if (refRefusal) return { ok: false, refusal: { status: 422, body: { error: refRefusal.message } } };
 
   // New user-created spaces default to a fully-strict schema posture (owner decision 2026-07-25):
   // `validationMode: 'strict'` + `strictLinkage: true`, so a space enforces its schema and referential integrity

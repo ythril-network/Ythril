@@ -33,7 +33,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const SERVER = 'server/src/spaces/body-schemas.ts';
+// `PropertySchemaZ` and its mergeFn refinement are `@ythril/schema`'s (`schema/src/space-meta.ts`), re-exported by `spaces/body-schemas.ts`.
+const SERVER = 'schema/src/space-meta.ts';
 const LIBRARY = 'server/src/api/schema-library.ts';
 const CLIENT = 'client/src/app/shared/merge-fns.ts';
 

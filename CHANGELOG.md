@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Schema:** `@ythril/schema` (in `schema/`) carries the space-schema types, limits and validator: `validateSpaceMeta` checks a space meta offline with the server's own refusals. The server imports it.
+- **Schema:** `@ythril/schema` is licensed Apache-2.0, with its own `LICENSE` and `NOTICE`.
+- **Schema:** `libraryRefRefusal` answers the `$ref` refusal alone. A direct parse outside `withSchemaLibrary` throws "no schema library installed" instead of reading an empty library.
+
+### Fixed
+
+- **Schema:** the schema dry run (`POST /api/spaces/:id/validate-schema`, MCP `schema_validate`) refuses a `$ref` to a missing library entry, or to one of another kind, with `422` and the save's own sentence, as the save does.
+
 ## [6.3.1] — 2026-11-02
 
 **A patch release: every door answers a waited sync with the same verdict, a local database failure is no longer counted against the peer, file metadata is counted, and shutdown waits for a running sync cycle's page.**

@@ -61,6 +61,7 @@ points at an agent's local, untracked rule sheet instead: `no-tracked-file-cites
 ```text
 ythril/
 ├── client/          Angular 21 SPA (workspace: @ythril/client)
+├── schema/          The space-schema vocabulary and validator, published for apps (workspace: @ythril/schema)
 ├── server/          Express 5 + TypeScript API (workspace: @ythril/server)
 ├── sidecars/        First-party sidecars (doc-render: PDF → page PNGs for the F11 VLM extraction path)
 ├── testing/
@@ -81,7 +82,7 @@ ythril/
 └── tsconfig.base.json  Shared TypeScript config
 ```
 
-npm workspaces: the root `package.json` declares `["server", "client"]`. All `npm` commands should be run from the repo root using `--workspace=` flags.
+npm workspaces: the root `package.json` declares `["schema", "server", "client"]`. All `npm` commands should be run from the repo root using `--workspace=` flags.
 
 ---
 
@@ -126,8 +127,12 @@ Or, to reuse the bundled container, expose its port with a dev-only `docker-comp
 ### Server (TypeScript → JavaScript)
 
 ```bash
-npm run build:server          # Compiles server/src → server/dist
+npm run build:server          # Compiles schema/src → schema/dist, then server/src → server/dist
 ```
+
+The server imports `@ythril/schema` (the space-schema bodies, parses, tuples and limits) from `schema/dist`, and its
+`prebuild` and `predev` compile the package first. A change to a schema body, a limit or a rule check is a change to
+`schema/src`; `server/src` re-exports it and defines none of it (`an-outside-apps-schema-validates-through-the-schema-package.test.js`).
 
 ### Client (Angular production build)
 
@@ -366,7 +371,9 @@ Images are built and pushed automatically by the CI workflow (`.github/workflows
 
 ### Steps
 
-1. Update `version` in `package.json`, `server/package.json`, and `client/package.json`.
+1. Update `version` in `package.json`, `server/package.json`, `client/package.json` and `schema/package.json`, the exact
+   `@ythril/schema` pin in `server/package.json`'s `dependencies`, and the lock file (`npm install --ignore-scripts` at the
+   root records both). The release gate refuses a tag whose package version differs.
 
 2. Commit and tag:
 
@@ -378,6 +385,9 @@ Images are built and pushed automatically by the CI workflow (`.github/workflows
    ```
 
 3. GitHub Actions builds for `linux/amd64` + `linux/arm64` and pushes to both GHCR and Docker Hub.
+
+4. After the release tag is pushed, publish the schema package from the tagged commit with the owner's npm token:
+   `npm publish -w @ythril/schema --access public` (its `prepack` builds it from a clean `dist`).
 
 ### Required GitHub secrets
 
@@ -464,7 +474,9 @@ Code should be boring to read. Clever tricks create maintenance debt.
 
 ### 6. Legal
 
-Ythril ships under the PolyForm Small Business License 1.0.0. Every contribution must respect this.
+Ythril ships under the PolyForm Small Business License 1.0.0. Every contribution must respect this. The exception is
+`schema/` (`@ythril/schema`), which is Apache-2.0 with its own `schema/LICENSE` and `schema/NOTICE`: a dependency added to
+it is named in `schema/NOTICE` too (a gate reads the package's production closure from the lock file).
 
 - **No copyleft-contaminated code dependencies in shipped Node packages.** GPL and AGPL dependencies are not permitted in the application dependency tree. Runtime infrastructure (for example MongoDB deployment options) must be documented explicitly in [Dependencies](dependencies.md), with licensing impact explained.
 - **License header awareness.** Third-party code snippets adapted into the codebase must have their original license noted in the `NOTICE` file.
@@ -510,7 +522,9 @@ A schema is stored, replicated, evaluated on every write and quoted back in ever
 place**, and a change that adds a second is the defect this repository produces most. What is one place now:
 
 - **A schema body is parsed once, before any store.** `spaces/body-schemas.ts` mints the parsed types every store takes
-  (a space's meta, a type, a library entry); nothing else does. A key added to a meta body needs its merge kind in
+  (a space's meta, a type, a library entry); nothing else does. The bodies and parses themselves are `@ythril/schema`'s
+  (`schema/src/`), re-exported by that shim; a server-only helper goes in the package's `./internal` entry, never its app
+  entry, whose names a test holds. A `$ref` is refused through `libraryRefRefusal` only, the package's one refusal. A key added to a meta body needs its merge kind in
   `spaces/meta-fields.ts` on the same commit (the body refuses to load without it), its rights row in
   `auth/space-field-rights.ts`, its first release in `sync/meta-skew.ts` so a write names the members that will refuse it, and the
   `schema_update` argument.
@@ -565,7 +579,8 @@ Use conventional-commit-style prefixes:
 
 ## License and contributor agreement
 
-Ythril is distributed under the **PolyForm Small Business License 1.0.0**. See `LICENSE` for the full text.
+Ythril is distributed under the **PolyForm Small Business License 1.0.0**. See `LICENSE` for the full text. `schema/`
+(the `@ythril/schema` package) is the exception: it is licensed under the Apache License 2.0 (`schema/LICENSE`).
 
 **Contributing requires signing the Contributor License Agreement (`CLA.md` in the repository root).** It is a licence, not an assignment: **you keep the copyright in everything you write.** What you grant is a licence broad enough for the project to be maintained, redistributed, and — this is the operative part — **licensed to others under different terms in future**, whether commercial, a different open licence, or both.
 

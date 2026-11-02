@@ -47,8 +47,9 @@ const PAIRS = [
   // Both moved from `config/types.ts` to the `config/types-knowledge.ts` leaf in Q-3. This gate caught the move
   // by failing, which is the "assert it FOUND both blocks" property above doing exactly its job — a path that
   // silently resolved to nothing would have turned it into a gate that compares nothing and passes.
-  { name: 'TypeSchema', doc: 'docs/integration-guide/06a-schema-api.md', src: 'server/src/config/types-knowledge.ts' },
-  { name: 'PropertySchema', doc: 'docs/integration-guide/06a-schema-api.md', src: 'server/src/config/types-knowledge.ts' },
+  // Then to `@ythril/schema` (`schema/src/vocabulary.ts`), the package the server imports the schema vocabulary from.
+  { name: 'TypeSchema', doc: 'docs/integration-guide/06a-schema-api.md', src: 'schema/src/vocabulary.ts' },
+  { name: 'PropertySchema', doc: 'docs/integration-guide/06a-schema-api.md', src: 'schema/src/vocabulary.ts' },
 ];
 
 /** Strip comments so a field named only in prose about the type cannot satisfy the comparison. */
@@ -132,8 +133,8 @@ describe('a documented interface block lists what the real interface declares', 
   // pages, and a second copy of the interface would be one more enumeration to rot. So the question is the other half
   // only — every key the interface declares is NAMED there — which is what a reader searching for a key needs.
   it('SpaceMeta — every key the interface declares is named in the spaces or schema docs', () => {
-    const body = interfaceBody(withoutComments(read('server/src/config/types-knowledge.ts')), 'SpaceMeta');
-    assert.ok(body !== null, 'interface SpaceMeta was not found in server/src/config/types-knowledge.ts — re-point this case');
+    const body = interfaceBody(withoutComments(read('schema/src/vocabulary.ts')), 'SpaceMeta');
+    assert.ok(body !== null, 'interface SpaceMeta was not found in schema/src/vocabulary.ts — re-point this case');
     const keys = fieldNames(body);
     assert.ok(keys.length >= 8, `only parsed ${keys.length} SpaceMeta key(s); the parse broke, not the docs`);
     const docs = ['docs/integration-guide/06-spaces-api.md', 'docs/integration-guide/06a-schema-api.md'].map(read).join('\n');
