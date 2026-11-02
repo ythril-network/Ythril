@@ -5,7 +5,7 @@ import { MIN_PEER_VERSION, peerFloorRefusal } from '../../sync/peer-floor.js';
 import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { attachSyncNote } from '../../sync/change-notes.js';
 import { networkSyncOutcome, peerSyncOutcome, resolveSyncWait, syncAnswerIsError, syncShutdownRefusal, syncTimeoutMs, verdictFields, type SyncAnswer } from '../../sync/trigger.js';
-import { syncVerdict, type MemberResult } from '../../sync/cycle-outcome.js';
+import { refusedMemberCount, syncVerdict, type MemberResult } from '../../sync/cycle-outcome.js';
 
 /** The members that did not simply sync, one line each — what a reader of the text half needs to know which member to look at. */
 function memberLines(members: readonly MemberResult[]): string {
@@ -319,8 +319,8 @@ export const network_syncTool: ToolHandler = {
         }],
         structuredContent: {
           status: !wait ? 'triggered' : answered ? 'completed' : 'timeout',
-          ...(wait && answered ? verdictFields(verdict, members) : { ok, members }),
-          synced: totalSynced, errors: totalErrors, refused: members.filter(m => m.outcome === 'peer-too-old').length, networks: lines, wait,
+          ...(wait && answered ? verdictFields(verdict, members) : { ok, members, refused: refusedMemberCount(members) }),
+          synced: totalSynced, errors: totalErrors, networks: lines, wait,
           ...(wait ? { timeoutMs } : {}),
           ...(stillRunning ? { timedOut: stillRunning } : {}),
         },

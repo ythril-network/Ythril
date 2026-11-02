@@ -34,6 +34,8 @@
  *  - every door of one subject (a network: five doors; a peer: three) gives ONE view: outcome, ok, code, and members as
  *    `{ networkId, instanceId, label, outcome, reason }`; and that view is the one the table says (`sync-verdict-is-one-table`);
  *  - the HTTP status is the same on every REST door of the subject: 200, 502 `sync_failed`, or 503 `sync_store_failed`;
+ *  - every door carries `refused`, the count of `peer-too-old` members (0 when none), and it is part of the compared view (a member below
+ *    the version floor is pinned for the two too-old cases; the dedicated network door and the MCP network branch answered without it);
  *  - MCP `isError` is `!ok`;
  *  - no answer, `reason` included, carries the driver's text or the peer's own error text (our sentence per outcome; the log has the rest);
  *  - `wait=false` answers `ok: true, status: 'triggered'` on every door (the request was accepted; the cycle has no outcome yet).
@@ -115,6 +117,8 @@ function setSecond(mode) {
 async function setFirst(mode) {
   door.state.family = null;
   if (mode === '500') door.state.family = (_req, res) => { res.status(500).json({ error: 'kaboom-7731 at 10.9.9.9' }); };
+  // Below the floor on evidence (as `a-peer-below-the-floor-is-refused` pins it): the member's turn ends as `peer-too-old` before anything is exchanged.
+  if (mode === 'too-old') { door.member().version = '1.0.0'; door.member().versionCheckedAt = new Date().toISOString(); }
   if (mode === 'fault') {
     door.state.family = door.serveFamily;
     await door.seedPeerRecords(S, 'facts', [positioned(build.fact(S, 'dv-fact-1', 101, { author: PEER_AUTHOR }))]);
@@ -187,7 +191,7 @@ function viewOf(answer) {
   const members = (Array.isArray(payload.members) ? payload.members : [])
     .map(m => ({ networkId: m.networkId, instanceId: m.instanceId, label: m.label, outcome: m.outcome, reason: m.reason }))
     .sort((a, b) => String(a.instanceId).localeCompare(String(b.instanceId)));
-  return { outcome: payload.outcome, ok: payload.ok, code, members };
+  return { outcome: payload.outcome, ok: payload.ok, code, refused: payload.refused, members };
 }
 
 /** Wait until no cycle the last call started is still running (a `wait=false` trigger answers before its cycle ends). */
@@ -224,6 +228,12 @@ const CASES = [
   { name: 'a local fault on one member and the other failed: nobody succeeded and not all are this instance\'s', first: 'fault', second: 'fail',
     network: { ...FAILED_502, members: { [PEER]: 'local-fault', [SECOND]: 'failed' } },
     peers: { [PEER]: { ...FAILED_503, members: { [PEER]: 'local-fault' } }, [SECOND]: { ...FAILED_502, members: { [SECOND]: 'failed' } } } },
+  { name: 'the only member is below the version floor (too old)', first: 'too-old', second: null,
+    network: { outcome: 'refused', ok: false, http: 200, refused: 1, members: { [PEER]: 'peer-too-old' } },
+    peers: { [PEER]: { outcome: 'refused', ok: false, http: 200, refused: 1, members: { [PEER]: 'peer-too-old' } } } },
+  { name: 'one member is too old and the other synced', first: 'too-old', second: 'ok',
+    network: { ...PARTIAL, refused: 1, members: { [PEER]: 'peer-too-old', [SECOND]: 'success' } },
+    peers: { [PEER]: { outcome: 'refused', ok: false, http: 200, refused: 1, members: { [PEER]: 'peer-too-old' } }, [SECOND]: { ...SUCCESS, members: { [SECOND]: 'success' } } } },
 ];
 
 const LABEL_OF = { [PEER]: PEER_LABEL, [SECOND]: SECOND_LABEL };
@@ -236,6 +246,8 @@ function assertAnswer(doorName, answer, want) {
   assert.equal(v.outcome, want.outcome, `outcome: ${where}`);
   assert.equal(v.ok, want.ok, `ok: ${where}`);
   assert.equal(v.code, want.code, `code: ${where}`);
+  // The count of members the peer's age ended (`peer-too-old`), on every door of every subject, zero when none: one field set for one house.
+  assert.equal(v.refused, want.refused ?? 0, `refused: ${where}`);
   if (answer.kind === 'rest') assert.equal(answer.status, want.http, `HTTP status: ${where}`);
   else assert.equal(answer.result.isError === true, !want.ok, `isError is not !ok: ${where}`);
   assert.deepEqual(v.members.map(m => [m.instanceId, m.outcome]), Object.entries(want.members).sort(([a], [b]) => a.localeCompare(b)),
@@ -272,6 +284,8 @@ describe('every sync door gives the same verdict for the same cycle', { skip }, 
     await door.reset({ direction: 'pull' });
     clearPositionMarks(door);
     door.member().consecutiveFailures = 0;
+    delete door.member().version;
+    delete door.member().versionCheckedAt;
     secondRequests = [];
     setSecond(null);
   });
