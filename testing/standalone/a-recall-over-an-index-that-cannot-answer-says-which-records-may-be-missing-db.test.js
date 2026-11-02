@@ -239,6 +239,26 @@ describe('a recall over an index that cannot answer says which records may be mi
     });
   });
 
+  describe('a filter the database refuses is the caller\'s error, not an index that cannot answer', () => {
+    it('a recall whose filter the store rejects (BadValue) throws what the classifier answers 400, with no index reason', async () => {
+      const resolved = resolveRecallFilter({ 'properties.marker': { $in: 5 } });
+      assert.ok(resolved.ok, `fixture check: the sanitizer must let this through to the store, or the case tests nothing: ${resolved.error}`);
+      const filter = resolved.kind === 'mongo' ? resolved.filter : resolved.kind === 'expression' ? resolved.expression : undefined;
+      const { classifyReadFailure } = await import('../../server/dist/brain/store-failure.js');
+      const degraded = [];
+      let caught;
+      try {
+        await recallMod.recall(GOK, 'Q', 10, undefined, ['entity'], undefined, undefined, filter, { degraded });
+      } catch (err) {
+        caught = err;
+      }
+      assert.ok(caught, `the recall answered (degraded [${degraded.join(', ')}]) where the store refused the caller's filter: `
+        + 'a malformed filter would read as a 200 with index_unavailable, and the caller is never told its filter is wrong');
+      assert.equal(classifyReadFailure(caught).status, 400, `the refusal classifies as ${classifyReadFailure(caught).status}, not the caller's 400`);
+      assert.deepEqual(degraded, [], 'no index reason for a refusal of the caller\'s own filter');
+    });
+  });
+
   describe('an index that will not serve (a real refusal: wrong numDimensions)', () => {
     it('fixture check: the harness mongot refuses the query for the dimension mismatch', async () => {
       const refusal = await rawRefusal(UNAVAIL, 'entities');

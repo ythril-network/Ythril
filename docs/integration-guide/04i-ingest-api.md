@@ -50,6 +50,7 @@ writes its claims twice; only the transcripts, which live at a derived path, are
 | `uncovered` | turns no claim covers |
 | `backends` | which models answered (`jev` or `assist`) |
 | `transcripts` | set when transcripts were skipped, with the reason |
+| `degraded` | set when entity matching searched a space whose index could not answer in full: recall's [degraded reasons](04a-recall-api.md#bounding-a-recall-in-time-maxtimems-and-degraded) (`index_not_ready` while the entity index is being built). The run still completes; a mention whose entity the search missed may have become a new entity, so review the run's entities or ingest again once the index serves |
 | `ids` | every key the extraction named → the record id it has now (written, or already in the space) |
 | `sourceTurns` | record id → the turns it came from. **Reported, never stored**: a turn id in a record would be noise in its vector, so this is the one place provenance lives — keep it if you need to join a record back to the conversation |
 
