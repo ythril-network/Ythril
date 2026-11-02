@@ -147,8 +147,6 @@ export function classifyMemberTurn(ended: MemberExchange | unknown): MemberOutco
 // After this many consecutive sync failures for a single member, we emit a prominent warning. The member is NOT auto-removed — that is a human decision.
 // Exported because the reparent invite warns when a parent has failed fewer than this (`api/invite.ts`): the one number "appears offline" means.
 export const STALE_FAILURE_THRESHOLD = 10;
-/** The same threshold for this instance's own faults with a member (v4 S3): logged once, at error. */
-const LOCAL_FAULT_THRESHOLD = 10;
 
 const saidTooOld = warnOnce<string>({ every: SKIP_WARNING_WINDOW_MS });
 
@@ -197,8 +195,9 @@ function moveCounters(net: NetworkConfig, member: NetworkMember, outcome: Member
   } else if (outcome === 'failed' && failures > STALE_FAILURE_THRESHOLD && failures % 10 === 0) {
     log.warn(`PEER STILL UNREACHABLE: '${peerText(member.label)}' (${failures} consecutive failures, last success: ${peerText(member.lastSyncAt ?? 'never')})`);
   }
-  if (outcome === 'local-fault' && row.consecutiveLocalFaults === LOCAL_FAULT_THRESHOLD) {
-    log.error(`LOCAL STORE FAILING for sync with '${peerText(member.label)}' in network '${peerText(net.label)}': ${LOCAL_FAULT_THRESHOLD} turns in a row `
+  // The same threshold for this instance's own faults with a member (v4 S3): logged once, at error.
+  if (outcome === 'local-fault' && row.consecutiveLocalFaults === STALE_FAILURE_THRESHOLD) {
+    log.error(`LOCAL STORE FAILING for sync with '${peerText(member.label)}' in network '${peerText(net.label)}': ${STALE_FAILURE_THRESHOLD} turns in a row `
       + 'could not complete because of this instance\'s own database. The peer is not at fault; look at this instance\'s store.');
   }
 }
