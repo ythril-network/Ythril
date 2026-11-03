@@ -115,6 +115,9 @@ describe('action labels are verbs in every locale (Q-115)', () => {
  */
 const PRODUCT_TERMS: { en: RegExp; wrong: { de: RegExp; pl: RegExp } }[] = [
   { en: /\bspaces?\b/i, wrong: { de: /leerzeichen/i, pl: /spacj/i } },
+  // An "ID" is an identifier. Machine translation read it as an identity document: "AUSWEIS" for the Spaces table's ID column and "Neuer Ausweis"
+  // for the rename dialog's new ID (de), "Nowy dowód" (pl: a proof, a receipt). Case-insensitive, because the column head is written in capitals.
+  { en: /\bIDs?\b/, wrong: { de: /ausweis/i, pl: /dow[oó]d/i } },
 ];
 /** Keys whose English "space" genuinely means the whitespace character. None today. */
 const WHITESPACE_KEYS: ReadonlySet<string> = new Set<string>();
@@ -123,7 +126,7 @@ describe('product terms are translated as the product noun, not the everyday wor
   const en = dictionary('en');
   const others = { de: dictionary('de'), pl: dictionary('pl') };
 
-  it('no value translates a Ythril space as a whitespace character', () => {
+  it('no value translates a product noun as its everyday spelling: a space as whitespace, an ID as an identity document (Q-539)', () => {
     const wrong: string[] = [];
     let checked = 0;
     for (const term of PRODUCT_TERMS) {

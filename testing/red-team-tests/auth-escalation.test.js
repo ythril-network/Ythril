@@ -19,6 +19,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
@@ -160,6 +161,58 @@ describe('H3 — space-restricted admin cannot mint a broader token', () => {
     const r = await post(INSTANCES.a, restrictedAdmin, '/api/tokens', { name: `esc-subset-${RUN}`, rights: legacyRights({ spaces: ['general'] })});
     assert.equal(r.status, 201, `Regression: restricted admin could not mint an in-scope token: ${JSON.stringify(r.body)}`);
     if (r.body?.token?.id) tokenIds.push(r.body.token.id);
+  });
+});
+
+// ── H4 — an OAuth consent cannot launder a peer-bound token into an unbound connector (Q-597) ───
+
+describe('H4 — a peer-bound token cannot approve an MCP OAuth connector', () => {
+  // Attack: a peer (or anyone holding the PAT it was issued) registers a client through open DCR, consents with the PEER's token and
+  // exchanges the code with its own PKCE verifier. The connector token minted has the peer's rights matrix and NO peer binding, so
+  // revoking the peer (revokePeerCredentialsIfOrphaned, adoptPeerToken) leaves it alive for the connector lifetime (90 days by default).
+  // Fix: the consent refuses a token made for one purpose (peer-bound or schema library) with a 403 before any code exists.
+  // Written red on d079607b3 (the consent answers 302 and the exchange mints a connector); run pending the test stack.
+  const REDIRECT = 'http://127.0.0.1:9/callback';
+  const tokenIds = [];
+  let clientId;
+
+  const consent = (token) => {
+    const form = new URLSearchParams({ client_id: clientId, redirect_uri: REDIRECT, code_challenge: 'x'.repeat(43), token });
+    return fetch(`${INSTANCES.a}/mcp-oauth/consent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString(), redirect: 'manual',
+    });
+  };
+
+  before(async () => {
+    const r = await fetch(`${INSTANCES.a}/register`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_name: `esc-h4-${RUN}`, redirect_uris: [REDIRECT], grant_types: ['authorization_code'], response_types: ['code'], token_endpoint_auth_method: 'none' }),
+    });
+    const body = await r.json();
+    assert.ok(r.status < 300 && body.client_id, `fixture: the client did not register (a 429 means the 20-an-hour DCR bucket is spent): ${r.status} ${JSON.stringify(body)}`);
+    clientId = body.client_id;
+  });
+
+  after(async () => {
+    for (const id of tokenIds) await del(INSTANCES.a, adminToken, `/api/tokens/${id}`).catch(() => {});
+  });
+
+  it('a peer-bound token\'s consent is refused with a 403 and no authorization code', async () => {
+    const peer = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `esc-peer-${RUN}`, peerInstanceId: crypto.randomUUID() });
+    assert.equal(peer.status, 201, JSON.stringify(peer.body));
+    tokenIds.push(peer.body.token.id);
+    const r = await consent(peer.body.plaintext);
+    assert.equal(r.status, 403,
+      `VULNERABILITY: a peer-bound token approved a connector (got ${r.status}); the connector minted from it has no peer binding`);
+    assert.equal(r.headers.get('location'), null, 'VULNERABILITY: an authorization code was issued to a peer-bound approver');
+  });
+
+  it('an ordinary token still approves a connector (control)', async () => {
+    const own = await post(INSTANCES.a, adminToken, '/api/tokens', { name: `esc-own-${RUN}`, rights: legacyRights({ spaces: ['general'] }) });
+    assert.equal(own.status, 201, JSON.stringify(own.body));
+    tokenIds.push(own.body.token.id);
+    const r = await consent(own.body.plaintext);
+    assert.equal(r.status, 302, `Regression: an ordinary token could not approve a connector (got ${r.status})`);
   });
 });
 

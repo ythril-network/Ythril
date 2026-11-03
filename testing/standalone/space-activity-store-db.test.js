@@ -22,18 +22,21 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { configureSpaces } from './_configured-spaces.mjs';
 
 const skip = await mongoSkipReason();
 
 const HOUR = Date.parse('2026-08-01T14:20:00.000Z');
 const NEXT_HOUR = Date.parse('2026-08-01T15:05:00.000Z');
 
-let mongo, activity;
+let mongo, activity, config;
 let recordSpaceCall, drainSpaceActivity, flushSpaceActivity, ensureActivityIndexes, summariseActivity,
   ACTIVITY_COLLECTION, ACTIVITY_RETENTION_DAYS;
 
 describe('space activity store — against a real MongoDB', { skip }, () => {
   before(async () => {
+    // The spaces the cases below record calls against: a call is counted only against a configured space (Q-606).
+    config = await configureSpaces(['general', 'alpha', 'beta', 'busy', 'useful', 'quiet', 'old', 'new'], 'space-activity-store');
     mongo = await openTestMongo('spaceactivity');
     ({ recordSpaceCall, drainSpaceActivity } = await import('../../server/dist/metrics/space-activity.js'));
     ({ flushSpaceActivity, ensureActivityIndexes, summariseActivity, ACTIVITY_COLLECTION,
@@ -104,6 +107,25 @@ describe('space activity store — against a real MongoDB', { skip }, () => {
     recordSpaceCall('alpha', 'recall', { ms: 5 });
     await flushSpaceActivity(NEXT_HOUR);
     assert.equal(await activity.countDocuments({ space: 'alpha' }), 2);
+  });
+
+  describe('only a configured space reaches the collection (Q-606)', () => {
+    it('an id the config does not hold is never written, whatever arrives', async () => {
+      for (let i = 0; i < 20; i++) recordSpaceCall(`invented-${i}`, 'read', { ms: 1 });
+      recordSpaceCall('alpha', 'read', { ms: 1 });
+      assert.equal(await flushSpaceActivity(HOUR), 1);
+      assert.deepEqual((await activity.find({}).toArray()).map(d => d.space), ['alpha'], 'a made-up id has a stored document, kept 90 days');
+    });
+
+    it('a space deleted between a call and the flush is not written back under its old id', async () => {
+      config.addSpace('deleted-mid-window');
+      recordSpaceCall('deleted-mid-window', 'write', { ms: 1 });
+      recordSpaceCall('alpha', 'write', { ms: 1 });
+      config.removeSpace('deleted-mid-window');
+      await flushSpaceActivity(HOUR);
+      assert.deepEqual((await activity.find({}).toArray()).map(d => d.space), ['alpha'],
+        'the purge of a deleted space\'s rows was undone by the counts that were still pending');
+    });
   });
 
   it('flushing nothing writes nothing', async () => {

@@ -102,3 +102,66 @@ describe('no product-facing instruction names a benchmark corpus', () => {
       + 'a number about a corpus belongs.');
   });
 });
+
+/**
+ * The second half of the same leak: not the corpus's NAME but its NUMBERS (Q-25).
+ *
+ * The gate above reads names, and `extraction.md` carried the measurement without ever naming a corpus: *"across ten
+ * conversations and 5,882 turns there were 24 in total"*, *"sixteen entries across 568 turns"*, *"covered 34.6% of a
+ * conversation and scored worse than storing raw turns"*. Every one of those is a count taken from a benchmark run,
+ * printed beside the rule it justifies, in the text a customer's extractor reads. It teaches the next reader that the rule
+ * is a fit to a dataset, and the day the dataset changes somebody deletes it. A figure of that kind belongs in the
+ * changelog and the tracker; the prompt gives the reason in terms of what is true of a support history or an agent
+ * transcript.
+ *
+ * What counts as a measurement is what a run of a corpus produces and nothing a rule needs: a percentage, a number with
+ * thousands separators, and a count of 10 or more (digits, or the words ten to a hundred) of the things a corpus is made
+ * of — turns, conversations, sessions, questions, entries, facts, events. Small counts in prose ("two sessions share a
+ * day", "eight months") are examples, not measurements, and are not matched.
+ */
+const MEASUREMENTS = [
+  { what: 'a percentage', re: /\b\d+(?:\.\d+)?\s?%/g },
+  { what: 'a number with thousands separators', re: /\b\d{1,3}(?:,\d{3})+\b/g },
+  {
+    what: 'a count of a corpus\'s things',
+    re: /(?<![\d,.])\b(?:\d{2,}|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)\s+(?:evidence\s+)?(?:turns|conversations|sessions|questions|entries|facts|events|retirements|answers|messages)\b/gi,
+  },
+];
+
+/** Every measurement in `text`, with its 1-based line. A global regex is built fresh per use. */
+function measurementsIn(text) {
+  const hits = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    for (const { what, re } of MEASUREMENTS) {
+      for (const m of line.matchAll(new RegExp(re.source, re.flags))) hits.push({ line: i + 1, what, text: m[0] });
+    }
+  });
+  return hits;
+}
+
+describe('no product-facing instruction states a measurement taken from a corpus', () => {
+  it('not in the prompt, not in the purpose, not in the usage notes', () => {
+    const offenders = [];
+    for (const f of PRODUCT_FACING) {
+      for (const h of measurementsIn(readFileSync(join(REPO_ROOT, f), 'utf8'))) {
+        offenders.push(`${f}:${h.line} states ${h.what} ('${h.text}')`);
+      }
+    }
+    assert.deepEqual(offenders, [],
+      'a rule read by everybody who ingests anything is justified by a number a benchmark run produced:\n  '
+      + offenders.join('\n  ')
+      + '\n\nGive the reason in terms of what is true of a support history or an agent transcript, and leave the '
+      + 'figure in the changelog and the tracker.');
+  });
+
+  it('the detector sees the three shapes it was written for, and leaves examples alone', () => {
+    const seen = (s) => measurementsIn(s).map(h => h.what);
+    assert.deepEqual(seen('Across ten conversations and 5,882 turns there were 24 in total.'),
+      ['a number with thousands separators', 'a count of a corpus\'s things']);
+    assert.deepEqual(seen('which ended with sixteen entries across 568 turns'), ['a count of a corpus\'s things', 'a count of a corpus\'s things']);
+    assert.deepEqual(seen('an extraction that covered 34.6% of a conversation'), ['a percentage']);
+    // The examples a rule is explained with.
+    assert.deepEqual(seen('If two sessions share a day, read the time. A conversation covering eight months yielded two retirements.'), []);
+    assert.deepEqual(seen('Fifty-two weeks; 3 facts, 7 turns'), []);
+  });
+});

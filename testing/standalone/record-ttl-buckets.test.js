@@ -17,11 +17,15 @@
  *
  * Run: node --test testing/standalone/record-ttl-buckets.test.js
  */
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
+import { tempInstanceDir, removeInstanceDir, bootInstance } from './_vote-round-instance.mjs';
+
+// CONFIG_PATH and DATA_ROOT are set BEFORE anything of the build is imported: the writes below go through the real config loader.
+const dir = tempInstanceDir('ythril-ttl-');
 
 const {
   normaliseRecordTtl, recordTtlWindows, TTL_BUCKETS,
@@ -126,28 +130,10 @@ describe('the API and the storage type agree', () => {
       'an empty object must be refused: it would make "clear everything" and "change nothing" one request');
   });
 
-  it('the route normalises through the shared helper rather than deciding again', () => {
-    // The normalisation is a DECISION, so it moved into the planner both surfaces call — a second surface that
-    // normalised for itself is exactly how the two would drift.
-    const src = readFileSync(join(ROOT, 'server/src/spaces/meta-update.ts'), 'utf8');
-    assert.match(src, /normaliseRecordTtl\(space\.recordTtlDays, parsed\.data\.recordTtlDays\)/,
-      'the merge must read what is stored, or a partial write clears the buckets it did not mention');
-    const store = readFileSync(join(ROOT, 'server/src/spaces/spaces.ts'), 'utf8');
-    assert.ok(!/updates\.recordTtlDays\s*&&\s*updates\.recordTtlDays\s*>\s*0/.test(store),
-      'updateSpace must store what it is given, not re-decide the shape — that is how the two drift');
-  });
-
-  it('the raw body never reaches the store a second time', () => {
-    // Both of the bugs the UI run found came from here. `recordTtlDays` is applied ABOVE, merged over what was
-    // stored and normalised; the generic `...restPatch` spread further down then wrote the raw body over the
-    // top of it. So a partial write cleared the four buckets it did not mention, and an all-cleared write stored
-    // five explicit nulls instead of nothing — both with a 200 and no visible symptom.
-    // The write moved into `applySpaceMetaUpdate` with the rest of the side effects, so the destructure that keeps
-    // the raw body out of it moved too. Same guarantee, one file over.
-    const src = readFileSync(join(ROOT, 'server/src/spaces/meta-update.ts'), 'utf8');
-    assert.match(src, /const \{ documentExtraction: _rawMode, recordTtlDays: _rawTtl, \.\.\.restPatch \} = patchData;/,
-      'recordTtlDays must be destructured OUT of the spread that reaches updateSpace, like documentExtraction');
-  });
+  // The three source-text pins that stood here (the planner's `normaliseRecordTtl(...)` call, `updateSpace` not re-deciding the shape, and the
+  // exact destructure that keeps the raw body out of the spread) are replaced by `describe('applySpaceMetaUpdate stores ...')` below, which
+  // drives the write itself: the rule is what is STORED, not how a file spells it (Q-507). The text pin went red on a harmless respelling and
+  // stayed green when the spread was broken some other way.
 
   it('the UI subscribes to its save — an awaited Observable sends nothing', () => {
     // The Danger Zone reported "Retention saved." and sent no request at all: `updateSpace` returns a cold
@@ -197,5 +183,115 @@ describe('the API and the storage type agree', () => {
       'retentionDays must skip the schema lookup for the file bucket');
     assert.match(src, /collection === 'file' \|\| !CONTENT_TIER_COLLECTIONS/,
       'contentDays must skip the file bucket before indexing the content-tier list');
+  });
+});
+
+/**
+ * The write itself, through `planSpaceMetaUpdate` and `applySpaceMetaUpdate` on a real config (Q-507): what the space STORES after a write is the
+ * rule, whatever the code that gets it there is spelled like.
+ *
+ * Both of the defects the UI run found live between the plan and the store: the raw body's `recordTtlDays` reaching `updateSpace` a second time
+ * through the generic spread (a partial write cleared the four buckets it did not name; an all-cleared write stored five nulls), and a write that
+ * did not read what was stored. The plain branch (a space in no network) and the networked branch (a meta change that opens a round, where the TTL
+ * is a LOCAL setting applied from the plan and never voted) both have to store the merged window; the other fields of the same PATCH ride along in
+ * the plain branch's spread and must not carry the raw TTL with them.
+ */
+describe('applySpaceMetaUpdate stores the merged window, never the raw body', () => {
+  const SELF = 'aaaaaaaa-0000-4000-8000-000000005e1f';
+  const MEMBER = (n) => ({ instanceId: `aaaaaaaa-0000-4000-8000-0000000000a${n}`, label: `m${n}`, url: `https://m${n}.example.com`, tokenHash: 'h', direction: 'both' });
+  let loader, plan, apply;
+
+  before(async () => {
+    loader = await bootInstance(dir, {
+      instanceId: SELF,
+      spaces: [
+        { id: 'general', label: 'General', builtIn: true, folders: [] },
+        { id: 'plain', label: 'Plain', folders: [] },
+        { id: 'shared', label: 'Shared', folders: [] },
+      ],
+      networks: [{
+        id: 'net-ttl', label: 'Net', type: 'closed', origin: 'created', syncSchedule: '', spaces: ['shared'], votingDeadlineHours: 24,
+        createdAt: '2026-01-01T00:00:00.000Z', members: [MEMBER(1), MEMBER(2)], pendingRounds: [],
+      }],
+    });
+    ({ planSpaceMetaUpdate: plan, applySpaceMetaUpdate: apply } = await import('../../server/dist/spaces/meta-update.js'));
+  });
+  after(async () => {
+    await loader?.flushConfig();
+    removeInstanceDir(dir);
+  });
+
+  /** Store `stored` as the space's window, PATCH `body`, and answer what the config holds for it afterwards (and the outcome). */
+  async function patch(spaceId, stored, body) {
+    const space = loader.getConfig().spaces.find(s => s.id === spaceId);
+    assert.ok(space, `fixture: no space ${spaceId}`);
+    if (stored === undefined) delete space.recordTtlDays; else space.recordTtlDays = structuredClone(stored);
+    const decision = plan({ spaceId, space, body, ifMatch: undefined });
+    assert.equal(decision.ok, true, `the planner refused ${JSON.stringify(body)}: ${JSON.stringify(decision.refusal)}`);
+    const outcome = await apply(decision.plan);
+    const after = loader.getConfig().spaces.find(s => s.id === spaceId);
+    return { outcome, stored: after.recordTtlDays, has: 'recordTtlDays' in after, label: after.label };
+  }
+
+  for (const [branch, spaceId] of [['plain space', 'plain'], ['networked space', 'shared']]) {
+    // The networked branch is reached by a body that also carries a meta change (the round is opened for that); the window rides in the same body.
+    const withMeta = (b) => (spaceId === 'shared' ? { ...b, meta: { purpose: 'a purpose the network votes on' } } : b);
+    const expectOutcome = (o) => assert.ok(spaceId === 'shared' ? ['vote_pending', 'applied'].includes(o.outcome) : o.outcome === 'applied', `${branch}: outcome ${o.outcome}`);
+
+    describe(branch, () => {
+      it('a partial object over stored buckets keeps the buckets it does not name', async () => {
+        const r = await patch(spaceId, { entity: 365, chrono: 90 }, withMeta({ recordTtlDays: { chrono: 30 } }));
+        expectOutcome(r.outcome);
+        assert.deepEqual(r.stored, { entity: 365, chrono: 30 }, 'a partial write must merge over what was stored');
+      });
+
+      it('a partial object over a stored scalar keeps the other four on that number', async () => {
+        const r = await patch(spaceId, 90, withMeta({ recordTtlDays: { chrono: 30 } }));
+        expectOutcome(r.outcome);
+        assert.deepEqual(r.stored, { entity: 90, fact: 90, edge: 90, chrono: 30, file: 90 });
+      });
+
+      it('an all-cleared write stores nothing: the key is gone, not five nulls', async () => {
+        const r = await patch(spaceId, { chrono: 90 }, withMeta({ recordTtlDays: { chrono: null } }));
+        expectOutcome(r.outcome);
+        assert.equal(r.stored, undefined, 'one representation of "no retention"');
+      });
+
+      it('a per-bucket clear removes just that bucket', async () => {
+        const r = await patch(spaceId, ALL5, withMeta({ recordTtlDays: { file: null } }));
+        expectOutcome(r.outcome);
+        assert.deepEqual(r.stored, { entity: 90, fact: 90, edge: 90, chrono: 90 });
+      });
+
+      it('a bare number replaces the whole window', async () => {
+        const r = await patch(spaceId, { chrono: 30 }, withMeta({ recordTtlDays: 365 }));
+        expectOutcome(r.outcome);
+        assert.equal(r.stored, 365);
+      });
+
+      it('a write that does not mention the window leaves it as stored', async () => {
+        const r = await patch(spaceId, { entity: 365, chrono: 90 }, withMeta({ label: 'Renamed' }));
+        expectOutcome(r.outcome);
+        assert.deepEqual(r.stored, { entity: 365, chrono: 90 }, 'a label edit must not touch the window');
+        assert.equal(r.label, 'Renamed', 'fixture check: the other field of the same PATCH was applied');
+      });
+
+      it('the window rides beside other fields of the same PATCH without the raw body overwriting it', async () => {
+        const r = await patch(spaceId, { entity: 365, chrono: 90 }, withMeta({ label: 'Both', recordTtlDays: { chrono: 7 } }));
+        expectOutcome(r.outcome);
+        assert.deepEqual(r.stored, { entity: 365, chrono: 7 }, 'the generic spread of the other fields must not write the raw recordTtlDays over the merged one');
+        assert.equal(r.label, 'Both');
+      });
+    });
+  }
+
+  it('the store keeps exactly what it is handed: `updateSpace` does not re-decide the shape', async () => {
+    const { updateSpace } = await import('../../server/dist/spaces/spaces.js');
+    updateSpace('plain', { recordTtlDays: { chrono: 5 } });
+    assert.deepEqual(loader.getConfig().spaces.find(s => s.id === 'plain').recordTtlDays, { chrono: 5 });
+    updateSpace('plain', { recordTtlDays: 30 });
+    assert.equal(loader.getConfig().spaces.find(s => s.id === 'plain').recordTtlDays, 30, 'a scalar is stored as a scalar');
+    updateSpace('plain', { recordTtlDays: undefined });
+    assert.equal(loader.getConfig().spaces.find(s => s.id === 'plain').recordTtlDays, undefined, 'an explicit clear removes it');
   });
 });

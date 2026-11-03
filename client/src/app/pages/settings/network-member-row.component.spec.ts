@@ -93,3 +93,62 @@ describe('NetworkMemberRowComponent: sync health (bundle-39)', () => {
     }
   });
 });
+
+describe('NetworkMemberRowComponent: the local-store badge is readable without a pointer (Q-680)', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  /** The badge for THIS instance's store: queried by its own class, because `.member-failing` is on both badges and the peer's comes first. */
+  const localBadge = (f: { nativeElement: HTMLElement }) => f.nativeElement.querySelector<HTMLElement>('.member-local-failing');
+
+  /** What the badge's `aria-describedby` points at, as assistive technology reads it. */
+  const described = (f: { nativeElement: HTMLElement }, badge: HTMLElement): string =>
+    (badge.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+      .map(id => f.nativeElement.querySelector(`#${CSS.escape(id)}`)?.textContent?.trim() ?? '').join(' ').trim();
+
+  it('is the title of the local-store badge stated by the dictionary, not by a literal (the one form for a count of 1, the other for 4)', () => {
+    for (const [count, form] of [[1, 'one'], [4, 'other']] as const) {
+      const f = make(member({ consecutiveLocalFaults: count }));
+      expect(localBadge(f)?.getAttribute('title'), `count ${count}`).toBe(EN[`networks.member.localFailingTitle.${form}`]!.replace('{{count}}', String(count)));
+    }
+  });
+
+  it('the badge can take the keyboard focus: tabindex 0', () => {
+    const badge = localBadge(make(member({ consecutiveLocalFaults: 4 })));
+    expect(badge, 'the local-store badge is rendered').toBeTruthy();
+    expect(badge!.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('its accessible DESCRIPTION is the title sentence: aria-describedby names an element carrying the same words', () => {
+    const f = make(member({ consecutiveLocalFaults: 4 }));
+    const badge = localBadge(f)!;
+    expect(badge.getAttribute('aria-describedby'), 'the badge is described by something').toBeTruthy();
+    expect(described(f, badge)).toBe(EN['networks.member.localFailingTitle.other']!.replace('{{count}}', '4'));
+  });
+
+  it('en, de and pl: the description is the language\'s own sentence', () => {
+    for (const lang of ['en', 'de', 'pl'] as const) {
+      const d = dictOf(lang);
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({ imports: [NetworkMemberRowComponent, getTranslocoModule({ translation: { en: d } })] });
+      const f = TestBed.createComponent(NetworkMemberRowComponent);
+      f.componentRef.setInput('member', member({ consecutiveLocalFaults: 1 }));
+      f.detectChanges();
+      const sentence = described(f, localBadge(f)!);
+      expect(sentence, lang).toBe(d['networks.member.localFailingTitle.one']!.replace('{{count}}', '1'));
+    }
+  });
+
+  it('a member whose peer failed, with no local fault, has no local badge to describe', () => {
+    expect(localBadge(make(member({ consecutiveFailures: 3 })))).toBeNull();
+  });
+
+  it('two members on one page do not share a description id', () => {
+    const a = make(member({ instanceId: 'peer-aaaa', consecutiveLocalFaults: 2 }));
+    const ida = localBadge(a)!.getAttribute('aria-describedby');
+    const b = make(member({ instanceId: 'peer-bbbb', consecutiveLocalFaults: 2 }));
+    const idb = localBadge(b)!.getAttribute('aria-describedby');
+    expect(ida).toBeTruthy();
+    expect(idb).toBeTruthy();
+    expect(ida, 'ids are per member, or two rows in one list would point at each other').not.toBe(idb);
+  });
+});

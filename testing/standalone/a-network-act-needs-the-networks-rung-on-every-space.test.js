@@ -164,3 +164,94 @@ describe('a space admin and its own spaces (F-37)', () => {
     assert.equal(networkInviteRefusal({ id: 'a', rights: { instanceAdmin: true, createSpaces: true, floor: null, perSpace: {} } }, { spaces: ['qa'] }), null);
   });
 });
+
+/*
+ * Q-603 — a network that carries NO space is the instance admin's alone. "The rung on EVERY space it carries" is false of
+ * an empty list for everyone but the instance admin: `[].every(...)` is true, and a rung held on spaces is not one held on
+ * a network that has none. `takeSpaceOutOfNetwork` leaves such a network in config when its last space goes, and until
+ * now any token with a matrix could read it, change its settings, attach a space to it and leave it (which tells every
+ * member and can revoke a peer's credentials). One list, five acts, and every one of them is asked here.
+ */
+describe('a network that carries no space is the instance admin\'s alone (Q-603)', () => {
+  const ADMIN = { id: 'a', rights: { instanceAdmin: true, createSpaces: true, floor: null, perSpace: {} } };
+  const EMPTY = { id: 'emptied', spaces: [], spaceOrigins: {} };
+  // Every caller shape that holds rungs: a high rung on its own spaces, the floor at admin, a space admin, and a floor-only token.
+  const CALLERS = {
+    'a token at networks admin on a space': token({ qa: areas('admin') }),
+    'a token with networks admin on the floor': token({}, { floor: areas('admin') }),
+    'a space admin': token({}, { spaceAdmin: { floor: false, spaces: ['qa'] } }),
+    'a space admin of the floor': token({}, { spaceAdmin: { floor: true, spaces: [] } }),
+  };
+  let mod;
+  before(async () => { mod = await import('../../server/dist/auth/network-rights.js'); });
+
+  for (const [who, caller] of Object.entries(CALLERS)) {
+    describe(who, () => {
+      it('does not see it', () => {
+        assert.deepEqual(mod.visibleNetworks(caller, [EMPTY, { id: 'real', spaces: ['qa'] }]).map(n => n.id).filter(id => id === 'emptied'), [],
+          'an emptied network was listed to a token that is not the instance admin');
+      });
+      it('may not change its settings', () => {
+        assert.equal(typeof mod.networkSettingsRefusal(caller, EMPTY), 'string', 'networkSettingsRefusal returned null for a network with no spaces');
+      });
+      it('may not leave it', () => {
+        assert.equal(typeof mod.networkLeaveRefusal(caller, EMPTY), 'string', 'networkLeaveRefusal returned null for a network with no spaces');
+      });
+      it('may not add a space to it', () => {
+        assert.equal(typeof mod.networkAddSpaceRefusal(caller, EMPTY, 'qa'), 'string', 'networkAddSpaceRefusal returned null for a network with no spaces');
+      });
+      it('may not invite into it (a control: this refusal already holds)', () => {
+        assert.equal(typeof mod.networkInviteRefusal(caller, EMPTY), 'string');
+      });
+    });
+  }
+
+  it('the instance admin still sees it, changes it, leaves it and adds to it', () => {
+    assert.deepEqual(mod.visibleNetworks(ADMIN, [EMPTY]).map(n => n.id), ['emptied']);
+    assert.equal(mod.networkSettingsRefusal(ADMIN, EMPTY), null);
+    assert.equal(mod.networkLeaveRefusal(ADMIN, EMPTY), null);
+    assert.equal(mod.networkAddSpaceRefusal(ADMIN, EMPTY, 'qa'), null);
+  });
+
+  it('a token with no matrix reaches nothing, as before (a control)', () => {
+    assert.deepEqual(mod.visibleNetworks({ id: 'x' }, [EMPTY]), []);
+  });
+
+  it('a join that would leave the network with no spaces is refused to a token that is not the instance admin', () => {
+    // The remote's own list is what is judged: a join onto a network the remote shares no space of has nothing for a rung to be held on.
+    const caller = token({ qa: areas('admin') }, { createSpaces: true, floor: areas('admin') });
+    assert.equal(typeof mod.networkJoinRefusal(caller, { existing: [], toCreate: [] }), 'string',
+      'networkJoinRefusal returned null for a join that carries no space');
+    assert.equal(mod.networkJoinRefusal(ADMIN, { existing: [], toCreate: [] }), null, 'the instance admin may');
+  });
+});
+
+describe('administersEvery: administering is held on EVERY space, and an empty list is not every space (Q-603)', () => {
+  let reachable;
+  before(async () => { reachable = await import('../../server/dist/auth/reachable-spaces.js'); });
+  const adminOf = (...ids) => ({ instanceAdmin: false, createSpaces: false, floor: null, perSpace: {}, spaceAdmin: { floor: false, spaces: ids } });
+
+  it('is exported beside holdsRungOnEvery', () => {
+    assert.equal(typeof reachable.administersEvery, 'function',
+      'module server/dist/auth/reachable-spaces.js does not export administersEvery: the implementation creates it');
+  });
+  it('is false on an empty list, true when every space is administered, false when one is short, false with no rights', () => {
+    assert.equal(typeof reachable.administersEvery, 'function', 'administersEvery does not exist yet');
+    assert.equal(reachable.administersEvery(adminOf('qa'), []), false, 'an empty list is every space of nothing: it must not answer yes');
+    assert.equal(reachable.administersEvery(adminOf('qa', 'ops'), ['qa', 'ops']), true);
+    assert.equal(reachable.administersEvery(adminOf('qa'), ['qa', 'ops']), false);
+    assert.equal(reachable.administersEvery(undefined, ['qa']), false);
+    assert.equal(reachable.holdsRungOnEvery(adminOf('qa'), [], 'networks', 'read'), false, 'the sibling the new one sits beside');
+  });
+});
+
+describe('network-rights.ts holds no hand copy of "every space" (Q-603)', () => {
+  it('no `.every(` over a network\'s spaces and no empty-list branch: holdsRungOnEvery and administersEvery own the question', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { stripComments } = await import('./_strip-comments.mjs');
+    const src = stripComments(readFileSync('server/src/auth/network-rights.ts', 'utf8'));
+    assert.match(src, /holdsRungOnEvery\(/, 'network-rights.ts no longer calls the shared predicate; the gate lost its subject');
+    const copies = src.split('\n').filter(l => /\.every\(/.test(l) || /\.spaces\.length\s*===\s*0/.test(l));
+    assert.deepEqual(copies, [], 'a hand copy of "holds on every space" (the empty-means-everything shape) — use holdsRungOnEvery / administersEvery');
+  });
+});

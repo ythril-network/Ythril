@@ -29,7 +29,7 @@
  * Run: node --test testing/standalone/upstream-reads-are-bounded.test.js
  * (requires a prior `npm run build` in server/)
  */
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -203,5 +203,202 @@ describe('the bounded error-body reader', () => {
       start(c) { c.error(new Error('connection reset mid-error-body')); },
     }));
     assert.equal(await mod.boundedErrorText(broken), '', 'it threw, so the real upstream status is now lost');
+  });
+});
+
+// ── Q-363: a model server's `error` field is bounded by ONE reader, not by each caller ─────────────────────────
+//
+// `boundedJson` bounds the BODY (256 MiB). A 1 MB `error.message` inside it passes that bound, and four callers put it
+// whole into a thrown Error that reaches logs and caller answers, while `util/model-chat.ts` already cut the same text
+// with `peerText(…, { max })`. The rule is the shape of the call: a caller that reads a model server's JSON and then
+// reads `.error` of it goes through `boundedModelJson`, which owns that check, so no caller can drop the bound.
+
+/** The text between the `<` at `from` and its matching `>`, or null when there is no type argument. */
+function typeArgumentAt(src, from) {
+  if (src[from] !== '<') return null;
+  let depth = 0;
+  for (let i = from; i < src.length; i++) {
+    const c = src[i];
+    if (c === '<') depth++;
+    else if (c === '>' && src[i - 1] !== '=') { depth--; if (depth === 0) return src.slice(from + 1, i); }
+  }
+  return null;
+}
+
+/**
+ * Every `boundedJson` call in `src` whose result is read for an `error` — by its type argument naming an `error` member, or by
+ * the variable it is assigned to being followed by `.error` within the next lines. Returns the offending call heads.
+ */
+function boundedJsonReadsForError(src) {
+  const found = [];
+  for (const m of src.matchAll(/(?:const|let)\s+(\w+)\s*=\s*await\s+boundedJson\b/g)) {
+    const name = m[1];
+    const afterName = m.index + m[0].length;
+    const typeArg = typeArgumentAt(src, afterName);
+    const tail = src.slice(afterName, afterName + 1500).split('\n').slice(0, 12).join('\n');
+    const typed = typeArg !== null && /\berror\s*\??\s*:/.test(typeArg);
+    const used = new RegExp(`\\b${name}\\.error\\b`).test(tail);
+    if (typed || used) found.push(`${name} = await boundedJson…`);
+  }
+  return found;
+}
+
+describe('Q-363 the gate: a model server\'s JSON is read through boundedModelJson', () => {
+  it('the detector names a boundedJson read that reads `.error` (planted copies of the defect)', () => {
+    const typed = "const json = await boundedJson<{\n data?: number[];\n error?: { message?: string };\n}>(response, 'p');";
+    const used = "const j = await boundedJson<Record<string, unknown>>(res, 'M');\nif (j.error) throw new Error(String(j.error));";
+    const clean = "const j = await boundedJson<{ data?: number[] }>(res, 'M');\nreturn j.data;";
+    assert.equal(boundedJsonReadsForError(typed).length, 1, 'a type argument naming `error` must be flagged');
+    assert.equal(boundedJsonReadsForError(used).length, 1, 'a `.error` read after the call must be flagged');
+    assert.equal(boundedJsonReadsForError(clean).length, 0, 'a read that never looks at an error is not a model-server read');
+  });
+
+  it('no caller reads `.error` of a boundedJson result outside bounded-read.ts', () => {
+    const offenders = [];
+    for (const f of sourceFiles()) {
+      if (f === HELPER) continue;
+      for (const hit of boundedJsonReadsForError(code(f))) offenders.push(`${f}: ${hit}`);
+    }
+    assert.deepEqual(offenders, [], 'a model server\'s `error` (a string for Ollama, an object for OpenAI-compatible servers) is '
+      + 'put whole into a thrown Error, so a megabyte error text reaches the logs and the caller. Use '
+      + '`boundedModelJson(res, label)` from util/bounded-read.js: it owns the `error` check and cuts the text through peerText.\n  '
+      + offenders.join('\n  '));
+  });
+
+  it('and boundedModelJson is actually used, so the gate above is not vacuous', () => {
+    let sites = 0;
+    for (const f of sourceFiles()) {
+      if (f === HELPER) continue;
+      sites += (code(f).match(/boundedModelJson[<(]/g) ?? []).length;
+    }
+    // embedding.ts (1), files/media/providers.ts (3), util/model-chat.ts (2): every model-server JSON read.
+    assert.ok(sites >= 6, `only ${sites} boundedModelJson call sites outside the helper; the six model-server reads were not routed`);
+  });
+
+  it('the two P5 sites bound their error text through peerText', () => {
+    const audio = code('server/src/files/media/audio-embedder.ts');
+    const lastError = audio.match(/\blastError\s*=\s*err instanceof Error[^;]+;/g) ?? [];
+    assert.ok(lastError.length > 0, 'audio-embedder.ts no longer assigns lastError; the gate lost its subject');
+    for (const s of lastError) assert.match(s, /peerText\(/, `a chunk's provider error is stored raw in lastError: ${s}`);
+    const worker = code('server/src/files/media/worker.ts');
+    const message = worker.match(/\bconst message\s*=\s*err instanceof Error[^;]+;/g) ?? [];
+    assert.ok(message.length > 0, 'worker.ts no longer derives `message` from the caught error; the gate lost its subject');
+    for (const s of message) assert.match(s, /peerText\(/, `a job's failure text goes to failJob unbounded: ${s}`);
+  });
+});
+
+describe('Q-363 boundedModelJson', () => {
+  const MEGABYTE = 'E'.repeat(1_000_000);
+  const jsonRes = (obj) => new Response(JSON.stringify(obj), { headers: { 'content-type': 'application/json' } });
+  const needsHelper = () => assert.equal(typeof mod.boundedModelJson, 'function',
+    'module server/dist/util/bounded-read.js does not export boundedModelJson: the implementation creates it');
+
+  it('returns the parsed body when there is no error', async () => {
+    needsHelper();
+    assert.deepEqual(await mod.boundedModelJson(jsonRes({ data: [1] }), 'Model'), { data: [1] });
+  });
+
+  it('a string error (Ollama) is thrown, named by the label', async () => {
+    needsHelper();
+    await assert.rejects(() => mod.boundedModelJson(jsonRes({ error: 'model "x" not found' }), 'Ollama vision'),
+      (err) => { assert.match(err.message, /Ollama vision/); assert.match(err.message, /model "x" not found/); return true; });
+  });
+
+  it('an object error (OpenAI-compatible) is thrown with its message', async () => {
+    needsHelper();
+    await assert.rejects(() => mod.boundedModelJson(jsonRes({ error: { message: 'quota exceeded', type: 'x' } }), 'Whisper'),
+      (err) => { assert.match(err.message, /quota exceeded/); return true; });
+  });
+
+  it('a megabyte error text, string or object, is cut: the thrown message stays a line', async () => {
+    needsHelper();
+    for (const error of [MEGABYTE, { message: MEGABYTE }, { detail: MEGABYTE }]) {
+      await assert.rejects(() => mod.boundedModelJson(jsonRes({ error }), 'Embedding'),
+        (err) => {
+          assert.ok(err.message.length < 600, `a ${typeof error} error of 1,000,000 chars became a ${err.message.length}-char message`);
+          return true;
+        });
+    }
+  });
+
+  it('credentials in the error text are redacted, as peerText does', async () => {
+    needsHelper();
+    await assert.rejects(() => mod.boundedModelJson(jsonRes({ error: 'cannot reach https://svc:hunter2pw@models.internal/v1' }), 'Model'),
+      (err) => { assert.doesNotMatch(err.message, /hunter2pw/); return true; });
+  });
+
+  it('a caller\'s own fail() builds the thrown Error from the bounded text', async () => {
+    needsHelper();
+    class Mine extends Error {}
+    let got;
+    await assert.rejects(() => mod.boundedModelJson(jsonRes({ error: MEGABYTE }), 'Model', { fail: (m) => { got = m; return new Mine(m); } }),
+      (err) => err instanceof Mine);
+    assert.ok(typeof got === 'string' && got.length < 600, 'fail() was handed the unbounded text');
+  });
+
+  it('still refuses an oversize body like boundedJson (maxBytes)', async () => {
+    needsHelper();
+    await assert.rejects(() => mod.boundedModelJson(jsonRes({ data: 'x'.repeat(5000) }), 'Model', { maxBytes: 100 }), /exceeded 100 bytes|too large/);
+  });
+});
+
+describe('Q-363 embed() against a model server whose error text is a megabyte', () => {
+  let server; let local; let dir; let emb;
+  const saved = {};
+  const ENV = ['CONFIG_PATH', 'EMBEDDING_URL', 'EMBEDDING_DIMENSIONS', 'EMBEDDING_PROVIDER'];
+  const MEGABYTE = 'X'.repeat(1_000_000);
+  let answer = { error: { message: MEGABYTE } };
+
+  before(async () => {
+    const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs');
+    const { listenOnLoopback } = await import('../_shared/local-server.mjs');
+    const http = await import('node:http');
+    mkdirSync('E:/TMP/Ythril/data/b231-tests-S', { recursive: true });
+    dir = mkdtempSync(join('E:/TMP/Ythril/data/b231-tests-S', 'q363-'));
+    for (const k of ENV) saved[k] = process.env[k];
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({ instanceId: 'q363', instanceLabel: 'q363', tokens: [], networks: [],
+      spaces: [{ id: 'general', label: 'G', builtIn: true, folders: [], meta: {} }] }), { mode: 0o600 });
+    server = http.createServer((q, r) => { q.resume(); q.on('end', () => { r.writeHead(200, { 'content-type': 'application/json' }); r.end(JSON.stringify(answer)); }); });
+    local = await listenOnLoopback(server);
+    process.env.CONFIG_PATH = join(dir, 'config.json');
+    process.env.EMBEDDING_DIMENSIONS = '8';
+    delete process.env.EMBEDDING_PROVIDER;
+    process.env.EMBEDDING_URL = local.url;
+    const loader = await import('../../server/dist/config/loader.js');
+    loader.loadConfig();
+    emb = await import('../../server/dist/brain/embedding.js');
+  });
+
+  after(async () => {
+    await local?.close();
+    for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  });
+
+  it('the thrown message is a bounded line, not the megabyte', async () => {
+    answer = { error: { message: MEGABYTE } };
+    await assert.rejects(() => emb.embed('hi'), (err) => {
+      assert.ok(err.message.length < 600, `embed() threw a ${err.message.length}-char message for a 1,000,000-char error text`);
+      return true;
+    });
+  });
+
+  it('an error object with no message is cut too (the JSON.stringify branch)', async () => {
+    answer = { error: { detail: MEGABYTE } };
+    await assert.rejects(() => emb.embed('hi'), (err) => {
+      assert.ok(err.message.length < 600, `embed() threw a ${err.message.length}-char message for a 1,000,000-char error object`);
+      return true;
+    });
+  });
+
+  it('an unreachable endpoint\'s thrown message carries no credentials of the configured URL', async () => {
+    const { closedLoopbackPort } = await import('../_shared/closed-port.mjs');
+    const port = await closedLoopbackPort();
+    process.env.EMBEDDING_URL = `http://svc:hunter2pw@127.0.0.1:${port}`;
+    try {
+      await assert.rejects(() => emb.embed('hi'), (err) => {
+        assert.doesNotMatch(err.message, /hunter2pw/, 'the thrown "Could not reach embedding endpoint at <baseUrl>" carries the URL\'s password');
+        return true;
+      });
+    } finally { process.env.EMBEDDING_URL = local.url; }
   });
 });
