@@ -4,6 +4,25 @@ function Write-Step([string]$message) {
   Write-Host "[enable-networks] $message"
 }
 
+# Windows has no Unix modes, so "private" is an ACL: this file or directory belongs to the current user ALONE (inheritance
+# off, one explicit entry for this user's SID). The `.env` lands under the repository's ACL and the token under the user
+# profile's; without this each is only as private as the folder it happens to be in. A failure stops the script rather than
+# leaving a secret readable.
+function Set-OwnerOnlyAcl([string]$path) {
+  $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $isDir = Test-Path -LiteralPath $path -PathType Container
+  $grant = if ($isDir) { "*${sid}:(OI)(CI)F" } else { "*${sid}:F" }
+  & icacls $path /inheritance:r /grant:r $grant | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "icacls could not restrict '$path' to the current user (exit $LASTEXITCODE)" }
+}
+
+# The file exists and is the user's alone BEFORE a secret is written into it: Set-Content writes into an existing file and
+# keeps its ACL, so there is no moment at which the content sits under an inherited one.
+function Initialize-OwnerOnlyFile([string]$path) {
+  if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType File -Path $path | Out-Null }
+  Set-OwnerOnlyAcl $path
+}
+
 function Update-SessionPath {
   # winget (and other installers) register new PATH entries in the registry but do not
   # mutate the current process environment. Refresh from both registry scopes so that
@@ -205,8 +224,11 @@ $token = Get-StableToken -envPath $envPath -tokenFile $tokenFile
 # without needing it injected on the command line.
 $tokenDir = Split-Path -Parent $tokenFile
 if (-not (Test-Path $tokenDir)) { New-Item -ItemType Directory -Path $tokenDir -Force | Out-Null }
+Set-OwnerOnlyAcl $tokenDir
+Initialize-OwnerOnlyFile $tokenFile
 Set-Content -Path $tokenFile -Value $token -Encoding UTF8 -NoNewline
 
+Initialize-OwnerOnlyFile $envPath
 Set-DotEnvValue -envPath $envPath -key 'YTHRIL_LOCAL_AGENT_ENABLED' -value 'true'
 Set-DotEnvValue -envPath $envPath -key 'YTHRIL_LOCAL_AGENT_URL' -value 'http://127.0.0.1:38123'
 Set-DotEnvValue -envPath $envPath -key 'YTHRIL_LOCAL_AGENT_TOKEN' -value $token

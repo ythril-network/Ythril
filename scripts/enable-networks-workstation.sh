@@ -19,23 +19,45 @@ get_env_value() {
   printf '%s' "${line#*=}"
 }
 
+# The one door a secret file is written through: its content on stdin, the file that results is mode 0600.
+#
+# A temp file is made in the target's own directory (so the final mv is a rename on one filesystem, never a copy), set to
+# 0600 BEFORE any content reaches it, and moved over the target. So it does not matter what umask the caller had or what
+# mode an earlier run left: the file that results is the caller's own, at 0600. It REPLACES the target, so the owner, group
+# and any ACL of an earlier file are not kept either. A symlink standing at the target is refused rather than followed
+# or replaced. The temp file is removed when anything fails, including the mv.
+write_private() {
+  local target="$1"
+  if [[ -L "$target" ]]; then
+    echo "refusing to write ${target}: it is a symbolic link (a secret is never written through one)" >&2
+    return 1
+  fi
+  (
+    umask 077
+    tmp="$(mktemp "$(dirname "$target")/.tmp.XXXXXX")" || exit 1
+    trap 'rm -f "$tmp"' EXIT
+    chmod 600 "$tmp"
+    cat > "$tmp"
+    mv "$tmp" "$target"
+  )
+}
+
+# The value goes to awk through its environment, never as an argument: an argument is readable by every local user
+# for as long as the command runs, and `awk -v` also reads backslash sequences in the value.
 upsert_env_value() {
   local key="$1"
   local value="$2"
   mkdir -p "$(dirname "$env_path")"
 
   if [[ ! -f "$env_path" ]]; then
-    printf '%s=%s\n' "$key" "$value" > "$env_path"
+    printf '%s=%s\n' "$key" "$value" | write_private "$env_path"
     return
   fi
 
   if grep -qE "^${key}=" "$env_path"; then
-    local tmp
-    tmp="$(mktemp)"
-    awk -v k="$key" -v v="$value" 'BEGIN{re="^" k "="} $0 ~ re {print k "=" v; next} {print}' "$env_path" > "$tmp"
-    mv "$tmp" "$env_path"
+    K="$key" V="$value" awk 'BEGIN{k=ENVIRON["K"]; v=ENVIRON["V"]; re="^" k "="} $0 ~ re {print k "=" v; next} {print}' "$env_path" | write_private "$env_path"
   else
-    printf '%s=%s\n' "$key" "$value" >> "$env_path"
+    { awk '{print}' "$env_path"; printf '%s=%s\n' "$key" "$value"; } | write_private "$env_path"
   fi
 }
 
@@ -117,9 +139,10 @@ ensure_cloudflare_login() {
   write_step "cloudflared login completed."
 }
 
+# The header goes to curl on its stdin (`-H @-`), not in its argument list, where `ps` shows it to every local user.
 test_helper_auth() {
   local token="$1"
-  curl -fsS --max-time 3 -H "Authorization: Bearer ${token}" "http://127.0.0.1:38123/v1/status" >/dev/null 2>&1
+  printf 'Authorization: Bearer %s\n' "$token" | curl -fsS --max-time 3 -H @- "http://127.0.0.1:38123/v1/status" >/dev/null 2>&1
 }
 
 is_port_listening() {
@@ -150,7 +173,10 @@ ensure_helper_running() {
   fi
 
   write_step "Starting local helper service in background..."
-  mkdir -p "$state_dir"
+  # The log is created owner-only BEFORE the connector writes to it, and an earlier run's mode is set right again: a
+  # `>` redirect keeps the mode the file already has. (The state directory exists and is 0700: the main flow made it.)
+  ( umask 077; : >> "${state_dir}/connector.log" )
+  chmod 600 "${state_dir}/connector.log"
   (
     cd "$repo_root"
     YTHRIL_CONNECTOR_TOKEN="$token" nohup npm run local-connector:dev --workspace=server >"${state_dir}/connector.log" 2>&1 &
@@ -163,9 +189,10 @@ ensure_cloudflared
 ensure_cloudflare_login
 
 mkdir -p "$state_dir"
+# Every run, not only the first: a directory an earlier version of this script made keeps the mode it was made with.
+chmod 700 "$state_dir"
 token="$(get_stable_token)"
-printf '%s\n' "$token" > "$token_file"
-chmod 600 "$token_file" || true
+printf '%s\n' "$token" | write_private "$token_file"
 
 upsert_env_value YTHRIL_LOCAL_AGENT_ENABLED true
 upsert_env_value YTHRIL_LOCAL_AGENT_URL http://127.0.0.1:38123

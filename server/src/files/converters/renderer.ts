@@ -50,6 +50,18 @@ export interface RenderedPages {
   truncated: boolean;
   /** First page index of the returned window. Echoed by the sidecar; 0 for a from-the-start render. */
   startPage: number;
+  /**
+   * The dpi each returned page was really rendered at, in `pages` order. A sidecar lowers a page's dpi until the page fits
+   * `RENDER_MAX_PIXELS` (Q-611), so a value below the dpi asked for means that page was read at a lower resolution. Absent
+   * from a sidecar that predates the clamp.
+   */
+  dpiUsed?: number[];
+  /**
+   * Pages of this window the sidecar would not render (a size that is not finite and positive, or one that would need less
+   * than the 72 dpi floor to fit), with its reason; `page` is the absolute, 0-based index. They are part of the window:
+   * the next window starts after them, so a caller steps by `pages.length + skipped.length`. Absent from an older sidecar.
+   */
+  skipped?: { page: number; reason: string }[];
 }
 
 /**
@@ -87,17 +99,25 @@ export async function renderDocumentPages(
   }
 
   // The largest JSON body in the server: `pages` is an array of base64 PNGs, and every one of them is
-  // decoded below. Bounded because renderDpi accepts up to 600 and maxPages up to 2000 from the UI.
-  const body = await boundedJson<{ pages?: string[]; total?: number; truncated?: boolean; startPage?: number }>(
-    res, `${which} sidecar`);
+  // decoded below. Bounded because renderDpi accepts up to 600 and maxPages up to 2000 from the UI. The sidecars
+  // end a window themselves at RENDER_MAX_RESPONSE_BYTES (128 MiB by default, `truncated: true`), which has to stay
+  // BELOW this ceiling (YTHRIL_MAX_UPSTREAM_RESPONSE_BYTES, 256 MiB): a window the sidecar was willing to send must
+  // be one this read is willing to take, or the extraction falls back to OCR for a document the sidecar handled.
+  const body = await boundedJson<{
+    pages?: string[]; total?: number; truncated?: boolean; startPage?: number;
+    dpiUsed?: number[]; skipped?: { page: number; reason: string }[];
+  }>(res, `${which} sidecar`);
   const pages = (body.pages ?? []).map(b64 => Buffer.from(b64, 'base64'));
   if (body.truncated) log.debug(`render: pages ${startPage}–${startPage + pages.length} of ${body.total}; more follow`);
   // `startPage` falls back to what we asked for: an older sidecar that does not echo it still windows
-  // correctly, it just cannot confirm the offset.
+  // correctly, it just cannot confirm the offset. `dpiUsed` and `skipped` are passed on only when the sidecar
+  // answered them: an older one answers neither, and neither is invented for it.
   return {
     pages,
     total: body.total ?? pages.length,
     truncated: body.truncated ?? false,
     startPage: body.startPage ?? startPage,
+    ...(Array.isArray(body.dpiUsed) ? { dpiUsed: body.dpiUsed } : {}),
+    ...(Array.isArray(body.skipped) ? { skipped: body.skipped } : {}),
   };
 }

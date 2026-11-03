@@ -4,8 +4,8 @@
  * It is heavy (LibreOffice) and opt-in (compose `office` profile), so this suite **skips** unless the
  * sidecar is reachable — it does not force LibreOffice into every CI run. To exercise it locally:
  *
- *   docker build -t ythril-doc-office:0.1.0 ./sidecars/doc-office
- *   docker run -d --read-only --tmpfs /tmp:size=512m -p 8101:8100 ythril-doc-office:0.1.0
+ *   docker build -t ythril-doc-office:0.2.0 ./sidecars/doc-office
+ *   docker run -d --read-only --tmpfs /tmp:size=512m -p 8101:8100 ythril-doc-office:0.2.0
  *   node --test testing/integration/doc-office-sidecar.test.js
  *
  * Run: node --test testing/integration/doc-office-sidecar.test.js

@@ -10,7 +10,8 @@
  * rather than a missing feature, which is what settled the direction here.
  *
  * The same page is precise about the other direction — *"Turning suppression off does not go back and embed
- * what was written while it was on. Use the space's Reindex control"* — so only turning it ON is in scope.
+ * what was written while it was on. Use **Backfill missing embeddings** on the space's Danger tab"* (`POST /reembed`;
+ * a full reindex rebuilds every vector, which is the other repair) — so only turning it ON is in scope.
  *
  * ## Why the sweep is unconditional rather than a before/after diff
  *

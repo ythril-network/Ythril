@@ -10,10 +10,12 @@
  *
  * ## What counts
  *
- * A diff that touches `server/src/` or `client/src/` — the code that ships — must also add at least one line inside
- * the `[Unreleased]` section of `CHANGELOG.md`.
+ * A diff that touches `server/src/`, `client/src/`, `sidecars/` or `scripts/` — the code that ships, and the programs
+ * an operator runs — must also add at least one line inside the `[Unreleased]` section of `CHANGELOG.md`. `sidecars/`
+ * and `scripts/` were exempt or unlisted until Q-611/Q-612: a change to how much memory a rendered page may take, or to
+ * which mode a script writes a secret with, went through with no line and nothing noticed.
  *
- * Deliberately NOT required for: tests, `testing/`, `docs/`, workflows, `scripts/`, `todo/`, or a `*.spec.ts`
+ * Deliberately NOT required for: tests, `testing/`, `docs/`, workflows, `todo/`, or a `*.spec.ts`
  * anywhere. Those change without changing what a user gets. The exemption is **by path**, with no "skip changelog"
  * escape hatch: if a source change genuinely has no user-facing effect, saying so in one CHANGELOG line is cheap and
  * leaves a record, whereas a marker in a PR title leaves nothing and is used the moment it is inconvenient.
@@ -40,15 +42,18 @@ const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
 const EXEMPT = [
   /^testing\//,
   /^docs\//,
-  /^scripts\//,
   /^todo\//,
   /^\.github\//,
   /\.spec\.ts$/,
   /\.test\.js$/,
 ];
 
-/** Paths that ship to a user, and therefore need one. */
-const SHIPPED = [/^server\/src\//, /^client\/src\//, /^client\/public\//];
+/**
+ * Paths that ship to a user, and therefore need one: the server and client, the page-render and office sidecars
+ * (they run in the product's own containers and parse untrusted documents), and `scripts/` (the programs an operator
+ * runs on their own machine, `enable-networks-workstation.*` among them, which write that operator's secrets).
+ */
+const SHIPPED = [/^server\/src\//, /^client\/src\//, /^client\/public\//, /^sidecars\//, /^scripts\//];
 
 let changed;
 try {

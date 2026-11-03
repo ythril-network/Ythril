@@ -473,7 +473,7 @@ jobs:
         with:
           context: sidecars/doc-render
           load: true
-          tags: ythril-doc-render:0.1.0
+          tags: ythril-doc-render:0.2.0
           cache-from: type=gha,scope=ythril-doc-render
 
       - name: Build the doc-office sidecar (its own layer cache scope)
@@ -483,7 +483,7 @@ jobs:
         with:
           context: sidecars/doc-office
           load: true
-          tags: ythril-doc-office:0.1.0
+          tags: ythril-doc-office:0.2.0
           cache-from: type=gha,scope=ythril-doc-office
 
       - name: Start test containers
