@@ -104,14 +104,26 @@ type ActNotice =
   <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">{{ 'spaces.dangerZone.embeddingsDescription' | transloco }}</p>
 
   <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:10px;">
-    <input type="checkbox" [ngModel]="suppress()" (ngModelChange)="suppress.set($event)" name="suppressEmbeddings" style="margin-top:2px;" />
+    <input type="checkbox" [ngModel]="suppress()" (ngModelChange)="suppress.set($event)" name="suppressEmbeddings" style="margin-top:2px;" [attr.aria-describedby]="suppress() ? 'suppress-notice' : null" />
     <span style="font-size:13px;">{{ 'spaces.dangerZone.embeddingsSuppress' | transloco }}</span>
   </label>
 
   <!-- Shown while the box is ticked rather than only after saving: the consequence an operator needs is that
        records written from now on have no vector, and telling them that AFTER they save is telling them too late. -->
+  <!-- A status the checkbox is described by, so a screen reader that lands on the box hears the consequence. When the draft differs from what is saved
+       (ticked, space embeds), it leads with the one sentence that matters, "Save removes the stored text vectors", and folds the rest. -->
   @if (suppress()) {
-    <div class="alert alert-warning" style="margin-bottom:12px;font-size:12px;">{{ 'spaces.dangerZone.embeddingsNoBackfill' | transloco }}</div>
+    <div id="suppress-notice" role="status" class="alert alert-warning" style="margin-bottom:12px;font-size:12px;">
+      @if (removesVectors()) {
+        <p style="margin:0 0 4px;"><strong>{{ 'spaces.dangerZone.embeddingsRemovesVectors' | transloco }}</strong></p>
+        <details>
+          <summary>{{ 'spaces.dangerZone.embeddingsRemovesVectorsMore' | transloco }}</summary>
+          <p style="margin:4px 0 0;">{{ 'spaces.dangerZone.embeddingsRemovesVectorsWayBack' | transloco: { button: ('spaces.dangerZone.embeddingsBackfill' | transloco) } }} {{ 'spaces.dangerZone.embeddingsNoBackfill' | transloco }}</p>
+        </details>
+      } @else {
+        {{ 'spaces.dangerZone.embeddingsNoBackfill' | transloco }}
+      }
+    </div>
   }
 
   <!-- The per-TYPE overrides, read-only, for the same reason retention lists them: an operator setting a
@@ -482,6 +494,7 @@ export class SpaceDangerTabComponent {
       // that backwards is records silently missing from recall, which nobody reports because there is nothing to
       // see. Re-seeded per space, and the previous space's backfill result is cleared with it.
       this.suppress.set(s.meta?.suppressEmbeddings === true);
+      this.savedSuppress.set(this.suppress());
       this.backfillResult.set(null);
     });
   }
@@ -493,6 +506,10 @@ export class SpaceDangerTabComponent {
 
   /** The space-wide tier of record > schema > space. The LOWEST tier — any type schema that states a value wins. */
   readonly suppress = signal(false);
+  /** What is saved: the draft differs from it when Save would change the setting. */
+  private readonly savedSuppress = signal(false);
+  /** Save would turn suppression ON for a space that embeds: the sweep that follows removes the stored text vectors of its records. */
+  readonly removesVectors = computed(() => this.suppress() && !this.savedSuppress());
   readonly savingSuppress = signal(false);
   readonly backfilling = signal(false);
   readonly backfillResult = signal<ReembedResult | null>(null);
@@ -525,6 +542,13 @@ export class SpaceDangerTabComponent {
   async saveSuppress(): Promise<void> {
     const space = this.state.settingsSpace();
     if (!space) return;
+    // Turning it ON removes the stored text vectors of the space's records (the sweep after Save): ask first, in words that say so.
+    if (this.removesVectors() && !(await this.confirmDialog.confirm({
+      title: this.transloco.translate('spaces.dangerZone.embeddingsSuppressConfirmTitle'),
+      message: this.transloco.translate('spaces.dangerZone.embeddingsRemovesVectors') + ' ' + this.transloco.translate('spaces.dangerZone.embeddingsRemovesVectorsWayBack', { button: this.transloco.translate('spaces.dangerZone.embeddingsBackfill') }),
+      confirmLabel: this.transloco.translate('spaces.dangerZone.embeddingsSave'),
+      danger: true,
+    }))) return;
     this.savingSuppress.set(true);
     try {
       // `firstValueFrom`, not `await` on the Observable — `updateSpace` is cold, and awaiting one resolves with
@@ -534,6 +558,7 @@ export class SpaceDangerTabComponent {
       // Sent inside `meta`, because the server MERGES a partial meta over what is stored: sending the whole meta
       // back would race any other edit made since this dialog opened.
       await firstValueFrom(this.spacesApi.updateSpace(space.id, { meta: { suppressEmbeddings: this.suppress() } }));
+      this.savedSuppress.set(this.suppress());
       this.store.load();
       this.toast.success(this.transloco.translate('spaces.dangerZone.embeddingsSaved'));
     } catch (err) {

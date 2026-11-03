@@ -12,6 +12,7 @@ import { ModalDirective } from '../../shared/modal.directive';
 import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-strip.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { refusalText } from '../../core/refusal-text';
+import { pageTranslator } from '../../core/page-translator';
 import { PluralText } from '../../core/plural-text.service';
 import { PluralPipe } from '../../core/plural.pipe';
 
@@ -427,6 +428,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
   private adminApi = inject(AdminApi);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
+  private readonly say = pageTranslator();
   private readonly plural = inject(PluralText);
 
   /** "N entries total", in the plural form the reader's language uses for N. */
@@ -451,7 +453,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
 
   /** At-a-glance rollup of what's currently in view, with warn/error emphasis when non-zero. */
   summaryItems = computed<SummaryItem[]>(() => {
-    const tr = (k: string) => this.transloco.translate(k);
+    const tr = this.say;
     const es = this.entries();
     const c4 = es.filter(e => e.status >= 400 && e.status < 500).length;
     const c5 = es.filter(e => e.status >= 500).length;
@@ -752,10 +754,16 @@ export class AuditLogComponent implements OnInit, OnDestroy {
     this.serverLogStreaming.set(false);
   }
 
+  /**
+   * A line's colour by its own level, read where the server writes it: `[<ISO time>] [<LEVEL>] ...` with the level padded to five characters
+   * (server/src/util/log.ts). Anchored at the start of the line, so a message that merely contains `[ERROR]` (an echoed header, a forged value) does not
+   * take the colour of a level it was not logged at.
+   */
   serverLogColor(line: string): string {
-    if (line.includes('[ERROR]')) return 'var(--error)';
-    if (line.includes('[WARN ')) return 'var(--warning)';
-    if (line.includes('[DEBUG]')) return 'var(--text-muted)';
+    const level = /^\[[^\]]+\] \[(ERROR|WARN |DEBUG|INFO )\]/.exec(line)?.[1];
+    if (level === 'ERROR') return 'var(--error)';
+    if (level === 'WARN ') return 'var(--warning)';
+    if (level === 'DEBUG') return 'var(--text-muted)';
     return 'var(--text-primary)';
   }
 

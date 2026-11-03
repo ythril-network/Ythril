@@ -17,8 +17,7 @@
 import { CommonModule, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { Subscription, TimeoutError, of } from 'rxjs';
-import { catchError, timeout } from 'rxjs/operators';
+import { Subscription, TimeoutError, of, catchError, timeout } from 'rxjs';
 import { GraphLoadWatch, WAIT_GIVE_UP_MS } from './graph-load-watch';
 import { LatestWins } from '../../core/latest-wins';
 
@@ -28,6 +27,7 @@ import { GraphDetailFilter } from './graph-detail-filter';
 import { linkedToNode, linkedToEdge, type LinkedRecords } from './graph-linked-fetch';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
+import { FocusHandoffDirective } from '../../shared/focus-handoff.directive';
 import { httpErrorReason } from '../../core/http-error';
 import {
   Space,
@@ -88,7 +88,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
   // `openBrainDrawer` alongside the `drawerRecord` signal that guards the drawer's `@if`, the same
   // load-bearing coupling pinned by the brain spec.
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [UnknownSpaceNoticeComponent, CommonModule, FormsModule, EntryPopupComponent, PhIconComponent, ErrorStateComponent, TranslocoPipe, RecordDrawerComponent, GraphLinkedRecordsComponent, GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent, GraphPanelHeaderComponent, GraphToolbarComponent],
+  imports: [UnknownSpaceNoticeComponent, CommonModule, FormsModule, EntryPopupComponent, PhIconComponent, ErrorStateComponent, TranslocoPipe, RecordDrawerComponent, GraphLinkedRecordsComponent, GraphNodeRecordCardComponent, GraphEdgeRecordCardComponent, GraphPanelHeaderComponent, GraphToolbarComponent, FocusHandoffDirective],
   // Its own drawer collaborators, so the standalone `/graph` route works with nothing above it. When
   // this page is embedded as Brain's Graph tab these SHADOW Brain's instances, which is deliberate:
   // the drawer then patches this page's per-node lists, exactly as the forked drawer did. The cost is
@@ -97,7 +97,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
   host: { '[class.embedded]': 'isEmbedded()' },
   styles: [GRAPH_STYLES],
   template: `
-    <!-- ═══ Space selector ══════════════════════════════════════════════════ -->
+    @let notShown = loadError() !== null || loading(); <!-- ═══ Space selector: notShown = the drawn graph is hidden (error or load in flight) ═══ -->
     @if (unknownParam(); as n) { <app-unknown-space-notice [requested]="n.requested" [shown]="n.shown" /> }
     @if (!isEmbedded() && spaces().length > 0) {
       <div class="space-tabs">
@@ -109,7 +109,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
 
     <app-graph-toolbar
       [spaceId]="activeSpaceId()"
-      [stats]="rootEntity() ? { nodes: nodeCount(), edges: edgeCount() } : null"
+      [stats]="rootEntity() && loadError() === null ? { nodes: nodeCount(), edges: edgeCount() } : null" [graphHidden]="notShown"
       [depth]="depth()"
       [direction]="direction()"
       [hideLabels]="hideLabels()"
@@ -134,7 +134,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
         }
 
         @if (loading()) {
-          <div class="loading-overlay">
+          <div class="loading-overlay" tabindex="-1" appFocusHandoff=".retry-btn, .cy-container">
             <div class="loading-spinner"></div>
             @if (waiting()) {
               <div class="loading-waiting" role="status">
@@ -162,11 +162,11 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
           </div>
         }
 
-        <div #cyContainer class="cy-container" [style.visibility]="rootEntity() ? 'visible' : 'hidden'"></div>
+        <div #cyContainer class="cy-container" tabindex="-1" [style.visibility]="rootEntity() && !notShown ? 'visible' : 'hidden'"></div>
       </div>
 
       <!-- ── Side panel (node selected) ────────────────────────────────── -->
-      @if (selectedNode()) {
+      @if (selectedNode() && !notShown) {
         <div class="side-panel">
           <app-graph-panel-header
             [color]="panelColor()"
@@ -198,7 +198,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
       }
 
       <!-- ── Side panel (edge selected) ────────────────────────────────── -->
-      @if (selectedEdge()) {
+      @if (selectedEdge() && !notShown) {
         <div class="side-panel">
           <app-graph-panel-header
             [color]="panelColor()"

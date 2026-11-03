@@ -30,7 +30,7 @@ import { Space, SpaceStats, AboutInfo, EmbeddingQueue, VoteRound, TokenAccessEnt
 import type { ReindexRunState } from '../../core/embed-ops.types';
 // Aliased: the class members below carry the same names, and a bare call that resolves to the import
 // rather than the member is the kind of line a reader has to stop and check.
-import { retentionSummary as summariseRetention, retentionTypeOverrides as retentionOverridesOf } from './overview-retention';
+import { retentionSummaryOf, retentionTypesOf } from './overview-retention';
 
 import { CollectionTab } from './brain-tabs';
 import { ErModelPanelComponent } from './er-model-panel.component';
@@ -695,10 +695,10 @@ export class OverviewTabComponent {
    * by an implementation detail — and only lists per bucket when they actually differ.
    */
   /** Delegated to `overview-retention.ts` — pure, and out of a file the ratchet has frozen. */
-  retentionSummary = computed<string>(() => summariseRetention(this.space(), (k, p) => this.transloco.translate(k, p)));
+  retentionSummary = retentionSummaryOf(this.space);
 
   /** Same. The list of types whose own schema overrides the space-wide window. */
-  retentionTypes = computed(() => retentionOverridesOf(this.space(), (k, p) => this.transloco.translate(k, p)));
+  retentionTypes = retentionTypesOf(this.space);
 
   // `total` and `statCards` went with the statistics strip. Both existed only to feed those tiles, and the
   // ER diagram computes its own per-type counts from the model it already fetched — keeping a second

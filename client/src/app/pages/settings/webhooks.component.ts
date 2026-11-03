@@ -19,6 +19,7 @@ import {
   Space, WebhookSubscription, WebhookDelivery, WebhookEventType, WEBHOOK_EVENT_GROUPS,
 } from '../../core/api.types';
 import { refusalText } from '../../core/refusal-text';
+import { pageTranslator } from '../../core/page-translator';
 import { PluralText } from '../../core/plural-text.service';
 import { PluralPipe } from '../../core/plural.pipe';
 
@@ -248,6 +249,7 @@ export class WebhooksComponent implements OnInit {
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
+  private readonly say = pageTranslator();
   private readonly plural = inject(PluralText);
 
   /** "N consecutive failures", in the plural form the reader's language uses for N. */
@@ -290,7 +292,7 @@ export class WebhooksComponent implements OnInit {
     const ws = this.webhooks();
     const failing = ws.filter(w => w.status === 'failing').length;
     const disabled = ws.filter(w => w.status === 'disabled').length;
-    const tr = (k: string) => this.transloco.translate(k);
+    const tr = this.say;
     const items: SummaryItem[] = [{ label: tr('webhooks.summary.endpoints'), value: ws.length }];
     if (failing) items.push({ label: tr('webhooks.summary.failing'), value: failing, variant: 'error' });
     if (disabled) items.push({ label: tr('webhooks.summary.disabled'), value: disabled, variant: 'off' });

@@ -4,7 +4,7 @@ import { DuplicateRecord, ContradictionRecord } from '../../core/api.types';
 import { DuplicatesApi } from '../../core/duplicates-api.service';
 import type { CollectionTab } from './brain-tabs';
 import { PhIconComponent } from '../../shared/ph-icon.component';
-import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-strip.component';
+import { SummaryStripComponent } from '../../shared/summary-strip.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import { RelativeTimeComponent } from '../../shared/relative-time.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
@@ -20,7 +20,7 @@ import { FORK_KINDS, type ForkKind } from '../../core/forks.types';
 import { ReviewCompletenessState } from './review-completeness-state';
 import { ReviewContradictionsPanelComponent } from './review-contradictions-panel.component';
 import { ReviewContradictionsState } from './review-contradictions-state';
-import { scorePct, scoreVariant } from './review-score';
+import { scorePct, scoreVariant, duplicatesSummaryOf } from './review-score';
 
 @Component({
   selector: 'app-review-tab',
@@ -500,17 +500,7 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     (this.sub() === 'contradictions' ? this.conState.rows() : this.rows()).length >= ReviewTabComponent.SERVER_CAP);
 
   /** Operator-first rollup atop the list: how many still need attention + how strong the matches are. */
-  summaryItems = computed<SummaryItem[]>(() => {
-    const list = this.rows();
-    const open = list.filter(r => r.status === 'open').length;
-    const scores = list.map(r => r.score);
-    const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-    return [
-      { label: this.transloco.translate('duplicates.summary.open'), value: String(open), variant: open ? 'warn' : 'ok' },
-      { label: this.transloco.translate('duplicates.summary.avgScore'), value: scores.length ? `${Math.round(avg * 100)}%` : '—' },
-      { label: this.transloco.translate('duplicates.summary.shown'), value: String(this.filteredRows().length) },
-    ];
-  });
+  summaryItems = duplicatesSummaryOf(this.rows, this.filteredRows);
 
   protected readonly scorePct = scorePct;
   protected readonly scoreVariant = scoreVariant;

@@ -131,7 +131,7 @@ import { stagePillVariant } from './stage-health';
         </div>
         <div class="field">
           <label for="emb-model">{{ 'mediaProcessing.field.model' | transloco }}</label>
-          <input id="emb-model" data-mono [(ngModel)]="s.embedding.model" [disabled]="s.embeddingLocked('model')" placeholder="nomic-embed-text" />
+          <input id="emb-model" data-mono type="text" [(ngModel)]="s.embedding.model" [disabled]="s.embeddingLocked('model')" placeholder="nomic-embed-text" />
         </div>
         <div class="grid2">
           <div class="field">
@@ -228,7 +228,7 @@ import { stagePillVariant } from './stage-health';
         </div>
         <div class="field">
           <label for="rr-model">{{ 'mediaProcessing.field.model' | transloco }}</label>
-          <input id="rr-model" data-mono [(ngModel)]="s.rerank.model" [disabled]="s.rerankLocked('model')"
+          <input id="rr-model" data-mono type="text" [(ngModel)]="s.rerank.model" [disabled]="s.rerankLocked('model')"
             placeholder="BAAI/bge-reranker-v2-m3" />
         </div>
         <div class="field">
@@ -283,7 +283,7 @@ import { stagePillVariant } from './stage-health';
         </div>
         <div class="field">
           <label for="nli-model">{{ 'mediaProcessing.field.model' | transloco }}</label>
-          <input id="nli-model" data-mono [(ngModel)]="s.nli.model" [disabled]="s.nliLocked('model')"
+          <input id="nli-model" data-mono type="text" [(ngModel)]="s.nli.model" [disabled]="s.nliLocked('model')"
             placeholder="MoritzLaurer/deberta-v3-base-zeroshot-v2.0" />
         </div>
         <div class="field">
@@ -334,7 +334,7 @@ import { stagePillVariant } from './stage-health';
         </div>
         <div class="field">
           <label for="vis-model">{{ 'mediaProcessing.field.model' | transloco }}</label>
-          <input id="vis-model" data-mono [(ngModel)]="s.form.vision!.model" [disabled]="s.isLocked('vision.model')" placeholder="moondream" />
+          <input id="vis-model" data-mono type="text" [(ngModel)]="s.form.vision!.model" [disabled]="s.isLocked('vision.model')" placeholder="moondream" />
         </div>
         <div class="field">
           <label for="vis-key">{{ 'mediaProcessing.field.apiKeyExternal' | transloco }}</label>
@@ -387,7 +387,7 @@ import { stagePillVariant } from './stage-health';
         </div>
         <div class="field">
           <label for="stt-model">{{ 'mediaProcessing.field.model' | transloco }}</label>
-          <input id="stt-model" data-mono [(ngModel)]="s.form.stt!.model" [disabled]="s.isLocked('stt.model')" placeholder="base" />
+          <input id="stt-model" data-mono type="text" [(ngModel)]="s.form.stt!.model" [disabled]="s.isLocked('stt.model')" placeholder="base" />
         </div>
         <div class="field">
           <label for="stt-key">{{ 'mediaProcessing.field.apiKeyExternal' | transloco }}</label>
@@ -436,7 +436,7 @@ import { stagePillVariant } from './stage-health';
         </div>
         <div class="field">
           <label for="assist-model">{{ 'mediaProcessing.field.model' | transloco }}</label>
-          <input id="assist-model" data-mono [(ngModel)]="s.assist.model" [disabled]="s.assistLocked()"
+          <input id="assist-model" data-mono type="text" [(ngModel)]="s.assist.model" [disabled]="s.assistLocked()"
             [placeholder]="'mediaProcessing.assist.modelPlaceholder' | transloco" />
         </div>
         <div class="field">
@@ -590,7 +590,7 @@ import { stagePillVariant } from './stage-health';
           <div class="grid2">
             <div class="field">
               <label for="face-ext-model">{{ 'mediaProcessing.face.externalModelName' | transloco }}</label>
-              <input id="face-ext-model" data-mono [(ngModel)]="s.faceExternal.model"
+              <input id="face-ext-model" data-mono type="text" [(ngModel)]="s.faceExternal.model"
                 [disabled]="s.faceExternalLocked() || s.managed" />
             </div>
             <div class="field">
