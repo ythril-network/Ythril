@@ -68,7 +68,7 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 for (const k of ['SKIP_GLOBAL_RATE_LIMIT', 'SKIP_AUTH_RATE_LIMIT', 'SKIP_SYNC_RATE_LIMIT']) process.env[k] = 'true';
 process.env['YTHRIL_RATE_LIMIT_PER_MINUTE'] ??= '1000000';
 
-const { MongoServerError } = createRequire(path.resolve('server/package.json'))('mongodb');
+const { MongoServerError, MongoNetworkError } = createRequire(path.resolve('server/package.json'))('mongodb');
 
 const S = 'doorverdict';
 const SECOND = 'dv-second';
@@ -175,7 +175,7 @@ async function rest(method, route) {
   });
   const text = await r.text();
   let body; try { body = JSON.parse(text); } catch { body = undefined; }
-  return { kind: 'rest', status: r.status, body, text };
+  return { kind: 'rest', status: r.status, body, text, headers: Object.fromEntries(r.headers) };
 }
 
 async function mcp(args) {
@@ -472,6 +472,49 @@ describe('every sync door gives the same verdict for the same cycle', { skip }, 
         for (const m of rows) assert.ok([PEER, SECOND].includes(m.instanceId) && typeof m.outcome === 'string', `a listed member is not one of the network's: ${where}`);
         assert.equal(payload.refused, 0, `refused: ${where}`);
         assert.equal(payload.membersTotal, 2, `membersTotal: ${where}`);
+        await cyclesEnded();
+      }
+    } finally {
+      armed = false;
+      Object.defineProperty(net, 'members', { configurable: true, enumerable: true, writable: true, value: real });
+      await cyclesEnded().catch(() => undefined);
+    }
+  });
+
+  it('a store failure under a waited cycle carries Retry-After on every REST door, the generic one included, with the members it finished', async () => {
+    // The store's retryable failure (a dropped connection) is a 503 with the wait the store names. The generic door delegates to the tool, which
+    // RETURNS the failure (so the answer can carry the members): the wait rides the result to the dispatcher's outcome and `sendToolAnswer` writes the
+    // header, the same one place that wrote it when the failure was thrown. Red when the tool's result drops it.
+    setSecond('ok');
+    await setFirst('ok');
+    const net = networkConfig();
+    const real = net.members;
+    let armed = false;
+    Object.defineProperty(net, 'members', {
+      configurable: true, enumerable: true,
+      get() { if (armed) throw new MongoNetworkError('connection 3 to 10.1.2.3:27017 closed'); return real; },
+      set(v) { armed = false; Object.defineProperty(net, 'members', { configurable: true, enumerable: true, writable: true, value: v }); },
+    });
+    const doors = [
+      ['REST POST /api/networks/:id/sync', () => rest('POST', { path: `/api/networks/${door.NET}/sync?wait=true&timeoutMs=60000` })],
+      ['generic POST /api/network_sync {networkId}', () => rest('POST', { path: '/api/network_sync', body: { networkId: door.NET, wait: true, timeoutMs: 60000 } })],
+    ];
+    try {
+      for (const [name, call] of doors) {
+        const hold = holdSecond();
+        const pending = call();
+        await hold.reached;
+        armed = true;
+        hold.release();
+        const answer = await pending;
+        armed = false;
+        const where = `${name}: ${answer.text.slice(0, 500)}`;
+        assert.doesNotMatch(answer.text, LEAK, `${name} answered with the driver's text: ${answer.text.slice(0, 600)}`);
+        assert.equal(answer.status, 503, `HTTP status: ${where}`);
+        assert.ok(Number(answer.headers['retry-after']) > 0, `${name} carries no Retry-After for a retryable store failure (headers ${JSON.stringify(answer.headers)}): ${where}`);
+        const payload = payloadOf(answer);
+        assert.equal(payload.retryable, true, `retryable: ${where}`);
+        assert.ok(Array.isArray(payload.members), `the answer carries no members: ${where}`);
         await cyclesEnded();
       }
     } finally {
