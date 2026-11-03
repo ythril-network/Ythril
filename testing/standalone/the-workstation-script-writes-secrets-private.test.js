@@ -175,7 +175,7 @@ describe('write_private makes the file private whatever the umask was', () => {
 
   it('a new file is 0600 and holds what was written to stdin, under umask 022', (t) => {
     const out = run(t, 'printf "%s\\n" "TOKEN=abc" | write_private "$d/.env" && stat -c "%a" "$d/.env"');
-    if (!out) return;
+    if (!out) return t.skip('this filesystem does not keep Unix modes (run on Linux CI)');
     assert.equal(out.r.status, 0, out.r.stderr);
     assert.equal(out.r.stdout.trim(), '600');
     assert.equal(readFileSync(join(out.dir, '.env'), 'utf8'), 'TOKEN=abc\n');
@@ -183,7 +183,7 @@ describe('write_private makes the file private whatever the umask was', () => {
 
   it('a file an earlier run left at 0644 is replaced by a 0600 one', (t) => {
     const out = run(t, 'printf old > "$d/token"; chmod 644 "$d/token"; printf "%s" new | write_private "$d/token" && stat -c "%a" "$d/token"');
-    if (!out) return;
+    if (!out) return t.skip('this filesystem does not keep Unix modes (run on Linux CI)');
     assert.equal(out.r.status, 0, out.r.stderr);
     assert.equal(out.r.stdout.trim(), '600', 'the earlier mode must not survive');
     assert.equal(readFileSync(join(out.dir, 'token'), 'utf8'), 'new');
@@ -191,14 +191,14 @@ describe('write_private makes the file private whatever the umask was', () => {
 
   it('leaves nothing but the target behind', (t) => {
     const out = run(t, 'printf x | write_private "$d/.env"');
-    if (!out) return;
+    if (!out) return t.skip('this filesystem does not keep Unix modes (run on Linux CI)');
     assert.equal(out.r.status, 0, out.r.stderr);
     assert.deepEqual(readdirSync(out.dir).sort(), ['.env']);
   });
 
   it('refuses a symlink at the target, and the file it points at is not touched', (t) => {
     const out = run(t, 'printf secret > "$d/real"; ln -s "$d/real" "$d/.env" 2>/dev/null; [ -L "$d/.env" ] || { echo NOLINK; exit 0; }; printf new | write_private "$d/.env"; echo "rc=$?"; cat "$d/real"');
-    if (!out) return;
+    if (!out) return t.skip('this filesystem does not keep Unix modes (run on Linux CI)');
     if (/NOLINK/.test(out.r.stdout)) { t.skip('this shell cannot make a symlink'); return; }
     assert.doesNotMatch(out.r.stdout, /rc=0/, `a symlinked .env must be refused, got ${JSON.stringify(out.r.stdout)}`);
     assert.match(out.r.stdout, /secret$/, 'the file behind the link is untouched');
