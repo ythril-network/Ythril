@@ -567,7 +567,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
       return withUnknownFieldRows(refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace), rows);
     }
     const handlerSpaceIds = withoutHeldFor(toolReach(name, rights, accessibleSpaceIds), peerId);
-    const result = await tool.handle({
+    const handled = await tool.handle({
       args: a,
       callSpace,
       callSpaces: rawSpaces,
@@ -592,6 +592,9 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
       recordChanges: (before, after) => { facts.snapshots = { before, after }; },
       recordAuditChanges: (changes) => { facts.snapshots = { explicit: changes }; },
     });
+    // A `Retry-After` a tool carries on its result (a returned store failure) leaves the result here and rides the outcome, as a thrown one's does.
+    const { retryAfterSeconds: resultRetryAfter, ...unwrapped } = handled ?? ({} as ToolResult);
+    const result = (handled ? unwrapped : handled) as ToolResult;
     // A tool that returns `isError` failed on its own terms, so the status has to come from the RESULT or
     // every rejected write would be logged as a success. 422: the call was well-formed and it was refused.
     // A failed act after a passed vote is a FAILURE the act's tool answers with `spaceActFailureAnswer`'s body (design v5 section 2.2
@@ -600,7 +603,10 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     // the code's own 502 / 503 when nothing synced or it was stopped, 504 for a wait that ran out. The same cycle, the same status, whichever door asked.
     const status = result?.isError ? (isSpaceActFailure(result) ? 500 : syncAnswerStatus(result) ?? 422) : 200;
     // A read through a view says which members it read (the answer is narrowed to what the caller reads now, never silently).
-    return withUnknownFieldRows({ result: result && !result.isError ? announceViewMembers(result, viewSpacesRead) : result, status, callSpace }, rows);
+    return withUnknownFieldRows({
+      result: result && !result.isError ? announceViewMembers(result, viewSpacesRead) : result, status, callSpace,
+      ...(resultRetryAfter !== undefined ? { retryAfterSeconds: resultRetryAfter } : {}),
+    }, rows);
   } catch (err) {
     const answer = answerThrown(err);
     // Recorded by `auditedToolCall`, at the status `answer` carries: a refusal, a conflict, a store failure and a fault are each one row.

@@ -144,6 +144,13 @@ export type ToolResult = {
    * it does not simplify anything — it breaks the build.
    */
   structuredContent?: Record<string, unknown>;
+  /**
+   * The wait a REST door puts on the answer as `Retry-After`, for a tool that RETURNS a store failure instead of throwing it (a sync that carries
+   * the members it finished beside the store's words, Q-675). The seconds are the store's own (`storeFailureAnswer`), copied here, never decided
+   * again. The dispatcher takes it OFF the result and hands it to the door as the outcome's `retryAfterSeconds` (`sendToolAnswer`), so it is a
+   * header and never part of what MCP carries.
+   */
+  retryAfterSeconds?: number;
 };
 
 /**

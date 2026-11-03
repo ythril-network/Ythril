@@ -26,6 +26,8 @@ function failedResult(answer: SyncAnswer): ToolResult {
     content: [{ type: 'text' as const, text: `${String(answer.body['error'] ?? 'The sync cycle failed.')}${memberLines(answer.partial?.members ?? [])}` }],
     structuredContent: { ...answer.body },
     isError: true,
+    // The store's own wait, carried to the REST door that delegates here (`Retry-After`, as when the failure was thrown).
+    ...(answer.storeFailure?.retryAfterSeconds !== undefined ? { retryAfterSeconds: answer.storeFailure.retryAfterSeconds } : {}),
   };
 }
 
