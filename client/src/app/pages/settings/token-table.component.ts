@@ -138,6 +138,8 @@ import type { TokenRecord } from '../../core/api.types';
                   <button class="icon-btn" style="margin-left:4px;" [attr.title]="'tokens.action.editLabelTitle' | transloco"
                     [attr.aria-label]="'tokens.action.editLabelAriaLabel' | transloco" (click)="editLabelStart.emit(t)"><ph-icon name="pencil-simple" [size]="13"/></button>
                   @if (t.id === selfTokenId()) { <span style="margin-left:6px;font-size:0.75rem;color:var(--text-muted);">{{ 'tokens.table.currentSession' | transloco }}</span> }
+                  @if (t.peerInstanceId) { <span class="badge badge-gray" style="margin-left:6px;" [attr.title]="'tokens.badge.peerTitle' | transloco">{{ 'tokens.badge.peer' | transloco }}</span> }
+                  @if (t.approvedByTokenId) { <span class="badge badge-gray" style="margin-left:6px;" [attr.title]="t.approvedByTokenId">{{ 'tokens.badge.approvedBy' | transloco: { id: t.approvedByTokenId.slice(0, 8) } }}</span> }
                 }
               </td>
               <td>

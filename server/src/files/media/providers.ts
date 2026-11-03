@@ -13,7 +13,7 @@
  */
 
 import type { MediaProviderConfig } from '../../config/types.js';
-import { boundedJson, boundedErrorText } from '../../util/bounded-read.js';
+import { boundedModelJson, boundedErrorText } from '../../util/bounded-read.js';
 import { log } from '../../util/log.js';
 import { ssrfSafeFetch } from '../../util/ssrf.js';
 import { allowPrivateForSlot, type EgressSlot } from '../../config/model-egress-policy.js';
@@ -215,8 +215,7 @@ export class OllamaVisionProvider implements VisionProvider {
       throw new Error(`Ollama vision HTTP ${res.status}: ${body}`);
     }
 
-    const json = await boundedJson<{ message?: { content?: string }; error?: string }>(res, 'Ollama vision', MAX_VISION_RESPONSE_BYTES);
-    if (json.error) throw new Error(`Ollama vision error: ${json.error}`);
+    const json = await boundedModelJson<{ message?: { content?: string } }>(res, 'Ollama vision', { maxBytes: MAX_VISION_RESPONSE_BYTES });
     const caption = json.message?.content?.trim();
     if (!caption) throw new Error('Ollama vision returned empty caption');
     return caption;
@@ -291,11 +290,7 @@ export class ExternalVisionProvider implements VisionProvider {
       throw new Error(`External vision HTTP ${res.status}: ${body}`);
     }
 
-    const json = await boundedJson<{
-      choices?: { message?: { content?: string } }[];
-      error?: { message?: string };
-    }>(res, 'External vision', MAX_VISION_RESPONSE_BYTES);
-    if (json.error) throw new Error(`External vision error: ${json.error.message}`);
+    const json = await boundedModelJson<{ choices?: { message?: { content?: string } }[] }>(res, 'External vision', { maxBytes: MAX_VISION_RESPONSE_BYTES });
     const caption = json.choices?.[0]?.message?.content?.trim();
     if (!caption) throw new Error('External vision returned empty caption');
     return caption;
@@ -357,12 +352,10 @@ export class WhisperProvider implements SttProvider {
       throw new Error(`Whisper HTTP ${res.status}: ${body}`);
     }
 
-    const json = await boundedJson<{
+    const json = await boundedModelJson<{
       text?: string;
       segments?: { start?: number; end?: number; text?: string }[];
-      error?: { message?: string };
-    }>(res, 'Whisper', MAX_STT_RESPONSE_BYTES);
-    if (json.error) throw new Error(`Whisper error: ${json.error.message}`);
+    }>(res, 'Whisper', { maxBytes: MAX_STT_RESPONSE_BYTES });
 
     const text = json.text?.trim() ?? '';
     const segments: SttSegment[] = (json.segments ?? []).map(s => ({

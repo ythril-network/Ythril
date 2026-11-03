@@ -38,22 +38,31 @@ const SECRET_QUERY_PARAMS = /([?&](?:token|api[-_]?key|access[-_]?token|auth|sec
  * `webhooks/store.ts` logged the target URL verbatim on creation. Same secret, different retained
  * store, and application logs usually have *broader* access than the admin-only audit API.
  *
- * Matches only between the scheme and the first `/`, so a path or query containing `@` is left alone.
+ * Matches only between the scheme and the first `/`, so a path or query containing `@` is left alone. The userinfo ends at
+ * the LAST `@` before that `/` or the next whitespace (`[^\s/]+@`), so a password that contains an `@` is hidden whole, and
+ * an `?` or `#` inside a password does not end it early. The price is that an `@` in a query with no path slash
+ * (`https://h?q=a@b`) is hidden too: a line over-redacted costs a debugging session, a password half-written costs more. A
+ * password with an unencoded `/` is not a userinfo a pattern can tell from a host and a path, and is left as written.
+ *
+ * **A scheme run may BEGIN with a digit, plus, dot or hyphen** (`9https://u:pw@h`, `x+https://…`): the scheme is
+ * `[0-9+.-]*` then a letter then scheme characters, so a URL pasted after such a prefix is still one URL.
  *
  * **The lookbehind is what keeps it linear** (bundle-30 `R9`). Without it a match could START at every character
  * of a run of scheme characters, and each start scanned the rest of the run looking for `://`: 40 000 letters
  * took 0.7 s and the cost grew with the square, so a peer's megabyte `_id` of letters was minutes of event loop
  * on the line that logged it. A scheme now starts only where no scheme character precedes it, so each run is
- * scanned once; a real URL is always preceded by something else (a space, a quote, `=`, the start of the text).
+ * scanned once; a real URL is always preceded by something else (a space, a quote, `=`, the start of the text). The
+ * non-letter prefix cannot make a second start inside a run: it holds no letter, so the first letter of the run is the
+ * only place the scheme proper can begin.
  */
-const URL_USERINFO = /(?<![a-z0-9+.\-])([a-z][a-z0-9+.\-]*:\/\/)[^\s/@]+@/gi;
+const URL_USERINFO = /(?<![a-z0-9+.\-])([0-9+.\-]*[a-z][a-z0-9+.\-]*:\/\/)[^\s/]+@/gi;
 
 /**
  * A URL authority still open where a value was cut for redaction — `https://user:pass` with its `@` past the
  * window. `peerText` redacts a bounded window of a value, and `URL_USERINFO` needs the `@` that ends a userinfo:
  * without this, a password longer than the window's margin would reach the line half-written.
  */
-const OPEN_USERINFO_AT_END = /(?<![a-z0-9+.\-])([a-z][a-z0-9+.\-]*:\/\/)[^\s/@]*$/i;
+const OPEN_USERINFO_AT_END = /(?<![a-z0-9+.\-])([0-9+.\-]*[a-z][a-z0-9+.\-]*:\/\/)[^\s/]*$/i;
 
 /**
  * Exported so the few places that legitimately write straight to the console — the crash handlers,

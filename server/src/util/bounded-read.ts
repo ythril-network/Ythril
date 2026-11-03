@@ -28,6 +28,7 @@
  * `renderer.ts` decodes every returned page with `Buffer.from(b64, 'base64')` — so the JSON string, the parsed
  * strings and the decoded buffers are all live at once. That path needs no bug and no attacker to hurt.
  */
+import { peerText } from './log.js';
 
 /**
  * Default ceiling for one upstream response body.
@@ -103,6 +104,34 @@ export async function boundedJson<T>(
   }
   const merged = Buffer.concat(chunks.map(c => Buffer.from(c.buffer, c.byteOffset, c.byteLength)));
   return JSON.parse(merged.toString('utf8')) as T;
+}
+
+/**
+ * Read a MODEL SERVER's JSON reply: `boundedJson`, and a reply that carries an `error` is thrown as a line.
+ *
+ * Question: "how much of a model server's own error words may we quote?" `boundedJson` bounds the BODY (256 MiB); a megabyte
+ * `error.message` sits inside that bound, and a caller that put it whole into a thrown Error sent a megabyte to the logs and
+ * to its own caller's answer. The `error` check lives HERE so a caller cannot drop the cut: the text is read as `peerText`
+ * reads a value from outside (redacted, escaped, at most `ERROR_BODY_CHARS`, saying how much it left out). The field is a
+ * string for Ollama and an object for an OpenAI-compatible server, so it is taken as `unknown`: an object's `message` is
+ * the text when it is a string, the object itself rendered otherwise.
+ *
+ * @param label  Named in the thrown message and in a too-large refusal.
+ * @param opts.fail  Builds the thrown Error from `error: <bounded text>` when a caller has its own error type or prefix.
+ */
+export async function boundedModelJson<T extends object>(
+  res: Response,
+  label: string,
+  opts: { maxBytes?: number; fail?: (message: string) => Error } = {},
+): Promise<T> {
+  const json = await boundedJson<T & { error?: unknown }>(res, label, opts.maxBytes);
+  const error = json?.error;
+  if (!error) return json;
+  const said = typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
+    ? (error as { message: string }).message
+    : error;
+  const text = peerText(said, { max: ERROR_BODY_CHARS });
+  throw opts.fail ? opts.fail(`error: ${text}`) : new Error(`${label} error: ${text}`);
 }
 
 /**

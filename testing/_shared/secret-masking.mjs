@@ -64,7 +64,9 @@ const SHAPES = Object.freeze([
   // it) a scheme could start again after every `-`, `.` and `+` of a long run, and each start read the rest of the run
   // before failing to find `://`: quadratic in the length of text nothing in which is a credential. With it, each run is
   // read from its start once, so the cost is linear in the text (held, over 100 000 characters, by the gate named above).
-  [/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi, '$1***@'],
+  // A scheme run may begin with a digit, plus, dot or hyphen (`9https://u:pw@h`): `[0-9+.-]*` before the first letter, the same
+  // rule as `URL_USERINFO` in `schema/src/text.ts` (two copies of one rule, held identical by the differential in the gate).
+  [/(?<![a-z0-9+.-])([0-9+.-]*[a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi, '$1***@'],
   [/ythril_[A-Za-z0-9]{8,}(?:[_-][A-Za-z0-9]+)*/g, '***'],
   [/gh[pousr]_[A-Za-z0-9]{16,}/g, '***'],
   [/github_pat_[A-Za-z0-9_]{16,}/g, '***'],

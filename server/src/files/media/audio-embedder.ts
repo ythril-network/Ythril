@@ -20,7 +20,7 @@ import { scratchDir } from '../stored-bytes.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { AUDIO_STEPS, type MediaRunOpts } from './progress.js';
 import { isAbandonment, stopIfLeaseLost } from './lease.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
@@ -329,7 +329,8 @@ export async function embedAudio(
         // segment and beats.
         if (isAbandonment(err)) throw err;
         failed++;
-        lastError = err instanceof Error ? err.message : String(err);
+        // Through `peerText` (redacted, escaped, bounded): a provider's error text is its own words, and `lastError` is stored and logged.
+        lastError = err instanceof Error ? peerText(err.message) : peerText(err);
         log.warn(`Audio embedder: chunk ${i} of ${fileId} failed: ${lastError}`);
         // Continue processing remaining chunks — a partial transcript beats none. The COUNT is what the
         // caller needs, though: without it the worker marked the job `complete` over audio that was

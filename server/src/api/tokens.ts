@@ -6,6 +6,7 @@ import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { rateLimitRefusalResponse } from '../rate-limit/per-token.js';
 import { createToken, initialRightsOf, listTokens, revokeToken, regenerateToken, renameToken, setTokenRights, setTokenMfa, setTokenRateLimit } from '../auth/tokens.js';
 import { isMfaEnabled, verifyMfaCode } from '../auth/totp.js';
+import { specialPurposeApproverRefusal } from '../auth/peer-bound.js';
 import { z } from 'zod';
 import { SPACE_AREAS, RUNGS, RUNG_IMPLICATIONS, DERIVED_RUNGS } from '../config/rights-shape.js';
 import { ROUTE_RIGHTS, NOT_AREA_SCOPED } from '../auth/space-rights.js';
@@ -334,6 +335,13 @@ const REMOVED_MINT_OPTIONS: Record<string, string> = {
 };
 
 tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, res) => {
+  // A token made for one purpose (a peer's sync, the schema library) never mints another: a peer token whose rights were raised would
+  // otherwise hand out unbound tokens with its own matrix (Q-597). Asked before the body is read, so no input shapes the answer.
+  const specialPurpose = specialPurposeApproverRefusal(req.authToken, 'mint a token');
+  if (specialPurpose) {
+    res.status(403).json({ error: specialPurpose });
+    return;
+  }
   const removed = Object.keys(REMOVED_MINT_OPTIONS)
     .filter(k => (req.body as Record<string, unknown> | undefined)?.[k] !== undefined);
   if (removed.length > 0) {
@@ -501,6 +509,7 @@ export const ECHOABLE: Record<string, string | null> = {
   peerInstanceId: null,
   schemaLibrary: null,
   oauthClientId: null,
+  approvedByTokenId: null,
 };
 
 const ECHOABLE_FIELDS = Object.keys(ECHOABLE);

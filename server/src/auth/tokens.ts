@@ -275,6 +275,8 @@ export async function createOAuthToken(opts: {
    * The connector would end up able to write files the authorising token could only read.
    */
   rights?: TokenRecord['rights'];
+  /** The id of the token whose holder approved this connector (`TokenRecord.approvedByTokenId`). */
+  approvedByTokenId?: string;
   ttlMs: number | null; // null = never expires
   maxTokens: number;
 }): Promise<{ record: TokenRecord; plaintext: string }> {
@@ -289,6 +291,7 @@ export async function createOAuthToken(opts: {
     lastUsed: null,
     expiresAt: opts.ttlMs === null ? null : new Date(Date.now() + opts.ttlMs).toISOString(),
     oauthClientId: opts.clientId,
+    ...(opts.approvedByTokenId ? { approvedByTokenId: opts.approvedByTokenId } : {}),
     // ALWAYS stored, for the reason spelled out on `createToken` above — and this is the path that fix
     // MISSED. `createToken` was given an unconditional matrix because a token minted after boot had none
     // until the next restart; this second minting path kept storing nothing, so every OAuth connector token
