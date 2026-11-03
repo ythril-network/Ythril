@@ -235,7 +235,7 @@ function boundedJsonReadsForError(src) {
     const name = m[1];
     const afterName = m.index + m[0].length;
     const typeArg = typeArgumentAt(src, afterName);
-    const tail = src.slice(afterName, afterName + 1500).split('\n').slice(0, 12).join('\n');
+    const tail = src.slice(afterName).split('\n').slice(0, 12).join('\n');
     const typed = typeArg !== null && /\berror\s*\??\s*:/.test(typeArg);
     const used = new RegExp(`\\b${name}\\.error\\b`).test(tail);
     if (typed || used) found.push(`${name} = await boundedJson…`);

@@ -629,7 +629,10 @@ describe('the render sidecars read their caps once, and the docs state what they
     const doc = read(RENDER_DOC);
     const at = doc.indexOf('It honours `RENDER_MAX_BYTES`');
     assert.ok(at > 0, 'the office-sidecar sentence naming the caps it honours is gone');
-    const sentence = doc.slice(at, doc.indexOf('\n\n', at));
+    // The paragraph the sentence is in: its lines up to the first empty one, found by line so CRLF cannot move the end.
+    const lines = doc.slice(at).split(/\r?\n/);
+    const empty = lines.findIndex(l => l.trim() === '');
+    const sentence = lines.slice(0, empty < 0 ? lines.length : empty).join('\n');
     for (const name of ['RENDER_MAX_PIXELS', 'RENDER_MAX_RESPONSE_BYTES']) {
       assert.ok(sentence.includes(name), `the doc-office section honours ${name} exactly as doc-render does, and says so`);
     }
