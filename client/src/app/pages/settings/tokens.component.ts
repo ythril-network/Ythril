@@ -15,6 +15,7 @@ import { TokenRightsDialogComponent } from './token-rights-dialog.component';
 import { OwnTokenRightsComponent } from './own-token-rights.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
+import { pageTranslator } from '../../core/page-translator';
 import { TOKENS_PAGE_STYLES } from './tokens.styles';
 import { TokenTableComponent } from './token-table.component';
 import { filterTokens, sortTokens, isExpired, isExpiringSoon } from './token-table';
@@ -79,11 +80,6 @@ import type { TokenSortField, SortDir } from './token-table';
         (created)="onTokenCreated($event)"/>
     }
 
-    <!-- Operator summary -->
-    @if (!loading() && tokens().length) {
-      <app-summary-strip [heading]="'tokens.list.title' | transloco" [items]="summary()" style="display:block;margin-bottom:16px;"/>
-    }
-
     <!-- Token list -->
     <div class="card">
       <div class="card-header">
@@ -130,12 +126,19 @@ import type { TokenSortField, SortDir } from './token-table';
           (create)="showCreateDialog.set(true)" />
       }
     </div>
+
+    <!-- Operator summary: after the list (owner, 2026-09-28: it ate the top of the page), by DOM order, not CSS order, so the reading order matches. It has its own heading;
+         borrowing the list card's title put "Active tokens" on the page twice. -->
+    @if (!loading() && tokens().length) {
+      <app-summary-strip [heading]="'tokens.summary.title' | transloco" [items]="summary()" style="display:block;margin-top:16px;"/>
+    }
   `,
 })
 export class TokensComponent implements OnInit {
   private authApi = inject(AuthApi);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
+  private readonly say = pageTranslator();
   private toast = inject(ToastService);
   private confirmDialog = inject(ConfirmDialogService);
 
@@ -369,7 +372,7 @@ export class TokensComponent implements OnInit {
     const ts = this.tokens();
     const expired = ts.filter(t => this.isExpired(t)).length;
     const expiring = ts.filter(t => this.isExpiringSoon(t)).length;
-    const tr = (k: string) => this.transloco.translate(k);
+    const tr = this.say;
     const items: SummaryItem[] = [{ label: tr('tokens.summary.active'), value: ts.length - expired }];
     if (expiring) items.push({ label: tr('tokens.summary.expiring'), value: expiring, variant: 'warn' });
     if (expired) items.push({ label: tr('tokens.summary.expired'), value: expired, variant: 'error' });

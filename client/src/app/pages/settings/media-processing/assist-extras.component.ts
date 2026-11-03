@@ -97,7 +97,7 @@ import type { AssistBudgetCfg, AssistFallbackCfg } from './media-processing.type
       <div class="grid2">
         <div class="field">
           <label for="assist-fb-model">{{ 'mediaProcessing.field.model' | transloco }}</label>
-          <input id="assist-fb-model" data-mono [disabled]="s.assistLocked()"
+          <input id="assist-fb-model" data-mono type="text" [disabled]="s.assistLocked()"
             [ngModel]="fallback().model" (ngModelChange)="setFallback({ model: $event })" />
         </div>
         <div class="field">

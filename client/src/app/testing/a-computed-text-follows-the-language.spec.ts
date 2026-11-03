@@ -54,29 +54,19 @@ describe('a computed() text follows the language', () => {
   const TRANSLATES = /\btranslate\b/;
 
   /**
-   * The computeds this gate found on its first run that translate with no dependency on the words, by `file#member`, each with the reason it is
-   * still here. A RATCHET, not an exemption: the list may only shrink (a member fixed and still listed fails, so the entry goes), and a new computed
-   * that translates without reading the words fails. Q-185 fixes the Overview's two (the ticket's); the rest are the same defect found by the same
-   * gate and are the next bundle's to clear.
+   * There is no baseline: the computeds this gate found on its first run (nine summary strips, banners and tooltips besides the Overview's two)
+   * were fixed in the same bundle, through `pageTranslator()` in `core/page-translator.ts`, which reads `ActiveLanguage.revision()` itself. A new
+   * computed that translates without reading the words fails here, and the way out is that factory, not a list.
    */
-  const BASELINE: Readonly<Record<string, string>> = {
-    'src/app/pages/brain/review-contradictions-panel.component.ts#summaryItems': 'summary strip labels, found by the Q-185 gate',
-    'src/app/pages/brain/review-tab.component.ts#summaryItems': 'summary strip labels, found by the Q-185 gate',
-    'src/app/pages/settings/audit-log.component.ts#summaryItems': 'summary strip labels, found by the Q-185 gate',
-    'src/app/pages/settings/networks.component.ts#summaryItems': 'summary strip labels, found by the Q-185 gate',
-    'src/app/pages/settings/rung-picker.component.ts#clampTitle': 'tooltip text, found by the Q-185 gate',
-    'src/app/pages/settings/spaces.component.ts#spacesSummary': 'summary strip labels, found by the Q-185 gate',
-    'src/app/pages/settings/tokens.component.ts#summary': 'summary strip labels, found by the Q-185 gate',
-    'src/app/pages/settings/webhooks.component.ts#summary': 'summary strip labels, found by the Q-185 gate',
-    'src/app/pages/views/views-migration-banner.component.ts#lines': 'banner sentences, found by the Q-185 gate',
-  };
 
   /** The computeds whose body translates and does not read the words signal. */
   const unwatched = (list: { where: string; body: string; name?: string }[]): { where: string; name?: string }[] =>
     list.filter(c => TRANSLATES.test(c.body) && !READS_THE_WORDS.test(c.body)).map(c => ({ where: c.where, name: c.name }));
 
   it('finds computeds that translate (a floor: a changed call shape cannot pass by finding none)', () => {
-    expect(computedBodies.filter(c => TRANSLATES.test(c.body)).length).toBeGreaterThanOrEqual(3);
+    // Most computeds now translate through `pageTranslator()` and never spell `translate`; the ones that still do are a floor of one, and the planted
+    // shapes below hold the detector's other side.
+    expect(computedBodies.filter(c => TRANSLATES.test(c.body)).length).toBeGreaterThanOrEqual(1);
   });
 
   it('reads a planted computed that translates without the words as stale, and one that reads them as fine', () => {
@@ -88,14 +78,8 @@ describe('a computed() text follows the language', () => {
     expect(unwatched([bad, handedOn, good, ready, none]).map(u => u.where)).toEqual(['x:1', 'x:2']);
   });
 
-  it('no computed() outside the baseline translates without reading revision(), wordsReady() or language(): it would keep the raw key of words not yet loaded', () => {
-    const stale = unwatched(computedBodies).filter(u => !u.name || !(u.name in BASELINE)).map(u => `${u.where}  ${u.name ?? '(unnamed)'}`);
+  it('no computed() translates without reading revision(), wordsReady() or language(): it would keep the raw key of words not yet loaded', () => {
+    const stale = unwatched(computedBodies).map(u => `${u.where}  ${u.name ?? '(unnamed)'}`);
     expect(stale, `computed() texts that translate with no dependency on the words arriving:\n  ${stale.join('\n  ')}`).toEqual([]);
-  });
-
-  it('every baseline entry still names a computed that translates without the words (a fixed one leaves the list)', () => {
-    const found = new Set(unwatched(computedBodies).map(u => u.name));
-    const fixed = Object.keys(BASELINE).filter(name => !found.has(name));
-    expect(fixed, `baseline entries that no longer need it:\n  ${fixed.join('\n  ')}`).toEqual([]);
   });
 });

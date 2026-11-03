@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output } f
 import { TranslocoService } from '@jsverse/transloco';
 import type { Rung } from './rights-glyph.component';
 import { translatedOrEmpty } from '../../core/translated-text';
+import { pageTranslator } from '../../core/page-translator';
 
 export const RUNGS: readonly Rung[] = ['none', 'read', 'write', 'admin'];
 const RANK: Record<Rung, number> = { none: 0, read: 1, write: 2, admin: 3 };
@@ -81,6 +82,7 @@ const LABEL: Record<Rung, string> = { none: '—', read: 'R', write: 'W', admin:
 })
 export class RungPickerComponent {
   private t = inject(TranslocoService);
+  private say = pageTranslator();
 
   value = input.required<Rung>();
   /**
@@ -119,9 +121,9 @@ export class RungPickerComponent {
   private clampTitle = computed(() => {
     const by = this.impliedBy();
     return RANK[this.implied()] > RANK[this.floor()] && by
-      ? this.t.translate('tokens.rights.clamp.implied',
-        { rung: this.implied(), area: this.t.translate('tokens.rights.area.' + by.area), cause: by.rung })
-      : this.t.translate('tokens.rights.clamp.floor', { rung: this.floor() });
+      ? this.say('tokens.rights.clamp.implied',
+        { rung: this.implied(), area: this.say('tokens.rights.area.' + by.area), cause: by.rung })
+      : this.say('tokens.rights.clamp.floor', { rung: this.floor() });
   });
 
   segments = computed(() => {

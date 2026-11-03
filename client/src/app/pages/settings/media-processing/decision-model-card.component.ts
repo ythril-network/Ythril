@@ -57,7 +57,7 @@ import { MediaProcessingStateService } from './media-processing-state.service';
       </div>
       <div class="field">
         <label for="decision-model">{{ 'mediaProcessing.field.model' | transloco }}</label>
-        <input id="decision-model" data-mono [(ngModel)]="s.decision.model" [disabled]="s.decisionLocked()" placeholder="jev-latest" />
+        <input id="decision-model" data-mono type="text" [(ngModel)]="s.decision.model" [disabled]="s.decisionLocked()" placeholder="jev-latest" />
       </div>
       <div class="field">
         <label for="decision-key">{{ 'mediaProcessing.field.apiKey' | transloco }}</label>

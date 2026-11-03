@@ -14,8 +14,7 @@ import { NetworkChangeNotesComponent } from './network-change-notes.component';
 import { NetworkSyncHistoryComponent } from './network-sync-history.component';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { AdminApi } from '../../core/admin-api.service';
-import { TranslocoPipe } from '@jsverse/transloco';
-import { TranslocoService } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -38,6 +37,7 @@ import { NetworkJoinDialogComponent } from './network-join-dialog.component';
 import { NetworkEnableWizardComponent } from './network-enable-wizard.component';
 import { refusalText } from '../../core/refusal-text';
 import { PluralPipe } from '../../core/plural.pipe';
+import { pageTranslator } from '../../core/page-translator';
 @Component({
   selector: 'app-networks',
   standalone: true,
@@ -350,7 +350,7 @@ export class NetworksComponent implements OnInit {
   /** At-a-glance rollup atop the page. Recomputes when `networks` changes — and `loadVotes` always
    *  bumps `networks` after updating the vote cache, so the "need your vote" count stays live. */
   readonly summaryItems = computed<SummaryItem[]>(() => {
-    const tr = (k: string) => this.transloco.translate(k);
+    const tr = this.t;
     const nets = this.networks();
     const needVote = nets.filter(n => this.openVotes(n.id).length > 0).length;
     const members = nets.reduce((sum, n) => sum + (n.members?.length ?? 0), 0);
@@ -367,7 +367,7 @@ export class NetworksComponent implements OnInit {
   private readonly decisions = viewChildren(RecentDecisionsComponent);
   private readonly histories = viewChildren(NetworkSyncHistoryComponent);
   private readonly dates = inject(DateFormatService);
-  private readonly t: Translate = (key, params) => this.transloco.translate(key, params);
+  private readonly t: Translate = pageTranslator();
 
   ngOnInit(): void {
     this.load();
@@ -507,9 +507,10 @@ export class NetworksComponent implements OnInit {
         // Auto-refresh history after sync completes (give it a moment)
         setTimeout(() => this.histories().find(h => h.networkId() === networkId)?.refreshIfOpen(), 3000);
       },
-      error: () => {
+      error: (err) => {
         delete this.syncingNet[networkId];
         this.syncResults[networkId] = { ok: false };
+        this.toast.error(refusalText(this.transloco, err, 'networks.network.sync.failed'));
         this.networks.update(n => [...n]);
       },
     });

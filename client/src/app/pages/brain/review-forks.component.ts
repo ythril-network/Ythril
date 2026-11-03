@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, input, linkedSignal, output, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { ActiveLanguage } from '../../core/active-language';
 import { DateFormatService } from '../../core/date-format.service';
 import { formatList } from '../../core/list-format';
 import { PluralText } from '../../core/plural-text.service';
+import { pageTranslator } from '../../core/page-translator';
 import {
   FORK_KINDS, FORK_KIND_TAB, type ForkCounts, type ForkKeep, type ForkKind, type ForkKindsFields, type ForkMarkedCounts, type ForkResolvedElsewhere, type ForkRow, type ForkVersion,
 } from '../../core/forks.types';
@@ -256,7 +257,6 @@ interface RowView {
   `,
 })
 export class ReviewForksComponent {
-  private readonly transloco = inject(TranslocoService);
   private readonly active = inject(ActiveLanguage);
   private readonly dates = inject(DateFormatService);
   private readonly plural = inject(PluralText);
@@ -307,10 +307,7 @@ export class ReviewForksComponent {
   protected short(id: string): string { return id.slice(0, 8); }
 
   /** One words lookup, in the page's language and recomputed when its words arrive. */
-  private tr(key: string, params?: Record<string, unknown>): string {
-    this.active.revision();
-    return this.transloco.translate(key, params, this.active.language() || undefined);
-  }
+  private readonly tr = pageTranslator();
 
   protected count(kind: ForkKind): number { return this.counts()?.[kind] ?? this.counted()[kind]; }
   protected markedCount(kind: ForkKind): number { return this.marked()?.[kind] ?? 0; }

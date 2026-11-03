@@ -59,11 +59,13 @@ import type { RereadState } from './network-reread-view';
       </span>
     }
     @if (member().consecutiveLocalFaults) {
-      <span class="member-failing member-local-failing"
-        [attr.title]="localFailingTitle()">
+      <!-- A title reaches a mouse and nobody else: the badge takes the keyboard focus and is DESCRIBED by the same sentence, so a screen reader and a keyboard user get it too. -->
+      <span class="member-failing member-local-failing" tabindex="0"
+        [attr.title]="localFailingTitle()" [attr.aria-describedby]="localDescId">
         <ph-icon name="warning" [size]="11"/>
         {{ 'networks.member.localFailing' | transloco: { count: member().consecutiveLocalFaults } }}
       </span>
+      <span class="sr-only" [id]="localDescId">{{ localFailingTitle() }}</span>
     }
 
     <!-- A re-read this member still owes (bundle-81): not a failure, so it is a status pill and not the red badge above. -->
@@ -130,7 +132,10 @@ import type { RereadState } from './network-reread-view';
   `],
 })
 export class NetworkMemberRowComponent {
+  private static seq = 0;
   private readonly plural = inject(PluralText);
+  /** The id of the sentence the local-store badge is described by: one per row, because a page lists many members and an id must be unique. */
+  protected readonly localDescId = `member-local-failing-${NetworkMemberRowComponent.seq++}`;
 
   readonly member = input.required<NetworkMember>();
   /** Whether this member still owes a re-read of the network (`owed`: spaces still to come, `catching`: one is being read now); null when nothing is owed. */

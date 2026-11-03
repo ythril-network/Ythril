@@ -27,6 +27,7 @@ import { HealthDotComponent } from './health-dot.component';
 import { HscrollTopDirective } from '../../../shared/hscroll-top.directive';
 import { MediaProcessingStateService, PipeId } from './media-processing-state.service';
 import { PipelineStatusService } from './pipeline-status.service';
+import { pageTranslator } from '../../../core/page-translator';
 import { HealthState, MODE_STAGES, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS, MediaClass } from './media-processing.types';
 
 /** One drawn step. `actor` is a model or tool name; `health` is looked up from the status payload. */
@@ -181,6 +182,8 @@ interface Step {
                   <span class="val" [attr.title]="st.actor"><bdi>{{ st.actor }}</bdi></span>
                 }
               </div>
+              <!-- A dimmed step is only drawn faint (opacity), which a screen reader and a reader with low contrast never see: say it in words. -->
+              @if (stepDim(st.key)) { <span class="sr-only">{{ 'mediaProcessing.pipelines.willNotRun' | transloco }}</span> }
             </div>
           </div>
         }
@@ -265,6 +268,7 @@ interface Step {
                     <span class="val" [attr.title]="st.actor"><bdi>{{ st.actor }}</bdi></span>
                   }
                 </div>
+                @if (mediaStepDim(p.id, st.key)) { <span class="sr-only">{{ 'mediaProcessing.pipelines.willNotRun' | transloco }}</span> }
               </div>
             </div>
           }
@@ -320,6 +324,8 @@ interface Step {
 export class PipelinesTabComponent {
   readonly s = inject(MediaProcessingStateService);
   readonly pipeline = inject(PipelineStatusService);
+  /** A word of the page's language, for a step's actor that is not a model name; read inside the computeds below, so it follows the language. */
+  private readonly say = pageTranslator();
 
   /** Which document stages the current mode actually runs — dims the rest rather than hiding them. */
   activeStages = computed(() => MODE_STAGES[this.s.docMode()]);
@@ -478,8 +484,9 @@ export class PipelinesTabComponent {
       { key: 'render', name: 'mediaProcessing.step.render', actor: 'doc-render', ...this.stage('sidecar', 'doc-render'), conditional: true, cardId: 'doc-render' },
       { key: 'vlm', name: 'mediaProcessing.step.vlm', actor: doc.vlmModel || this.notSet, ...this.stage('model', 'doc-vlm'), conditional: true, cardId: 'doc-vlm' },
       // Validate is pure in-process arithmetic (does the VLM output cover the OCR text?), so it has no
-      // endpoint and therefore no dot to report — undefined health, not a green one it has not earned.
-      { key: 'validate', name: 'mediaProcessing.step.validate', actor: 'in-process', health: null, conditional: true },
+      // endpoint to ask and nothing to be unwell: `ok` means "needs no endpoint", exactly as it does for the video
+      // splitter and the text chunker. (`null` would draw "unknown", a grey bead saying we could not tell.)
+      { key: 'validate', name: 'mediaProcessing.step.validate', actor: this.say('mediaProcessing.actor.inProcess'), health: 'ok', conditional: true },
       { key: 'repair', name: 'mediaProcessing.step.repair', actor: doc.repairModel || doc.vlmModel || this.notSet, ...this.stage('model', 'doc-repair'), conditional: true, cardId: 'doc-repair' },
       { key: 'verify', name: 'mediaProcessing.step.verify', actor: doc.verifyModel || this.notSet, ...this.stage('model', 'doc-verify'), conditional: true, cardId: 'doc-verify' },
       { key: 'embed', name: 'mediaProcessing.step.embed', actor: this.s.embedding.model || this.notSet, ...this.stage('model', 'embedding'), conditional: false, cardId: 'embedding' },
@@ -543,7 +550,7 @@ export class PipelinesTabComponent {
         steps: [
           // Chunking only happens at the `chunk` rung; `embed` produces one vector for the whole
           // document. The chunker is bundled and always available in-process, so it reports 'ok'.
-          { key: 'chunk', name: 'mediaProcessing.step.chunk', actor: 'text chunker', health: 'ok', conditional: true },
+          { key: 'chunk', name: 'mediaProcessing.step.chunk', actor: this.say('mediaProcessing.actor.textChunker'), health: 'ok', conditional: true },
           { key: 'txt-embed', name: 'mediaProcessing.step.embed', actor: embedModel, ...this.stage('model', 'embedding'), conditional: false, cardId: 'embedding' },
         ] as Step[],
       },

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { pageTranslator } from '../../core/page-translator';
 import { ViewsApi, type UnclaimedView, type ViewsMigrationReport } from '../../core/views-api.service';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { PluralText } from '../../core/plural-text.service';
@@ -44,7 +45,7 @@ export class ViewsMigrationBannerComponent {
   readonly retired = input<readonly string[] | null>(null);
 
   private readonly api = inject(ViewsApi);
-  private readonly transloco = inject(TranslocoService);
+  private readonly say = pageTranslator();
   private readonly plural = inject(PluralText);
   private readonly report = signal<ViewsMigrationReport | null>(null);
 
@@ -57,15 +58,15 @@ export class ViewsMigrationBannerComponent {
   protected readonly visible = computed(() => (this.ids().length > 0 || this.unclaimedNames().length > 0) && this.dismissedKey() !== this.owedKey());
 
   protected readonly lines = computed(() => {
-    const say = (base: string, names: readonly string[]) =>
+    const counted = (base: string, names: readonly string[]) =>
       names.length > 0 ? [this.plural.text(base, names.length, { names: names.join(', ') })] : [];
     const migrated = [...(this.report()?.migrated ?? [])].sort();
-    const where = `${this.transloco.translate('nav.section.admin')} > ${this.transloco.translate('nav.spaces')}`;
+    const where = `${this.say('nav.section.admin')} > ${this.say('nav.spaces')}`;
     return [
-      ...say('views.migration.migrated', migrated),
-      ...say('views.migration.unclaimed', this.unclaimedNames()),
-      ...say('views.migration.retired', this.ids()),
-      this.transloco.translate('views.migration.review', { where }),
+      ...counted('views.migration.migrated', migrated),
+      ...counted('views.migration.unclaimed', this.unclaimedNames()),
+      ...counted('views.migration.retired', this.ids()),
+      this.say('views.migration.review', { where }),
     ];
   });
 

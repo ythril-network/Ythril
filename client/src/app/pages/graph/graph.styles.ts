@@ -121,6 +121,8 @@ export const GRAPH_STYLES = `
       pointer-events: none;
       gap: 8px;
     }
+    /* The error block is the one child that takes clicks: its Retry must not inherit the empty state's "ignore the pointer" (Q-209). */
+    .canvas-empty app-error-state { pointer-events: auto; }
     .empty-icon {
       font-size: 52px;
       line-height: 1;
@@ -158,8 +160,7 @@ export const GRAPH_STYLES = `
       border-radius: 50%;
       animation: graph-spin 0.75s linear infinite;
     }
-    @keyframes graph-spin { to { transform: rotate(360deg); } }
-    .loading-overlay { flex-direction: column; gap: 14px; }
+    @keyframes graph-spin { to { transform: rotate(360deg); } }    .loading-overlay { flex-direction: column; gap: 14px; }
     .loading-waiting { max-width: 420px; padding: 0 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
     .loading-waiting p { margin: 0 0 6px; }
     .loading-waiting .loading-waiting-title { color: var(--text-primary); }
@@ -578,11 +579,12 @@ export const GRAPH_TOOLBAR_STYLES = `
     line-height: 1;
     transition: border-color var(--transition), color var(--transition), background var(--transition);
   }
-  .toolbar-btn:hover {
+  .toolbar-btn:hover:not(:disabled) {
     border-color: var(--accent);
     color: var(--text-primary);
     background: var(--accent-dim);
   }
+  .toolbar-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .graph-stats {
     font-size: 12px;
     color: var(--text-muted);

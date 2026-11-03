@@ -77,10 +77,10 @@ import { PluralText } from '../../core/plural-text.service';
     @if (stats(); as s) {
       <span class="graph-stats">{{ statsText(s) }}</span>
     }
-    <button class="toolbar-btn" [attr.title]="'graph.toolbar.fitViewport' | transloco" (click)="fit.emit()">
+    <button class="toolbar-btn" [disabled]="graphHidden()" [attr.title]="'graph.toolbar.fitViewport' | transloco" (click)="fit.emit()">
       <ph-icon name="corners-out" [size]="16"/>
     </button>
-    <button class="toolbar-btn" [attr.title]="'graph.toolbar.resetGraph' | transloco" (click)="reset.emit()">
+    <button class="toolbar-btn" [disabled]="graphHidden()" [attr.title]="'graph.toolbar.resetGraph' | transloco" (click)="reset.emit()">
       <ph-icon name="arrows-clockwise" [size]="16"/>
     </button>
   `,
@@ -101,6 +101,8 @@ export class GraphToolbarComponent {
   readonly spaceId = input<string>('');
   /** Node and edge counts, or null when there is nothing traversed to count. */
   readonly stats = input<{ nodes: number; edges: number } | null>(null);
+  /** True while the page hides its drawn graph (an error, or a load in flight): Fit and Reset have nothing shown to act on (Q-209). */
+  readonly graphHidden = input<boolean>(false);
 
 
   private readonly plural = inject(PluralText);

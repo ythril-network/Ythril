@@ -17,9 +17,11 @@
  *
  * **It does not save.** The two hosts persist differently and must keep doing so: Space Settings is STAGED
  * (edit several types, then Save) while the Overview panel is IMMEDIATE (edit one type, write it now). A
- * save in here would force one host to adopt the other's model. The panel's write must additionally go
- * through `PATCH /api/spaces/:id` rather than `PUT /:id/schema`, which applies directly and would be a
- * silent consensus bypass on a networked space.
+ * save in here would force one host to adopt the other's model. The panel's write goes through
+ * `PATCH /api/spaces/:id` rather than `PUT /:id/schema`, because PATCH merges the one type it names while PUT
+ * replaces the whole map and would drop every other type the panel did not have in view. Both open a
+ * `meta_change` vote round on a networked space (202 `vote_pending`, or 200 where this instance's own yes
+ * carries it); neither skips it.
  *
  * **It does not own the library actions.** Export, save-to-library, unlink and remove stay with the settings
  * tab's header. Those are about the schema LIBRARY and about deleting a type, not about editing one, and the
@@ -203,15 +205,17 @@ export interface LayerMark {
        deliberate overrides in each direction. A two-state control could not express "embed this type even
        though the space suppresses", and it would write a value on every save for types nobody touched. -->
   <div class="field">
-    <label>{{ 'spaces.schema.suppressEmbeddings.label' | transloco }}</label>
-    <select [ngModel]="suppressValue()" (ngModelChange)="setSuppress($event)" style="max-width:320px;">
+    <label [attr.for]="suppressId">{{ 'spaces.schema.suppressEmbeddings.label' | transloco }}</label>
+    <select [id]="suppressId" [attr.aria-describedby]="d().suppressEmbeddings === true ? suppressId + '-notice' : null" [ngModel]="suppressValue()" (ngModelChange)="setSuppress($event)" style="max-width:320px;">
       <option value="inherit">{{ 'spaces.schema.suppressEmbeddings.inherit' | transloco }}</option>
       <option value="on">{{ 'spaces.schema.suppressEmbeddings.on' | transloco }}</option>
       <option value="off">{{ 'spaces.schema.suppressEmbeddings.off' | transloco }}</option>
     </select>
     <div class="sch-hint" style="margin-top:3px;">{{ 'spaces.schema.suppressEmbeddings.hint' | transloco }}</div>
     @if (d().suppressEmbeddings === true) {
-      <div class="sch-msg warn">{{ 'spaces.schema.suppressEmbeddings.noBackfill' | transloco }}</div>
+      <div class="sch-msg warn" role="status" [id]="suppressId + '-notice'"><strong>{{ 'spaces.schema.suppressEmbeddings.removes' | transloco }}</strong>
+        {{ 'spaces.schema.suppressEmbeddings.wayBack' | transloco: { button: ('spaces.dangerZone.embeddingsBackfill' | transloco), tab: ('spaces.popup.tab.dangerZone' | transloco), section: ('spaces.dangerZone.embeddingsTitle' | transloco) } }}
+        {{ 'spaces.schema.suppressEmbeddings.noBackfill' | transloco }}</div>
     }
   </div>
   <!-- An edge label's permitted ENDS and its cardinality.
@@ -650,6 +654,9 @@ export class SchemaTypeEditorComponent {
    * `null` is "inherit" and must round-trip as `null` — mapping it to `false` would write a decision on every
    * save for every type nobody edited, and pin each of them to embedding regardless of the space setting.
    */
+  /** The select's id (and its notice's id prefix): one per editor, because a page lists several types and an id must be unique. */
+  private static seq = 0;
+  protected readonly suppressId = `sch-suppress-${SchemaTypeEditorComponent.seq++}`;
   readonly suppressValue = computed<'inherit' | 'on' | 'off'>(() => {
     const v = this.draft().suppressEmbeddings;
     return v === null || v === undefined ? 'inherit' : v ? 'on' : 'off';

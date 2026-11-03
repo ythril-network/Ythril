@@ -1006,12 +1006,13 @@ hr, .divider {
 
 /* ── Reduced motion ──────────────────────────────────────────────────────────
    Honour the OS "reduce motion" setting: collapse decorative animations and
-   transitions for users with vestibular sensitivity. The loading spinner is
-   deliberately exempted — it is *informative* motion (it signals "working"),
-   and freezing it mid-rotation reads as broken rather than calmer. Kept last so
-   it overrides earlier rules. */
+   transitions for users with vestibular sensitivity. The loading spinners
+   (.spinner, and the graph page's .loading-spinner) are deliberately exempted
+   — it is *informative* motion (it signals "working"), and freezing it
+   mid-rotation reads as broken rather than calmer. Kept last so it overrides
+   earlier rules. */
 @media (prefers-reduced-motion: reduce) {
-  *:not(.spinner),
+  *:not(.spinner):not(.loading-spinner),
   *::before,
   *::after {
     animation-duration: 0.01ms !important;

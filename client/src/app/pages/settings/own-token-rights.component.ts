@@ -37,10 +37,9 @@ import { RightsGlyphComponent, type TokenRights } from './rights-glyph.component
       border: 1px solid var(--border); border-radius: var(--radius-md);
       background: var(--bg-surface); padding: 14px 16px;
     }
-    .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+    .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
     .head h3 { margin: 0; font-size: 13.5px; }
     .name { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--text-secondary); }
-    .why { margin: 0 0 10px; font-size: 12px; color: var(--text-muted); }
     .legacy { margin: 0; font-size: 12.5px; color: var(--text-secondary); }
   `],
   template: `
@@ -51,8 +50,8 @@ import { RightsGlyphComponent, type TokenRights } from './rights-glyph.component
           @if (name(); as n) { <span class="name">{{ n }}</span> }
           <app-rights-glyph [rights]="r"/>
         </div>
-        <p class="why">{{ 'tokens.own.readOnly' | transloco }}</p>
-        <app-rights-matrix [rights]="r" [spaces]="spaces()" [readonlyView]="true"/>
+        <!-- Read-only, said to assistive technology rather than in a visible sentence (the owner removed the sentence): a group named so, around disabled controls. -->
+        <app-rights-matrix role="group" [attr.aria-label]="'tokens.own.matrixLabel' | transloco" [rights]="r" [spaces]="spaces()" [readonlyView]="true"/>
       </div>
     } @else if (legacy()) {
       <div class="own">

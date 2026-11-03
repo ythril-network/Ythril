@@ -6,8 +6,8 @@ import {
   SpaceActivity,
 } from '../../core/api.types';
 import { SpacesApi } from '../../core/spaces-api.service';
+import { pageTranslator } from '../../core/page-translator';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { TranslocoService } from '@jsverse/transloco';
 import { DragDropModule } from '@angular/cdk/drag-drop';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { StatusPillComponent } from '../../shared/status-pill.component';
@@ -176,7 +176,7 @@ export class SpacesComponent implements OnInit {
   protected readonly actStateVariant = actStateVariant;
   protected readonly actKindKey = actKindKey;
   private spacesApi   = inject(SpacesApi);
-  private transloco = inject(TranslocoService);
+  private readonly say = pageTranslator();
   /** Settings-dialog state, shared with the tabs. Public: the template binds to it. */
   readonly state = inject(SpaceSettingsState);
   /** Server data for the page (space list + networks). Public: the template binds to it. */
@@ -190,11 +190,11 @@ export class SpacesComponent implements OnInit {
     const waiting = list.filter(s => s.indexStatus === 'building' && s.indexWaiting).length;
     const attention = list.filter(s => (s.indexStatus === 'building' && !s.indexWaiting) || s.indexStatus === 'failed').length;
     return [
-      { label: this.transloco.translate('spaces.summary.count'), value: String(list.length) },
-      { label: this.transloco.translate('spaces.summary.storage'), value: `${totalUsed.toFixed(totalUsed < 10 ? 2 : 1)} GiB` },
-      { label: this.transloco.translate('spaces.summary.indexing'), value: String(attention), variant: attention ? 'warn' : 'ok' },
-      { label: this.transloco.translate('spaces.summary.waiting'), value: String(waiting), variant: waiting ? 'warn' : undefined,
-        hint: waiting ? this.transloco.translate('spaces.summary.waitingHint') : undefined },
+      { label: this.say('spaces.summary.count'), value: String(list.length) },
+      { label: this.say('spaces.summary.storage'), value: `${totalUsed.toFixed(totalUsed < 10 ? 2 : 1)} GiB` },
+      { label: this.say('spaces.summary.indexing'), value: String(attention), variant: attention ? 'warn' : 'ok' },
+      { label: this.say('spaces.summary.waiting'), value: String(waiting), variant: waiting ? 'warn' : undefined,
+        hint: waiting ? this.say('spaces.summary.waitingHint') : undefined },
     ];
   });
 

@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { pageTranslator } from '../../core/page-translator';
 import type { ContradictionRecord } from '../../core/api.types';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -277,7 +278,7 @@ import { scorePct, scoreVariant } from './review-score';
   `,
 })
 export class ReviewContradictionsPanelComponent {
-  private readonly transloco = inject(TranslocoService);
+  private readonly say = pageTranslator();
 
   readonly state = input.required<ReviewContradictionsState>();
   /** The contradictions AFTER the tab's shared search and record-type filter; the state's `rows` is the list as loaded. */
@@ -296,8 +297,8 @@ export class ReviewContradictionsPanelComponent {
   protected readonly summaryItems = computed<SummaryItem[]>(() => {
     const open = this.state().rows().filter(r => r.status === 'open').length;
     return [
-      { label: this.transloco.translate('duplicates.summary.open'), value: String(open), variant: open ? 'warn' : 'ok' },
-      { label: this.transloco.translate('duplicates.summary.shown'), value: String(this.rows().length) },
+      { label: this.say('duplicates.summary.open'), value: String(open), variant: open ? 'warn' : 'ok' },
+      { label: this.say('duplicates.summary.shown'), value: String(this.rows().length) },
     ];
   });
 }
