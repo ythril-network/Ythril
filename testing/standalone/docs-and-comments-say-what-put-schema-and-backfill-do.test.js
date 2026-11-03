@@ -59,7 +59,7 @@ export function paragraphs(text) {
 /** `PUT /schema`, `PUT :id/schema`, `PUT /:id/schema`, `PUT /api/spaces/:id/schema`, as prose or code. */
 const PUT_SCHEMA = /PUT\s*`?\s*(?:\/api\/spaces\/)?\/?(?::id\/|\{id\}\/)?\/?schema\b/;
 /** Sentences that say a schema write skips the network's vote. */
-const SKIPS_THE_VOTE = /applies\s+\*{0,2}directly\*{0,2}|bypass(?:es)?\s+the\s+(?:network\s+)?vote|consensus\s+bypass|does\s+not\s+open\s+a\s+vote|not\s+open\s+a\s+vote\s+round|without\s+(?:a|the)\s+(?:network\s+)?vote\b/i;
+const SKIPS_THE_VOTE = /applies\s+\**directly\**|bypass(?:es)?\s+the\s+(?:network\s+)?vote|consensus\s+bypass|does\s+not\s+open\s+a\s+vote|not\s+open\s+a\s+vote\s+round|without\s+(?:a|the)\s+(?:network\s+)?vote\b/i;
 
 /** Where `paras` of `file` say `PUT /schema` skips the vote. */
 export function staleVoteClaims(file, paras) {

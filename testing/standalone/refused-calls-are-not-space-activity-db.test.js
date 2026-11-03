@@ -27,6 +27,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { appRouter } from '../_shared/in-process-app.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'activitychain';
@@ -43,8 +44,7 @@ async function settle() {
   const before = calls(SPACE);
   const r = await facts(SPACE, admin.plaintext);
   assert.equal(r.status, 200, `fixture check: the control read was answered ${r.status}`);
-  const until = Date.now() + 2_000;
-  while (calls(SPACE) === before && Date.now() < until) await new Promise(res => setTimeout(res, 10));
+  await waitFor(() => calls(SPACE) !== before, 2_000, 10, undefined, { what: 'the control read to be counted' });
   assert.equal(calls(SPACE), before + 1, 'fixture check: the control read was not counted');
 }
 

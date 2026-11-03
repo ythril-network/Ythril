@@ -60,12 +60,15 @@ export function clampFunctions(code) {
   return new Map([...topLevelFunctions(code)].filter(([, text]) => /MAX_PIXELS/.test(text)));
 }
 
-/** The text that reads `name` from the environment: the line, plus the helper it goes through if it calls one. */
+/** The text that reads `name` from the environment: the statement, plus the helper it goes through if it calls one. */
 function readingUnit(code, name) {
   const lines = code.split('\n');
   const at = lines.findIndex(l => l.includes(`"${name}"`) || l.includes(`'${name}'`));
   if (at < 0) return null;
-  const unit = [lines.slice(at, at + 12).join('\n')];
+  // The statement: its line and the indented lines that continue it, bounded by indentation as `topLevelFunctions` bounds a def.
+  let end = at + 1;
+  while (end < lines.length && /^\s/.test(lines[end])) end++;
+  const unit = [lines.slice(at, end).join('\n')];
   const helper = /(\w+)\s*\(\s*["']RENDER_/.exec(lines[at]);
   if (helper && !/environ/.test(lines[at])) unit.push(topLevelFunctions(code).get(helper[1]) ?? '');
   return unit.join('\n');

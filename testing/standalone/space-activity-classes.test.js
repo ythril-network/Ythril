@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 
 import { execFileSync } from 'node:child_process';
 import { configureSpaces } from './_configured-spaces.mjs';
+import { testChildEnv } from '../_shared/test-child-env.mjs';
 
 let classifyOperation, recordSpaceCall, drainSpaceActivity, peekSpaceActivity, hourBucket, activityDocId,
   CALL_CLASSES;
@@ -283,8 +284,7 @@ describe('space activity — only a configured space is counted (Q-606)', () => 
       try { m.recordSpaceCall('anything', 'read', { ms: 1 }); } catch (e) { threw = String(e && e.message || e); }
       console.log(JSON.stringify({ threw, keys: m.peekSpaceActivity().map(r => r.space) }));
     `;
-    const env = { ...process.env, CONFIG_PATH: `${config.dir}/no-such-config.json` };
-    delete env.NODE_TEST_CONTEXT;
+    const env = testChildEnv({ CONFIG_PATH: `${config.dir}/no-such-config.json` });
     const out = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', code], { env, encoding: 'utf8' }).trim().split('\n').at(-1));
     assert.equal(out.threw, null, `recordSpaceCall threw before setup: ${out.threw}`);
     assert.deepEqual(out.keys, [], 'a call before setup was counted against a space nobody configured');
