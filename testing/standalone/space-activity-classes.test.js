@@ -22,8 +22,19 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
+import { execFileSync } from 'node:child_process';
+import { configureSpaces } from './_configured-spaces.mjs';
+
 let classifyOperation, recordSpaceCall, drainSpaceActivity, peekSpaceActivity, hourBucket, activityDocId,
   CALL_CLASSES;
+
+/**
+ * The spaces this process configures (Q-606: a call is counted only against a configured space). Loaded at the top of the file, before
+ * any import of the server, because the config loader reads `CONFIG_PATH` once. `busy`, `mixed`, `slow`, `odd`, `a` and `b` are the
+ * spaces the accumulation cases below record against; the rest are the ones the configured-space cases move and remove.
+ */
+const CONFIGURED = ['general', 'busy', 'mixed', 'slow', 'odd', 'a', 'b'];
+const config = await configureSpaces(CONFIGURED, 'space-activity-classes');
 
 /** Every `operation: '...'` the audit middleware declares — its table, not a copy of it. */
 function auditOperations() {
@@ -186,6 +197,97 @@ describe('space activity — accumulation', () => {
     const rows = drainSpaceActivity();
     assert.equal(rows.length, 3);
     assert.equal(rows.filter(r => r.space === 'a').length, 2);
+  });
+});
+
+/*
+ * Q-606 — only a CONFIGURED space is counted. The key of the pending map is the raw path segment of an unauthenticated request, so
+ * "bounded by spaces x 4" was false: every distinct string a caller sent became a map key and, at the flush, a stored document kept 90
+ * days and listed by the admin overview. Membership is asked of the live config (a space created after boot, or renamed, is counted under
+ * its current id), on the branch that would add a key, and again when the map is drained for a flush, so counts pending at a delete or a
+ * rename never write back under the old id. It reads the config only through `isConfigLoaded`: it runs in a response's `finish` handler
+ * with no try, where a throw takes the process down.
+ */
+describe('space activity — only a configured space is counted (Q-606)', () => {
+  before(async () => {
+    ({ recordSpaceCall, drainSpaceActivity, peekSpaceActivity } = await import('../../server/dist/metrics/space-activity.js'));
+  });
+  const keys = () => [...new Set(peekSpaceActivity().map(r => r.space))].sort();
+
+  it('a space the config does not hold leaves no key, however many distinct ids arrive', () => {
+    drainSpaceActivity();
+    for (let i = 0; i < 50; i++) recordSpaceCall(`invented-${i}`, 'read', { ms: 1 });
+    recordSpaceCall('busy', 'read', { ms: 1 });
+    assert.deepEqual(keys(), ['busy'], 'the pending map holds ids no space has');
+  });
+
+  it('an id that differs from a configured one only in case is not that space', () => {
+    drainSpaceActivity();
+    recordSpaceCall('BUSY', 'read', { ms: 1 });
+    recordSpaceCall('busy ', 'read', { ms: 1 });
+    assert.deepEqual(keys(), [], 'a near-miss of a configured id was counted as a space of its own');
+  });
+
+  it('a call on a configured space still counts, once its key exists (the hot path)', () => {
+    drainSpaceActivity();
+    for (let i = 0; i < 5; i++) recordSpaceCall('busy', 'read', { ms: 1 });
+    assert.equal(peekSpaceActivity().find(r => r.space === 'busy').totals.n, 5);
+  });
+
+  it('a space created after boot is counted under its id', () => {
+    drainSpaceActivity();
+    config.addSpace('latecomer');
+    try {
+      recordSpaceCall('latecomer', 'write', { ms: 1 });
+      assert.deepEqual(keys(), ['latecomer']);
+    } finally { config.removeSpace('latecomer'); }
+  });
+
+  it('a renamed space is counted under its current id, and the old one is no longer a space', () => {
+    drainSpaceActivity();
+    config.addSpace('before-rename');
+    try {
+      config.renameSpace('before-rename', 'after-rename');
+      recordSpaceCall('before-rename', 'write', { ms: 1 });
+      recordSpaceCall('after-rename', 'write', { ms: 1 });
+      assert.deepEqual(keys(), ['after-rename']);
+    } finally { config.removeSpace('after-rename'); }
+  });
+
+  it('counts pending when a space is deleted are dropped at the drain, never written back under the old id', () => {
+    drainSpaceActivity();
+    config.addSpace('doomed');
+    recordSpaceCall('doomed', 'write', { ms: 1 });
+    recordSpaceCall('busy', 'write', { ms: 1 });
+    config.removeSpace('doomed');
+    const rows = drainSpaceActivity();
+    assert.deepEqual([...new Set(rows.map(r => r.space))].sort(), ['busy'], 'a deleted space\'s pending counts reached the flush');
+  });
+
+  it('counts pending when a space is renamed are dropped at the drain under the old id', () => {
+    drainSpaceActivity();
+    config.addSpace('rename-me');
+    recordSpaceCall('rename-me', 'write', { ms: 1 });
+    config.renameSpace('rename-me', 'renamed');
+    try {
+      assert.deepEqual(drainSpaceActivity(), [], 'a renamed space\'s pending counts were written under the old id');
+    } finally { config.removeSpace('renamed'); }
+  });
+
+  it('before setup (no config loaded) a call neither throws nor leaves a key', () => {
+    // A fresh process that imported the counters and never loaded a config: an unauthenticated request can reach `recordSpaceCall` before setup,
+    // from a handler with no try. The answer is "no space is configured yet", never a throw from `getConfig()`.
+    const code = `
+      const m = await import(${JSON.stringify(new URL('../../server/dist/metrics/space-activity.js', import.meta.url).href)});
+      let threw = null;
+      try { m.recordSpaceCall('anything', 'read', { ms: 1 }); } catch (e) { threw = String(e && e.message || e); }
+      console.log(JSON.stringify({ threw, keys: m.peekSpaceActivity().map(r => r.space) }));
+    `;
+    const env = { ...process.env, CONFIG_PATH: `${config.dir}/no-such-config.json` };
+    delete env.NODE_TEST_CONTEXT;
+    const out = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', code], { env, encoding: 'utf8' }).trim().split('\n').at(-1));
+    assert.equal(out.threw, null, `recordSpaceCall threw before setup: ${out.threw}`);
+    assert.deepEqual(out.keys, [], 'a call before setup was counted against a space nobody configured');
   });
 });
 

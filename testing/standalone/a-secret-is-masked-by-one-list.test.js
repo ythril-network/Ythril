@@ -78,6 +78,12 @@ const ROWS = [
   ['a mongodb connection string with user and password', 'failed mongodb://ythril:ythril-test-pw@127.0.0.1:27017/db?x=1 here', 'failed mongodb://***@127.0.0.1:27017/db?x=1 here'],
   ['a mongodb+srv connection string', 'mongodb+srv://admin:s3cret@cluster0.example.net/app', 'mongodb+srv://***@cluster0.example.net/app'],
   ['a password that contains an @', 'mongodb://u:p@ss@host:27017/db', 'mongodb://***@host:27017/db'],
+  // Q-365: a scheme run may BEGIN with a digit, plus, dot or hyphen (the server's redactor held the same rows).
+  ['a scheme beginning with a digit', 'cloned 9https://u:pw@h.example/p', 'cloned 9https://***@h.example/p'],
+  ['a scheme beginning with a plus, dot and hyphen', '-+.https://u:pw@h.example/p', '-+.https://***@h.example/p'],
+  ['a digit-prefixed scheme whose password contains an @', '9mongodb://u:p@ss@host:27017/db', '9mongodb://***@host:27017/db'],
+  ['two URLs on one line, the second digit-prefixed', 'https://a:aw@one.example and 9https://c:cw@two.example/x', 'https://***@one.example and 9https://***@two.example/x'],
+  ['a mailto address', 'write mailto:someone@example.com now', 'write mailto:someone@example.com now'],
   ['URL userinfo with a token and no password', 'cloned https://tokenvalue123@example.com/org/repo.git', 'cloned https://***@example.com/org/repo.git'],
   ['a URL with no userinfo', 'GET https://example.com/path/a@b?q=1', 'GET https://example.com/path/a@b?q=1'],
   ['a host and port with no scheme', 'mongo-a:27017/db', 'mongo-a:27017/db'],
@@ -162,7 +168,7 @@ describe('masking takes time in proportion to the text, whatever the text is (ev
    * pattern costs seconds where a linear one costs milliseconds, so a slow CI machine cannot make the wrong one pass:
    * the budget is 250 ms, and the answer must still be the input unchanged (nothing in it is a credential).
    */
-  const LONG_UNITS = [['a-', 'a hyphen'], ['a.', 'a dot'], ['a+', 'a plus']];
+  const LONG_UNITS = [['a-', 'a hyphen'], ['a.', 'a dot'], ['a+', 'a plus'], ['1a', 'a digit'], ['1+', 'a digit and plus'], ['-.a', 'a hyphen, dot and letter']];
   const LONG_CHARS = 100_000;
   const BUDGET_MS = 250;
   const longInput = (unit) => unit.repeat(LONG_CHARS / unit.length);
@@ -219,6 +225,38 @@ describe('masking takes time in proportion to the text, whatever the text is (ev
 
   it('the userinfo rows still read right when the scheme starts after a separator, as a URL in prose does', () => {
     assert.equal(mask('see (https://u:p@host/x) and a-b.c+d://x:y@h'), 'see (https://***@host/x) and a-b.c+d://***@h');
+  });
+});
+
+describe('Q-365 the two URL-userinfo maskers agree on what they hide', () => {
+  /*
+   * The server's `redactSecrets` (schema/src/text.ts, shipped in the image) and this module's `maskSecrets` (the maintainer
+   * scripts and test tooling) write the same userinfo rule twice, because the image holds neither `scripts/` nor `testing/`.
+   * Two copies of one rule drift (the lookbehind fix and the `[^\s/]+@` tail landed in one first), so the question asked here
+   * is the one they share: over every scheme prefix, scheme, userinfo and tail, a credential is hidden by BOTH or by NEITHER.
+   * The secret is the part after the last `@` of the userinfo, or the password, so an `@` in a password is in the corpus.
+   */
+  const PREFIXES = ['', '9', '-+.', 'x+', 'a9', '1.2.', ' ', '"', '(', '=', '+', '.', '-'];
+  const SCHEMES = ['https', 'mongodb+srv', 'a9b', 'ftp'];
+  const USERINFO = [['u:pw1xyz', 'pw1xyz'], ['pw1xyz', 'pw1xyz'], ['u:p@ss1xyz', 'ss1xyz'], ['u:p@s@s1xyz', 's1xyz'], ['u', 'u@']];
+  const TAILS = ['@h', '@h/p', '@h:1/p?q=a@b', '@h tail', '@h/p@y'];
+
+  it('over the whole corpus, neither leaks a password, and where one does the other does too', async () => {
+    const { redactSecrets } = await import('../../server/dist/util/log.js');
+    const disagree = [];
+    const leaks = [];
+    let compared = 0;
+    for (const prefix of PREFIXES) for (const scheme of SCHEMES) for (const [userinfo, secret] of USERINFO) for (const tail of TAILS) {
+      const text = `${prefix}${scheme}://${userinfo}${tail}`;
+      const server = redactSecrets(text).includes(secret);
+      const tooling = mask(text).includes(secret);
+      compared++;
+      if (server !== tooling) disagree.push(`${JSON.stringify(text)}: server ${server ? 'LEAKS' : 'hides'}, tooling ${tooling ? 'LEAKS' : 'hides'}`);
+      if (server || tooling) leaks.push(text);
+    }
+    assert.ok(compared > 500, `only ${compared} strings compared`);
+    assert.deepEqual(disagree, [], 'the two maskers hide different credentials; they are one rule written twice');
+    assert.deepEqual(leaks, [], 'a password reached the line');
   });
 });
 

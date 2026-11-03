@@ -171,13 +171,16 @@ describe('the check cannot pass vacuously', () => {
 });
 
 describe('what it exempts, and what it refuses to exempt', () => {
-  it('tests, docs, scripts, workflows and trackers are exempt', () => {
+  it('tests, docs, workflows and trackers are exempt', () => {
+    // `scripts/` is no longer exempt WHOLESALE (Q-612): `enable-networks-workstation.*` is run by operators and writes their
+    // secrets, so a change to it needs a line. What the sidecars and scripts require is run, not read, in
+    // `check-changelog-covers-sidecars-and-scripts.test.js`.
     const at = CODE.indexOf('const EXEMPT');
     assert.ok(at > 0, 'the exemption list is gone');
     const list = CODE.slice(at, CODE.indexOf('];', at));
     // Scoped to the LIST. Matching the whole file found `testing/` in the docstring, so deleting a real exemption
     // left this green.
-    for (const p of ['testing', 'docs', 'scripts', 'todo', 'github', 'spec']) {
+    for (const p of ['testing', 'docs', 'todo', 'github', 'spec']) {
       assert.match(list, new RegExp(p, 'i'), `${p} should be in the exemption list`);
     }
   });

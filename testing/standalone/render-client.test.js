@@ -130,6 +130,64 @@ describe('render client — page windows', () => {
   });
 });
 
+describe('render client — what a clamping sidecar reports (Q-611)', () => {
+  // A sidecar that clamps a page's scale to RENDER_MAX_PIXELS answers `dpiUsed` per page; one that stops a window
+  // early at RENDER_MAX_RESPONSE_BYTES answers fewer pages than were asked for with `truncated: true`; a page it
+  // cannot render at all (non-finite or zero size, or below the 72 dpi floor) comes back as a `skipped` entry with
+  // its reason, not as a 413 for the whole request. The client must hand all three to its caller as they came: a
+  // dropped `truncated` loses pages silently, and a dropped `dpiUsed` / `skipped` is the warning the extraction logs
+  // once per document ("page 7 was read at 96 dpi, not 150") never being able to fire.
+  const asBody = (o) => JSON.stringify({ count: (o.pages ?? []).length, dpi: 150, ...o });
+  const png = (s) => Buffer.from(s).toString('base64');
+
+  it('passes a lowered per-page dpi through as `dpiUsed`', async () => {
+    renderState.body = asBody({ pages: [png('A'), png('B')], total: 2, truncated: false, startPage: 0, dpiUsed: [150, 96] });
+    try {
+      const r = await R.renderDocumentPages(Buffer.from('%PDF'), { fileName: 'x.pdf', dpi: 150 });
+      assert.deepEqual(r.dpiUsed, [150, 96]);
+      assert.equal(r.pages.length, 2);
+    } finally { renderState.body = null; }
+  });
+
+  it('a window the sidecar ended early keeps its honest page count and `truncated`, so the caller can advance by it', async () => {
+    renderState.body = asBody({ pages: [png('P3'), png('P4')], total: 12, truncated: true, startPage: 3 });
+    try {
+      const r = await R.renderDocumentPages(Buffer.from('%PDF'), { fileName: 'x.pdf', maxPages: 5, startPage: 3 });
+      assert.equal(r.pages.length, 2, 'two of the five asked for came back');
+      assert.equal(r.truncated, true);
+      assert.equal(r.startPage, 3);
+      assert.equal(r.total, 12);
+    } finally { renderState.body = null; }
+  });
+
+  it('passes a skipped page through with the page and its reason', async () => {
+    const skipped = [{ page: 7, reason: 'page size is not finite' }];
+    renderState.body = asBody({ pages: [png('P6')], total: 9, truncated: true, startPage: 6, skipped });
+    try {
+      const r = await R.renderDocumentPages(Buffer.from('%PDF'), { fileName: 'x.pdf', startPage: 6 });
+      assert.deepEqual(r.skipped, skipped);
+    } finally { renderState.body = null; }
+  });
+
+  it('an older sidecar that answers neither field still decodes: they are absent, not an error', async () => {
+    renderState.body = asBody({ pages: [png('A')], total: 1, truncated: false, startPage: 0 });
+    try {
+      const r = await R.renderDocumentPages(Buffer.from('%PDF'), { fileName: 'x.pdf' });
+      assert.equal(r.pages.length, 1);
+      assert.ok(r.dpiUsed === undefined || (Array.isArray(r.dpiUsed) && r.dpiUsed.length === 0), 'no invented dpiUsed');
+      assert.ok(r.skipped === undefined || (Array.isArray(r.skipped) && r.skipped.length === 0), 'no invented skipped');
+    } finally { renderState.body = null; }
+  });
+
+  it('office documents report the same fields as PDFs', async () => {
+    officeState.body = asBody({ pages: [png('O1')], total: 1, truncated: false, startPage: 0, dpiUsed: [88], skipped: [] });
+    try {
+      const r = await R.renderDocumentPages(Buffer.from('PK'), { fileName: 'wide.docx', dpi: 150 });
+      assert.deepEqual(r.dpiUsed, [88]);
+    } finally { officeState.body = null; }
+  });
+});
+
 describe('render client — renderDocumentPages routing + decode', () => {
   it('routes a PDF to the doc-render sidecar and decodes pages/total/truncated', async () => {
     const r = await R.renderDocumentPages(Buffer.from('%PDF-fake'), { fileName: 'x.pdf', maxPages: 2 });

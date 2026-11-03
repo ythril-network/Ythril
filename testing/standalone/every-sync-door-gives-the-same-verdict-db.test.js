@@ -76,7 +76,24 @@ const SECOND_LABEL = 'Second peer';
 /** Text a driver error or a peer's body carries and no answer may repeat: an internal host and port, and the peer's own words. */
 const LEAK = /10\.1\.2\.3|27017|kaboom-7731|10\.9\.9\.9/;
 
-let door, engine, server, base, adminKey, callTool, ADMIN, getConfig, getSecrets, second, secondMode = 'ok', secondRequests = [];
+let door, engine, server, base, adminKey, callTool, ADMIN, getConfig, getSecrets, second, secondMode = 'ok', secondRequests = [], secondHold = null;
+
+/**
+ * Hold the second member's answers on a latch: while it stands every request the second member's server gets waits, so a cycle that reaches
+ * that member stays running for as long as the test keeps the latch and not a moment less (no race against the 1000 ms floor of the wait's bound).
+ * `reached` settles once the cycle has asked the second member, i.e. once the first member's turn is over.
+ */
+function holdSecond() {
+  let open; let reachedNow;
+  const hold = {
+    promise: new Promise(resolve => { open = resolve; }),
+    reached: new Promise(resolve => { reachedNow = resolve; }),
+    arrived: () => reachedNow(),
+    release: () => { secondHold = null; open(); },
+  };
+  secondHold = hold;
+  return hold;
+}
 
 /** The second member's server: every replicated family answered empty (`ok`) or 500 (`fail`), nothing else served. */
 async function startSecond(families) {
@@ -84,13 +101,17 @@ async function startSecond(families) {
   const srv = http.createServer((req, res) => {
     secondRequests.push(`${req.method} ${req.url}`);
     const send = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
-    if (secondMode === 'fail') { send(500, { error: 'kaboom-7731 at 10.9.9.9' }); return; }
-    const m = new URL(req.url, 'http://x').pathname.match(/^\/api\/sync\/([a-z]+)$/);
-    if (req.method === 'GET' && m && (m[1] === 'tombstones' || families.includes(m[1]))) {
-      send(200, { items: [], nextCursor: null, through: head, head, positions: 1 });
-      return;
-    }
-    send(404, { error: 'not served by the second fake peer' });
+    const answer = () => {
+      if (secondMode === 'fail') { send(500, { error: 'kaboom-7731 at 10.9.9.9' }); return; }
+      const m = new URL(req.url, 'http://x').pathname.match(/^\/api\/sync\/([a-z]+)$/);
+      if (req.method === 'GET' && m && (m[1] === 'tombstones' || families.includes(m[1]))) {
+        send(200, { items: [], nextCursor: null, through: head, head, positions: 1 });
+        return;
+      }
+      send(404, { error: 'not served by the second fake peer' });
+    };
+    if (secondHold) { const h = secondHold; h.arrived(); h.promise.then(answer); return; }
+    answer();
   });
   // own-listener: binds every interface so the LAN address answers, because the SSRF guards block loopback
   await new Promise(resolve => srv.listen(0, '0.0.0.0', resolve));
@@ -326,6 +347,139 @@ describe('every sync door gives the same verdict for the same cycle', { skip }, 
       } finally { fault?.undo(); }
     });
   }
+
+  /**
+   * A waited sync whose bound runs out answers what the cycle FINISHED, on every door (bundle-231, Q-675).
+   *
+   * The first member's turn ends at once; the second member's server is held on a latch ({@link holdSecond}), so the cycle is still running
+   * when the wait's floor of 1000 ms ends and nothing about the answer depends on how fast this machine is: the cycle cannot end first, and
+   * it is released only after the answer is in. The answer is `504`/`timeout`, `ok: false`, and carries `members` (the members whose turn
+   * had ended, as the completed answer lists them), `refused` (the count of `peer-too-old` among them) and, on a network's own answer,
+   * `membersTotal` (how many members the network has, so a caller can tell 1 of 2 from 1 of 1). Before the change the 504 carried none of
+   * the three, though the cycle knew them, and the docs promised the finished members.
+   */
+  const TIMEOUT_DOORS = [
+    ['REST POST /api/networks/:id/sync', true, () => rest('POST', { path: `/api/networks/${door.NET}/sync?wait=true&timeoutMs=1000` })],
+    ['generic POST /api/network_sync {networkId}', true, () => rest('POST', { path: '/api/network_sync', body: { networkId: door.NET, wait: true, timeoutMs: 1000 } })],
+    ['generic POST /api/network_sync {} (all networks)', false, () => rest('POST', { path: '/api/network_sync', body: { wait: true, timeoutMs: 1000 } })],
+    ['MCP network_sync {networkId}', true, () => mcp({ networkId: door.NET, wait: true, timeoutMs: 1000 })],
+    ['MCP network_sync {} (all networks)', false, () => mcp({ wait: true, timeoutMs: 1000 })],
+  ];
+  const TIMEOUT_CASES = [
+    { name: 'the first member synced, the second is still running', first: 'ok', members: [[PEER, 'success']], refused: 0 },
+    { name: 'the first member is too old, the second is still running', first: 'too-old', members: [[PEER, 'peer-too-old']], refused: 1 },
+  ];
+
+  /** One door's timeout answer held to the rule: 504 / isError, `timeout`, not ok, the finished members by identity, `refused`, no leak. */
+  function assertTimeoutAnswer(name, answer, want, { total }) {
+    const payload = payloadOf(answer);
+    const where = `${name}: ${answer.text.slice(0, 700)}`;
+    assert.doesNotMatch(answer.text, LEAK, `${name} answered with the driver's or the peer's text: ${answer.text.slice(0, 600)}`);
+    if (answer.kind === 'rest') assert.equal(answer.status, 504, `HTTP status: ${where}`);
+    else assert.equal(answer.result.isError, true, `isError: ${where}`);
+    assert.equal(payload.status, 'timeout', `status: ${where}`);
+    assert.equal(payload.ok, false, `ok: ${where}`);
+    assert.ok(Array.isArray(payload.members), `the timeout answer carries no members (the cycle had ${want.members.length} finished): ${where}`);
+    const view = viewOf(answer);
+    assert.deepEqual(view.members.map(m => [m.instanceId, m.outcome]), want.members, `members finished so far (instanceId, outcome): ${where}`);
+    for (const m of view.members) {
+      assert.equal(m.networkId, door.NET, `member networkId: ${where}`);
+      assert.equal(m.label, LABEL_OF[m.instanceId], `member label: ${where}`);
+      assert.ok(typeof m.reason === 'string' && m.reason.length > 0 && m.reason.length <= 200, `member reason: ${where}`);
+    }
+    assert.equal(payload.refused, want.refused, `refused: ${where}`);
+    if (total) assert.equal(payload.membersTotal, 2, `membersTotal (the network has two members, one finished): ${where}`);
+    return view;
+  }
+
+  for (const c of TIMEOUT_CASES) {
+    it(`a wait that runs out answers the finished members on every door: ${c.name}`, async () => {
+      setSecond('ok');
+      await setFirst(c.first);
+      for (const [name, total, call] of TIMEOUT_DOORS) {
+        const hold = holdSecond();
+        try {
+          const answer = await call();
+          assert.ok(secondRequests.length > 0, `fixture check: the cycle never asked the second member, so the first member's turn had not ended when ${name} timed out`);
+          assertTimeoutAnswer(name, answer, c, { total });
+        } finally {
+          hold.release();
+          await cyclesEnded();
+        }
+      }
+    });
+  }
+
+  it('a trigger that joins the running cycle reads the members of the cycle it joined', async () => {
+    // Two doors ask while one cycle runs: the second joins the first's cycle (the runner starts nothing), and each answers the SAME finished
+    // members. A reader of a registry keyed to the wrong cycle, or of a cycle's own object that a rerun replaced, would answer []; a
+    // trigger that arrives after the cycle ENDED is a new cycle and is not this test's subject.
+    setSecond('ok');
+    await setFirst('ok');
+    const hold = holdSecond();
+    try {
+      const first = TIMEOUT_DOORS[0][2]();
+      await hold.reached;
+      const joined = TIMEOUT_DOORS[3][2]();
+      const [a, b] = await Promise.all([first, joined]);
+      assertTimeoutAnswer(TIMEOUT_DOORS[0][0], a, TIMEOUT_CASES[0], { total: true });
+      assertTimeoutAnswer(TIMEOUT_DOORS[3][0], b, TIMEOUT_CASES[0], { total: true });
+      assert.deepEqual(viewOf(a).members, viewOf(b).members, 'the joined trigger and the first read different members of one cycle');
+    } finally {
+      hold.release();
+      await cyclesEnded();
+    }
+  });
+
+  it('a cycle that throws after members finished answers 500 with the members it finished, on both network doors', async () => {
+    // A throw OUTSIDE the member loop (the store failing under the cycle) ends the cycle as an error, and the answer used to carry no member
+    // either: the members that had finished are known to the cycle at that moment. The throw is driven by the network's own member list, read
+    // once more after each successful member (the revert-parent look): it throws from the moment the second member has been asked, which is
+    // after the first member finished and before the second's turn ends.
+    setSecond('ok');
+    await setFirst('ok');
+    const net = networkConfig();
+    const real = net.members;
+    let armed = false;
+    Object.defineProperty(net, 'members', {
+      configurable: true, enumerable: true,
+      get() { if (armed) throw new MongoServerError({ message: 'connection closed at 10.1.2.3:27017', code: 13, codeName: 'Unauthorized' }); return real; },
+      set(v) { armed = false; Object.defineProperty(net, 'members', { configurable: true, enumerable: true, writable: true, value: v }); },
+    });
+    const doors = [
+      ['REST POST /api/networks/:id/sync', () => rest('POST', { path: `/api/networks/${door.NET}/sync?wait=true&timeoutMs=60000` })],
+      ['MCP network_sync {networkId}', () => mcp({ networkId: door.NET, wait: true, timeoutMs: 60000 })],
+    ];
+    try {
+      for (const [name, call] of doors) {
+        const hold = holdSecond();
+        const pending = call();
+        await hold.reached;
+        armed = true;
+        hold.release();
+        const answer = await pending;
+        armed = false;
+        const payload = payloadOf(answer);
+        const where = `${name}: ${answer.text.slice(0, 700)}`;
+        assert.doesNotMatch(answer.text, LEAK, `${name} answered with the driver's text: ${answer.text.slice(0, 600)}`);
+        assert.ok(answer.kind === 'mcp' || answer.status >= 500, `a cycle that threw answered ${answer.status}: ${where}`);
+        assert.equal(payload.ok, false, `ok: ${where}`);
+        assert.ok(Array.isArray(payload.members), `the error answer carries no members (the cycle had finished some): ${where}`);
+        // The first member's turn had ended before the throw and must be listed; whether the member the throw landed in is listed is the
+        // cycle's own bookkeeping (not this test's subject), but every row listed is a member of this network with an outcome of ours.
+        const rows = viewOf(answer).members;
+        assert.deepEqual(rows.filter(m => m.instanceId === PEER).map(m => [m.instanceId, m.outcome, m.networkId, m.label]), [[PEER, 'success', door.NET, PEER_LABEL]], `the member finished before the throw: ${where}`);
+        for (const m of rows) assert.ok([PEER, SECOND].includes(m.instanceId) && typeof m.outcome === 'string', `a listed member is not one of the network's: ${where}`);
+        assert.equal(payload.refused, 0, `refused: ${where}`);
+        assert.equal(payload.membersTotal, 2, `membersTotal: ${where}`);
+        await cyclesEnded();
+      }
+    } finally {
+      armed = false;
+      Object.defineProperty(net, 'members', { configurable: true, enumerable: true, writable: true, value: real });
+      await cyclesEnded().catch(() => undefined);
+    }
+  });
 
   it('wait=false answers ok: true and status triggered on every door', async () => {
     setSecond('ok');

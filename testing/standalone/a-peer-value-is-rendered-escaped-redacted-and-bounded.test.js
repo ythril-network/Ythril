@@ -145,6 +145,32 @@ describe('peerText: redacted, cut, escaped, never throws', () => {
         assert.ok(!render('Authorization: Bearer ythril_abcdef123456').includes('ythril_abcdef123456'), 'a bearer token was not redacted');
       });
 
+      it('Q-365: redacts BEFORE the cut when the scheme begins with a digit, plus, dot or hyphen too', () => {
+        // The open-ended pattern (a URL authority still open where the window ends) took the same lookbehind as the closed one
+        // and lost the same prefixes: `9https://user:<long password>` cut inside the password wrote its first half to the line.
+        const render = renderer(name);
+        const max = bound();
+        const password = 'Pw0rdSecretSecretSecretSecretSecretSecret';
+        for (const prefix of ['9', '-+.', 'x+', '1.2.']) {
+          for (const back of [5, 20, 40]) {
+            const head = `${prefix}https://admin:`;
+            const pad = 'p '.repeat(Math.ceil((max - head.length - back) / 2)).slice(0, max - head.length - back - 1);
+            const out = render(`${pad} ${head}${password}@peer.example/api/sync tail`);
+            for (let k = 4; k <= password.length; k++) {
+              assert.ok(!out.includes(password.slice(0, k)),
+                `scheme prefix ${JSON.stringify(prefix)}, cut ${back} chars into the password: ${k} of its characters reached the line: …${out.slice(-80)}`);
+            }
+          }
+        }
+      });
+
+      it('Q-365: a password containing an @ is redacted to its last @, in the window and past it', () => {
+        const render = renderer(name);
+        const out = render('https://admin:Pa@Sw0rdSecretXyz@peer.example/api/sync');
+        assert.ok(!out.includes('Sw0rdSecretXyz') && !out.includes('Pa@S'), `the part of the password after its @ reached the line: ${out}`);
+        assert.ok(out.includes('peer.example'), `the host was lost: ${out}`);
+      });
+
       it('cuts on a code-point boundary: no lone surrogate, whichever side of a pair the bound falls on', () => {
         const render = renderer(name);
         const max = bound();

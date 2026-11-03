@@ -23,11 +23,12 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { configureSpaces } from './_configured-spaces.mjs';
 
 const skip = await mongoSkipReason();
 
 const HOUR = Date.parse('2026-08-01T14:20:00.000Z');
-let mongo, activity;
+let mongo, activity, config;
 let recordSpaceCall, drainSpaceActivity, flushSpaceActivity, purgeSpaceActivity, renameSpaceActivity,
   summariseActivity, ACTIVITY_COLLECTION;
 
@@ -39,6 +40,8 @@ async function seed(space, calls = 3, at = HOUR) {
 
 describe('space activity lifecycle — against a real MongoDB', { skip }, () => {
   before(async () => {
+    // The spaces `seed` records calls against: a call is counted only against a configured space (Q-606).
+    config = await configureSpaces(['general', 'doomed', 'keeper', 'reused', 'old-name', 'before', 'multi', 'same', 'purged-then-called'], 'space-activity-lifecycle');
     mongo = await openTestMongo('activitylifecycle');
     ({ recordSpaceCall, drainSpaceActivity } = await import('../../server/dist/metrics/space-activity.js'));
     ({ flushSpaceActivity, purgeSpaceActivity, renameSpaceActivity, summariseActivity, ACTIVITY_COLLECTION } =
@@ -65,6 +68,17 @@ describe('space activity lifecycle — against a real MongoDB', { skip }, () => 
     drainSpaceActivity();
     const rows = await summariseActivity(24, HOUR + 60_000);
     assert.deepEqual(rows.filter(r => r.space === 'reused'), []);
+  });
+
+  it('a call that finishes after the space was deleted leaves no row to purge later (Q-606)', async () => {
+    // The delete purged the rows; a response still in flight then reports its call. The counts are pending when the delete lands, so the
+    // flush must not write them back under the id of a space that no longer exists - and a space recreated with that id inherits nothing.
+    recordSpaceCall('purged-then-called', 'recall', { ms: 20, answered: true, topScore: 0.8 });
+    config.removeSpace('purged-then-called');
+    try {
+      await flushSpaceActivity(HOUR);
+      assert.equal(await activity.countDocuments({ space: 'purged-then-called' }), 0, 'the usage of a deleted space was written after its purge');
+    } finally { config.addSpace('purged-then-called'); }
   });
 
   it('purging a space with no rows is a no-op, not an error', async () => {

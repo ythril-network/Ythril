@@ -557,6 +557,96 @@ describe('numbers quoted in the docs match the constants they quote', () => {
   }
 });
 
+/**
+ * The caps the render sidecars read from their own environment (Q-611), and the number the docs give for each.
+ *
+ * The defaults live in two places — `sidecars/doc-render/app.py` and `sidecars/doc-office/app.py` are built from
+ * separate directories — and in the table of `05a-conversion-pipeline.md`. Three copies of a number that bounds how
+ * much memory an untrusted document may take is the shape this file exists for: the table says what an operator
+ * plans the container's memory limit around, so a default that moved in one twin and not the table is a limit the
+ * operator did not know they had. The twins must agree with each other first; then the table must state that value,
+ * as the raw number or in the unit it is read in (MiB for bytes, MP for pixels).
+ *
+ * The default is read as written in the source: a plain number, or a product of numbers (`100 * 1024 * 1024`),
+ * through `os.environ.get(NAME, ...)` or a helper called as `helper("NAME", ...)`.
+ */
+const RENDER_SIDECARS = ['sidecars/doc-render/app.py', 'sidecars/doc-office/app.py'];
+const RENDER_CAP_ROWS = [
+  { name: 'RENDER_MAX_BYTES', units: [['MiB', 1024 * 1024]] },
+  { name: 'RENDER_MAX_PAGES', units: [] },
+  { name: 'RENDER_MAX_PIXELS', units: [['MP', 1e6], ['megapixels', 1e6], ['MiP', 1024 * 1024]] },
+  { name: 'RENDER_MAX_RESPONSE_BYTES', units: [['MiB', 1024 * 1024]] },
+];
+const RENDER_DOC = 'docs/integration-guide/05a-conversion-pipeline.md';
+
+/** The default a sidecar reads for `name`, as a number; null when the source does not read it or writes it in a form this cannot evaluate. */
+export function sidecarDefault(src, name) {
+  const code = src.split(/\r?\n/).map(l => l.replace(/\s+#[^'"]*$/, '')).join('\n');
+  const at = code.search(new RegExp(`["']${name}["']\\s*,`));
+  if (at < 0) return null;
+  let i = code.indexOf(',', at) + 1;
+  let depth = 0; let expr = '';
+  for (; i < code.length; i++) {
+    const c = code[i];
+    if (c === '(') depth++;
+    if (c === ')') { if (depth === 0) break; depth--; }
+    expr += c;
+  }
+  const arithmetic = expr.replace(/\bstr\s*\(/g, '(').replace(/["']/g, '').trim();
+  if (!/^[0-9_*+\s()]+$/.test(arithmetic)) return null;
+  const v = Function(`"use strict"; return (${arithmetic.replace(/_/g, '')});`)();
+  return Number.isFinite(v) ? v : null;
+}
+
+/** The table row of `name` in the doc, or ''. */
+const docRow = (doc, name) => doc.split(/\r?\n/).find(l => l.startsWith('|') && l.includes(`\`${name}\``)) ?? '';
+
+/** Does the row state `value`: as digits (grouping marks allowed) or in one of its units? */
+export function rowStates(row, value, units) {
+  const plain = row.replace(/[,_\s ]/g, '');
+  if (new RegExp(`(?<![0-9])${value}(?![0-9])`).test(plain)) return true;
+  return units.some(([unit, size]) => {
+    const n = value / size;
+    return Number.isInteger(n) && new RegExp(`(?<![0-9.])${n}\\s*${unit}\\b`).test(row);
+  });
+}
+
+describe('the render sidecars read their caps once, and the docs state what they read (Q-611)', () => {
+  for (const { name, units } of RENDER_CAP_ROWS) {
+    it(`${name}: both sidecars read the same default, and 05a states it`, () => {
+      const [a, b] = RENDER_SIDECARS.map(f => sidecarDefault(read(f), name));
+      assert.ok(a !== null, `${RENDER_SIDECARS[0]} does not read ${name} with a default this can evaluate`);
+      assert.ok(b !== null, `${RENDER_SIDECARS[1]} does not read ${name} with a default this can evaluate`);
+      assert.equal(a, b, `the twins disagree on ${name}: doc-render ${a}, doc-office ${b}`);
+      const row = docRow(read(RENDER_DOC), name);
+      assert.ok(row, `${RENDER_DOC} has no table row for \`${name}\``);
+      assert.ok(rowStates(row, a, units),
+        `${name} defaults to ${a} in both sidecars, but its row in ${RENDER_DOC} does not state that value:\n  ${row}`);
+    });
+  }
+
+  it('the office section says it honours the new caps too, not only the first two', () => {
+    const doc = read(RENDER_DOC);
+    const at = doc.indexOf('It honours `RENDER_MAX_BYTES`');
+    assert.ok(at > 0, 'the office-sidecar sentence naming the caps it honours is gone');
+    const sentence = doc.slice(at, doc.indexOf('\n\n', at));
+    for (const name of ['RENDER_MAX_PIXELS', 'RENDER_MAX_RESPONSE_BYTES']) {
+      assert.ok(sentence.includes(name), `the doc-office section honours ${name} exactly as doc-render does, and says so`);
+    }
+  });
+
+  it('the cell reader holds: it evaluates a product, a string default and a helper call, and refuses what it cannot', () => {
+    assert.equal(sidecarDefault('MAX_BYTES = int(os.environ.get("RENDER_MAX_BYTES", str(100 * 1024 * 1024)))  # 100 MiB', 'RENDER_MAX_BYTES'), 104857600);
+    assert.equal(sidecarDefault('P = _positive_int_env("RENDER_MAX_PIXELS", "40_000_000")', 'RENDER_MAX_PIXELS'), 40000000);
+    assert.equal(sidecarDefault('P = int(os.environ.get("RENDER_MAX_PIXELS", compute()))', 'RENDER_MAX_PIXELS'), null);
+    assert.equal(sidecarDefault('x = 1', 'RENDER_MAX_PIXELS'), null);
+    assert.equal(rowStates('| `RENDER_MAX_PIXELS` | `40000000` (40 MP) | cap |', 40000000, [['MP', 1e6]]), true);
+    assert.equal(rowStates('| `RENDER_MAX_PIXELS` | 40 MP | cap |', 40000000, [['MP', 1e6]]), true);
+    assert.equal(rowStates('| `RENDER_MAX_PIXELS` | `20000000` | cap |', 40000000, [['MP', 1e6]]), false);
+    assert.equal(rowStates('| `RENDER_MAX_PIXELS` | 140 MP | cap |', 40000000, [['MP', 1e6]]), false);
+  });
+});
+
 describe('the defaults a new space is seeded with are documented as such', () => {
   // The seeding moved to `spaces/space-create.ts` with the rest of the create chain, so both surfaces seed the same
   // posture rather than the route seeding it and a tool not. The pairing is unchanged; only where the code lives is.

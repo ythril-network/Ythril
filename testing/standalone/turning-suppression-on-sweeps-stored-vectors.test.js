@@ -9,7 +9,7 @@
  * eleven write paths honour the flag; nothing honoured it for records that already existed.
  *
  * The same page is precise about the other direction — *"Turning suppression off does not go back and embed
- * what was written while it was on. Use the space's Reindex control"* — so only the ON direction is a promise
+ * what was written while it was on. Use **Backfill missing embeddings** on the space's Danger tab"* — so only the ON direction is a promise
  * that was not kept, and only the ON direction is in scope here.
  *
  * ## Why the sweep is unconditional rather than a before/after diff

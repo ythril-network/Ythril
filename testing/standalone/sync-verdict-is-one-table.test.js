@@ -48,13 +48,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 
-/** Every member outcome word, in the plan's order. The closed list: a word added to the server is added here and to the table. */
-const WORDS = ['success', 'catching-up', 'records-refused', 'peer-too-old', 'local-fault', 'interrupted', 'failed'];
+/**
+ * Every member outcome word: the server's own closed list (`MEMBER_OUTCOMES`, read from the build), never a copy of it here (Q-681). A word added
+ * to the server is enumerated by the mixes below the moment it exists (and the count of mixes follows the list). `sync-status-words-are-one-list`
+ * holds that no test file carries the list by hand.
+ */
+let WORDS;
 
 let cycle, errors, floor;
 
 before(async () => {
   cycle = await import('../../server/dist/sync/cycle-outcome.js');
+  WORDS = [...cycle.MEMBER_OUTCOMES];
+  assert.ok(WORDS.length >= 7, `MEMBER_OUTCOMES lists ${WORDS.length} words: the export moved or shrank`);
   errors = await import('../../server/dist/util/errors.js');
   floor = await import('../../server/dist/sync/peer-floor.js');
 });
@@ -155,7 +161,8 @@ describe('syncVerdict is one ordered table over the members\' outcomes', () => {
         `the members ${JSON.stringify(mix)} came to ${JSON.stringify(got)}, not ${JSON.stringify(want)}`);
       checked++;
     }
-    assert.equal(checked, 1 + 7 + 49 + 343, 'fixture check: the enumeration did not cover every mix');
+    const n = WORDS.length;
+    assert.equal(checked, 1 + n + n ** 2 + n ** 3, 'fixture check: the enumeration did not cover every mix');
   });
 
   it('`ok` is true for the one outcome `success` and for nothing else, over every mix', () => {

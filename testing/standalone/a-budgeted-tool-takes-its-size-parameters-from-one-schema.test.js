@@ -71,6 +71,67 @@ describe('a budgeted tool takes its size parameters from one schema', () => {
     assert.match(s.maxChars.description, new RegExp(String(MAX_MAX_BYTES)), 'and the ceiling');
   });
 
+  /**
+   * What a caller reads about the FIRST unit when it sets a ceiling below it (bundle-231, Q-450): `maxChars` says "whole rows only", and the
+   * first one is nevertheless admitted whole above the ceiling (or the item could never be read) - except `read_file`, whose window SPLITS a
+   * first paragraph at the ceiling. Two engines, two truths, one description per tool that has to say which.
+   *
+   * The set is derived (every registered tool that advertises `maxChars`), the engine each tool pages with is read off its own schema (a tool
+   * with a `markdownSkip` windows a document; every other pages rows through `applyBudget`), and the engine's behaviour is MEASURED with an item
+   * past the 1000-character floor, so a description is held to what the code does and not to what another description says.
+   */
+  const WHOLE_SENTENCE = /the first [^.`]+ is returned whole even above the ceiling, with `truncated: true`/;
+  const SPLIT_SENTENCE = /the first paragraph is split at the ceiling/;
+  const maxCharsTools = () => [...TOOLS_BY_NAME.entries()]
+    .map(([name, tool]) => ({ name, props: propertiesOf(tool) }))
+    .filter(t => t.props.maxChars);
+
+  it('the tools that advertise maxChars were found, and none is outside the budgeted set the scan derived', () => {
+    const found = maxCharsTools().map(t => t.name);
+    assert.ok(found.length >= 7, `only ${found.length} tool(s) advertise maxChars: ${found.join(', ')}`);
+    for (const name of ['recall', 'similar', 'filter', 'read_spill', 'graph_traverse', 'schema_validate', 'read_file']) {
+      assert.ok(found.includes(name), `${name} no longer advertises maxChars: ${found.join(', ')}`);
+    }
+  });
+
+  it('the two engines do what the descriptions must say: rows admit the first whole, the document window splits', async () => {
+    const { applyBudget, resolveBudget } = await import('../../server/dist/brain/result-budget.js');
+    const { markdownWindow } = await import('../../server/dist/files/markdown-window.js');
+    const big = 'x'.repeat(5000);
+    const rows = applyBudget([{ text: big }, { text: 'second' }], resolveBudget({ maxChars: 1000 }));
+    assert.equal(rows.returned.length, 1, 'fixture check: the first row is admitted');
+    assert.ok(JSON.stringify(rows.returned[0]).length > 1000, 'the first row is returned whole even though it is over the 1000-character ceiling');
+    assert.equal(rows.truncated, true, 'and the answer says it was truncated (the rest is behind it)');
+    const win = markdownWindow(big, 0, 1000);
+    assert.ok(win.markdown.length <= 1000, `the document window returned ${win.markdown.length} characters for a 1000 ceiling: the first paragraph is split`);
+    assert.equal(win.truncated, true);
+  });
+
+  it('every tool\'s maxChars description declares its first-unit behaviour, and it is the behaviour of the engine the tool pages with', () => {
+    const wrong = [];
+    for (const { name, props } of maxCharsTools()) {
+      const description = String(props.maxChars.description);
+      const windows = Boolean(props.markdownSkip);
+      const want = windows ? SPLIT_SENTENCE : WHOLE_SENTENCE;
+      const other = windows ? WHOLE_SENTENCE : SPLIT_SENTENCE;
+      if (!want.test(description)) wrong.push(`${name}: maxChars does not say ${windows ? 'that the first paragraph is split at the ceiling' : 'that the first item is returned whole even above the ceiling, with `truncated: true`'} (${description.slice(0, 160)}...)`);
+      if (other.test(description)) wrong.push(`${name}: maxChars states the OTHER engine's first-unit behaviour`);
+    }
+    assert.deepEqual(wrong, [], `a size ceiling that does not say what happens to the unit that is itself over it:\n  ${wrong.join('\n  ')}`);
+  });
+
+  it('a tool\'s maxChars description names the continuation its own answer carries, not another tool\'s', () => {
+    const wrong = [];
+    for (const { name, props } of maxCharsTools()) {
+      const description = String(props.maxChars.description);
+      const names = [...description.matchAll(/`(nextSkip|markdownNextSkip|nextAfter)`/g)].map(m => m[1]);
+      if (props.markdownSkip && !names.includes('markdownNextSkip')) wrong.push(`${name}: pages a document by markdownNextSkip but its maxChars names ${names.join(', ') || 'no continuation'}`);
+      if (props.markdownSkip && names.includes('nextSkip')) wrong.push(`${name}: its maxChars names \`nextSkip\`, which its answer does not carry`);
+      if (!props.markdownSkip && names.length === 0) wrong.push(`${name}: its maxChars names no continuation`);
+    }
+    assert.deepEqual(wrong, [], wrong.join('\n  '));
+  });
+
   it('the paging schema is the size schema plus skip and remainderDump, never a second copy', () => {
     const p = pageBudgetSchema('match');
     assert.deepEqual(Object.keys(p).sort(), ['maxBytes', 'maxChars', 'maxTokens', 'remainderDump', 'skip']);

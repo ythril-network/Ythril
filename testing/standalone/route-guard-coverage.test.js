@@ -154,12 +154,16 @@ const PEER_AUTH_REASON = 'peer-to-peer sync — authenticated as a PEER via peer
 /**
  * Routes exempt by PATH rather than by router, because their router has no name worth keying on.
  *
+ * KEYED BY THE FULL MOUNTED PATH (`POST /api/notify`), never the router-relative one (`POST /`): eight routers declare a `POST /`, so
+ * the relative key excused all eight and a ninth unguarded one would have passed (Q-545). A key must name exactly one mounted route
+ * (`every exemption key names exactly one mounted route`, below), so an exemption can neither widen nor go stale.
+ *
  * A route registered inside a function is written against that function's `router` parameter, so exempting
  * `'router'` would exempt every such route on the instance -- including the file upload, which is a real
  * space-scoped write. The path is the only handle that means one route.
  */
 const EXEMPT_ROUTE = new Map([
-  ['POST /', 'the peer notification channel on `notifyRouter`. Authenticated INSIDE the handler against the '
+  ['POST /api/notify', 'the peer notification channel on `notifyRouter`. Authenticated INSIDE the handler against the '
     + 'claiming instance: a peer PAT carries `peerInstanceId` and may only speak as that peer, and a '
     + 'non-member is refused. Middleware cannot do it — which instance may send the event depends on the '
     + 'body. Its sibling `/trigger` is NOT covered by this and never was.'],
@@ -171,14 +175,14 @@ const EXEMPT_ROUTE = new Map([
    * key and is `requireAdmin`. Nothing was wrong today; what was wrong was that dropping that guard would
    * have been invisible, which is exactly how `POST /api/notify/trigger` came to take any token at all.
    */
-  ['POST /apply', 'the joining leg of the invite handshake. Authenticated by the invite KEY in the body — '
+  ['POST /api/invite/apply','the joining leg of the invite handshake. Authenticated by the invite KEY in the body — '
     + 'the caller has no token on this instance yet, which is what the handshake is for.'],
-  ['POST /finalize', 'the completing leg of the same handshake, authenticated by the same key.'],
-  ['POST /networks/:networkId/pair', 'a club member opening a pairing with a member another peer introduced (Q-135). The '
+  ['POST /api/invite/finalize','the completing leg of the same handshake, authenticated by the same key.'],
+  ['POST /api/sync/networks/:networkId/pair','a club member opening a pairing with a member another peer introduced (Q-135). The '
     + 'caller has no token here yet, which is what the pairing is for; it is answered only for an instance this '
     + 'instance\'s own peers introduced, and the caller is proven by calling back the address that introduction '
     + 'vouched for, where only the token minted for that pairing is accepted (`networks/member-introductions.ts`).'],
-  ['POST /redeem', 'a pub/sub\'s published invite key opening a handshake (F-41). The key IS the credential — the '
+  ['POST /api/invite/redeem','a pub/sub\'s published invite key opening a handshake (F-41). The key IS the credential — the '
     + 'caller has no token here, which is the point — and the route answers only for a network this instance publishes.'],
   ['POST /mcp-oauth/consent', 'the OAuth consent form POST. It carries no bearer header by design — the '
     + 'token arrives in the form body, and `handleConsent` validates it itself with `findMatchingToken` and '
@@ -269,23 +273,26 @@ const WRITE_EXEMPT = new Map([
  * but must NOT be blocked for a read-only token — searching is exactly what read-only is for.
  */
 const READ_SHAPED_POSTS = [
+  // FULL mounted paths, as EXEMPT_ROUTE's keys are: a bare `/recall` would excuse any router's `POST /recall` (Q-545).
   // The search family lost its `/spaces/:spaceId` prefix at 5.0 — the space moved into the body so a
   // caller can omit it and read across spaces. `traverse` keeps its path: it walks FROM an entity, which
   // lives in exactly one space, so there is nothing to omit.
-  '/filter',
-  '/similar',
-  '/spaces/:spaceId/traverse',
+  '/api/brain/similar',
+  '/api/brain/spaces/:spaceId/traverse',
   // Minting a single-use ticket to WATCH the live-events stream is a read (the stream itself allows
   // read-only tokens — "watching is a read"), so it must not be blocked for a read-only token.
-  '/spaces/:spaceId/events/ticket',
-  '/recall',
-  '/:id/validate-schema',
-  '/export-space',
-  '/config/test',
+  '/api/brain/spaces/:spaceId/events/ticket',
+  '/api/brain/recall',
+  '/api/spaces/:id/validate-schema',
+  '/api/schema-library/export-space',
+  '/api/admin/data/config/test',
 ];
 
-/** @type {{router:string, method:string, routePath:string, chain:string, file:string}[]} */
+/** @type {{router:string, method:string, routePath:string, path:string, chain:string, file:string}[]} */
 let routes = [];
+
+/** The key an exemption is written under: the verb and the FULL mounted path (`POST /api/notify`, never the router-relative `POST /`). */
+const keyOf = (r) => `${r.method.toUpperCase()} ${r.path}`;
 /** Guards applied to an ENTIRE router via `xRouter.use(...)` — they cover every route on it. */
 let routerLevelGuards = new Map();
 
@@ -423,15 +430,51 @@ describe('Route guards — every mutating route must be protected', () => {
     return r.chain + (routerLevelGuards.get(r.router) ?? '');
   }
 
-  it('every mutating route requires an authenticated identity', () => {
+  /** The mutating routes of `list` that carry no auth guard and are not exempt: the rule of the test below, as a function so a case can be fed a fake router. */
+  function withoutAuthGuard(list) {
     const unguarded = [];
-    for (const r of routes) {
+    for (const r of list) {
       if (!MUTATING.has(r.method)) continue;
-      if (EXEMPT.has(r.router) || EXEMPT_ROUTE.has(`${r.method.toUpperCase()} ${r.routePath}`)) continue;
+      if (EXEMPT.has(r.router) || EXEMPT_ROUTE.has(keyOf(r))) continue;
       if (!AUTH_GUARDS.some(g => effectiveChain(r).includes(g))) {
-        unguarded.push(`${r.method.toUpperCase()} ${r.routePath}  (${r.file}: ${r.router})`);
+        unguarded.push(`${r.method.toUpperCase()} ${r.path}  (${r.file}: ${r.router})`);
       }
     }
+    return unguarded;
+  }
+
+  it('every exemption key names exactly one mounted route (a stale or ambiguous key is refused)', () => {
+    // EXEMPT_ROUTE and READ_SHAPED_POSTS are keyed by the FULL mounted path. A key that matches no route is an exemption left
+    // behind by a route that moved or went (the stale `/filter` sat in READ_SHAPED_POSTS unnoticed); a key that matches two excuses
+    // a route nobody wrote it for (`POST /` matched eight routers). Both are refused here.
+    const problems = [];
+    const count = (key) => routes.filter(r => keyOf(r) === key).length;
+    for (const key of EXEMPT_ROUTE.keys()) {
+      const n = count(key);
+      if (n !== 1) problems.push(`EXEMPT_ROUTE "${key}" matches ${n} mounted routes, not exactly one (keys are \`METHOD /full/mounted/path\`)`);
+    }
+    for (const p of READ_SHAPED_POSTS) {
+      const n = count(`POST ${p}`);
+      if (n !== 1) problems.push(`READ_SHAPED_POSTS "${p}" matches ${n} mounted POST routes, not exactly one (entries are full mounted paths)`);
+    }
+    assert.deepEqual(problems, [], `exemptions that do not name exactly one mounted route:\n  ${problems.join('\n  ')}`);
+  });
+
+  it('seen red: an unguarded POST / on another router is reported, and an exempt route on its own path is not', () => {
+    // The fake is `POST /` on a router that is not the notify router, with no guard at all. Under the router-relative key
+    // `POST /` the exemption of the peer notification channel excused it; under the full mounted path it is reported.
+    const fake = { router: 'someOtherRouter', method: 'post', routePath: '/', path: '/api/someother', chain: '', file: 'api/someother.ts' };
+    const real = routes.find(r => keyOf(r) === 'POST /api/notify');
+    assert.ok(real, 'sanity: POST /api/notify is mounted');
+    const reported = withoutAuthGuard([fake, real]);
+    assert.deepEqual(reported, ['POST /api/someother  (api/someother.ts: someOtherRouter)'], 'the fake unguarded POST / must be the one report');
+    // The fake wearing the SAME relative path as the exempt route must still be reported: nothing excuses a route by its router-relative path.
+    const lookalike = { ...fake, router: 'anotherRouter', routePath: real.routePath, path: '/api/lookalike' };
+    assert.equal(withoutAuthGuard([lookalike]).length, 1, 'a route sharing only the router-relative path with an exempt route must not be excused');
+  });
+
+  it('every mutating route requires an authenticated identity', () => {
+    const unguarded = withoutAuthGuard(routes);
     assert.deepEqual(
       unguarded, [],
       'These mutating routes have NO auth guard — they are reachable without a valid identity. ' +
@@ -446,10 +489,10 @@ describe('Route guards — every mutating route must be protected', () => {
     for (const r of routes) {
       if (!MUTATING.has(r.method)) continue;
       if (EXEMPT.has(r.router) || WRITE_EXEMPT.has(r.router)
-          || EXEMPT_ROUTE.has(`${r.method.toUpperCase()} ${r.routePath}`)) continue;
-      if (r.method === 'post' && READ_SHAPED_POSTS.includes(r.routePath)) continue;
+          || EXEMPT_ROUTE.has(keyOf(r))) continue;
+      if (r.method === 'post' && READ_SHAPED_POSTS.includes(r.path)) continue;
       if (!WRITE_GUARDS.some(g => effectiveChain(r).includes(g))) {
-        writable.push(`${r.method.toUpperCase()} ${r.routePath}  (${r.file}: ${r.router})`);
+        writable.push(`${r.method.toUpperCase()} ${r.path}  (${r.file}: ${r.router})`);
       }
     }
     assert.deepEqual(
@@ -465,7 +508,7 @@ describe('Route guards — every mutating route must be protected', () => {
     // DIFFERENT space — a cross-tenant read/write, not merely a missing login check.
     const unscoped = [];
     for (const r of routes) {
-      if (EXEMPT.has(r.router) || EXEMPT_ROUTE.has(`${r.method.toUpperCase()} ${r.routePath}`)) continue;
+      if (EXEMPT.has(r.router) || EXEMPT_ROUTE.has(keyOf(r))) continue;
       if (!/:spaceId\b/.test(r.routePath)) continue;
       // Admin-scoped guards carry the space check themselves.
       const chain = effectiveChain(r);

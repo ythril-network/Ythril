@@ -208,3 +208,121 @@ describe('coalescing runner — isRunning', () => {
     assert.equal(runner.isRunning('net'), false);
   });
 });
+
+/**
+ * `join(key, job)` — the handle a trigger reads progress from (bundle-231, Q-675).
+ *
+ * A waited sync that runs out of time answers the members that had finished, so the trigger has to reach the running cycle's progress. The
+ * runner owns who joined what, so it is the runner that hands each trigger the progress of the cycle IT joined: `join` returns
+ * `{ promise, progress }`, the runner creates a fresh holder for every run it starts and passes it to the job as its argument, and a trigger
+ * that joins reads that same holder. `run` stays what it was (a promise of the joined job's result), for its other caller.
+ *
+ * Red until `join` exists: the handle is read off a function the runner does not have yet (`runner.join is not a function`).
+ */
+describe('coalescing runner — join hands each trigger the progress of the cycle it joined', () => {
+  /** A job that records the progress holder it was handed and waits for the test to finish it. */
+  function progressJob() {
+    const state = { holders: [], resolvers: [] };
+    const job = (progress) => {
+      state.holders.push(progress);
+      return new Promise(resolve => state.resolvers.push(resolve));
+    };
+    state.finishOne = async (value = 'done') => {
+      const resolve = state.resolvers.shift();
+      assert.ok(resolve, 'expected a job to be in flight');
+      resolve(value);
+      await new Promise(r => setImmediate(r));
+    };
+    return { job, state };
+  }
+
+  it('join exists on the runner', () => {
+    const runner = createCoalescingRunner();
+    assert.equal(typeof runner.join, 'function', 'server/dist/sync/coalescing-runner.js: createCoalescingRunner() has no join(key, job); the implementation adds it');
+  });
+
+  it('hands the job a progress holder, and the handle returns that holder while the job runs', async () => {
+    const runner = createCoalescingRunner();
+    const { job, state } = progressJob();
+    const handle = runner.join('net', job);
+    assert.equal(state.holders.length, 1, 'one job started');
+    assert.equal(typeof state.holders[0], 'object', 'the job is handed a holder object');
+    assert.notEqual(state.holders[0], null);
+    assert.equal(handle.progress, state.holders[0], 'the handle reads the very holder the job was given');
+    state.holders[0].finished = ['a'];                      // the job writes what it has done so far
+    assert.deepEqual(handle.progress.finished, ['a'], 'what the job writes into its holder is what the trigger reads');
+    await state.finishOne('result-1');
+    assert.equal(await handle.promise, 'result-1');
+  });
+
+  it('a trigger that joins a running cycle reads the SAME holder, and starts nothing', async () => {
+    const runner = createCoalescingRunner();
+    const { job, state } = progressJob();
+    const first = runner.join('net', job);
+    const joined = runner.join('net', job);
+    const third = runner.join('net', job);
+    assert.equal(state.holders.length, 1, 'three triggers, one job');
+    assert.equal(joined.progress, first.progress, 'a joiner reads the progress of the cycle it joined');
+    assert.equal(third.progress, first.progress);
+    state.holders[0].finished = ['x', 'y'];
+    assert.deepEqual(joined.progress.finished, ['x', 'y'], 'the joiner sees what the cycle has finished');
+    await state.finishOne('r1');
+    assert.equal(await first.promise, 'r1');
+    assert.equal(await joined.promise, 'r1', 'the joiner resolves with the result of the job it joined, as run() does');
+    await state.finishOne('r2');                            // let the single rerun end
+  });
+
+  it('the rerun a joiner queued gets a holder of its own, and a trigger that joins the rerun reads that one', async () => {
+    const runner = createCoalescingRunner();
+    const { job, state } = progressJob();
+    const first = runner.join('net', job);
+    const joinedFirst = runner.join('net', job);            // queues the rerun, reads the first cycle
+    state.holders[0].finished = ['from-cycle-1'];
+    await state.finishOne('r1');
+    await first.promise;
+    assert.equal(state.holders.length, 2, 'the queued rerun started once the first cycle ended');
+    assert.notEqual(state.holders[1], state.holders[0], 'the rerun has a fresh holder, not the finished cycle\'s');
+    assert.equal(state.holders[1].finished, undefined, 'the rerun starts with nothing finished');
+    const joinedRerun = runner.join('net', job);            // arrives while the rerun runs
+    assert.equal(joinedRerun.progress, state.holders[1], 'a trigger that arrives during the rerun reads the rerun\'s holder');
+    assert.equal(joinedFirst.progress, state.holders[0], 'the trigger that joined the first cycle still reads the first cycle\'s holder after it ended');
+    assert.deepEqual(joinedFirst.progress.finished, ['from-cycle-1']);
+    state.holders[1].finished = ['from-cycle-2'];
+    assert.deepEqual(joinedRerun.progress.finished, ['from-cycle-2']);
+    await state.finishOne('r2');
+    assert.equal(await joinedRerun.promise, 'r2');
+    await state.finishOne('r3');                            // the rerun the joiner of the rerun queued
+  });
+
+  it('keys keep separate holders', async () => {
+    const runner = createCoalescingRunner();
+    const { job, state } = progressJob();
+    const a = runner.join('net-a', job);
+    const b = runner.join('net-b', job);
+    assert.equal(state.holders.length, 2);
+    assert.notEqual(a.progress, b.progress, 'two keys, two cycles, two holders');
+    await state.finishOne();
+    await state.finishOne();
+    await Promise.all([a.promise, b.promise]);
+  });
+
+  it('a job that throws still releases the key, and the joiner sees the rejection', async () => {
+    const runner = createCoalescingRunner();
+    let calls = 0;
+    const job = () => { calls++; return calls === 1 ? Promise.reject(new Error('cycle threw')) : Promise.resolve('ok'); };
+    const handle = runner.join('net', job);
+    await assert.rejects(() => handle.promise, /cycle threw/);
+    assert.equal(runner.isRunning('net'), false);
+    assert.equal(await runner.join('net', job).promise, 'ok', 'the key recovers');
+  });
+
+  it('run() is unchanged: a promise of the joined result, for the caller that has no use for progress', async () => {
+    const runner = createCoalescingRunner();
+    const { job, state } = progressJob();
+    const p = runner.run('net', job);
+    assert.equal(typeof p.then, 'function', 'run returns a promise');
+    assert.equal(state.holders.length, 1, 'run starts the job too');
+    await state.finishOne('plain');
+    assert.equal(await p, 'plain');
+  });
+});
