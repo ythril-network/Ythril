@@ -61,6 +61,7 @@ import { clearTokenCache } from './auth/tokens.js';
 import { clearOidcCache } from './auth/oidc.js';
 import { initAddedSpaces, markSpacesOwedInit, ensureGeneralSpace, reconcilePendingSpaceOp, removeSpaceFromConfig, WIPE_COLLECTION_TYPES, wipeTypesOf } from './spaces/lifecycle.js';
 import { log, peerText, runWithRequestId } from './util/log.js';
+import { indexRoutes, routeLabel } from './http/route-map.js';
 import { rearmCronSchedulers } from './schedulers.js';
 import { getReadiness, classifyCheckError } from './ready.js';
 import { isShuttingDown } from './lifecycle.js';
@@ -244,9 +245,9 @@ export function createApp() {
     const reqSize = parseInt(req.headers['content-length'] ?? '0', 10) || 0;
 
     res.on('finish', () => {
-      // Use the Express route pattern if matched; fall back to normalised path.
-      const route = (req.route?.path as string | undefined)
-        ?? req.path.replace(/\/[0-9a-f-]{8,}/gi, '/:id');
+      // The registered full pattern when a route matched, a mount's label for a refusal before any route, else `unmatched`:
+      // a member of a fixed set, never a spelling of the request (`http/route-map.ts`).
+      const route = routeLabel(req, res.statusCode);
       const method = req.method;
       const statusCode = String(res.statusCode);
       const durationSec = Number(process.hrtime.bigint() - start) / 1e9;
@@ -648,7 +649,7 @@ export function createApp() {
      */
     if (err instanceof ConnectionsNotWritten) {
       // Audited as a write of the record too, which a create's path cannot name (`sendConnectionsNotWritten`).
-      sendConnectionsNotWritten(res, err, `${req.method} ${req.baseUrl}${req.path}`);
+      sendConnectionsNotWritten(res, err, `${req.method} ${routeLabel(req)}`);
       return;
     }
     /*
@@ -682,7 +683,7 @@ export function createApp() {
      * with its stack; everything else stays the `500` below.
      */
     // Named by method and path (never the query, which can carry a file path), as a route's own catch names itself.
-    const store = storeFailureAnswer(err, `${req.method} ${req.baseUrl}${req.path}`);
+    const store = storeFailureAnswer(err, `${req.method} ${routeLabel(req)}`);
     if (store) {
       sendStoreFailure(res, store);
       return;
@@ -697,6 +698,9 @@ export function createApp() {
   });
 
   void globalRateLimit; // imported for side-effect registration reference
+
+  // After every mount: the route map the metrics label, the area guard and the error labels read (`http/route-map.ts`).
+  indexRoutes(app);
 
   return app;
 }

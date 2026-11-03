@@ -14,7 +14,10 @@
  *
  * Read by BOTH doors that read a document's text: `GET …/files/extract` for the converted Markdown, and `read_file`.
  */
-import { resolveBudget, type BudgetRequest, type ResolvedBudget } from '../brain/result-budget.js';
+import { resolveBudget, type BudgetRequest, type Pager, type ResolvedBudget } from '../brain/result-budget.js';
+
+/** The document pager: windows of whole paragraphs, the answer continues at `markdownNextSkip`, and a first paragraph over the ceiling is SPLIT at it (`Q-111`). */
+export const WINDOW_PAGER: Pager = { continuedBy: 'markdownNextSkip', firstUnit: 'split' };
 
 export interface MarkdownWindow {
   markdown: string;

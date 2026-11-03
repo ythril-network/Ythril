@@ -15,6 +15,7 @@ import { spacesForBodyScopedRequest } from './body-scoped-space.js';
 import type { SpaceArea } from '../config/rights-shape.js';
 import { takesAView, type Rung } from './space-rights.js';
 import { rungFor, satisfies } from './required-rung.js';
+import { registeredPathOf } from '../http/route-map.js';
 import { effectiveRung } from './mint-cap.js';
 import { authAttemptsTotal } from '../metrics/registry.js';
 import { logAuthFailure } from '../audit/middleware.js';
@@ -374,9 +375,10 @@ function enforceMfa(
  *
  * A route the inventory does not resolve at RUNTIME falls through to the reach check alone, with a warning.
  * That is not the permissive default this feature exists to remove: reach is still enforced, so this can
- * only ever be stricter than yesterday, never looser. What it cannot yet be is COMPLETE, because
- * `req.baseUrl + req.route.path` is the only way to reconstruct the inventory key at runtime and nested
- * routers can make that disagree with the registered path.
+ * only ever be stricter than yesterday, never looser. The inventory key is the route's REGISTERED full
+ * pattern, read from the route map (`http/route-map.ts`) by the Route object the request matched. It used to
+ * be rebuilt from `req.baseUrl + req.route.path`, which is the caller's spelling of the mount: a mixed-case
+ * path found no row and skipped the area rung (Q-700).
  *
  * The warning is the point. It names the key that missed, so the log says exactly which routes still need
  * the mapping before misses can be turned into refusals — which is the follow-up. Flipping to refuse now
@@ -391,7 +393,8 @@ function enforceAreaRung(
 ): boolean {
   const rights = (record as { rights?: Parameters<typeof effectiveRung>[0] }).rights;
 
-  const routePath = `${req.baseUrl ?? ''}${(req.route as { path?: string } | undefined)?.path ?? ''}`;
+  // The REGISTERED pattern, never the request's casing: `req.baseUrl` echoes what the caller typed, and a mixed-case mount found no row (Q-700).
+  const routePath = registeredPathOf(req);
   const verdict = rungFor(req.method, routePath);
   // A route on NOT_AREA_SCOPED is DECIDED, not missed, so it says nothing. Warning on it told an operator to
   // add it to ROUTE_RIGHTS — which would undo the recorded decision — and made "once the log is clean" a state
@@ -497,7 +500,7 @@ function judgeSpaceParam(
   const owner = viewOwnerOf(record);
   const view = resolveOwnView(owner, spaceId, cfg);
   if (!view) return 'space';
-  const routePath = `${req.baseUrl ?? ''}${(req.route as { path?: string } | undefined)?.path ?? ''}`;
+  const routePath = registeredPathOf(req);
   const verdict = rungFor(req.method, routePath);
   const readsData = verdict.kind === 'requires' && verdict.scope === 'path' && takesAView(verdict);
   const rights = (record as { rights?: TokenRights }).rights;

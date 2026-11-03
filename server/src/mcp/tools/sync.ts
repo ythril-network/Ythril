@@ -6,11 +6,27 @@ import { unknownPeerRefusal } from '../../sync/peer-target.js';
 import { attachSyncNote } from '../../sync/change-notes.js';
 import { networkSyncOutcome, peerSyncOutcome, resolveSyncWait, syncAnswerIsError, syncShutdownRefusal, syncTimeoutMs, verdictFields, type SyncAnswer } from '../../sync/trigger.js';
 import { refusedMemberCount, syncVerdict, type MemberResult } from '../../sync/cycle-outcome.js';
+import { reportServerFailure } from '../../util/report-failure.js';
 
 /** The members that did not simply sync, one line each — what a reader of the text half needs to know which member to look at. */
 function memberLines(members: readonly MemberResult[]): string {
   const rows = members.filter(m => m.outcome !== 'success').map(m => `\n- ${m.label}: ${m.outcome} (${m.reason})`);
   return rows.join('');
+}
+
+/**
+ * A cycle that ended in a failure, as a tool answer (Q-675): the sentence, the members it had finished, and the body REST answers with
+ * (`status: 'error'`, `ok: false`, `members`, `refused`, `membersTotal`). It is a RESULT and not a throw, because a throw reaches the dispatcher's
+ * failure handling, which has no members to carry; the cause is reported here, as the REST door's sender reports it (a store failure was
+ * reported when it was classified).
+ */
+function failedResult(answer: SyncAnswer): ToolResult {
+  if (answer.failure) reportServerFailure(answer.failure.where, answer.failure.err);
+  return {
+    content: [{ type: 'text' as const, text: `${String(answer.body['error'] ?? 'The sync cycle failed.')}${memberLines(answer.partial?.members ?? [])}` }],
+    structuredContent: { ...answer.body },
+    isError: true,
+  };
 }
 
 /** A refused trigger (shutdown began) as a tool answer: the sentence, and the structured half REST answers with, so both halves say it. */
@@ -160,7 +176,11 @@ export const network_syncTool: ToolHandler = {
         + 'wants the outcome and a script wants the answer at once. Everything else is the same on both doors.\n'
         + '- `timeoutMs` — how long to wait for a NETWORK\'s cycle (default 30000, held to 1000-120000 and not refused '
         + 'outside it). A full cycle applies it per network. Ignored for `peerId`, whose cycle is bounded by that peer\'s own '
-        + 'request timeouts; ignored with `wait: false`.\n\n'
+        + 'request timeouts; ignored with `wait: false`. Without `networkId` or `peerId` the networks are waited for ONE AFTER ANOTHER, so a '
+        + 'full cycle can take up to `timeoutMs` per network.\n\n'
+        + 'A TIMEOUT OR A FAILED CYCLE STILL SAYS WHAT IT HAD DONE: `members` lists the members whose turn had ended (each with its own `outcome`), '
+        + '`refused` counts the ones the peer\'s age ended, and on a single network `membersTotal` says how many members the network has, so 1 of 2 '
+        + 'reads differently from 1 of 1. There is no `outcome` for a cycle that did not finish; `ok` is false.\n\n'
         + 'RESPONSE: what the cycle did — per network when you omit `peerId`, with a total, and ONE VERDICT the REST '
         + 'doors give too: `outcome` (success | partial | refused | failed | interrupted), `ok` (true only when '
         + '`outcome` is `success`), `code` (`sync_failed` when no member succeeded, `sync_store_failed` when this instance\'s own '
@@ -231,8 +251,8 @@ export const network_syncTool: ToolHandler = {
       if (attached && 'error' in attached) return fail(attached.status, attached.error);
       const noteId = attached ? attached.queued._id : undefined;
       const answer = await networkSyncOutcome(net.id, { wait, timeoutMs, ...(noteId ? { noteId } : {}) });
-      // A cycle that threw is answered by the dispatcher's own failure handling, as it was when the tool ran the cycle itself.
-      if (answer.failure) throw answer.failure.err;
+      // A cycle that ended in a failure answers what REST answers: the members it had finished, and the store's words or ours.
+      if (answer.failure || answer.storeFailure) return failedResult(answer);
       const queued = noteId ? ` Change note ${noteId} queued for the members below.` : '';
       const status = answer.body.status;
       if (status === 'shutting_down') return refusedResult(answer);
@@ -242,7 +262,7 @@ export const network_syncTool: ToolHandler = {
         content: [{ type: 'text' as const, text: (status === 'triggered'
           ? `${net.label}: sync cycle started (wait: false) — not waited for; see network_sync_history for what it did.`
           : status === 'timeout'
-            ? `${net.label}: the cycle is still running after ${timeoutMs} ms (it was not stopped); see network_sync_history for what it did.`
+            ? `${net.label}: the cycle is still running after ${timeoutMs} ms (it was not stopped); ${answer.partial?.members.length ?? 0} of ${answer.partial?.membersTotal ?? net.members.length} member(s) had finished; see network_sync_history for what it did.${memberLines(answer.partial?.members ?? [])}`
             : `${net.label}: ${synced} ok, ${errors} error(s) — ${answer.body['outcome']}.${memberLines(answer.detail?.members ?? [])}`) + queued }],
         // The body REST answers, whole: `wait` and (for a waited network) `timeoutMs` say what applied; `outcome`, `ok`, `code` and `members` are there when the cycle finished.
         structuredContent: { ...answer.body },
@@ -287,16 +307,22 @@ export const network_syncTool: ToolHandler = {
     } else {
       // Sync all networks: the same act per network, the wait and the bound applied to each.
       // One answer per network, none lost to the first that failed: every member of every network is collected, and the verdict is
-      // read over all of them, by the same function the doors of one network use.
-      let totalSynced = 0; let totalErrors = 0; let stillRunning = 0;
+      // read over all of them, by the same function the doors of one network use. A network that ran out of time or failed is recorded
+      // WITH the members it had finished (the answers before it are kept, and the networks after it still run); the networks are waited
+      // for in turn, so a full cycle can take up to `timeoutMs` per network.
+      let totalSynced = 0; let totalErrors = 0; let stillRunning = 0; let failedNetworks = 0;
       const lines: string[] = [];
       const members: MemberResult[] = [];
       for (const net of syncCfg.networks) {
         const answer = await networkSyncOutcome(net.id, { wait, timeoutMs });
-        if (answer.failure) throw answer.failure.err;
         const status = answer.body.status;
         if (status === 'shutting_down') return refusedResult(answer);
-        if (status === 'triggered') lines.push(`${net.label}: cycle started`);
+        members.push(...(answer.partial?.members ?? []));
+        if (answer.failure || answer.storeFailure) {
+          failedNetworks++;
+          if (answer.failure) reportServerFailure(answer.failure.where, answer.failure.err);
+          lines.push(`${net.label}: the cycle failed — ${String(answer.body['error'] ?? 'see the server log')}`);
+        } else if (status === 'triggered') lines.push(`${net.label}: cycle started`);
         else if (status === 'timeout') { stillRunning++; lines.push(`${net.label}: still running after ${timeoutMs} ms`); }
         else {
           const r = answer.detail!;
@@ -308,21 +334,22 @@ export const network_syncTool: ToolHandler = {
       }
       const verdict = syncVerdict(members);
       // A network still running has no outcome yet, so the answer names none: it is not ok, and says which kind of answer it is.
-      const answered = stillRunning === 0;
+      const answered = stillRunning === 0 && failedNetworks === 0;
       const ok = !wait || (answered && verdict.ok);
       const total = !wait ? `\n\nStarted ${lines.length} cycle(s) (wait: false) — not waited for.`
-        : `\n\nTotal: ${totalSynced} synced, ${totalErrors} error(s)${stillRunning ? `, ${stillRunning} still running` : ` — ${verdict.outcome}`}.${memberLines(members)}`;
+        : `\n\nTotal: ${totalSynced} synced, ${totalErrors} error(s)${failedNetworks ? `, ${failedNetworks} failed` : ''}${stillRunning ? `, ${stillRunning} still running` : failedNetworks ? '' : ` — ${verdict.outcome}`}.${memberLines(members)}`;
       return {
         content: [{
           type: 'text' as const,
           text: lines.length === 0 ? 'No networks configured.' : lines.join('\n') + total,
         }],
         structuredContent: {
-          status: !wait ? 'triggered' : answered ? 'completed' : 'timeout',
+          status: !wait ? 'triggered' : answered ? 'completed' : failedNetworks ? 'error' : 'timeout',
           ...(wait && answered ? verdictFields(verdict, members) : { ok, members, refused: refusedMemberCount(members) }),
           synced: totalSynced, errors: totalErrors, networks: lines, wait,
           ...(wait ? { timeoutMs } : {}),
           ...(stillRunning ? { timedOut: stillRunning } : {}),
+          ...(failedNetworks ? { failedNetworks } : {}),
         },
         isError: !ok,
       };

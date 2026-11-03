@@ -36,6 +36,28 @@ before(async () => {
 });
 
 describe('the lookup', () => {
+  /*
+   * CASE-BLIND, and the inventory must allow it (Q-700). The lookup lowercases both sides, because a path that reached it in another casing
+   * (`/Api/Brain/...`) used to find no row and be taken for unclassified. That is only sound while no two rows differ in case alone, and no
+   * exemption does either: this holds it, so a route with a `:spaceId` and another with a `:spaceid` cannot shadow each other unseen.
+   */
+  it('no two inventory rows, and no two exemptions, differ only in case', () => {
+    const rows = ROUTE_RIGHTS.map(r => `${r.method} ${r.route}`);
+    const folded = new Map();
+    for (const k of rows) {
+      const f = k.toLowerCase();
+      if (folded.has(f) && folded.get(f) !== k) assert.fail(`ROUTE_RIGHTS holds "${folded.get(f)}" and "${k}", which the case-blind lookup cannot tell apart`);
+      folded.set(f, k);
+    }
+    const exempt = NOT_AREA_SCOPED.map(r => r.route);
+    assert.equal(new Set(exempt.map(p => p.toLowerCase())).size, new Set(exempt).size, 'two NOT_AREA_SCOPED routes differ only in case');
+  });
+
+  it('a request path in another casing is asked as the registered one is', () => {
+    assert.deepEqual(rungFor('GET', '/Api/Brain/Spaces/:spaceId/Stats'), rungFor('GET', '/api/brain/spaces/:spaceId/stats'));
+    assert.equal(rungFor('GET', '/API/BRAIN/SPACES/:SPACEID/STATS').kind, 'requires', 'an upper-cased path is still a classified route, not an unclassified one');
+  });
+
   it('answers for a classified route', () => {
     const r = rungFor('POST', '/api/brain/spaces/:spaceId/traverse');
     assert.deepEqual(r, { kind: 'requires', area: 'knowledge', needs: 'read', scope: 'path' });

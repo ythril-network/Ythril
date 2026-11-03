@@ -20,6 +20,7 @@ import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { ToolRefusal } from '../../util/errors.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
+import { KEYSET_PAGER } from '../../brain/result-budget.js';
 
 export const schema_validateTool: ToolHandler = {
   name: 'schema_validate',
@@ -89,7 +90,7 @@ export const schema_validateTool: ToolHandler = {
         description: 'The `nextAfter` of the previous page, to continue after it. Omit it to start from the beginning.',
       },
       // The size ceilings every budgeted tool takes, from their one declaration.
-      ...budgetSizeSchema('violating record', 'nextAfter'),
+      ...budgetSizeSchema('violating record', KEYSET_PAGER),
     },
     required: ['space'],
     additionalProperties: false,

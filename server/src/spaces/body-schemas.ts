@@ -196,10 +196,10 @@ export const UpdateSpaceBody = z.object({
    * saved, and silently not happen. Reported by an integrator whose space had 21 foreign types they could
    * not remove by any sequence of UI actions.
    *
-   * Deliberately NOT a new endpoint. `PUT :id/schema` already replaces wholesale, but it calls
-   * `updateSpace()` directly and so bypasses the network vote that a meta change on a networked space
-   * has to go through. Routing the UI's Save there would have traded a silent no-op for a silent
-   * consensus bypass.
+   * Deliberately NOT a new endpoint. `PUT :id/schema` already replaces wholesale, and since Q-52 it is a
+   * vote like this PATCH: on a networked space it opens a `meta_change` round (202 `vote_pending`, or 200
+   * where this instance's own yes carries it), and on a space in no network it writes at once. The gap was that THIS door could not say "remove", which `replace` says
+   * on the door the settings UI already saves through.
    */
   typeSchemasMode: z.enum(['merge', 'replace']).optional(),
   /**

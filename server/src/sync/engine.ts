@@ -90,10 +90,22 @@ export { remoteToLocal, localToRemote } from './space-map.js';
 // `runSyncForNetwork` is async, so the in-flight promise it returns is never referentially equal to
 // the one it holds, and a members-less cycle resolves in microtasks, so a queued rerun starts and
 // finishes before any caller resumes.
-const _syncRunner = createCoalescingRunner<NetworkCycleResult>({
+const _syncRunner = createCoalescingRunner<NetworkCycleResult, NetworkCycleProgress>({
   onQueued: (id) => log.debug(`Sync cycle already running for network ${peerText(id)} — queuing rerun`),
   onRerun: (id) => log.debug(`Rerun requested for network ${peerText(id)} — starting`),
 });
+
+/**
+ * What a running cycle has done so far, for a trigger that stops waiting for it (Q-675). The runner makes one holder per run and hands it to
+ * the cycle, which fills it in; a trigger reads the holder of the run it joined (`joinSyncForNetwork`). `members` is the cycle's own list, live:
+ * a reader copies it when it builds its answer. Absent until the cycle has read the network.
+ */
+export interface NetworkCycleProgress {
+  /** The members whose turn has ended, with each one's outcome. */
+  members?: readonly MemberResult[];
+  /** How many members the network had when the cycle began. */
+  membersTotal?: number;
+}
 
 /** True while a sync cycle for the given network is in-flight. Cheap, in-memory —
  *  used by GET /api/spaces to show a "syncing" status on a space's network chip. */
@@ -107,7 +119,19 @@ export function isNetworkSyncing(networkId: string): boolean {
  *  schedule exactly one follow-up. Resolves with the result of the cycle the caller JOINED, not of
  *  any rerun. */
 export async function runSyncForNetwork(networkId: string): Promise<NetworkCycleResult> {
-  return _syncRunner.run(networkId, () => inCycle(() => _runSyncForNetworkImpl(networkId)));
+  return _syncRunner.run(networkId, cycleJob(networkId));
+}
+
+/** The job the runner runs for a network: one cycle, counted, handed the progress holder of its run. Shared by `runSyncForNetwork` and `joinSyncForNetwork`. */
+const cycleJob = (networkId: string) => (progress: NetworkCycleProgress): Promise<NetworkCycleResult> =>
+  inCycle(() => _runSyncForNetworkImpl(networkId, progress));
+
+/**
+ * {@link runSyncForNetwork}, and with it the progress holder of the cycle the caller started or joined. A trigger that races the cycle
+ * against a time bound reads the holder when the bound ends, to answer the members that had finished.
+ */
+export function joinSyncForNetwork(networkId: string): { promise: Promise<NetworkCycleResult>; progress: NetworkCycleProgress } {
+  return _syncRunner.join(networkId, cycleJob(networkId));
 }
 
 // Every cycle, network and single-peer alike, is counted here the moment it starts: the quiescence a test waits for, and what a shutdown
@@ -117,10 +141,11 @@ export function syncCyclesInFlight(): number { return cycles.size; }
 export function syncCyclesSettled(ms: number): ReturnType<DetachedWork['settledWithin']> { return cycles.settledWithin(ms); }
 const inCycle = <T>(run: () => Promise<T>): Promise<T> => cycles.track(run());
 
-async function _runSyncForNetworkImpl(networkId: string): Promise<NetworkCycleResult> {
+async function _runSyncForNetworkImpl(networkId: string, progress: NetworkCycleProgress): Promise<NetworkCycleResult> {
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
   if (!net) throw new Error(`Network ${networkId} not found`);
+  progress.membersTotal = net.members.length;
 
   const triggeredAt = new Date().toISOString();
   // What the cycle's pulls stored against the local schemas' rules, per space across every member (`sync/arrival-recording.ts`, R6-9).
@@ -131,6 +156,7 @@ async function _runSyncForNetworkImpl(networkId: string): Promise<NetworkCycleRe
   log.info(`Starting sync cycle for network '${peerText(net.label)}' (${net.members.length} members)`);
   // Every member's turn is read by the one classifier both doors use (`sync/cycle-outcome.ts`): its outcome, its counters, the cycle's tally.
   const cycle = new CycleOutcome();
+  progress.members = cycle.members;
   const syncTimer = syncDurationSeconds.startTimer({ network: networkId });
 
   for (const member of net.members) {

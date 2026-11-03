@@ -60,19 +60,27 @@ export type RungVerdict =
   | { kind: 'not-area-scoped' }
   | { kind: 'unclassified' };
 
-/** Normalise a mount + route pair into the key the inventory stores. */
+/**
+ * Normalise a mount + route pair into the key the inventory stores.
+ *
+ * LOWERCASED on both sides: the caller passes the registered pattern (`http/route-map.ts` `registeredPathOf`), and a path that reached
+ * here in another casing must still find its row. A lookup that is exact about case is the Q-700 bypass: `/Api/Brain/...` found no row,
+ * was taken for unclassified, and skipped the area rung. Parameter names differ only in case nowhere in the inventory
+ * (`a-path-casing-does-not-skip-the-area-rung-db.test.js` and `required-rung-lookup.test.js` hold the lookup).
+ */
 function key(method: string, routePath: string): string {
-  return `${method.toUpperCase()} ${routePath.replace(/\/+$/, '') || '/'}`;
+  return `${method.toUpperCase()} ${path(routePath)}`;
 }
 
-/** Trailing slashes normalised the same way, so the two lists cannot disagree on `/x` versus `/x/`. */
+/** Trailing slashes normalised the same way, so the two lists cannot disagree on `/x` versus `/x/`; case-blind like `key`. */
 function path(routePath: string): string {
-  return routePath.replace(/\/+$/, '') || '/';
+  return routePath.replace(/\/+$/, '').toLowerCase() || '/';
 }
 
 const BY_KEY: ReadonlyMap<string, RungRequirement> = new Map(
   ROUTE_RIGHTS.map(r => [key(r.method, r.route), { area: r.area, needs: r.needs, scope: r.scope }]),
 );
+const EXEMPT_PATHS: ReadonlySet<string> = new Set([...NOT_AREA_SCOPED_PATHS].map(path));
 
 /**
  * Which of the three states this route is in.
@@ -84,7 +92,7 @@ const BY_KEY: ReadonlyMap<string, RungRequirement> = new Map(
 export function rungFor(method: string, fullPath: string): RungVerdict {
   const found = BY_KEY.get(key(method, fullPath));
   if (found) return { kind: 'requires', ...found };
-  if (NOT_AREA_SCOPED_PATHS.has(path(fullPath))) return { kind: 'not-area-scoped' };
+  if (EXEMPT_PATHS.has(path(fullPath))) return { kind: 'not-area-scoped' };
   return { kind: 'unclassified' };
 }
 

@@ -14,7 +14,7 @@ import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { readSpillByPath } from '../../brain/read-spill-act.js';
 import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
-import { resolveTextWindow, type MarkdownWindow } from '../../files/markdown-window.js';
+import { resolveTextWindow, WINDOW_PAGER, type MarkdownWindow } from '../../files/markdown-window.js';
 import { carriagesFor, defaultBudgetChars } from '../../brain/result-budget.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { extractListingAsked, extractListingRefusal, readExtractListing } from '../../files/extract-listing.js';
@@ -40,7 +40,8 @@ export const read_fileTool: ToolHandler = {
               type: 'integer', minimum: 0,
               description: 'Character offset the window starts at (default 0). Send the previous answer\'s `markdownNextSkip`.',
             },
-            ...budgetSizeSchema('character'),
+            // The document window's own pager: it continues by `markdownNextSkip` and SPLITS a first paragraph over the ceiling.
+            ...budgetSizeSchema('character', WINDOW_PAGER),
             // NO `minimum`/`maximum` on these four, as on the route: the dispatcher enforces this schema before the handler, so a
             // bound here would refuse what `GET …/files/extract` clamps (`limit`, `skip`) or refuses in its own words (`images*`).
             limit: {
