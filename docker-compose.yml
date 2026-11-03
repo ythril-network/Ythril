@@ -351,9 +351,17 @@
   # light (~python-slim + pypdfium2, no model weights), so leaving it running is cheap.
   doc-render:
     build: ./sidecars/doc-render
-    image: ythril-doc-render:0.1.0
+    # The tag moves whenever the sidecar's source does (0.2.0: the per-page pixel clamp and the response cap, Q-611): an
+    # existing 0.1.0 image is not rebuilt by `up`, so the fix would never land on a host that already had the old one.
+    image: ythril-doc-render:0.2.0
     container_name: ythril-doc-render
     restart: unless-stopped
+    # What bounds one rendered page and one answer (docs/integration-guide/05a-conversion-pipeline.md). Empty means the
+    # sidecar's own default (40 MP a page, 128 MiB an answer); the memory ceiling below has to hold one page in flight
+    # plus an answer's worth of encoded pages, so raise DOC_RENDER_MEM_LIMIT when raising either.
+    environment:
+      RENDER_MAX_PIXELS: ${RENDER_MAX_PIXELS:-}
+      RENDER_MAX_RESPONSE_BYTES: ${RENDER_MAX_RESPONSE_BYTES:-}
     # Defence in depth on top of the internal network + non-root user.
     read_only: true
     security_opt:
@@ -384,9 +392,14 @@
   doc-office:
     profiles: ["office"]
     build: ./sidecars/doc-office
-    image: ythril-doc-office:0.1.0
+    # Moves with the sidecar's source, as doc-render's does (0.2.0: the same pixel clamp and response cap).
+    image: ythril-doc-office:0.2.0
     container_name: ythril-doc-office
     restart: unless-stopped
+    # The same two caps as doc-render, read the same way (empty means the sidecar's own default).
+    environment:
+      RENDER_MAX_PIXELS: ${RENDER_MAX_PIXELS:-}
+      RENDER_MAX_RESPONSE_BYTES: ${RENDER_MAX_RESPONSE_BYTES:-}
     read_only: true
     tmpfs:
       - /tmp:size=512m

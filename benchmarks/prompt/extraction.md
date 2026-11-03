@@ -429,16 +429,18 @@ position within a session and the date between sessions; do neither the other wa
 
 **And do not let the date rule freeze the file's order.** Sessions are not always handed to you
 in time order, and the one that comes second on the page may have happened first. Every session carries its
-date; read that, and if two sessions share a day, read the time on them. Retiring by position in nearly
-half a corpus gets it exactly backwards — the stale claim asserted and the current one marked dead, which
-is the inverse of what this section is for and shows up in no count.
+date; read that, and if two sessions share a day, read the time on them. Retiring by position gets it
+exactly backwards whenever the order on the page is not the order in time — the stale claim asserted and
+the current one marked dead, which is the inverse of what this section is for and looks fine on a read of
+either claim alone.
 
 **Expect very few of these, and do not go looking for more.** A conversation covering eight months, a
 death, a job loss, a promotion, a church joined, two dogs acquired and a graduation yielded exactly two
 retirements — and that was right, because the carve-outs above are right: a pet that died and a project
-that finished are still true of their period. Across ten conversations and 5,882 turns there were 24 in
-total. **A thin count is the expected result, not evidence you missed some**, and treating it as a target
-is how a graph comes to assert that things are over which are not.
+that finished are still true of their period. Most conversations hold none at all: people rarely say that
+a thing they said before is no longer so, and a claim only retires when they do. **A thin count is the
+expected result, not evidence you missed some**, and treating it as a target is how a graph comes to
+assert that things are over which are not.
 
 **Never retire something the conversation did not retire.** Two claims that merely disagree are not a
 supersession — people misremember, and a later session repeating a fact differently is usually one fact said
@@ -559,8 +561,9 @@ refuses.
 
 **Every turn must appear in some claim's `sourceTurns`.** That is how the claim layer stays complete without
 being a transcript: facts cover the turns they came from, including the ones that carry no fact alone. An
-extraction that dropped the quiet turns covered 34.6% of a conversation and scored worse than storing raw
-turns, because a question about a dropped turn cannot be answered by anything.
+extraction that dropped the quiet turns leaves holes exactly where a question can land, and a question
+about a dropped turn cannot be answered by anything: that is worse than storing the raw turns, which keep
+everything that was said.
 
 **When a day holds more than one session, give each one a `key`.** Some conversations are one session a
 day over months; others are several a day over a fortnight, and then the date is not a name — it is shared.
@@ -587,8 +590,8 @@ Write the chrono entry with the session date and `status: completed`.
 **The distinction is where the uncertainty comes from, and it runs opposite to the rule above.** *"Last
 week I got married"* names an offset, which makes the session date KNOWN to be wrong — so no entry. *"I
 just finished"* names no offset at all, so nothing contradicts the session date. Refusing both is what put
-a shop opening, a tour, a video shoot and a flood off one conversation's timeline, which ended with
-sixteen entries across 568 turns: **this is the largest single source of missing events.**
+a shop opening, a tour, a video shoot or a flood off the timeline altogether: **an event with no entry
+cannot be found by when it happened, and "when" is the question people ask about it.**
 
 **Link every claim to what it is about.** This is what makes it reachable from another session, and it is how
 two facts stated months apart become one answer: both hang off the subject they share.

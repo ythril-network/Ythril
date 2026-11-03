@@ -387,8 +387,13 @@ services:
   # sums the defaults of every set one `docker compose up` starts together against the development VM).
   doc-render:
     build: ../sidecars/doc-render
-    image: ythril-doc-render:0.1.0
+    image: ythril-doc-render:0.2.0
     container_name: ythril-doc-render-test
+    # The same two caps production passes through (empty = the sidecar's default); the render-sidecar integration test
+    # reads the pixel cap back from the health answer, so a stack started with another value is measured against it.
+    environment:
+      RENDER_MAX_PIXELS: ${RENDER_MAX_PIXELS:-}
+      RENDER_MAX_RESPONSE_BYTES: ${RENDER_MAX_RESPONSE_BYTES:-}
     cpus: "${YTHRIL_TEST_DOCRENDER_CPUS:-0.5}"
     mem_limit: "${YTHRIL_TEST_DOCRENDER_MEM:-512m}"
     pids_limit: "${YTHRIL_TEST_DOCRENDER_PIDS:-128}"
@@ -424,8 +429,11 @@ services:
   doc-office:
     profiles: ["office"]
     build: ../sidecars/doc-office
-    image: ythril-doc-office:0.1.0
+    image: ythril-doc-office:0.2.0
     container_name: ythril-doc-office-test
+    environment:
+      RENDER_MAX_PIXELS: ${RENDER_MAX_PIXELS:-}
+      RENDER_MAX_RESPONSE_BYTES: ${RENDER_MAX_RESPONSE_BYTES:-}
     cpus: "${YTHRIL_TEST_DOCOFFICE_CPUS:-1.0}"
     mem_limit: "${YTHRIL_TEST_DOCOFFICE_MEM:-1536m}"
     pids_limit: "${YTHRIL_TEST_DOCOFFICE_PIDS:-512}"

@@ -12,7 +12,7 @@
  * content before falling back to OCR. Consensus (`verify`) and the external hosted-VLM egress path
  * (with ssrfSafeFetch) are later phases.
  */
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { assistBackend, viaAssist } from '../../config/assist-backend.js';
 import { getDocumentProcessingConfig } from '../../config/loader.js';
 import type { DocExtractionMode } from '../../config/types.js';
@@ -93,7 +93,7 @@ export async function vlmExtractDocument(
     ocr = await new UnstructuredConverter().convertRich(fileBytes, fileName);
   } catch (err) {
     if (route.ocrOnly) throw err; // no VLM path to fall through to — surface the OCR error as today
-    log.warn(`VLM extract: OCR evidence unavailable (${err instanceof Error ? err.message : err}) — VLM will run ungrounded`);
+    log.warn(`VLM extract: '${peerText(fileName)}': OCR evidence unavailable (${peerText(err instanceof Error ? err.message : err)}) — VLM will run ungrounded`);
   }
 
   if (route.ocrOnly) {
@@ -129,8 +129,16 @@ export async function vlmExtractDocument(
     // Kept ONLY for the single-window case, so the consensus pass below can re-read the same images.
     // Holding every window's buffers would defeat the per-call fact bound that `maxPages` exists for.
     let firstWindowPages: Buffer[] = [];
+    // What the render sidecar did to pages instead of reading them as asked (Q-611), collected across windows and
+    // said ONCE per document below: a lowered dpi is a page read at a lower resolution than `renderDpi`, a skipped
+    // page is a page that is not in the extraction.
+    const dpiLowered: string[] = [];
+    const pagesSkipped: string[] = [];
 
-    for (let startPage = 0; pagesRead < pageBudget; startPage += windowSize) {
+    // The next window starts where the last one ENDED, not `windowSize` further on: a sidecar may end a window early
+    // (its response cap, `truncated: true`), and a step of the size asked for would then jump over the pages it did
+    // not return. A window's pages are the ones it returned plus the ones it skipped.
+    for (let startPage = 0; pagesRead < pageBudget;) {
       const take = Math.min(windowSize, pageBudget - pagesRead);
       // One beat BEFORE the render, so the stall clock starts when this step does rather than partway through
       // the one before it — the same reason the describe pass gets one. It does not make the step visible
@@ -145,11 +153,30 @@ export async function vlmExtractDocument(
         timeoutMs: renderWindowTimeoutMs(cfg.pageTimeoutMs, take),
       });
       totalPages = window.total;
-      if (window.pages.length === 0) {
+      const skippedHere = window.skipped ?? [];
+      const consumed = window.pages.length + skippedHere.length;
+      if (consumed === 0) {
         // Only an error on the FIRST window: a later empty window just means we reached the end, which
         // `truncated: false` would normally have told us already.
         if (startPage === 0) throw new Error('render produced no pages');
         break;
+      }
+      // `dpiUsed[i]` belongs to the i-th returned page, whose index is the window's start plus the pages before it
+      // (returned or skipped): walk the indexes, passing over the skipped ones.
+      const skippedAt = new Set(skippedHere.map(s => s.page));
+      let at = window.startPage;
+      window.pages.forEach((_, i) => {
+        while (skippedAt.has(at)) at++;
+        const used = window.dpiUsed?.[i];
+        if (typeof used === 'number' && used < cfg.renderDpi) dpiLowered.push(`page ${at}: ${used} dpi`);
+        at++;
+      });
+      for (const s of skippedHere) pagesSkipped.push(`page ${s.page}: ${s.reason}`);
+      if (window.pages.length === 0) {
+        // Every page of the window was skipped: nothing to transcribe here, but the document goes on.
+        if (!window.truncated) break;
+        startPage += consumed;
+        continue;
       }
       if (startPage === 0) firstWindowPages = window.pages; else { segmented = true; firstWindowPages = []; }
       pagesRead += window.pages.length;
@@ -171,7 +198,20 @@ export async function vlmExtractDocument(
 
       if (!window.truncated) break;          // no pages after this window — done
       if (pagesRead >= pageBudget) { moreAfterBudget = true; break; }
+      if (consumed < take) {
+        log.debug(`VLM extract: '${peerText(fileName)}' window at page ${startPage} came back short (${consumed} of ${take}, more follow) — the next window starts after the pages it returned`);
+      }
+      startPage += consumed;
     }
+
+    // Said once per document, never per window: the operator reads one line that names the file.
+    if (dpiLowered.length > 0) {
+      log.warn(`VLM extract: '${peerText(fileName)}' had pages rendered below documentProcessing.renderDpi (${cfg.renderDpi}) to fit the render sidecar's RENDER_MAX_PIXELS: ${peerText(dpiLowered.join('; '))}`);
+    }
+    if (pagesSkipped.length > 0) {
+      log.warn(`VLM extract: '${peerText(fileName)}' has pages the render sidecar would not render, which are NOT in the extraction: ${peerText(pagesSkipped.join('; '))}`);
+    }
+    if (pagesRead === 0) throw new Error(`render produced no pages${pagesSkipped.length > 0 ? ' (every page was skipped)' : ''}`);
 
     let markdown = parts.filter(Boolean).join('\n\n---\n\n').trim();
     if (moreAfterBudget) {
@@ -182,7 +222,7 @@ export async function vlmExtractDocument(
       // must still be loud.
       markdown += `\n\n<!-- document truncated to ${pagesRead} of ${totalPages} pages -->`;
       log.warn(
-        `VLM extract: '${fileName}' truncated — read ${pagesRead} of ${totalPages} pages ` +
+        `VLM extract: '${peerText(fileName)}' truncated — read ${pagesRead} of ${totalPages} pages ` +
         `(documentProcessing.maxTotalPages = ${pageBudget}). The rest was NOT indexed.`,
       );
     }
@@ -200,11 +240,11 @@ export async function vlmExtractDocument(
       // require every window's buffers alive at once. Not a regression either: before segmentation a long
       // document was truncated to one window, so consensus never saw more than this anyway.
       if (segmented && route.stages.includes('verify') && cfg.verifyModel) {
-        log.info(`VLM extract: '${fileName}' was read in segments — skipping the consensus pass (it would re-transcribe all ${pagesRead} pages).`);
+        log.info(`VLM extract: '${peerText(fileName)}' was read in segments — skipping the consensus pass (it would re-transcribe all ${pagesRead} pages).`);
       }
       if (!segmented && route.stages.includes('verify') && cfg.verifyModel && evidence.trim()) {
         const consensus = await runConsensus(firstWindowPages, markdown, evidence, cfg, verifyEp, repairEp).catch(err => {
-          log.warn(`VLM extract: consensus pass errored (${err instanceof Error ? err.message : err}) — keeping primary`);
+          log.warn(`VLM extract: '${peerText(fileName)}': consensus pass errored (${peerText(err instanceof Error ? err.message : err)}) — keeping primary`);
           return null;
         });
         if (consensus && consensus.text !== markdown) {
@@ -253,7 +293,7 @@ export async function vlmExtractDocument(
         }
         log.info(`VLM extract: repair still below threshold (${rv.issues.join('; ')}) — falling back to OCR`);
       } catch (err) {
-        log.warn(`VLM extract: repair errored (${err instanceof Error ? err.message : err}) — falling back to OCR`);
+        log.warn(`VLM extract: '${peerText(fileName)}': repair errored (${peerText(err instanceof Error ? err.message : err)}) — falling back to OCR`);
       }
     }
 
@@ -264,7 +304,7 @@ export async function vlmExtractDocument(
     throw new Error(`VLM output rejected and no OCR evidence to fall back to: ${v.issues.join('; ')}`);
   } catch (err) {
     if (ocr) {
-      log.warn(`VLM extract failed (${err instanceof Error ? err.message : err}) — falling back to OCR`);
+      log.warn(`VLM extract failed for '${peerText(fileName)}' (${peerText(err instanceof Error ? err.message : err)}) — falling back to OCR`);
       return { ...ocr, extractionPath: `${route.label}→ocr` };
     }
     throw err; // nothing produced a result — let the pipeline surface the failure as today
@@ -310,7 +350,7 @@ async function runConsensus(
       const reconciled = r.text.trim();
       if (reconciled) candidates.push({ text: reconciled, label: 'consensus' });
     } catch (err) {
-      log.warn(`VLM extract: consensus reconcile errored (${err instanceof Error ? err.message : err}) — arbitrating on the drafts`);
+      log.warn(`VLM extract: consensus reconcile errored (${peerText(err instanceof Error ? err.message : err)}) — arbitrating on the drafts`);
     }
   }
 

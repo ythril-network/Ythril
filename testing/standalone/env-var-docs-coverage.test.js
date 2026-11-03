@@ -146,7 +146,8 @@ const READ_PATTERNS = [
   new RegExp(`os\\.environ\\.get\\(\\s*['"]${NAME}['"]`, 'g'),
   new RegExp(`os\\.getenv\\(\\s*['"]${NAME}['"]`, 'g'),
   // Reads via helpers. Omitting these made the first run of this scan produce three false findings.
-  new RegExp(`\\b(?:envTrue|envFalse|envInt|envNum|envStr|envList|readEnv|getEnv)\\(\\s*['"]${NAME}['"]`, 'g'),
+  // `_positive_int_env` is the render sidecars' one reader of a cap (Q-611): it refuses a non-positive value at start.
+  new RegExp(`\\b(?:envTrue|envFalse|envInt|envNum|envStr|envList|readEnv|getEnv|_positive_int_env)\\(\\s*['"]${NAME}['"]`, 'g'),
 ];
 
 /** Where a variable can legitimately be "used": source, plus compose/Dockerfile interpolation. */
