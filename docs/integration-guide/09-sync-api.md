@@ -65,10 +65,14 @@ Authorization: Bearer <instance-admin token>
 
 Both answer the same shape: `{ "ok": true, "status": "triggered", ... }` when fire-and-forget (the request was
 accepted; no cycle has ended, so there is no `outcome` and no `members` yet), and with `?wait=true` either
-`completed`, `504 timeout` (still running: `ok: false`, with the members that had finished) or `500 error`. A
-cycle that fails on the store is answered as every door answers a store failure — `503`, `Retry-After`,
-`{ "error": …, "retryable": true, "code": … }` in our words — and never with the database driver's message (it
-names internal hosts and ports).
+`completed`, `504 timeout` (still running: `ok: false`) or `500 error`. A `504` and a `500` both say what the cycle
+had done when the answer was built, and carry no `outcome`, because a cycle that did not finish has none: `members`
+(the members whose turn had ended, each with its own `outcome`, the same rows a completed answer lists), `refused` (how
+many of those the peer's age ended) and `membersTotal` (how many members the network has, so `1` of `2` reads
+differently from `1` of `1`). A cycle that fails on the store is answered as every door answers a store failure —
+`503`, `Retry-After` when the store gave a wait, `{ "error": …, "retryable": true, "code": … }` in our words, and the
+same `members`, `refused` and `membersTotal` — and never with the database driver's message (it names internal hosts and
+ports).
 
 **A completed answer says what the cycle was, once.** `outcome` is the cycle's one verdict, computed from its
 members' outcomes by one function and the same word the sync history and `ythril_sync_cycles_total` carry,
@@ -114,9 +118,12 @@ outside `1000`–`120000` is held to it, never refused) and the same peer rule (
 calling the tool wants what the cycle did and a script or the UI's button wants the answer at once; send `wait`
 explicitly and the two doors behave alike. The same tool reached through the generic REST door
 (`POST /api/network_sync`) answers as REST does, with the same status for the same cycle. A full MCP cycle (no
-`networkId`, no `peerId`) applies `timeoutMs` to each network in turn, and a network still running past it is
-reported as `timeout`, not stopped; every network is waited for and reported with its own `members` (one that failed
-does not hide the others), and the answer's `outcome` is the verdict over all of them.
+`networkId`, no `peerId`) applies `timeoutMs` to each network in turn, so the whole call can take up to `timeoutMs` per
+network, and a network still running past it is reported as `timeout`, not stopped; every network is waited for and
+reported with its own `members` (one that timed out or failed does not hide the others, and the members it had finished
+are kept), and the answer's `outcome` is the verdict over all of them. When a network's cycle failed, the answer says
+`status: "error"` with a `failedNetworks` count and, like a timeout, no `outcome`. The same tool on one network answers a
+timeout or a failed cycle with `members`, `refused` and `membersTotal`, as the REST doors do, and `isError` is true.
 
 `errors` (REST and the MCP `network_sync` result alike) counts the members whose outcome is `failed` or
 `local-fault`; `refused` counts the members whose turn was ended because the peer is too old (it answered in the 5.x shape, or is below the version floor): nothing was exchanged with it and no failure was counted against it (it is shown as too old, `peer-too-old` in `members`). Every waited answer carries it, on every door (the dedicated network door, the peer door, the generic door and MCP, for a network, a peer or all networks), `0` when no member was too old.

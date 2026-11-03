@@ -582,17 +582,21 @@ What it does is remove the record's embedding, not hide the record. So a suppres
 next to it — it simply stops competing on meaning. If a record you know exists never appears in a search, check
 these three levels before treating it as a fault.
 
-Turning it **on** removes the vectors already stored for what it now covers — whether you turned it on, for the
-space or in a type's schema, or a network whose schema this space follows did — files and their passages included. A record's text is kept, so
+Turning it **on** removes the stored text vectors of what it now covers when you press **Save** (the Danger tab and the
+Schema tab both say so before you confirm) — whether you turned it on, for the
+space or in a type's schema, or a network whose schema this space follows did — files and their passages included. Only
+the **text** vectors go: a face's vector follows **face recognition's own switch**, which suppression does not touch. A record's text is kept, so
 **Lexical** search still finds it. A record that arrives from a peer while its type or space is suppressed here
 is stored without a vector, whatever this instance held for it before. The same holds for a **file**: while the
 file or its space is suppressed, the passages of its converted text and the captions, transcripts and video
 sections of its images, audio and video are stored with their text and no vector, whether you uploaded the
 file or a peer sent it.
 
-> Turning suppression off does not go back and embed what was written while it was on. Use **Backfill
+> Turning suppression off does not go back and embed what was written while it was on, and neither does Save. Turn
+> it off, save, then use **Backfill
 > missing embeddings** on the space's Danger tab, which embeds only what has no vector or whose text changed since its vector
-> was made, or re-save an individual record.
+> was made, or re-save an individual record. One press handles a limited number of records, so press it again
+> until it reports none remain.
 > **Reindex** works too, but it rebuilds every vector in the space to fill that gap.
 >
 > The per-record setting is API-only today — there is no checkbox for it in the UI. Upgrading a script

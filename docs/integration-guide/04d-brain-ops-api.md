@@ -98,6 +98,12 @@ Operator work on the instance — creating a space, casting a network vote, rota
 counted, even though those requests carry a space id. Counting them would credit a brand-new empty space with
 activity it never had.
 
+A call that was **refused is not counted either**: a request with no valid credential, and one a guard answered
+`403` or `429`, did not use the space, so it never shows as activity. Only a request that was let in counts. Nor
+does an id that is not a configured space: a request for `/api/brain/<made-up-id>/…` leaves no row, and the counts
+of a call that finishes after its space was deleted or renamed are dropped rather than written back under the old
+id. (The audit log still records what was attempted.)
+
 Buckets are hourly and in UTC, kept for 90 days. A window with no calls returns an empty `spaces` array.
 
 ---
@@ -126,6 +132,9 @@ Same row shape as the per-space endpoint, for **all** spaces in one response, bu
 token has no business learning how heavily every other space is used, and the per-space route above exists
 for exactly that caller. And it is one request rather than N: calling the per-space endpoint once per row is
 a front-end N+1, which on a sixty-five-space instance means sixty-five requests to draw one table.
+
+**The overview lists configured spaces only.** A row stored by an earlier release for an id no space has (the
+tail of what unauthenticated requests used to create) is not listed; it ages out with the 90-day retention.
 
 **A space with no traffic in the window is absent, not zero-filled.** The caller already knows which spaces
 exist; what it cannot know is which ones the window covers, so the absence carries the information. It also
@@ -598,7 +607,7 @@ read them from `data` instead.
 | `collection` | ✅ | One of: `facts`, `entities`, `edges`, `chrono`, `files`, `links` |
 | `filter` | — | Query filter object (defaults to `{}`). A predicate that names a field no read returns (`embedding`, `deliveredBy`, `_functionalGuard`) directly — as a field key, at the top level or inside `$and`/`$or`/`$nor`, or as a `"$field"` path inside `$expr` — is a `400` naming the field, the same words on both doors; only `{"<field>": {"$exists": true}}` (or `false`) is accepted on it. On `embedding` that asks whether the key is stored, not whether the record holds a vector: a stored `embedding: null` or `[]` is **no vector**, and the embedding worker and the [backfill](06-spaces-api.md#re-embed-backfill) treat it as none |
 | `projection` | — | Projection object (`1` include / `0` exclude). The non-`_id` keys decide the mode, and `_id` decides it only when it is the only key, so `{"_id": 1}` answers each row's `_id` alone. A field a read never sends cannot be asked for by name: the vector, `deliveredBy` and an edge's write guard are withheld from every answer, absent projection included, and an inclusion naming only withheld fields answers the `_id` alone |
-| `limit` | — | Max rows, default `200` and NOT capped. What bounds an answer instead: the byte budget (`maxChars`/`maxBytes`) trims it and returns `nextSkip`, `maxTimeMS` bounds the query's duration, and through a personal view over more than one member a `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
+| `limit` | — | Max rows, default `200` and NOT capped. What bounds an answer instead: the byte budget (`maxChars`/`maxBytes`) trims it, in whole rows, and returns `nextSkip` (the first row is returned whole even when it alone is over the ceiling, with `truncated: true`, or it could never be read), `maxTimeMS` bounds the query's duration, and through a personal view over more than one member a `skip + limit` past the merge ceiling is an explicit `400` naming the limit |
 | `skip` | — | Rows to discard before the page (default `0`) — see below |
 | `sort` | — | Field to order by. Per-collection allowlist; an unlisted field is a `400` naming the allowed ones. Omit for [landing order](04-brain-api.md#sorting-all-brain-list-endpoints) (the record that most recently landed on this instance first). `links` sorts by `createdAt`, `updatedAt`, `from` and `to`; a link has no name, title or type of its own.|
 | `dir` | — | `asc` or `desc` (default `desc`). Only meaningful with `sort` |

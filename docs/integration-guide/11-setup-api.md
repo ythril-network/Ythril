@@ -57,18 +57,26 @@ Exposes a [Prometheus-compatible](https://prometheus.io/docs/instrumenting/expos
 **Response** `200` — `text/plain; version=0.0.4; charset=utf-8`:
 
 ```text
-# HELP ythril_http_requests_total Total HTTP requests by method, route pattern, and status code
+# HELP ythril_http_requests_total Total HTTP requests by method, full route pattern (unmatched when no route matched; a mount path when a guard refused before any route), and status code
 # TYPE ythril_http_requests_total counter
-ythril_http_requests_total{method="GET",route="/health",status_code="200"} 42
+ythril_http_requests_total{method="GET",route="/api/tokens/:id",status_code="200"} 42
 ...
 ```
+
+The `route` label is always one of a fixed set, never the path the caller sent: the **full registered pattern** of the route
+that answered (`/api/tokens/:id`, with its mount in front, whatever the casing of the request), the single value `unmatched`
+for a request no route claimed (a path nothing serves answers `404` under it), or, for a request a guard refused before
+any route was reached (a missing credential, a rate limit, maintenance), the **mount path** the request sat under
+(`/api/tokens`). So the number of series follows the number of routes and cannot be grown by whoever is sending requests, and
+a dashboard that wants "everything that did not reach a handler" reads `unmatched` plus the mount-path series with a
+`401`, `403`, `429` or `503` status.
 
 **Metrics exposed:**
 
 | Metric | Type | Description |
 |---|---|---|
-| `ythril_http_requests_total` | counter | Total requests by method, route, status code |
-| `ythril_http_request_duration_seconds` | histogram | Request latency by method and route |
+| `ythril_http_requests_total` | counter | Total requests by method, full route pattern, status code. `route` is `unmatched` when no route matched, and the mount path when a guard refused the request before any route (see above) |
+| `ythril_http_request_duration_seconds` | histogram | Request latency by method and full route pattern; `route` is `unmatched` when no route matched, and the mount path when a guard refused the request before any route |
 | `ythril_http_request_size_bytes` | histogram | Request body size |
 | `ythril_http_response_size_bytes` | histogram | Response body size |
 | `ythril_facts_total` | gauge | Approximate facts by space — read from collection metadata, not counted per scrape |

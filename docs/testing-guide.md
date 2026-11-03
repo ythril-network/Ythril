@@ -34,6 +34,9 @@ the test files its diff reaches.
 | Sync | the test stack | `npm run test:up`, `npm run test:sync` |
 | Red team | the test stack | `npm run test:up`, `npm run test:redteam` |
 
+`npm run test:up` (and `test:up:rebuild`) first takes down a stack that was started from the same compose file without
+`-p ythril-test` (compose then names it `testing`): its containers hold the same names, so it would otherwise block the
+new stack at the first container.
 `npm run test:down` takes the stack down and wipes its volumes. `npm run test:all:core` runs the stack suites and then
 standalone, never stops at the first failure, and prints one status line per suite; it does not run the client suite, so
 run that beside it. `npm run test:all` is `test:all:core` plus the cleanup, and does **not** start the stack. CI runs

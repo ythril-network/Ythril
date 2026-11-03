@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+| Changes on upgrade | Action |
+|---|---|
+| The `doc-render` and `doc-office` images are `0.2.0`; an existing `0.1.0` image is not rebuilt by `docker compose up` alone | Run `docker compose up --build` (or `pull`) once |
+| The `route` label of `ythril_http_*` metrics is the full route pattern (`/api/tokens/:id`); it was the router's own part (`/`, `/:id`). A path no route matched is `unmatched`; a request a guard refused before any route is labelled with its mount path | Update dashboards and alerts keyed on the old labels |
+| A network with no spaces left is seen, left, updated and deleted by the instance admin only; a non-admin token gets `404` | None; ask the instance admin |
+| A sync that times out (`504`) or fails (`500`, `503`) answers the members it had finished, `refused` and `membersTotal` | Read them; `ok: false` and the status are unchanged |
+| A page larger than `RENDER_MAX_PIXELS` (default 40 megapixels) is rendered at a lower DPI, reported as `dpiUsed`; a page that would need less than 72 DPI is skipped with a reason. A render answer ends early with `truncated: true` past `RENDER_MAX_RESPONSE_BYTES` (default 128 MiB) | Raise both with `DOC_RENDER_MEM_LIMIT` if you need larger pages at full DPI |
+| Calls that were refused (`401`, `403`, `429`) or named a space this instance does not have are no longer counted as space activity | None |
+
+### Security
+
+- **Rights:** a request path in a different letter case (`/Api/Brain/...`) skipped a space's area rung: a token that reaches a space but holds no rung on an area could read that area. The rung is now asked of the route that was registered, whatever the casing (Q-700).
+- **MCP connectors:** a token bound to a peer instance, or a schema-library token, could approve an AI connector, which then carried the peer's rights without its binding and outlived the peer's revocation. Both are refused (`403`), at the connector's consent and at token creation. A connector's own token still approves another connector. Connectors approved before this release by a peer-bound token: find them through the `mcp.oauth.consent` audit rows whose approving token was peer-bound (resolve the token id with `GET /api/tokens` while it exists); treat a connector whose approving token no longer exists as suspect, and revoke them (Q-597).
+- **Logs:** a URL's password was left in a log line when the scheme followed a digit or one of `+ . -` (`9https://user:pass@host`), and the part of a password after an `@` inside it (`p@ss`) was left too. Both are redacted now (Q-365).
+- **Models:** a model server's error message was quoted in full in an error and a job's stored failure; it is cut at 200 characters, and an embedding endpoint's address in an error has its password redacted (Q-363).
+- **Activity:** unauthenticated calls naming invented space ids grew the activity counters without bound; only configured spaces are counted (Q-606).
+- **Metrics:** paths no route matched each minted a `route` label; they share one label now (Q-605).
+- **Workstation:** the networks setup script wrote `.env` and the local connector token readable by others and passed the token on command lines; both files are written `0600` (owner-only on Windows) and the token is never an argument (Q-612).
+
+### Added
+
+- **Tokens:** a connector's record says which token approved it (`approvedByTokenId`), and the token list marks peer-bound tokens and the approver of each connector.
+- **Rendering:** `RENDER_MAX_PIXELS` and `RENDER_MAX_RESPONSE_BYTES` for both render sidecars, reported by their health answer.
+
+### Changed
+
+- **Networks:** a network whose spaces were all removed is the instance admin's alone, as one with spaces is; a join that would carry no space is refused for a non-admin (Q-603).
+- **Sync:** a waited sync that times out or fails says which members it had finished; the all-networks MCP sync records every network's answer instead of stopping at the first failure (Q-675).
+- **MCP:** each budgeted tool's `maxChars` says how its first item is treated: returned whole even above the ceiling, or (for `read_file`) split at it, and names its own continuation field (Q-450).
+- **Media:** the Validate step shows as working, or warns with the vision steps when no vision model is set; a dimmed step says it will not run (Q-64).
+- **Settings:** a refused sync is a translated message; the tokens page shows its summary after the list; the server log colours a line by its own level only (Q-679, Q-124, Q-323).
+- **Spaces:** turning embedding suppression on asks before Save, and says Save removes the stored text vectors and Backfill restores them (Q-368).
+- **Tooling:** the changelog check covers `sidecars/` and `scripts/`; `npm run test:up` first clears a test stack left by a run without a project name.
+
+### Fixed
+
+- **Graph:** Retry was not clickable after a graph had been drawn; the stale graph, its counts and its controls are hidden while the error shows (Q-209).
+- **Rendering:** a render window the sidecar ended early skipped the pages in between (Q-611).
+- **Translations:** the retention line and nine other summaries kept the language of their first render; German and Polish said "Ausweis"/"dowód" for an ID; nine model fields had no input type and lost their style (Q-185, Q-539, Q-177).
+- **Accessibility:** the local-store badge, the suppression notices and the read-only rights matrix are announced to a screen reader (Q-680, Q-368, Q-124).
+- **Docs:** `PUT /schema` on a networked space is a vote whose passed result is applied as a merge; the guides said it applied directly (Q-509).
+- **Tests:** controls in two store-timeout tests run under a wider bound (Q-635; the flake was not reproduced, the margin is precautionary).
+
 ## [6.4.0] — 2026-11-03
 
 **A minor release: recall and similar answer with what they can find and say so while a search index builds or cannot serve, the search process's heap and logs are the operator's to set and read, a token's default rate limit is 1200 a minute, and `@ythril/schema` types a space's schemas.**

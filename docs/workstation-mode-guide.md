@@ -435,6 +435,20 @@ The Ythril side of the same link:
 | `YTHRIL_LOCAL_AGENT_TOKEN` | *(none)* | Bearer token Ythril presents to the connector. Normally generated at spawn time. |
 | `YTHRIL_LOCAL_AGENT_TOKEN_FILE` | connector's token file | Read when the token is not supplied via the environment. |
 
+**Where the token lives, and who can read it.** The setup script writes the token twice, and both copies are private to
+you: the connector's token file (`~/.ythril-local-connector/token`) is mode `0600` inside a state directory of mode
+`0700`, and the repository's `.env`, which carries the same token as `YTHRIL_LOCAL_AGENT_TOKEN`, is `0600` too. The
+script sets the modes on every run, so a directory or file an earlier version made more open is tightened. On Windows,
+which has no Unix modes, the script gives the same files and the state directory an owner-only ACL (inheritance
+removed, the current user the only entry) and stops if it cannot. The token never appears in a process's argument list,
+where any local user could read it.
+
+The Ythril container reads the token from `YTHRIL_LOCAL_AGENT_TOKEN`, which compose passes through from `.env`; the
+token file mounted into it is only a fallback. A Linux host whose user id is not `1000` (the container's user) cannot
+offer that fallback: the `0600` file belongs to a user the container is not, so it is unreadable there and the
+environment variable is the only way the container learns the token. Keep `.env` filled in, and do not loosen the
+file's mode to make the fallback work.
+
 ### Run the wizard
 
 Once the connector is running:
@@ -555,6 +569,7 @@ With this setup, internet traffic reaches only what the tunnel hostname maps to.
 
 - Good: hostname mapped to Ythril only.
 - Good: the local connector is guarded by a bearer token, not by its bind address. It binds `0.0.0.0` by default (deliberately, so the Docker container can reach it via host-gateway), so do not rely on the bind for isolation. Operators who want to tighten the bind can set `YTHRIL_CONNECTOR_BIND_HOST`.
+- Good: the token is kept private on disk. The setup script writes `.env` and the connector's token file at `0600` and the state directory at `0700` (an owner-only ACL on Windows), so another account on the machine cannot read the token the whole link rests on (see *Where the token lives, and who can read it* above).
 - Avoid: adding extra ingress rules for unrelated local ports.
 
 ### Validation checklist
