@@ -29,11 +29,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { load } from 'js-yaml';
 import { loadCompose, environmentOf } from '../_shared/compose-file.mjs';
-import { REPO_ROOT } from './_sources.mjs';
+import { loadCi } from '../_shared/ci-workflow.mjs';
 
 const SIDECARS = ['doc-render', 'doc-office'];
 const CAPS = ['RENDER_MAX_PIXELS', 'RENDER_MAX_RESPONSE_BYTES'];
@@ -75,7 +72,7 @@ export function passthroughViolations(label, service) {
 
 const prod = loadCompose('docker-compose.yml');
 const test = loadCompose('testing/docker-compose.test.yml');
-const ci = load(readFileSync(join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8'));
+const ci = loadCi();
 
 describe('a render sidecar image has one tag everywhere it is named', () => {
   for (const name of SIDECARS) {
