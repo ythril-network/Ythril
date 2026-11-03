@@ -350,11 +350,12 @@ describe('Q-363 embed() against a model server whose error text is a megabyte', 
   let answer = { error: { message: MEGABYTE } };
 
   before(async () => {
-    const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs');
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
     const { listenOnLoopback } = await import('../_shared/local-server.mjs');
     const http = await import('node:http');
-    mkdirSync('E:/TMP/Ythril/data/b231-tests-S', { recursive: true });
-    dir = mkdtempSync(join('E:/TMP/Ythril/data/b231-tests-S', 'q363-'));
+    // The OS temp directory: the harness points TEMP/TMP where a run's files belong, and a container's /tmp is discarded with it.
+    // (A hard-coded Windows path was created literally as a folder inside the checkout when this ran in a Linux container.)
+    dir = mkdtempSync(join((await import('node:os')).tmpdir(), 'q363-'));
     for (const k of ENV) saved[k] = process.env[k];
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ instanceId: 'q363', instanceLabel: 'q363', tokens: [], networks: [],
       spaces: [{ id: 'general', label: 'G', builtIn: true, folders: [], meta: {} }] }), { mode: 0o600 });
@@ -371,6 +372,7 @@ describe('Q-363 embed() against a model server whose error text is a megabyte', 
 
   after(async () => {
     await local?.close();
+    if (dir) (await import('node:fs')).rmSync(dir, { recursive: true, force: true });
     for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
   });
 

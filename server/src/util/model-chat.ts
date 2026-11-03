@@ -22,10 +22,9 @@
  * fallback without cooling the primary down — the endpoint is fine, it declined this content.
  */
 import Anthropic from '@anthropic-ai/sdk';
-import { boundedJson, boundedErrorText } from './bounded-read.js';
+import { boundedModelJson, boundedErrorText } from './bounded-read.js';
 import { chatUrlFor, claudeBaseFor, claudeModelsUrlFor } from '../files/converters/vlm-endpoint.js';
 import { postWithBackoff } from '../extractor/model-post.js';
-import { peerText } from './log.js';
 import { backoffDelayMs } from './backoff.js';
 
 /**
@@ -36,9 +35,6 @@ import { backoffDelayMs } from './backoff.js';
 const CLAUDE_RETRIES = 2;
 const CLAUDE_BACKOFF_BASE_MS = 1_000;
 const CLAUDE_BACKOFF_CAP_MS = 2_000;
-
-/** How much of a model server's own error text a failure quotes. */
-const MODEL_ERROR_MAX = 200;
 
 export type ChatWire = 'ollama' | 'openai' | 'anthropic';
 
@@ -119,14 +115,12 @@ export async function chatOnce(
     }, (e: unknown) => { throw fail(`unreachable (${url}): ${e instanceof Error ? e.message : String(e)}`); });
 
   if (endpoint.wire === 'ollama') {
-    const j = await boundedJson<{ model?: string; message?: { content?: unknown }; done_reason?: string; error?: unknown }>(res, 'Model');
-    // Bounded by the one renderer (`peerText`): a cut by code unit split a character, and a string error was not cut.
-    if (j.error) throw fail(`error: ${peerText(j.error, { max: MODEL_ERROR_MAX })}`);
+    // `boundedModelJson` owns the `error` check: what a model server says is cut by the one renderer (`peerText`).
+    const j = await boundedModelJson<{ model?: string; message?: { content?: unknown }; done_reason?: string }>(res, 'Model', { fail });
     const text = typeof j.message?.content === 'string' ? j.message.content : '';
     return { text, truncated: j.done_reason === 'length', ...(j.model ? { model: j.model } : {}) };
   }
-  const j = await boundedJson<{ model?: string; choices?: { message?: { content?: unknown }; finish_reason?: string }[]; usage?: Record<string, unknown>; error?: unknown }>(res, 'Model');
-  if (j.error) throw fail(`error: ${peerText(j.error, { max: MODEL_ERROR_MAX })}`);
+  const j = await boundedModelJson<{ model?: string; choices?: { message?: { content?: unknown }; finish_reason?: string }[]; usage?: Record<string, unknown> }>(res, 'Model', { fail });
   const content = j.choices?.[0]?.message?.content;
   return {
     text: typeof content === 'string' ? content : '',

@@ -217,7 +217,10 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
 
   // F-34.1: which local spaces this join would touch — before ANY local write. Refused here, nothing was created
   // and finalize is never called, so the inviter's token for us expires with the handshake.
-  const joinRefusal = networkJoinRefusal(caller, {
+  // The REMOTE's own space list is what a join that carries no space is judged on (Q-603, `networkJoinRefusal` refuses it to a token
+  // that is not the instance admin). `entries` is that list FILTERED (an older inviter's names, a dismissed space), and a re-apply
+  // whose spaces are all filtered out touches nothing: it must not be refused because of the peer's version.
+  const joinRefusal = entries.length === 0 && resolved.entries.length > 0 ? null : networkJoinRefusal(caller, {
     existing: entries.map(e => e.localId).filter(id => cfg.spaces.some(cs => cs.id === id)),
     toCreate: entries.map(e => e.localId).filter(id => !cfg.spaces.some(cs => cs.id === id)),
   });

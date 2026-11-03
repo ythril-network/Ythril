@@ -309,6 +309,10 @@ export interface TokenRecord {
   admin: boolean;
   readOnly?: boolean;
   schemaLibrary?: boolean;
+  /** Set on a token a peer syncs with: it is that peer's credential, not the operator's own tooling (the table marks it). */
+  peerInstanceId?: string;
+  /** On an AI connector's token: the id of the token whose holder approved it (a local field; the id may no longer resolve). */
+  approvedByTokenId?: string;
   /**
    * This token's relationship to the second factor. Absent = `inherit` (follow the instance-wide switch),
    * which is what every existing token does. `exempt` skips MFA even when the switch is on — the automation

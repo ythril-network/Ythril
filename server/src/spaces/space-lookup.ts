@@ -27,6 +27,19 @@ export function configuredSpaceIds(): string[] {
   return configuredSpaces().map(s => s.id);
 }
 
+/**
+ * Is `spaceId` a space this instance configures right now? Never throws and allocates nothing.
+ *
+ * Asked of the LIVE config each time (a space created after boot, or renamed, is counted under its current id), and false before
+ * setup rather than a throw from `getConfig()`: a caller on a request's `finish` handler has no `try`, and an uncaught throw there ends the
+ * process. It prevents a made-up string (an unauthenticated request's path segment) from being taken for a space. `findSpace` is the
+ * lookup that returns the space and throws before setup; this is the yes/no that does not, so a caller that has no use for the
+ * record does not pay for a copy of the list (`configuredSpaceIds`) or catch the not-loaded error.
+ */
+export function isConfiguredSpace(spaceId: string): boolean {
+  return isConfigLoaded() && getConfig().spaces.some(s => s.id === spaceId);
+}
+
 /** Get the SpaceConfig for a given id, or undefined. */
 export function findSpace(spaceId: string): SpaceConfig | undefined {
   return getConfig().spaces.find(s => s.id === spaceId);

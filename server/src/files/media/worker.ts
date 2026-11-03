@@ -35,7 +35,7 @@ import { toSafeRelPath } from '../../util/paths.js';
 import { configuredSpaceIds } from '../../spaces/space-lookup.js';
 import { intervalJob, type IntervalJob } from '../../util/interval-job.js';
 import type { MediaJobDoc } from '../../config/types.js';
-import { log } from '../../util/log.js';
+import { log, peerText } from '../../util/log.js';
 import { createMediaProviders } from './providers.js';
 import type { MediaProviderBundle } from './providers.js';
 import { removeFileHere } from '../remove-file-here.js';
@@ -655,7 +655,8 @@ async function processJob(
     mediaJobsCompletedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
     log.info(`Media worker: completed ${mediaType} job ${spaceId}/${fileId} (${fileEmbeddingStatus})`);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    // A provider's error text is its own words: redacted, escaped and bounded before it is logged and stored as the job's `lastError`.
+    const message = err instanceof Error ? peerText(err.message) : peerText(err);
     // A lost lease is not a failed job. Stall recovery has already put this file back in the queue with an
     // attempt spent, and another claimant is on it: calling failJob here would spend a SECOND attempt and
     // write a `lastError` describing nothing that went wrong, and calling completeJob would report a

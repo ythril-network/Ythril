@@ -41,6 +41,7 @@ import { createOAuthToken, findMatchingToken } from '../auth/tokens.js';
 import { authRateLimit } from '../rate-limit/middleware.js';
 import { log } from '../util/log.js';
 import { isInstanceAdmin } from '../auth/instance-admin.js';
+import { specialPurposeApproverRefusal } from '../auth/peer-bound.js';
 import { envInt } from '../config/env-num.js';
 import type { TokenRecord } from '../config/types.js';
 
@@ -113,6 +114,8 @@ interface MintIdentity {
    * so `files: read` beside `knowledge: write` comes back as write in both.
    */
   rights: TokenRecord['rights'] | undefined;
+  /** The id of the token that was pasted to approve: stored on the connector's record, so an operator can tell who approved it. */
+  approvedByTokenId: string;
 }
 interface AuthCodeEntry {
   clientId: string;
@@ -183,6 +186,7 @@ const provider: OAuthServerProvider = {
       spaces: entry.identity.spaces,
       readOnly: entry.identity.readOnly,
       ...(entry.identity.rights ? { rights: entry.identity.rights } : {}),
+      approvedByTokenId: entry.identity.approvedByTokenId,
       ttlMs: OAUTH_TOKEN_TTL_MS,
       maxTokens: MAX_OAUTH_TOKENS,
     });
@@ -344,6 +348,18 @@ async function handleConsent(req: Request, res: Response): Promise<void> {
   const { hash: _hash, ...approver } = record;
   req.authToken = approver;
 
+  // A token made for one purpose (a peer's sync, the schema library) may not approve a connector: the connector minted from its
+  // consent carries the same rights matrix and no peer binding, so a peer revocation would leave it alive (Q-597). Refused here, after
+  // the audit entry names the approver and BEFORE an authorization code exists, so nothing can be minted from it. This is the only
+  // path to `createOAuthToken`, which is why the binding is not carried through the mint instead (that would make the connector a
+  // peer-treated token for every `peerBoundTo` reader).
+  const refusal = specialPurposeApproverRefusal(record, 'approve a connector');
+  if (refusal) {
+    log.warn(`MCP OAuth consent refused: token ${record.id} is made for one purpose (client ${clientId}).`);
+    renderConsentError(res, 403, refusal);
+    return;
+  }
+
   const now = Date.now();
   pruneExpiredCodes(now);
   const code = randomBytes(32).toString('base64url');
@@ -360,7 +376,7 @@ async function handleConsent(req: Request, res: Response): Promise<void> {
     // Read directly rather than through the old `legacySpacesOf` helper, which was named for the 
     // scoping use that no longer exists — a helper named for one caller gets used by every other.
     identity: { admin: isInstanceAdmin(record), readOnly: false, spaces: (record as { spaces?: string[] }).spaces,
-      rights: (record as { rights?: TokenRecord['rights'] }).rights },
+      rights: (record as { rights?: TokenRecord['rights'] }).rights, approvedByTokenId: record.id },
     expiresAt: now + AUTH_CODE_TTL_MS,
   });
 

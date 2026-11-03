@@ -15,6 +15,7 @@
 import { Router } from 'express';
 import { requireAdmin } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
+import { isConfiguredSpace } from '../spaces/space-lookup.js';
 import { summariseActivity, ACTIVITY_RETENTION_DAYS } from '../metrics/space-activity-store.js';
 
 export const spaceActivityRouter = Router();
@@ -34,6 +35,8 @@ spaceActivityRouter.get('/', globalRateLimit, requireAdmin, async (req, res) => 
   const maxHours = ACTIVITY_RETENTION_DAYS * 24;
   const hours = Number.isFinite(raw) ? Math.max(1, Math.min(maxHours, Math.floor(raw))) : 24 * 7;
 
-  const spaces = await summariseActivity(hours);
+  // Configured spaces only: rows stored by earlier releases for ids no space has (the 90-day tail of what an unauthenticated request's path
+  // segment made, Q-606) are not a space and are not listed. They age out with the retention window.
+  const spaces = (await summariseActivity(hours)).filter(s => isConfiguredSpace(s.space));
   res.json({ hours, retentionDays: ACTIVITY_RETENTION_DAYS, spaces });
 });

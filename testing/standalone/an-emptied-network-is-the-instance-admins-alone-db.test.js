@@ -127,11 +127,20 @@ describe('a network with no space is the instance admin\'s alone (real routes, r
 
   describe('MCP: the same token', () => {
     const call = (name, args) => door.call(name, args, { rights: NONADMIN });
+    /**
+     * A network act's refusal over MCP: the tool answers `isError` with the act's status in its text (`toResult`: "the status travels in
+     * the text, as on every other tool that mirrors a route"), and the dispatch records an `isError` result as 422. So the 404 is read from
+     * the text, and the door's status must still be an error.
+     */
+    const is404 = (out, what) => {
+      assert.match(out.text, /^Error \(404\)/, `${what}: ${out.status} ${out.text.slice(0, 200)}`);
+      assert.ok(out.status >= 400, `${what}: the door's status was ${out.status}`);
+    };
 
     it('network_get is not found', async () => {
       seed();
       const out = await call('network_get', { id: EMPTY_READ });
-      assert.equal(out.status, 404, `an emptied network was read: ${out.status} ${out.text.slice(0, 200)}`);
+      is404(out, 'an emptied network was read');
     });
 
     it('network_peers does not list it', async () => {
@@ -144,28 +153,28 @@ describe('a network with no space is the instance admin\'s alone (real routes, r
     it('network_update is not found and changes nothing', async () => {
       seed();
       const out = await call('network_update', { id: EMPTY_READ, label: 'taken over' });
-      assert.equal(out.status, 404, `an emptied network was reconfigured: ${out.status} ${out.text.slice(0, 200)}`);
+      is404(out, 'an emptied network was reconfigured');
       assert.equal(stored(EMPTY_READ)?.label, 'Emptied A');
     });
 
     it('network_add_space is not found and attaches nothing', async () => {
       seed();
       const out = await call('network_add_space', { id: EMPTY_READ, spaceId: OTHER });
-      assert.equal(out.status, 404, `a space was added to an emptied network: ${out.status} ${out.text.slice(0, 200)}`);
+      is404(out, 'a space was added to an emptied network');
       assert.deepEqual(stored(EMPTY_READ)?.spaces, []);
     });
 
     it('network_pending_space (dismiss) is not found and records nothing', async () => {
       seed();
       const out = await call('network_pending_space', { id: EMPTY_READ, spaceId: 'pend', action: 'dismiss' });
-      assert.equal(out.status, 404, `a pending space of an emptied network was resolved: ${out.status} ${out.text.slice(0, 200)}`);
+      is404(out, 'a pending space of an emptied network was resolved');
       assert.deepEqual(stored(EMPTY_READ)?.dismissedSpaces ?? [], []);
     });
 
     it('network_leave is not found and the network stays', async () => {
       seed();
       const out = await call('network_leave', { id: EMPTY_LEAVE });
-      assert.equal(out.status, 404, `an emptied network was left: ${out.status} ${out.text.slice(0, 200)}`);
+      is404(out, 'an emptied network was left');
       assert.ok(stored(EMPTY_LEAVE), 'the network record was removed');
     });
   });

@@ -43,6 +43,12 @@ export interface TokenRecord {
   schemaLibrary?: boolean; // true = only valid on GET /api/schema-library/public*; no space access
   oauthClientId?: string;  // set on PATs minted by the MCP OAuth flow — links this token to the connector client that created it (for rotation, capping, and UI attribution)
   /**
+   * On a connector token: the id of the token whose holder approved it at `/mcp-oauth/consent`. A LOCAL field: tokens are never
+   * replicated, so it is read only on this instance. It names an id, not a live link: the approving token may since have been revoked
+   * (the id then resolves to nothing, which is itself worth an operator's attention), and nothing is revoked along with it (D-71).
+   */
+  approvedByTokenId?: string;
+  /**
    * This token's relationship to the second factor. Absent = `inherit`.
    *
    * ## Why this is per-token at all

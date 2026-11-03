@@ -29,6 +29,8 @@
  * survive being summed across buckets, which is what a 24-hour or 7-day view needs.
  */
 
+import { isConfiguredSpace } from '../spaces/space-lookup.js';
+
 /**
  * The closed set of call classes.
  *
@@ -82,7 +84,14 @@ export function recordSpaceCall(
 ): void {
   if (!space) return;                       // a global recall has no space to attribute
   let byClass = _pending.get(space);
-  if (!byClass) { byClass = new Map(); _pending.set(space, byClass); }
+  if (!byClass) {
+    // A key is made only for a space the config holds (Q-606): the id is the raw path segment of a request that may carry no credential,
+    // and every distinct string it sent was a map key here and a stored document, kept 90 days, after the flush. Asked once per space per
+    // flush window, on the branch that adds a key; the hot path stays the `Map` hit above.
+    if (!isConfiguredSpace(space)) return;
+    byClass = new Map();
+    _pending.set(space, byClass);
+  }
   let t = byClass.get(cls);
   if (!t) { t = emptyTotals(); byClass.set(cls, t); }
 
@@ -114,6 +123,9 @@ export function recordSpaceCall(
 export function drainSpaceActivity(): SpaceActivityRow[] {
   const rows: SpaceActivityRow[] = [];
   for (const [space, byClass] of _pending) {
+    // Counts pending for a space deleted or renamed since the call are dropped here, so they never write back under the old id
+    // (the store's purge docblock: a deleted space's activity is removed, and must stay removed).
+    if (!isConfiguredSpace(space)) continue;
     for (const [cls, totals] of byClass) rows.push({ space, cls, totals });
   }
   _pending.clear();

@@ -21,7 +21,7 @@
  * than fixing it twice.
  */
 import { getConfig } from '../config/loader.js';
-import { effectiveRung } from './mint-cap.js';
+import { effectiveRung, administers } from './mint-cap.js';
 import { satisfies } from './required-rung.js';
 import type { TokenRights, SpaceArea, Rung } from '../config/rights-shape.js';
 
@@ -103,4 +103,13 @@ export function holdsRungOnEvery(
   rights: TokenRights | undefined, spaces: readonly string[], area: SpaceArea, needs: Rung,
 ): boolean {
   return !!rights && spaces.length > 0 && spaces.every(s => holdsRung(rights, s, area, needs));
+}
+
+/**
+ * Does this token ADMINISTER every one of these spaces (`F-37`)? The sibling of `holdsRungOnEvery` for the space-admin grant, and
+ * it answers an empty list the same way, for the same reason: `false`. "Administers every space of the network" is not true of a
+ * network that carries none, and a hand-written `.every(...)` said so (Q-603). A caller for whom an empty set means yes says so itself.
+ */
+export function administersEvery(rights: TokenRights | null | undefined, spaces: readonly string[]): boolean {
+  return !!rights && spaces.length > 0 && spaces.every(s => administers(rights, s));
 }

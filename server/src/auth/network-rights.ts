@@ -20,6 +20,16 @@
  * shared by every space it carries, so changing them needs `networks: admin` on every one. `GET /api/networks`
  * and MCP `network_peers` read `visibleNetworks`, so the two doors show the same networks.
  *
+ * ## A network with no space left is the instance admin's alone (Q-603)
+ *
+ * "The rung on every space it carries" is true of an empty list for nobody but the instance admin: a rung is held on spaces,
+ * and an emptied network has none. To any other token it is not listed and every act on it answers 404 (never 403, which would
+ * confirm it exists); joining a remote network that carries no space is refused for the same reason. The instance admin sees,
+ * changes, adds to and leaves it, which is how an operator tidies one up after `takeSpaceOutOfNetwork` leaves it in the config.
+ * The shared predicates (`holdsRungOnEvery`, `administersEvery`) answer `false` on an empty list, so no act here holds a copy of
+ * the question. Leaving it is the instance admin's too, a call of this change: granting it to every matrix holder would be the
+ * empty-means-everything shape being removed.
+ *
  * ## What stays instance-admin, deliberately
  *
  * Votes, topology, peer members, signing keys, invites and sync are acts on the network as a whole, not on a
@@ -35,7 +45,7 @@
  */
 import type { TokenRights } from '../config/rights-shape.js';
 import { isInstanceAdmin } from './instance-admin.js';
-import { holdsRung, holdsRungOnEvery } from './reachable-spaces.js';
+import { holdsRung, holdsRungOnEvery, administersEvery } from './reachable-spaces.js';
 import { effectiveRung } from './mint-cap.js';
 import { mayLeaveNetwork, type LeaveVerdict } from './network-membership.js';
 import { administers } from './mint-cap.js';
@@ -63,6 +73,9 @@ export function networkCreateRefusal(caller: Caller, spaces: string[]): string |
     + `${short.join(', ')}. A network is shared with every peer, so it is only as permitted as its least-permitted space.`;
 }
 
+/** What a refusal says about a network that carries no space: whom it belongs to now. */
+const EMPTIED_NETWORK_REFUSAL = "A network that carries no space is the instance admin's alone: a rung is held on spaces, and this one has none.";
+
 const LEAVE_REASON: Record<Exclude<LeaveVerdict, { allowed: true }>['because'], string> = {
   'insufficient-rung': "needs 'write' on networks (its own membership) or 'admin' (any)",
   'not-your-membership': "was established by another token — leaving it needs 'admin' on networks",
@@ -75,6 +88,9 @@ export function networkLeaveRefusal(
   net: { spaces: string[]; spaceOrigins?: Record<string, string> | undefined },
 ): string | null {
   if (isInstanceAdmin(caller)) return null;
+  // An emptied network has no space for a rung to be held on, so below the instance admin nobody may leave it (Q-603): the loop
+  // below would refuse nothing and answer `null`, which is the empty-means-everything shape.
+  if (!net.spaces.length) return EMPTIED_NETWORK_REFUSAL;
   const refused = net.spaces.flatMap(spaceId => {
     const rung = caller.rights ? effectiveRung(caller.rights, spaceId, 'networks') : 'none';
     const v = mayLeaveNetwork({ origins: net.spaceOrigins, spaceId, tokenId: caller.id ?? '', rung });
@@ -83,20 +99,22 @@ export function networkLeaveRefusal(
   return refused.length ? `This token may not leave the network: ${refused.join('; ')}.` : null;
 }
 
-/** Does this token hold `needs` on networks for EVERY space `net` carries? Instance admin always does. */
+/**
+ * Does this token hold `needs` on networks for EVERY space `net` carries? Instance admin always does.
+ *
+ * A network that carries NO space is the instance admin's alone (Q-603): a rung is held on spaces, an emptied network has none,
+ * and `holdsRungOnEvery` answers `false` on an empty list. It used to be held by any token with a matrix, which is the
+ * empty-means-everything shape. `takeSpaceOutOfNetwork` leaves such a network in the config when its last space goes, so
+ * the instance admin is who tidies it up.
+ */
 function holdsOnEvery(caller: Caller, net: { spaces: string[] }, needs: 'read' | 'write' | 'admin'): boolean {
-  if (isInstanceAdmin(caller)) return true;
-  // A network carrying no spaces is held by any token with a matrix — the answer this always gave, stated here
-  // because the shared predicate refuses an empty list.
-  if (net.spaces.length === 0) return !!caller.rights;
-  return holdsRungOnEvery(caller.rights, net.spaces, 'networks', needs);
+  return isInstanceAdmin(caller) || holdsRungOnEvery(caller.rights, net.spaces, 'networks', needs);
 }
 
 /** The networks this token may see: `networks: read` on every space each carries. One filter for both doors. */
 export function visibleNetworks<N extends { spaces: string[] }>(caller: Caller, networks: N[]): N[] {
   // Or administering every space it carries (`F-37`): a space admin may create one, so it must be able to see it.
-  return networks.filter(n => holdsOnEvery(caller, n, 'read')
-    || (!!caller.rights && n.spaces.length > 0 && n.spaces.every(s => administers(caller.rights, s))));
+  return networks.filter(n => holdsOnEvery(caller, n, 'read') || administersEvery(caller.rights, n.spaces));
 }
 
 /** Why this token may not change `net`'s settings, or `null` when it may — `networks: admin` on every space. */
@@ -113,6 +131,9 @@ export function networkSettingsRefusal(caller: Caller, net: { spaces: string[] }
 export function networkJoinRefusal(caller: Caller, spaces: { existing: string[]; toCreate: string[] }): string | null {
   if (isInstanceAdmin(caller)) return null;
   const rights = caller.rights;
+  // The remote's own list is judged by the caller (`join-remote-act.ts`). A join that carries no space would leave an emptied network
+  // behind, which is the instance admin's alone (Q-603), and a rung has nothing to be checked on.
+  if (!spaces.existing.length && !spaces.toCreate.length) return `This token may not join the network: it carries no space. ${EMPTIED_NETWORK_REFUSAL}`;
   const short = spaces.existing.filter(s => !mayShare(caller, s));
   const reasons: string[] = [];
   if (short.length) reasons.push(`'write' on networks, or administering the space, is short on: ${short.join(', ')}`);
@@ -137,8 +158,8 @@ export function networkJoinRefusal(caller: Caller, spaces: { existing: string[];
  */
 export function networkInviteRefusal(caller: Caller, net: { spaces: string[] }): string | null {
   if (isInstanceAdmin(caller)) return null;
+  if (administersEvery(caller.rights, net.spaces)) return null;
   const short = net.spaces.filter(s => !caller.rights || !administers(caller.rights, s));
-  if (!short.length && net.spaces.length) return null;
   return `Inviting into a network needs instance admin, or administering EVERY space it carries; this token does not administer: `
     + `${(short.length ? short : ['(the network carries no space)']).join(', ')}.`;
 }
@@ -155,8 +176,7 @@ export function networkAddSpaceRefusal(caller: Caller, net: { spaces: string[] }
   if (isInstanceAdmin(caller)) return null;
   const reasons: string[] = [];
   if (!mayShare(caller, space)) reasons.push(`sharing '${space}' needs 'write' on networks, or administering it`);
-  const governs = holdsOnEvery(caller, net, 'admin')
-    || (!!caller.rights && net.spaces.length > 0 && net.spaces.every(s => administers(caller.rights, s)));
+  const governs = holdsOnEvery(caller, net, 'admin') || administersEvery(caller.rights, net.spaces);
   if (!governs) reasons.push("changing what the network carries needs 'admin' on networks, or administering, for every space it already carries");
   return reasons.length ? `This token may not add the space: ${reasons.join('; ')}.` : null;
 }

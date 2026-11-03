@@ -469,7 +469,13 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
     // `recallOutcome` is stashed on the request by the recall handler, which is the only code that knows
     // whether the answer contained anything — and "did it answer" is what separates a useful space from one
     // that is merely asked a lot.
-    if (matched.spaceId) {
+    //
+    // Only a call that was AUTHENTICATED and not refused by a guard is use of a space (Q-606, `04d-brain-ops-api.md`: an empty space must
+    // not gain activity): no token and no view read means nobody was let in, and a 403 or a 429 is a caller told no. Stated as what counts,
+    // not as what does not, so a maintenance 503 or a refusal added before authentication later fails closed. The skip is around the
+    // counters only: the audit row below is written either way.
+    const admitted = !!(req.authToken || req.viewRead) && res.statusCode !== 403 && res.statusCode !== 429;
+    if (matched.spaceId && admitted) {
       const cls = classifyOperation(matched.operation);
       if (cls && req.viewRead) {
         // A read through a personal view counts one call in each member it READ and nothing under the view's id (which is its owner's

@@ -1,4 +1,4 @@
-import { boundedJson, boundedErrorText } from '../util/bounded-read.js';
+import { boundedModelJson, boundedErrorText } from '../util/bounded-read.js';
 import { getEmbeddingConfig, getModelSlots } from '../config/loader.js';
 import { ssrfSafeFetch } from '../util/ssrf.js';
 import { allowPrivateForSlot } from '../config/model-egress-policy.js';
@@ -205,7 +205,7 @@ async function embedViaHttp(
     const msg = err instanceof Error ? err.message : String(err);
     log.warn(`Embedding endpoint unreachable (${peerText(cfg.baseUrl)}): ${peerText(msg)}`);
     throw new Error(
-      `Could not reach embedding endpoint at ${cfg.baseUrl}. ` +
+      `Could not reach embedding endpoint at ${peerText(cfg.baseUrl)}. ` +
       `Make sure an embedding server (e.g. Ollama) is running and configured.`,
     );
   }
@@ -213,11 +213,7 @@ async function embedViaHttp(
     const body = await boundedErrorText(response);
     throw new EmbeddingHttpError(response.status, body, retryAfterMs(response));
   }
-  const json = await boundedJson<{
-    data?: { embedding?: number[] }[];
-    error?: { message?: string };
-  }>(response, 'embedding provider');
-  if (json.error) throw new Error(`Embedding API error: ${json.error.message ?? JSON.stringify(json.error)}`);
+  const json = await boundedModelJson<{ data?: { embedding?: number[] }[] }>(response, 'Embedding API');
   const vector = json.data?.[0]?.embedding;
   if (!vector || vector.length === 0) throw new Error('Embedding API returned empty vector');
   if (vector.length !== cfg.dimensions) {
