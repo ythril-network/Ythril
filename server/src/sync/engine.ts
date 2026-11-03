@@ -122,9 +122,14 @@ export async function runSyncForNetwork(networkId: string): Promise<NetworkCycle
   return _syncRunner.run(networkId, cycleJob(networkId));
 }
 
-/** The job the runner runs for a network: one cycle, counted, handed the progress holder of its run. Shared by `runSyncForNetwork` and `joinSyncForNetwork`. */
-const cycleJob = (networkId: string) => (progress: NetworkCycleProgress): Promise<NetworkCycleResult> =>
-  inCycle(() => _runSyncForNetworkImpl(networkId, progress));
+/**
+ * The job the runner runs for a network: one cycle, counted, handed the progress holder of its run. Shared by `runSyncForNetwork` and `joinSyncForNetwork`.
+ * A declaration with a block body, not a curried arrow const: the housekeeping gates read a function by its declaration and its block, and a concise
+ * `const f = (a) => (b) => …` is a function they cannot see, so the cycle's loops would have no root reaching them (`every-housekeeping-space-walk-is-isolated`).
+ */
+function cycleJob(networkId: string) {
+  return (progress: NetworkCycleProgress): Promise<NetworkCycleResult> => inCycle(() => _runSyncForNetworkImpl(networkId, progress));
+}
 
 /**
  * {@link runSyncForNetwork}, and with it the progress holder of the cycle the caller started or joined. A trigger that races the cycle
