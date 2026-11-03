@@ -53,7 +53,7 @@ administrator and a space administrator both still pass, because both hold `admi
 
 Full-replace semantics for the entire `meta.typeSchemas` map. Use this when you want to overwrite all type definitions across all knowledge types in a single call (for example, restoring an exported schema). For incremental updates, prefer `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` (single type) or `PATCH /api/spaces/:id` (deep-merge).
 
-Before the new schema is written, the previous `typeSchemas` is automatically backed up to `_schema-backup-<ISO-timestamp>.json` inside the space's file store, so a bad replacement can be recovered or re-imported. Backup write failures are logged but never block the replacement.
+On a space in no network, the previous `typeSchemas` (when it holds any type) is first backed up to `_schema-backup-<ISO-timestamp>.json` inside the space's file store, so a bad replacement can be recovered or re-imported, and the replacement is then applied at once. Backup write failures are logged but never block the replacement. On a networked space nothing is written until the round passes, so no backup file is made: the round is the review, and a passed round applies as a merge (below).
 
 `$ref` values inside any property schema are validated against the instance's schema library — unknown refs return `422` with the list of missing entries.
 
@@ -283,7 +283,7 @@ guarded at the rung it advertises rather than at "administers the whole space".
 | `sample` | `{ "kind": "entity" \| "edge" \| "fact" \| "chrono", "record": { … } }` — check **one record you supply** instead of the stored ones, in the STORED shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, with `type`, `description`, `tags`, `properties`; a field left out is empty). Nothing stored is read, it costs one evaluation, and it is not rate limited — **and, in either mode, a check runs only rules you could save**: a call with a `meta` whose rules (`rules`, or any type's `rules`) differ from the stored ones needs `admin` on `schema`, the right to save them, and is otherwise refused `403` (see *What it costs*) |
 | `limit` | Violating records per page, 1 to 500 (default 500) |
 | `after` | The `nextAfter` of the previous page. Opaque; one this check did not give is a `400` |
-| `maxChars`, `maxBytes`, `maxTokens` | The size ceilings every budgeted read takes, on a stored-data check: the page is cut to **whole violating records** that fit, and `nextAfter` continues it. **Default `maxChars`: 50 000 on REST, 25 000 on MCP** — the one default the two doors deliberately differ on — and the answer discloses the number it used (`budgetChars`, `budgetBytes`). A value that is not a positive integer is a `400` |
+| `maxChars`, `maxBytes`, `maxTokens` | The size ceilings every budgeted read takes, on a stored-data check: the page is cut to **whole violating records** that fit, and `nextAfter` continues it; the first violating record is returned whole even when it alone is over the ceiling, with `truncated: true`, or it could never be read. **Default `maxChars`: 50 000 on REST, 25 000 on MCP** — the one default the two doors deliberately differ on — and the answer discloses the number it used (`budgetChars`, `budgetBytes`). A value that is not a positive integer is a `400` |
 
 A key the check does not take is dropped, never followed: a `projection` or `fields` in the body changes nothing about
 what is read. **A body that fails validation is refused `400` with the whole refusal, `{ "error", "issues" }`** — the

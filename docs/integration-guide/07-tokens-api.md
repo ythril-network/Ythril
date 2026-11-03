@@ -35,7 +35,7 @@ Returns the effective identity and permissions of the caller token.
 }
 ```
 
-Returns the full stored token record minus its `hash`. Besides the fields above it also includes `peerInstanceId`, `schemaLibrary`, and `oauthClientId` when those apply to the token.
+Returns the full stored token record minus its `hash`. Besides the fields above it also includes `peerInstanceId`, `schemaLibrary`, `oauthClientId` and `approvedByTokenId` when those apply to the token. `approvedByTokenId` is on an AI connector's token: the id of the token whose holder approved the connector at the consent step. It is local to this instance (tokens are never replicated) and an id, not a live link: the approving token may since have been revoked, in which case the id resolves to nothing in `GET /api/tokens`, and the connector is not revoked with it. The settings table marks a peer's token (**Peer**) and a connector's token (**Approved by** and the first characters of that id).
 
 ---
 
@@ -343,6 +343,12 @@ request without `rights` is judged on the matrix the token would be stored with,
 every space: an instance administrator gets that token, and a space-restricted administrator is refused (`403`)
 and must name its own spaces in `rights`.
 
+**A token made for one purpose does not mint.** A peer-bound token (`peerInstanceId`) and a library access token
+(`schemaLibrary`) each exist for a single door, so `POST /api/tokens` answers `403` to either one before it reads the
+body: a peer token whose rights were raised would otherwise hand out tokens with its own matrix and no peer binding,
+which a peer's revocation would not reach. Mint with your own token. The same two kinds cannot approve an AI connector
+either (see [MCP](16-mcp.md)); a connector's own token can.
+
 > **`readOnly` is not stored on a token, and sending it to `POST /api/tokens` is a `400`**, as the table above
 > says. Write `rights.floor` with read rungs instead.
 >
@@ -507,7 +513,7 @@ dropped:
 ```
 
 `spaces`, `admin` and `readOnly` are the pre-2.6.0 scope model; their replacement is `rights`. The rest
-(`createdAt`, `lastUsed`, `expiresAt`, `peerInstanceId`, `schemaLibrary`, `oauthClientId`) are set
+(`createdAt`, `lastUsed`, `expiresAt`, `peerInstanceId`, `schemaLibrary`, `oauthClientId`, `approvedByTokenId`) are set
 when the token is minted and are not editable on any route.
 
 A field name this route has never heard of is still a `400` — a mis-spelled `spaceIds` must not be accepted

@@ -214,13 +214,49 @@ lightweight and carries no model weights) or stop it with no effect on today's O
 `ythril-convert` network (no database, no internet egress), non-root and resource-limited. Ythril reaches
 it via `RENDER_SIDECAR_URL`. The **application** default is `http://localhost:8100` (a sidecar in the same network namespace); `docker-compose.yml` overrides it to `http://doc-render:8100`, the service name on the internal network. Both are correct for their layer — check which one applies to your deployment rather than assuming the compose value is the default.
 
-Two limits are set **on the sidecar**, not in Ythril's config — they bound what an untrusted document can
+Four limits are set **on the sidecar**, not in Ythril's config — they bound what an untrusted document can
 make it do, so they belong to the process that parses it:
 
 | Env (on the sidecar) | Default | Meaning |
 |---|---|---|
 | `RENDER_MAX_BYTES` | `104857600` (100 MiB) | Largest document the renderer will accept. |
 | `RENDER_MAX_PAGES` | `500` | Hard ceiling on pages rendered per request, whatever `maxPages` asks for. |
+| `RENDER_MAX_PIXELS` | `40000000` (40 MP) | Most pixels one rendered page may have. A page that would exceed it is rendered at a lower DPI until it fits (an A4 page at 600 DPI and an A0 page at 150 DPI both sit inside the default); a page that would need less than 72 DPI to fit is skipped. A PDF decides its own page size, so a document of a few hundred bytes can declare a page of 14400 × 14400 points. |
+| `RENDER_MAX_RESPONSE_BYTES` | `134217728` (128 MiB) | Most encoded page data one answer may carry. The answer ends early with `truncated: true` when the next page would pass it; the first page of a window is always sent. |
+
+Both caps are read once, when the sidecar starts. A value that is not a positive whole number stops the sidecar and
+names the variable, so a typo is a failed start and never a silently different limit. Set them in `.env`: compose
+passes the same two variables to `doc-render` and to `doc-office`, and an empty value means the default. Keep
+`RENDER_MAX_RESPONSE_BYTES` below `YTHRIL_MAX_UPSTREAM_RESPONSE_BYTES` (explained under *Document Processing
+Configuration* below): an answer the sidecar is willing to send has to be one Ythril is willing to read.
+
+**The container's memory has to hold what these caps admit.** One page is rendered at a time and released, so the
+memory is one page in flight plus the encoded pages held for the answer. At the defaults a window of dense 40 MP pages
+peaked at roughly three quarters of the 1 GiB that `DOC_RENDER_MEM_LIMIT` gives the sidecar by default. Raising either
+cap therefore needs a higher `DOC_RENDER_MEM_LIMIT` (and `DOC_OFFICE_MEM_LIMIT` for the office sidecar), or the
+sidecar is OOM-killed and the extraction falls back to OCR.
+
+**What a render answer says about the pages it changed.** `POST /render` answers `pages` (base64 PNGs), `count`,
+`total`, `truncated`, `startPage` and `dpi` as before, plus two fields that report what the caps did:
+
+| Field | Meaning |
+|---|---|
+| `dpiUsed` | The DPI each returned page was really rendered at, in `pages` order. Equal to `dpi` unless the page was lowered to fit `RENDER_MAX_PIXELS`. |
+| `skipped` | `[{ "page", "reason" }]` — pages of this window the sidecar would not render: a size that is not finite and positive, or one that would need less than 72 DPI to fit. `page` is the absolute, 0-based index. The request still succeeds. |
+
+A window can come back shorter than `maxPages` (a skipped page, or the response cap), so the next window starts at
+`startPage` plus the pages returned plus the pages skipped, and a caller loops until `truncated` is `false`. `GET /health`
+names both caps (`maxPixels`, `maxResponseBytes`). Ythril logs one line per document for the pages it read below
+`renderDpi` and one for the pages that are not in the extraction; neither is stored with the document. A document whose
+every page was skipped fails and says so.
+
+> **Upgrading.** The sidecar images are tagged `0.2.0` for this change. A `0.1.0` image already on the host is not
+> rebuilt by `docker compose up`, so rebuild them (`docker compose build doc-render`, and `doc-office` where you run it)
+> to get the caps; until then the old sidecar renders every page at the DPI asked for and answers neither new field.
+>
+> **What changes for a document.** A page so large that rendering it could exhaust the sidecar's memory (and send
+> the document back to the OCR text) is now rendered at a lower DPI and read by the document model like any other page. Where that model is an
+> external one, the same acknowledged-egress gate as before decides whether the page images may go to it.
 
 #### Office-render sidecar (`doc-office`) — optional
 
@@ -238,7 +274,7 @@ instance. Ythril reaches it via `RENDER_OFFICE_SIDECAR_URL` (default `http://doc
 When it is absent, office docs simply use OCR, unchanged. LibreOffice is MPL-2.0 / LGPL-3.0 (not AGPL) and
 runs as a separate process, so it does not affect Ythril's licensing.
 
-It honours `RENDER_MAX_BYTES` and `RENDER_MAX_PAGES` exactly as `doc-render` does, plus one of its own:
+It honours `RENDER_MAX_BYTES`, `RENDER_MAX_PAGES`, `RENDER_MAX_PIXELS` and `RENDER_MAX_RESPONSE_BYTES` exactly as `doc-render` does (the converted PDF's pages are clamped like any oversized PDF page, and the same `dpiUsed` and `skipped` answer fields apply), plus one of its own:
 
 | Env (on the sidecar) | Default | Meaning |
 |---|---|---|
@@ -403,7 +439,7 @@ They are never queued, so they do not sit at `pending` waiting for work that wil
 | `repairBaseUrl` | `""` | Endpoint for the repair model. Empty ⇒ reuses `vlmBaseUrl`. Env override: `DOC_REPAIR_URL`. |
 | `verifyModel` | `""` | Engages on the **`repair`** level, and on **`auto`** when a repair model is set (F11-d consensus). A *second* document VLM. When set, the repair level runs it as an independent second transcription of each page, reconciles it with the primary draft against the OCR text, and keeps the highest-coverage result — **never worse** than the primary. Empty ⇒ no consensus pass. Best set to a *different* model than `vlmModel`. Env override: `DOC_VERIFY_MODEL`. |
 | `verifyBaseUrl` | `""` | Endpoint for the verify model. Empty ⇒ reuses `vlmBaseUrl`. Env override: `DOC_VERIFY_URL`. |
-| `renderDpi` | `150` | Page rasterization DPI for the render sidecar (VLM modes only). |
+| `renderDpi` | `150` | Page rasterization DPI for the render sidecar (VLM modes only). A ceiling, not a promise: the sidecar lowers a page's DPI when the page would pass `RENDER_MAX_PIXELS`, and skips a page that would need less than 72 DPI to fit. A skipped page is not in the extraction. Both are logged once per document (see the page-render sidecar above). |
 | `maxPages` | `50` | Pages rendered per **render call** — one sidecar round trip's fact/latency bound. Not how much of a document is read: longer documents are walked in windows of this size. |
 | `maxTotalPages` | `200` | Pages read from **one document** in total, across windows. Beyond this the extraction stops and says so, in the log and in the stored markdown. |
 | `pageTimeoutMs` | `60000` | Per-page VLM transcription timeout (VLM modes only). It is the DEFAULT for the four document model slots, not an override of them: a a `modelSlots.<document slot>.timeoutMs` you set wins for that model, and this value applies to every document call that has none. Until 4.2 it was passed as an override, so those four slot budgets were documented, patchable, pinnable and inert — both defaults being 60 s is why nothing disagreed. |
@@ -596,7 +632,9 @@ see the egress table above. You can optionally point a **bigger, external model*
 > **Raise it if you have raised render quality.** The one path that can legitimately approach the default is
 > document rendering: `renderDpi` accepts up to 600 and `maxPages` up to 2000, and the sidecar
 > returns each page as a base64 image in one JSON body. 50 pages at 600 DPI sits comfortably under 256 MiB;
-> 2000 does not.
+> 2000 does not. The sidecar ends a window itself at its own `RENDER_MAX_RESPONSE_BYTES` (128 MiB by default),
+> so at the defaults a window never reaches this ceiling and simply comes back shorter than `maxPages`. This
+> ceiling needs raising only together with `RENDER_MAX_RESPONSE_BYTES`, which has to stay below it.
 >
 > **A malformed value falls back to the default rather than removing the ceiling**, so a typo cannot silently
 > unbound these reads.

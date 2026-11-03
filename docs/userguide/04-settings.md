@@ -661,7 +661,8 @@ member's word must not let it in. Accept it and the two connect on the next sync
 network does not carry yet, where your position allows it: the publisher of a pub/sub network, the root of a tree or
 a club's organiser, which all add it at once, or any member of a closed or democratic network, where it opens a vote
 that appears under **Open votes** for every member. It needs the Networks right at admin on every space already in
-the network and at write on the one you add (or administering all of them). Every other member gets the space on its
+the network and at write on the one you add (or administering all of them); a network that no longer carries any
+space is added to by the instance administrator alone. Every other member gets the space on its
 next sync, created if it has none. It only adds: nothing there is overwritten or deleted. One exception protects your
 own data: on a club, closed or democratic network, a space of yours with the same name that is not in the network
 stays out of it unless you voted yes, because those networks sync both ways and joining it would send your records to
@@ -896,4 +897,4 @@ vote and its yes is already in the tally. Where your yes alone carries the round
 
 ### Leaving a network
 
-Click **Leave network** at the bottom of the network card. Your local data in the network's spaces is kept.
+Click **Leave network** at the bottom of the network card. Your local data in the network's spaces is kept. A network that no longer carries any space (its last space was taken out) is not shown to anyone but the instance administrator, who alone can open it, change it and leave it.

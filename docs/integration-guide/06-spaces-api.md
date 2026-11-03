@@ -604,7 +604,7 @@ A single space has no endpoint of its own: read it from the listing above, or re
 **Removing a type schema.** `PATCH` deep-merges by default, so omitting a type does not delete it — a merge that could delete would make every PATCH potentially destructive, and a client that round-trips a space would silently drop schemas whenever its serialiser emitted `null` for an unset field. There are three ways to delete:
 
 - `DELETE /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` for one type (404 if it does not exist).
-- `PUT /api/spaces/:id/schema` to replace the whole map. It writes a timestamped backup of the previous schema into the space first. Note it applies **directly**, so on a networked space it does not open a vote round — use the PATCH form below if the change should go to consensus.
+- `PUT /api/spaces/:id/schema` to replace the whole map. On a space in no network it writes a timestamped backup of the previous schema first and then applies the replacement at once. On a networked space it is a vote, like every schema write there: it opens a round (`202 vote_pending`, or `200` where this instance's own yes carries it), nothing is written until the round passes, and a passed round applies as a **merge**, so a type the replacement leaves out is kept (see [Replace Full Schema](06a-schema-api.md#replace-full-schema-bulk-overwrite)).
 - `PATCH /api/spaces/:id` with `"typeSchemasMode": "replace"` alongside `meta.typeSchemas`. The payload becomes authoritative: types absent from it are removed. This is the same request as any other meta change, so it takes the same network-vote path.
 
 ```jsonc
