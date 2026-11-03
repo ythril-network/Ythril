@@ -1,4 +1,14 @@
-import { BUDGET_CEILING_MIN, MIN_MAX_BYTES, MAX_MAX_BYTES, DEFAULT_CHARS_PER_TOKEN, budgetDefaultsSentence } from '../../brain/result-budget.js';
+import { BUDGET_CEILING_MIN, MIN_MAX_BYTES, MAX_MAX_BYTES, DEFAULT_CHARS_PER_TOKEN, ROW_PAGER, budgetDefaultsSentence, type Pager } from '../../brain/result-budget.js';
+
+/**
+ * What the ceiling does to the unit that is itself over it, said in the caller's words and from the pager's own descriptor (Q-450): a row pager
+ * admits the first row whole (the answer says `truncated: true`), a document window splits the first paragraph at the ceiling.
+ */
+function overTheCeilingSentence(unit: string, pager: Pager): string {
+  return pager.firstUnit === 'split'
+    ? 'the first paragraph is split at the ceiling, so a window never exceeds it.'
+    : `the first ${unit} is returned whole even above the ceiling, with \`truncated: true\`, or it could never be read.`;
+}
 
 /**
  * The input schema of the size ceilings every budgeted tool takes: `maxChars`, `maxBytes`, `maxTokens` (`Q-161`).
@@ -9,13 +19,17 @@ import { BUDGET_CEILING_MIN, MIN_MAX_BYTES, MAX_MAX_BYTES, DEFAULT_CHARS_PER_TOK
  * `maxBytes` under 1000 that the resolver deliberately honours. So the floors here are the resolver's: a small
  * `maxChars` is RAISED to the floor rather than refused, and `maxBytes` has none. `unit` names what one row of THIS
  * answer is ("match", "row", "node", "item"), so the description a caller reads while building arguments says what
- * a budget cuts.
+ * a budget cuts. `pager` is the descriptor of the module that pages (`ROW_PAGER`, `KEYSET_PAGER`, `WINDOW_PAGER`): it names the field the
+ * answer continues by and what happens to a first unit over the ceiling, so the description is the code's own.
  */
-export function budgetSizeSchema(unit: string, continuedBy = 'nextSkip'): Record<string, Record<string, unknown>> {
+export function budgetSizeSchema(unit: string, pager: Pager = ROW_PAGER): Record<string, Record<string, unknown>> {
+  const lead = pager.firstUnit === 'split'
+    ? `Ceiling on the returned text, in CHARACTERS: whole paragraphs only, the rest reached with \`${pager.continuedBy}\`; `
+    : `Ceiling on the serialised answer, in CHARACTERS: whole ${unit}s only, the rest reached with \`${pager.continuedBy}\`; `;
   return {
     maxChars: {
       type: 'integer', minimum: BUDGET_CEILING_MIN,
-      description: `Ceiling on the serialised answer, in CHARACTERS: whole ${unit}s only, the rest reached with \`${continuedBy}\`. `
+      description: `${lead}${overTheCeilingSentence(unit, pager)} `
         + `${budgetDefaultsSentence()} Held between ${MIN_MAX_BYTES} and ${MAX_MAX_BYTES}: a smaller value is raised to ${MIN_MAX_BYTES}, not refused. Characters equal `
         + 'bytes only for ASCII — for a byte ceiling use `maxBytes`.',
     },

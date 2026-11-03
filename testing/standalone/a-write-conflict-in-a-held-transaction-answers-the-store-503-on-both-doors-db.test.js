@@ -35,6 +35,14 @@ const skip = await mongoSkipReason();
 const S = 'heldconflict';
 const BOUND = { writeTimeoutMs: 2000, holdDeadlineMs: 2000 };
 const CAP_MS = BOUND.holdDeadlineMs + 4000;
+/**
+ * The bound a CONTROL runs under (Q-635). A control asks "does the unlocked merge land?", and it shared the 2000 ms bound of the locked cases, so a
+ * machine too busy to finish a merge in 2 s would answer the control 503 and read as a failed fixture. Under this bound a busy machine has ten times
+ * the time and the control still fails if the merge itself fails. It is a MARGIN: the flake was not reproduced (0 of 20 runs per file under CPU
+ * contention in a 1-CPU container, bundle-231), so it is unproven that the old bound was ever the cause. The locked cases keep BOUND: they wait
+ * the bound out on purpose.
+ */
+const CONTROL_BOUND = { writeTimeoutMs: 20_000, holdDeadlineMs: 20_000 };
 const SURVIVOR = 'aaaaaaaa-0000-4000-8000-0000000000a1';
 const ABSORBED = 'aaaaaaaa-0000-4000-8000-0000000000a2';
 const DRIVER_TEXT = /Mongo\w*Error|MaxTimeMS|maxTimeMS|exceeded time limit|Timed out during|Server reported a timeout|WriteConflict|heldconflict_entities|E11000/;
@@ -105,7 +113,9 @@ describe('a write conflict a held transaction meets is the store not answering',
 
   for (const d of DOORS) {
     it(`control: ${d.name} merges when nothing is locked`, async () => {
-      const r = await d.call();
+      await setWriteBoundForTest(CONTROL_BOUND);
+      let r;
+      try { r = await d.call(); } finally { await setWriteBoundForTest(BOUND); }
       assert.ok(r.status === 200 || r.status === 201, `${d.name} answered ${r.status} with nothing locked: ${r.text.slice(0, 300)}`);
     });
 

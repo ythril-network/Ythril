@@ -598,14 +598,14 @@ onHousekeepingSignal((event) => {
 
 export const httpRequestsTotal = new Counter({
   name: 'ythril_http_requests_total',
-  help: 'Total HTTP requests by method, route pattern, and status code',
+  help: 'Total HTTP requests by method, full route pattern (unmatched when no route matched; a mount path when a guard refused before any route), and status code',
   labelNames: ['method', 'route', 'status_code'] as const,
   registers: [register],
 });
 
 export const httpRequestDurationSeconds = new Histogram({
   name: 'ythril_http_request_duration_seconds',
-  help: 'HTTP request latency in seconds by method and route pattern',
+  help: 'HTTP request latency in seconds by method and full route pattern (unmatched when no route matched; a mount path when a guard refused before any route)',
   labelNames: ['method', 'route'] as const,
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
   registers: [register],

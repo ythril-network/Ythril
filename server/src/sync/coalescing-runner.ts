@@ -39,7 +39,19 @@ export interface CoalescingRunnerHooks {
   onRerun?(key: string): void;
 }
 
-export interface CoalescingRunner<T> {
+/**
+ * What a trigger holds of the job it joined: the result to await, and the PROGRESS HOLDER the runner created for that run (Q-675).
+ *
+ * The holder is a plain object the job fills in as it goes (the sync cycle writes the members that have finished). A trigger that gives up
+ * waiting (a timeout) reads it to say what the cycle had done, and it reads the holder of the run it JOINED: the runner makes a fresh one
+ * for every run it starts, the queued rerun included, so a late reader never sees the work of a cycle that is not the one it joined.
+ */
+export interface CoalescingJoin<T, P extends object> {
+  promise: Promise<T>;
+  progress: P;
+}
+
+export interface CoalescingRunner<T, P extends object = object> {
   /**
    * Run `job` for `key`, unless one is already running — in which case join it and queue a single
    * follow-up.
@@ -47,16 +59,20 @@ export interface CoalescingRunner<T> {
    * Resolves with the result of the job the caller JOINED, not of the rerun. A caller that needs the
    * later result must call again once this settles; that is the same contract the sync engine had.
    */
-  run(key: string, job: () => Promise<T>): Promise<T>;
+  run(key: string, job: (progress: P) => Promise<T>): Promise<T>;
+  /**
+   * {@link run}, and the progress holder of the run the caller started or joined. The job is handed that holder as its argument.
+   */
+  join(key: string, job: (progress: P) => Promise<T>): CoalescingJoin<T, P>;
   /** True while a job for `key` is in flight. Cheap and in-memory. */
   isRunning(key: string): boolean;
 }
 
-export function createCoalescingRunner<T>(hooks: CoalescingRunnerHooks = {}): CoalescingRunner<T> {
-  const running = new Map<string, Promise<T>>();
+export function createCoalescingRunner<T, P extends object = object>(hooks: CoalescingRunnerHooks = {}): CoalescingRunner<T, P> {
+  const running = new Map<string, CoalescingJoin<T, P>>();
   const rerunRequested = new Set<string>();
 
-  async function run(key: string, job: () => Promise<T>): Promise<T> {
+  function join(key: string, job: (progress: P) => Promise<T>): CoalescingJoin<T, P> {
     const inflight = running.get(key);
     if (inflight) {
       // Join the running job and ask for one more pass after it. `add` on a Set is what makes this
@@ -66,21 +82,24 @@ export function createCoalescingRunner<T>(hooks: CoalescingRunnerHooks = {}): Co
       return inflight;
     }
 
-    const started = job();
-    running.set(key, started);
-    try {
-      return await started;
-    } finally {
+    // A holder of this run's own: a rerun starts with nothing finished, and a reader of the run that ended keeps reading that run's.
+    const progress = {} as P;
+    let started: Promise<T>;
+    try { started = job(progress); } catch (err) { started = Promise.reject(err); }
+    const promise = started.finally(() => {
       // Release FIRST, so the rerun below sees a free key rather than joining the job that is ending.
       running.delete(key);
       // No rerun once shutdown has begun: it would start work after the wait for work in flight has ended, against a store about to close
       // (bundle-39 D5). What it was asked for is picked up by the first cycle after the next start.
       if (rerunRequested.delete(key) && !isShuttingDown()) {
         hooks.onRerun?.(key);
-        void run(key, job);
+        void join(key, job).promise;
       }
-    }
+    });
+    const flight: CoalescingJoin<T, P> = { promise, progress };
+    running.set(key, flight);
+    return flight;
   }
 
-  return { run, isRunning: (key: string) => running.has(key) };
+  return { join, run: (key, job) => join(key, job).promise, isRunning: (key: string) => running.has(key) };
 }

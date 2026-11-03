@@ -318,6 +318,27 @@ export function applyBudget<T>(results: readonly T[], budget: ResolvedBudget): B
 }
 
 /**
+ * How a pager of budgeted answers continues, and what it does with the FIRST unit when that unit alone is over the ceiling (Q-450).
+ *
+ * Exported by the module that does the paging, and read by the tool schema (`budgetSizeSchema`), so the sentence a caller reads about "the
+ * first row over the ceiling" comes from the code that pages and not from a second description of it: two engines, two truths.
+ *
+ * - `continuedBy`: the field of the ANSWER that carries the next position (`nextSkip`, `nextAfter`, `markdownNextSkip`);
+ * - `firstUnit`: `whole` (the first row is admitted whole above the ceiling, or it could never be read, and the answer says `truncated: true`)
+ *   or `split` (a first paragraph over the ceiling is cut at it).
+ */
+export interface Pager {
+  readonly continuedBy: string;
+  readonly firstUnit: 'whole' | 'split';
+}
+
+/** The row pager: `applyBudget` and `budgetMeter` admit the first item whole. The answer continues at `nextSkip`. */
+export const ROW_PAGER: Pager = { continuedBy: 'nextSkip', firstUnit: 'whole' };
+
+/** A row pager that continues by a keyset (`after` / `nextAfter`) and admits the first row whole as `applyBudget` does. */
+export const KEYSET_PAGER: Pager = { continuedBy: 'nextAfter', firstUnit: 'whole' };
+
+/**
  * THE admission rule, one item at a time — for a reader that cannot hold the whole list, such as a spill whose
  * pages are decoded only as the window reaches them (`read-spill-store.ts`). `applyBudget` is this in a loop.
  *

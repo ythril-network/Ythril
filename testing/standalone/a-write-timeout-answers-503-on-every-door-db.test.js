@@ -41,6 +41,13 @@ const skip = await mongoSkipReason();
 const S = 'timeout503';
 const BOUND = { writeTimeoutMs: 2000, holdDeadlineMs: 2000 };
 const CAP_MS = BOUND.holdDeadlineMs + 2500;
+/**
+ * The bound the CONTROL runs under (Q-635): it asks "does every door write when nothing is stalled?" across four doors in turn, and used the 2000 ms
+ * bound of the stalled cases, so a busy machine could end a slow unstalled write at the bound and read as a stall. Ten times the time here; a write
+ * that really fails still fails. A MARGIN: the flake was not reproduced (0 of 20 runs per file under CPU contention in a 1-CPU container,
+ * bundle-231), so it is unproven that the old bound was ever the cause. The stalled cases keep BOUND: they wait it out on purpose.
+ */
+const CONTROL_BOUND = { writeTimeoutMs: 20_000, holdDeadlineMs: 20_000 };
 
 /** What the driver says about a write the bound ended — none of it may reach a caller. */
 const DRIVER_TEXT = /Mongo\w*Error|MaxTimeMS|maxTimeMS|exceeded time limit|Timed out during|Server reported a timeout|WriteConflict|timeout503_facts|E11000/;
@@ -70,11 +77,14 @@ describe('a write timeout answers 503 on every door', { skip }, () => {
   });
 
   it('control: unstalled, every door writes (so a 503 below is the stall, not the fixture)', async () => {
-    for (const d of DOORS) {
-      await seedDoorSpace(env.door, S);
-      const r = await d.call();
-      assert.equal(r.status, 200, `${d.name} answered ${r.status} with nothing stalled: ${r.text.slice(0, 300)}`);
-    }
+    await setWriteBoundForTest(CONTROL_BOUND);
+    try {
+      for (const d of DOORS) {
+        await seedDoorSpace(env.door, S);
+        const r = await d.call();
+        assert.equal(r.status, 200, `${d.name} answered ${r.status} with nothing stalled: ${r.text.slice(0, 300)}`);
+      }
+    } finally { await setWriteBoundForTest(BOUND); }
   });
 
   for (const d of DOORS) {

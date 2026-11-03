@@ -65,7 +65,8 @@
  */
 import type { Response } from 'express';
 import { log, peerText } from '../util/log.js';
-import { sendCaughtFailure } from '../api/send-failure.js';
+import { sendCaughtFailure, sendStoreFailure } from '../api/send-failure.js';
+import { storeFailureAnswer, type StoreFailureAnswer } from '../brain/store-failure.js';
 import { withinTimeBound, isTimeBoundEnded } from '../util/time-bound.js';
 import { isShuttingDown } from '../lifecycle.js';
 import { MEMBER_OUTCOMES, refusedMemberCount, syncVerdict, type MemberResult, type SyncVerdict } from './cycle-outcome.js';
@@ -105,6 +106,13 @@ export interface SyncAnswer {
   status: number;
   body: Record<string, unknown> & { status: 'triggered' | 'completed' | 'timeout' | 'error' | 'shutting_down'; wait: boolean };
   failure?: { err: unknown; where: string };
+  /**
+   * The store's answer, when the cycle ended in a failure on the store's side (classified here, once, so the body can carry the members and
+   * the door still sends the store's status and `Retry-After`). Set with `failure` absent: the store's classification logged the cause.
+   */
+  storeFailure?: StoreFailureAnswer;
+  /** The members a cycle had finished when its answer was built, for a door that reports more than the body does (a timeout, a failure). */
+  partial?: CyclePartial;
   detail?: { notFound?: boolean; networksSynced?: number; errors: number; refused?: number; synced?: number; members: MemberResult[]; verdict: SyncVerdict };
 }
 
@@ -116,6 +124,24 @@ export interface SyncAnswer {
  */
 export function verdictFields(verdict: SyncVerdict, members: MemberResult[]): { ok: boolean; outcome: SyncVerdict['outcome']; code?: string; refused: number; members: MemberResult[] } {
   return { ok: verdict.ok, outcome: verdict.outcome, ...(verdict.code ? { code: verdict.code } : {}), refused: refusedMemberCount(members), members };
+}
+
+/** What a cycle had done when a waited answer ended without its result (Q-675): a snapshot, never the cycle's live list. */
+export interface CyclePartial { members: MemberResult[]; membersTotal?: number }
+
+/**
+ * The fields a timeout (504) and a cycle's failure (500, or the store's 503) carry about the cycle: `members` (the members whose turn had
+ * ended, the same rows the completed answer lists), `refused` (how many of them the peer's age ended) and `membersTotal` (how many the
+ * network has, so a caller tells 1 of 2 from 1 of 1). There is NO verdict here: a cycle that did not finish has no outcome, and `ok` is false
+ * because it did not. Taken from the progress holder of the cycle the trigger JOINED, and copied: the cycle keeps writing to its own list.
+ */
+export function partialCycleFields(partial: CyclePartial): { members: MemberResult[]; refused: number; membersTotal?: number } {
+  return { members: partial.members, refused: refusedMemberCount(partial.members), ...(partial.membersTotal !== undefined ? { membersTotal: partial.membersTotal } : {}) };
+}
+
+/** The snapshot of a running cycle's progress holder (`NetworkCycleProgress`); empty when the cycle never got as far as reading the network. */
+function snapshotOf(progress: { members?: readonly MemberResult[]; membersTotal?: number }): CyclePartial {
+  return { members: [...(progress.members ?? [])], ...(progress.membersTotal !== undefined ? { membersTotal: progress.membersTotal } : {}) };
 }
 
 /**
@@ -147,6 +173,8 @@ export function syncAnswerStatus(result: { structuredContent?: Record<string, un
   const structured = result.structuredContent;
   if (!structured) return undefined;
   if (structured['status'] === 'timeout' && typeof structured['wait'] === 'boolean') return 504;
+  // A cycle that ended in a failure (`networkSyncOutcome`): the store's 503 when it said `retryable`, else the 500 REST answers.
+  if (structured['status'] === 'error' && typeof structured['wait'] === 'boolean') return structured['retryable'] === true ? 503 : 500;
   if (typeof structured['outcome'] !== 'string' || !Array.isArray(structured['members'])) return undefined;
   const code = structured['code'];
   return (typeof code === 'string' ? CODE_STATUS.get(code) : undefined) ?? 200;
@@ -174,13 +202,15 @@ export function syncShutdownRefusal(subject: Record<string, unknown>, wait: bool
  *
  * `wait` false answers `triggered` immediately and logs any later failure. `wait` true races the cycle
  * against `timeoutMs` and answers `completed` (with the cycle's one verdict: 200, or 502 `sync_failed` / 503 `sync_store_failed` /
- * 503 `shutting_down` when nothing synced, this instance's store failed, or shutdown stopped it), `timeout` (504, still running) or `error` (500).
+ * 503 `shutting_down` when nothing synced, this instance's store failed, or shutdown stopped it), `timeout` (504, still running) or `error` (500, or the store's
+ * own 503). A `timeout` and an `error` carry what the cycle had finished — `members`, `refused`, `membersTotal` (`partialCycleFields`), read from the
+ * progress of the cycle this trigger joined — and no verdict, because a cycle that did not finish has no outcome.
  * Every answer names the `wait` it used, and a waited one the `timeoutMs` that bounded it. Once shutdown began no cycle is started (503).
  */
 export async function networkSyncOutcome(
   networkId: string, opts: { wait: boolean; timeoutMs: number; noteId?: string },
 ): Promise<SyncAnswer> {
-  const { runSyncForNetwork } = await import('./engine.js');
+  const { joinSyncForNetwork } = await import('./engine.js');
   // F-42: every answer names the change note this sync carries, whatever became of the cycle — the note is queued
   // either way and travels with the next cycle that reaches each member.
   const note = opts.noteId ? { noteId: opts.noteId } : {};
@@ -188,13 +218,15 @@ export async function networkSyncOutcome(
   if (closing) return closing;
 
   if (!opts.wait) {
-    void runSyncForNetwork(networkId)
+    void joinSyncForNetwork(networkId).promise
       .catch(err => log.error(`Triggered sync for network ${peerText(networkId)} failed: ${peerText(err)}`));
     return { status: 200, body: { ok: true, status: 'triggered', networkId, wait: false, ...note } };
   }
 
+  // The handle of the cycle this trigger started or JOINED: what that cycle had finished is read from it if the wait ends first (Q-675).
+  const { promise, progress } = joinSyncForNetwork(networkId);
   try {
-    const r = await withinTimeBound(runSyncForNetwork(networkId), opts.timeoutMs, `the sync cycle of network ${networkId}`);
+    const r = await withinTimeBound(promise, opts.timeoutMs, `the sync cycle of network ${networkId}`);
     const verdict = syncVerdict(r.members);
     return {
       status: verdict.status,
@@ -202,18 +234,30 @@ export async function networkSyncOutcome(
       detail: { synced: r.synced, errors: r.errors, members: r.members, verdict },
     };
   } catch (err) {
+    // Copied NOW: the cycle goes on writing to its own list, and the answer says what it had finished when the wait ended.
+    const partial = snapshotOf(progress);
     if (isTimeBoundEnded(err)) {
       // 504 and NOT an error: the cycle is still running, and saying "failed" would send an operator
-      // looking for a fault that does not exist.
-      return { status: 504, body: { ok: false, status: 'timeout', networkId, wait: true, timeoutMs: opts.timeoutMs, ...note } };
+      // looking for a fault that does not exist. It says what the cycle HAS finished.
+      return { status: 504, body: { ok: false, status: 'timeout', networkId, wait: true, timeoutMs: opts.timeoutMs, ...partialCycleFields(partial), ...note }, partial };
     }
-    // Through the one sender (bundle-30 I13): a store failure is its 503 in our words — this answered the
-    // exception's message, which for the store's names internal hosts and ports. Anything else is answered by what it is, in our
-    // words (`sendCaughtFailure`): the reason is in the server log, not in a body.
+    // A store failure is its 503 (or the store's own 500) in our words — this answered the exception's message, which for the store's names
+    // internal hosts and ports (bundle-30 I13). It is classified HERE so the body can carry the members the cycle had finished beside the store's
+    // words, and the door still sends the store's status and `Retry-After`. Anything else is answered by what it is, in our words
+    // (`sendCaughtFailure`): the reason is in the server log, not in a body.
+    const where = `synchronous sync trigger for network ${peerText(networkId)}`;
+    const store = storeFailureAnswer(err, where);
+    if (store) {
+      return {
+        status: store.status,
+        body: { ...store.body, ok: false, status: 'error', networkId, wait: true, timeoutMs: opts.timeoutMs, ...partialCycleFields(partial), ...note },
+        storeFailure: store, partial,
+      };
+    }
     return {
       status: 500,
-      body: { ok: false, status: 'error', networkId, wait: true, timeoutMs: opts.timeoutMs, error: SYNC_FAILED_TEXT, ...note },
-      failure: { err, where: `synchronous sync trigger for network ${peerText(networkId)}` },
+      body: { ok: false, status: 'error', networkId, wait: true, timeoutMs: opts.timeoutMs, error: SYNC_FAILED_TEXT, ...partialCycleFields(partial), ...note },
+      failure: { err, where }, partial,
     };
   }
 }
@@ -252,6 +296,7 @@ export async function peerSyncOutcome(peerId: string, opts: { wait: boolean }): 
 
 /** Put a sync answer on the wire: its status and body, or — when the cycle threw — through the one sender every route catch uses. */
 export function sendSyncAnswer(res: Response, answer: SyncAnswer): void {
+  if (answer.storeFailure) { sendStoreFailure(res, answer.storeFailure, answer.body); return; }
   if (answer.failure) { sendCaughtFailure(res, answer.failure.where, answer.failure.err, answer.body); return; }
   res.status(answer.status).json(answer.body);
 }

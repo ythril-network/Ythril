@@ -491,7 +491,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // `unknownWriteFields` (Q-320): this instance's answer to a top-level field a brain write does not take. Local like the three above,
   // and for their reason: it is never replicated, so a vote has nothing to carry and a networked PATCH that also changes the meta would
   // answer `vote_pending` and drop it silently. `!== undefined`, not truthiness: `null` and `''` are the clear, and `updateSpace` removes
-  // the key for them and never stores `'warn'`. Applied HERE and taken out of `restPatch` below, so one site writes it.
+  // the key for them and never stores `'warn'`. Applied HERE and taken out of the spread below (`storablePatch`), so one site writes it.
   if (patchData.unknownWriteFields !== undefined) {
     updateSpace(id, { unknownWriteFields: patchData.unknownWriteFields });
   }
@@ -581,10 +581,10 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // values, and letting the raw body through here overwrote that with itself — so a partial TTL write cleared the
   // four buckets it did not mention, and an all-cleared write stored five explicit nulls instead of nothing. Both
   // returned 200 and looked like they had worked; found by driving the UI.
-  const { documentExtraction: _rawMode, recordTtlDays: _rawTtl, ...restPatch } = patchData;
-  // `unknownWriteFields` was applied above for every request, so it leaves the spread too: exactly one site writes it. (A second
-  // destructure and not a third name in the one above, which `record-ttl-buckets.test.js` pins by its exact text.)
-  const { unknownWriteFields: _rawUnknownWriteFields, ...storablePatch } = restPatch;
+  // `unknownWriteFields` was applied above for every request, so it leaves the spread too: exactly one site writes it. All three leave in this
+  // ONE destructure, whatever their spelling: `record-ttl-buckets.test.js` holds the RULE (a partial TTL write through `applySpaceMetaUpdate`
+  // never clears a bucket it did not name), not this text.
+  const { documentExtraction: _rawMode, recordTtlDays: _rawTtl, unknownWriteFields: _rawUnknownWriteFields, ...storablePatch } = patchData;
   // F-39.2: a space in no network has no layer, so its own definitions ARE the edited meta — kept in step, or a stale
   // `ownMeta` would come back the next time a network sends this space a layer.
   const held = getConfig().spaces.find(s => s.id === id);
