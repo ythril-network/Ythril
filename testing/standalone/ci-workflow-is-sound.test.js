@@ -83,7 +83,7 @@ import {
   MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, shellCommands, usesOf, isCommitPinned, stepsUsing,
   runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue, triggersOf, onOf, mergeGateEntries,
   workflowFiles, loadWorkflow, actionFiles, loadAction, parseAction, CI_WORKFLOW,
-  REUSE_JOB_ID, REUSE_OUTPUT, REUSE_EMPTY, ifConjuncts, skipsWhenRunIsReused,
+  REUSE_JOB_ID, REUSE_OUTPUT, REUSE_EMPTY, ifConjuncts, skipsWhenRunIsReused, unguardedNeeds,
 } from '../_shared/ci-workflow.mjs';
 // The full-run names (`FULL_RUN_WORKFLOW`, `FULL_RUN_PREFIX`, `loadFullRun`, `branchesOf`) are read off the namespace, so a
 // module that lacks one fails the tests that need it and not the whole file.
@@ -1268,6 +1268,11 @@ function reuseSkipSetViolations(doc) {
   if (suites.length < SUITE_FLOOR) v.push(`only ${suites.length} suite job(s) derived (floor ${SUITE_FLOOR}): the derivation is broken`);
   for (const id of suites) {
     if (!skipsWhenRunIsReused(doc.jobs[id])) v.push(`${id} does not stand down on a reused run: it must wait for \`${REUSE_JOB_ID}\` and carry \`if: !cancelled() && ${REUSE_EMPTY}\``);
+    // `!cancelled()` replaces the default `success()`: a job that also waits for another (the stack jobs wait for `prepare`) must
+    // name that job's success itself, or it runs after the failure it waited for.
+    for (const dep of unguardedNeeds(doc.jobs[id])) {
+      v.push(`${id} waits for \`${dep}\` but its \`if\` does not require \`needs.${dep}.result == 'success'\`: \`!cancelled()\` replaces the default \`success()\`, so it would run after a failed \`${dep}\``);
+    }
   }
   for (const { id, job } of jobEntries(doc)) {
     if (!suites.includes(id) && !isAdvisory(job) && ifConjuncts(job).includes(REUSE_EMPTY)) {
@@ -1726,6 +1731,9 @@ const BREAKAGES = [
   ['a suite job stops waiting for reuse (its needs context has no output)', (d) => { job(d, 'integration').needs = 'prepare'; }, 'suite jobs stand down on a reused run', /integration does not stand down/],
   ['a suite job\'s condition is the default success() again (a failed reuse would skip it)', (d) => { job(d, 'sync').if = "${{ needs.reuse.outputs.full_run == '' }}"; }, 'suite jobs stand down on a reused run', /sync does not stand down/],
   ['a suite job\'s condition is the other way round', (d) => { job(d, 'sync').if = "${{ !cancelled() && needs.reuse.outputs.full_run != '' }}"; }, 'suite jobs stand down on a reused run', /sync does not stand down/],
+  ['a stack job stops requiring the success of prepare (a failed prepare would not stop it: !cancelled() replaces success())', (d) => {
+    job(d, 'sync').if = "${{ !cancelled() && needs.reuse.outputs.full_run == '' }}";
+  }, 'suite jobs stand down on a reused run', /sync waits for `prepare` but its `if` does not require `needs\.prepare\.result == 'success'`/],
   ['the changelog job carries the reuse condition', (d) => { job(d, 'changelog').needs = 'reuse'; job(d, 'changelog').if = "${{ !cancelled() && needs.reuse.outputs.full_run == '' }}"; }, 'suite jobs stand down on a reused run', /changelog carries the reuse condition/],
   ['the advisory job does not wait for reuse', (d) => { job(d, 'ci-advisory').needs = ['standalone', 'integration', 'sync']; }, 'suite jobs stand down on a reused run', /must wait for `reuse`/],
   ['the advisory job keeps a bare always()', (d) => { job(d, 'ci-advisory').if = 'always()'; }, 'suite jobs stand down on a reused run', /must wait for `reuse`/],
@@ -2278,5 +2286,21 @@ describe('a job that stands down on a reused run is read from its `if:` and its 
     ['the right condition and no need for reuse (the output is not in its context)', candidate("${{ !cancelled() && needs.reuse.outputs.full_run == '' }}", 'prepare'), false],
   ]) {
     it(`${stands ? 'stands down' : 'does not'}: ${what}`, () => assert.equal(skipsWhenRunIsReused(j), stands));
+  }
+});
+
+describe('a job that stands down must also require the success of every other job it waits for (`!cancelled()` replaces `success()`)', () => {
+  const REUSED = "!cancelled() && needs.reuse.outputs.full_run == ''";
+  for (const [what, j, unguarded] of [
+    ['waits for reuse only', { needs: 'reuse', if: `\${{ ${REUSED} }}` }, []],
+    ['waits for reuse and prepare and requires prepare\'s success', { needs: ['reuse', 'prepare'], if: `\${{ ${REUSED} && needs.prepare.result == 'success' }}` }, []],
+    ['the same with double quotes and no braces', { needs: ['reuse', 'prepare'], if: `${REUSED} && needs.prepare.result == "success"` }, []],
+    ['waits for prepare and never requires it', { needs: ['reuse', 'prepare'], if: `\${{ ${REUSED} }}` }, ['prepare']],
+    ['requires the wrong result of prepare', { needs: ['reuse', 'prepare'], if: `\${{ ${REUSED} && needs.prepare.result != 'failure' }}` }, ['prepare']],
+    ['requires the success of another job than the one it waits for', { needs: ['reuse', 'prepare'], if: `\${{ ${REUSED} && needs.sync.result == 'success' }}` }, ['prepare']],
+    ['waits for two jobs and requires one', { needs: ['reuse', 'a', 'b'], if: `\${{ ${REUSED} && needs.a.result == 'success' }}` }, ['b']],
+    ['has no condition at all', { needs: ['reuse', 'prepare'] }, ['prepare']],
+  ]) {
+    it(`${unguarded.length ? `flags ${unguarded.join(', ')}` : 'is clean'}: ${what}`, () => assert.deepEqual(unguardedNeeds(j), unguarded));
   }
 });

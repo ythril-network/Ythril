@@ -259,6 +259,17 @@ export function skipsWhenRunIsReused(job) {
 }
 
 /**
+ * The jobs a job waits for, besides `reuse`, whose success its `if:` does not require (`needs.<id>.result == 'success'`): the
+ * jobs it would run without. `!cancelled()` REPLACES the default `success()` of a job that needs another, so a job that stands down
+ * on a reused run with `needs: [reuse, prepare]` and no such conjunct runs after a FAILED `prepare` (a stack with no image to
+ * load) and reports a second red for one cause. Empty for a job whose every dependency is guarded.
+ */
+export function unguardedNeeds(job) {
+  const parts = ifConjuncts(job);
+  return [].concat(job.needs ?? []).filter((id) => id !== REUSE_JOB_ID && !parts.includes(`needs.${id}.result == 'success'`));
+}
+
+/**
  * Is a workflow flag ON — the YAML boolean `true`, or the string `'true'` an expression or a quoted value gives.
  *
  * The one reading of "true" for a workflow's flags (`continue-on-error`, `merge-multiple`): a rule that tested only

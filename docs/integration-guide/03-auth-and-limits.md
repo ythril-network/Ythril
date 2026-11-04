@@ -280,6 +280,9 @@ Added in 3.3.0. The number a token gets is resolved in this order:
 2. `YTHRIL_RATE_LIMIT_PER_MINUTE`, set by whoever runs the instance;
 3. **1 200 / min** (300 before 6.4). A request with no credential stays at the global limiter's 300.
 
+The space-admin tier in step 1 is deliberate (owner decision D-68, 2026-11-04): a space admin sets the quota of any token in
+scope of their space, the admin's own token included, as 6.2.0 shipped it.
+
 So an instance that configures neither tier behaves exactly as it did before.
 
 **Absent on a token means INHERIT, not unlimited.** Most tokens carry no value at all, and that is the

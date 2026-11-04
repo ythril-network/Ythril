@@ -4,6 +4,9 @@
  * Owner request, 2026-08-20: *"ratelimit should be settable on token by instance admin"* and *"and instancewide
  * by infra"*. Two tiers, and the pure resolution lives here so it can be tested without an HTTP server.
  *
+ * The owner kept the space-admin tier (a space admin sets the quota of a token in scope, the admin's own token included)
+ * on 2026-11-04 (D-68), which widens the 2026-08-20 request above on purpose; it is not a gap to close.
+ *
  * ## The bucket was already per token — only the ceiling was a constant
  *
  * `clientRateLimitKey` has always keyed the global limiter on a hash of the credential, so requests were already

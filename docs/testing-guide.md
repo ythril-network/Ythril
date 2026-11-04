@@ -124,13 +124,21 @@ A suite that got slower is a defect nobody reports, so every run leaves a record
 **A full run is a third kind of run.** A maintainer's push to `full-run/<bundle>` (see [The CI job graph](#the-ci-job-graph))
 leaves the same three places, and its timings are read in that run's own step summary: the recorder below never records one.
 
+**A pull request that reuses a Full run is a fourth.** When a green Full run of the pull request's own tree exists, the
+pull request's suite jobs and `CI advisory` are skipped, so its run holds no durations of its own: its `Full run reuse` job's
+step summary names the Full run it relies on, and the durations are that Full run's (its places above). `Build & Test` of
+the pull request downloads that run's `test-results-<job>-<attempt>` artifacts and reads them as it reads its own. A pull
+request that did not reuse (no Full run of its tree, a moved `main`, a `ci:full` label) reads as any other.
+
 **The job's own log is public and unmasked.** Anyone can read it, and nothing rewrites it: the masking below covers the
 files a run uploads, not the console. A secret that reaches the console is published. So the question is what can reach
 repository code in `ci.yml` at all, and the answer is short:
 
-- **A read-only job token, only where a step declares it.** The `CI advisory` job's timings step sets `GH_TOKEN` from the
-  job token, to read the last runs of main from the Actions API. No other step sets it; the workflow-level permissions
-  are `contents: read`, and that job alone adds `actions: read`.
+- **A read-only job token, only where a step declares it.** Three steps hold the job token, each named by the workflow gate:
+  the `CI advisory` job's timings step (`GH_TOKEN`, to read the last runs of main from the Actions API), the `reuse` job's
+  deciding step and `Build & Test`'s verify step (`GH_TOKEN`, to read a Full run), and that gate's download of the reused
+  run's results (`github-token`). No other step sets it; the workflow-level permissions are `contents: read`, and only those
+  three jobs (`CI advisory`, `reuse`, `Build & Test`) add `actions: read`.
 - **The cache token, in `prepare`.** The step that exposes the Actions cache to Buildx puts the runtime token and cache
   URL in the environment of the steps after it in that job, so the image build can read the layer cache; the cache is
   written on a push to main only.
@@ -332,7 +340,9 @@ can fix there, and refused in CI unless it is expected.**
   `expected-in-ci:` AND its file is on the list; the client suite has no expected skips at all, so anything it does not
   pass or fail is named. It exits 2, not 0, when the results cannot answer (a missing or cut-off file).
   `node scripts/skip-check.mjs <run id>` reads that step's verdict for one finished run, with the same exit codes; a
-  partial re-run whose gate job did not reach the step answers 2.
+  partial re-run whose gate job did not reach the step answers 2. On a pull request that reused a Full run (see
+  [The CI job graph](#the-ci-job-graph)) the step read that Full run's results, so its verdict is the Full run's, not one of
+  the pull request's own suites.
 - **What local preflight's missing database half costs and saves** is measured, not argued: `node scripts/trade.mjs` (optionally
   `--limit N`, or `--line full-run/bundle-<n>` for one Work-Log line) reads the Full runs through `gh` and counts each by the
   conclusion of its database step in every attempt. It reports CI minutes saved (the database step of each Full run, a proxy
@@ -489,22 +499,48 @@ What that means when you add a file:
 The authoritative description is the comment at the top of `.github/workflows/ci.yml`; the workflow gates
 (`ci-workflow-is-sound` and its siblings) read the parsed YAML. The shape:
 
-- **Jobs that start at once** because they need nothing from the image: the client tests and build, the standalone files
-  that need only `server/dist`, the standalone files that need only the test MongoDB, and `prepare`.
-- **`prepare`** runs the changelog check (pull requests), the docs lint and the one build of the test image, written as an
-  archive other jobs load. It is the only job that writes a cache.
+- **`reuse`** (named `Full run reuse`, pull requests only) decides, in a few seconds, whether this pull request's run reads
+  the results of a green Full run of its own tree instead of running the suites. It reuses only when all of these hold:
+  no `ci:full` label; the merge tree equals the tree of the pull request's head commit (so `main` has not moved under it);
+  the newest Full run of that head commit is a push to a `full-run/` ref of this repository, completed and green on its
+  latest attempt, with its `Full run / Build & Test` a success; and every results artifact of that attempt is listed and
+  unexpired. Its one output, `full_run`, is `<run id>.<attempt>` or empty. It **fails open**: anything it cannot establish
+  (an API error, a short page, a 120 s deadline) is "no reuse", the whole graph runs, and the reason is in its step summary.
+  A push to `main` and a Full run never reuse (the job is skipped); an outside contributor's pull request and one into a
+  release branch find no Full run of their commit, so they run every suite as before.
+- **`changelog`** is the pull request's CHANGELOG check, a job of its own because a reused run skips every suite job and the
+  check is not one of them. It waits for nothing and carries no condition.
+- **Jobs that start at once** because they need nothing from the image: the client tests and build (`client-tests`), the
+  standalone files that need only `server/dist` (`standalone-pure`), the standalone files that need only the test MongoDB
+  (`standalone-db`, one job per shard of the plan), and `prepare`. Each waits for `reuse` and **stands down** (is skipped)
+  when `reuse` named a Full run.
+- **`prepare`** runs the docs lint and the one build of the test image, written as an archive other jobs load. It is the only
+  job that writes a cache.
 - **Stack jobs** wait for `prepare`, load the image and start only the services their suite drives, with
-  `--no-build --pull never` so compose can neither rebuild nor pull a different image: the standalone instance third,
-  integration, sync and red team. Each ends by uploading its results and, on failure, dumping the containers' logs.
-- **`Build & Test`** is the only required check and does no work. It waits for every other job and fails unless each
-  succeeded. Its name is exact: the repository ruleset requires the context by that name and the merge monitor waits for
-  it, so renaming it, or putting a matrix on it, silently removes the gate. GitHub creates the check only when the jobs it
-  needs have finished, so while others still run there is no `Build & Test` yet, which means in progress and never passing.
-- **`CI advisory`** is not required and may fail: timings and trends.
+  `--no-build --pull never` so compose can neither rebuild nor pull a different image: the standalone instance third
+  (`standalone-instance`), `integration`, `sync` and the red team (`redteam`). Each ends by uploading its results and, on failure, dumping the containers' logs. They
+  stand down on a reused run too, and also require `prepare` to have succeeded.
+- **`Build & Test`** (`test`) is the only required check. It waits for every other job and fails unless each succeeded; a suite job
+  may be skipped only beside a named, reused Full run, and `reuse` and `changelog` must then have succeeded. Where a run is
+  reused it reads that Full run again first (its commit, trigger, branch, repository, latest attempt, its own gate and every
+  results artifact) and **fails closed**, naming the remedy (re-run the whole PR run); then it downloads that run's results,
+  or this run's when nothing was reused, and runs the same two evidence checks over them. Its name is exact: the repository
+  ruleset requires the context by that name and the merge monitor waits for it, so renaming it, or putting a matrix on it,
+  silently removes the gate. GitHub creates the check only when the jobs it needs have finished, so while others still run
+  there is no `Build & Test` yet, which means in progress and never passing.
+- **`ci-advisory`** (`CI advisory`) is not required and may fail: timings and trends. It reads this run's own results, so it
+  stands down on a reused run.
+
+**`ci:full` forces the whole graph.** A pull request that carries the label `ci:full` never reuses: add the label (adding it
+starts a run, because `pull_request` includes the `labeled` type, and that run sees the label) and every suite runs. Removing
+the label and pushing returns to the decision. A re-run of a run keeps the labels of its event, so to force the graph on a run
+that already finished, add the label and let that new run go. An outside contributor's pull request never reuses, because no
+Full run of its commit exists.
 
 Every job of `ci.yml` has a `timeout-minutes` with its reason beside it. A concurrency group keeps one run per ref; a newer
-push to a pull request supersedes the older run, and a push to `main` is never cancelled, because it is the run that fills
-the caches. The workflow's token is `contents: read` and nothing wider; `CI advisory` alone adds `actions: read`.
+push to a pull request supersedes the older run (a label added to it starts a run, and so also supersedes it), and a push to
+`main` is never cancelled, because it is the run that fills the caches. The workflow's token is `contents: read` and nothing
+wider; only `reuse`, `Build & Test` and `CI advisory` add `actions: read`.
 
 ### The full run of a bundle
 
@@ -529,8 +565,12 @@ locally only the test files its diff reaches.
 - **The calling job has no `timeout-minutes` of its own,** because every job it calls has one.
 - **Its timings are never recorded.** The recorder reads pushes to `main` from `ci.yml` only; read a full run's durations in
   its own step summary (see [Reading durations](#reading-durations)).
-- **The cost is two full graphs per bundle, by design:** this run and the pull request's. A full run's result artifacts are
-  kept 30 days and nobody reads them. A full run also writes no image or sidecar cache (see
+- **The cost is one full graph per bundle, and a pull request that reuses it pays minutes:** when the pull request's tree is
+  the full run's (the normal case, with `main` already in the branch: rebase before the full run), its own `Build & Test`
+  reads this run's results instead of running the suites again, so the pull request's run costs the `Full run reuse`, the
+  `CHANGELOG entry` and the gate's few minutes and not a second graph. A full run's result artifacts are kept 30 days and
+  the pull request reads them, so a full run older than that, or a pull request whose tree differs (`main` moved, a commit
+  after the full run), runs the whole graph again, and so does one carrying `ci:full`. A full run also writes no image or sidecar cache (see
   [What is cached](#what-is-cached-and-what-is-not)), so one after a bundle that changed image layers builds them cold.
 - **An outside contributor is not asked for one.** Only someone with push access to the repository can push a `full-run/` ref, and a
   contributor's pull request runs every suite through its own `Build & Test`. A fork may run the same workflow in its own

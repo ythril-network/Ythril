@@ -42,7 +42,7 @@
  * Open choices the design leaves, stated so the implementation does not guess: how the entry computes `treeMatches` (a `git`
  * comparison of the merge tree with the head SHA's tree); the env names the entry reads (`EVENT`/`GITHUB_EVENT_NAME`, `HEAD_SHA`,
  * `PR_LABELS`, `FULL_RUN`, `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_OUTPUT`,
- * `GITHUB_STEP_SUMMARY`); that the entry wraps a dynamic import so a load error is also "no reuse" (not held here).
+ * `GITHUB_STEP_SUMMARY`); that the entry wraps a dynamic import so a load error is also "no reuse" (held by the last block of this file, over a scratch copy of the script).
  *
  * The fixtures are the recorded responses for Full run 41895080392 (bundle-236, head 9e1e19ddc), reduced to the fields the
  * decision reads: `_fixtures/full-run-reuse/{runs,jobs,artifacts}.json`.
@@ -52,7 +52,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -416,5 +416,60 @@ describe('node scripts/full-run-reuse.mjs — decide fails open, verify fails cl
     assert.notEqual(r.status, 0, 'a read error passed the gate');
     assert.match(r.out, REMEDY);
     assert.doesNotMatch(r.output, /run_id=/, 'a failed verification wrote the outputs the download reads');
+  });
+});
+
+describe('a module the entry cannot load: decide fails open, verify fails closed (the dynamic import is inside the fail-open)', () => {
+  /**
+   * The script alone in a scratch repository whose `scripts/_shared/gh-call.mjs` is `callCore` (or absent): the entry's own
+   * import of it is what is tested, so the copy sits where the script expects its neighbour and nothing of this repository's
+   * tree is touched.
+   */
+  function entryWithCallCore(callCore, args, env) {
+    const dir = mkdtempSync(join(tmpdir(), 'full-run-reuse-load-'));
+    try {
+      mkdirSync(join(dir, 'scripts', '_shared'), { recursive: true });
+      writeFileSync(join(dir, 'scripts', 'full-run-reuse.mjs'), readFileSync(join(REPO_ROOT, SCRIPT), 'utf8'));
+      // The script's STATIC repository imports, read off its source (a list written here would miss tomorrow's); only the call
+      // core, which it loads dynamically, is the variable here.
+      const statics = [...readFileSync(join(REPO_ROOT, SCRIPT), 'utf8').matchAll(/^import\s[^;]*?from\s+'\.\/(_shared\/[\w.-]+\.mjs)';/gm)].map((m) => m[1]);
+      assert.ok(statics.includes('_shared/script-cli.mjs'), `the static imports were not read: ${statics.join(', ') || 'none'}`);
+      for (const rel of statics) writeFileSync(join(dir, 'scripts', rel), readFileSync(join(REPO_ROOT, 'scripts', rel), 'utf8'));
+      if (callCore !== null) writeFileSync(join(dir, 'scripts', '_shared', 'gh-call.mjs'), callCore);
+      const output = join(dir, 'output');
+      const summary = join(dir, 'summary');
+      writeFileSync(output, '');
+      writeFileSync(summary, '');
+      const r = spawnSync(process.execPath, [join(dir, 'scripts', 'full-run-reuse.mjs'), ...args], {
+        cwd: dir, encoding: 'utf8', timeout: 60_000,
+        env: { PATH: '/nonexistent', HOME: dir, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary, GITHUB_REPOSITORY: REPO, ...env },
+      });
+      return { status: r.status, out: `${r.stdout}\n${r.stderr}`, output: readFileSync(output, 'utf8'), summary: readFileSync(summary, 'utf8') };
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+  const PULL_REQUEST = { GITHUB_EVENT_NAME: 'pull_request', HEAD_SHA: HEAD, PR_LABELS: '[]' };
+
+  for (const [what, callCore] of [['is missing', null], ['has a syntax error', 'export const ghJson = ;\n'], ['throws when it is evaluated', 'throw new Error("boom");\n']]) {
+    it(`decide: gh-call.mjs ${what}: exit 0, an empty full_run, a warning that names the load, never a failed job`, () => {
+      const r = entryWithCallCore(callCore, ['decide'], PULL_REQUEST);
+      assert.equal(r.status, 0, r.out);
+      assert.equal(r.output, 'full_run=\n');
+      assert.match(r.out, /::warning\b[^\n]*load-error/, 'a load error that does not warn hides a broken script behind a healthy-looking job');
+      assert.match(r.summary, /load-error/);
+    });
+
+    it(`verify: gh-call.mjs ${what}: a non-zero exit that names the remedy, and no outputs for the download`, () => {
+      const r = entryWithCallCore(callCore, ['verify'], { FULL_RUN: `${RUN_ID}.1`, GITHUB_RUN_ID: '555', GITHUB_RUN_ATTEMPT: '1', HEAD_SHA: HEAD });
+      assert.notEqual(r.status, 0, 'a module that did not load passed the gate');
+      assert.match(r.out, REMEDY);
+      assert.doesNotMatch(r.output, /run_id=/);
+    });
+  }
+
+  it('decide on a push never loads gh-call.mjs: a missing module is no reason to warn when nothing is read', () => {
+    const r = entryWithCallCore(null, ['decide'], { GITHUB_EVENT_NAME: 'push' });
+    assert.equal(r.status, 0, r.out);
+    assert.equal(r.output, 'full_run=\n');
+    assert.doesNotMatch(r.out, /::warning/);
   });
 });

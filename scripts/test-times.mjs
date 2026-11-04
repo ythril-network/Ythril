@@ -94,6 +94,7 @@ import {
 } from './_shared/telemetry-record.mjs';
 import { withRecordLock, recordLockPath, lockWaitMs, LOCK_WAIT_ENV, LOCK_WAIT_MS } from './_shared/record-lock.mjs';
 import { newestBy } from './_shared/newest-by.mjs';
+import { workflowCommand } from './_shared/workflow-command.mjs';
 import { recordDestination, refuseRecordingUnderCi } from './_shared/record-destination.mjs';
 import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
 import { readCappedBody } from './_shared/capped-body.mjs';
@@ -1213,8 +1214,8 @@ const clientFigures = (report, root) => figuresOf('client', summariseClient({ re
 /** A suite of a run as the baseline keeps it: its time, its files' times, and its own scope and outcome (a suite is judged on its own). */
 const baselineSuite = (s) => [s.suite, { ms: s.ms, scope: s.scope, outcome: s.outcome, files: Object.fromEntries(s.fileTimes.map(f => [f.file, f.ms])) }];
 
-/** A GitHub Actions annotation: one line of its own, so the run page shows it. */
-const annotate = (what, message) => `::warning title=${what}::${firstLine(message).replace(/[\r%]/g, ' ')}`;
+/** A GitHub Actions warning about `what`, its message's first line only, so the run page shows it. */
+const annotate = (what, message) => workflowCommand('warning', what, firstLine(message));
 
 /**
  * Files and suites slower than the last {@link SUMMARY_BASELINE_RUNS} trusted, successful runs of main, read from their

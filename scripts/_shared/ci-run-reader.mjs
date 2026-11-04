@@ -28,65 +28,21 @@
  * logged in to `gh`. They answer different questions with different credentials, so they are two readers on purpose, and a
  * change to how a run id is checked is made here and in that pager's own id handling, not by merging them.
  *
+ * The first three guards (decimal id, argument array with a 60 s bound and a clean environment, the named errors) live in
+ * `scripts/_shared/gh-call.mjs`, the one module that spawns `gh`, which this module re-exports (Q-710).
+ *
  * Every function takes an injected `gh` (or `exec`) so a gate can hand it a fake and assert on the argument arrays it receives.
  */
-import { execFileSync } from 'node:child_process';
 import { loadCi, jobEntries, stepsOf } from '../../testing/_shared/ci-workflow.mjs';
-import { testChildEnv } from '../../testing/_shared/test-child-env.mjs';
+import { ghJson, ghText, GhNotInstalledError, GhNotLoggedInError, decimalId, DEFAULT_REPO_SLUG } from './gh-call.mjs';
+
+// The call core (the one `gh` spawner: argument array, decimal-id guard, 60 s bound, the two named errors) is `gh-call.mjs`, a
+// module of node built-ins only, so a job that installs nothing can import it. Re-exported here unchanged, so every caller of
+// this reader reads exactly what it read before; this module keeps what needs the parsed workflow (js-yaml).
+export { ghJson, ghText, GhNotInstalledError, GhNotLoggedInError };
 
 /** The repository every call reads, in one place: `gh run view` and the REST endpoint must name the same one. */
-export const REPO_SLUG = 'ythril-network/Ythril';
-
-/** `gh` is not on the PATH. */
-export class GhNotInstalledError extends Error {
-  constructor(cause) {
-    super('gh is not installed or not on the PATH: install the GitHub CLI (https://cli.github.com) and run `gh auth login`');
-    this.name = 'GhNotInstalledError';
-    this.cause = cause;
-  }
-}
-
-/** `gh` is installed and has no login. */
-export class GhNotLoggedInError extends Error {
-  constructor(cause) {
-    super('gh is not logged in: run `gh auth login`');
-    this.name = 'GhNotLoggedInError';
-    this.cause = cause;
-  }
-}
-
-/** A run id (or job id) as the string that goes into an argument or an endpoint path; throws on anything that is not all decimal digits. */
-function decimalId(id, what = 'run id') {
-  const text = typeof id === 'number' && Number.isSafeInteger(id) && id >= 0 ? String(id) : id;
-  if (typeof text !== 'string' || !/^\d+$/.test(text)) throw new Error(`${what} ${JSON.stringify(id)} is not a decimal number`);
-  return text;
-}
-
-/**
- * What `gh <args>` printed, as text. `args` must be an array of strings (a shell line is refused before anything runs).
- *
- * @param {string[]} args
- * @param {{ exec?: typeof execFileSync }} [options]  `exec` is `execFileSync`'s shape, injected by gates
- */
-export function ghText(args, { exec = execFileSync } = {}) {
-  if (!Array.isArray(args) || !args.every(a => typeof a === 'string')) throw new TypeError('gh is called with an argument array of strings, never a shell line');
-  try {
-    // timeout: the bound on every call, 60 s; a hung gh ends and says so. env: `gh` runs a user's extensions and aliases and has no
-    // use for the recorder's token (`YTHRIL_TEST_RUNS_*`, held by a process that records): `testChildEnv` is the one place that
-    // says what a child inherits.
-    return String(exec('gh', args, { encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024, env: testChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] }));
-  } catch (e) {
-    if (e?.code === 'ENOENT') throw new GhNotInstalledError(e);
-    if (/gh auth login|not logged in/i.test(`${e?.message ?? ''}\n${e?.stderr ?? ''}`)) throw new GhNotLoggedInError(e);
-    throw e;
-  }
-}
-
-/** What `gh <args>` printed, parsed as JSON. */
-export function ghJson(args, options) {
-  const text = ghText(args, options);
-  try { return JSON.parse(text); } catch { throw new Error(`gh ${args.slice(0, 2).join(' ')} printed no JSON`); }
-}
+export const REPO_SLUG = DEFAULT_REPO_SLUG;
 
 /** The fields of a run that the readers use; `jobs` is the LATEST attempt's. */
 const RUN_FIELDS = 'status,conclusion,attempt,headSha,jobs';
