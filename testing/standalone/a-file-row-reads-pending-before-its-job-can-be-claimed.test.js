@@ -75,6 +75,21 @@ const ROW_AFTER_A_HELD_JOB = {
 const holdsTheJob = () => /\bclaimableAfter\s*:[^,}]*\bREPLACE_SETTLE_MS\b/;
 
 /**
+ * Where a row mark RUNS, not where it is written: a mark wrapped in a local closure (`const mark = () => setFileProcessingState(...)`)
+ * runs where the closure is called. Bundle-236's first cut defined the mark above the job write and called it after, and this gate,
+ * reading text order, passed it.
+ */
+function whereTheRowMarkRuns(body, markIndex) {
+  const before = body.slice(0, markIndex);
+  const closure = /\bconst\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::\s*[^=]+)?=>\s*$/.exec(before.slice(Math.max(0, before.lastIndexOf('\n', before.length - 2) - 200)));
+  if (!closure) return markIndex;
+  const call = new RegExp(`\\b${closure[1]}\\s*\\(`, 'g');
+  call.lastIndex = markIndex;
+  const at = call.exec(body);
+  return at ? at.index : markIndex;
+}
+
+/**
  * Functions of `src` that write a job pending and mark the row pending: `marking`, `name -> what the row mark comes
  * after` (empty when it is in order). Plus `others`: the pending-writers that do not mark the row.
  */
@@ -85,8 +100,9 @@ export function pendingWriters(src) {
   for (const [name, body] of functions) {
     const writes = [...body.matchAll(jobPendingWrite())].map(m => m.index);
     if (writes.length === 0) continue;
-    const row = rowPendingMark().exec(body);
-    if (!row) { others.push(name); continue; }
+    const found = rowPendingMark().exec(body);
+    if (!found) { others.push(name); continue; }
+    const row = { index: whereTheRowMarkRuns(body, found.index) };
     const woken = wake().exec(body);
     const late = [];
     if (row.index > Math.min(...writes)) late.push('the job write');
@@ -127,6 +143,14 @@ describe('the detector reads which functions put a job pending, and in what orde
       'a writer whose job write is the spread is invisible to the gate: a row marked after it passes');
     assert.deepEqual([...pendingWriters(plant(`${row}\n${spread}\n${wakeCall}`)).marking], [['f', []]]);
     assert.deepEqual(pendingWriters(plant(`${spread}\n${wakeCall}`)).others, ['f'], 'a spread writer that never marks the row is among the others');
+  });
+
+  it('reads a row mark wrapped in a closure where the closure is CALLED (bundle-236: a mark defined above the job write and called after it passed on text order)', () => {
+    const job = "await jobs.updateOne(filter, { $set: { status: 'pending' } });";
+    const def = "const mark = (): Promise<void> => setFileProcessingState(spaceId, id, { embeddingStatus: 'pending' });";
+    assert.deepEqual([...pendingWriters(plant(`${def}\n${job}\nawait mark();`)).marking], [['f', ['the job write']]],
+      'a closure called after the job write marks the row late');
+    assert.deepEqual([...pendingWriters(plant(`${def}\nawait mark();\n${job}`)).marking], [['f', []]]);
   });
 
   it('does not read a filter, a comment, or a function with no job write as a pending write', () => {
