@@ -134,9 +134,9 @@ Pass `inputFormat` in the JSON body (or as a query parameter in raw uploads) to 
 | `"html"` | Extract article body with jsdom + @mozilla/readability + turndown, fully in-process |
 | `"md"` | Normalise + split on H2/H3 headings, in-process — no sidecar, no `_converted/` copy |
 | `"txt"` | Normalise + split on paragraph boundaries, in-process — `headingText` is null on all chunks |
+| `"text"` | Legacy bypass: single flat embedding, no chunking, unchanged behaviour |
 
 Every chunk is split to the embedder's input ceiling afterwards, whichever format made it ([Chunk size](#chunk-size)).
-| `"text"` | Legacy bypass: single flat embedding, no chunking, unchanged behaviour |
 
 Example — upload and convert a PDF:
 
