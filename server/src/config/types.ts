@@ -5,6 +5,7 @@ import type { AssistModelExtras } from './assist-backend.js';
 import type { MachineMadeSource } from '../files/machine-made-sources.js';
 import type { SpaceActEntry, SpaceActSet } from './types-space-acts.js';
 import type { DupeScannerConfig, ContradictionScannerConfig, DupeActionRule } from './types-scanners.js';
+import type { EmbeddingConfig } from './types-embedding.js';
 export type { SpaceActEntry, SpaceActKind, SpaceActState, SpaceActRound, SpaceActPostSteps, SpaceActSet, SpaceActSetMember } from './types-space-acts.js';
 export interface TokenRecord {
   id: string;
@@ -354,59 +355,6 @@ export interface SpaceConfig extends SpaceSchemaLayering {
    *  treat absent as 'ready'. The space is writable while 'building'; only semantic
    *  recall waits for READY. */
   indexStatus?: 'building' | 'ready' | 'failed';
-}
-
-export interface EmbeddingConfig {
-  /** If set, route embedding requests to this OpenAI-compatible HTTP endpoint.
-   *  If absent, the bundled local ONNX model is used (default, works out of the box). */
-  baseUrl?: string;
-  /**
-   * How many chunk embeds may run at once while converting one document. Absent = per-embedder default:
-   * low for the bundled local model (one inference process runs one embed at a time, so more only queues, in front of
-   * every recall and write too), higher for an HTTP endpoint (network-bound, the work is elsewhere). See
-   * `embed-concurrency.ts` for the measurements. Raise it only with CPU headroom to spare; clamped to 1…32.
-   */
-  embedConcurrency?: number;
-  /**
-   * The most UTF-8 bytes one embedder request may carry, task prefix included. Absent = 6,000; range 512…65,536. An embedder with a
-   * small context (512 tokens) needs it lower. Read through `embedInputCeiling()` (`brain/embed-text.ts`), which never means "no limit":
-   * a stored value outside the range (a hand-edited `config.json` is not validated at load) reads as the default. A change re-chunks
-   * a file only when it is re-converted (`retry_embed_file`).
-   */
-  maxInputBytes?: number;
-  model: string;
-  dimensions: number;
-  similarity: 'cosine' | 'dotProduct' | 'euclidean';
-  /**
-   * Where the HTTP embedding endpoint lives (only relevant when `baseUrl` is set). `local` (default) = a
-   * trusted internal endpoint (e.g. Ollama on the cluster network) reached with a plain fetch; `external` =
-   * an operator-supplied public endpoint reached through the SSRF-guarded fetch at runtime (SSRF follow-up
-   * part 2). Mirrors `visionProvider`/`sttProvider`. Absent/`local` keeps today's behaviour.
-   */
-  provider?: 'local' | 'external';
-  /**
-   * Which task-prefix convention the embedding model expects.
-   *
-   * Asymmetric retrieval models want the query and the stored passage marked differently, and get
-   * measurably worse recall without it. The convention is per MODEL FAMILY, not per deployment, so it
-   * cannot be inferred from `baseUrl`:
-   *
-   * - `nomic` — `search_document: ` / `search_query: ` (nomic-embed-text-*).
-   * - `qwen`  — query-side instruction only; passages are embedded bare (Qwen3-Embedding).
-   * - `none`  — no prefix. Correct for OpenAI `text-embedding-3-*`, bge-m3, and anything symmetric,
-   *             where a prefix is just noise in the vector.
-   * - `auto`  — **the default, and exactly what this instance did before the field existed**: `nomic`
-   *             for the bundled local model, `none` for an HTTP endpoint. Chosen so that upgrading
-   *             changes no vector. It is a compatibility default, not a good one — an operator running
-   *             nomic behind Ollama should set `nomic` explicitly and re-index.
-   *
-   * Changing this changes every vector, so a corpus embedded under one scheme cannot be searched under
-   * another. The admin UI treats it like `model`/`dimensions`/`similarity` and requires confirmation.
-   */
-  prefixScheme?: 'auto' | 'none' | 'nomic' | 'qwen';
-  /** API key for an external embedding endpoint. Stored in `secrets.json` (never `config.json`), masked in
-   *  the admin API. */
-  apiKey?: string;
 }
 
 export interface StorageConfig {
@@ -2043,3 +1991,8 @@ export type { ConflictDoc, LosingFileMetadata, MetadataConflictDoc, AnyConflictD
 //
 // Moved to `types-jobs.ts` (Q-166). Re-exported so every importer of these names keeps importing them from here.
 export type { MediaJobDoc, BrainEmbedRecordType, BrainEmbedJobDoc } from './types-jobs.js';
+
+// ── Embedding configuration ─────────────────────────────────────────────────
+//
+// Moved to `types-embedding.ts` (bundle-237). Re-exported so every importer keeps importing it from here.
+export type { EmbeddingConfig } from './types-embedding.js';
