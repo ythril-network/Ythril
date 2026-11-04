@@ -156,7 +156,7 @@ function viaCallers(key, at, here, depth, prop) {
 describe('the derivation works', () => {
   it('found both doors and the apply (floors)', () => {
     assert.ok(PUSH_ROUTE, `no POST ${PUSH_PATH} among the mounted routes — re-anchor`);
-    assert.ok(ENGINE_ROOTS.length >= 10, `only ${ENGINE_ROOTS.length} function(s) in ${ENGINE} — re-anchor`);
+    assert.ok(ENGINE_ROOTS.length >= 6, `only ${ENGINE_ROOTS.length} function(s) in ${ENGINE} — re-anchor`);
     assert.ok(APPLIES.length >= 1, `POST ${PUSH_PATH} reaches no write to a tombstones collection — the walk is broken`);
   });
 

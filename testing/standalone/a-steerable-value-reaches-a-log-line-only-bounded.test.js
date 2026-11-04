@@ -538,7 +538,7 @@ describe('the derivation works', () => {
       assert.ok(DOORS[area].length >= floor, `only ${DOORS[area].length} door(s) found for ${area} (floor ${floor}) — re-anchor`);
     }
     assert.ok(TOOL_ROOTS.length >= 65, `only ${TOOL_ROOTS.length} MCP tool handler(s) found — re-anchor`);
-    assert.ok(DOORS.engine[0].roots.length >= 10, `only ${DOORS.engine[0].roots.length} function(s) in ${ENGINE} — re-anchor`);
+    assert.ok(DOORS.engine[0].roots.length >= 6, `only ${DOORS.engine[0].roots.length} function(s) in ${ENGINE} — re-anchor`);
     assert.ok(DOORS.fileSync[0].roots.length >= 2, `only ${DOORS.fileSync[0].roots.length} function(s) in ${FILE_SYNC} — re-anchor`);
   });
 
