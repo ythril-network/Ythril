@@ -22,4 +22,4 @@ const failed = countSink<[reason: EmbedJobFailedReason]>();
 export const setEmbedJobFailedSink = failed.set;
 
 /** `ythril_embed_jobs_failed_total`, as the queue counts it: one job left `failed`, under its reason. */
-export const embedJobsFailedTotal = { count: failed.count };
+export const embedJobsFailedTotal = { count: failed.add };

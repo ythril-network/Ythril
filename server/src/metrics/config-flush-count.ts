@@ -19,4 +19,4 @@ const failure = countSink<[]>();
 export const setConfigFlushFailureSink = failure.set;
 
 /** One failed background flush of config.json, counted. */
-export const countConfigFlushFailure = failure.count;
+export const countConfigFlushFailure = failure.add;
