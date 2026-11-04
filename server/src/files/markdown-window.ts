@@ -91,8 +91,11 @@ export function markdownWindow(text: string, skip: number, maxChars: number, max
 /**
  * Where to cut one paragraph too large for a window: the furthest line break the window can hold, else the furthest
  * character it can (never zero — a window always advances). A UTF-16 surrogate pair is never split.
+ *
+ * Exported for `util/bounded-text.ts`, which cuts a text to a byte ceiling by the same rule (the embedder's input bound and this
+ * reader's window are two questions that share one answer to "where may a text be cut").
  */
-function splitPoint(text: string, start: number, paragraphEnd: number, fits: (to: number) => boolean): number {
+export function splitPoint(text: string, start: number, paragraphEnd: number, fits: (to: number) => boolean): number {
   let lo = start + 1;
   let hi = paragraphEnd;
   // The furthest prefix that fits, by binary search — `fits` is monotone in the end offset.
