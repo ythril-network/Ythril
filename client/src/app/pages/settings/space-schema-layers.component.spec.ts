@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
-import { provideTransloco } from '@jsverse/transloco';
 import { SpaceSchemaLayersComponent, proposalFor } from './space-schema-layers.component';
 import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
+import { getTranslocoModule } from '../../testing/transloco-testing';
 
 /**
  * The Schema tab's network layers panel (F-39.3): nothing for a space no network sends schema to, and the order it
@@ -21,9 +21,9 @@ let api: { getSchemaLayers: ReturnType<typeof vi.fn>; setNetworkPrecedence: Retu
 function mount(v: SchemaLayersView) {
   api = { getSchemaLayers: vi.fn(() => of(v)), setNetworkPrecedence: vi.fn((_id: string, n: string[]) => of(view({ precedence: n }))), proposeToNetwork: vi.fn(() => of({})) };
   TestBed.configureTestingModule({
-    imports: [SpaceSchemaLayersComponent],
+    // The spec module (a language loaded), never a bare provideTransloco: with none loaded every label logged a missing translation.
+    imports: [SpaceSchemaLayersComponent, getTranslocoModule()],
     providers: [
-      provideTransloco({ config: { availableLangs: ['en'], defaultLang: 'en' } }),
       { provide: SchemaApi, useValue: api },
       { provide: ToastService, useValue: { success: vi.fn(), error: vi.fn() } },
     ],
