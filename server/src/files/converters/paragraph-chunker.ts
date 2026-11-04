@@ -12,16 +12,10 @@
  */
 
 import type { Chunk } from './types.js';
-import { boundedPrefix } from '../../util/bounded-text.js';
+import { cappedOverlap } from './chunk-overlap.js';
 
 export interface ParagraphChunkerOptions {
   maxChunkLength?: number; // default 800
-}
-
-/** Extract the last paragraph from a chunk body for overlap. */
-function lastParagraph(body: string): string {
-  const paras = body.split(/\n{2,}/).filter(p => p.trim().length > 0);
-  return paras.length > 0 ? (paras[paras.length - 1] ?? '') : '';
 }
 
 /**
@@ -45,7 +39,7 @@ export function paragraphChunk(
     if (prevLastPara) {
       body = prevLastPara + '\n\n' + body;
     }
-    prevLastPara = boundedPrefix(lastParagraph(body), maxLen).text;
+    prevLastPara = cappedOverlap(body, maxLen);
     chunks.push({ headingText: null, content: body, chunkIndex: chunks.length });
     currentParas = [];
     currentLen = 0;
