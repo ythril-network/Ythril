@@ -445,7 +445,10 @@ export const FROZEN = {
   //
   // 533 -> 525 (`Q-426`): the conflict documents (a file copy and a file's losing metadata) moved WHOLE to
   // `types-conflicts.ts` (it measured 556 over 533 with the metadata conflict added). The ceiling follows the file down.
-  'server/src/config/types.ts': 525,
+  //
+  // 525 -> 518 (bundle-237): `EmbeddingConfig` moved WHOLE to `types-embedding.ts` (it measured 527 over 525 with
+  // `embedding.maxInputBytes` and `FileMetaDoc.wholeDocument` added). The ceiling follows the file down.
+  'server/src/config/types.ts': 518,
   'client/src/app/pages/settings/data.component.ts': 644,
   // RAISED 646 -> 647 by ONE line: the Q-6 narrowing swapped `resolveMemberSpaces` for `memberSpacesForRequest`,
   // and this file no longer needed the old import, so it gained an import line and lost none. Not growth in any
