@@ -35,9 +35,11 @@ release. **Re-uploading is still how you retry a failed analysis.** To have a fi
 succeeded, delete it and upload it again.
 
 **A file replaced with other bytes starts over.** A few seconds after the last write to that path, it is analysed
-again from the beginning, and an analysis still running for the old bytes stops and writes nothing more. The old
-description, faces and text stop turning up in search as soon as the new analysis starts, or at once when the new file
-is not analysed (it is too large, or that kind of analysis is switched off). If Ythril cannot queue the new analysis, the file shows
+again from the beginning, and an analysis still running for the old bytes stops and writes nothing more. The file's
+own entry stops matching the old file at once, with the upload: a description Ythril made from it, its excerpt and its search
+text go (a description you wrote stays), and the new analysis writes new ones. The old faces and passages stop turning
+up in search as soon as the new analysis starts, or at once when the new file is not analysed (it is too large, or that
+kind of analysis is switched off). If Ythril cannot queue the new analysis, the file shows
 *Failed* with the reason instead of *Pending*; upload it again. A **Retry** is a whole new run too, and is refused while Ythril is working on the file.
 
 **Actions per row:**

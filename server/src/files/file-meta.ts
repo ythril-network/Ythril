@@ -58,7 +58,7 @@ import type { Filter } from 'mongodb';
 import { spaceCollection } from '../db/space-collection.js';
 import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
-import { isLocalFileField, stripDerivedStages } from './derived-fields.js';
+import { isLocalFileField, stripDerivedStages, replacedBytesStages } from './derived-fields.js';
 
 
 
@@ -154,9 +154,17 @@ export async function upsertFileMeta(
     }
     // Each branch's store write is ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
     await admitSpaceWrite(spaceId, 'files', () => writeAtReadVersion(spaceId, 'files', normalised, undefined, async (at) => {
+      // A PIPELINE, because what OTHER bytes made goes in this same write (`replacedBytesStages`, files/derived-fields.ts): asked by the
+      // database of the stored hash, before the stage that sets the new one, so the row never holds the new hash beside the old bytes'
+      // description, excerpt or vector. Every value is a `$literal`: a description that starts with `$` is text, not a field path.
+      const values = Object.fromEntries(Object.entries({ ...$set, ...at.patch }).map(([k, v]) => [k, { $literal: v }]));
       const res = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
         asFilter<FileMetaDoc>(writeFilterFor(normalised, { readSeq: at.readSeq })),
-        asUpdate<FileMetaDoc>({ $set: { ...$set, ...at.patch }, $unset }),
+        [
+          ...(opts.sha256 !== undefined ? replacedBytesStages(opts.sha256, 'authored') : []),
+          { $set: values },
+          { $unset: Object.keys($unset) },
+        ] as never,
       );
       return res.matchedCount > 0 ? res : null;
     }, 'file.upsert'));
@@ -221,7 +229,23 @@ export async function recordArrivedFile(
   const expireAt = expiryForCreate(spaceId, undefined, { collection: 'file' });
   // An UPSERT: it creates the row when none is there, so it is ONE admitted and counted unit from its own check (`admitSpaceWrite`).
   await admitSpaceWrite(spaceId, 'files', async () => {
-    await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).updateOne(
+    const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+    /*
+     * A row already held takes the new bytes in a PIPELINE, so what OTHER bytes made this instance's copy match by (its excerpt, vector and
+     * `matchedText`) goes in the same write, asked by the database of the stored hash (`replacedBytesStages`, files/derived-fields.ts). The
+     * description is the publisher's and is not touched ('arrival'): its removal arrives as the publisher's own authored write. The
+     * upsert below is the new row's, and a pipeline cannot say `$setOnInsert`.
+     */
+    const held = await files.updateOne(
+      asFilter<FileMetaDoc>({ _id: normalised }),
+      [
+        ...replacedBytesStages(sha256, 'arrival'),
+        { $set: { sizeBytes: { $literal: sizeBytes }, sha256: { $literal: sha256 } } },
+        { $unset: ['deletedAt'] },
+      ] as never,
+    );
+    if (held.matchedCount > 0) return;
+    await files.updateOne(
       asFilter<FileMetaDoc>({ _id: normalised }),
       asUpdate<FileMetaDoc>({
         $set: { sizeBytes, sha256 },

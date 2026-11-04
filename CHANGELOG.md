@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MCP:** each budgeted tool's `maxChars` says how its first item is treated (returned whole above the ceiling, or split at it for `read_file`) and names its continuation field.
 - **Media:** the Validate step shows as working, or warns with the vision steps when no vision model is set; a dimmed step says it will not run.
 - **Media:** a replaced file's old caption, faces and passages stop matching when its new analysis starts, or at once when the new bytes are not analysed.
+- **Files:** a file written with other bytes drops, in the same write, the description, excerpt and search text its old bytes made; a description a person wrote stays.
 - **Settings:** a refused sync is a translated message; the tokens page shows its summary after the list; the server log colours a line by its own level only.
 - **Spaces:** turning embedding suppression on asks before Save, and says Save removes the stored text vectors and Backfill restores them.
 - **Tooling:** the changelog check covers `sidecars/` and `scripts/`; `npm run test:up` first clears a test stack left by a run without a project name.
