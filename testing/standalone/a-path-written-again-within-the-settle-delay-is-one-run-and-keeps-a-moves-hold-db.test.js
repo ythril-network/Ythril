@@ -18,6 +18,8 @@
  *     SECOND write, later than the first write left it.
  *  3. A new-bytes write onto a terminal job while a move is running at the path leaves the job unclaimable until the move's hold
  *     is over: `claimableAfter` is at or after the write plus `moveTiming().holdMs`.
+ *  4. A new-bytes write onto a job that already carries a LATER hold keeps it, move or no move at the write (the hold is read inside the
+ *     write, so one taken between the door's read and its write is not lost).
  *
  * ## Seen red
  *
@@ -83,6 +85,19 @@ describe('a path written again settles into one run, and a move\'s hold is kept 
     assert.ok(afterFirst !== null, 'the first write left no wait at all');
     assert.ok(claimableAt(job) !== null && claimableAt(job) >= secondAt && claimableAt(job) > afterFirst,
       `claimableAfter is ${JSON.stringify(job.claimableAfter)}, not after the second write (${new Date(secondAt).toISOString()}) and later than the first left it: the run starts inside the burst`);
+  });
+
+  it('a new-bytes write onto a job that carries a later hold keeps that hold, with no move in flight at the write', async () => {
+    await finishedFirstVersion();
+    const hold = new Date(Date.now() + 60_000).toISOString();
+    await d.jobs().updateOne({ _id: FILE }, { $set: { claimableAfter: hold } });
+    assert.equal(d.moveFlight.moveIsRunningAt(SPACE, FILE), false, 'fixture check: no move is running at the path');
+    await d.put(FILE, BYTES(2));
+
+    const job = await jobNow();
+    assert.equal(job.status, 'pending');
+    assert.equal(job.claimableAfter, hold,
+      `claimableAfter is ${JSON.stringify(job.claimableAfter)}, not the hold the job carried (${hold}): a hold taken between the read and the write is lost`);
   });
 
   it('a new-bytes write onto a finished job while a move runs at the path keeps the job unclaimable until the move\'s hold is over', async () => {

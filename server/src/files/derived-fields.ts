@@ -436,6 +436,33 @@ export async function clearRowsOfOtherBytes(spaceId: string, claim: JobClaim, fi
 }
 
 /**
+ * The write door's half of {@link clearRowsOfOtherBytes}, for the rows that rule cannot judge: remove the rows of `fileId` that carry NO
+ * `sourceSha256` (written before the stamp existed), in chunks of `READ_CHUNK`. Returns how many it removed.
+ *
+ * ## What it prevents
+ *
+ * A picture replaced by other bytes, on an instance upgraded from a release before the stamp: its caption and face rows have no stamp, the
+ * run's clear counts them as the same bytes, and they stayed under the new picture for good. Called by `replaceContent` for NEW bytes of a
+ * media file only, AFTER the write that revoked the old run's claim and made the job the new bytes' (the old run's writes are fenced, and
+ * every row the new run writes is stamped, so this delete can never remove the new run's work: it is called only when the new bytes' hash is
+ * known, which is what makes the new run stamp). Never on a same-bytes write or a retry: an unstamped row may hold a person's face label.
+ */
+export async function clearUnstampedRowsOfFile(spaceId: string, fileId: string): Promise<number> {
+  assertSpaceTakesWrites(spaceId, 'files');
+  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  const unstamped = { parentFileId: fileId, sourceSha256: { $exists: false } };
+  let cleared = 0;
+  for (;;) {
+    const page = await files.find(asFilter<FileMetaDoc>(unstamped as never), { projection: { _id: 1 }, limit: READ_CHUNK }).toArray();
+    if (page.length === 0) return cleared;
+    const ids = page.map(r => String(r._id));
+    await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: ids }, ...unstamped } as never));
+    await retireEmbedWorkOfRemovedRows(spaceId, { ids });
+    cleared += ids.length;
+  }
+}
+
+/**
  * The row a run writes, carrying the bytes the run analyses: `sourceSha256` from the run's claim (`JobClaim.sourceSha256`), on every derived
  * row, so the one place that stamps it is the one place a derived row is written. A claim with no hash (an extracted image's job, a lazy
  * repair's) stamps nothing: a row with no `sourceSha256` counts as made from the same bytes as any run (`clearRowsOfOtherBytes`).

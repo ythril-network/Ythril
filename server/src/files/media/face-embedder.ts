@@ -230,7 +230,7 @@ const LABELLED_FACE = { faceEntityId: { $exists: true, $ne: null } };
 /**
  * Does the space hold a labelled face the face index should be serving (Q-327)? Any age: the gallery has no fresh-write scan, so a face
  * labelled seconds ago is one the search must still find. A failed read answers `true` (`holdsRecordTheIndexShouldServe`): the face is
- * deferred, never stored unlabelled on a read that did not run.
+ * deferred, never stored matched to no one on a read that did not run.
  */
 function holdsLabelledFace(spaceId: string, startedAt: number): Promise<boolean> {
   return holdsRecordTheIndexShouldServe(spaceCollection(spaceId, 'files'), 'faceEmbedding',
@@ -240,7 +240,7 @@ function holdsLabelledFace(spaceId: string, startedAt: number): Promise<boolean>
 /** "This space's face index refuses every search": said once per space per ten minutes, not once per face of a backlog. */
 const faceIndexRefusalSaid = warnOnce<string>({ every: 10 * 60_000 });
 
-/** "A face was stored unlabelled because the job's deferrals were spent": the same window, the same reason. */
+/** "A face was stored matched to no one by the gallery because the job's deferrals were spent (a label it already had is kept)": the same window, the same reason. */
 const deferralSpentSaid = warnOnce<string>({ every: 10 * 60_000 });
 
 /**
