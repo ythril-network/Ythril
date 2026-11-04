@@ -209,6 +209,18 @@ export class GalleryIncompleteError extends Error {
   }
 }
 
+/**
+ * What a gallery search answers (bundle-236, Q-698): a person (`match`), no one (`no_match`: the gallery ANSWERED), or nothing
+ * (`could_not_answer`: the index refuses every search, or the job's deferrals ran out). Only `could_not_answer` lets a face keep a label
+ * it already had, so a stranger and a gallery that was down are never the same answer.
+ */
+export type GalleryAnswer =
+  | { kind: 'match'; entityId: string; score: number }
+  | { kind: 'no_match' }
+  | { kind: 'could_not_answer'; reason: 'index_unavailable' | 'deferral_spent' };
+
+const NO_MATCH: GalleryAnswer = { kind: 'no_match' };
+
 /** The whole budget one gallery search gets. A media job is background work: accuracy over speed. */
 const GALLERY_BUDGET_MS = 30_000;
 
@@ -244,18 +256,20 @@ const deferralSpentSaid = warnOnce<string>({ every: 10 * 60_000 });
  * filtered recall uses: the window first, completed from the labelled faces' ids when the window cannot prove
  * it held the best one.
  *
- * Returns `{ entityId, score }` when the best labelled face passes the threshold, `null` when the gallery holds
- * no labelled face that does, and THROWS {@link GalleryIncompleteError} when the search could not be completed — see there.
- * Exported as the test seam.
+ * Returns a typed {@link GalleryAnswer}, so the writer can tell a stranger from a gallery that was down (a label the face already had is
+ * kept only for the second): `match` when the best labelled face passes the threshold and its person still exists; `no_match` when
+ * the gallery holds no labelled face that does (no labelled face, a score below the threshold, or a label whose person is gone);
+ * `could_not_answer` `index_unavailable` when the face index refuses every search while a face is labelled. It THROWS
+ * {@link GalleryIncompleteError} when the search could not be completed and is worth waiting for — see there. Exported as the test seam.
  *
  * ## A search that could not answer is asked whether there is a gallery (Q-327)
  *
  * A refused search and one that answered NOTHING (an absent or still-building index answers no documents, no error) read the
- * space's labelled faces once, at any age. None: there is no gallery, and `null` is the answer, whatever the index is doing (B7).
+ * space's labelled faces once, at any age. None: there is no gallery, and `no_match` is the answer, whatever the index is doing (B7).
  * One: a deadline, an index not serving yet, an index that answered nothing, or a store condition (a dead mongot) is
  * {@link GalleryIncompleteError}, so the job is deferred and run again; an index that will not serve without action (a dimension
- * mismatch, FAILED) answers `null`, so the caption and the job still complete, and `ythril_faces_stored_unmatched_total` counts the
- * face stored unlabelled with a warning once per space per window.
+ * mismatch, FAILED) answers `could_not_answer`, so the caption and the job still complete, and `ythril_faces_stored_unmatched_total` counts
+ * the face the gallery could not match, with a warning once per space per window.
  */
 export async function gallerySearch(
   spaceId: string,
@@ -263,7 +277,7 @@ export async function gallerySearch(
   threshold: number,
   /** The labelled-face id set, shared by every face of one image so a group photo reads it once. */
   memo?: PredicateIdMemo,
-): Promise<{ entityId: string; score: number } | null> {
+): Promise<GalleryAnswer> {
   const indexName = liveIndexName(`${spaceId}_files_faceEmbedding`);
   const startedAt = Date.now();
   let out;
@@ -283,7 +297,7 @@ export async function gallerySearch(
     if (isMaxTimeExpired(err)) throw new GalleryIncompleteError(spaceId, 'the search ran out of time');
     // Every other refusal asks whether there IS a gallery: with no labelled face anywhere, there is nothing to be incomplete
     // about, and null is the answer (B7). With one, the kind of refusal decides.
-    if (!await holdsLabelledFace(spaceId, startedAt)) return null;
+    if (!await holdsLabelledFace(spaceId, startedAt)) return NO_MATCH;
     // Not serving YET (being built, absent) or a store condition (a dead mongot, a lost connection): the job is deferred and
     // run again once the index serves (05c "the face index is still being updated").
     if (isIndexNotQueryableYet(err) || isStoreUnreachable(err)) {
@@ -292,29 +306,107 @@ export async function gallerySearch(
     // Only the store refusing is an index that will not serve; anything else (a fault of ours) is thrown as it was, not counted as one.
     if (!(err instanceof MongoServerError)) throw err;
     // An index that will not serve without action (a dimension mismatch, FAILED): waiting would hold every face photo of the space
-    // for ever and lose its caption, so the face is stored unlabelled - counted, and said once per space per window.
+    // for ever and lose its caption, so the face is stored matched to no one - counted, and said once per space per window.
     faceIndexRefusalSaid(spaceId, () => log.warn(`Face gallery: the face index of ${peerText(spaceId)} (${peerText(indexName)}) refuses `
-      + `every search (${peerText(err)}); faces are stored unlabelled until it is rebuilt from Settings → Spaces → Danger Zone`));
+      + `every search (${peerText(err)}); faces are stored matched to no one by the gallery (a label a face already had is kept) `
+      + 'until it is rebuilt from Settings → Spaces → Danger Zone'));
     facesStoredUnmatchedTotal.labels({ reason: 'index_unavailable' }).inc();
-    return null;
+    return { kind: 'could_not_answer', reason: 'index_unavailable' };
   }
 
   // NOTHING came back - an absent, dropped or still-building index answers no documents without an error (stage 1 reads that as
   // an exhausted window). That is "no match" only while there is no labelled face to match; with one the search is incomplete.
   if (out.docs.length === 0) {
     if (await holdsLabelledFace(spaceId, startedAt)) throw new GalleryIncompleteError(spaceId, out.degraded.join(', ') || 'the face index answered nothing');
-    return null;
+    return NO_MATCH;
   }
   if (out.degraded.length > 0) throw new GalleryIncompleteError(spaceId, out.degraded.join(', '));
 
   const top = out.docs[0];
-  if (!top) return null;
+  if (!top) return NO_MATCH;
   const score = top['score'];
-  if (typeof score !== 'number' || score < threshold) return null;
+  if (typeof score !== 'number' || score < threshold) return NO_MATCH;
   const entityId = top['faceEntityId'];
-  if (typeof entityId !== 'string' || !entityId) return null;
-  if (!await labelStillResolves(spaceId, entityId)) return null;
-  return { entityId, score };
+  if (typeof entityId !== 'string' || !entityId) return NO_MATCH;
+  if (!await labelStillResolves(spaceId, entityId)) return NO_MATCH;
+  return { kind: 'match', entityId, score };
+}
+
+// ── A label a face already had, kept when the gallery could not answer ─────
+
+/** A face's box as the detector and the stored row hold it: `[x, y, w, h]`, normalised to the image. */
+type FaceBox = readonly [number, number, number, number];
+
+/** The least overlap (intersection over union) at which a new face is the same face as a stored row. */
+const SAME_FACE_IOU = 0.5;
+
+/** A stored face row of the file, as the snapshot reads it. */
+interface StoredFaceRow {
+  _id: string;
+  faceBbox?: unknown;
+  faceEntityId?: string;
+  faceScore?: number;
+  sourceSha256?: string;
+}
+
+/** A box only when it is four finite numbers: a row written by an older build, or by hand, may hold anything. */
+function asFaceBox(v: unknown): FaceBox | null {
+  if (!Array.isArray(v) || v.length !== 4 || !v.every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+  return v as unknown as FaceBox;
+}
+
+/** Intersection over union of two `[x, y, w, h]` boxes. A box with no area overlaps nothing, itself included (0 / 0 is not 1). */
+export function boxIou(a: FaceBox, b: FaceBox): number {
+  if (a[2] <= 0 || a[3] <= 0 || b[2] <= 0 || b[3] <= 0) return 0;
+  const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]);
+  const h = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]);
+  if (w <= 0 || h <= 0) return 0;
+  const inter = w * h;
+  return inter / (a[2] * a[3] + b[2] * b[3] - inter);
+}
+
+/**
+ * Which stored row's label each face the gallery could not answer for keeps (bundle-236, C10).
+ *
+ * `rows` is the snapshot of the file's face rows taken BEFORE the run wrote any (the run's own upserts replace them by id), and `faces`
+ * the faces to place, by index, with their boxes. A row is a candidate when the bytes it was made from are this run's (no
+ * `sourceSha256` is a row from before the field, and counts as the same bytes), it carries a label and a box, and the person labelled
+ * still exists. Pairs at IoU of {@link SAME_FACE_IOU} or more are taken best first, one-to-one: a label is one person's face, once.
+ * The label and its score travel together. Returns the label per face index; a face absent from it keeps nothing.
+ */
+async function assignKeptLabels(
+  spaceId: string,
+  rows: StoredFaceRow[],
+  faces: Array<{ index: number; box: FaceBox | null }>,
+  sourceSha256: string | undefined,
+): Promise<Map<number, { faceEntityId: string; faceScore?: number }>> {
+  const pairs: Array<{ iou: number; face: number; row: number }> = [];
+  rows.forEach((row, r) => {
+    if (typeof row.faceEntityId !== 'string' || !row.faceEntityId) return;
+    if (row.sourceSha256 !== undefined && row.sourceSha256 !== sourceSha256) return;
+    const rowBox = asFaceBox(row.faceBbox);
+    if (!rowBox) return;
+    for (const f of faces) {
+      const iou = f.box ? boxIou(f.box, rowBox) : 0;
+      if (iou >= SAME_FACE_IOU) pairs.push({ iou, face: f.index, row: r });
+    }
+  });
+  // A person who is gone is asked once per person, and a row of one is no candidate: the dangling reference would seed new labels.
+  const resolves = new Map<string, boolean>();
+  for (const p of pairs) {
+    const id = rows[p.row]!.faceEntityId!;
+    if (!resolves.has(id)) resolves.set(id, await labelStillResolves(spaceId, id));
+  }
+  pairs.sort((x, y) => y.iou - x.iou || x.face - y.face || x.row - y.row);
+  const kept = new Map<number, { faceEntityId: string; faceScore?: number }>();
+  const spentRows = new Set<number>();
+  for (const p of pairs) {
+    const row = rows[p.row]!;
+    if (kept.has(p.face) || spentRows.has(p.row) || !resolves.get(row.faceEntityId!)) continue;
+    kept.set(p.face, { faceEntityId: row.faceEntityId!, ...(typeof row.faceScore === 'number' ? { faceScore: row.faceScore } : {}) });
+    spentRows.add(p.row);
+  }
+  return kept;
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -349,6 +441,11 @@ export async function embedFaces(
     log.debug(`Face recogniser: skipped for space '${spaceId}' — image analysis is below 'recognition'`);
     return;
   }
+
+  // A run whose claim is gone (a delete, a move, a re-upload that revoked the job) pays for no decode and no detect call: the first
+  // write would tell it nothing it makes is wanted, after the provider's quota and round trip were spent (a faces-only re-run has
+  // nothing else to cost).
+  if (!(await holdsClaim(spaceId, opts.claim))) throw new JobLeaseLostError(spaceId, opts.claim.jobId);
 
   // ── 1. Decode image to raw RGBA ─────────────────────────────────────────
   let pixelData: Buffer;
@@ -434,6 +531,15 @@ export async function embedFaces(
   /** The labelled faces' ids, read once for this image however many faces it holds — see `gallerySearch`. */
   const galleryMemo: PredicateIdMemo = new Map();
 
+  // The file's stored face rows, read ONCE and before the loop: the loop's own upserts replace them by id, and a label a face already had
+  // is kept only from what was stored before this run. A failed read throws - a snapshot nobody read is not "no rows".
+  const stored = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).find(
+    asFilter<FileMetaDoc>({ parentFileId: fileId, faceEmbedding: { $exists: true } }),
+    { projection: { _id: 1, faceBbox: 1, faceEntityId: 1, faceScore: 1, sourceSha256: 1 } },
+  ).toArray() as unknown as StoredFaceRow[];
+  /** The faces the gallery could not answer for: written after the loop, once the rows' labels are shared out one-to-one. */
+  const unanswered: Array<{ index: number; box: FaceBox | null; doc: FileMetaDoc }> = [];
+
   // ── 3. Process each detected face ────────────────────────────────────────
   for (let i = 0; i < faces.length; i++) {
     // The entry of each face is a hop of its own (a gallery search per face): beat, and stop if the claim is gone.
@@ -455,20 +561,21 @@ export async function embedFaces(
     }
 
     // Gallery search — find the closest labeled face. A gallery that cannot answer defers the job, until the job's deferral is
-    // spent (`job-queue.ts: DEFERRAL_CAP_MS`): then the face is stored unlabelled, counted, and said, rather than waited for again.
-    let match: Awaited<ReturnType<typeof gallerySearch>>;
+    // spent (`job-queue.ts: DEFERRAL_CAP_MS`): then the face is stored matched to no one, counted, and said, rather than waited for again.
+    let answer: GalleryAnswer;
     try {
-      match = await gallerySearch(spaceId, embedding, faceCfg.confidenceThreshold, galleryMemo);
+      answer = await gallerySearch(spaceId, embedding, faceCfg.confidenceThreshold, galleryMemo);
     } catch (err) {
       if (!(err instanceof GalleryIncompleteError) || opts.galleryMayDefer !== false) throw err;
       deferralSpentSaid(spaceId, () => log.warn(`Face gallery of ${peerText(spaceId)}: ${peerText(err)} after the job's deferrals were `
-        + 'spent; the face is stored unlabelled'));
+        + 'spent; the face is stored matched to no one by the gallery (a label the face already had is kept)'));
       facesStoredUnmatchedTotal.labels({ reason: 'deferral_spent' }).inc();
-      match = null;
+      answer = { kind: 'could_not_answer', reason: 'deferral_spent' };
     }
 
-    const faceEntityId = match?.entityId;
-    const faceScore = match?.score;
+    // Only a match is a label the gallery found: it alone seeds the parent's person link. A label kept below is not found, only kept.
+    const faceEntityId = answer.kind === 'match' ? answer.entityId : undefined;
+    const faceScore = answer.kind === 'match' ? answer.score : undefined;
 
     // Track the first auto-label for the parent file update
     if (faceEntityId && !autoLabelEntityId) {
@@ -499,9 +606,29 @@ export async function embedFaces(
       ...(boxRaw !== undefined ? { faceBbox: boxRaw as [number, number, number, number] } : {}),
     };
 
+    // A face the gallery could not answer for waits for the loop's end: which stored row's label it keeps is decided across ALL such faces.
+    if (answer.kind === 'could_not_answer') {
+      unanswered.push({ index: i, box: asFaceBox(boxRaw), doc: chunkDoc as FileMetaDoc });
+      continue;
+    }
+
     // Through the one writer of a derived row, which holds the claim and reads the PARENT in the same transaction: a face row
     // written after the picture was deleted is a face recall still finds, for a file nobody can open.
     await upsertDerivedFileRow(spaceId, opts.claim, chunkDoc as FileMetaDoc);
+  }
+
+  // ── 4b. The faces the gallery could not answer for keep the label their stored row had ─────────────
+  if (unanswered.length > 0) {
+    const kept = await assignKeptLabels(spaceId, stored, unanswered, opts.claim.sourceSha256);
+    for (const f of unanswered) {
+      stopIfLeaseLost(spaceId, opts);
+      const label = kept.get(f.index);
+      await upsertDerivedFileRow(spaceId, opts.claim, (label ? { ...f.doc, ...label } : f.doc) as FileMetaDoc);
+    }
+    if (kept.size > 0) {
+      log.info(`Face recogniser: kept the label of ${kept.size} of ${unanswered.length} face(s) of ${peerText(spaceId)}/${peerText(fileId)} `
+        + 'that the gallery could not match');
+    }
   }
 
   // ── 5. Auto-label parent file ───────────────────────────────────────────
