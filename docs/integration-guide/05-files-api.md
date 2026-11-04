@@ -392,7 +392,8 @@ has: those of a file a failure left standing stay with it, and a repeat of the d
 **A delete takes what derives from the file even work running at that moment.** A media job that is processing the file
 when it is deleted, moved or wiped with its space cannot write a derived record afterwards: every write it makes about
 its file is made under its claim on the job, and a delete, a move, a directory delete and a space wipe revoke the claims
-first. A run that lost its claim ends without completing or failing, and writes nothing about a file re-uploaded at the
+first. **So does a file written again at the same path with other bytes:** the write gives the job to the new bytes, and a run
+still going over the old ones loses its claim. A run that lost its claim ends without completing or failing, and writes nothing about a file re-uploaded at the
 same path. **The one exception is a face run's auto-label:** linking the recognised person to the file is an authored write
 that cannot join the claim, so it is made just after a check that the run still holds it, and a file deleted and uploaded
 again at the same path in that instant can receive the link. **Records a previous version already leaked** (a derived record written after the delete by a job that was
