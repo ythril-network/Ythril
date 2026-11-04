@@ -506,8 +506,9 @@ The authoritative description is the comment at the top of `.github/workflows/ci
   latest attempt, with its `Full run / Build & Test` a success; and every results artifact of that attempt is listed and
   unexpired. Its one output, `full_run`, is `<run id>.<attempt>` or empty. It **fails open**: anything it cannot establish
   (an API error, a short page, a 120 s deadline) is "no reuse", the whole graph runs, and the reason is in its step summary.
-  A push to `main` and a Full run never reuse (the job is skipped); an outside contributor's pull request and one into a
-  release branch find no Full run of their commit, so they run every suite as before.
+  A push to `main` and a Full run never reuse (the job is skipped). An outside contributor's pull request never reuses: a Full
+  run must belong to this repository. A pull request into a release branch reuses only when its head has a green Full run of
+  the same tree, which a patch branch usually has not, so it usually runs every suite.
 - **`changelog`** is the pull request's CHANGELOG check, a job of its own because a reused run skips every suite job and the
   check is not one of them. It waits for nothing and carries no condition.
 - **Jobs that start at once** because they need nothing from the image: the client tests and build (`client-tests`), the
