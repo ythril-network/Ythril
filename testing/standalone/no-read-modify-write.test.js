@@ -162,6 +162,13 @@ function countedFields(value) {
 
 const propertyKey = (p) => (p.name && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) ? p.name.text : null);
 
+/**
+ * The key a write records for `$set: <identifier>`: the whole update object is one value. Through a parameter it is the call site's
+ * object literal that holds the keys, so a helper that writes `$set: fields` (`endEmbedJob`) does not hide a count its caller built
+ * from a snapshot (bundle-237 moved `failEmbedJob`'s terminal write there, and the sweep stopped seeing `lostChildFailures`).
+ */
+const WHOLE_SET = '*';
+
 /** Every write call in `sf`, with the `{ key, value }` pairs of each `$set` object literal in its arguments. */
 function writesOf(sf) {
   const out = [];
@@ -172,6 +179,8 @@ function writesOf(sf) {
       walkEveryNode(arg, (p) => {
         if (!ts.isPropertyAssignment(p) || propertyKey(p) !== '$set') return;
         const obj = unwrapExpression(p.initializer);
+        // `$set: fields`: the whole update is a value, often a parameter whose object literal is built at the call site.
+        if (obj && ts.isIdentifier(obj)) { sets.push({ key: WHOLE_SET, value: obj }); return; }
         if (!obj || !ts.isObjectLiteralExpression(obj)) return;
         for (const q of obj.properties) {
           if (ts.isPropertyAssignment(q) && propertyKey(q)) sets.push({ key: propertyKey(q), value: q.initializer });
@@ -209,7 +218,7 @@ function parameterWrites(files) {
         if (!index.has(name)) index.set(name, new Map());
         const byParam = index.get(name);
         if (!byParam.has(at)) byParam.set(at, new Set());
-        byParam.get(at).add(lastSegment(key));
+        byParam.get(at).add(key === WHOLE_SET ? WHOLE_SET : lastSegment(key));
       }
     }
   }
@@ -247,6 +256,14 @@ export function findCounterFromSnapshot(sources) {
         const keys = byParam.get(at);
         if (!keys) return;
         for (const f of countedFields(arg)) if (keys.has(f)) hit(path, sf, n, f, name);
+        const obj = keys.has(WHOLE_SET) ? unwrapExpression(arg) : null;
+        if (obj && ts.isObjectLiteralExpression(obj)) {
+          for (const q of obj.properties) {
+            const key = ts.isPropertyAssignment(q) || ts.isShorthandPropertyAssignment(q) ? propertyKey(q) : null;
+            const value = ts.isPropertyAssignment(q) ? q.initializer : ts.isShorthandPropertyAssignment(q) ? q.name : null;
+            if (key && value && countedFields(value).includes(lastSegment(key))) hit(path, sf, q, lastSegment(key), name);
+          }
+        }
       });
     });
   }
@@ -267,6 +284,11 @@ export const EXEMPT = [
     file: 'server/src/brain/embed-queue.ts', fn: 'failEmbedJob', field: 'transientFailures',
     why: 'the count comes from the job this worker claimed, and the write is filtered by the claim token (claimedBy): a job whose claim '
       + 'was taken over matches nothing, so only the claim holder writes the count it read',
+  },
+  {
+    file: 'server/src/brain/embed-queue.ts', fn: 'failEmbedJob', field: 'lostChildFailures',
+    why: 'as transientFailures: read from the claimed job and written (through endEmbedJob) under its claim token, so only the claim '
+      + 'holder writes it',
   },
 ];
 
@@ -413,6 +435,29 @@ describe('no read-modify-write over a Mongo document', () => {
         }` },
     ]);
     assert.deepEqual(hits.map(h => `${h.file} ${h.fn} ${h.field} ${h.via}`), ['server/src/x/pass.ts pass attempts recordAttempt']);
+  });
+
+  it('shape 2 DETECTS a count built at the call site of a helper whose write is `$set: <parameter>` (the shape of endEmbedJob)', () => {
+    const hits = one(`
+      async function endJob(id: string, fields: Fields): Promise<void> {
+        await jobs().updateOne(asFilter({ id }), asUpdate({ $set: fields }));
+      }
+      export async function fail(id: string, opts: { lost?: number }): Promise<void> {
+        const lost = (opts.lostFailures ?? 0) + 1;
+        await endJob(id, { status: 'failed', lostFailures: lost, note: 'x' });
+      }`);
+    assert.deepEqual(hits.map(h => `${h.fn} ${h.field} ${h.via}`), ['fail lostFailures endJob']);
+  });
+
+  it('shape 2 does NOT flag fresh values passed to a `$set: <parameter>` helper', () => {
+    const hits = one(`
+      async function endJob(id: string, fields: Fields): Promise<void> {
+        await jobs().updateOne(asFilter({ id }), asUpdate({ $set: fields }));
+      }
+      export async function fail(id: string, attempts: number): Promise<void> {
+        await endJob(id, { status: 'failed', attempts: 5, updatedAt: now() });
+      }`);
+    assert.deepEqual(hits, []);
   });
 
   it('shape 2 DETECTS a count $set by updateMany in the same function', () => {
