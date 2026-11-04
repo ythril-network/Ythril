@@ -36,8 +36,10 @@ async function jobs(space) {
  *
  * @param {string} space
  * @param {string} fileId  the file's id, which is its job's id
- * @param {object} [over]  fields to override on the job document (`mediaType`, `attempts`, `progressAt`...)
- * @returns {Promise<{ jobId: string, claimToken: string }>}
+ * @param {object} [over]  fields to override on the job document (`mediaType`, `attempts`, `progressAt`, `sha256`...). A `sha256` is the bytes
+ *   the job analyses, and the claim then carries it as `sourceSha256`, as the worker builds it (`processJob`): every derived row the run writes
+ *   is stamped with it. No `sha256`: a job with no known hash, which stamps nothing and clears nothing.
+ * @returns {Promise<{ jobId: string, claimToken: string, sourceSha256?: string }>}
  */
 export async function seedClaim(space, fileId, over = {}) {
   const claimToken = randomUUID();
@@ -46,7 +48,7 @@ export async function seedClaim(space, fileId, over = {}) {
     status: 'processing', attempts: 1, maxAttempts: 3, lastError: null,
     claimedAt: NOW, progressAt: NOW, claimToken, createdAt: NOW, updatedAt: NOW, ...over,
   }, { upsert: true });
-  return { jobId: fileId, claimToken };
+  return { jobId: fileId, claimToken, ...(over.sha256 ? { sourceSha256: over.sha256 } : {}) };
 }
 
 /** Take the claim on `fileId` away the way a delete or a move does: the job is gone (or held), so its token matches nothing. */

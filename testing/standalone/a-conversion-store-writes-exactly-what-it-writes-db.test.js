@@ -62,13 +62,16 @@ async function seedParent(id, over = {}, space = OPEN) {
 }
 
 /** The claim a conversion commits under: a real `processing` job with a token (`_media-claim.mjs`), as a text job holds it. */
-const claimFor = (space, fileId) => seedClaim(space, fileId, { mimeType: 'text/plain', mediaType: 'text', resolvedFormat: 'txt' });
+const SOURCE = 'b'.repeat(64);
+const claimFor = (space, fileId) => seedClaim(space, fileId, { mimeType: 'text/plain', mediaType: 'text', resolvedFormat: 'txt', sha256: SOURCE });
 
 const chunk = (chunkIndex, content, headingText = '') => ({ chunkIndex, content, headingText });
 const store = (space, id, chunks, converted = null, images = [], opts) => pipeline.storeConversionResults(space, id, chunks, converted, images, opts);
 const abs = (space, rel) => path.join(sandbox.spaceRoot(space), rel);
 
-const CHUNK_KEYS = ['_id', 'spaceId', 'path', 'tags', 'createdAt', 'updatedAt', 'sizeBytes', 'author', 'parentFileId', 'chunkIndex', 'headingText', 'content', 'matchedText'];
+const CHUNK_KEYS = ['_id', 'spaceId', 'path', 'tags', 'createdAt', 'updatedAt', 'sizeBytes', 'author', 'parentFileId', 'chunkIndex', 'headingText', 'content', 'matchedText', 'sourceSha256'];
+/** The keys of a bare sidecar row (the converted copy, an extracted image): the run's bytes are on it like on every derived row. */
+const SIDECAR_KEYS = ['_id', 'spaceId', 'path', 'tags', 'createdAt', 'updatedAt', 'sizeBytes', 'author', 'parentFileId', 'sourceSha256'];
 const keysOf = (doc) => Object.keys(doc).sort();
 
 describe('storeConversionResults writes exactly what it writes today (real MongoDB, real embed() over a stub)', { skip }, () => {
@@ -163,7 +166,8 @@ describe('storeConversionResults writes exactly what it writes today (real Mongo
     assert.equal(result.convertedFileId, '_converted/docs/report.pdf.md');
     assert.equal(fs.readFileSync(abs(OPEN, result.convertedFileId), 'utf8'), '# The whole document\n\nbody\n', 'the converted markdown is on disk at that path');
     const converted = await files().findOne({ _id: result.convertedFileId });
-    assert.deepEqual(keysOf(converted), ['_id', 'spaceId', 'path', 'tags', 'createdAt', 'updatedAt', 'sizeBytes', 'author', 'parentFileId'].sort());
+    assert.deepEqual(keysOf(converted), SIDECAR_KEYS.slice().sort());
+    assert.equal(converted.sourceSha256, SOURCE);
     assert.equal(converted.parentFileId, 'docs/report.pdf');
     assert.equal(converted.sizeBytes, Buffer.byteLength('# The whole document\n\nbody\n', 'utf8'));
     assert.deepEqual(converted.author, LOCAL);
@@ -183,7 +187,8 @@ describe('storeConversionResults writes exactly what it writes today (real Mongo
     assert.equal(result.chunkCount, 1);
     const rows = await files().find({ _id: { $regex: '^_extracted/' } }).sort({ _id: 1 }).toArray();
     assert.deepEqual(rows.map(r => r._id), ['_extracted/docs/report.pdf/image-0.jpg', '_extracted/docs/report.pdf/image-1.png']);
-    assert.deepEqual(keysOf(rows[0]), ['_id', 'spaceId', 'path', 'tags', 'createdAt', 'updatedAt', 'sizeBytes', 'author', 'parentFileId'].sort());
+    assert.deepEqual(keysOf(rows[0]), SIDECAR_KEYS.slice().sort());
+    assert.equal(rows[0].sourceSha256, SOURCE);
     assert.equal(rows[0].parentFileId, 'docs/report.pdf');
     assert.equal(rows[0].sizeBytes, Buffer.byteLength('jpeg-bytes'));
     assert.equal(fs.readFileSync(abs(OPEN, rows[0]._id), 'utf8'), 'jpeg-bytes');

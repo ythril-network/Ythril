@@ -97,6 +97,13 @@ export interface JobClaim {
   jobId: string;
   /** Absent on a claim made by a build that predates tokens; the fence then checks the status alone. */
   claimToken?: string | null;
+  /**
+   * The SHA-256 of the bytes this run analyses: the job's own (`MediaJobDoc.sha256`, set by the write door), built once where the claim is.
+   * The derived-row writers (`derived-fields.ts`) stamp it on every row the run makes, INSIDE, so no caller can drop it, and the run's start
+   * clears the rows another run's bytes made (`clearRowsOfOtherBytes`). Absent on a job with no known hash (an extracted image's, a lazy
+   * repair's): such a run stamps nothing and clears nothing.
+   */
+  sourceSha256?: string | undefined;
 }
 
 /**
@@ -151,6 +158,16 @@ export async function writeUnderClaim<T>(
   return opts.positionHolder === undefined
     ? inBoundedTransaction(fenced, bound)
     : inHeldTransaction(spaceId, opts.positionHolder, fenced, bound);
+}
+
+/**
+ * Throw `JobLeaseLostError` unless `claim` still holds its job — decided by the fence's WRITE to the job document ({@link writeUnderClaim}),
+ * not by a read ({@link holdsClaim}). For a run's step that has no transaction of its own to carry the fence (a queue cancel, a retire, a
+ * byte removal): asked right before it, so a run that lost its claim to a re-upload stops at the step instead of doing it over the new
+ * run's work. It narrows the window to the step's own length and does not close it; what can join a transaction does (`writeUnderClaim`).
+ */
+export async function fenceOnClaim(spaceId: string, claim: JobClaim): Promise<void> {
+  await writeUnderClaim(spaceId, claim, async () => undefined);
 }
 
 /**

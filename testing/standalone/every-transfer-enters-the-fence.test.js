@@ -62,6 +62,9 @@ const EXEMPT_FUNCTIONS = new Map([
   ['server/src/files/chunks.ts:(anonymous)', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/converters/pipeline.ts:removeSidecarRows', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/derived-rows.ts:deleteRowsDerivedFrom', { why: ONLY_REMOVES_OR_REFUSES }],
+  // The two clears a media or text RUN makes at its start (bundle-236): each deletes rows in chunks under the run's claim and writes nothing else.
+  ['server/src/files/converters/pipeline.ts:deleteConversionArtifactsUnderClaim', { why: ONLY_REMOVES_OR_REFUSES }],
+  ['server/src/files/derived-fields.ts:clearRowsOfOtherBytes', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/brain/entities.ts:unlabelFacesWhere', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/files/derived-fields.ts:stripFlaggedRowsOnce', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/brain/retention-stamp-heal.ts:healStoredStamps', { why: UPDATES_EXISTING_ONLY }],

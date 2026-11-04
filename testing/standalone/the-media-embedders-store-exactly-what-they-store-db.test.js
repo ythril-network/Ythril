@@ -176,14 +176,15 @@ const handleOf = (bytes, mime, mediaType) => {
 };
 
 /** A run holds its job's claim (`_media-claim.mjs`): every write an embedder makes is under it, and the caller's `opts` ride beside it. */
-const runImage = async (space, id, bytes = Buffer.from('png-bytes'), mime = 'image/png', opts) => imageMod.embedImage(space, id, handleOf(bytes, mime, 'image'), mime, vision, { ...opts, claim: await seedClaim(space, id) });
-const runAudio = async (space, id, bytes = Buffer.from('wav-bytes'), mime = 'audio/wav', overlapMs, opts) => audioMod.embedAudio(space, id, handleOf(bytes, mime, 'audio'), mime, stt, overlapMs, { ...opts, claim: await seedClaim(space, id) });
+const SOURCE = 'a'.repeat(64);
+const runImage = async (space, id, bytes = Buffer.from('png-bytes'), mime = 'image/png', opts) => imageMod.embedImage(space, id, handleOf(bytes, mime, 'image'), mime, vision, { ...opts, claim: await seedClaim(space, id, { sha256: SOURCE }) });
+const runAudio = async (space, id, bytes = Buffer.from('wav-bytes'), mime = 'audio/wav', overlapMs, opts) => audioMod.embedAudio(space, id, handleOf(bytes, mime, 'audio'), mime, stt, overlapMs, { ...opts, claim: await seedClaim(space, id, { sha256: SOURCE }) });
 const runVideo = async (space, id, bytes = Buffer.from('mp4-bytes'), mime = 'video/mp4', { keyframes = true, overlapMs, intervalS, opts } = {}) =>
-  videoMod.embedVideo(space, id, handleOf(bytes, mime, 'video'), mime, vision, stt, keyframes, overlapMs, intervalS, { ...opts, claim: await seedClaim(space, id) });
+  videoMod.embedVideo(space, id, handleOf(bytes, mime, 'video'), mime, vision, stt, keyframes, overlapMs, intervalS, { ...opts, claim: await seedClaim(space, id, { sha256: SOURCE }) });
 
 /** The keys a chunk row of each kind carries, exactly: a key added or dropped by a move into another writer is a finding. */
 const VECTOR = ['embedding', 'embeddingModel'];
-const IMAGE_KEYS = ['_id', 'spaceId', 'path', 'tags', 'createdAt', 'updatedAt', 'sizeBytes', 'author', 'parentFileId', 'chunkIndex', 'content', 'matchedText'];
+const IMAGE_KEYS = ['_id', 'spaceId', 'path', 'tags', 'createdAt', 'updatedAt', 'sizeBytes', 'author', 'parentFileId', 'chunkIndex', 'content', 'matchedText', 'sourceSha256'];
 const AUDIO_KEYS = [...IMAGE_KEYS, 'chunkOffsetMs', 'chunkDurationMs'];
 const keysOf = (doc) => Object.keys(doc).sort();
 const expectKeys = (doc, base, withVector = true) => assert.deepEqual(keysOf(doc), [...base, ...(withVector ? VECTOR : [])].sort(), `${doc._id}: the row's keys`);

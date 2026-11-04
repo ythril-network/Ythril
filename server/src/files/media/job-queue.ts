@@ -897,7 +897,7 @@ export async function cancelMediaJobs(spaceId: string, filePaths: readonly strin
  * sidecar FILE by its id, a sidecar TREE by its prefix. Called by a file's and a directory's delete, so neither spells the sidecar
  * paths itself; the set is `jobPathsOf`, the one a move holds and re-keys, so delete and move cannot disagree about whose a job
  * is. **A file's OWN job is not among them** (`cancelMediaJob` takes it): the text job of a file clears that file's
- * sidecars from inside itself (`deleteConversionArtifacts`, before it re-chunks), and would cancel its own lease.
+ * sidecars from inside itself (`deleteConversionArtifactsUnderClaim`, before it re-chunks), and would cancel its own lease.
  *
  * What it prevents: a job outliving its source, retrying for ever against a path nothing holds — or, worse, finishing after the
  * delete's cascade and writing a row of the deleted content. A peer that never converts holds `_converted/<f>.md` as an ordinary

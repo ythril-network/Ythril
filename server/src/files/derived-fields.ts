@@ -75,6 +75,8 @@ import { writtenHereFilter } from '../sync/written-here.js';
 import { authorRef } from '../config/author.js';
 import { toDocId } from '../util/paths.js';
 import { inChunks } from '../util/chunks.js';
+import { READ_CHUNK } from '../db/read-by-id.js';
+import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import type { ClientSession } from 'mongodb';
 import type { FileMetaDoc } from '../config/types.js';
@@ -108,7 +110,7 @@ const FILE_META_KEYS: Readonly<Record<keyof FileMetaDoc, true>> = {
   seq: true, deletedAt: true, embedding: true, embeddingModel: true, parentFileId: true, chunkIndex: true,
   headingText: true, content: true, convertedFileId: true, chunkCount: true, conversionError: true, mediaType: true,
   embeddingStatus: true, chunkOffsetMs: true, chunkDurationMs: true, mediaJobError: true, faceEmbedding: true,
-  faceEntityId: true, faceBbox: true, faceScore: true, wholeDocument: true,
+  faceEntityId: true, faceBbox: true, faceScore: true, wholeDocument: true, sourceSha256: true,
 };
 
 /**
@@ -333,6 +335,9 @@ export async function writeDerivedFields(o: {
  * created, which is what the delete had already decided. The upsert is why the check cannot be a predicate in the
  * filter — a non-matching filter on `replaceOne(upsert: true)` INSERTS rather than skipping, which is how a guard put
  * there would have created exactly the row it meant to refuse.
+ *
+ * **The row carries the bytes it was made from** ({@link stampedWith}): the claim's `sourceSha256` is set on it HERE, so no caller can write a
+ * derived row that cannot be told from another run's, and the next run over other bytes can clear it (`clearRowsOfOtherBytes`).
  */
 export async function upsertDerivedFileRow(spaceId: string, claim: JobClaim, doc: FileMetaDoc): Promise<DerivedWriteOutcome> {
   // Refused before the row is built. NOT counted by the fence, on purpose: the run's CLAIM is this write's fence (see `writeUnderClaim`). A wipe
@@ -344,10 +349,56 @@ export async function upsertDerivedFileRow(spaceId: string, claim: JobClaim, doc
   return writeUnderClaim(spaceId, claim, async (session): Promise<DerivedWriteOutcome> => {
     if (!await parentIsLive(spaceId, parentFileId, session)) return 'gone';
     await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).replaceOne(
-      asFilter<FileMetaDoc>({ _id: doc._id }), asDoc<FileMetaDoc>(doc), { upsert: true, session },
+      asFilter<FileMetaDoc>({ _id: doc._id }), asDoc<FileMetaDoc>(stampedWith(claim, doc)), { upsert: true, session },
     );
     return 'written';
   });
+}
+
+/**
+ * The START of an image, audio or video run: remove the rows of `fileId` that were made from OTHER bytes than this run's, before the run
+ * spends a model call — in chunks of `READ_CHUNK`, each under the run's claim ({@link writeUnderClaim}), so a run that loses its claim
+ * stops at the next chunk and removes nothing of the run that replaced it. Returns how many rows it removed.
+ *
+ * ## What it prevents
+ *
+ * A file written again at its path keeps its derived rows until something removes them, and a media run writes the same ids (`#media-chunk0`,
+ * `#face-chunkN`) only for what it finds: new bytes with one face fewer left the old image's extra face row, matched by the gallery, under the new
+ * image. The rows name the bytes they came from ({@link stampedWith}), so the run that starts over other bytes takes them away — at ITS start,
+ * under ITS claim, never at the door: a door-side delete lands after, or over, the run the same write started (bundle-236, C1/C3).
+ *
+ * ## The rule
+ *
+ * A row is another run's when `sourceSha256` is PRESENT and differs from the claim's. A row with none (written before the stamp existed, or by
+ * a run with no known hash) counts as the same bytes and stays, and a claim with no `sourceSha256` (an extracted image's job) clears nothing: with no
+ * hash to compare there is nothing to call different. A same-bytes re-run (a deferred job's faces-only run) keeps its caption, as it always has.
+ * Only the rows whose `parentFileId` is the file are read: a media file's derived rows are one level deep. A text run clears EVERY derived row of its
+ * file instead (`deleteConversionArtifactsUnderClaim`), because a conversion's rows are not the same set twice.
+ */
+export async function clearRowsOfOtherBytes(spaceId: string, claim: JobClaim, fileId: string): Promise<number> {
+  const bytes = claim.sourceSha256;
+  if (!bytes) return 0;
+  assertSpaceTakesWrites(spaceId, 'files');
+  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  const ofOtherBytes = { parentFileId: fileId, sourceSha256: { $exists: true, $ne: bytes } };
+  let cleared = 0;
+  for (;;) {
+    const page = await files.find(asFilter<FileMetaDoc>(ofOtherBytes as never), { projection: { _id: 1 }, limit: READ_CHUNK }).toArray();
+    if (page.length === 0) return cleared;
+    const ids = page.map(r => String(r._id));
+    await writeUnderClaim(spaceId, claim, session => files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: ids }, ...ofOtherBytes } as never), { session }));
+    await retireEmbedWorkOfRemovedRows(spaceId, { ids });
+    cleared += ids.length;
+  }
+}
+
+/**
+ * The row a run writes, carrying the bytes the run analyses: `sourceSha256` from the run's claim (`JobClaim.sourceSha256`), on every derived
+ * row, so the one place that stamps it is the one place a derived row is written. A claim with no hash (an extracted image's job, a lazy
+ * repair's) stamps nothing: a row with no `sourceSha256` counts as made from the same bytes as any run (`clearRowsOfOtherBytes`).
+ */
+function stampedWith(claim: JobClaim, doc: FileMetaDoc): FileMetaDoc {
+  return claim.sourceSha256 ? { ...doc, sourceSha256: claim.sourceSha256 } : doc;
 }
 
 /**
@@ -366,6 +417,8 @@ export async function upsertDerivedFileRow(spaceId: string, claim: JobClaim, doc
  *
  * The delete-then-insert of a slice is the writer's own replacement of its previous run's rows, inside its claim: it is a holder of the
  * claim, not a remover of the file's rows.
+ *
+ * Every row it stores carries the claim's `sourceSha256` ({@link stampedWith}), stamped here and not by the caller.
  */
 export async function replaceDerivedFileRows(
   spaceId: string,
@@ -382,7 +435,7 @@ export async function replaceDerivedFileRows(
     const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
     for (const slice of inChunks(docs, opts.batch)) {
       await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: slice.map(d => d._id) } }), { session });
-      await files.insertMany(slice.map(d => asDoc<FileMetaDoc>(d)), { session });
+      await files.insertMany(slice.map(d => asDoc<FileMetaDoc>(stampedWith(claim, d))), { session });
     }
     return 'written';
   });

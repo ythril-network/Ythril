@@ -44,13 +44,13 @@ import { moveCarriesRecordsAt } from '../move-markers.js';
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
 import { embedVideo } from './video-embedder.js';
-import { markFileProcessing, setDerivedDescriptionIfUnset, setDerivedExcerpt, type FileProcessingState, type MachineMadeSource } from '../derived-fields.js';
+import { clearRowsOfOtherBytes, markFileProcessing, setDerivedDescriptionIfUnset, setDerivedExcerpt, type FileProcessingState, type MachineMadeSource } from '../derived-fields.js';
 import { mimeTypeForPath } from '../mime.js';
 import { describeDocument } from '../converters/describe.js';
 import {
   runConversionPipeline,
   storeConversionResults,
-  deleteConversionArtifacts,
+  deleteConversionArtifactsUnderClaim,
 } from '../converters/pipeline.js';
 import type { ResolvedFormat } from '../converters/pipeline.js';
 import { ConversionUnavailableError } from '../converters/types.js';
@@ -427,7 +427,9 @@ async function processJob(
   let leaseLost = false;
   // The same loss, as a signal a running ffmpeg step can be killed by (`MediaProgressOpts.signal`).
   const lease = new AbortController();
-  const claim: JobClaim = { jobId: String(fileId), claimToken: job.claimToken };
+  // `sourceSha256`: the bytes this run analyses (the job's own hash), built once here and stamped on every derived row the run writes
+  // (`derived-fields.ts`). A job with no hash (an extracted image's, a lazy repair's) stamps nothing and clears nothing.
+  const claim: JobClaim = { jobId: String(fileId), claimToken: job.claimToken, ...(job.sha256 ? { sourceSha256: job.sha256 } : {}) };
   const heartbeat = (p?: StepProgress): void => {
     void touchJobProgress(spaceId, String(fileId), p, job.claimToken).then(stillOurs => {
       if (!stillOurs) { leaseLost = true; lease.abort(); }
@@ -482,6 +484,11 @@ async function processJob(
     await markFileProcessing(spaceId, claim, { embeddingStatus: 'processing' })
       .catch(err => { if (isAbandonment(err)) throw err; }); // otherwise non-fatal — job tracking is the source of truth
 
+    // THE RUN'S START, before any model call: an image, an audio or a video run removes what OTHER bytes at this path made (a caption, faces,
+    // transcript segments), in claim-fenced chunks. The text run clears its own file's conversion below, because that one clears everything.
+    // Not best-effort: a failure here fails the run to be retried, since going on would add this run's rows beside the old bytes' ones.
+    if (mediaType !== 'text') await clearRowsOfOtherBytes(spaceId, claim, String(fileId));
+
     // Run the appropriate embedder
     let derivedDescription: string | undefined;
     // What produced `derivedDescription`, and the document's own opening prose when there is one. Both are
@@ -534,8 +541,9 @@ async function processJob(
       }
       case 'text': {
         // Text/document embedding: chunk + embed the file content asynchronously.
-        // Delete any stale chunks first so a re-upload always produces a clean set.
-        await deleteConversionArtifacts(spaceId, fileId);
+        // Delete any stale chunks first so a re-upload always produces a clean set — every derived row of the file, under THIS run's claim and in
+        // chunks (`deleteConversionArtifactsUnderClaim`): a run that lost its claim to a re-upload stops, and never deletes the new run's rows.
+        await deleteConversionArtifactsUnderClaim(spaceId, claim, fileId);
         const resolvedFmt = (job.resolvedFormat ?? 'text') as ResolvedFormat;
         // F11-c: a per-space extraction-mode override wins over the instance-wide default (pipeline
         // falls back to `documentProcessing.mode` when this is undefined).

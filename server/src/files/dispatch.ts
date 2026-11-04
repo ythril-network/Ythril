@@ -237,15 +237,10 @@ export async function dispatchFileProcessing(
       return { resolvedFormat, embeddingStatus: input.prior.embeddingStatus === 'complete' ? 'complete' : 'pending' };
     }
     // Document (md/txt/html/pdf/docx/epub): always converted by the background worker.
-    // Clear stale conversion artifacts first so overwriting a document does not leave
-    // duplicate chunk records behind.
-    //
-    // UNTIL the run clears them itself: this delete is made here, with no claim, so an old run still going over the replaced bytes
-    // can write its rows after it. The design moves it under the NEW run's claim (a fenced, chunked clear at the run's start, before
-    // any model call), and this call goes then. The job below is already the new bytes' (`replaceContent` revokes the old run's claim).
-    await deleteConversionArtifacts(spaceId, filePath).catch(err => {
-      log.warn(`deleteConversionArtifacts error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
-    });
+    // NO delete here: the stale conversion (passages, sidecar rows, extracted images' jobs, sidecar bytes) is cleared by the NEW run at its
+    // start, under its own claim and in chunks (`deleteConversionArtifactsUnderClaim`, before any model call). A delete made here had no claim,
+    // so an old run still going over the replaced bytes could write its rows after it; the job below is already the new bytes' (`replaceContent`
+    // revokes the old run's claim), and its settle delay orders the clear after this write.
     const queued = await replaceContent(spaceId, filePath, {
       mimeType, mediaType: 'text', resolvedFormat, sha256: input.sha256, arrival: input.arrival === true,
     });
