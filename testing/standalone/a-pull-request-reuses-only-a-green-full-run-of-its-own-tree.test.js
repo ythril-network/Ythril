@@ -57,6 +57,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './_sources.mjs';
+import { makeScratchRepo } from '../_shared/scratch-git-repo.mjs';
 import { CI_WORKFLOW, loadCi, jobEntries, stepsUsing } from '../_shared/ci-workflow.mjs';
 
 const SCRIPT = 'scripts/full-run-reuse.mjs';
@@ -477,33 +478,26 @@ describe('a module the entry cannot load: decide fails open, verify fails closed
 describe('the tree comparison never makes a full clone shallow or partial (bundle-244: a drive on a developer\'s clone did)', () => {
   /** An origin with two commits of different trees, a FULL clone of it, then a third commit the clone has not fetched. */
   function repos() {
-    const dir = mkdtempSync(join(tmpdir(), 'full-run-reuse-tree-'));
-    const git = (cwd, ...args) => {
-      const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', HOME: dir } });
-      assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
-      return r.stdout.trim();
-    };
-    const origin = join(dir, 'origin');
-    mkdirSync(origin);
-    git(origin, 'init', '-q', '-b', 'main');
-    git(origin, 'config', 'uploadpack.allowAnySHA1InWant', 'true');
-    git(origin, 'config', 'uploadpack.allowFilter', 'true');
+    const origin = makeScratchRepo({ prefix: 'full-run-reuse-tree-' });
+    const git = (...args) => origin.git(...args).trim();
+    git('config', 'uploadpack.allowAnySHA1InWant', 'true');
+    git('config', 'uploadpack.allowFilter', 'true');
     const commit = (text) => {
-      writeFileSync(join(origin, 'f.txt'), text);
-      git(origin, 'add', 'f.txt');
-      git(origin, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', text);
-      return git(origin, 'rev-parse', 'HEAD');
+      writeFileSync(join(origin.dir, 'f.txt'), text);
+      git('add', 'f.txt');
+      git('commit', '-q', '-m', text);
+      return git('rev-parse', 'HEAD');
     };
     const first = commit('one');
     const second = commit('two');
-    const work = join(dir, 'work');
-    git(dir, 'clone', '-q', `file://${origin}`, work);
+    // The clone sits beside the origin, not inside it, so the origin's tree stays what its commits say.
+    const work = `${origin.dir}-work`;
+    git('clone', '-q', `file://${origin.dir}`, work);
     const third = commit('three');
-    const state = () => ({
-      shallow: git(work, 'rev-parse', '--is-shallow-repository'),
-      partial: spawnSync('git', ['config', '--get-regexp', 'promisor|partialclone'], { cwd: work, encoding: 'utf8' }).stdout.trim(),
-    });
-    return { dir, work, first, second, third, state };
+    const inWork = (...args) => spawnSync('git', args, { cwd: work, encoding: 'utf8' }).stdout.trim();
+    const state = () => ({ shallow: inWork('rev-parse', '--is-shallow-repository'), partial: inWork('config', '--get-regexp', 'promisor|partialclone') });
+    const cleanup = () => { origin.cleanup(); rmSync(work, { recursive: true, force: true, maxRetries: 5 }); };
+    return { work, first, second, third, state, cleanup };
   }
 
   for (const [what, pick, expected] of [
@@ -520,7 +514,7 @@ describe('the tree comparison never makes a full clone shallow or partial (bundl
         assert.equal(answer, expected);
         assert.deepEqual(r.state(), { shallow: 'false', partial: '' }, 'the comparison changed what the clone is');
       } finally {
-        rmSync(r.dir, { recursive: true, force: true });
+        r.cleanup();
       }
     });
   }
