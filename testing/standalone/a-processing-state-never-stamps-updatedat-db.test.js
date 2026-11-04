@@ -18,7 +18,7 @@
  * asserts the status the writer was SUPPOSED to record, so a case that drove nothing fails instead of agreeing that
  * nothing moved.
  *
- * - **The job queue**: `enqueueTextJob`, `completeJob`, `failJob` (an exhausted job, which marks the file; and one with
+ * - **The job queue**: `replaceContent` (once `enqueueTextJob`), `completeJob`, `failJob` (an exhausted job, which marks the file; and one with
  *   retries left, which marks nothing and is the control), `retryJob`, `retryFailedJobs`.
  * - **The dispatcher**: the media skip marks (oversized, class off), the pending mark, the documents-off skip.
  * - **The media worker**, through the loop that claims a job (`processJob` is not exported): the "processing" mark and
@@ -122,8 +122,9 @@ async function authoredHalf(id, space = SPACE) {
  * `entry` is the function key the coverage test walks from; `status` is what the writer must have recorded.
  */
 const CASES = [
-  { name: 'enqueueTextJob', entries: ['server/src/files/media/job-queue.ts:enqueueTextJob'], status: 'pending',
-    run: async (id) => { await seed(id); await jobQueue.enqueueTextJob(SPACE, id, 'md'); } },
+  // `enqueueTextJob` was folded into `replaceContent` (bundle-236, Q-698): the write door's call for new bytes, media or document.
+  { name: 'replaceContent', entries: ['server/src/files/media/job-queue.ts:replaceContent'], status: 'pending',
+    run: async (id) => { await seed(id); await jobQueue.replaceContent(SPACE, id, { mimeType: 'text/markdown', mediaType: 'text', resolvedFormat: 'md', arrival: false }); } },
   { name: 'completeJob (complete)', entries: ['server/src/files/media/job-queue.ts:completeJob'], status: 'complete',
     run: async (id) => { await seed(id); await jobQueue.completeJob(SPACE, await seedClaim(SPACE, id), 'complete'); } },
   { name: 'completeJob (partial)', entries: ['server/src/files/media/job-queue.ts:completeJob'], status: 'partial',
@@ -240,7 +241,7 @@ describe('recording a file\'s processing state never stamps its authored half (r
       await jobs().deleteMany({});
       await seed(id, { embeddingStatus: undefined, sizeBytes: bytes.length });
       // Enqueueing stamps the row today; the poison goes back AFTER it, so what is measured is the worker.
-      await jobQueue.enqueueTextJob(SPACE, id, 'md');
+      await jobQueue.replaceContent(SPACE, id, { mimeType: 'text/plain', mediaType: 'text', resolvedFormat: 'md', arrival: false });
       await files().updateOne({ _id: id }, { $set: { updatedAt: POISON, seq: POISON_SEQ, embeddingStatus: 'pending' } });
       worker.startMediaEmbeddingWorker();
       try {

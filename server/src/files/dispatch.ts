@@ -20,8 +20,8 @@ import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { getMediaEmbeddingConfig, DEFAULT_MEDIA_MAX_FILE_SIZE_BYTES } from '../config/loader.js';
 import { resolveInputFormat, deleteConversionArtifacts, isMediaFormat, type ResolvedFormat } from './converters/pipeline.js';
-import { enqueueMediaJob, enqueueTextJob } from './media/job-queue.js';
-import { setFileProcessingState } from './derived-fields.js';
+import { replaceContent, cancelMediaJob, reportDoorFailure } from './media/job-queue.js';
+import { setFileProcessingState, type FileProcessingState } from './derived-fields.js';
 import { documentsAreOff } from './converters/extraction-level.js';
 import { mediaIsOff } from './converters/media-level.js';
 import { mimeTypeForPath } from './mime.js';
@@ -66,6 +66,29 @@ async function readPriorProcessing(spaceId: string, filePath: string): Promise<P
   ) as PriorProcessing | null;
 }
 
+/**
+ * The cancel form of the write door, for bytes that replace a file's and are NOT analysed (over the size cap, the class off for the
+ * space, documents off): revoke the job of the old bytes, then remove the rows and sidecars made from them, and only then record the
+ * terminal `row`. With no new run, nothing would ever clear them: recall would keep finding the replaced picture by the caption of the
+ * one before, and the face gallery would keep matching a person the new file may not show. The job goes FIRST, so nothing is claimable
+ * at the path to write a row after the delete (the removal is `deleteConversionArtifacts`: chunked by `READ_CHUNK` at every level).
+ *
+ * Answers whether it was done. A failure marks the row `failed` and logs ERROR (`reportDoorFailure`) and answers `false`: a row that
+ * reads `skipped` over the caption of other bytes is the state this exists to end.
+ */
+async function declineReplacement(spaceId: string, id: string, row: FileProcessingState): Promise<boolean> {
+  try {
+    await cancelMediaJob(spaceId, id);
+    await deleteConversionArtifacts(spaceId, id);
+  } catch (err) {
+    await reportDoorFailure(spaceId, id, 'removing the job and the rows of the replaced bytes', err);
+    return false;
+  }
+  // Through the one writer of a file's processing state (`files/derived-fields.ts`): it stamps no `updatedAt` and no `seq`.
+  await setFileProcessingState(spaceId, id, row);
+  return true;
+}
+
 /** The statuses under which identical bytes are left exactly as they are: the work is done, or is under way. */
 const SETTLED = new Set<string>(['complete', 'pending', 'processing']);
 
@@ -76,7 +99,7 @@ const SETTLED = new Set<string>(['complete', 'pending', 'processing']);
  *   - a hash from the CALLER, so an unknown hash processes rather than assumes;
  *   - the SAME hash on the prior row, which is the identity — same bytes through the same pipeline;
  *   - a status in {complete, pending, processing}: the work is done, or a job is under way and a second arrival must not reset it
- *     (`enqueueTextJob` does, and half a conversion is thrown away). A file that failed, was skipped, or finished only
+ *     (`replaceContent` resets a job for other bytes, and half a conversion is thrown away). A file that failed, was skipped, or finished only
  *     partly (`failed`, `skipped`, `partial`) is retried: those are exactly the states a retry exists for.
  *
  * Getting this wrong in the other direction is invisible: a file silently never processed, discovered only when someone
@@ -118,7 +141,10 @@ export interface DispatchInput {
 
 export interface DispatchResult {
   resolvedFormat: ResolvedFormat;
-  /** Present for media (all cases) and documents (`pending`); undefined for plain text. */
+  /**
+   * Present for media (all cases) and documents (`pending`); undefined for plain text, and for a file the door could not queue or
+   * clean up after (its row then reads `failed`).
+   */
   embeddingStatus?: FileEmbeddingStatus;
 }
 
@@ -127,13 +153,14 @@ export interface DispatchResult {
  * metadata record. Returns the resolved format (so the caller can pick a 202/201 status code) and
  * the embedding status (for the response body).
  *
- * **What throws and what does not.** A failure to ENQUEUE the job (`enqueueMediaJob`, `enqueueTextJob`) and to clear a document's
- * stale conversion artifacts is logged and swallowed, so a transient worker or queue error cannot fail the write itself. The
- * processing STATE of the file's row is written with an awaited write (`setFileProcessingState`: `pending`, or the terminal
- * `skipped` of every class this function declines, plain text included) and is NOT guarded: a store failure there throws out of
- * this function. That is deliberate — a row left with no state is one the pull's lazy repair would offer for ever — and the caller
- * is the door's record step (`recordAndDispatchFile`), whose failure takes the bytes back (`removeUnrecordedBytes`) and is
- * answered or retried by that door.
+ * **What throws and what does not.** A failure to QUEUE the job (`replaceContent`), and to remove what a class it declines left
+ * (the cancel form, `declineReplacement`), does not fail the write itself, so a transient worker or queue error cannot lose bytes: it is
+ * logged at ERROR and the file's row reads `failed` with the reason, never `pending` with no job behind it (that row would make the
+ * re-upload of the same bytes look like work under way, and skip it). The answer then carries no `embeddingStatus`. A failure to clear a
+ * document's stale conversion artifacts is logged and swallowed. The processing STATE of the plain-text row (the terminal `skipped`) is written with an awaited write
+ * (`setFileProcessingState`) and is NOT guarded: a store failure there throws out of this function. That is deliberate — a row left with
+ * no state is one the pull's lazy repair would offer for ever — and the caller is the door's record step (`recordAndDispatchFile`),
+ * whose failure takes the bytes back (`removeUnrecordedBytes`) and is answered or retried by that door.
  *
  * Every class it declines is left in a terminal state (`skipped`: an unknown extension, a media file over the size cap, a media
  * class or the documents turned off for the space), and identical bytes whose processing settled are not processed again
@@ -158,11 +185,8 @@ export async function dispatchFileProcessing(
     // Media (image/audio/video): enqueue an async embedding job, or record why we didn't.
     // `mediaType` is the guard-narrowed format so it satisfies FileMetaDoc's media subset.
     const mediaType = resolvedFormat;
-    // Through the one writer of a file's processing state (`files/derived-fields.ts`): it stamps no `updatedAt` and no `seq`.
-    const setMediaStatus = (status: Exclude<FileEmbeddingStatus, 'complete'>): Promise<unknown> =>
-      setFileProcessingState(spaceId, normId, { mediaType, embeddingStatus: status });
     // Identical bytes that already completed, or whose job is under way: nothing to do, and this is the most expensive thing
-    // on the instance to redo. `enqueueMediaJob` deliberately resets a terminal job "so re-upload triggers
+    // on the instance to redo. `replaceContent` deliberately resets a terminal job "so re-upload triggers
     // re-processing" — right when the bytes are new, waste when they are not. The rule is `settledAndIdentical`'s.
     if (settledAndIdentical(input.prior, input.sha256)) {
       log.debug(`Media file ${peerText(spaceId)}/${peerText(filePath)}: identical bytes already ${peerText(input.prior.embeddingStatus)} — pipeline skipped`);
@@ -176,7 +200,7 @@ export async function dispatchFileProcessing(
     // 'skipped' with a reason — not the old blanket 'disabled'. (Existing 'disabled' records still
     // render; that status just has no producer now.)
     if (input.bytes > maxBytes) {
-      await setMediaStatus('skipped');
+      if (!await declineReplacement(spaceId, normId, { mediaType, embeddingStatus: 'skipped' })) return { resolvedFormat };
       log.info(`Media file ${peerText(spaceId)}/${peerText(filePath)} skipped: ${input.bytes} bytes exceeds maxFileSizeBytes (${maxBytes})`);
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
@@ -184,15 +208,13 @@ export async function dispatchFileProcessing(
     // Enqueuing a job that will do nothing leaves the file at `pending` forever — indistinguishable
     // from a stuck queue, and the reason recall comes back empty would be nowhere to be found.
     if (mediaIsOff(spaceId, mediaType)) {
-      await setMediaStatus('skipped');
+      if (!await declineReplacement(spaceId, normId, { mediaType, embeddingStatus: 'skipped' })) return { resolvedFormat };
       log.info(`Media file ${peerText(spaceId)}/${peerText(filePath)} not analysed: ${mediaType} analysis is off for this space`);
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
-    await setMediaStatus('pending');
-    await enqueueMediaJob(spaceId, filePath, mimeType, mediaType, { arrival: input.arrival === true }).catch(err => {
-      log.warn(`enqueueMediaJob error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
-    });
-    return { resolvedFormat, embeddingStatus: 'pending' };
+    // The write door's one call (`replaceContent`): the job for these bytes, the row `pending` after it, a failure on the row.
+    const queued = await replaceContent(spaceId, filePath, { mimeType, mediaType, sha256: input.sha256, arrival: input.arrival === true });
+    return queued === 'queued' ? { resolvedFormat, embeddingStatus: 'pending' } : { resolvedFormat };
   }
 
   if (resolvedFormat !== 'text') {
@@ -202,7 +224,7 @@ export async function dispatchFileProcessing(
     // That is precisely the silent-failure shape the vector-index work was about: the UI shows a
     // spinner, recall returns nothing, and neither says why.
     if (documentsAreOff(spaceId)) {
-      await setFileProcessingState(spaceId, normId, { embeddingStatus: 'skipped' });
+      if (!await declineReplacement(spaceId, normId, { embeddingStatus: 'skipped' })) return { resolvedFormat };
       log.info(`Document ${peerText(spaceId)}/${peerText(filePath)} not analysed: document extraction is off for this space`);
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
@@ -217,13 +239,17 @@ export async function dispatchFileProcessing(
     // Document (md/txt/html/pdf/docx/epub): always converted by the background worker.
     // Clear stale conversion artifacts first so overwriting a document does not leave
     // duplicate chunk records behind.
+    //
+    // UNTIL the run clears them itself: this delete is made here, with no claim, so an old run still going over the replaced bytes
+    // can write its rows after it. The design moves it under the NEW run's claim (a fenced, chunked clear at the run's start, before
+    // any model call), and this call goes then. The job below is already the new bytes' (`replaceContent` revokes the old run's claim).
     await deleteConversionArtifacts(spaceId, filePath).catch(err => {
       log.warn(`deleteConversionArtifacts error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
     });
-    await enqueueTextJob(spaceId, filePath, resolvedFormat, mimeType).catch(err => {
-      log.warn(`enqueueTextJob error for ${peerText(spaceId)}/${peerText(filePath)}: ${peerText(err)}`);
+    const queued = await replaceContent(spaceId, filePath, {
+      mimeType, mediaType: 'text', resolvedFormat, sha256: input.sha256, arrival: input.arrival === true,
     });
-    return { resolvedFormat, embeddingStatus: 'pending' };
+    return queued === 'queued' ? { resolvedFormat, embeddingStatus: 'pending' } : { resolvedFormat };
   }
 
   // Plain text ('text': an extension the pipeline does not convert): stored as-is, no embedding pipeline — and SAID so. Every

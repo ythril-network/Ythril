@@ -56,13 +56,23 @@ const wake = () => /\bmarkSpaceMayHaveWork\s*\(/;
  * Functions that put a job `pending` and leave the file row alone, with why that is right. Keyed by name; a stale row fails.
  */
 const ROW_ALREADY_RIGHT = {
-  enqueueMediaJob: 'the media branch: `dispatch.ts` marks the row (`setMediaStatus(\'pending\')`) before it calls this',
+  enqueueMediaJob: 'makes sure a file has a job (the lazy repair of a pulled file, an extracted image): the row reads what its own run left, and a terminal job reset here is one whose row is already terminal; the write door that marks the row pending is `replaceContent`',
   failJob: 'a retry: the row already reads `processing` and stays so until the job ends; the row is not told anything until then',
   deferJob: 'a deferral while the face gallery cannot answer: the row already reads `processing` and stays so until the job ends, as for a failJob retry',
   releaseClaimedJob: 'hands a claimed job back at shutdown: the row already reads `processing`, and the next claim writes it again',
   resetStalledJobs: 'stall recovery re-queues a job that stopped reporting: the row already reads `processing`',
   holdJobsForMove: 'the job is held (not claimable) for a move; the move rewrites the row itself',
 };
+
+/**
+ * Functions that mark the row AFTER the job on purpose, because the job write itself holds the job unclaimable for the settle delay
+ * (`claimableAfter` set from `REPLACE_SETTLE_MS` in that write), so no claim can land before the row mark. Each must still carry that
+ * hold in its source (checked below), and a stale row fails, as for ROW_ALREADY_RIGHT.
+ */
+const ROW_AFTER_A_HELD_JOB = {
+  retryJob: 'its write must not touch a job a worker has claimed, so the guarded job write (status $ne processing) decides first and the row is marked only for a job the retry took; that write holds the job for REPLACE_SETTLE_MS',
+};
+const holdsTheJob = () => /\bclaimableAfter\s*:[^,}]*\bREPLACE_SETTLE_MS\b/;
 
 /**
  * Functions of `src` that write a job pending and mark the row pending: `marking`, `name -> what the row mark comes
@@ -134,13 +144,24 @@ describe('job-queue.ts: a file row reads pending before its job is claimable', (
   const { marking, others } = pendingWriters(SRC);
 
   it('finds the three writers, so the rule cannot pass by finding none', () => {
-    for (const name of ['enqueueTextJob', 'retryJob', 'retryFailedJobs']) {
+    // `enqueueTextJob` was folded into `replaceContent` (bundle-236, Q-698), the write door's one call for media and documents.
+    for (const name of ['replaceContent', 'retryJob', 'retryFailedJobs']) {
       assert.ok(marking.has(name), `${name} is no longer seen writing a job pending and marking its row pending: re-derive`);
     }
   });
 
+  it('a function excused for marking the row after a held job still holds it, and still marks late', () => {
+    const bodies = new Map(topLevelFunctions(stripComments(SRC)));
+    for (const name of Object.keys(ROW_AFTER_A_HELD_JOB)) {
+      assert.ok(bodies.has(name), `${name} is excused in ROW_AFTER_A_HELD_JOB and no longer exists: remove the row`);
+      assert.ok(holdsTheJob().test(bodies.get(name)), `${name} marks the row after the job but its job write no longer sets claimableAfter from REPLACE_SETTLE_MS: a worker can claim inside the gap`);
+      assert.ok((marking.get(name) ?? []).length > 0, `${name} now marks the row first: remove its ROW_AFTER_A_HELD_JOB row`);
+    }
+  });
+
   it('every function that marks the row pending does so before the job write and before the wake', () => {
-    const out = [...marking].filter(([, late]) => late.length > 0).map(([name, late]) => `${name} marks the row after ${late.join(' and after ')}`);
+    const out = [...marking].filter(([name, late]) => late.length > 0 && !(name in ROW_AFTER_A_HELD_JOB))
+      .map(([name, late]) => `${name} marks the row after ${late.join(' and after ')}`);
     assert.deepEqual(out, [],
       'a worker that claims the job inside that gap marks the row processing and finishes, and the late `pending` overwrites it: '
       + 'the file reads pending for ever. Write the row first (as dispatch.ts does for media)');

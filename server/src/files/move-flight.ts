@@ -12,9 +12,10 @@
  *
  * ## What it prevents
  *
- * A manual `retry_embedding` of a file whose move is running would clear the move's hold on the file's job (`retryJob` sets
- * `claimableAfter` to null), and the worker would claim the job at the OLD path in the middle of the move. The job queue asks
- * {@link moveIsRunningAt} and answers "not now" instead.
+ * A manual `retry_embedding` of a file whose move is running would replace the move's hold on the file's job (`retryJob` sets
+ * `claimableAfter` to its own few seconds' wait), and the worker would claim the job at the OLD path in the middle of the move. The job
+ * queue asks {@link moveIsRunningAt} and answers "not now" instead. The write door (`replaceContent`) asks it too, but cannot refuse a
+ * write: it holds the job it writes until the move's hold is over.
  */
 import { keyedLock } from '../util/keyed-lock.js';
 import { isAtOrUnder, moveKey, movedRoot, parentOfSidecar } from './moved-paths.js';
