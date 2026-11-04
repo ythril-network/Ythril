@@ -22,6 +22,7 @@ function setup(status: Record<string, unknown> = {
     embedding: { model: 'nomic-embed-text' },
     docMode: () => 'off',
     docCfg: () => ({}),
+    vlmNeededButMissing: () => false,
     isLocked: () => false,
     managed: false,
   };

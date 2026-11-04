@@ -18,7 +18,7 @@ import { ConfirmDialogService } from '../../../core/confirm-dialog.service';
 import { StatusVariant } from '../../../shared/status-pill.component';
 import {
   MediaCfg, MediaClass, DocProcCfg, DocAssistCfg, DocMode, EmbeddingCfg,
-  TestResult, TestTarget, VerifyResult, VerifyTarget, FaceRecognitionCfg, MODE_STAGES, FaceExternalCfg, RerankCfg, NliCfg,
+  TestResult, TestTarget, VerifyResult, VerifyTarget, FaceRecognitionCfg, FaceExternalCfg, RerankCfg, NliCfg,
   CARD_SLOT, type SlotTuningCfg, type DecisionModelCfg,
 } from './media-processing.types';
 import { assistExtrasPatch, fallbackNeedsAck, hostOf } from './assist-extras';
@@ -768,12 +768,6 @@ export class MediaProcessingStateService {
   // 'off' runs nothing, so a missing vision model is not a problem it can have.
   vlmNeededButMissing(): boolean { return this.docMode() !== 'ocr' && this.docMode() !== 'off' && !this.vlmConfigured(); }
   modeDescKey(): string { return `mediaProcessing.modeDesc.${this.docMode()}`; }
-  stageClass(key: string): string {
-    if (!MODE_STAGES[this.docMode()].has(key)) return 'dim';
-    // Validate checks the VLM's output against the OCR text, so it waits on the vision model with the steps that produce that output.
-    if (this.vlmNeededButMissing() && (key === 'render' || key === 'vlm' || key === 'repair' || key === 'validate')) return 'warn';
-    return 'on';
-  }
   /** Key plus the interpolation params, so the sentence can be re-ordered per language. */
   docSummary(): { key: string; params: Record<string, string> } {
     const m = this.docMode();

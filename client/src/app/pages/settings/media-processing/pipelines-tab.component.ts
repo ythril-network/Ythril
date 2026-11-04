@@ -486,7 +486,12 @@ export class PipelinesTabComponent {
       // Validate is pure in-process arithmetic (does the VLM output cover the OCR text?), so it has no
       // endpoint to ask and nothing to be unwell: `ok` means "needs no endpoint", exactly as it does for the video
       // splitter and the text chunker. (`null` would draw "unknown", a grey bead saying we could not tell.)
-      { key: 'validate', name: 'mediaProcessing.step.validate', actor: this.say('mediaProcessing.actor.inProcess'), health: 'ok', conditional: true },
+      // It checks the vision model's output against the OCR text, so a mode that needs a vision model and has none leaves it nothing to check: its
+      // dot then says so, as the vision steps' own dots do, rather than staying `ok` beside them.
+      { key: 'validate', name: 'mediaProcessing.step.validate', actor: this.say('mediaProcessing.actor.inProcess'), conditional: true,
+        ...(this.s.vlmNeededButMissing()
+          ? { health: 'unconfigured' as const, detail: this.say('mediaProcessing.step.validateWaitsForVision') }
+          : { health: 'ok' as const }) },
       { key: 'repair', name: 'mediaProcessing.step.repair', actor: doc.repairModel || doc.vlmModel || this.notSet, ...this.stage('model', 'doc-repair'), conditional: true, cardId: 'doc-repair' },
       { key: 'verify', name: 'mediaProcessing.step.verify', actor: doc.verifyModel || this.notSet, ...this.stage('model', 'doc-verify'), conditional: true, cardId: 'doc-verify' },
       { key: 'embed', name: 'mediaProcessing.step.embed', actor: this.s.embedding.model || this.notSet, ...this.stage('model', 'embedding'), conditional: false, cardId: 'embedding' },

@@ -2328,6 +2328,7 @@
   "mediaProcessing.step.render": "Rendern",
   "mediaProcessing.step.vlm": "Bildmodell",
   "mediaProcessing.step.validate": "Prüfen",
+  "mediaProcessing.step.validateWaitsForVision": "Wartet auf ein Bildmodell: ohne eines gibt es keine Bildauswertung zu prüfen",
   "mediaProcessing.step.repair": "Reparieren",
   "mediaProcessing.step.verify": "Verifizieren",
   "mediaProcessing.step.embed": "Einbetten",
