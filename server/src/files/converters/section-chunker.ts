@@ -36,7 +36,7 @@
  */
 
 import type { Chunk } from './types.js';
-import { boundedPrefix } from '../../util/bounded-text.js';
+import { cappedOverlap } from './chunk-overlap.js';
 
 const HEADING_RE = /^#{2,3}\s+(.+)$/;
 const TABLE_OPEN_RE = /^<table[^>]*>/i;
@@ -88,21 +88,6 @@ function splitOversized(body: string, maxLen: number): string[] {
   }
   if (current.length > 0) parts.push(current.join('\n\n'));
   return parts.length > 0 ? parts : [body];
-}
-
-/** Extract the last paragraph from a chunk body for overlap.
- *  Table blocks are excluded — they are semantic units that should
- *  not be duplicated into the following chunk as context overlap.
- */
-function lastParagraph(body: string): string {
-  const paras = body.split(/\n{2,}/).filter(p => p.trim().length > 0);
-  for (let i = paras.length - 1; i >= 0; i--) {
-    const para = paras[i]!;
-    if (!/<table/i.test(para)) {
-      return para;
-    }
-  }
-  return '';
 }
 
 /**
@@ -176,7 +161,7 @@ export function sectionChunk(
     }
 
     // Capped, so an indivisible last paragraph (a 38 KB table of rows) is not copied whole into the next section's body.
-    prevLastPara = boundedPrefix(lastParagraph(body), maxBodyLength).text;
+    prevLastPara = cappedOverlap(body, maxBodyLength, { skipTables: true });
 
     // A section with no size limit was the whole defect: two headings in a 57 KB document meant two 28 KB
     // chunks. Every part keeps the section's heading, so provenance survives the split and a reader still sees
