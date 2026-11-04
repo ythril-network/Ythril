@@ -24,9 +24,9 @@
  * ## What it imports
  *
  * Node built-ins, `scripts/_shared/script-cli.mjs` (the one "was I run" test), `newest-by.mjs` (the one newest-first order),
- * `workflow-command.mjs` (the one annotation escape) and `scripts/_shared/gh-call.mjs` (all built-ins only), and nothing else: the job that runs it installs nothing (held by `unexpected-skips-fail-the-ci-gate`). `gh-call.mjs`
- * is loaded by a dynamic import INSIDE the fail-open, so a module
- * that does not load is also "no reuse" and never a failed job (held by
+ * `workflow-command.mjs` (the one annotation escape) and `scripts/_shared/gh-call.mjs` (all built-ins only), and nothing else:
+ * the job that runs it installs nothing (held by `unexpected-skips-fail-the-ci-gate`). `gh-call.mjs` is loaded by a dynamic
+ * import INSIDE the fail-open, so a module that does not load is also "no reuse" and never a failed job (held by
  * `a-pull-request-reuses-only-a-green-full-run-of-its-own-tree`).
  *
  * ## The entry
