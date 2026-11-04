@@ -439,13 +439,20 @@ describe('the embed call is the backstop for the LOCAL model, and the HTTP branc
     const retry = http.search(/\bembedViaHttpWithRetry\s*\(/);
     assert.ok(cut >= 0, 'the HTTP branch of embed() has no boundedPrefix cut: an input over the ceiling reaches the embedder whole, which refuses it');
     assert.ok(retry >= 0 && cut < retry, 'the cut must sit OUTSIDE the retry closure, so a 503 retry does not cut and warn again');
-    // The repo's idiom is `const said = warnOnce<string>(...)` at module level, then `said(key, ...)` at the site: the gate finds the
-    // instances warnOnce made in embedding.ts and requires the HTTP branch to call one of them.
-    const source = stripComments(readFileSync(join(ROOT, 'server/src/brain/embedding.ts'), 'utf8'));
-    const instances = [...source.matchAll(/\bconst\s+(\w+)\s*=\s*warnOnce\s*</g)].map(m => m[1]);
-    assert.ok(instances.length > 0, 'embedding.ts makes no warnOnce instance: the cut would be said once per call');
-    assert.ok(instances.some(name => new RegExp(`\\b${name}\\s*\\(`).test(http)),
-      `the HTTP branch calls none of embedding.ts's warnOnce instances (${instances.join(', ')}): the cut is said once per call`);
+    // The cut is counted and said by `noteInputCut` (brain/embed-ceiling.ts), the one place every producer's cut goes through. The HTTP
+    // branch must call it and say nothing itself, and `noteInputCut` must say through an instance warnOnce made (the repo's idiom:
+    // `const said = warnOnce<string>(...)` at module level, `said(key, ...)` at the site), or the cut is said once per call.
+    assert.match(http, /\bnoteInputCut\s*\(\s*'http'/, "the HTTP branch does not call noteInputCut('http', ...): its cut is neither counted nor said once");
+    assert.ok(!/\blog\.warn\s*\(/.test(http), 'the HTTP branch warns by itself: the cut is said once per call');
+    const ceiling = stripComments(readFileSync(join(ROOT, 'server/src/brain/embed-ceiling.ts'), 'utf8'));
+    const fnAt = ceiling.indexOf('export function noteInputCut(');
+    assert.ok(fnAt >= 0, 'embed-ceiling.ts has no noteInputCut');
+    const [noteFrom, noteTo] = block(ceiling, ceiling.indexOf('{', ceiling.indexOf(')', fnAt)));
+    const note = ceiling.slice(noteFrom, noteTo);
+    const instances = [...ceiling.matchAll(/\bconst\s+(\w+)\s*=\s*warnOnce\s*</g)].map(m => m[1]);
+    assert.ok(instances.length > 0, 'embed-ceiling.ts makes no warnOnce instance: the cut would be said once per call');
+    assert.ok(instances.some(name => new RegExp(`\\b${name}\\s*\\(`).test(note)),
+      `noteInputCut calls none of embed-ceiling.ts's warnOnce instances (${instances.join(', ')}): the cut is said once per call`);
     assert.ok(!/MAX_LOCAL_EMBED_CHARS/.test(http), 'the HTTP branch is bounded by the setting, not by the local warn threshold');
   });
 });

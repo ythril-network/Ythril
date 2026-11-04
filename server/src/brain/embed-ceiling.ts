@@ -17,6 +17,7 @@ import { getEmbeddingConfig } from '../config/loader.js';
 import { DUAL_DOOR_BOUNDS } from '../config/setting-bounds.js';
 import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
+import { embedInputCutTotal } from '../metrics/registry.js';
 
 /** The ceiling when none is configured or the configured one is not valid. */
 export const DEFAULT_EMBED_INPUT_BYTES = 6_000;
@@ -38,4 +39,27 @@ export function embedInputCeiling(cfg: { maxInputBytes?: unknown } = storedEmbed
     `embedding.maxInputBytes is ${peerText(stored)}, which is not a whole number of bytes from ${min} to ${max}; `
     + `the default of ${DEFAULT_EMBED_INPUT_BYTES} is used. Set it through PATCH /api/admin/media-config or correct config.json.`));
   return DEFAULT_EMBED_INPUT_BYTES;
+}
+
+const cutSaid = warnOnce<string>({ max: 8, every: 10 * 60_000 });
+
+/**
+ * Which producer's text was cut: a whole-document vector (the `embed` level), a media transcript, caption or combined text, or an input the
+ * HTTP embedder was sent cut by `embed()`'s last guard.
+ */
+export type CutProducer = 'whole-document' | 'media' | 'http';
+
+/**
+ * Count and say one cut of an embedder input, for every producer that cuts: `embedTextForProducer` (`embed-text.ts`), a rebuild that embeds
+ * a cut text (`embedStoredRecord`) and `embed()`'s HTTP guard (`embedding.ts`). It is counted (`ythril_embed_input_cut_total{producer}`) and
+ * said once per window and producer, so a stream of oversized texts does not fill the log ring. It lives here, with the ceiling it reports
+ * on, because `embed-text.ts` imports `embedding.ts`: a count made in either would leave the other to write it again.
+ */
+export function noteInputCut(producer: CutProducer, textBytes: number, keptBytes: number): void {
+  embedInputCutTotal.labels({ producer }).inc();
+  cutSaid(producer, () => log.warn(producer === 'http'
+    ? `Embedding input is ${textBytes} bytes, over the embedder's ceiling of ${embedInputCeiling()} (embedding.maxInputBytes); `
+      + `the HTTP embedder is sent the first ${keptBytes}. A vector of a cut text describes its beginning only.`
+    : `A ${producer} text of ${textBytes} bytes is over the embedder's ceiling (embedding.maxInputBytes); it is embedded as its first `
+      + `${keptBytes} bytes, so its vector describes its beginning only. The stored text is whole and is still found by its words.`));
 }

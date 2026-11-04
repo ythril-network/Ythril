@@ -21,8 +21,9 @@ import { writeDerivedFields, type FileRowTier } from '../files/derived-fields.js
 import type { SpacePart } from '../db/space-collection.js';
 import { embed } from './embedding.js';
 import {
-  factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText, boundedEmbedText, embedTextFor, embedInputCeiling, noteInputCut,
+  factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText, boundedEmbedText, embedTextFor, embedInputCeiling,
 } from './embed-text.js';
+import { noteInputCut } from './embed-ceiling.js';
 import { overCeilingMessage } from './embed-errors.js';
 import { utf8Bytes } from '../util/bounded-text.js';
 import { resolveEdgeEndpointNames, resolveEndpointNames } from './edge-endpoint-names.js';

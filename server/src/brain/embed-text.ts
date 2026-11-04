@@ -1,9 +1,6 @@
 import { boundedPrefix, utf8Bytes } from '../util/bounded-text.js';
-import { warnOnce } from '../util/warn-once.js';
-import { log } from '../util/log.js';
-import { embedInputCutTotal } from '../metrics/registry.js';
 import { largestTaskPrefixBytes } from './embedding.js';
-import { embedInputCeiling, storedEmbeddingConfig } from './embed-ceiling.js';
+import { embedInputCeiling, noteInputCut, storedEmbeddingConfig, type CutProducer } from './embed-ceiling.js';
 
 // The ceiling's accessor lives in `embed-ceiling.ts` (`embedding.ts` reads it too, and cannot import this file); it is re-exported
 // here, beside the builders that read it, because this is where a reader of "what is embedded" looks.
@@ -215,11 +212,6 @@ export function embedTextFor(headingText: string | null | undefined, content: st
   return boundedEmbedText(headingText, content).text;
 }
 
-const cutSaid = warnOnce<string>({ max: 8, every: 10 * 60_000 });
-
-/** Which producer's text was cut: a whole-document vector (the `embed` level) or a media transcript, caption or combined text. */
-export type CutProducer = 'whole-document' | 'media';
-
 /**
  * {@link embedTextFor} for a PRODUCER that embeds a text it cannot split (a whole document, a transcript): the cut is deterministic
  * and recorded, counted (`ythril_embed_input_cut_total{producer}`) and said once per window. A rebuild of the same record calls
@@ -233,12 +225,4 @@ export function embedTextForProducer(
   const { text, cut } = boundedEmbedText(headingText, content);
   if (cut) noteInputCut(producer, utf8Bytes(content), utf8Bytes(text));
   return text;
-}
-
-/** The count and the warning of one cut, for a producer (`embedTextForProducer`) or a rebuild that embeds a cut text (`embedStoredRecord`). */
-export function noteInputCut(producer: CutProducer, textBytes: number, keptBytes: number): void {
-  embedInputCutTotal.labels({ producer }).inc();
-  cutSaid(producer, () => log.warn(
-    `A ${producer} text of ${textBytes} bytes is over the embedder's ceiling (embedding.maxInputBytes); it is embedded as its first `
-    + `${keptBytes} bytes, so its vector describes its beginning only. The stored text is whole and is still found by its words.`));
 }
