@@ -42,8 +42,12 @@ import { REPO_ROOT } from './_sources.mjs';
 
 const JOB_QUEUE = 'server/src/files/media/job-queue.ts';
 
-/** A job written `pending`: in a `$set`, or in the inserted document. A FILTER on `status: 'pending'` is not a write. Built fresh per use. */
-const jobPendingWrite = () => /(?:\$set\s*:\s*\{[^}]*?|const\s+doc\b[^=]*=\s*\{[^}]*?)\bstatus\s*:\s*'pending'/g;
+/**
+ * A job written `pending`: in a `$set`, in the inserted document, or through the `RUN_RESET` spread (bundle-236: the reset moved into
+ * one spread, so the literal is no longer in the writer). A FILTER on `status: 'pending'` is not a write. Built fresh per use; the
+ * one shape of it is `_pending-job-writes.mjs`'s, which the gate that asks whether a writer goes through the spread also reads.
+ */
+import { jobPendingWrite } from './_pending-job-writes.mjs';
 /** The file row marked `pending` through the one writer of processing state. */
 const rowPendingMark = () => /\bsetFileProcessingState\s*\([^;]*?\bembeddingStatus\s*:\s*'pending'/;
 const wake = () => /\bmarkSpaceMayHaveWork\s*\(/;
@@ -103,6 +107,16 @@ describe('the detector reads which functions put a job pending, and in what orde
       [['f', ['the job write']]]);
     assert.deepEqual([...pendingWriters(plant(`await jc.updateMany(f, { $set: { status: 'pending', attempts: 0 } });\n${row}`)).marking],
       [['f', ['the job write']]]);
+  });
+
+  it('reads a write that goes through the RUN_RESET spread as a pending write (bundle-236, Q-698: the reset moves into one spread, so the status literal is no longer in the writer)', () => {
+    const spread = 'await jobs.updateOne(filter, { $set: { ...RUN_RESET, updatedAt: now } });';
+    const row = "await setFileProcessingState(spaceId, id, { embeddingStatus: 'pending' });";
+    const wakeCall = 'markSpaceMayHaveWork(spaceId);';
+    assert.deepEqual([...pendingWriters(plant(`${spread}\n${wakeCall}\n${row}`)).marking], [['f', ['the job write', 'the wake']]],
+      'a writer whose job write is the spread is invisible to the gate: a row marked after it passes');
+    assert.deepEqual([...pendingWriters(plant(`${row}\n${spread}\n${wakeCall}`)).marking], [['f', []]]);
+    assert.deepEqual(pendingWriters(plant(`${spread}\n${wakeCall}`)).others, ['f'], 'a spread writer that never marks the row is among the others');
   });
 
   it('does not read a filter, a comment, or a function with no job write as a pending write', () => {

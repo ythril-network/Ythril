@@ -21,6 +21,15 @@
  *     with a warn and a counter) instead of waiting for ever on a gallery that does not come back.
  *  4. The deferred job carries `facesOnly`, so its re-run does not repeat the caption (`a-deferred-image-run-does-not-caption-again-db.test.js`).
  *
+ *  5. (bundle-236, Q-698) The marks end with the job: after `completeJob` and after the LAST `failJob` the job carries neither
+ *     `deferredSince` nor `facesOnly`, so a retry or a re-upload starts a whole run, caption included. CHARACTERISATION: `endJob`
+ *     already unsets both, so these two cases are green on the base; they pin it while the reset moves into one spread (`RUN_RESET`,
+ *     `DEFERRAL_MARKS`).
+ *  6. (bundle-236, Q-698) `deferJob` answers WHY, not whether: `'deferred'`, `'past_cap'` (the 30 minutes are spent: the run goes on) or
+ *     `'lost'` (the claim is no longer the job's: the run ends as abandoned, never as a failure). A boolean cannot tell a run that
+ *     must stop from one that must go on, and the worker treated both as "carry on and write under a claim it no longer holds".
+ *     Red on the base: it answers `true` and `false`.
+ *
  * The reason a deferral is made for is the caller's; the queue stores no policy beyond the wait and the cap.
  *
  * Seen red on the base: `deferJob` is not exported (the file's own first case), so every other case fails on the same missing writer.
@@ -156,5 +165,58 @@ describe('a media job can be deferred without spending an attempt (real MongoDB)
     const before = await jobOf('f.png');
     await queue.deferJob(SPACE, job._id, 'not-the-token-of-this-run', 'index_not_ready');
     assert.deepEqual(await jobOf('f.png'), before, 'a deferral with a token that is not the run\'s changed the job another run holds');
+  });
+
+  // ── bundle-236 (Q-698): the marks end with the job; deferJob says why it did not defer ──────────────────────────────────────
+
+  const marked = (job) => ['deferredSince', 'facesOnly'].filter(k => k in job);
+
+  /** A deferred, re-claimed job and its file row (the end of a job writes both). */
+  async function deferredAndReclaimed(id) {
+    await mongo.col(`${SPACE}_files`).insertOne({ _id: id, spaceId: SPACE, path: id, tags: [], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', sizeBytes: 5, seq: 1, embeddingStatus: 'processing' });
+    const job = await claimed(id);
+    await queue.deferJob(SPACE, job._id, job.claimToken, 'index_not_ready');
+    assert.deepEqual(marked(await jobOf(id)), ['deferredSince', 'facesOnly'], 'fixture check: the deferral set both marks');
+    return await reclaim(id);
+  }
+
+  it('CHARACTERISATION: completeJob takes both deferral marks off the job', async () => {
+    const job = await deferredAndReclaimed('g.png');
+    await queue.completeJob(SPACE, { jobId: job._id, claimToken: job.claimToken }, 'complete');
+    const after = await jobOf('g.png');
+    assert.equal(after.status, 'complete');
+    assert.deepEqual(marked(after), [], 'a finished job kept its deferral marks: a retry of it would skip the caption');
+  });
+
+  it('CHARACTERISATION: the last failJob (the attempts spent) takes both deferral marks off the job', async () => {
+    const job = await deferredAndReclaimed('h.png');
+    await queue.failJob(SPACE, { jobId: job._id, claimToken: job.claimToken }, job.maxAttempts, job.maxAttempts, 'the embedder gave up');
+    const after = await jobOf('h.png');
+    assert.equal(after.status, 'failed');
+    assert.deepEqual(marked(after), [], 'a failed job kept its deferral marks: a retry of it would skip the caption');
+  });
+
+  it('answers \'deferred\' when it defers the job', async () => {
+    const job = await claimed('i.png');
+    assert.equal(await queue.deferJob(SPACE, job._id, job.claimToken, 'index_not_ready'), 'deferred');
+  });
+
+  it('answers \'lost\' for a claim that is no longer the job\'s (another token, no token, no job) and changes nothing', async () => {
+    const job = await claimed('j.png');
+    const before = await jobOf('j.png');
+    assert.equal(await queue.deferJob(SPACE, job._id, 'not-the-token-of-this-run', 'index_not_ready'), 'lost', 'a token that is not the run\'s');
+    assert.equal(await queue.deferJob(SPACE, job._id, null, 'index_not_ready'), 'lost', 'no token at all');
+    assert.equal(await queue.deferJob(SPACE, 'no-such-job.png', job.claimToken, 'index_not_ready'), 'lost', 'a job that is gone');
+    assert.deepEqual(await jobOf('j.png'), before);
+  });
+
+  it('answers \'past_cap\' past 30 minutes of deferral, and the job stays claimed', async () => {
+    const job = await claimed('k.png');
+    await queue.deferJob(SPACE, job._id, job.claimToken, 'index_not_ready');
+    await jobs().updateOne({ _id: 'k.png' }, { $set: { deferredSince: new Date(Date.now() - 31 * MINUTE).toISOString() } });
+    const again = await reclaim('k.png');
+    const answer = await queue.deferJob(SPACE, again._id, again.claimToken, 'index_not_ready');
+    assert.equal(answer, 'past_cap', `the cap's answer is ${JSON.stringify(answer)}: a run cannot tell it must go on from one that lost its claim`);
+    assert.equal((await jobOf('k.png')).status, 'processing');
   });
 });

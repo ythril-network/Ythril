@@ -29,7 +29,8 @@
  * answers `ok`). The arrival cases are green.
  *
  * Run: node --test testing/standalone/a-retried-job-is-a-clean-run-that-keeps-its-identity-and-never-takes-a-claimed-one-db.test.js
- * (requires a prior `npm run build:server`, and a reachable mongod)
+ * (requires a prior `npm run build:server`, and a reachable mongod at the harness address ON LOOPBACK: the relay listens on loopback and
+ * the server's client dials the harness host at the relay's port, as in every test that uses `_delayed-write-relay.mjs`)
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
