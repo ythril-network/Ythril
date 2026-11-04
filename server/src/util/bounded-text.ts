@@ -25,14 +25,12 @@
  *    and the "rest fits" question is asked before the line-break search so the last part is not cut early. An upload may be 500 MiB,
  *    and a splitter that sliced the rest of the text for every probe would hold the event loop for minutes.
  */
-import { splitPoint } from '../files/markdown-window.js';
+import { isHighSurrogate, splitPoint } from '../files/markdown-window.js';
 
 /** The UTF-8 length of `s`, a lone surrogate counted as the three bytes `Buffer.byteLength` counts. */
 export function utf8Bytes(s: string): number {
   return Buffer.byteLength(s, 'utf8');
 }
-
-const isHighSurrogate = (code: number): boolean => code >= 0xd800 && code <= 0xdbff;
 
 /** The end of the part that starts at `from`: the whole rest when it fits, else the cut `splitPoint` finds in a window that cannot overshoot. */
 function partEnd(text: string, from: number, maxBytes: number): number {
