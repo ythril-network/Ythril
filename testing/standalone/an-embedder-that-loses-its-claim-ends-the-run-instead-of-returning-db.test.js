@@ -127,10 +127,14 @@ describe('an embedder whose claim is gone ends the run (real MongoDB, real write
     const claim = await seedClaim(S, id);
     const handle = handleFor(id, png);
     // The gallery answers a labelled face (a real answer needs a vector-search index, which the test store has not): the face is auto-labelled.
-    // The claim is taken in the instant the label is about to be decided on, the read the label's own guard makes.
+    // The claim is taken in the instant the label is about to be decided on, the read the label's own guard makes: the first claim read
+    // AFTER the face row is stored. The claim reads before it (the one before the decode, `assertHoldsClaim`) pass untouched, so the face
+    // row is written under a held claim and only the auto-label meets the loss. A claim lost BEFORE the decode, with no face stored, is held
+    // by a-face-run-whose-claim-is-gone-asks-no-face-provider-db.
     const filesProto = Object.getPrototypeOf(acts.door.mongo.col('probe'));
     const aggregate = filesProto.aggregate;
     const countDocuments = filesProto.countDocuments;
+    let revoked = false;
     filesProto.aggregate = function gallery(pipeline, ...rest) {
       if (this.collectionName === `${S}_files` && Array.isArray(pipeline) && pipeline[0]?.['$vectorSearch']) {
         return { toArray: async () => [{ window: [{ n: 1, min: 0.99 }], hits: [{ _id: 'labelled', score: 0.99, faceEntityId: PERSON }] }] };
@@ -138,7 +142,11 @@ describe('an embedder whose claim is gone ends the run (real MongoDB, real write
       return aggregate.call(this, pipeline, ...rest);
     };
     filesProto.countDocuments = async function takeTheClaimFirst(...args) {
-      if (this.collectionName === `${S}_media_jobs`) await revoke(S, id);
+      if (this.collectionName === `${S}_media_jobs` && !revoked
+        && await countDocuments.call(files(), { parentFileId: id, faceEmbedding: { $exists: true } }) > 0) {
+        revoked = true;
+        await revoke(S, id);
+      }
       return countDocuments.apply(this, args);
     };
     try {
@@ -149,6 +157,7 @@ describe('an embedder whose claim is gone ends the run (real MongoDB, real write
       filesProto.aggregate = aggregate;
       filesProto.countDocuments = countDocuments;
     }
+    assert.ok(revoked, 'fixture: no claim read followed the stored face row, so the auto-label was never met with a lost claim');
     assert.deepEqual((await derivedOf(id)).filter(r => r.includes('#face-chunk')), [`${id}#face-chunk0`], 'the face row written while the claim was held is the only one that may stand');
   });
 });
