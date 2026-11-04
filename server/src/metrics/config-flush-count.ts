@@ -11,15 +11,12 @@
  * A failed flush matters more since the version mark rides on it (`util/version-mark.ts`): the mark is saved in the background, and a flush that keeps
  * failing is a mark that is not reaching the disk.
  */
+import { countSink } from './count-sink.js';
 
-let sink: (() => void) | undefined;
+const failure = countSink<[]>();
 
 /** Called once by the registry, at load. */
-export function setConfigFlushFailureSink(next: () => void): void {
-  sink = next;
-}
+export const setConfigFlushFailureSink = failure.set;
 
 /** One failed background flush of config.json, counted. */
-export function countConfigFlushFailure(): void {
-  sink?.();
-}
+export const countConfigFlushFailure = failure.count;
