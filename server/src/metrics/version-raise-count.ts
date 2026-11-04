@@ -9,6 +9,7 @@
  * `ythril_version_counter_raised_total` in the registry; the registry gives this leaf a sink when it loads, and a count made before then
  * (a unit test that never loads the registry) is dropped, as no scrape would have read it.
  */
+import { countSink } from './count-sink.js';
 
 /** Why a counter was raised: `start` (the first stamp of a space in this process) or `went_back` (the counter was found below one this process had seen). */
 export type VersionRaiseReason = 'start' | 'went_back';
@@ -16,14 +17,10 @@ export type VersionRaiseReason = 'start' | 'went_back';
 /** The reasons, so the registry pre-declares one series for each. */
 export const VERSION_RAISE_REASONS: readonly VersionRaiseReason[] = ['start', 'went_back'];
 
-let sink: ((reason: VersionRaiseReason) => void) | undefined;
+const raised = countSink<[reason: VersionRaiseReason]>();
 
 /** Called once by the registry, at load. */
-export function setVersionRaiseSink(next: (reason: VersionRaiseReason) => void): void {
-  sink = next;
-}
+export const setVersionRaiseSink = raised.set;
 
 /** One raise of a counter that actually moved it, counted under its reason. */
-export function countVersionCounterRaise(reason: VersionRaiseReason): void {
-  sink?.(reason);
-}
+export const countVersionCounterRaise = raised.count;

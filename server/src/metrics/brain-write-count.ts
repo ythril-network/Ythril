@@ -12,17 +12,15 @@
  * loads, and a count made before then (a unit test that never loads the registry) is dropped, as no scrape would have read it.
  */
 
-/** Where a count goes: the registry's counter, `collection` the collection's name and `outcome` one of its labels. */
-type Sink = (collection: string, outcome: string) => void;
+import { countSink } from './count-sink.js';
 
-let sink: Sink | undefined;
+/** Where a count goes: the registry's counter, `collection` the collection's name and `outcome` one of its labels. */
+const write = countSink<[collection: string, outcome: string]>();
 
 /** Called once by the registry, at load. */
-export function setBrainWriteSink(next: Sink): void {
-  sink = next;
-}
+export const setBrainWriteSink = write.set;
 
 /** One brain write's outcome, counted: `ceiling` (refused, the record's version is at the highest sync accepts) or `collision` (a retry). */
 export function countBrainWriteSeq(collection: string, outcome: 'ceiling' | 'collision'): void {
-  sink?.(collection, outcome);
+  write.count(collection, outcome);
 }
