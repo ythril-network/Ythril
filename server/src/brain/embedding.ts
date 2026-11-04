@@ -10,7 +10,7 @@ import { slotTimeoutMs } from '../config/model-slots.js';
 import { runLocalInference, warmLocalInference } from './local-inference.js';
 import { embedInputCeiling } from './embed-ceiling.js';
 import { boundedPrefix, utf8Bytes } from '../util/bounded-text.js';
-import { warnOnce as onceNamed } from '../util/warn-once.js';
+import { warnOnce } from '../util/warn-once.js';
 
 export interface EmbeddingResult {
   vector: number[];
@@ -90,10 +90,9 @@ const MAX_LOCAL_EMBED_CHARS = 8_000;
 
 // ── HTTP endpoint fallback ─────────────────────────────────────────────────
 /**
- * The HTTP branch's cut is said once per window, not once per call: a stream of oversized facts would fill the log ring. Named
- * `warnOnce` (the factory is imported as `onceNamed`) because that is what the call reads as at its one site, in `embed()`.
+ * The HTTP branch's cut is said once per window, not once per call: a stream of oversized facts would fill the log ring.
  */
-const warnOnce = onceNamed<string>({ max: 2, every: 10 * 60_000 });
+const warnInputCut = warnOnce<string>({ max: 2, every: 10 * 60_000 });
 
 /** `input` is already task-prefixed by `prepareInput` — do not prefix again here. */
 /**
@@ -286,7 +285,7 @@ export async function embed(
       const sent = boundedPrefix(input, embedInputCeiling(cfg));
       if (sent.cut) {
         embedInputCutTotal.labels({ producer: 'http' }).inc();
-        warnOnce('http-input', () => log.warn(
+        warnInputCut('http-input', () => log.warn(
           `Embedding input is ${utf8Bytes(input)} bytes, over the embedder's ceiling of ${embedInputCeiling(cfg)} (embedding.maxInputBytes); `
           + `the HTTP embedder is sent the first ${utf8Bytes(sent.text)}. A vector of a cut text describes its beginning only.`));
       }

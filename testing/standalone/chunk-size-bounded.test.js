@@ -439,7 +439,13 @@ describe('the embed call is the backstop for the LOCAL model, and the HTTP branc
     const retry = http.search(/\bembedViaHttpWithRetry\s*\(/);
     assert.ok(cut >= 0, 'the HTTP branch of embed() has no boundedPrefix cut: an input over the ceiling reaches the embedder whole, which refuses it');
     assert.ok(retry >= 0 && cut < retry, 'the cut must sit OUTSIDE the retry closure, so a 503 retry does not cut and warn again');
-    assert.match(http, /\bwarnOnce\s*\(/, 'the cut is announced through warnOnce, not once per call');
+    // The repo's idiom is `const said = warnOnce<string>(...)` at module level, then `said(key, ...)` at the site: the gate finds the
+    // instances warnOnce made in embedding.ts and requires the HTTP branch to call one of them.
+    const source = stripComments(readFileSync(join(ROOT, 'server/src/brain/embedding.ts'), 'utf8'));
+    const instances = [...source.matchAll(/\bconst\s+(\w+)\s*=\s*warnOnce\s*</g)].map(m => m[1]);
+    assert.ok(instances.length > 0, 'embedding.ts makes no warnOnce instance: the cut would be said once per call');
+    assert.ok(instances.some(name => new RegExp(`\\b${name}\\s*\\(`).test(http)),
+      `the HTTP branch calls none of embedding.ts's warnOnce instances (${instances.join(', ')}): the cut is said once per call`);
     assert.ok(!/MAX_LOCAL_EMBED_CHARS/.test(http), 'the HTTP branch is bounded by the setting, not by the local warn threshold');
   });
 });
