@@ -69,6 +69,18 @@ function isChunkerPassage(doc: Record<string, unknown>): boolean {
 }
 
 /**
+ * Is this a derived chunker passage whose embed text is over the embedder's budget (stored before the ceiling existed)?
+ *
+ * Asked by {@link derivedText} (which answers its whole text, uncut) and by `embedStoredRecord` (which refuses it with the cure named),
+ * so the two cannot disagree about which passages are over: the derived check, the chunker check and the cut test are made together here.
+ */
+function passageOverCeiling(doc: Record<string, unknown>): boolean {
+  const content = doc['content'];
+  return typeof content === 'string' && isDerived(doc) && isChunkerPassage(doc)
+    && boundedEmbedText(doc['headingText'] as string | null | undefined, content).cut;
+}
+
+/**
  * A derived record's text, or `null` when it has none: a face chunk, a converted or extracted copy.
  *
  * It is `embedTextFor`'s output, the ONE builder the producers call too (so a rebuilt vector describes what the producer's did):
@@ -79,7 +91,7 @@ function derivedText(doc: Record<string, unknown>): string | null {
   const content = doc['content'];
   if (typeof content !== 'string' || content === '') return null;
   const heading = doc['headingText'] as string | null | undefined;
-  if (isChunkerPassage(doc) && boundedEmbedText(heading, content).cut) return chunkEmbedText(heading, content);
+  if (passageOverCeiling(doc)) return chunkEmbedText(heading, content);
   return embedTextFor(heading, content);
 }
 
@@ -457,7 +469,7 @@ export async function embedStoredRecord(
   try {
     // A passage a chunker made before the ceiling existed, over it: not embedded cut (it would end `complete` with most of its text
     // unfindable by meaning). The failure path below stores its text and ends the job at once (`failEmbedJob`, by these words).
-    if (recordType === 'file' && isDerived(doc) && isChunkerPassage(doc) && boundedEmbedText(doc['headingText'] as string | null | undefined, doc['content'] as string).cut) {
+    if (recordType === 'file' && passageOverCeiling(doc)) {
       throw new Error(overCeilingMessage(utf8Bytes(toEmbed), embedInputCeiling()));
     }
     // A text that has no chunker (a media chunk, a whole document) is embedded cut: counted, as its producer counts it.
