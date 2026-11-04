@@ -113,7 +113,7 @@ export const OVER_CEILING_MARKER = 'This passage is larger than the embedder acc
  * most of its text unfindable by meaning, so it is refused with the act that cures it: re-converting its file splits it into parts.
  */
 export function overCeilingMessage(bytes: number, ceiling: number): string {
-  return `${OVER_CEILING_MARKER} (${bytes} bytes, ceiling ${ceiling}). Re-convert its file to split it: retry_embed_file, or POST /api/files/<space>/retry_embedding.`;
+  return `${OVER_CEILING_MARKER} (${bytes} bytes, ceiling ${ceiling}). Re-convert its file to split it: retry_embed_file, or POST /api/files/<space>/retry_embedding?path=<file>.`;
 }
 
 /** Is this the refusal {@link overCeilingMessage} writes? Anchored, like {@link isRequestRefusal}: a message that merely contains the words is not it. */
