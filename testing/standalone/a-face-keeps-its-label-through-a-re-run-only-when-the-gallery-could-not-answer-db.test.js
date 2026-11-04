@@ -77,9 +77,7 @@ const CTL = [0.0, 0.0, 0.125, 0.125];
 let runs, acts, embedFaces, metrics, png, scratch, seq = 0;
 const files = () => acts.door.coll(S, 'files');
 
-async function seedParent(p) {
-  await files().insertOne({ _id: p, spaceId: S, path: p, sizeBytes: png.length, tags: [], createdAt: T0, updatedAt: T0, seq: 1 });
-}
+const seedParent = (p) => runs.seedParent(p, png.length);
 
 /** One stored face row of `file`: the old run's. `label: null` is an unlabelled face; `box: undefined` a row with no `faceBbox`. */
 async function seedFaceRow(file, i, { box, label = PERSON, score = SCORE, sha }) {

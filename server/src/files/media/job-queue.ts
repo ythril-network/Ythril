@@ -25,6 +25,7 @@ import { idsUnder, jobIdClausesOf, jobPathsOf, movedPairs, movedRoot, sidecarsOf
 import { setFileProcessingState } from '../derived-fields.js';
 import { rekeyRows } from '../rekey-rows.js';
 import { moveTiming } from '../move-timing.js';
+import { sameKnownHash } from '../same-known-hash.js';
 import { moveIsRunningAt } from '../move-flight.js';
 import { moveCarriesRecordsAt } from '../move-markers.js';
 
@@ -326,7 +327,7 @@ export async function replaceContent(spaceId: string, filePath: string, identity
   let step = 'reading the job at the path';
   try {
     const existing = await jobCollection(spaceId).findOne(asFilter<MediaJobDoc>({ _id: id })) as MediaJobDoc | null;
-    const sameBytes = identity.sha256 !== undefined && identity.sha256 !== '' && existing?.sha256 === identity.sha256;
+    const sameBytes = sameKnownHash(identity.sha256, existing?.sha256);
     if (existing && sameBytes && (existing.status === 'pending' || existing.status === 'processing')) {
       step = 'taking the arrival mark off the job at the path';
       if (existing.arrival && !identity.arrival) {
@@ -343,7 +344,7 @@ export async function replaceContent(spaceId: string, filePath: string, identity
     const now = Date.now();
     const iso = new Date(now).toISOString();
     const settled = new Date(now + REPLACE_SETTLE_MS).toISOString();
-    const moveHeld = moveIsRunningAt(spaceId, id) || await moveCarriesRecordsAt(spaceId, id);
+    const moveHeld = await moveHoldsPath(spaceId, id);
     const lit = (v: string) => ({ $literal: v });
     // One write, an aggregation pipeline so that what the job already carries is read INSIDE it (a move's hold, the first creation's
     // stamp). `$literal` keeps a path or a type that starts with `$` from being read as a field.
@@ -382,10 +383,27 @@ export async function replaceContent(spaceId: string, filePath: string, identity
     await reportDoorFailure(spaceId, id, step, err);
     return 'failed';
   } finally {
-    markSpaceMayHaveWork(spaceId);
-    // A claim that found the job still waiting dropped the space from the probe hint; announce again when it may be claimed.
-    setTimeout(() => markSpaceMayHaveWork(spaceId), REPLACE_SETTLE_MS + 100).unref();
+    announceNowAndWhenSettled(spaceId);
   }
+}
+
+/**
+ * Whether a move of `path` is running now or still owed its records (`moveIsRunningAt`, `moveCarriesRecordsAt`): the one question
+ * both doors that reset a job ({@link replaceContent}, {@link retryJob}) ask before they write it. Asked as two reads at each door,
+ * one of them could be dropped, and the reset would end the move's hold and let a worker claim the job at the OLD path.
+ */
+async function moveHoldsPath(spaceId: string, path: string): Promise<boolean> {
+  return moveIsRunningAt(spaceId, path) || await moveCarriesRecordsAt(spaceId, path);
+}
+
+/**
+ * Announce a space's work to the claim walk now, and again when a job written just now may be claimed ({@link REPLACE_SETTLE_MS}
+ * later). A claim that found the job still waiting drops the space from the probe hint, so without the second announcement the job
+ * would wait for the next full scan; written once at each door, the second half was the forgettable one.
+ */
+function announceNowAndWhenSettled(spaceId: string): void {
+  markSpaceMayHaveWork(spaceId);
+  setTimeout(() => markSpaceMayHaveWork(spaceId), REPLACE_SETTLE_MS + 100).unref();
 }
 
 /**
@@ -1063,7 +1081,7 @@ export async function retryJob(
   if (!existing) return 'not_found';
   if (existing.status === 'processing') return 'processing';
   // A move of this path is running or owed: its hold is what keeps the job off the old path, and the reset below would end it.
-  if (moveIsRunningAt(spaceId, fileId) || await moveCarriesRecordsAt(spaceId, fileId)) return 'processing';
+  if (await moveHoldsPath(spaceId, fileId)) return 'processing';
 
   const now = new Date();
   const res = await jobCollection(spaceId).updateOne(
@@ -1081,8 +1099,7 @@ export async function retryJob(
   await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'pending', mediaJobError: undefined });
   // A manual retry must be picked up — announce it, now and when the settle delay is over, or the claim walk would not
   // probe this space until the next full scan (up to 30 s of the user staring at "pending").
-  markSpaceMayHaveWork(spaceId);
-  setTimeout(() => markSpaceMayHaveWork(spaceId), REPLACE_SETTLE_MS + 100).unref();
+  announceNowAndWhenSettled(spaceId);
   return 'ok';
 }
 

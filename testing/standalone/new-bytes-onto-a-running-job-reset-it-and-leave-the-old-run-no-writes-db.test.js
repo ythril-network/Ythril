@@ -34,6 +34,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { POISON } from './_dispatch-door.mjs';
 import { openReplacedBytesDoor } from './_replaced-bytes-door.mjs';
+import { isLeaseLost } from './_media-claim.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -47,7 +48,6 @@ const MARKS = { deferredSince: new Date(Date.now() - 60_000).toISOString(), face
 let d;
 const jobNow = () => d.jobs().findOne({ _id: FILE });
 const rowNow = () => d.files().findOne({ _id: FILE });
-const isLeaseLost = (err) => err instanceof Error && err.name === 'JobLeaseLostError';
 
 /** The first bytes written, their job claimed, the claim carrying a deferral's marks and a failure's trace: a run in flight. */
 async function runInFlight() {

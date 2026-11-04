@@ -53,10 +53,7 @@ let runs, acts, png, metrics;
 const files = () => acts.door.coll(S, 'files');
 const jobs = () => acts.door.coll(S, 'media_jobs');
 
-async function seedPicture(p) {
-  await acts.files.writeFile(S, p, png);
-  await files().insertOne({ _id: p, spaceId: S, path: p, sizeBytes: png.length, tags: [], createdAt: T0, updatedAt: T0, seq: 1 });
-}
+const seedPicture = (p) => runs.seedPicture(p, png);
 
 /** The gallery holds a labelled face (of another picture): the only thing that makes a refused search a gallery that could not answer. */
 const seedLabelledFace = () => files().insertOne({

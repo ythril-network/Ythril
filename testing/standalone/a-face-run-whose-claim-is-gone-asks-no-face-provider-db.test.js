@@ -45,9 +45,7 @@ const T0 = '2026-09-01T00:00:00.000Z';
 let runs, acts, embedFaces, isAbandonment, png, scratch;
 const files = () => acts.door.coll(S, 'files');
 
-async function seedParent(p) {
-  await files().insertOne({ _id: p, spaceId: S, path: p, sizeBytes: png.length, tags: [], createdAt: T0, updatedAt: T0, seq: 1 });
-}
+const seedParent = (p) => runs.seedParent(p, png.length);
 function handleOf(name) {
   const p = path.join(scratch, name);
   fs.writeFileSync(p, png);

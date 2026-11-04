@@ -45,7 +45,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { openParkedMediaRuns } from './_parked-media-runs.mjs';
 import { parkDriverCall } from './_parked-driver-call.mjs';
 import { waitForLiveWrite } from './_active-operations.mjs';
-import { seedClaim, revoke } from './_media-claim.mjs';
+import { seedClaim, revoke, isLeaseLost } from './_media-claim.mjs';
 import { installFfmpeg } from './_media-job-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -57,7 +57,6 @@ const files = () => acts.door.coll(S, 'files');
 /** The identities of every row derived from `parent`: expected to be none once the parent is gone. */
 const derivedOf = async (parent) => (await files().find({ parentFileId: parent }, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
 const parentOf = (id) => files().findOne({ _id: id });
-const isLeaseLost = (err) => err instanceof Error && err.name === 'JobLeaseLostError';
 const nextCall = () => runs.vision.calls.length + 1;
 
 /** A stored PNG (the face step decodes the pixels) and its file row, as an upload leaves them. */
