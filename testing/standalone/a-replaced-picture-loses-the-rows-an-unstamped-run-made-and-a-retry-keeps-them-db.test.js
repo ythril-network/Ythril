@@ -28,7 +28,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { openReplacedBytesDoor } from './_replaced-bytes-door.mjs';
+import { openReplacedBytesDoor, sha256Of } from './_replaced-bytes-door.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -73,6 +73,32 @@ describe('a replaced picture loses its unstamped rows; a same-bytes write and a 
     await d.put(FILE, BYTES(1));
     assert.equal((await d.jobs().findOne({ _id: FILE })).status, 'pending', 'fixture check: the write reset the failed job');
     assert.deepEqual(await d.derivedIds(FILE), [...ids].sort(), 'a same-bytes write removed rows that may hold a person\'s label');
+  });
+
+  // The clear asks the FILE ROW's previous hash, never the job's: a job made before this version carries no `sha256`, and a same-bytes
+  // rewrite of it read as "new bytes" and deleted a person's face label.
+  it('a legacy failed job with no hash, the file row\'s hash equal to the new bytes: a rewrite of the same bytes keeps the unstamped rows', async () => {
+    const ids = await finishedWithLegacyRows('failed');
+    await d.jobs().updateOne({ _id: FILE }, { $unset: { sha256: '' } });
+    assert.equal((await d.jobs().findOne({ _id: FILE })).sha256, undefined, 'fixture check: the job is a legacy one');
+    assert.equal((await d.files().findOne({ _id: FILE })).sha256, sha256Of(BYTES(1)), 'fixture check: the file row knows the hash of the bytes');
+    await d.put(FILE, BYTES(1));
+    assert.equal((await d.jobs().findOne({ _id: FILE })).status, 'pending', 'fixture check: the write reset the failed job');
+    assert.deepEqual(await d.derivedIds(FILE), [...ids].sort(), 'a rewrite of the same bytes removed rows that may hold a person\'s label, because the legacy job has no hash to compare');
+  });
+
+  it('the same legacy job, other bytes: the unstamped rows are removed (the file row\'s hash is what differs)', async () => {
+    await finishedWithLegacyRows('failed');
+    await d.jobs().updateOne({ _id: FILE }, { $unset: { sha256: '' } });
+    await d.put(FILE, BYTES(2));
+    assert.deepEqual(await d.derivedIds(FILE), [], 'the rows of the replaced picture are still stored');
+  });
+
+  it('a file row with no hash (nothing says the bytes changed): the unstamped rows are kept', async () => {
+    const ids = await finishedWithLegacyRows('failed');
+    await d.files().updateOne({ _id: FILE }, { $unset: { sha256: '' } });
+    await d.put(FILE, BYTES(2));
+    assert.deepEqual(await d.derivedIds(FILE), [...ids].sort(), 'rows were removed on no evidence that the bytes changed');
   });
 
   it('a manual retry keeps the unstamped rows', async () => {

@@ -192,6 +192,8 @@ export async function dispatchFileProcessing(
     // Identical bytes that already completed, or whose job is under way: nothing to do, and this is the most expensive thing
     // on the instance to redo. `replaceContent` deliberately resets a terminal job "so re-upload triggers
     // re-processing" — right when the bytes are new, waste when they are not. The rule is `settledAndIdentical`'s.
+    // Read before the guard below: it is a type predicate, and narrows `input.prior` to `never` on the path that goes on.
+    const priorSha256 = input.prior?.sha256;
     if (settledAndIdentical(input.prior, input.sha256)) {
       log.debug(`Media file ${peerText(spaceId)}/${peerText(filePath)}: identical bytes already ${peerText(input.prior.embeddingStatus)} — pipeline skipped`);
       return { resolvedFormat, embeddingStatus: input.prior.embeddingStatus === 'complete' ? 'complete' : 'pending' };
@@ -217,7 +219,9 @@ export async function dispatchFileProcessing(
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
     // The write door's one call (`replaceContent`): the job for these bytes, the row `pending` after it, a failure on the row.
-    const queued = await replaceContent(spaceId, filePath, { mimeType, mediaType, sha256: input.sha256, arrival: input.arrival === true });
+    const queued = await replaceContent(spaceId, filePath, {
+      mimeType, mediaType, sha256: input.sha256, priorSha256, arrival: input.arrival === true,
+    });
     return queued === 'queued' ? { resolvedFormat, embeddingStatus: 'pending' } : { resolvedFormat };
   }
 
