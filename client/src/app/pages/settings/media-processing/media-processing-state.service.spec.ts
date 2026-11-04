@@ -386,8 +386,7 @@ describe('MediaProcessingStateService — derived display state', () => {
     expect(c.docPillLabelKey()).toBe('mediaProcessing.docPill.fallback');
     expect(c.docVariant()).toBe('warn');
     expect(c.docSummary().key).toBe('mediaProcessing.docSummary.fallback');
-    // The affected stages are flagged rather than shown as running normally.
-    expect(c.stageClass('vlm')).toBe('warn');
+    // The affected steps' dots on the page are asserted where they render (pipelines-tab.step-health.spec.ts).
   });
 
   it('describes a configured VLM mode as actually running', () => {
@@ -395,7 +394,6 @@ describe('MediaProcessingStateService — derived display state', () => {
     expect(c.vlmNeededButMissing()).toBe(false);
     expect(c.docPillLabelKey()).toBe('mediaProcessing.docPill.active');
     expect(c.docSummary().params['model']).toBe('llava');
-    expect(c.stageClass('vlm')).toBe('on');
   });
 
   it('OCR mode never reports a missing vision model, because it does not use one', () => {
@@ -440,12 +438,10 @@ describe('MediaProcessingStateService — derived display state', () => {
     expect(c.docVariant()).toBe('off');
     expect(c.vlmNeededButMissing()).toBe(false); // nothing runs, so nothing can be missing
     expect(c.docSummary().key).toBe('mediaProcessing.docSummary.off');
-    expect(c.stageClass('ocr')).toBe('dim');
   });
 
   it("'auto' shows the full chain, because it means the most this instance can do", () => {
     const { c } = make(cfgFixture({ documentProcessing: { mode: 'auto', vlmModel: 'llava' } }));
-    expect(c.stageClass('repair')).toBe('on');
     expect(c.docSummary().params['model']).toBe('llava');
   });
 });

@@ -10,7 +10,7 @@
  *
  *  - Validate reports `ok` in every mode, as the splitter and the chunker do;
  *  - every dimmed step (document and media pipelines alike) has a screen-reader text saying it will not run, and a running step has none;
- *  - Validate follows the VLM steps: when the mode needs a vision model and none is set, `stageClass('validate')` warns with `render`, `vlm` and `repair`;
+ *  - Validate follows the VLM steps: when the mode needs a vision model and none is set, its dot on the page is not `ok` and says it waits for one;
  *  - the actors that were English literals in the component ('in-process', 'text chunker') are words of the language.
  */
 import { readFileSync } from 'node:fs';
@@ -142,27 +142,29 @@ describe('a step that will not run says so in words (Q-64)', () => {
 describe('Validate follows the VLM steps when the vision model is missing (Q-64)', () => {
   beforeEach(() => TestBed.resetTestingModule());
 
-  it('vlm / repair / auto without a vision model: validate warns with render, vlm and repair', () => {
-    for (const mode of ['vlm', 'repair', 'auto'] as const) {
-      const { s } = mount(cfg({ mode, vlmModel: '' }));
-      expect(s.vlmNeededButMissing(), mode).toBe(true);
-      // `repair` is warned only in the modes that run it; in `vlm` the mode dims it (the one rule `stageClass` already has).
-      for (const key of mode === 'vlm' ? ['render', 'vlm', 'validate'] : ['render', 'vlm', 'repair', 'validate']) {
-        expect(s.stageClass(key), `${mode}: ${key}`).toBe('warn');
+  // What the PAGE draws, not a service method: the warning lived in a `stageClass` no template read, so the live page showed Validate green with no
+  // vision model while the spec of that method passed (bundle-231's drive). The dot is the step's state on the page; it is asserted where it renders.
+  for (const language of ['en', 'de', 'pl'] as const) {
+    it(`${language}: vlm / repair / auto without a vision model: Validate's dot is not "ok" and says, in words, that it waits for a vision model`, () => {
+      for (const mode of ['vlm', 'repair', 'auto'] as const) {
+        const { c, step } = mount(cfg({ mode, vlmModel: '' }), language);
+        const validate = c.documentSteps().find(st => st.key === 'validate')!;
+        expect(validate.health, mode).toBe('unconfigured');
+        expect(validate.detail, mode).toBe(dictionary(language)['mediaProcessing.step.validateWaitsForVision']);
+        const dot = step('mediaProcessing.step.validate')!.querySelector('app-health-dot .dot')!;
+        expect(dot.getAttribute('aria-label'), mode).not.toBe(`${dictionary(language)['mediaProcessing.step.validate']}: ${dictionary(language)['mediaProcessing.health.ok']}`);
       }
-    }
+    });
+  }
+
+  it('with the vision model set, Validate is `ok`, as the VLM steps are', () => {
+    const { c } = mount(cfg({ mode: 'vlm', vlmModel: 'llava' }));
+    expect(c.documentSteps().find(st => st.key === 'validate')?.health).toBe('ok');
   });
 
-  it('with the vision model set, validate is on, as the VLM steps are', () => {
-    const { s } = mount(cfg({ mode: 'vlm', vlmModel: 'llava' }));
-    expect(s.vlmNeededButMissing()).toBe(false);
-    expect(s.stageClass('validate')).toBe('on');
-  });
-
-  it('where the mode does not run validate (ocr, off) it stays dim, with or without a model', () => {
-    for (const mode of ['ocr', 'off'] as const) {
-      expect(mount(cfg({ mode, vlmModel: '' })).s.stageClass('validate'), mode).toBe('dim');
-    }
+  it('the service keeps no second, unrendered copy of the step states', () => {
+    const src = readFileSync('src/app/pages/settings/media-processing/media-processing-state.service.ts', 'utf8');
+    expect(src, 'stageClass was read by no template').not.toMatch(/\bstageClass\s*\(/);
   });
 });
 

@@ -2328,6 +2328,7 @@
   "mediaProcessing.step.render": "Render",
   "mediaProcessing.step.vlm": "Vision",
   "mediaProcessing.step.validate": "Validate",
+  "mediaProcessing.step.validateWaitsForVision": "Waits for a vision model: with none set there is no vision output to check",
   "mediaProcessing.step.repair": "Repair",
   "mediaProcessing.step.verify": "Verify",
   "mediaProcessing.step.embed": "Embed",
