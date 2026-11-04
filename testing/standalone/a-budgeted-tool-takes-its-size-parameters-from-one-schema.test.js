@@ -137,4 +137,16 @@ describe('a budgeted tool takes its size parameters from one schema', () => {
     assert.deepEqual(Object.keys(p).sort(), ['maxBytes', 'maxChars', 'maxTokens', 'remainderDump', 'skip']);
     for (const k of SIZE) assert.deepEqual(p[k], budgetSizeSchema('match')[k]);
   });
+
+  it('a unit is pluralised as English does it: "matches", never "matchs" (bundle-231 drive read "whole matchs only")', () => {
+    const wrong = [];
+    for (const { name, props } of maxCharsTools()) {
+      for (const k of ['maxChars', 'skip', 'remainderDump']) {
+        const text = String(props[k]?.description ?? '');
+        for (const m of text.matchAll(/\b\w*(?:ch|sh|x|ss)s\b/g)) wrong.push(`${name}.${k}: "${m[0]}"`);
+      }
+    }
+    assert.deepEqual(wrong, [], wrong.join('\n  '));
+    assert.match(String(budgetSizeSchema('match').maxChars.description), /whole matches only/);
+  });
 });
